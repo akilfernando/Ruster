@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 3;
+pub const FORMAT_VERSION: u32 = 4;
 pub const MAX_OBJECTS: usize = 256;
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub const HISTORY_LIMIT: usize = 32;
@@ -235,7 +235,7 @@ impl fmt::Display for SceneError {
             Self::Format(error) => write!(f, "invalid scene JSON: {error}"),
             Self::UnsupportedVersion(version) => write!(
                 f,
-                "unsupported scene version {version}; supported versions are 1, 2 and {FORMAT_VERSION}"
+                "unsupported scene version {version}; supported versions are 1 through {FORMAT_VERSION}"
             ),
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
             Self::StaleRevision { expected, actual } => write!(
@@ -279,8 +279,29 @@ impl From<serde_json::Error> for SceneError {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TransformDelta {
+    id: String,
+    before: Transform,
+    after: Transform,
+}
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct IndexedObject {
+    object: Object,
+    index: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Change {
+    Transforms {
+        changes: Vec<TransformDelta>,
+    },
+    Objects {
+        created: Vec<IndexedObject>,
+        deleted: Vec<IndexedObject>,
+    },
     Create {
         object: Object,
         index: usize,
@@ -307,9 +328,82 @@ enum Change {
 }
 
 impl Change {
+    fn references_asset(&self) -> bool {
+        match self {
+            Self::Mesh { before, after, .. } => before.is_some() || after.is_some(),
+            Self::Create { object, .. } | Self::Delete { object, .. } => object.mesh.is_some(),
+            Self::Objects { created, deleted } => created
+                .iter()
+                .chain(deleted)
+                .any(|e| e.object.mesh.is_some()),
+            _ => false,
+        }
+    }
+    fn contains_id(&self, id: &str) -> bool {
+        match self {
+            Self::Create { object, .. } | Self::Delete { object, .. } => object.id == id,
+            Self::Name { id: old, .. }
+            | Self::Transform { id: old, .. }
+            | Self::Mesh { id: old, .. } => old == id,
+            Self::Transforms { changes } => changes.iter().any(|e| e.id == id),
+            Self::Objects { created, deleted } => {
+                created.iter().chain(deleted).any(|e| e.object.id == id)
+            }
+        }
+    }
     fn apply(&self, scene: &mut Scene, undo: bool) -> Result<(), SceneError> {
         let inconsistent = || SceneError::Invalid("inconsistent authored history".into());
         match self {
+            Self::Transforms { changes } => {
+                if changes.is_empty() || changes.len() > MAX_OBJECTS {
+                    return Err(inconsistent());
+                }
+                let mut ids = HashSet::new();
+                for c in changes {
+                    if !ids.insert(&c.id) {
+                        return Err(inconsistent());
+                    }
+                    Self::Transform {
+                        id: c.id.clone(),
+                        before: c.before.clone(),
+                        after: c.after.clone(),
+                    }
+                    .apply(scene, undo)?;
+                }
+            }
+            Self::Objects { created, deleted } => {
+                if (created.is_empty() == deleted.is_empty())
+                    || created.len() + deleted.len() > MAX_OBJECTS
+                {
+                    return Err(inconsistent());
+                }
+                let entries = if created.is_empty() { deleted } else { created };
+                let mut ids = HashSet::new();
+                for (i, e) in entries.iter().enumerate() {
+                    e.object.validate()?;
+                    if !ids.insert(&e.object.id) || i > 0 && entries[i - 1].index >= e.index {
+                        return Err(inconsistent());
+                    }
+                }
+                let insert = !created.is_empty() != undo;
+                if insert {
+                    for e in entries {
+                        Self::Create {
+                            object: e.object.clone(),
+                            index: e.index,
+                        }
+                        .apply(scene, false)?;
+                    }
+                } else {
+                    for e in entries.iter().rev() {
+                        Self::Delete {
+                            object: e.object.clone(),
+                            index: e.index,
+                        }
+                        .apply(scene, false)?;
+                    }
+                }
+            }
             Self::Create { object, index } | Self::Delete { object, index } => {
                 object.validate()?;
                 let insert = matches!(self, Self::Create { .. }) != undo;
@@ -551,16 +645,14 @@ impl Document {
                 "history exceeds {HISTORY_LIMIT} changes"
             )));
         }
-        for (history, undo) in [(&self.undo, true), (&self.redo, false)] {
-            let mut scene = self.scene.clone();
-            for change in history.iter().rev() {
-                change.apply(&mut scene, undo)?;
-                scene.validate()?;
-            }
-        }
-        Ok(())
+        check_serialized_size(
+            &self.scene,
+            &self.undo.iter().collect::<Vec<_>>(),
+            &self.redo.iter().collect::<Vec<_>>(),
+        )
     }
     fn load(path: &Path) -> Result<Self, SceneError> {
+        reject_nonregular(path)?;
         let mut bytes = Vec::new();
         File::open(path)?
             .take(MAX_FILE_BYTES + 1)
@@ -579,13 +671,25 @@ impl Document {
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
-            3 => serde_json::from_value(value)?,
+            3 | 4 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
+        if version == 3
+            && document
+                .undo
+                .iter()
+                .chain(&document.redo)
+                .any(|c| matches!(c, Change::Transforms { .. } | Change::Objects { .. }))
+        {
+            return Err(SceneError::Invalid(
+                "scene v3 does not support grouped history".into(),
+            ));
+        }
         document.validate()?;
         Ok(document)
     }
     fn write(&self, path: &Path, create_new: bool) -> Result<(), SceneError> {
+        reject_nonregular(path)?;
         self.validate()?;
         let mut upgraded = self.clone();
         upgraded.format_version = FORMAT_VERSION;
@@ -619,6 +723,92 @@ impl Document {
     }
 }
 
+// Count history once and reserve the largest scene reachable through Undo/Redo.
+// This includes restored deleted objects, maximum revision width and stack formatting.
+fn check_serialized_size(
+    scene: &Scene,
+    undo: &[&Change],
+    redo: &[&Change],
+) -> Result<(), SceneError> {
+    #[derive(Serialize)]
+    struct SceneView<'a> {
+        id: &'a str,
+        revision: u64,
+        objects: &'a [Object],
+    }
+    impl<'a> From<&'a Scene> for SceneView<'a> {
+        fn from(scene: &'a Scene) -> Self {
+            Self {
+                id: &scene.id,
+                revision: u64::MAX,
+                objects: &scene.objects,
+            }
+        }
+    }
+    #[derive(Serialize)]
+    struct SceneOnly<'a> {
+        scene: SceneView<'a>,
+    }
+    #[derive(Serialize)]
+    struct View<'a> {
+        format: &'static str,
+        format_version: u32,
+        scene: SceneView<'a>,
+        undo: &'a [&'a Change],
+        redo: &'a [&'a Change],
+    }
+    struct Counter(u64);
+    impl Write for Counter {
+        fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
+            self.0 += bytes.len() as u64;
+            if self.0 > MAX_FILE_BYTES {
+                return Err(std::io::Error::other("serialized scene exceeds 1 MiB"));
+            }
+            Ok(bytes.len())
+        }
+        fn flush(&mut self) -> std::io::Result<()> {
+            Ok(())
+        }
+    }
+    fn size(value: &impl Serialize) -> Result<u64, SceneError> {
+        let mut counter = Counter(0);
+        serde_json::to_writer_pretty(&mut counter, value)
+            .map_err(|e| SceneError::Invalid(format!("scene cannot be saved within 1 MiB: {e}")))?;
+        Ok(counter.0)
+    }
+    let all: Vec<_> = undo.iter().chain(redo).copied().collect();
+    let envelope = size(&View {
+        format: "ruster-scene",
+        format_version: FORMAT_VERSION,
+        scene: scene.into(),
+        undo: &all,
+        redo: &[],
+    })?;
+    // Match the nested scene's indentation; the wrapper's constant bytes cancel.
+    let current = size(&SceneOnly {
+        scene: scene.into(),
+    })?;
+    let mut largest = current;
+    for (history, reversing) in [(undo, true), (redo, false)] {
+        let mut candidate = scene.clone();
+        for change in history.iter().rev() {
+            change.apply(&mut candidate, reversing)?;
+            candidate.validate()?;
+            largest = largest.max(size(&SceneOnly {
+                scene: (&candidate).into(),
+            })?);
+        }
+    }
+    // Splitting a nonempty stack into two adds at most two pretty-format bytes.
+    let stack_headroom = if all.len() >= 2 { 2 } else { 0 };
+    if envelope - current + largest + stack_headroom + 1 > MAX_FILE_BYTES {
+        return Err(SceneError::Invalid(
+            "scene or reversible history cannot be saved within 1 MiB".into(),
+        ));
+    }
+    Ok(())
+}
+
 /// Authored state with bounded object, name, transform and mesh deltas. Runtime state belongs elsewhere.
 #[derive(Clone, Debug)]
 pub struct Session {
@@ -630,8 +820,10 @@ pub struct Session {
 impl Session {
     pub fn new(scene: Scene) -> Result<Self, SceneError> {
         scene.validate()?;
+        let document = Document::new(scene);
+        document.validate()?;
         Ok(Self {
-            document: Document::new(scene),
+            document,
             path: None,
             saved: None,
             loaded_format_version: FORMAT_VERSION,
@@ -675,13 +867,7 @@ impl Session {
                 .undo
                 .iter()
                 .chain(&self.document.redo)
-                .any(|change| match change {
-                    Change::Mesh { before, after, .. } => before.is_some() || after.is_some(),
-                    Change::Create { object, .. } | Change::Delete { object, .. } => {
-                        object.mesh.is_some()
-                    }
-                    _ => false,
-                })
+                .any(Change::references_asset)
     }
     /// IDs retained by reversible history are reserved, preventing accidental identity reuse.
     pub fn contains_object_id(&self, id: &str) -> bool {
@@ -691,15 +877,40 @@ impl Session {
                 .undo
                 .iter()
                 .chain(&self.document.redo)
-                .any(|c| match c {
-                    Change::Create { object, .. } | Change::Delete { object, .. } => {
-                        object.id == id
-                    }
-                    Change::Name { id: old, .. }
-                    | Change::Transform { id: old, .. }
-                    | Change::Mesh { id: old, .. } => old == id,
-                })
+                .any(|c| c.contains_id(id))
     }
+
+    /// Allocate bounded IDs with one transient history scan, including grouped reservations.
+    pub fn allocate_object_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        if count > MAX_OBJECTS {
+            return Err(SceneError::Invalid("ID request exceeds256 objects".into()));
+        }
+        let mut used: HashSet<&str> = self.scene().objects.iter().map(|o| o.id.as_str()).collect();
+        for change in self.document.undo.iter().chain(&self.document.redo) {
+            match change {
+                Change::Create { object, .. } | Change::Delete { object, .. } => {
+                    used.insert(&object.id);
+                }
+                Change::Name { id, .. }
+                | Change::Transform { id, .. }
+                | Change::Mesh { id, .. } => {
+                    used.insert(id);
+                }
+                Change::Transforms { changes } => {
+                    used.extend(changes.iter().map(|e| e.id.as_str()));
+                }
+                Change::Objects { created, deleted } => {
+                    used.extend(created.iter().chain(deleted).map(|e| e.object.id.as_str()));
+                }
+            }
+        }
+        Ok((1..=used.len() + count)
+            .map(|n| format!("object-{n}"))
+            .filter(|id| !used.contains(id.as_str()))
+            .take(count)
+            .collect())
+    }
+
     /// Append a validated object. Its ID cannot collide with current or reversible state.
     pub fn create(&mut self, expected_revision: u64, object: Object) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
@@ -781,14 +992,169 @@ impl Session {
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
-        change.apply(&mut self.document.scene, false)?;
+        let mut candidate = self.scene().clone();
+        change.apply(&mut candidate, false)?;
+        candidate.revision = next;
+        candidate.validate()?;
+        let mut undo: Vec<_> = self
+            .document
+            .undo
+            .iter()
+            .skip(usize::from(self.document.undo.len() == HISTORY_LIMIT))
+            .collect();
+        undo.push(&change);
+        check_serialized_size(&candidate, &undo, &[])?;
+        self.document.scene = candidate;
         if self.document.undo.len() == HISTORY_LIMIT {
             self.document.undo.remove(0);
         }
         self.document.undo.push(change);
         self.document.redo.clear();
-        self.document.scene.revision = next;
         Ok(next)
+    }
+    /// One atomic transform gesture: one revision and one undo entry for all targets.
+    pub fn edit_transforms(
+        &mut self,
+        expected_revision: u64,
+        edits: &[(String, Transform)],
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        if edits.len() > MAX_OBJECTS {
+            return Err(SceneError::Invalid(
+                "transform group exceeds 256 edits".into(),
+            ));
+        }
+        let mut ids = HashSet::new();
+        let mut changes = Vec::new();
+        for (id, transform) in edits {
+            if !ids.insert(id) {
+                return Err(SceneError::Invalid("duplicate transform target".into()));
+            }
+            transform.validate()?;
+            let object = self
+                .scene()
+                .objects
+                .iter()
+                .find(|o| &o.id == id)
+                .ok_or_else(|| SceneError::ObjectNotFound(id.clone()))?;
+            if &object.transform != transform {
+                changes.push(TransformDelta {
+                    id: id.clone(),
+                    before: object.transform.clone(),
+                    after: transform.clone(),
+                });
+            }
+        }
+        if changes.is_empty() {
+            return Ok(self.scene().revision);
+        }
+        self.commit_change(Change::Transforms { changes })
+    }
+    /// Append a copied group atomically. IDs must be fresh in current and reversible state.
+    pub fn create_many(
+        &mut self,
+        expected_revision: u64,
+        objects: Vec<Object>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        if objects.is_empty() {
+            return Ok(self.scene().revision);
+        }
+        if objects.len() > MAX_OBJECTS || self.scene().objects.len() + objects.len() > MAX_OBJECTS {
+            return Err(SceneError::Invalid(
+                "object group exceeds 256 objects".into(),
+            ));
+        }
+        let mut ids = HashSet::new();
+        for object in &objects {
+            object.validate()?;
+            if !ids.insert(&object.id) || self.contains_object_id(&object.id) {
+                return Err(SceneError::Invalid(
+                    "new object ID collides with current or reversible state".into(),
+                ));
+            }
+        }
+        let start = self.scene().objects.len();
+        let created = objects
+            .into_iter()
+            .enumerate()
+            .map(|(i, object)| IndexedObject {
+                object,
+                index: start + i,
+            })
+            .collect();
+        self.commit_change(Change::Objects {
+            created,
+            deleted: Vec::new(),
+        })
+    }
+    /// Delete a selection atomically, retaining its original scene order for undo.
+    pub fn delete_many(
+        &mut self,
+        expected_revision: u64,
+        ids: &[String],
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        if ids.is_empty() {
+            return Ok(self.scene().revision);
+        }
+        if ids.len() > MAX_OBJECTS {
+            return Err(SceneError::Invalid(
+                "object group exceeds 256 objects".into(),
+            ));
+        }
+        let mut unique = HashSet::new();
+        let mut deleted = Vec::with_capacity(ids.len());
+        for id in ids {
+            if !unique.insert(id) {
+                return Err(SceneError::Invalid("duplicate deletion target".into()));
+            }
+            let index = self
+                .scene()
+                .objects
+                .iter()
+                .position(|o| &o.id == id)
+                .ok_or_else(|| SceneError::ObjectNotFound(id.clone()))?;
+            deleted.push(IndexedObject {
+                object: self.scene().objects[index].clone(),
+                index,
+            });
+        }
+        deleted.sort_unstable_by_key(|e| e.index);
+        self.commit_change(Change::Objects {
+            created: Vec::new(),
+            deleted,
+        })
+    }
+    /// Copy selected objects in caller order, appending the copies as one undo step.
+    pub fn duplicate_many(
+        &mut self,
+        expected_revision: u64,
+        pairs: &[(String, String)],
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        if pairs.len() > MAX_OBJECTS {
+            return Err(SceneError::Invalid(
+                "object group exceeds 256 objects".into(),
+            ));
+        }
+        let mut sources = HashSet::new();
+        let mut objects = Vec::with_capacity(pairs.len());
+        for (source, id) in pairs {
+            if !sources.insert(source) {
+                return Err(SceneError::Invalid("duplicate source in selection".into()));
+            }
+            let mut object = self
+                .scene()
+                .objects
+                .iter()
+                .find(|o| &o.id == source)
+                .ok_or_else(|| SceneError::ObjectNotFound(source.clone()))?
+                .clone();
+            object.id.clone_from(id);
+            objects.push(object);
+        }
+        self.create_many(expected_revision, objects)
     }
     fn check_revision(&self, expected: u64) -> Result<(), SceneError> {
         let actual = self.scene().revision;
@@ -809,32 +1175,19 @@ impl Session {
             .document
             .scene
             .objects
-            .iter_mut()
+            .iter()
             .find(|o| o.id == id)
             .ok_or_else(|| SceneError::ObjectNotFound(id.into()))?;
         if &object.transform == transform {
             return Ok(self.document.scene.revision);
         }
-        let next = self
-            .document
-            .scene
-            .revision
-            .checked_add(1)
-            .ok_or(SceneError::RevisionOverflow)?;
-        let change = Change::Transform {
+        self.commit_change(Change::Transform {
             id: id.into(),
             before: object.transform.clone(),
             after: transform.clone(),
-        };
-        object.transform = transform.clone();
-        self.document.scene.revision = next;
-        self.document.redo.clear();
-        if self.document.undo.len() == HISTORY_LIMIT {
-            self.document.undo.remove(0);
-        }
-        self.document.undo.push(change);
-        Ok(next)
+        })
     }
+
     /// Assign a syntactically valid stable asset ID, or None for a cube.
     /// Registry lookup belongs to the caller; failed/no-op commands preserve history.
     pub fn set_mesh(
@@ -851,32 +1204,19 @@ impl Session {
             .document
             .scene
             .objects
-            .iter_mut()
+            .iter()
             .find(|o| o.id == object_id)
             .ok_or_else(|| SceneError::ObjectNotFound(object_id.into()))?;
         if object.mesh == mesh {
             return Ok(self.document.scene.revision);
         }
-        let next = self
-            .document
-            .scene
-            .revision
-            .checked_add(1)
-            .ok_or(SceneError::RevisionOverflow)?;
-        let change = Change::Mesh {
+        self.commit_change(Change::Mesh {
             id: object_id.into(),
             before: object.mesh.clone(),
-            after: mesh.clone(),
-        };
-        object.mesh = mesh;
-        self.document.scene.revision = next;
-        self.document.redo.clear();
-        if self.document.undo.len() == HISTORY_LIMIT {
-            self.document.undo.remove(0);
-        }
-        self.document.undo.push(change);
-        Ok(next)
+            after: mesh,
+        })
     }
+
     pub fn undo(&mut self, expected_revision: u64) -> Result<u64, SceneError> {
         self.history(expected_revision, true)
     }
@@ -889,19 +1229,27 @@ impl Session {
             self.document.undo.last().ok_or(SceneError::NoUndo)?
         } else {
             self.document.redo.last().ok_or(SceneError::NoRedo)?
-        }
-        .clone();
+        };
         let next = self
             .scene()
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
-        change.apply(&mut self.document.scene, undo)?;
+        let mut candidate = self.scene().clone();
+        change.apply(&mut candidate, undo)?;
+        candidate.revision = next;
+        candidate.validate()?;
+        // Admission/load already bounded every reachable scene with maximum revision
+        // width. Moving this same delta between stacks preserves that invariant.
+        let change = if undo {
+            self.document.undo.pop().ok_or(SceneError::NoUndo)?
+        } else {
+            self.document.redo.pop().ok_or(SceneError::NoRedo)?
+        };
+        self.document.scene = candidate;
         if undo {
-            self.document.undo.pop();
             self.document.redo.push(change);
         } else {
-            self.document.redo.pop();
             self.document.undo.push(change);
         }
         self.document.scene.revision = next;
@@ -930,6 +1278,12 @@ struct SceneLock {
     path: PathBuf,
     _file: File,
 }
+impl Drop for SceneLock {
+    fn drop(&mut self) {
+        // End the lock scope even if a concurrent fork temporarily inherited the FD.
+        let _ = fs2::FileExt::unlock(&self._file);
+    }
+}
 impl SceneLock {
     fn acquire(path: &Path) -> Result<Self, SceneError> {
         let parent = path
@@ -941,16 +1295,18 @@ impl SceneLock {
             .file_name()
             .ok_or_else(|| SceneError::Invalid("file name required".into()))?;
         let path = parent.join(name);
-        reject_symlink(&path)?;
+        reject_nonregular(&path)?;
         let mut lock_name = OsString::from(".");
         lock_name.push(name);
         lock_name.push(".ruster-lock");
+        let lock_path = parent.join(lock_name);
+        reject_nonregular(&lock_path)?;
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
             .read(true)
             .write(true)
-            .open(parent.join(lock_name))?;
+            .open(lock_path)?;
         fs2::FileExt::try_lock_exclusive(&file).map_err(|error| {
             if error.kind() == std::io::ErrorKind::WouldBlock
                 || error.raw_os_error() == fs2::lock_contended_error().raw_os_error()
@@ -960,14 +1316,14 @@ impl SceneLock {
                 SceneError::Io(error)
             }
         })?;
-        reject_symlink(&path)?;
+        reject_nonregular(&path)?;
         Ok(Self { path, _file: file })
     }
 }
-fn reject_symlink(path: &Path) -> Result<(), SceneError> {
+fn reject_nonregular(path: &Path) -> Result<(), SceneError> {
     match path.symlink_metadata() {
-        Ok(m) if m.file_type().is_symlink() => Err(SceneError::Invalid(
-            "scene destination must not be a symlink".into(),
+        Ok(m) if !m.is_file() => Err(SceneError::Invalid(
+            "scene file and lock must be regular files".into(),
         )),
         Ok(_) => Ok(()),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
@@ -1003,6 +1359,216 @@ impl Preview {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Unique risk: partial multi-object mutations and per-object undo steps break a
+    // gesture's atomicity; oversized retained deltas must not create unsaveable state.
+    #[test]
+    fn grouped_edits_are_atomic_one_step_and_byte_bounded() {
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let first = session.scene().objects[0].transform.clone();
+        let mut moved = first.clone();
+        moved.translation[0] += 1.0;
+        let before = session.document.clone();
+        assert!(session
+            .edit_transforms(
+                0,
+                &[
+                    ("left".into(), moved.clone()),
+                    ("missing".into(), moved.clone())
+                ]
+            )
+            .is_err());
+        assert_eq!(session.document, before);
+        assert!(session
+            .edit_transforms(
+                0,
+                &[
+                    ("left".into(), moved.clone()),
+                    ("left".into(), moved.clone())
+                ]
+            )
+            .is_err());
+        assert_eq!(session.document, before);
+        session
+            .edit_transforms(
+                0,
+                &[("left".into(), moved.clone()), ("right".into(), moved)],
+            )
+            .unwrap();
+        assert_eq!(session.undo_len(), 1);
+        session.undo(1).unwrap();
+        assert_eq!(session.scene().objects, before.scene.objects);
+        let before = session.document.clone();
+        assert_eq!(
+            session
+                .edit_transforms(2, &[("left".into(), first)])
+                .unwrap(),
+            2
+        );
+        assert_eq!(session.document, before);
+        session
+            .duplicate_many(
+                2,
+                &[
+                    ("left".into(), "left-copy".into()),
+                    ("right".into(), "right-copy".into()),
+                ],
+            )
+            .unwrap();
+        assert_eq!(session.scene().objects.len(), 5);
+        assert_eq!(session.undo_len(), 1);
+        session
+            .delete_many(3, &["left".into(), "right-copy".into()])
+            .unwrap();
+        session.undo(4).unwrap();
+        assert_eq!(
+            session
+                .scene()
+                .objects
+                .iter()
+                .map(|o| o.id.as_str())
+                .collect::<Vec<_>>(),
+            ["left", "center", "right", "left-copy", "right-copy"]
+        );
+        session.undo(5).unwrap();
+        assert_eq!(session.scene().objects, before.scene.objects);
+
+        let mut large = Session::new(Scene::empty("large")).unwrap();
+        large
+            .create_many(
+                0,
+                (0..MAX_OBJECTS)
+                    .map(|i| {
+                        Object::cube(
+                            format!("object-{i}-{}", "a".repeat(110)),
+                            Some("n".repeat(128)),
+                        )
+                    })
+                    .collect(),
+            )
+            .unwrap();
+        let mut rejected = false;
+        for n in 1..=HISTORY_LIMIT {
+            let edits: Vec<_> = large
+                .scene()
+                .objects
+                .iter()
+                .map(|o| {
+                    let mut t = o.transform.clone();
+                    t.translation = [n as f32; 3];
+                    (o.id.clone(), t)
+                })
+                .collect();
+            let before = large.document.clone();
+            match large.edit_transforms(large.scene().revision, &edits) {
+                Ok(_) => assert!(large.document.validate().is_ok()),
+                Err(SceneError::Invalid(_)) => {
+                    assert_eq!(large.document, before);
+                    rejected = true;
+                    break;
+                }
+                Err(e) => panic!("unexpected error: {e}"),
+            }
+        }
+        assert!(rejected, "history must reject before becoming unsaveable");
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("large.json");
+        large.save(&path).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() <= MAX_FILE_BYTES);
+        assert_eq!(Session::open(&path).unwrap().scene(), large.scene());
+        // An admitted near-cap transaction remains undoable across revision digit growth.
+        let objects = large.scene().objects.clone();
+        large.document.scene.revision = 98;
+        large.undo(98).unwrap();
+        large.redo(99).unwrap();
+        assert_eq!(large.scene().revision, 100);
+        assert_eq!(large.scene().objects, objects);
+        // Group history can reserve far more than the old289-ID editor probe.
+        let mut ids = Session::new(Scene::empty("ids")).unwrap();
+        for (start, count) in [(1, 256), (257, 44)] {
+            let objects: Vec<_> = (start..start + count)
+                .map(|n| Object::cube(format!("object-{n}"), None))
+                .collect();
+            let names: Vec<_> = objects.iter().map(|o| o.id.clone()).collect();
+            ids.create_many(ids.scene().revision, objects).unwrap();
+            ids.delete_many(ids.scene().revision, &names).unwrap();
+        }
+        assert_eq!(
+            ids.allocate_object_ids(2).unwrap(),
+            vec!["object-301", "object-302"]
+        );
+        assert!(ids.allocate_object_ids(MAX_OBJECTS + 1).is_err());
+    }
+
+    // Unique risk: a v3 label can silently accept grouped v4 semantics, or opening
+    // a supported v3 document loses name/lifecycle undo and redo state.
+    #[test]
+    fn v3_migrates_scalar_history_but_rejects_grouped_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v3.json");
+        let mut doc = Document::new(Scene::demo());
+        doc.format_version = 3;
+        doc.scene.objects[0].name = Some("Named".into());
+        doc.undo.push(Change::Name {
+            id: "left".into(),
+            before: None,
+            after: Some("Named".into()),
+        });
+        doc.redo.push(Change::Delete {
+            object: doc.scene.objects[1].clone(),
+            index: 1,
+        });
+        std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        let mut session = Session::open(&path).unwrap();
+        assert_eq!(session.loaded_format_version(), 3);
+        session.redo(0).unwrap();
+        session.undo(1).unwrap();
+        session.undo(2).unwrap();
+        assert!(session.scene().objects[0].name.is_none());
+        session.save(&path).unwrap();
+        assert_eq!(session.loaded_format_version(), 4);
+        doc.undo = vec![Change::Transforms {
+            changes: vec![TransformDelta {
+                id: "left".into(),
+                before: Transform::default(),
+                after: doc.scene.objects[0].transform.clone(),
+            }],
+        }];
+        std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        assert!(Session::open(&path).is_err());
+    }
+
+    // Unique risk: a FIFO or other nonregular source/lock blocks before bounded
+    // ingestion. Metadata rejection must occur before any open call.
+    #[cfg(unix)]
+    #[test]
+    fn nonregular_sources_and_locks_are_rejected_before_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fifo.scene");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(&path)
+            .status()
+            .unwrap()
+            .success());
+        assert!(matches!(Scene::load(&path), Err(SceneError::Invalid(_))));
+        assert!(matches!(
+            Scene::demo().save(&path),
+            Err(SceneError::Invalid(_))
+        ));
+        assert!(matches!(Session::open(&path), Err(SceneError::Invalid(_))));
+        let path = dir.path().join("ordinary.json");
+        let lock = dir.path().join(".ordinary.json.ruster-lock");
+        assert!(std::process::Command::new("mkfifo")
+            .arg(lock)
+            .status()
+            .unwrap()
+            .success());
+        assert!(matches!(
+            Session::new(Scene::demo()).unwrap().save(&path),
+            Err(SceneError::Invalid(_))
+        ));
+        assert!(!path.exists());
+    }
 
     // Unique risk: lifecycle deltas preserve order/identity/assets through storage and
     // interleaved edits while failed commands and no-op naming preserve redo.
@@ -1094,7 +1660,7 @@ mod tests {
         old.undo(1).unwrap();
         old.undo(2).unwrap();
         old.save(&path).unwrap();
-        assert_eq!(old.loaded_format_version(), 3);
+        assert_eq!(old.loaded_format_version(), FORMAT_VERSION);
         assert!(Session::open(&path).unwrap().scene().objects[0]
             .mesh
             .is_none());
@@ -1471,7 +2037,13 @@ mod tests {
             session.save(dir.path().join("./scene.json")),
             Err(SceneError::Busy)
         ));
+        // Model a descriptor inherited by another process: closing just this File
+        // would retain flock until every duplicate closes, beyond the guard scope.
+        let inherited = lock._file.try_clone().unwrap();
         drop(lock);
+        let reacquired = SceneLock::acquire(&path).unwrap();
+        drop(reacquired);
+        drop(inherited);
         let mut external = Document::load(&path).unwrap();
         external.scene.objects[0].color[0] = 0.5;
         external.write(&path, false).unwrap();

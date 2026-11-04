@@ -1,5 +1,34 @@
+use serde::Deserialize;
 use std::error::Error;
+use std::io::Read;
 use std::path::Path;
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct TransformEdit {
+    object_id: String,
+    transform: ruster_scene::Transform,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct DuplicateEdit {
+    object_id: String,
+    new_object_id: String,
+}
+
+fn read_batch<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Box<dyn Error>> {
+    if !path.symlink_metadata()?.is_file() {
+        return Err("Batch input must be a regular file.".into());
+    }
+    let mut bytes = Vec::new();
+    std::fs::File::open(path)?
+        .take(ruster_scene::MAX_FILE_BYTES + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() as u64 > ruster_scene::MAX_FILE_BYTES {
+        return Err("Batch input exceeds1MiB.".into());
+    }
+    Ok(serde_json::from_slice(&bytes)?)
+}
 
 use ruster_scene::{Object, Preview, Scene, Session, FORMAT_VERSION};
 
@@ -12,7 +41,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: ruster-scene demo FILE | new FILE SCENE_ID | create FILE REV ID [NAME] | rename FILE REV ID [NAME] | duplicate FILE REV SOURCE NEW_ID [NAME] | delete FILE REV ID | inspect FILE | transform FILE EXPECTED_REV OBJECT X Y Z [RX RY RZ SX SY SZ] | mesh FILE EXPECTED_REV OBJECT ASSET_ID|none | undo FILE EXPECTED_REV | redo FILE EXPECTED_REV | run FILE TICKS (0..10000)";
+    let usage = "usage: ruster-scene demo FILE | new FILE SCENE_ID | create FILE REV ID [NAME] | rename FILE REV ID [NAME] | duplicate FILE REV SOURCE NEW_ID [NAME] | delete FILE REV ID | inspect FILE | transform FILE EXPECTED_REV OBJECT X Y Z [RX RY RZ SX SY SZ] | mesh FILE EXPECTED_REV OBJECT ASSET_ID|none | transforms|duplicates|deletes FILE EXPECTED_REV BATCH.json | undo FILE EXPECTED_REV | redo FILE EXPECTED_REV | run FILE TICKS (0..10000)";
     let Some(command) = args.first() else {
         return Err(usage.into());
     };
@@ -83,6 +112,36 @@ fn run() -> Result<(), Box<dyn Error>> {
                 Some(args[4].clone())
             };
             let revision = session.set_mesh(args[2].parse()?, &args[3], mesh)?;
+            session.save(path)?;
+            println!("revision {revision}");
+        }
+        ("transforms" | "duplicates" | "deletes", 4) => {
+            let path = Path::new(&args[1]);
+            let mut session = Session::open(path)?;
+            let expected = args[2].parse()?;
+            let input = Path::new(&args[3]);
+            let revision = match command.as_str() {
+                "transforms" => {
+                    let edits: Vec<TransformEdit> = read_batch(input)?;
+                    let edits: Vec<_> = edits
+                        .into_iter()
+                        .map(|e| (e.object_id, e.transform))
+                        .collect();
+                    session.edit_transforms(expected, &edits)?
+                }
+                "duplicates" => {
+                    let edits: Vec<DuplicateEdit> = read_batch(input)?;
+                    let edits: Vec<_> = edits
+                        .into_iter()
+                        .map(|e| (e.object_id, e.new_object_id))
+                        .collect();
+                    session.duplicate_many(expected, &edits)?
+                }
+                _ => {
+                    let ids: Vec<String> = read_batch(input)?;
+                    session.delete_many(expected, &ids)?
+                }
+            };
             session.save(path)?;
             println!("revision {revision}");
         }

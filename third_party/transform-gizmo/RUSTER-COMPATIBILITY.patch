@@ -1,0 +1,24 @@
+--- a/transform-gizmo/Cargo.toml
++++ b/transform-gizmo/Cargo.toml
+@@ -51 +51 @@
+-version = "0.36"
++version = "0.37"
+@@ -54 +54 @@
+-version = "0.36"
++version = "0.37"
+@@ -63 +63 @@
+-version = "0.36"
++version = "0.37"
+--- a/transform-gizmo-egui/Cargo.toml
++++ b/transform-gizmo-egui/Cargo.toml
+@@ -51 +51 @@
+-version = "0.36"
++version = "0.37"
+@@ -57 +57 @@
+-version = "0.36"
++version = "0.37"
+--- a/transform-gizmo-egui/src/lib.rs
++++ b/transform-gizmo-egui/src/lib.rs
+@@ -89 +89 @@
+-            ui.id().with("_interaction"),
++            ui.scope_id().with("_interaction"),

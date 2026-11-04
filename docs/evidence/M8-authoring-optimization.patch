@@ -1,0 +1,63 @@
+--- a/crates/ruster-scene/src/lib.rs
++++ b/crates/ruster-scene/src/lib.rs
+@@ -645,13 +645,6 @@
+                 "history exceeds {HISTORY_LIMIT} changes"
+             )));
+         }
+-        for (history, undo) in [(&self.undo, true), (&self.redo, false)] {
+-            let mut scene = self.scene.clone();
+-            for change in history.iter().rev() {
+-                change.apply(&mut scene, undo)?;
+-                scene.validate()?;
+-            }
+-        }
+         check_serialized_size(
+             &self.scene,
+             &self.undo.iter().collect::<Vec<_>>(),
+@@ -800,6 +793,7 @@
+         let mut candidate = scene.clone();
+         for change in history.iter().rev() {
+             change.apply(&mut candidate, reversing)?;
++            candidate.validate()?;
+             largest = largest.max(size(&SceneOnly {
+                 scene: (&candidate).into(),
+             })?);
+@@ -1235,8 +1229,7 @@
+             self.document.undo.last().ok_or(SceneError::NoUndo)?
+         } else {
+             self.document.redo.last().ok_or(SceneError::NoRedo)?
+-        }
+-        .clone();
++        };
+         let next = self
+             .scene()
+             .revision
+@@ -1246,22 +1239,17 @@
+         change.apply(&mut candidate, undo)?;
+         candidate.revision = next;
+         candidate.validate()?;
+-        let mut projected_undo: Vec<_> = self.document.undo.iter().collect();
+-        let mut projected_redo: Vec<_> = self.document.redo.iter().collect();
+-        if undo {
+-            projected_undo.pop();
+-            projected_redo.push(&change);
++        // Admission/load already bounded every reachable scene with maximum revision
++        // width. Moving this same delta between stacks preserves that invariant.
++        let change = if undo {
++            self.document.undo.pop().ok_or(SceneError::NoUndo)?
+         } else {
+-            projected_redo.pop();
+-            projected_undo.push(&change);
+-        }
+-        check_serialized_size(&candidate, &projected_undo, &projected_redo)?;
++            self.document.redo.pop().ok_or(SceneError::NoRedo)?
++        };
+         self.document.scene = candidate;
+         if undo {
+-            self.document.undo.pop();
+             self.document.redo.push(change);
+         } else {
+-            self.document.redo.pop();
+             self.document.undo.push(change);
+         }
+         self.document.scene.revision = next;

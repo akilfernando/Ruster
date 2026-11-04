@@ -90,6 +90,11 @@ struct Lock {
     path: PathBuf,
     _file: File,
 }
+impl Drop for Lock {
+    fn drop(&mut self) {
+        let _ = fs2::FileExt::unlock(&self._file);
+    }
+}
 impl Lock {
     fn acquire(path: &Path) -> Result<Self, String> {
         let parent = path
@@ -194,7 +199,7 @@ impl MotionLab {
             .first()
             .map_or(String::new(), |o| o.id.clone());
         app.storage = Some(Storage {
-            path: lock.path,
+            path: lock.path.clone(),
             baseline: doc,
         });
         Ok(app)
@@ -239,7 +244,7 @@ impl MotionLab {
         }
         self.finish_edit();
         self.storage = Some(Storage {
-            path: lock.path,
+            path: lock.path.clone(),
             baseline: doc,
         });
         Ok(())

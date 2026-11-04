@@ -1,0 +1,2 @@
+bulk duplicate/transform/delete, invalid/stale and three shared undo passed
+save and reopen v4 passed

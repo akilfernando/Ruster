@@ -1,0 +1,870 @@
+{
+  "base": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_transform_many",
+      "scene_delete_many",
+      "scene_duplicate_many",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 4,
+    "objects": [
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "center",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "right",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "object-1",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "object-2",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.0,
+            1.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "f7a290cf4b7c115a",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "4",
+    "scene_id": "manipulation-test",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "duplicate": {
+    "ok": true,
+    "result": {
+      "changed": true,
+      "diff": [
+        {
+          "after": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "after_mesh": null,
+          "after_object": {
+            "color": [
+              0.8999999761581421,
+              0.4000000059604645,
+              0.1599999964237213,
+              1.0
+            ],
+            "id": "remote-a",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                1.0,
+                0.0
+              ]
+            }
+          },
+          "before": null,
+          "before_mesh": null,
+          "before_object": null,
+          "object_id": "remote-a"
+        },
+        {
+          "after": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              2.0,
+              1.0,
+              0.0
+            ]
+          },
+          "after_mesh": null,
+          "after_object": {
+            "color": [
+              0.30000001192092896,
+              0.75,
+              0.44999998807907104,
+              1.0
+            ],
+            "id": "remote-b",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                2.0,
+                1.0,
+                0.0
+              ]
+            }
+          },
+          "before": null,
+          "before_mesh": null,
+          "before_object": null,
+          "object_id": "remote-b"
+        }
+      ],
+      "diff_count": 2,
+      "diff_truncated": false,
+      "dirty": true,
+      "revision": "5",
+      "session_token": "[session]"
+    }
+  },
+  "stale": {
+    "error": {
+      "code": "stale_revision",
+      "message": "stale_revision",
+      "revision": "5",
+      "session_token": "[session]"
+    },
+    "ok": false
+  },
+  "transform": {
+    "ok": true,
+    "result": {
+      "changed": true,
+      "diff": [
+        {
+          "after": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              1.0,
+              2.0
+            ]
+          },
+          "after_mesh": null,
+          "after_object": {
+            "color": [
+              0.8999999761581421,
+              0.4000000059604645,
+              0.1599999964237213,
+              1.0
+            ],
+            "id": "remote-a",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                1.0,
+                2.0
+              ]
+            }
+          },
+          "before": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              1.0,
+              0.0
+            ]
+          },
+          "before_mesh": null,
+          "before_object": {
+            "color": [
+              0.8999999761581421,
+              0.4000000059604645,
+              0.1599999964237213,
+              1.0
+            ],
+            "id": "remote-a",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                1.0,
+                0.0
+              ]
+            }
+          },
+          "object_id": "remote-a"
+        },
+        {
+          "after": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              2.0,
+              1.0,
+              2.0
+            ]
+          },
+          "after_mesh": null,
+          "after_object": {
+            "color": [
+              0.30000001192092896,
+              0.75,
+              0.44999998807907104,
+              1.0
+            ],
+            "id": "remote-b",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                2.0,
+                1.0,
+                2.0
+              ]
+            }
+          },
+          "before": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              2.0,
+              1.0,
+              0.0
+            ]
+          },
+          "before_mesh": null,
+          "before_object": {
+            "color": [
+              0.30000001192092896,
+              0.75,
+              0.44999998807907104,
+              1.0
+            ],
+            "id": "remote-b",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                2.0,
+                1.0,
+                0.0
+              ]
+            }
+          },
+          "object_id": "remote-b"
+        }
+      ],
+      "diff_count": 2,
+      "diff_truncated": false,
+      "dirty": true,
+      "revision": "6",
+      "session_token": "[session]"
+    }
+  },
+  "invalid_delete": {
+    "error": {
+      "code": "object_not_found",
+      "message": "object missing does not exist",
+      "revision": "6",
+      "session_token": "[session]"
+    },
+    "ok": false
+  },
+  "delete": {
+    "ok": true,
+    "result": {
+      "changed": true,
+      "diff": [
+        {
+          "after": null,
+          "after_mesh": null,
+          "after_object": null,
+          "before": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              1.0,
+              2.0
+            ]
+          },
+          "before_mesh": null,
+          "before_object": {
+            "color": [
+              0.8999999761581421,
+              0.4000000059604645,
+              0.1599999964237213,
+              1.0
+            ],
+            "id": "remote-a",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                1.0,
+                2.0
+              ]
+            }
+          },
+          "object_id": "remote-a"
+        },
+        {
+          "after": null,
+          "after_mesh": null,
+          "after_object": null,
+          "before": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              2.0,
+              1.0,
+              2.0
+            ]
+          },
+          "before_mesh": null,
+          "before_object": {
+            "color": [
+              0.30000001192092896,
+              0.75,
+              0.44999998807907104,
+              1.0
+            ],
+            "id": "remote-b",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                2.0,
+                1.0,
+                2.0
+              ]
+            }
+          },
+          "object_id": "remote-b"
+        }
+      ],
+      "diff_count": 2,
+      "diff_truncated": false,
+      "dirty": true,
+      "revision": "7",
+      "session_token": "[session]"
+    }
+  },
+  "saved": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_transform_many",
+      "scene_delete_many",
+      "scene_duplicate_many",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": false,
+    "drafts_pending": false,
+    "loaded_format_version": 4,
+    "next_offset": null,
+    "object_count": 4,
+    "objects": [
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "center",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "right",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "object-1",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "object-2",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.0,
+            1.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "f7a290cf4b7c115a",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "10",
+    "scene_id": "manipulation-test",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "opened": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_transform_many",
+      "scene_delete_many",
+      "scene_duplicate_many",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": false,
+    "drafts_pending": false,
+    "loaded_format_version": 4,
+    "next_offset": null,
+    "object_count": 4,
+    "objects": [
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "center",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "right",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "object-1",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            1.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "object-2",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.0,
+            1.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "b5d485679286fe08",
+    "preview_stale": false,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "10",
+    "scene_id": "manipulation-test",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  }
+}

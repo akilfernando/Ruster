@@ -124,21 +124,25 @@ impl Camera {
             distance,
         }
     }
-    fn matrix(self, aspect: f32) -> Mat4 {
+    /// Separate view and projections keep toolkit clip-depth conventions explicit.
+    fn matrices(self, aspect: f32) -> (Mat4, Mat4, Mat4) {
         let direction = Vec3::new(
             self.yaw.sin() * self.pitch.cos(),
             self.pitch.sin(),
             self.yaw.cos() * self.pitch.cos(),
         );
-        Mat4::perspective_rh(
-            45.0_f32.to_radians(),
-            aspect,
-            self.distance * 0.001,
-            self.distance * 100.0,
-        ) * Mat4::look_at_rh(
+        let view = Mat4::look_at_rh(
             self.target + direction * self.distance,
             self.target,
             Vec3::Y,
+        );
+        let fov = 45.0_f32.to_radians();
+        let near = self.distance * 0.001;
+        let far = self.distance * 100.0;
+        (
+            view,
+            Mat4::perspective_rh(fov, aspect, near, far),
+            Mat4::perspective_rh_gl(fov, aspect, near, far),
         )
     }
 }
@@ -166,6 +170,35 @@ pub fn viewport_with_assets(
     selected: Option<&str>,
     meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
 ) -> Option<String> {
+    viewport_interactive(ui, scene, selected.as_slice(), meshes, true).picked
+}
+
+/// Scene viewport geometry and camera state for frontend-owned overlays.
+pub struct ViewportInteraction {
+    pub rect: egui::Rect,
+    pub response: egui::Response,
+    /// Newly clicked surface; the host decides whether an overlay consumes the click.
+    pub picked: Option<String>,
+    /// Right-handed view matrix, in column-major order.
+    pub view: [[f32; 4]; 4],
+    /// wgpu projection with clip depth 0..1, in column-major order.
+    pub projection: [[f32; 4]; 4],
+    /// Overlay-toolkit projection with clip depth -1..1, in column-major order.
+    /// Its screen x/y coordinates match `projection`.
+    pub gizmo_projection: [[f32; 4]; 4],
+}
+
+/// Paint a scene and return the viewport response and camera for a subsequent overlay.
+/// Every selected stable ID receives the existing material highlight. Disable navigation
+/// during an overlay gesture to freeze orbit, zoom and Fit; hosts suppress consumed picks.
+/// Scene and mesh validity/ownership requirements match `viewport_with_assets`.
+pub fn viewport_interactive(
+    ui: &mut egui::Ui,
+    scene: &Scene,
+    selected: &[&str],
+    meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+    navigation_enabled: bool,
+) -> ViewportInteraction {
     let camera_id = ui.scope_id().with(("ruster-3d-camera", &scene.id));
     let mut camera = ui
         .ctx()
@@ -173,7 +206,10 @@ pub fn viewport_with_assets(
         .unwrap_or_else(|| Camera::fit(scene, meshes));
     ui.horizontal(|ui| {
         ui.label("3D · Left click selects · Right drag orbits · Wheel zooms");
-        if ui.button("Fit").clicked() {
+        if ui
+            .add_enabled(navigation_enabled, egui::Button::new("Fit"))
+            .clicked()
+        {
             camera = Camera::fit(scene, meshes);
         }
     });
@@ -181,19 +217,20 @@ pub fn viewport_with_assets(
         ui.available_size().max(egui::vec2(1.0, 1.0)),
         egui::Sense::click_and_drag(),
     );
-    if response.dragged_by(egui::PointerButton::Secondary) {
+    if navigation_enabled && response.dragged_by(egui::PointerButton::Secondary) {
         let delta = ui.input(|input| input.pointer.delta());
         camera.yaw -= delta.x * 0.008;
         camera.pitch = (camera.pitch + delta.y * 0.008).clamp(-1.45, 1.45);
     }
-    if response.hovered() {
+    if navigation_enabled && response.hovered() {
         camera.distance = (camera.distance
             * (-ui.input(|input| input.smooth_scroll_delta.y) * 0.002).exp())
         .clamp(0.01, 1.0e7);
     }
     ui.ctx()
         .data_mut(|data| data.insert_temp(camera_id, camera));
-    let view_projection = camera.matrix(rect.aspect_ratio());
+    let (view, projection, gizmo_projection) = camera.matrices(rect.aspect_ratio());
+    let view_projection = projection * view;
     let picked = if response.clicked() {
         response.interact_pointer_pos().and_then(|p| {
             pick(
@@ -221,7 +258,7 @@ pub fn viewport_with_assets(
         let matrix = model(object);
         let normal = Mat3::from_mat4(matrix).inverse().transpose();
         let mut color = object.color;
-        if selected == Some(object.id.as_str()) {
+        if selected.contains(&object.id.as_str()) {
             for channel in &mut color[..3] {
                 *channel = (*channel * 0.65 + 0.35).min(1.0);
             }
@@ -250,7 +287,14 @@ pub fn viewport_with_assets(
             cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
         },
     ));
-    picked
+    ViewportInteraction {
+        rect,
+        response,
+        picked,
+        view: view.to_cols_array_2d(),
+        projection: projection.to_cols_array_2d(),
+        gizmo_projection: gizmo_projection.to_cols_array_2d(),
+    }
 }
 
 fn object_mesh<'a>(
@@ -922,15 +966,40 @@ mod tests {
         back.id = "back".into();
         back.transform.translation[2] = -3.0;
         scene.objects.push(back);
-        let vp = Mat4::perspective_rh(45.0_f32.to_radians(), 1.0, 0.01, 100.0)
-            * Mat4::look_at_rh(Vec3::new(0.0, 0.0, 6.0), Vec3::ZERO, Vec3::Y);
+        let camera = Camera {
+            target: Vec3::ZERO,
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 6.0,
+        };
+        let (view, projection, gizmo_projection) = camera.matrices(1.4);
+        for (depth, gpu_z, gizmo_z) in [
+            (camera.distance * 0.001, 0.0, -1.0),
+            (camera.distance * 100.0, 1.0, 1.0),
+        ] {
+            let point = Vec3::new(depth * 0.2, depth * -0.3, -depth);
+            let gpu = projection.project_point3(point);
+            let gizmo = gizmo_projection.project_point3(point);
+            assert!((gpu.z - gpu_z).abs() < 1.0e-5);
+            assert!((gizmo.z - gizmo_z).abs() < 1.0e-5);
+            assert!((gpu.x - gizmo.x).abs() < 1.0e-5);
+            assert!((gpu.y - gizmo.y).abs() < 1.0e-5);
+        }
+        let vp = projection * view;
         assert_eq!(
             pick(&scene, &BTreeMap::new(), vp, 0.0, 0.0),
             Some(scene.objects[0].id.clone())
         );
         assert_eq!(pick(&scene, &BTreeMap::new(), vp, 0.95, 0.95), None);
+        let surface = model(&scene.objects[0]).transform_point3(Vec3::new(0.2, 0.1, 0.5));
+        let ndc = vp.project_point3(surface);
+        assert!(ndc.x.abs() > 0.05 && ndc.y.abs() > 0.01);
+        assert_eq!(
+            pick(&scene, &BTreeMap::new(), vp, ndc.x, ndc.y),
+            Some(scene.objects[0].id.clone())
+        );
         scene.objects.truncate(1);
-        scene.objects[0].transform.translation = [0.0, 0.0, -200.0];
+        scene.objects[0].transform.translation = [0.0, 0.0, -1000.0];
         assert_eq!(
             pick(&scene, &BTreeMap::new(), vp, 0.0, 0.0),
             None,
@@ -957,16 +1026,21 @@ mod tests {
             indices: vec![0, 1, 2],
         });
         let meshes = BTreeMap::from([("triangle".into(), mesh)]);
-        let vp = Mat4::perspective_rh(60.0_f32.to_radians(), 1.0, 0.01, 100.0)
-            * Mat4::look_at_rh(Vec3::new(3.0, 0.0, 8.0), Vec3::new(3.0, 0.0, 0.0), Vec3::Y);
+        let camera = Camera::fit(&scene, &meshes);
+        let (view, projection, gizmo_projection) = camera.matrices(1.6);
+        let vp = projection * view;
         for (point, hit) in [
             (Vec3::new(2.4, -0.5, 0.0), true),
             (Vec3::new(3.8, 0.8, 0.0), false),
         ] {
-            let ndc = vp.project_point3(model(&scene.objects[0]).transform_point3(point));
+            let world = model(&scene.objects[0]).transform_point3(point);
+            let ndc = vp.project_point3(world);
+            let gizmo_ndc = (gizmo_projection * view).project_point3(world);
+            assert!(ndc.x.abs() > 0.05 && ndc.y.abs() > 0.05);
+            assert!((ndc.x - gizmo_ndc.x).abs() < 1.0e-5);
+            assert!((ndc.y - gizmo_ndc.y).abs() < 1.0e-5);
             assert_eq!(pick(&scene, &meshes, vp, ndc.x, ndc.y).is_some(), hit);
         }
-        let camera = Camera::fit(&scene, &meshes);
         assert!(camera
             .target
             .abs_diff_eq(Vec3::new(3.8, -0.1, -1.0), 1.0e-5));

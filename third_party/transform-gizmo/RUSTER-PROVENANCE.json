@@ -1,0 +1,80 @@
+{
+  "access_date": "2026-11-04",
+  "upstream_commit": "07a951ec17ebff2de4608b711ee0544ff2c8063c",
+  "root_lock_sha256": "b9fdd878b692355dc5e01f3c67fb76acc64c84257b8bcb5bb7e2800d5d320d0f",
+  "trial_lock_sha256": "6f516ef78d56df1d99896c4fca18d61fd83c71f5b60cae96f0dd296053766971",
+  "packages": [
+    {
+      "name": "transform-gizmo",
+      "version": "0.11.0",
+      "url": "https://static.crates.io/crates/transform-gizmo/transform-gizmo-0.11.0.crate",
+      "sha256": "fcd9584531c33435ec2e9c2f194a27e60c65a36a2168f0519e1483e06934c8ec",
+      "declared_license": "MIT OR Apache-2.0",
+      "source_rs_files": 12,
+      "source_rs_lines": 3085
+    },
+    {
+      "name": "transform-gizmo-egui",
+      "version": "0.11.0",
+      "url": "https://static.crates.io/crates/transform-gizmo-egui/transform-gizmo-egui-0.11.0.crate",
+      "sha256": "54832e69fb355472e05a768d88616459cd7cc321512a2f2d988bca201bdebc67",
+      "declared_license": "MIT OR Apache-2.0",
+      "source_rs_files": 2,
+      "source_rs_lines": 127
+    }
+  ],
+  "new_registry_versions": [
+    [
+      "darling",
+      "0.21.3"
+    ],
+    [
+      "darling_core",
+      "0.21.3"
+    ],
+    [
+      "darling_macro",
+      "0.21.3"
+    ],
+    [
+      "enum_dispatch",
+      "0.3.13"
+    ],
+    [
+      "enumset",
+      "1.1.15"
+    ],
+    [
+      "enumset_derive",
+      "0.15.1"
+    ],
+    [
+      "fnv",
+      "1.0.7"
+    ],
+    [
+      "glam",
+      "0.32.0"
+    ],
+    [
+      "ident_case",
+      "1.0.1"
+    ],
+    [
+      "mint",
+      "0.5.9"
+    ]
+  ],
+  "license_files": [
+    {
+      "path": "LICENSE-MIT",
+      "url": "https://raw.githubusercontent.com/urholaukkarinen/transform-gizmo/07a951ec17ebff2de4608b711ee0544ff2c8063c/LICENSE-MIT",
+      "sha256": "aa05defdb20fda2b3589b9fec24c02c6991cda59e8a7f7f045eb746f39ca3309"
+    },
+    {
+      "path": "LICENSE-APACHE",
+      "url": "https://raw.githubusercontent.com/urholaukkarinen/transform-gizmo/07a951ec17ebff2de4608b711ee0544ff2c8063c/LICENSE-APACHE",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4"
+    }
+  ]
+}

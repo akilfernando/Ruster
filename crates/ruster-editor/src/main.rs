@@ -2,6 +2,7 @@
 #[cfg(unix)]
 mod bridge;
 mod commands;
+mod manipulation;
 mod model;
 mod scene_editor;
 mod ui;

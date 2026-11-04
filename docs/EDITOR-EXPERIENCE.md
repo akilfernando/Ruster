@@ -62,3 +62,6 @@ The [post-M8 persistence reassessment](ROADMAP-REVIEW.md#post-m8-persistence-rea
 
 
 2026-11-04 construction update: generic create/display-name/duplicate/delete, new empty scene and persisted lifecycle undo now pass the [native construction journey](evidence/M8-objects-native.md). Earlier absence statements describe the M6 baseline. The remaining manipulation/content/workspace/tooling allocation is still open; this does not establish familiarity. The user reports mainly Unity experience for a later walkthrough; Unreal-user evidence remains separate.
+
+
+2026-11-04 manipulation update: ordered multi-selection, window-local copy/paste, grouped commands, transient translation/rotation/scale tools, three pivots, snapping and mixed-component fields are implemented. Real egui and [native controls/property evidence](evidence/M8-manipulation-tools-native.md) distinguish checked behavior from still-unverified physical focused handle input/human familiarity. Exact supported scale semantics exclude shear-producing world nonuniform group scaling; this is explicit UI/guide behavior, not silent approximation. Content/workspace/navigation/remapping/recovery and generic behavior/tooling integration remain open.

@@ -1,0 +1,111 @@
+   Compiling ruster-scene v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-scene)
+   Compiling ruster-authoring-bench v0.1.0 (/tmp/ruster-authoring-bench)
+    Finished `release` profile [optimized] target(s) in 3.75s
+     Running `target/release/ruster-authoring-bench`
+release benchmark samples=25 warmup=5; CPU-only Session API calls; no GPU/UI
+objects=3 history=0 transform(group=3): successes=25 failures=0 p50_ms=0.286 p95_ms=0.560 max_ms=0.564
+objects=3 history=0 transform(group=3) rejected attempts: successes=0 failures=0
+objects=3 history=0 transform(group=3) no-op attempts: successes=0 failures=0
+objects=3 history=0 transform(group=3) warmup_capacity_rejections=0
+objects=3 history~32 undo: successes=25 failures=0 p50_ms=0.002 p95_ms=0.002 max_ms=0.002
+objects=3 history~32 redo: successes=25 failures=0 p50_ms=0.002 p95_ms=0.002 max_ms=0.002
+objects=3 history=8 transform(group=3): successes=25 failures=0 p50_ms=0.247 p95_ms=0.270 max_ms=0.278
+objects=3 history=8 transform(group=3) rejected attempts: successes=0 failures=0
+objects=3 history=8 transform(group=3) no-op attempts: successes=0 failures=0
+objects=3 history=8 transform(group=3) warmup_capacity_rejections=0
+objects=3 history~32 undo: successes=25 failures=0 p50_ms=0.001 p95_ms=0.001 max_ms=0.001
+objects=3 history~32 redo: successes=25 failures=0 p50_ms=0.001 p95_ms=0.001 max_ms=0.001
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=0 transform(group=64): successes=12 failures=13 p50_ms=3.067 p95_ms=3.783 max_ms=3.783
+objects=64 history=0 transform(group=64) rejected attempts: successes=13 failures=0 p50_ms=1.936 p95_ms=2.159 max_ms=2.159
+objects=64 history=0 transform(group=64) no-op attempts: successes=0 failures=0
+objects=64 history=0 transform(group=64) warmup_capacity_rejections=0
+objects=64 history~22 undo: successes=25 failures=0 p50_ms=0.030 p95_ms=0.031 max_ms=0.032
+objects=64 history~22 redo: successes=25 failures=0 p50_ms=0.029 p95_ms=0.033 max_ms=0.037
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=64 history=8 transform(group=64): successes=4 failures=21 p50_ms=3.528 p95_ms=3.689 max_ms=3.689
+objects=64 history=8 transform(group=64) rejected attempts: successes=21 failures=0 p50_ms=1.914 p95_ms=2.011 max_ms=2.046
+objects=64 history=8 transform(group=64) no-op attempts: successes=0 failures=0
+objects=64 history=8 transform(group=64) warmup_capacity_rejections=0
+objects=64 history~22 undo: successes=25 failures=0 p50_ms=0.029 p95_ms=0.033 max_ms=0.035
+objects=64 history~22 redo: successes=25 failures=0 p50_ms=0.030 p95_ms=0.032 max_ms=0.033
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256) edit rejected: invalid scene: scene cannot be saved within 1 MiB: serialized scene exceeds 1 MiB
+objects=256 history=0 transform(group=256): successes=0 failures=25
+objects=256 history=0 transform(group=256) rejected attempts: successes=25 failures=0 p50_ms=2.300 p95_ms=2.518 max_ms=2.576
+objects=256 history=0 transform(group=256) no-op attempts: successes=0 failures=0
+objects=256 history=0 transform(group=256) warmup_capacity_rejections=5
+objects=256 history~5 undo: successes=25 failures=0 p50_ms=0.227 p95_ms=0.243 max_ms=0.243
+objects=256 history~5 redo: successes=25 failures=0 p50_ms=0.229 p95_ms=0.248 max_ms=0.252
+objects=256 history=8 transform(group=3): successes=25 failures=0 p50_ms=8.261 p95_ms=8.621 max_ms=8.625
+objects=256 history=8 transform(group=3) rejected attempts: successes=0 failures=0
+objects=256 history=8 transform(group=3) no-op attempts: successes=0 failures=0
+objects=256 history=8 transform(group=3) warmup_capacity_rejections=0
+objects=256 history~32 undo: successes=25 failures=0 p50_ms=0.042 p95_ms=0.042 max_ms=0.047
+objects=256 history~32 redo: successes=25 failures=0 p50_ms=0.042 p95_ms=0.043 max_ms=0.048
+near-bound setup: objects=256 large_group_history=5 serialized_bytes=1007610 limit_bytes=1048576 occupancy=96.1%
+objects=256 near-byte-bound transform(group=1): successes=25 failures=0 p50_ms=8.928 p95_ms=11.084 max_ms=11.121
+objects=256 near-byte-bound transform(group=1) rejected attempts: successes=0 failures=0
+objects=256 near-byte-bound transform(group=1) no-op attempts: successes=0 failures=0
+objects=256 near-byte-bound transform(group=1) warmup_capacity_rejections=0
+objects=256 near-byte-bound history=32 undo: successes=25 failures=0 p50_ms=0.042 p95_ms=0.047 max_ms=0.069
+objects=256 near-byte-bound history=32 redo: successes=25 failures=0 p50_ms=0.042 p95_ms=0.046 max_ms=0.048
+grouped delete setup: objects=256 retained_transform_history=9 result_objects=0 (undo restores all 256)
+objects=256 history=8 delete(group=256): successes=25 failures=0 p50_ms=3.029 p95_ms=3.159 max_ms=3.200
+objects=256 history=9 undo(group delete restores 256): successes=25 failures=0 p50_ms=0.235 p95_ms=0.247 max_ms=0.252
+objects=256 history=8 redo(group delete): successes=25 failures=0 p50_ms=0.065 p95_ms=0.070 max_ms=0.070

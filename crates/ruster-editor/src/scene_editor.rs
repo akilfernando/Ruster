@@ -52,6 +52,7 @@ static GENERATION: AtomicU64 = AtomicU64::new(1);
 pub struct SceneEditor {
     session: Session,
     selected: Option<String>,
+    manipulation: crate::manipulation::Manipulation,
     draft: Option<Fields>,
     preview: Preview,
     show_preview: bool,
@@ -103,6 +104,9 @@ impl SceneEditor {
             })
             .unwrap_or_default();
         let preview_assets = resolved.clone();
+        let mut manipulation = crate::manipulation::Manipulation::default();
+        manipulation.select_only(selected.clone());
+        manipulation.reset_precision(session.scene());
         let name_text = session
             .scene()
             .objects
@@ -112,6 +116,7 @@ impl SceneEditor {
         Self {
             session,
             selected,
+            manipulation,
             draft,
             preview,
             show_preview: false,
@@ -139,23 +144,30 @@ impl SceneEditor {
         }
     }
     fn drafts(&self) -> bool {
-        self.selected
-            .as_ref()
-            .and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id))
-            .map(|o| Some(Fields::from(&o.transform)).as_ref() != self.draft.as_ref())
-            .unwrap_or(false)
+        self.manipulation.precision_pending()
+            || self
+                .selected
+                .as_ref()
+                .and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id))
+                .map(|o| Some(Fields::from(&o.transform)).as_ref() != self.draft.as_ref())
+                .unwrap_or(false)
     }
     fn reconcile_selection(&mut self) {
-        if !self
-            .selected
-            .as_ref()
-            .is_some_and(|id| self.session.scene().objects.iter().any(|o| &o.id == id))
-        {
-            self.selected = self.session.scene().objects.first().map(|o| o.id.clone());
+        self.manipulation.reconcile(self.session.scene());
+        if self.manipulation.ids.is_empty() && self.selected.is_some() {
+            self.manipulation
+                .select_only(self.session.scene().objects.first().map(|o| o.id.clone()));
         }
+        self.selected = self.manipulation.selected();
+    }
+    fn select_object(&mut self, id: Option<String>, additive: bool) {
+        self.manipulation.select(id, additive);
+        self.selected = self.manipulation.selected();
+        self.sync_draft();
     }
     fn sync_draft(&mut self) {
         self.reconcile_selection();
+        self.manipulation.reset_precision(self.session.scene());
         self.name_text = self
             .selected
             .as_ref()
@@ -169,7 +181,7 @@ impl SceneEditor {
             .map(|o| Fields::from(&o.transform));
     }
     fn guard(&self) -> Result<(), String> {
-        if self.drafts() {
+        if self.drafts() || self.manipulation.active() {
             Err("drafts_pending".into())
         } else if self.dialog.is_some()
             || self.asset_dialog
@@ -184,6 +196,23 @@ impl SceneEditor {
         }
     }
     fn apply(&mut self) -> bool {
+        if self.manipulation.active() {
+            self.error = "Finish or cancel the transform gesture first.".into();
+            return false;
+        }
+        if self.manipulation.precision_pending() {
+            match self.manipulation.apply_precision(&mut self.session) {
+                Ok(()) => {
+                    self.sync_draft();
+                    self.error.clear();
+                    return true;
+                }
+                Err(error) => {
+                    self.error = error;
+                    return false;
+                }
+            }
+        }
         let Some(id) = self.selected.clone() else {
             return true;
         };
@@ -246,13 +275,6 @@ impl SceneEditor {
             Err(e) => self.error = e.to_string(),
         }
     }
-    fn next_object_id(&self) -> String {
-        // Probe only the bounded scene; IDs remain stable across display-name edits.
-        (1..=ruster_scene::MAX_OBJECTS + ruster_scene::HISTORY_LIMIT + 1)
-            .map(|n| format!("object-{n}"))
-            .find(|id| !self.session.contains_object_id(id))
-            .expect("bounded scene has a free generated ID")
-    }
     fn object_action(&mut self, action: &str) {
         if let Err(error) = self.guard() {
             self.error = error;
@@ -260,32 +282,47 @@ impl SceneEditor {
         }
         let revision = self.session.scene().revision;
         let selected = self.selected.clone();
-        let new_id = self.next_object_id();
+        let new_id = if action == "create" {
+            match crate::manipulation::Manipulation::fresh_ids(&self.session, 1) {
+                Ok(mut ids) => ids.remove(0),
+                Err(error) => {
+                    self.error = error;
+                    return;
+                }
+            }
+        } else {
+            String::new()
+        };
         let result = match action {
             "create" => self
                 .session
                 .create(revision, Object::cube(new_id.clone(), Some("Cube".into()))),
-            "duplicate" => selected
-                .as_deref()
-                .ok_or_else(|| "Select an object first.".to_string())
-                .and_then(|id| {
-                    let name = self
-                        .session
-                        .scene()
-                        .objects
-                        .iter()
-                        .find(|o| o.id == id)
-                        .map(|o| o.display_name().to_string())
-                        .unwrap_or_default();
-                    self.session
-                        .duplicate(revision, id, &new_id, Some(name))
-                        .map_err(|e| e.to_string())
-                })
-                .map_err(ruster_scene::SceneError::Invalid),
-            "delete" => selected
-                .as_deref()
-                .ok_or_else(|| ruster_scene::SceneError::Invalid("Select an object first.".into()))
-                .and_then(|id| self.session.delete(revision, id)),
+            "duplicate" => {
+                let new_ids = match crate::manipulation::Manipulation::fresh_ids(
+                    &self.session,
+                    self.manipulation.ids.len(),
+                ) {
+                    Ok(ids) => ids,
+                    Err(error) => {
+                        self.error = error;
+                        return;
+                    }
+                };
+                let pairs: Vec<_> = self
+                    .manipulation
+                    .ids
+                    .iter()
+                    .cloned()
+                    .zip(new_ids.iter().cloned())
+                    .collect();
+                let result = self.session.duplicate_many(revision, &pairs);
+                if result.is_ok() {
+                    self.manipulation.ids = new_ids;
+                    self.selected = self.manipulation.selected();
+                }
+                result
+            }
+            "delete" => self.session.delete_many(revision, &self.manipulation.ids),
             "rename" => selected
                 .as_deref()
                 .ok_or_else(|| ruster_scene::SceneError::Invalid("Select an object first.".into()))
@@ -297,8 +334,9 @@ impl SceneEditor {
         };
         match result {
             Ok(_) => {
-                if matches!(action, "create" | "duplicate") {
-                    self.selected = Some(new_id);
+                if action == "create" {
+                    self.manipulation.select_only(Some(new_id));
+                    self.selected = self.manipulation.selected();
                 }
                 self.sync_draft();
                 self.error.clear();
@@ -317,8 +355,113 @@ impl SceneEditor {
                 return;
             }
         }
-        *self = Self::new(Session::new(Scene::empty("untitled")).expect("empty scene is valid"));
+        let mut next =
+            Self::new(Session::new(Scene::empty("untitled")).expect("empty scene is valid"));
+        next.manipulation.clipboard_from(&mut self.manipulation);
+        *self = next;
         self.render = render;
+    }
+    fn clipboard_action(&mut self, paste: bool) {
+        if let Err(error) = self.guard() {
+            self.error = error;
+            return;
+        }
+        let root = self.assets.as_ref().map(|s| s.root().to_path_buf());
+        let result = if paste {
+            self.manipulation.paste(&mut self.session, root.as_deref())
+        } else {
+            self.manipulation.copy(&self.session, root.as_deref())
+        };
+        match result {
+            Ok(()) => {
+                self.selected = self.manipulation.selected();
+                self.sync_draft();
+                self.error.clear();
+                self.notice = if paste {
+                    "Pasted objects; one Undo restores the scene."
+                } else {
+                    "Copied objects inside this editor window."
+                }
+                .into();
+            }
+            Err(error) => self.error = error,
+        }
+    }
+    fn manipulation_ui(&mut self, ui: &mut egui::Ui) {
+        ui.label(format!(
+            "{} selected · last selected is active",
+            self.manipulation.ids.len()
+        ));
+        ui.horizontal(|ui| {
+            if ui.button("Copy objects").clicked() {
+                self.clipboard_action(false);
+            }
+            if ui.button("Paste objects").clicked() {
+                self.clipboard_action(true);
+            }
+        });
+        ui.small(
+            "Object clipboard stays in this window. Text fields keep normal clipboard behavior.",
+        );
+        ui.add_enabled_ui(!self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
+            use crate::manipulation::{Tool,Pivot};
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move");
+                ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate");
+                ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale");
+            });
+            ui.checkbox(&mut self.manipulation.local,"Local axes (active object)");
+            egui::ComboBox::from_label("Pivot").selected_text(match self.manipulation.pivot {Pivot::Individual=>"Individual origins",Pivot::Center=>"Selection center (mean origins)",Pivot::Active=>"Active object"}).show_ui(ui,|ui| {
+                ui.selectable_value(&mut self.manipulation.pivot,Pivot::Individual,"Individual origins");
+                ui.selectable_value(&mut self.manipulation.pivot,Pivot::Center,"Selection center (mean origins)");
+                ui.selectable_value(&mut self.manipulation.pivot,Pivot::Active,"Active object");
+            });
+            if self.manipulation.tool==Tool::Scale {
+                ui.small(if self.manipulation.local && self.manipulation.pivot==Pivot::Individual {"Local axis scaling at each object's origin."} else {"Uniform group scaling. For nonuniform scaling, choose Local + Individual origins. World nonuniform/shear is unsupported."});
+            }
+            ui.checkbox(&mut self.manipulation.snap,"Snapping");
+            ui.horizontal(|ui| {
+                match self.manipulation.tool {
+                    Tool::Translate=>{ui.label("Distance (scene units)");ui.add(egui::DragValue::new(&mut self.manipulation.snap_distance).range(0.001..=1000.0).speed(0.1));},
+                    Tool::Rotate=>{ui.label("Angle (degrees)");ui.add(egui::DragValue::new(&mut self.manipulation.snap_degrees).range(0.1..=180.0).speed(1.0));},
+                    Tool::Scale=>{ui.label("Scale factor increment");ui.add(egui::DragValue::new(&mut self.manipulation.snap_scale).range(0.001..=10.0).speed(0.05));},
+                }
+            });
+            ui.label("World translation offset for selected objects");
+            ui.horizontal(|ui| {
+                for (axis, text) in ["X", "Y", "Z"]
+                    .into_iter()
+                    .zip(&mut self.manipulation.delta)
+                {
+                    ui.label(axis);
+                    ui.add(egui::TextEdit::singleline(text).desired_width(50.0));
+                }
+            });
+            if ui
+                .add_enabled(
+                    !self.manipulation.ids.is_empty(),
+                    egui::Button::new("Apply translation offset"),
+                )
+                .clicked()
+            {
+                let result = self
+                    .guard()
+                    .and_then(|()| self.manipulation.apply_delta(&mut self.session));
+                match result {
+                    Ok(()) => {
+                        self.sync_draft();
+                        self.error.clear();
+                        self.notice =
+                            "Translation offset applied; one Undo restores all selected objects."
+                                .into();
+                    }
+                    Err(error) => self.error = error,
+                }
+            }
+        });
+        if self.manipulation.active() {
+            ui.label("Transform preview — release to commit, Escape to cancel.");
+        }
     }
     fn asset_snapshot(&mut self) {
         let meshes = self
@@ -368,8 +511,11 @@ impl SceneEditor {
         Ok(())
     }
     fn assign_mesh(&mut self, mesh: Option<String>) -> Result<u64, String> {
-        if self.drafts() {
-            return Err("Apply or revert transform fields before assigning a mesh.".into());
+        if self.drafts() || self.manipulation.active() {
+            return Err(
+                "Apply or revert transform fields and finish the gesture before assigning a mesh."
+                    .into(),
+            );
         }
         if let Some(id) = &mesh {
             if !self.resolved.contains_key(id) {
@@ -671,6 +817,11 @@ impl SceneEditor {
                 "name",
             ],
             "scene_delete" => &["expected_session_token", "expected_revision", "object_id"],
+            "scene_transform_many" => {
+                &["expected_session_token", "expected_revision", "transforms"]
+            }
+            "scene_delete_many" => &["expected_session_token", "expected_revision", "object_ids"],
+            "scene_duplicate_many" => &["expected_session_token", "expected_revision", "objects"],
             "scene_undo" | "scene_redo" => &["expected_session_token", "expected_revision"],
             "scene_replay" => &["expected_session_token", "expected_revision", "ticks"],
             _ => return Err(err("unsupported_operation")),
@@ -702,7 +853,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.asset_dialog||self.new_scene_pending||self.rename_pending,"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.asset_dialog||self.new_scene_pending||self.rename_pending,"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -783,6 +934,83 @@ impl SceneEditor {
                     .ok_or_else(|| err("invalid_arguments"))?;
                 self.session.delete(revision, id)
             }
+            "scene_transform_many" => {
+                let values = args["transforms"]
+                    .as_array()
+                    .filter(|v| v.len() <= ruster_scene::MAX_OBJECTS)
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let edits: Vec<_> = values
+                    .iter()
+                    .map(|value| {
+                        let entry = value.as_object().ok_or_else(|| err("invalid_arguments"))?;
+                        if entry.len() != 2
+                            || entry
+                                .keys()
+                                .any(|k| !["object_id", "transform"].contains(&k.as_str()))
+                        {
+                            return Err(err("invalid_arguments"));
+                        }
+                        let id = value["object_id"]
+                            .as_str()
+                            .ok_or_else(|| err("invalid_arguments"))?;
+                        let transform: Transform =
+                            serde_json::from_value(value["transform"].clone())
+                                .map_err(|_| err("invalid_arguments"))?;
+                        Ok((id.to_string(), transform))
+                    })
+                    .collect::<Result<_, (String, String)>>()?;
+                self.session.edit_transforms(revision, &edits)
+            }
+            "scene_delete_many" => {
+                let values = args["object_ids"]
+                    .as_array()
+                    .filter(|v| v.len() <= ruster_scene::MAX_OBJECTS)
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let ids: Vec<_> = values
+                    .iter()
+                    .map(|v| {
+                        v.as_str()
+                            .map(str::to_string)
+                            .ok_or_else(|| err("invalid_arguments"))
+                    })
+                    .collect::<Result<_, _>>()?;
+                self.session.delete_many(revision, &ids)
+            }
+            "scene_duplicate_many" => {
+                let values = args["objects"]
+                    .as_array()
+                    .filter(|v| v.len() <= ruster_scene::MAX_OBJECTS)
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let pairs: Vec<_> = values
+                    .iter()
+                    .map(|value| {
+                        let entry = value.as_object().ok_or_else(|| err("invalid_arguments"))?;
+                        if entry.len() != 2
+                            || entry
+                                .keys()
+                                .any(|k| !["object_id", "new_object_id"].contains(&k.as_str()))
+                        {
+                            return Err(err("invalid_arguments"));
+                        }
+                        Ok((
+                            value["object_id"]
+                                .as_str()
+                                .ok_or_else(|| err("invalid_arguments"))?
+                                .to_string(),
+                            value["new_object_id"]
+                                .as_str()
+                                .ok_or_else(|| err("invalid_arguments"))?
+                                .to_string(),
+                        ))
+                    })
+                    .collect::<Result<_, (String, String)>>()?;
+                let result = self.session.duplicate_many(revision, &pairs);
+                if result.is_ok() {
+                    self.manipulation.ids = pairs.into_iter().map(|(_, id)| id).collect();
+                    self.selected = self.manipulation.selected();
+                }
+                result
+            }
             "scene_undo" => self.session.undo(revision),
             "scene_redo" => self.session.redo(revision),
             _ => unreachable!(),
@@ -807,28 +1035,36 @@ impl SceneEditor {
             .as_str()
             .map(str::to_string);
         }
+        if matches!(op, "scene_create" | "scene_duplicate") {
+            self.manipulation.select_only(self.selected.clone());
+        }
         self.sync_draft();
         let changed = before != *self.session.scene();
         let mut ids: std::collections::BTreeSet<_> =
             before.objects.iter().map(|o| o.id.as_str()).collect();
         ids.extend(self.session.scene().objects.iter().map(|o| o.id.as_str()));
-        let diff: Vec<_> = ids
-            .into_iter()
-            .filter_map(|id| {
-                let old = before.objects.iter().find(|o| o.id == id);
-                let new = self.session.scene().objects.iter().find(|o| o.id == id);
-                (old != new).then(|| json!({"object_id":id,
-                    "before":old.map(|o| &o.transform),"after":new.map(|o| &o.transform),
-                    "before_mesh":old.and_then(|o| o.mesh.as_ref()),"after_mesh":new.and_then(|o| o.mesh.as_ref()),
-                    "before_object":old,"after_object":new}))
-            })
-            .collect();
+        let mut diff = Vec::with_capacity(16);
+        let mut diff_count = 0;
+        for id in ids {
+            let old = before.objects.iter().find(|o| o.id == id);
+            let new = self.session.scene().objects.iter().find(|o| o.id == id);
+            if old != new {
+                diff_count += 1;
+                if diff.len() < 16 {
+                    diff.push(json!({"object_id":id,
+                        "before":old.map(|o| &o.transform),"after":new.map(|o| &o.transform),
+                        "before_mesh":old.and_then(|o| o.mesh.as_ref()),"after_mesh":new.and_then(|o| o.mesh.as_ref()),
+                        "before_object":old,"after_object":new}));
+                }
+            }
+        }
+        let diff_truncated = diff_count > diff.len();
         self.notice = format!(
             "Agent {op}: revision {revision}; {} authored object(s) changed. Preview unchanged.",
-            diff.len()
+            diff_count
         );
         Ok(
-            json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"diff":diff,"dirty":self.session.is_dirty()}),
+            json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"dirty":self.session.is_dirty()}),
         )
     }
     fn content_ui(&mut self, ctx: &egui::Context) {
@@ -866,6 +1102,9 @@ impl SceneEditor {
         });
     }
     fn route_shortcuts(&mut self, ctx: &egui::Context) {
+        if self.manipulation.active() {
+            return;
+        }
         if !ctx.egui_wants_keyboard_input()
             && self.dialog.is_none()
             && !self.close_pending
@@ -875,6 +1114,18 @@ impl SceneEditor {
         {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
                 self.save();
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::C)) {
+                self.clipboard_action(false);
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::V)) {
+                self.clipboard_action(true);
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::D)) {
+                self.object_action("duplicate");
+            }
+            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
+                self.object_action("delete");
             }
             if ctx.input_mut(|i| {
                 i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::Z)
@@ -888,6 +1139,7 @@ impl SceneEditor {
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         if ctx.input(|i| i.viewport().close_requested()) && !self.close_approved {
+            self.manipulation.cancel();
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if self.new_scene_pending {
                 self.error = "Resolve or cancel New scene before closing.".into();
@@ -901,6 +1153,18 @@ impl SceneEditor {
             } else {
                 self.close_approved = true;
             }
+        }
+        if self.manipulation.active()
+            && (ctx.input(|i| !i.focused || i.key_pressed(egui::Key::Escape))
+                || self.dialog.is_some()
+                || self.asset_dialog
+                || self.close_pending
+                || self.close_approved
+                || self.new_scene_pending
+                || self.rename_pending)
+        {
+            self.manipulation.cancel();
+            self.notice = "Transform cancelled; authored state unchanged.".into();
         }
         self.route_shortcuts(&ctx);
         if self.running && self.last_tick.elapsed() >= Duration::from_millis(250) {
@@ -1014,7 +1278,7 @@ impl SceneEditor {
                     .show(ui, |ui| {
                         for (id, name) in ids {
                             if ui
-                                .selectable_label(self.selected.as_ref() == Some(&id), name)
+                                .selectable_label(self.manipulation.ids.contains(&id), name)
                                 .clicked()
                             {
                                 if self.guard().is_err() {
@@ -1022,35 +1286,33 @@ impl SceneEditor {
                                         "Apply or revert transform before changing selection."
                                             .into();
                                 } else {
-                                    self.selected = Some(id);
-                                    self.sync_draft();
+                                    let additive = ui.input(|i| {
+                                        i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift
+                                    });
+                                    self.select_object(Some(id), additive);
                                 }
                             }
                         }
                     });
             });
-        egui::Panel::right("scene_inspector").exact_size(290.).show(ui,|ui| {
+        egui::Panel::right("scene_inspector").default_size(320.).resizable(true).show(ui,|ui| {
+            egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("Object");
             if let Some(id) = &self.selected { ui.small(format!("Stable ID: {id}")); }
             if let Some(object) = self.selected.as_ref().and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id)) { ui.label(object.display_name()); }
-            if ui.add_enabled(self.selected.is_some(), egui::Button::new("Rename object")).clicked() {
+            if ui.add_enabled(self.manipulation.ids.len() == 1, egui::Button::new("Rename object")).clicked() {
                 match self.guard() { Ok(()) => self.rename_pending = true, Err(error) => self.error = error }
             }
+            self.manipulation_ui(ui);
             ui.heading("Transform");
             if let Some(object)=self.selected.as_ref().and_then(|id|self.session.scene().objects.iter().find(|o|&o.id==id)) {ui.label(format!("Mesh: {}",object.mesh.as_deref().unwrap_or("Procedural cube")));}
             ui.label(format!("Loaded scene format v{}; Save writes v{}.",self.session.loaded_format_version(),ruster_scene::FORMAT_VERSION));
-            if let Some(t)=&mut self.draft {
-                for (label,values) in [("Position",&mut t.translation),("Rotation (radians)",&mut t.rotation),("Scale",&mut t.scale)] {
-                    ui.label(label);
-                    ui.horizontal(|ui| { for (axis,value) in ["X","Y","Z"].into_iter().zip(values) {
-                        ui.label(axis);ui.add(egui::TextEdit::singleline(value).desired_width(52.));
-                    }});
+            ui.add_enabled_ui(!self.manipulation.ids.is_empty() && !self.manipulation.active(), |ui| {
+                match self.manipulation.precision_ui(ui,&mut self.session) {
+                    Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
+                    Ok(false)=>{},Err(error)=>self.error=error,
                 }
-                ui.horizontal(|ui| {
-                    if ui.button("Apply transform").clicked(){self.apply();}
-                    if ui.button("Revert transform").clicked(){self.sync_draft();self.error.clear();}
-                });
-            }
+            });
             ui.separator();ui.label(format!("Preview tick {}",self.preview.tick));
             if self.preview.scene!=*self.session.scene(){ui.colored_label(egui::Color32::YELLOW,"Scene or imported content changed; Reset preview.");}
             ui.horizontal(|ui| {
@@ -1059,6 +1321,7 @@ impl SceneEditor {
             });
             if ui.button("Reset preview").clicked(){self.running=false;self.preview.reset(self.session.scene());self.preview_assets=self.resolved.clone();}
             ui.label("Static arrangement: ticks advance lifecycle only; no sample gameplay is implied.");
+            });
         });
         if !self.asset_dialog && self.dialog.is_none() && !self.close_pending {
             egui::Panel::bottom("content_status").show(ui,|ui| {
@@ -1071,7 +1334,7 @@ impl SceneEditor {
                         match result {Ok(())=>self.notice="Created scene.wgsl; edit it, then Refresh scene shader.".into(),Err(e)=>self.error=e}
                     }
                     if ui.button("Refresh scene shader").clicked(){
-                        if self.drafts(){self.error="Apply/revert transform drafts before shader refresh.".into();}
+                        if self.drafts() || self.manipulation.active(){self.error="Apply/revert transform drafts and finish the gesture before shader refresh.".into();}
                         else if let Err(e)=self.refresh_shader(){self.shader_notice=format!("Shader rejected; last good pipeline retained: {}",e.chars().take(256).collect::<String>());self.error=self.shader_notice.clone();}
                     }
                     ui.label(&self.shader_notice);
@@ -1082,27 +1345,65 @@ impl SceneEditor {
         }
         egui::CentralPanel::default().show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.checkbox(&mut self.show_preview, "Show preview snapshot");
+                ui.add_enabled(
+                    !self.manipulation.active(),
+                    egui::Checkbox::new(&mut self.show_preview, "Show preview snapshot"),
+                );
                 ui.label("Right-drag orbit · scroll zoom");
             });
-            if let Some(id) = ruster_render::viewport_with_assets(
+            let transient = if !self.show_preview {
+                self.manipulation.transient_scene(self.session.scene())
+            } else {
+                None
+            };
+            let selected: Vec<_> = self.manipulation.ids.iter().map(String::as_str).collect();
+            let viewport = ruster_render::viewport_interactive(
                 ui,
                 if self.show_preview {
                     &self.preview.scene
                 } else {
-                    self.session.scene()
+                    transient.as_ref().unwrap_or(self.session.scene())
                 },
-                self.selected.as_deref(),
+                &selected,
                 if self.show_preview {
                     &self.preview_assets
                 } else {
                     &self.resolved
                 },
-            ) {
-                if self.guard().is_ok() && self.session.scene().objects.iter().any(|o| o.id == id) {
-                    self.selected = Some(id);
+                !self.manipulation.active(),
+            );
+            let may_draw = !self.show_preview
+                && !self.drafts()
+                && self.dialog.is_none()
+                && !self.asset_dialog
+                && !self.close_pending
+                && !self.close_approved
+                && !self.new_scene_pending
+                && !self.rename_pending;
+            let overlay_owns = if may_draw {
+                let before = self.session.scene().revision;
+                let result = self.manipulation.draw(ui, &viewport, &mut self.session);
+                if before != self.session.scene().revision {
                     self.sync_draft();
+                    self.notice = "Transform committed; Undo restores the whole selection.".into();
                 }
+                match result {
+                    Ok(owns) => owns,
+                    Err(error) => {
+                        self.error = error;
+                        true
+                    }
+                }
+            } else {
+                false
+            };
+            if viewport.response.clicked() && !overlay_owns && self.guard().is_ok() {
+                let id = viewport
+                    .picked
+                    .filter(|id| self.session.scene().objects.iter().any(|o| &o.id == id));
+                let additive =
+                    ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
+                self.select_object(id, additive);
             }
         });
         if self.rename_pending {
@@ -1159,7 +1460,7 @@ impl SceneEditor {
                                 Ok(session)=> {
                                     let render=self.render.clone();
                                     let reset=render.as_ref().map(|r|ruster_render::refresh_shader(r,ruster_render::default_shader())).unwrap_or(Ok(()));
-                                    match reset {Ok(())=>{*self=Self::new(session);self.render=render;},Err(error)=>self.error=error}
+                                    match reset {Ok(())=>{let mut next=Self::new(session);next.manipulation.clipboard_from(&mut self.manipulation);*self=next;self.render=render;},Err(error)=>self.error=error}
                                 },
                                 Err(error)=>self.error=error.to_string()
                             }
@@ -1501,6 +1802,28 @@ mod tests {
         assert_eq!(replay["result"]["ticks"], "10000");
         assert_eq!(editor.preview.tick, 0);
         assert!(serde_json::to_vec(&replay).unwrap().len() < 65536);
+        let transforms: Vec<_> = editor
+            .session
+            .scene()
+            .objects
+            .iter()
+            .map(|object| {
+                let mut transform = object.transform.clone();
+                transform.translation[0] += 1.0;
+                json!({"object_id":object.id,"transform":transform})
+            })
+            .collect();
+        let result = editor.command("host", "scene_transform_many", json!({"expected_session_token":result["result"]["session_token"],"expected_revision":"0","transforms":transforms}));
+        assert_eq!(result["ok"], true);
+        assert_eq!(result["result"]["diff_count"], 256);
+        assert_eq!(result["result"]["diff_truncated"], true);
+        assert_eq!(result["result"]["diff"].as_array().unwrap().len(), 16);
+        assert!(serde_json::to_vec(&result).unwrap().len() < 65536);
+        assert_eq!(editor.session.undo_len(), 1);
+        let revision = editor.session.scene().revision;
+        let malformed = editor.command("host", "scene_transform_many", json!({"expected_session_token":result["result"]["session_token"],"expected_revision":revision.to_string(),"transforms":[{"object_id":"object-0","transform":editor.session.scene().objects[0].transform,"unknown":true}]}));
+        assert_eq!(malformed["error"]["code"], "invalid_arguments");
+        assert_eq!(editor.session.scene().revision, revision);
         editor.close_pending = true;
         assert_eq!(editor.command("host","scene_undo",json!({"expected_session_token":result["result"]["session_token"],"expected_revision":"0"}))["error"]["code"],"recovery_pending");
     }

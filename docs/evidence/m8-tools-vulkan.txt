@@ -1,0 +1,454 @@
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for explicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for explicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for explicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for explicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+[Vulkan Loader] LAYER:          Searching for implicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.config/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.config/kdedefaults/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/xdg/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /etc/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /var/lib/flatpak/exports/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/local/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamoverlay_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_i386.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/steamfossilize_x86_64.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_render.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/VkLayer_MAKO_spatial_scaling.x86.json
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/vulkan/implicit_layer.d/afmf-linux.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/nvidia_layers.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_anti_lag.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/VkLayer_FROG_gamescope_wsi.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86_64.json
+[Vulkan Loader] LAYER:                /usr/share/vulkan/implicit_layer.d/MangoHud.x86.json
+[Vulkan Loader] LAYER:          Searching for explicit layer manifest files
+[Vulkan Loader] LAYER:             In following locations:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d
+[Vulkan Loader] LAYER:             Found the following files:
+[Vulkan Loader] LAYER:                /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+WARN wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x5624271f15e0, name: ?)
+[Vulkan Loader] WARNING | LAYER: env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x5624271f15e0, name: ?)
+[Vulkan Loader] WARNING | LAYER: env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+[Vulkan Loader] DEBUG | LAYER:  Loading layer library libVkLayer_khronos_validation.so
+[Vulkan Loader] INFO | LAYER:   Insert instance layer "VK_LAYER_KHRONOS_validation" (/home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so)
+[Vulkan Loader] DEBUG | LAYER:  Loading layer library libVkLayer_MESA_device_select.so
+[Vulkan Loader] INFO | LAYER:   Insert instance layer "VK_LAYER_MESA_device_select" (/usr/lib/libVkLayer_MESA_device_select.so)
+[Vulkan Loader] LAYER:          vkCreateInstance layer callstack setup to:
+[Vulkan Loader] LAYER:             <Application>
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] LAYER:             <Loader>
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] LAYER:             VK_LAYER_MESA_device_select
+[Vulkan Loader] LAYER:                     Type: Implicit
+[Vulkan Loader] LAYER:                     Enabled By: Implicit Layer
+[Vulkan Loader] LAYER:                         Disable Env Var:  NODEVICE_SELECT
+[Vulkan Loader] LAYER:                     Manifest: /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                     Library:  /usr/lib/libVkLayer_MESA_device_select.so
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] LAYER:             VK_LAYER_KHRONOS_validation
+[Vulkan Loader] LAYER:                     Type: Explicit
+[Vulkan Loader] LAYER:                     Enabled By: Environment Variable VK_INSTANCE_LAYERS
+[Vulkan Loader] LAYER:                     Manifest: /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+[Vulkan Loader] LAYER:                     Library:  /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] LAYER:             <Drivers>
+[Vulkan Loader] INFO | LAYER:   Inserted device layer "VK_LAYER_KHRONOS_validation" (/home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so)
+[Vulkan Loader] INFO | LAYER:   Failed to find vkGetDeviceProcAddr in layer "/usr/lib/libVkLayer_MESA_device_select.so"
+[Vulkan Loader] DRIVER:         vkCreateDevice layer callstack setup to:
+[Vulkan Loader] DRIVER:            <Application>
+[Vulkan Loader] DRIVER:              ||
+[Vulkan Loader] DRIVER:            <Loader>
+[Vulkan Loader] DRIVER:              ||
+[Vulkan Loader] LAYER:             VK_LAYER_KHRONOS_validation
+[Vulkan Loader] LAYER:                     Type: Explicit
+[Vulkan Loader] LAYER:                     Enabled By: Environment Variable VK_INSTANCE_LAYERS
+[Vulkan Loader] LAYER:                     Manifest: /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+[Vulkan Loader] LAYER:                     Library:  /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] DRIVER:            <Device>
+[Vulkan Loader] DRIVER:                Using "NVIDIA GeForce RTX 4060 Laptop GPU" with driver: "/usr/lib/libGLX_nvidia.so.615.78.08"
+Ruster shared 3D: adapter=NVIDIA GeForce RTX 4060 Laptop GPU backend=Vulkan timestamps=true
+Scene editor adapter: AdapterInfo { name: "NVIDIA GeForce RTX 4060 Laptop GPU", vendor: 4318, device: 10464, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "615.78.08", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }
+Ruster MCP bridge: /tmp/ruster-mcp-X2FpKzUddkwi1y1RNaSd4aOh/editor.sock (private same-user capability; opt-in)
+[Vulkan Loader] DEBUG | LAYER:  Unloading layer library /usr/lib/libVkLayer_MESA_device_select.so
+[Vulkan Loader] DEBUG | LAYER:  Unloading layer library /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so

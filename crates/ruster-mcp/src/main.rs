@@ -88,6 +88,53 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     };
     if matches!(
         name,
+        "scene_transform_many" | "scene_duplicate_many" | "scene_delete_many"
+    ) {
+        let field = match name {
+            "scene_transform_many" => "transforms",
+            "scene_duplicate_many" => "objects",
+            _ => "object_ids",
+        };
+        if !exact_keys(
+            args,
+            &["expected_session_token", "expected_revision", field],
+            &[],
+        ) || !args["expected_session_token"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty() && s.len() <= 256)
+            || !canonical_u64(&args["expected_revision"])
+        {
+            return false;
+        }
+        let Some(items) = args[field].as_array() else {
+            return false;
+        };
+        if items.is_empty() || items.len() > 256 {
+            return false;
+        }
+        let id = |v: &Value| v.as_str().is_some_and(|s| !s.is_empty() && s.len() <= 128);
+        return items.iter().all(|item| match name {
+            "scene_delete_many" => id(item),
+            "scene_duplicate_many" => item.as_object().is_some_and(|o| {
+                exact_keys(o, &["object_id", "new_object_id"], &[])
+                    && id(&item["object_id"])
+                    && id(&item["new_object_id"])
+            }),
+            _ => item.as_object().is_some_and(|o| {
+                exact_keys(o, &["object_id", "transform"], &[])
+                    && id(&item["object_id"])
+                    && item["transform"].as_object().is_some_and(|t| {
+                        exact_keys(t, &["translation", "rotation", "scale"], &[])
+                            && t.values().all(|v| {
+                                v.as_array()
+                                    .is_some_and(|a| a.len() == 3 && a.iter().all(Value::is_number))
+                            })
+                    })
+            }),
+        });
+    }
+    if matches!(
+        name,
         "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete"
     ) {
         let mut keys = vec!["expected_session_token", "expected_revision", "object_id"];
@@ -234,6 +281,9 @@ fn tools() -> Value {
         ("scene_rename", "Change an object's display name without changing its stable ID. Shares authored undo; preview unchanged."),
         ("scene_duplicate", "Duplicate one object with a fresh stable ID and display name. Preserves its transform and mesh; shares authored undo."),
         ("scene_delete", "Delete one object, retaining its data and position in bounded authored undo. Preview unchanged."),
+        ("scene_transform_many", "Atomically replace transforms for up to256 objects with one revision and Undo entry. Bounded diff page; inspect after truncated responses."),
+        ("scene_duplicate_many", "Atomically duplicate up to256 objects with supplied new immutable IDs, preserving names and properties; one Undo entry."),
+        ("scene_delete_many", "Atomically delete up to256 objects and preserve them in one Undo entry. Bounded diff page; inspect after truncated responses."),
         ("scene_transform", "Replace one object's authored translation, Euler rotation in radians and scale. Requires the inspected identity/revision and clean human drafts. Unsaved; shares human undo; leaves preview unchanged."),
         ("scene_undo", "Undo one authored scene change in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("scene_redo", "Redo one authored scene change in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
@@ -271,6 +321,20 @@ fn tools() -> Value {
                 properties.insert("new_object_id".into(), json!({"type":"string","minLength":1,"maxLength":128}));
                 required.push("new_object_id");
             }
+        }
+        if matches!(name, "scene_transform_many" | "scene_duplicate_many" | "scene_delete_many") {
+            let id = json!({"type":"string","minLength":1,"maxLength":128});
+            let (field, item) = match name {
+                "scene_duplicate_many" => ("objects", object_schema(json!({"object_id":id,"new_object_id":id}), vec!["object_id","new_object_id"])),
+                "scene_delete_many" => ("object_ids", id),
+                _ => {
+                    let vector = json!({"type":"array","items":{"type":"number"},"minItems":3,"maxItems":3});
+                    let transform = object_schema(json!({"translation":vector,"rotation":vector,"scale":vector}),vec!["translation","rotation","scale"]);
+                    ("transforms", object_schema(json!({"object_id":id,"transform":transform}),vec!["object_id","transform"]))
+                }
+            };
+            properties.insert(field.into(),json!({"type":"array","items":item,"minItems":1,"maxItems":256}));
+            required.push(field);
         }
         if name == "scene_transform" {
             properties.insert("object_id".into(), json!({"type":"string", "description":"Exact stable object ID returned by scene_inspect."}));
@@ -390,6 +454,9 @@ impl Server {
                         "replay",
                         "scene_inspect",
                         "scene_transform",
+                        "scene_transform_many",
+                        "scene_duplicate_many",
+                        "scene_delete_many",
                         "scene_create",
                         "scene_rename",
                         "scene_duplicate",
@@ -663,7 +730,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 20);
+        assert_eq!(tools.len(), 23);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -687,6 +754,9 @@ mod tests {
                 "scene_rename",
                 "scene_duplicate",
                 "scene_delete",
+                "scene_transform_many",
+                "scene_duplicate_many",
+                "scene_delete_many",
                 "scene_transform",
                 "scene_undo",
                 "scene_redo",
@@ -755,6 +825,27 @@ mod tests {
 
     #[test]
     fn scene_shapes_are_strict_and_semantic_validation_stays_with_owner() {
+        for (name, field, item) in [
+            (
+                "scene_transform_many",
+                "transforms",
+                json!({"object_id":"a","transform":{"translation":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]}}),
+            ),
+            (
+                "scene_duplicate_many",
+                "objects",
+                json!({"object_id":"a","new_object_id":"b"}),
+            ),
+            ("scene_delete_many", "object_ids", json!("a")),
+        ] {
+            let mut args = json!({"expected_session_token":"s","expected_revision":"7"});
+            args[field] = json!([item.clone()]);
+            assert!(valid_arguments(name, &args));
+            args[field] = json!([]);
+            assert!(!valid_arguments(name, &args));
+            args[field] = json!(vec![item; 257]);
+            assert!(!valid_arguments(name, &args));
+        }
         // Object operations have distinct, bounded shapes before forwarding to the owner.
         for (name, mut args) in [
             (
@@ -801,6 +892,18 @@ mod tests {
         assert!(!valid_arguments("scene_transform", &invalid));
         for (name, args) in [
             ("scene_transform", arguments.clone()),
+            (
+                "scene_transform_many",
+                json!({"expected_session_token":"s","expected_revision":"7","transforms":[{"object_id":"a","transform":{"translation":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]}}]}),
+            ),
+            (
+                "scene_duplicate_many",
+                json!({"expected_session_token":"s","expected_revision":"7","objects":[{"object_id":"a","new_object_id":"b"}]}),
+            ),
+            (
+                "scene_delete_many",
+                json!({"expected_session_token":"s","expected_revision":"7","object_ids":["a","b"]}),
+            ),
             (
                 "scene_create",
                 json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1","name":"Cube"}),

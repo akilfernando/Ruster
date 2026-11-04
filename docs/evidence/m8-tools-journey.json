@@ -1,0 +1,457 @@
+{
+  "before": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_transform_many",
+      "scene_delete_many",
+      "scene_duplicate_many",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": false,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "center",
+        "transform": {
+          "rotation": [
+            0.10000000149011612,
+            0.20000000298023224,
+            0.30000001192092896
+          ],
+          "scale": [
+            1.0,
+            2.0,
+            3.0
+          ],
+          "translation": [
+            0.0,
+            1.0,
+            2.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "right",
+        "transform": {
+          "rotation": [
+            0.4000000059604645,
+            0.5,
+            0.6000000238418579
+          ],
+          "scale": [
+            4.0,
+            5.0,
+            6.0
+          ],
+          "translation": [
+            2.0,
+            3.0,
+            4.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "3fa3eacc6b2472d2",
+    "preview_stale": false,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "0",
+    "scene_id": "tools-test",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "after": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_transform_many",
+      "scene_delete_many",
+      "scene_duplicate_many",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "center",
+        "transform": {
+          "rotation": [
+            0.10000000149011612,
+            0.20000000298023224,
+            0.30000001192092896
+          ],
+          "scale": [
+            1.0,
+            2.0,
+            3.0
+          ],
+          "translation": [
+            7.0,
+            1.0,
+            2.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "right",
+        "transform": {
+          "rotation": [
+            0.4000000059604645,
+            0.5,
+            0.6000000238418579
+          ],
+          "scale": [
+            4.0,
+            5.0,
+            6.0
+          ],
+          "translation": [
+            7.0,
+            3.0,
+            4.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "3fa3eacc6b2472d2",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "1",
+    "scene_id": "tools-test",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "undo": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_transform_many",
+      "scene_delete_many",
+      "scene_duplicate_many",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "center",
+        "transform": {
+          "rotation": [
+            0.10000000149011612,
+            0.20000000298023224,
+            0.30000001192092896
+          ],
+          "scale": [
+            1.0,
+            2.0,
+            3.0
+          ],
+          "translation": [
+            0.0,
+            1.0,
+            2.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "right",
+        "transform": {
+          "rotation": [
+            0.4000000059604645,
+            0.5,
+            0.6000000238418579
+          ],
+          "scale": [
+            4.0,
+            5.0,
+            6.0
+          ],
+          "translation": [
+            2.0,
+            3.0,
+            4.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "3fa3eacc6b2472d2",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "2",
+    "scene_id": "tools-test",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "saved": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_transform_many",
+      "scene_delete_many",
+      "scene_duplicate_many",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": false,
+    "drafts_pending": false,
+    "loaded_format_version": 4,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "center",
+        "transform": {
+          "rotation": [
+            0.10000000149011612,
+            0.20000000298023224,
+            0.30000001192092896
+          ],
+          "scale": [
+            1.0,
+            2.0,
+            3.0
+          ],
+          "translation": [
+            7.0,
+            1.0,
+            2.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "right",
+        "transform": {
+          "rotation": [
+            0.4000000059604645,
+            0.5,
+            0.6000000238418579
+          ],
+          "scale": [
+            4.0,
+            5.0,
+            6.0
+          ],
+          "translation": [
+            7.0,
+            3.0,
+            4.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "3fa3eacc6b2472d2",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "3",
+    "scene_id": "tools-test",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "opened": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_transform_many",
+      "scene_delete_many",
+      "scene_duplicate_many",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": false,
+    "drafts_pending": false,
+    "loaded_format_version": 4,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.8999999761581421,
+          0.4000000059604645,
+          0.1599999964237213,
+          1.0
+        ],
+        "id": "center",
+        "transform": {
+          "rotation": [
+            0.10000000149011612,
+            0.20000000298023224,
+            0.30000001192092896
+          ],
+          "scale": [
+            1.0,
+            2.0,
+            3.0
+          ],
+          "translation": [
+            7.0,
+            1.0,
+            2.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.30000001192092896,
+          0.75,
+          0.44999998807907104,
+          1.0
+        ],
+        "id": "right",
+        "transform": {
+          "rotation": [
+            0.4000000059604645,
+            0.5,
+            0.6000000238418579
+          ],
+          "scale": [
+            4.0,
+            5.0,
+            6.0
+          ],
+          "translation": [
+            7.0,
+            3.0,
+            4.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "eec5a39babaf6d49",
+    "preview_stale": false,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "3",
+    "scene_id": "tools-test",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  }
+}

@@ -91,4 +91,32 @@ fn headless_workflow_and_failed_command_preserve_disk() {
     assert_eq!(session.scene().objects[0].id, "stable-a");
     assert_eq!(session.scene().objects[0].display_name(), "Different label");
     assert_eq!(session.scene().objects[1].display_name(), "Owned object");
+    // The CLI must preserve one group revision/undo across the real file boundary.
+    let batch = dir.path().join("batch.json");
+    let batch_file = batch.to_str().unwrap();
+    std::fs::write(&batch, serde_json::to_vec(&serde_json::json!([
+        {"object_id":"stable-a","transform":{"translation":[3,0,0],"rotation":[0,0,0],"scale":[1,1,1]}},
+        {"object_id":"stable-b","transform":{"translation":[4,0,0],"rotation":[0,0,0],"scale":[1,1,1]}}
+    ])).unwrap()).unwrap();
+    assert!(cli(&["transforms", file, "5", batch_file]).status.success());
+    assert_eq!(ruster_scene::Scene::load(&path).unwrap().revision, 6);
+    assert!(cli(&["undo", file, "6"]).status.success());
+    assert!(ruster_scene::Scene::load(&path)
+        .unwrap()
+        .objects
+        .iter()
+        .all(|o| o.transform.translation == [0., 0., 0.]));
+    std::fs::write(&batch,r#"[{"object_id":"stable-a","new_object_id":"copy-a"},{"object_id":"stable-b","new_object_id":"copy-b"}]"#).unwrap();
+    assert!(cli(&["duplicates", file, "7", batch_file]).status.success());
+    std::fs::write(&batch, r#"["copy-a","copy-b"]"#).unwrap();
+    assert!(cli(&["deletes", file, "8", batch_file]).status.success());
+    assert!(cli(&["undo", file, "9"]).status.success());
+    let before = std::fs::read(&path).unwrap();
+    assert_eq!(ruster_scene::Scene::load(&path).unwrap().objects.len(), 4);
+    assert!(!cli(&["deletes", file, "8", batch_file]).status.success());
+    std::fs::write(&batch, "{broken").unwrap();
+    assert!(!cli(&["transforms", file, "10", batch_file])
+        .status
+        .success());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
 }
