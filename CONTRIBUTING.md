@@ -6,7 +6,7 @@ Before starting a large change, discuss it in an issue and read the [roadmap](do
 
 ## Working on a change
 
-1. Fork/clone the repository and create a branch. The pinned Rust toolchain is installed by rustup when needed; Python 3.10+ runs the local checks.
+1. Fork/clone the repository and create a branch. The pinned Rust toolchain is installed by rustup when needed; Python 3.11+ runs the local checks and packaging tools.
 2. Keep the change focused and preserve existing user work and file compatibility. Use a disposable example for editing/testing.
 3. Add or extend tests only for distinct behavior risks. Follow [TESTING.md](docs/TESTING.md); rendering, native interaction, concurrency and persistence need evidence beyond compilation.
 4. Update affected setup/API documentation and `docs/STATUS.md` with the implemented state, commands/results, failures and remaining limits. Record consequential architecture choices under `docs/decisions/`.

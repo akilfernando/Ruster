@@ -1,0 +1,42 @@
+# Original low-poly yard truck, authored for Ruster. MIT OR Apache-2.0.
+# +X front, Y up. All faces explicitly triangulated; no textures/MTL.
+# body
+v -0.9 0.0 -0.5
+v 0.9 0.0 -0.5
+v 0.9 0.0 0.5
+v -0.9 0.0 0.5
+v -0.9 0.55 -0.5
+v 0.9 0.55 -0.5
+v 0.9 0.55 0.5
+v -0.9 0.55 0.5
+f 1 2 3
+f 1 3 4
+f 5 7 6
+f 5 8 7
+f 1 6 2
+f 1 5 6
+f 2 7 3
+f 2 6 7
+f 3 8 4
+f 3 7 8
+f 4 5 1
+f 4 8 5
+# raised cab
+v 0.3 0.55 -0.5
+v 0.9 0.55 -0.5
+v 0.9 1.05 -0.5
+v 0.3 1.05 -0.5
+v 0.3 0.55 0.5
+v 0.9 0.55 0.5
+v 0.9 1.05 0.5
+v 0.3 1.05 0.5
+f 9 11 10
+f 9 12 11
+f 13 15 16
+f 13 14 15
+f 9 16 12
+f 9 13 16
+f 10 15 14
+f 10 11 15
+f 12 15 11
+f 12 16 15

@@ -40,3 +40,17 @@ Implementation evidence inspected: `crates/ruster-editor/src/scene_editor.rs`, i
 ## Relationship to the roadmap
 
 Keep M7 standalone application kit, M8 independent reuse and M9 public alpha as the current sequence. This requirement raises the editor experience acceptance bar; it is not satisfied merely by completing those systems milestones. Relevant work belongs alongside each affected workflow, and remaining baseline gaps must be explicitly scheduled before editor/public-alpha acceptance. A dedicated editor completion slice may be needed after a scoped gap assessment; no extra milestone or all-at-once rewrite is selected here. The user requirement takes precedence over older wording that treats everyday usability as optional polish.
+
+
+## Implementation allocation
+
+2026-11-04, agent-selected working slices under authorization to proceed with M7. This allocates the confirmed requirement; it does not mark any gap complete or promise exact control mappings. M7/M8/M9 order is unchanged.
+
+| Slice | Concrete scope and acceptance |
+| --- | --- |
+| M7 application kit, current | Clear Run/Pause/Step/Reset, discoverable controls, keyboard focus isolation, bounded timing after suspend, visible application outcomes and errors, executable-relative resources and a documented edit/build/package loop. Verify native input and relocated package; keep editor readiness unclaimed. |
+| M8 authoring foundation, before reuse acceptance | Generic object create/rename/duplicate/delete and copy/paste; multi-selection and coherent undo; transform gizmos, snapping, local/world/pivot choices and precision fields. First assess existing toolkit support and current primary Unity/Unreal interaction references, then test the real authoring journey. |
+| M8 content and workspace, before reuse acceptance | Search/filter and contextual actions, drag/drop reference assignment, useful content organization, frame selection/navigation controls, remappable/discoverable shortcuts, resizable/rearrangeable persisted layouts, recent working context and save/recovery handling. Verify the two applications exercise those facilities without sample-specific assumptions. |
+| M9 adoption and remaining corrections | Experienced Unity and Unreal creator walkthroughs, readable scaling/focus/accessibility review and fixes for supported journeys; verify recovery and distribution on the declared support matrix. No readiness claim while these baseline blockers remain. |
+
+M8 will need several runnable implementation slices; estimate each from its actual requirements rather than compressing it into a single example task. Shared changes preserve CLI/editor/MCP semantics where those operations are exposed. Avoid promising screen-reader compliance, crash recovery guarantees or a shortcut preset without corresponding implementation and evidence.

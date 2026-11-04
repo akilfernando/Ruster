@@ -1,0 +1,14 @@
+WARN wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x5615a8140d60, name: ?)
+ERROR wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	Layer "VK_LAYER_KHRONOS_validation" was not found but was requested by env var VK_INSTANCE_LAYERS!
+ERROR wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x5615a8140d60, name: ?)
+WARN wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x5615a8140d60, name: ?)
+ERROR wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	Layer "VK_LAYER_KHRONOS_validation" was not found but was requested by env var VK_INSTANCE_LAYERS!
+ERROR wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x5615a8140d60, name: ?)
+Ruster shared 3D: adapter=NVIDIA GeForce RTX 4060 Laptop GPU backend=Vulkan timestamps=true
+Ruster application summary: tick=0 completed=false ui_frames=61 frames=61 objects=8 mesh_uploads=2 mesh_upload_bytes=2568 draw_calls=2 unresolved_error=false

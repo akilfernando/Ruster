@@ -1,0 +1,129 @@
+{
+  "archive_sha256": "0438291f9f591d2506bfa865f87d67201efa254183e2b311f91bcaac9ea3c708",
+  "readonly_resources": true,
+  "runtime_package_unchanged": true,
+  "all_payload_current_developer_prefix_scan": true,
+  "display_and_runtime_env_removed": true,
+  "cwd": "/tmp",
+  "results": [
+    {
+      "name": "baseline",
+      "arguments": [
+        "--headless"
+      ],
+      "exit": 0,
+      "stdout": "Time up \u2014 target missed | tick=10 delivered=20 target=24 source=10 capacity=2\n",
+      "stderr": ""
+    },
+    {
+      "name": "improved",
+      "arguments": [
+        "--headless",
+        "--capacity",
+        "3"
+      ],
+      "exit": 0,
+      "stdout": "Target delivered! | tick=8 delivered=24 target=24 source=0 capacity=3\n",
+      "stderr": ""
+    },
+    {
+      "name": "zero-tick",
+      "arguments": [
+        "--headless",
+        "--ticks",
+        "0"
+      ],
+      "exit": 0,
+      "stdout": "Delivery in progress | tick=0 delivered=0 target=24 source=0 capacity=2\n",
+      "stderr": ""
+    },
+    {
+      "name": "invalid-settings",
+      "arguments": [
+        "--headless",
+        "--capacity",
+        "0"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "Ruster Yard: Use production 0\u20131000, capacity 1\u20131000, target 1\u20131000000 and time budget 1\u201310000 ticks.\n"
+    },
+    {
+      "name": "unknown-option",
+      "arguments": [
+        "--unknown-option"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "Ruster Yard: Unknown option \"--unknown-option\". Use --help to see available options.\n"
+    },
+    {
+      "name": "missing-resource",
+      "arguments": [
+        "--headless",
+        "--resources",
+        "/tmp/ruster-final-resource-recovery-1flee35b"
+      ],
+      "exit": 2,
+      "stdout": "",
+      "stderr": "Ruster Yard: Could not load the delivery yard: resource /tmp/ruster-final-resource-recovery-1flee35b/truck.obj: No such file or directory (os error 2)\nRestore truck.obj or pass --resources PATH to the original resource directory.\n"
+    },
+    {
+      "name": "recovered-resource",
+      "arguments": [
+        "--headless",
+        "--resources",
+        "/tmp/ruster-final-resource-recovery-1flee35b",
+        "--capacity",
+        "3"
+      ],
+      "exit": 0,
+      "stdout": "Target delivered! | tick=8 delivered=24 target=24 source=0 capacity=3\n",
+      "stderr": ""
+    },
+    {
+      "name": "recovery-default-root",
+      "arguments": [
+        "--headless",
+        "--capacity",
+        "3"
+      ],
+      "exit": 0,
+      "stdout": "Target delivered! | tick=8 delivered=24 target=24 source=0 capacity=3\n",
+      "stderr": ""
+    }
+  ],
+  "elf": {
+    "needed": [
+      "ld-linux-x86-64.so.2",
+      "libc.so.6",
+      "libgcc_s.so.1",
+      "libm.so.6"
+    ],
+    "interpreter": "/lib64/ld-linux-x86-64.so.2",
+    "glibc_symbols": [
+      "GLIBC_2.14",
+      "GLIBC_2.15",
+      "GLIBC_2.16",
+      "GLIBC_2.17",
+      "GLIBC_2.18",
+      "GLIBC_2.2.5",
+      "GLIBC_2.25",
+      "GLIBC_2.27",
+      "GLIBC_2.28",
+      "GLIBC_2.29",
+      "GLIBC_2.3",
+      "GLIBC_2.3.4",
+      "GLIBC_2.30",
+      "GLIBC_2.32",
+      "GLIBC_2.33",
+      "GLIBC_2.34",
+      "GLIBC_2.35",
+      "GLIBC_2.39",
+      "GLIBC_2.43",
+      "GLIBC_2.44",
+      "GLIBC_2.9"
+    ]
+  },
+  "external_normal_build_versions": 248
+}

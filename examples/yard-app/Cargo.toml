@@ -1,0 +1,19 @@
+[package]
+name = "ruster-yard"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+default = []
+inspection = ["ruster-app/inspection"]
+
+[dependencies]
+ruster-app = { path = "../../crates/ruster-app" }
+ruster-core = { path = "../../crates/ruster-core" }
+ruster-scene = { path = "../../crates/ruster-scene" }
+
+[lints]
+workspace = true

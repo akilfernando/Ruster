@@ -8,7 +8,7 @@ The user accepted the [post-M3 review](ROADMAP-REVIEW.md) on 2026-11-04. This ca
 
 Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Apply the user-confirmed [creator ethos](DIRECTION.md#project-ethos-serve-the-creator): explain what someone can create or change with the delivered systems, and where the workflow still limits them. This clarifies the existing user-outcome gates; it does not expand milestone scope. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
 
-M0 through M6 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M7 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
+M0 through M7 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M8 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
 
 | Milestone | Demonstrable deliverable | Status |
 | --- | --- | --- |
@@ -19,7 +19,7 @@ M0 through M6 are complete within their documented local scope; see [M1/M2 evide
 | M4 Native agent workflow | MCP client performs the same workflow with reviewable results | Complete, Linux editor-owned proof |
 | M5 Shared scene and 3D | Minimal scene and rendering shared by editor/runtime | Complete, bounded Linux procedural-scene scope |
 | M6 Content and iteration | Asset import, stable references and recoverable refresh | Complete, bounded OBJ/WGSL Linux scope |
-| M7 Standalone application kit | Code-first template and packaged interactive example | Planned |
+| M7 Standalone application kit | Code-first template and packaged interactive example | Complete, Linux development-kit scope |
 | M8 Independent reuse proof | A meaningfully different non-game application | Planned |
 | M9 Public alpha candidate | Usable release on an explicitly tested support matrix | Planned |
 
@@ -161,6 +161,8 @@ M6 delivered scope: bounded triangle-only OBJ import, stable-ID catalog with its
 
 **Decision gate:** source licensing is now MIT OR Apache-2.0 under decision0007; retain notices and review binary distribution obligations before packaging. Test Windows runtime feasibility before packaging assumptions harden, or explicitly narrow the support target. Add audio/physics/UI capabilities only where the chosen small application requires them.
 
+M7 delivered scope: ruster-app shared host with application-owned behavior, read-only resources and focus-aware bounded lifecycle; editable Yard challenge, portable source workspace and Linux x86_64 development archive. Independent source modification/rebuild, native controls/resize/shutdown, final release Vulkan validation and readonly relocation/recovery passed; see [M7 evidence](evidence/M7.md) and [distribution](DISTRIBUTION.md). Exact binary requires GLIBC2.44. Focus routing has real egui widget coverage; focused native keyboard and experienced-human familiarity remain unverified. No public binary release or editor readiness claim.
+
 ## M8 Independent reuse proof
 
 **User outcome:** demonstrate that the kit supports applications with genuinely different behavior and data needs.
@@ -168,6 +170,8 @@ M6 delivered scope: bounded triangle-only OBJ import, stable-ID catalog with its
 **Deliverable:** a small non-game application using the same kit as M7. Define its requirements in M5 so they guide extraction, then implement it here. A simple object/product configurator is a candidate; exact sample selection remains open.
 
 **Demo:** inspect and change application data without player, score or win-state concepts, then package/run it independently. An independent developer modifies both examples.
+
+**Working implementation slices:** the [experience allocation](EDITOR-EXPERIENCE.md#implementation-allocation) assigns generic object/manipulation, content/workspace and recovery work alongside the second application before reuse acceptance. These are concrete follow-on requirements; the current prototype does not already provide a familiar editor.
 
 **Exit criteria:** no copying engine internals into the second example; shared mechanisms remain domain-neutral; exposed coupling is corrected; representative performance and iteration costs are recorded. Two differently presented logistics demos alone do not establish broad reuse.
 

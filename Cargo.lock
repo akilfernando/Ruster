@@ -2683,6 +2683,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruster-app"
+version = "0.1.0"
+dependencies = [
+ "eframe",
+ "log",
+ "ruster-assets",
+ "ruster-render",
+ "ruster-scene",
+ "tempfile",
+ "wgpu",
+]
+
+[[package]]
 name = "ruster-assets"
 version = "0.1.0"
 dependencies = [
@@ -2766,6 +2779,15 @@ dependencies = [
  "raw-window-handle",
  "ruster-core",
  "winit",
+]
+
+[[package]]
+name = "ruster-yard"
+version = "0.1.0"
+dependencies = [
+ "ruster-app",
+ "ruster-core",
+ "ruster-scene",
 ]
 
 [[package]]

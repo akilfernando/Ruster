@@ -1,0 +1,174 @@
+use super::*;
+
+struct Counter {
+    content: Content,
+    count: u64,
+    goal: u64,
+    fail: bool,
+    dt: Duration,
+}
+impl Counter {
+    fn new(goal: u64) -> Self {
+        Self {
+            content: Content::new(Scene::demo(), MeshMap::new()).unwrap(),
+            count: 0,
+            goal,
+            fail: false,
+            dt: Duration::from_millis(10),
+        }
+    }
+}
+impl Application for Counter {
+    fn content(&self) -> &Content {
+        &self.content
+    }
+    fn tick(&mut self, step: Step) -> Result<(), String> {
+        assert_eq!(step.tick, self.count + 1);
+        assert_eq!(step.dt, self.dt);
+        if self.fail {
+            return Err("behavior refused tick".into());
+        }
+        self.count += 1;
+        self.content.scene_mut().objects[0].transform.translation[0] = self.count as f32;
+        Ok(())
+    }
+    fn reset(&mut self) -> Result<(), String> {
+        self.count = 0;
+        self.fail = false;
+        self.content = Content::new(Scene::demo(), MeshMap::new())?;
+        Ok(())
+    }
+    fn completed(&self) -> bool {
+        self.count >= self.goal
+    }
+}
+
+#[test]
+fn explicit_replay_reset_and_normal_completion_share_one_lifecycle() {
+    let mut runtime = Runtime::new(Counter::new(3), Duration::from_millis(10)).unwrap();
+    for _ in 0..3 {
+        runtime.step().unwrap();
+    }
+    let expected = runtime.app().content().scene().fingerprint();
+    assert_eq!(runtime.tick(), 3);
+    runtime.step().unwrap(); // A completed application never receives an extra step.
+    assert_eq!(runtime.tick(), 3);
+    runtime.reset().unwrap();
+    assert!(!runtime.is_running());
+    assert_eq!(runtime.tick(), 0);
+    runtime.set_running(true);
+    assert_eq!(runtime.advance(Duration::from_millis(100)).unwrap(), 3);
+    assert!(!runtime.is_running());
+    assert_eq!(runtime.app().content().scene().fingerprint(), expected);
+}
+
+#[test]
+fn scheduling_drops_stall_debt_and_pause_does_not_leak_elapsed_time() {
+    let mut runtime = Runtime::new(Counter::new(100), Duration::from_millis(10)).unwrap();
+    runtime.set_running(true);
+    assert_eq!(runtime.advance(Duration::from_secs(3600)).unwrap(), 4);
+    assert_eq!(runtime.advance(Duration::ZERO).unwrap(), 0);
+    runtime.set_running(false);
+    assert_eq!(runtime.advance(Duration::from_secs(3600)).unwrap(), 0);
+    runtime.set_running(true);
+    assert_eq!(runtime.advance(Duration::from_millis(9)).unwrap(), 0);
+    assert_eq!(runtime.advance(Duration::from_millis(1)).unwrap(), 1);
+    assert_eq!(runtime.tick(), 5);
+    for dt in [Duration::from_millis(500), Duration::from_secs(1)] {
+        let mut counter = Counter::new(100);
+        counter.dt = dt;
+        let mut runtime = Runtime::new(counter, dt).unwrap();
+        runtime.set_running(true);
+        assert_eq!(runtime.advance(dt).unwrap(), 1);
+        assert_eq!(runtime.tick(), 1);
+    }
+}
+
+#[test]
+fn behavior_or_invalid_scene_stops_ticks_and_reset_recovers() {
+    let mut runtime = Runtime::new(Counter::new(100), Duration::from_millis(10)).unwrap();
+    runtime.app_mut().fail = true;
+    runtime.set_running(true);
+    assert!(runtime
+        .advance(Duration::from_millis(10))
+        .unwrap_err()
+        .contains("refused"));
+    assert!(!runtime.is_running());
+    assert_eq!(runtime.tick(), 0);
+    runtime.reset().unwrap();
+    runtime.app_mut().content.scene_mut().objects[0].color[0] = f32::NAN;
+    runtime.set_running(true);
+    assert!(runtime.step().unwrap_err().contains("color"));
+    assert!(!runtime.is_running());
+    assert_eq!(runtime.tick(), 0);
+    runtime.reset().unwrap();
+    runtime.step().unwrap();
+    assert_eq!(runtime.tick(), 1);
+}
+
+#[test]
+fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
+    let mesh = ruster_assets::parse_obj(b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+    let mut scene = Scene::demo();
+    scene.objects[0].mesh = Some("triangle".into());
+    assert!(Content::new(scene.clone(), MeshMap::new())
+        .err()
+        .unwrap()
+        .contains("missing mesh triangle"));
+    let mut invalid = mesh.clone();
+    invalid.indices[0] = 100;
+    assert!(Content::new(
+        scene.clone(),
+        [("triangle".into(), Arc::new(invalid))].into()
+    )
+    .is_err());
+    let mut invalid = mesh.clone();
+    invalid.vertices[0].normal = [0.0; 3];
+    assert!(Content::new(
+        scene.clone(),
+        [("triangle".into(), Arc::new(invalid))].into()
+    )
+    .is_err());
+    assert!(Content::new(scene, [("triangle".into(), Arc::new(mesh))].into()).is_ok());
+}
+
+#[test]
+fn resource_root_loads_read_only_and_rejects_bad_or_escaping_resources() {
+    let temporary = tempfile::tempdir().unwrap();
+    let resource_dir = temporary.path().join("resources");
+    std::fs::create_dir(&resource_dir).unwrap();
+    Scene::demo().save(resource_dir.join("scene.json")).unwrap();
+    std::fs::write(
+        resource_dir.join("triangle.obj"),
+        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+    )
+    .unwrap();
+    std::fs::write(resource_dir.join("bad.obj"), b"broken").unwrap();
+    let root = ResourceRoot::new(&resource_dir).unwrap();
+    assert_eq!(root.scene("scene.json").unwrap(), Scene::demo());
+    assert_eq!(root.mesh("triangle.obj").unwrap().indices.len(), 3);
+    assert!(root.mesh("bad.obj").unwrap_err().contains("bad.obj"));
+    assert!(root
+        .scene("missing.json")
+        .unwrap_err()
+        .contains("missing.json"));
+    assert!(root
+        .scene("triangle.obj")
+        .unwrap_err()
+        .contains("scene resource"));
+    assert!(root.scene("subdirectory").is_err());
+    for path in ["", "../scene.json", "/etc/passwd"] {
+        assert!(root.resolve(path).is_err());
+    }
+    #[cfg(unix)]
+    {
+        std::os::unix::fs::symlink(temporary.path(), resource_dir.join("outside")).unwrap();
+        assert!(root.resolve("outside").unwrap_err().contains("escapes"));
+        let _socket = std::os::unix::net::UnixListener::bind(resource_dir.join("socket")).unwrap();
+        assert!(root.scene("socket").unwrap_err().contains("regular file"));
+        assert!(root.mesh("socket").unwrap_err().contains("regular file"));
+    }
+    // Neither loader creates an asset catalog or a cache in the resource directory.
+    assert!(!resource_dir.join(".ruster-cache").exists());
+    assert!(!resource_dir.join(".ruster-assets.json").exists());
+}

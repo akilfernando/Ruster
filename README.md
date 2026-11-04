@@ -9,7 +9,7 @@ Ruster's purpose is to help people turn their own ideas into working creations. 
 
 Familiarity for experienced Unity and Unreal creators, including everyday editor conveniences, is a core requirement. The [editor experience baseline](docs/EDITOR-EXPERIENCE.md) describes the target and the gaps still to close.
 
-**Early development:** milestones M0–M6 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines.
+**Early development:** milestones M0–M7 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines.
 
 ![Ruster scene editor with procedural 3D objects and transform inspector](docs/evidence/m5-scene-editor.png)
 
@@ -20,16 +20,17 @@ Familiarity for experienced Unity and Unreal creators, including everyday editor
 - **Human and agent workflows:** an offline native editor and CLI, plus an optional native MCP adapter that edits the displayed session with identity/revision checks and draft protection.
 - **Repeatable previews:** authored state stays separate from runtime snapshots. The scene preview is a static arrangement with explicit lifecycle ticks and Reset; it does not imply physics or gameplay simulation.
 - **Content iteration:** import a triangle-only OBJ, assign its stable asset ID, refresh after source edits and recover from invalid input while retaining the last good geometry/pipeline. The catalog and originals are authored; the cache is disposable.
+- **A standalone application kit:** application-owned behavior, shared input/lifecycle/rendering and read-only resources; an editable delivery challenge and source/binary packaging tools.
 - **A logistics reference application:** integer throughput simulation, saved scenarios, a schematic viewer and the original authoring workflow remain available separately.
 
-The current scene limit is 256 objects and one viewport. M6 adds bounded triangle-only OBJ mesh import, stable references, rebuildable caches and controlled asset/WGSL refresh. Textures/MTL, general mesh formats, physics/audio, a general ECS and the standalone application kit remain later work. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope.
+The current scene limit is 256 objects and one viewport. M6 adds bounded triangle-only OBJ mesh import, stable references, rebuildable caches and controlled asset/WGSL refresh. Textures/MTL, general mesh formats, physics/audio and a general ECS remain later work. M7 supplies the bounded application kit and Linux development packaging described below. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope.
 
 ## Quickstart
 
 ### Requirements
 
 - Git and [Rust via rustup](https://rust-lang.org/tools/install/). The repository pins the tested Rust 1.99.1 toolchain, including rustfmt and Clippy.
-- Python 3.10 or newer for the verification runner.
+- Python 3.11 or newer for verification and application packaging.
 - For graphical tools: a Linux Wayland/X11 desktop and a working Vulkan driver. A display is not required for the headless CLI or ordinary tests.
 
 A documented [upstream SPIR-V compatibility patch](third_party/wgpu-hal/RUSTER-PATCH.md) is included with full source and licenses; newer GPU feature requirements must revisit this temporary boundary.
@@ -57,6 +58,17 @@ cargo run --locked -p ruster-scene -- run examples/arrangement.scene.json 10
 ```
 
 This reports the scene identity, revision, three objects, ten preview ticks and a deterministic snapshot fingerprint. See the [editor guide](crates/ruster-editor/README.md), [scene API and CLI](crates/ruster-scene/README.md) and [renderer guide](crates/ruster-render/README.md) for editing, persistence guarantees and diagnostics.
+
+### Build your own application
+
+M7's source template demonstrates application-owned behavior using the shared kit. Run the delivery challenge, or export it to a new editable workspace:
+
+```sh
+cargo run --locked -p ruster-yard -- --resources examples/yard-app/resources
+python3 scripts/new_app.py /tmp/my-ruster-app
+```
+
+Use Run/Pause, Step and Reset. The default truck capacity misses the delivery target; capacity 3 completes it. Change the application rules in `examples/yard-app/src/lib.rs`, rebuild and package your result. Export requires the pinned dependencies in the local Cargo cache; see the [application guide](examples/yard-app/README.md), [kit API](crates/ruster-app/README.md) and [distribution workflow](docs/DISTRIBUTION.md). The Linux development package runs outside the checkout with resources beside its executable; editor/MCP services are not required.
 
 ### Imported content example
 
@@ -107,6 +119,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. [AGENTS.md](AGE
 | --- | --- |
 | Current implementation, verification and limitations | [Status](docs/STATUS.md) |
 | Delivery sequence and acceptance gates | [Roadmap](docs/ROADMAP.md) |
+| Create, modify and package an application | [Application kit](crates/ruster-app/README.md), [distribution](docs/DISTRIBUTION.md), [M7 evidence](docs/evidence/M7.md) |
 | Product direction | [Direction](docs/DIRECTION.md) |
 | Architecture and tradeoffs | [Decisions](docs/decisions/README.md) |
 | Scene/editor/MCP delivery evidence | [M5 evidence](docs/evidence/M5.md), [M6 content evidence](docs/evidence/M6.md) |

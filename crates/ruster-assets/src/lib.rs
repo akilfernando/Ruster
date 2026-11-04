@@ -619,7 +619,9 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
     }
     Ok(())
 }
-fn validate_mesh(mesh: &Mesh) -> Result<(), AssetError> {
+/// Validate bounded indexed triangles, finite positions and unit-length normals.
+/// Shared by cached imports and application-provided immutable mesh snapshots.
+pub fn validate_mesh(mesh: &Mesh) -> Result<(), AssetError> {
     if mesh.vertices.is_empty()
         || mesh.vertices.len() > MAX_VERTICES
         || mesh.indices.is_empty()
@@ -636,9 +638,7 @@ fn validate_mesh(mesh: &Mesh) -> Result<(), AssetError> {
                 || v.normal.iter().map(|c| c * c).sum::<f32>() > 1.01
         })
     {
-        return Err(error(
-            "mesh cache contains invalid or out-of-bounds geometry",
-        ));
+        return Err(error("mesh contains invalid or out-of-bounds geometry"));
     }
     Ok(())
 }

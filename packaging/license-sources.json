@@ -1,0 +1,214 @@
+{
+  "schema": 1,
+  "notes": "egui-family source uses exact upstream 0.37.0 release tag (peeled commit841a328); published crate VCS commit7c0b404 was unavailable upstream at access. eframe uses its available published VCS commit. Other groups use published crate .cargo_vcs_info.json commit. Readable source texts supplement Cargo source files; source provenance is retained here.",
+  "texts": [
+    {
+      "path": "licenses/egui-LICENSE-MIT.txt",
+      "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+      "source": "https://raw.githubusercontent.com/emilk/egui/841a328ba2dd8f6996beb7189ebb7fc00e668a2a/LICENSE-MIT",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "ecolor",
+          "version": "0.37.0"
+        },
+        {
+          "name": "egui",
+          "version": "0.37.0"
+        },
+        {
+          "name": "egui-wgpu",
+          "version": "0.37.0"
+        },
+        {
+          "name": "egui-winit",
+          "version": "0.37.0"
+        },
+        {
+          "name": "emath",
+          "version": "0.37.0"
+        },
+        {
+          "name": "epaint",
+          "version": "0.37.0"
+        }
+      ]
+    },
+    {
+      "path": "licenses/egui-LICENSE-APACHE.txt",
+      "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "source": "https://raw.githubusercontent.com/emilk/egui/841a328ba2dd8f6996beb7189ebb7fc00e668a2a/LICENSE-APACHE",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "ecolor",
+          "version": "0.37.0"
+        },
+        {
+          "name": "egui",
+          "version": "0.37.0"
+        },
+        {
+          "name": "egui-wgpu",
+          "version": "0.37.0"
+        },
+        {
+          "name": "egui-winit",
+          "version": "0.37.0"
+        },
+        {
+          "name": "emath",
+          "version": "0.37.0"
+        },
+        {
+          "name": "epaint",
+          "version": "0.37.0"
+        }
+      ]
+    },
+    {
+      "path": "licenses/eframe-LICENSE-MIT.txt",
+      "sha256": "95ca92f5f8ea5231f1580b3a2a799e8260af3114b900e1def5355a7f44bcf60c",
+      "source": "https://raw.githubusercontent.com/emilk/egui/3c6eb8261c3293ad9c7ea1ed58487e038860ebef/LICENSE-MIT",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "eframe",
+          "version": "0.37.0"
+        }
+      ]
+    },
+    {
+      "path": "licenses/eframe-LICENSE-APACHE.txt",
+      "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "source": "https://raw.githubusercontent.com/emilk/egui/3c6eb8261c3293ad9c7ea1ed58487e038860ebef/LICENSE-APACHE",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "eframe",
+          "version": "0.37.0"
+        }
+      ]
+    },
+    {
+      "path": "licenses/accesskit-LICENSE-MIT.txt",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/f3026222559c7f5f46d8f25cb7404de68eb149f0/LICENSE-MIT",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "accesskit",
+          "version": "0.25.2"
+        },
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.1"
+        },
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.2"
+        },
+        {
+          "name": "accesskit_unix",
+          "version": "0.24.1"
+        },
+        {
+          "name": "accesskit_winit",
+          "version": "0.34.2"
+        }
+      ]
+    },
+    {
+      "path": "licenses/accesskit-LICENSE-APACHE.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/f3026222559c7f5f46d8f25cb7404de68eb149f0/LICENSE-APACHE",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "accesskit",
+          "version": "0.25.2"
+        },
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.1"
+        },
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.2"
+        },
+        {
+          "name": "accesskit_unix",
+          "version": "0.24.1"
+        },
+        {
+          "name": "accesskit_winit",
+          "version": "0.34.2"
+        }
+      ]
+    },
+    {
+      "path": "licenses/accesskit-LICENSE.chromium.txt",
+      "sha256": "845022e0c1db1abb41a6ba4cd3c4b674ec290f3359d9d3c78ae558d4c0ed9308",
+      "source": "https://raw.githubusercontent.com/AccessKit/accesskit/f3026222559c7f5f46d8f25cb7404de68eb149f0/LICENSE.chromium",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "accesskit",
+          "version": "0.25.2"
+        },
+        {
+          "name": "accesskit_atspi_common",
+          "version": "0.21.1"
+        },
+        {
+          "name": "accesskit_consumer",
+          "version": "0.39.2"
+        },
+        {
+          "name": "accesskit_unix",
+          "version": "0.24.1"
+        },
+        {
+          "name": "accesskit_winit",
+          "version": "0.34.2"
+        }
+      ]
+    },
+    {
+      "path": "licenses/profiling-LICENSE-MIT.txt",
+      "sha256": "c8167fdeeed46d3f244d3f85c5bf998ce889343691c32be2c61a8bc4b5c08333",
+      "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-MIT",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "profiling",
+          "version": "1.0.18"
+        }
+      ]
+    },
+    {
+      "path": "licenses/profiling-LICENSE-APACHE.txt",
+      "sha256": "10d30a673cd5e9349bdc02aeb48f14b3386d27d0da32df8f0a555d4aa16aa551",
+      "source": "https://raw.githubusercontent.com/aclysma/profiling/8271551172eb6fa4cba47369aedd93790c623df9/LICENSE-APACHE",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "profiling",
+          "version": "1.0.18"
+        }
+      ]
+    },
+    {
+      "path": "licenses/spirv-LICENSE.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "source": "https://raw.githubusercontent.com/gfx-rs/rspirv/8afc3d0ac8e158128cd1410bb2e4b4c26ab11bb4/LICENSE",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "spirv",
+          "version": "0.4.0+sdk-1.4.341.0"
+        }
+      ]
+    }
+  ]
+}

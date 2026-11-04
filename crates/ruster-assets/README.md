@@ -29,7 +29,7 @@ Cache publication or catalog save failure keeps the previous accepted in-memory 
 
 All mutation APIs compare the complete on-disk catalog baseline under a project advisory lock. `import_at(expected_revision, id, source)`, `refresh_at(expected_revision, id)` and `rename_at(expected_revision, id, source)` also reject stale catalog revisions; session-token checks belong to the editor/MCP host, not AssetStore. Convenience methods use the current in-memory revision. Cooperating writers must reopen after a disk conflict. Symlink checks and path confinement protect supported project use; this is not a hostile-filesystem security sandbox, and concurrent noncooperating source filesystem edits are outside the lock contract.
 
-`AssetStore::mesh` borrows the accepted mesh; `meshes()` returns a bounded owned snapshot suitable for renderer ownership. `inspect()` exposes stable IDs, relative paths, accepted hashes, Ready/Missing/Invalid status and recovery diagnostics. Opening may rebuild caches but never accepts changed bytes or advances catalog revision. A same-content refresh repairs status/cache without advancing revision.
+`validate_mesh` checks bounds, indices, finite positions and unit normals for application-provided mesh snapshots using the same validation as cached imports. `AssetStore::mesh` borrows the accepted mesh; `meshes()` returns a bounded owned snapshot suitable for renderer ownership. `inspect()` exposes stable IDs, relative paths, accepted hashes, Ready/Missing/Invalid status and recovery diagnostics. Opening may rebuild caches but never accepts changed bytes or advances catalog revision. A same-content refresh repairs status/cache without advancing revision.
 
 ## Verification
 
