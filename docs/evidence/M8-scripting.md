@@ -24,6 +24,8 @@ Ten 100ms ticks of the original script produce left Y0.841471/rotationY1 at spee
 
 Final integrated `python3 scripts/check.py --base origin/main` passed:86Rust tests,20tooling tests, strict Clippy, formatting and Markdown checks in73.40s. One hardware probe remains intentionally ignored in the default lane; the native GPU capture above is separate evidence. Dependency feature unification rebuilt portions of the workspace (Clippy17.11s, Rust build/tests54.62s), and the existing capacity fixture still dominates test execution. This is not a warm-feedback performance claim. `python3 scripts/dependency_notices.py --check` passed on the regenerated inventory. Root inspected the framebuffer and reused worker evidence rather than repeating the UI journey. Final documentation-only edits receive the lightweight Markdown/whitespace check.
 
+Source `f17e45c` was pushed to personal public main. Hosted [run41793353477](https://github.com/akilfernando/Ruster/actions/runs/41793353477) passed the full gate/notices; Linux job3m0s including setup/cache and dependency rebuilds. The changed dependency graph makes this unsuitable as a warm feedback comparison; it exceeds the initial2minute hosted target. No duplicate local full suite was run afterward.
+
 ## Limits and next work
 
 Only functions execute; top-level script statements/declarations are ignored, with no persistent globals. Behaviors return validated numeric transform maps; there are no object/resource references or arbitrary engine calls. The copied-state interface avoids exposing mutable Rust/scene references. Rhai's resource/operation checks are an in-process defensive boundary, not process isolation or a hard time/memory guarantee.
