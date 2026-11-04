@@ -849,10 +849,13 @@ impl Document {
         File::open(path)?
             .take(MAX_FILE_BYTES + 1)
             .read_to_end(&mut bytes)?;
+        Self::decode(&bytes)
+    }
+    fn decode(bytes: &[u8]) -> Result<Self, SceneError> {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(SceneError::Invalid("file exceeds 1 MiB".into()));
         }
-        let value = strict_json::parse(&bytes)?;
+        let value = strict_json::parse(bytes)?;
         if value.get("format").and_then(|v| v.as_str()) != Some("ruster-scene") {
             return Err(SceneError::Invalid("expected ruster-scene format; logistics v1 scenarios remain a separate format and are not migrated".into()));
         }
@@ -884,8 +887,7 @@ impl Document {
         document.validate()?;
         Ok(document)
     }
-    fn write(&self, path: &Path, create_new: bool) -> Result<(), SceneError> {
-        reject_nonregular(path)?;
+    fn encode(&self) -> Result<Vec<u8>, SceneError> {
         self.validate()?;
         let mut upgraded = self.clone();
         upgraded.format_version = FORMAT_VERSION;
@@ -894,6 +896,11 @@ impl Document {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(SceneError::Capacity);
         }
+        Ok(bytes)
+    }
+    fn write(&self, path: &Path, create_new: bool) -> Result<(), SceneError> {
+        reject_nonregular(path)?;
+        let bytes = self.encode()?;
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -1074,6 +1081,21 @@ impl Session {
             path: Some(lock.path.clone()),
         })
     }
+    /// Complete admitted authored document without changing save authority or history.
+    pub fn snapshot_bytes(&self) -> Result<Vec<u8>, SceneError> {
+        self.document.encode()
+    }
+    /// Restore a validated snapshot as an unsaved copy, never bound to its origin.
+    pub fn from_snapshot_bytes(bytes: &[u8]) -> Result<Self, SceneError> {
+        let document = Document::decode(bytes)?;
+        Ok(Self {
+            loaded_format_version: document.format_version,
+            document,
+            path: None,
+            saved: None,
+            history_evictions: 0,
+        })
+    }
     pub fn scene(&self) -> &Scene {
         &self.document.scene
     }
@@ -1195,6 +1217,41 @@ impl Session {
                 id: id.into(),
                 before,
                 after: binding,
+            }],
+            ..Change::default()
+        })
+    }
+    /// Create a fresh source and its attachment as one revision and Undo step.
+    /// Use set_binding to attach an existing source, or set_source for explicit repair.
+    pub fn create_behavior(
+        &mut self,
+        expected_revision: u64,
+        source_id: &str,
+        source: BehaviorSource,
+        binding_id: &str,
+        binding: BehaviorBinding,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(source_id)?;
+        validate_id(binding_id)?;
+        source.validate()?;
+        binding.validate()?;
+        if self.contains_source_id(source_id)
+            || self.contains_binding_id(binding_id)
+            || binding.source_id != source_id
+        {
+            return Err(SceneError::Invalid("Create behavior requires fresh identities and a binding referencing the new source.".into()));
+        }
+        self.commit_change(Change {
+            sources: vec![ValueDelta {
+                id: source_id.into(),
+                before: None,
+                after: Some(source),
+            }],
+            bindings: vec![ValueDelta {
+                id: binding_id.into(),
+                before: None,
+                after: Some(binding),
             }],
             ..Change::default()
         })
@@ -2002,6 +2059,26 @@ mod tests {
         let mut reopened = Session::open(&path).unwrap();
         assert_eq!(reopened.authoring(), session.authoring());
         assert!(!reopened.is_dirty());
+        // Recovery snapshots preserve the whole document while granting no
+        // authority to overwrite either the origin or an existing destination.
+        let baseline = reopened.saved.clone();
+        let original_bytes = std::fs::read(&path).unwrap();
+        let snapshot = reopened.snapshot_bytes().unwrap();
+        assert_eq!(reopened.saved, baseline);
+        assert_eq!(reopened.path(), Some(path.as_path()));
+        assert!(!reopened.is_dirty());
+        assert_eq!(std::fs::read(&path).unwrap(), original_bytes);
+        let mut recovered = Session::from_snapshot_bytes(&snapshot).unwrap();
+        assert_eq!(recovered.document, reopened.document);
+        assert!(recovered.path().is_none() && recovered.is_dirty());
+        assert!(matches!(recovered.save(&path), Err(SceneError::Conflict)));
+        assert_eq!(std::fs::read(&path).unwrap(), original_bytes);
+        recovered.undo(2).unwrap();
+        recovered.redo(3).unwrap();
+        assert_eq!(recovered.authoring(), reopened.authoring());
+        recovered
+            .save(dir.path().join("recovered-copy.json"))
+            .unwrap();
         assert!(Scene::load(&path)
             .unwrap_err()
             .to_string()
@@ -2054,6 +2131,46 @@ mod tests {
     // geometry and remap only references inside the copied selection, including self refs.
     #[test]
     fn behavior_lifecycle_is_one_undo_and_reserves_dangling_references() {
+        // New source + attachment must never become two independent Undo steps
+        // or leave a source behind when the owner's attachment is rejected.
+        let mut attached = Session::new(Scene::demo()).unwrap();
+        attached
+            .create_behavior(
+                0,
+                "source-1",
+                source("unfinished("),
+                "binding-1",
+                binding("left", "source-1"),
+            )
+            .unwrap();
+        assert_eq!((attached.scene().revision, attached.undo_len()), (1, 1));
+        attached.undo(1).unwrap();
+        assert!(attached.authoring().is_empty());
+        assert!(
+            attached.contains_source_id("source-1") && attached.contains_binding_id("binding-1")
+        );
+        attached.redo(2).unwrap();
+        let before = attached.document.clone();
+        for (revision, source_id, binding_id, owner, referenced_source) in [
+            (0, "source-2", "binding-2", "right", "source-2"),
+            (3, "source-1", "binding-2", "right", "source-1"),
+            (3, "source-2", "binding-1", "right", "source-2"),
+            (3, "source-2", "binding-2", "left", "source-2"),
+            (3, "source-2", "binding-2", "absent", "source-2"),
+            (3, "source-2", "binding-2", "right", "other-source"),
+        ] {
+            assert!(attached
+                .create_behavior(
+                    revision,
+                    source_id,
+                    source("unfinished("),
+                    binding_id,
+                    binding(owner, referenced_source)
+                )
+                .is_err());
+            assert_eq!(attached.document, before);
+            assert_eq!(attached.history_evictions(), 0);
+        }
         let mut session = Session::new(Scene::demo()).unwrap();
         let mut a = binding("left", "source-1");
         a.properties.insert(

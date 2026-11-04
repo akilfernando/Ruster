@@ -152,8 +152,11 @@ def commands(plan):
     checks = []
     if plan.scope == "full":
         checks.append([sys.executable, "-m", "unittest", "discover", "-s", "scripts/tests", "-v"])
+    # The virtual workspace has no default-members restriction. Normal fmt
+    # covers its members; --all also traverses excluded vendored path dependencies.
+    format_selection = [] if plan.scope == "full" else selection
     return checks + [
-        ["cargo", "fmt", "--all", "--", "--check"],
+        ["cargo", "fmt", *format_selection, "--", "--check"],
         ["cargo", "clippy", *selection, "--all-targets", "--locked", "--", "-D", "warnings"],
         ["cargo", "test", *selection, "--locked"],
     ]

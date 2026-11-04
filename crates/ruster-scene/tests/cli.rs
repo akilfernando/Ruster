@@ -11,6 +11,7 @@ fn cli(args: &[&str]) -> Output {
 // validation's input matrix belongs to library tests instead of subprocesses.
 #[test]
 fn headless_workflow_and_failed_command_preserve_disk() {
+    assert!(cli(&["--help"]).status.success());
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("demo.json");
     let file = path.to_str().unwrap();
@@ -119,4 +120,77 @@ fn headless_workflow_and_failed_command_preserve_disk() {
         .status
         .success());
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    // One source/binding transport journey protects JSON file arguments and
+    // unfinished-code persistence; the validation matrix stays in library tests.
+    let source_file = dir.path().join("source.json");
+    std::fs::write(&source_file, r#"{"label":"Unfinished","language_id":"future-language","host_api_version":1,"text":"function unfinished("}"#).unwrap();
+    assert!(cli(&[
+        "source-set",
+        file,
+        "10",
+        "source-k",
+        source_file.to_str().unwrap()
+    ])
+    .status
+    .success());
+    let binding_file = dir.path().join("binding.json");
+    std::fs::write(&binding_file,r#"{"object_id":"stable-a","source_id":"source-k","enabled":true,"properties":{"speed":{"type":"number","value":2}}}"#).unwrap();
+    assert!(cli(&[
+        "binding-set",
+        file,
+        "11",
+        "binding-k",
+        binding_file.to_str().unwrap()
+    ])
+    .status
+    .success());
+    let listed = cli(&["sources", file]);
+    assert!(listed.status.success());
+    let listed: serde_json::Value = serde_json::from_slice(&listed.stdout).unwrap();
+    assert_eq!(listed["items"][0]["id"], "source-k");
+    assert!(!listed.to_string().contains("function unfinished"));
+    assert!(cli(&["source-remove", file, "12", "source-k"])
+        .status
+        .success());
+    let diagnostics = cli(&["diagnostics", file]);
+    let diagnostics: serde_json::Value = serde_json::from_slice(&diagnostics.stdout).unwrap();
+    assert_eq!(diagnostics["total"], 1);
+    assert!(cli(&["undo", file, "13"]).status.success());
+    let restored = cli(&["source", file, "source-k"]);
+    let restored: serde_json::Value = serde_json::from_slice(&restored.stdout).unwrap();
+    assert_eq!(restored["text"], "function unfinished(");
+    let before = std::fs::read(&path).unwrap();
+    assert!(!cli(&["binding-remove", file, "12", "binding-k"])
+        .status
+        .success());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
+    let combined_file = dir.path().join("new-behavior.json");
+    let source: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&source_file).unwrap()).unwrap();
+    let mut binding: serde_json::Value =
+        serde_json::from_slice(&std::fs::read(&binding_file).unwrap()).unwrap();
+    binding["object_id"] = "stable-b".into();
+    binding["source_id"] = "source-new".into();
+    std::fs::write(
+        &combined_file,
+        serde_json::to_vec(&serde_json::json!({"source":source,"binding":binding})).unwrap(),
+    )
+    .unwrap();
+    assert!(cli(&[
+        "behavior-create",
+        file,
+        "14",
+        "source-new",
+        "binding-new",
+        combined_file.to_str().unwrap()
+    ])
+    .status
+    .success());
+    let created = ruster_scene::Session::open(&path).unwrap();
+    assert_eq!(created.scene().revision, 15);
+    assert!(created.source("source-new").is_some() && created.binding("binding-new").is_some());
+    assert!(cli(&["undo", file, "15"]).status.success());
+    let restored = ruster_scene::Session::open(&path).unwrap();
+    assert!(restored.source("source-new").is_none() && restored.binding("binding-new").is_none());
+    assert!(restored.source("source-k").is_some() && restored.binding("binding-k").is_some());
 }

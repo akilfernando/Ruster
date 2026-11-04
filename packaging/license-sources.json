@@ -1,6 +1,6 @@
 {
   "schema": 1,
-  "notes": "egui-family source uses exact upstream 0.37.0 release tag (peeled commit841a328); published crate VCS commit7c0b404 was unavailable upstream at access. eframe uses its available published VCS commit. Other groups use published crate .cargo_vcs_info.json commit. Readable source texts supplement Cargo source files; source provenance is retained here.",
+  "notes": "egui-family source uses exact upstream 0.37.0 release tag (peeled commit841a328); published crate VCS commit7c0b404 was unavailable upstream at access. eframe uses its available published VCS commit. Other groups use published crate .cargo_vcs_info.json commit. Readable source texts supplement Cargo source files; source provenance is retained here. Lua5.4.9 supplemental text preserves the complete unmodified copyright/permission comment from its exact lua-src VCS lua.h; the wrapper LICENSE retains an older Lua copyright period. Header bytes were compared with the installed pinned crate.",
   "texts": [
     {
       "path": "licenses/egui-LICENSE-MIT.txt",
@@ -207,6 +207,30 @@
         {
           "name": "spirv",
           "version": "0.4.0+sdk-1.4.341.0"
+        }
+      ]
+    },
+    {
+      "path": "licenses/mlua-sys-LICENSE.txt",
+      "sha256": "63b61a30d3e3abcfcb1bda4b99f4eea9fdb7d6ab05fbc513461fef6cf89baf29",
+      "source": "https://raw.githubusercontent.com/mlua-rs/mlua/a186d461c7772aed4cb0a9fa1d1899121c6450e7/LICENSE",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "mlua-sys",
+          "version": "0.13.0"
+        }
+      ]
+    },
+    {
+      "path": "licenses/lua54-5.4.9-LICENSE.txt",
+      "sha256": "fe7591799d3e229b3c9640314215dd085777889df9a35d4ea78d1c7aa5c351c6",
+      "source": "https://raw.githubusercontent.com/mlua-rs/lua-src-rs/3c65a4674fd25a89fb924538ce7fe1c89c64a71b/lua-5.4.9/lua.h",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "lua-src",
+          "version": "551.0.2"
         }
       ]
     }

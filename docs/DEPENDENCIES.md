@@ -5,7 +5,7 @@ This inventory covers every external package in the locked workspace resolution,
 Cargo's declared SPDX license expression is metadata supplied by each package. Its presence is not an independent license review or certification.
 Project source licensing does not change the licenses of dependencies.
 
-External locked package versions: **429**. Packages with no discovered readable license text: **62**.
+External locked package versions: **435**. Packages with no discovered readable license text: **63**.
 
 | Package | Version | Cargo source | Declared license expression | Upstream repository |
 | --- | --- | --- | --- | --- |
@@ -55,6 +55,7 @@ External locked package versions: **429**. Packages with no discovered readable 
 | block2 | 0.5.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | block2 | 0.6.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | blocking | 1.7.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/blocking](https://github.com/smol-rs/blocking) |
+| bstr | 1.13.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/BurntSushi/bstr](https://github.com/BurntSushi/bstr) |
 | bumpalo | 3.20.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/fitzgen/bumpalo](https://github.com/fitzgen/bumpalo) |
 | bytemuck | 1.25.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/Lokathor/bytemuck](https://github.com/Lokathor/bytemuck) |
 | bytemuck_derive | 1.12.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/Lokathor/bytemuck](https://github.com/Lokathor/bytemuck) |
@@ -190,6 +191,8 @@ External locked package versions: **429**. Packages with no discovered readable 
 | litrs | 1.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/LukasKalbertodt/litrs](https://github.com/LukasKalbertodt/litrs) |
 | lock_api | 0.4.14 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |
 | log | 0.4.35 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/log](https://github.com/rust-lang/log) |
+| lua-src | 551.0.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mlua-rs/lua-src-rs](https://github.com/mlua-rs/lua-src-rs) |
+| luajit-src | 210.7.4+c6ffc14 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mlua-rs/luajit-src-rs](https://github.com/mlua-rs/luajit-src-rs) |
 | malloc_buf | 0.0.6 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/SSheldon/malloc_buf](https://github.com/SSheldon/malloc_buf) |
 | memchr | 2.8.3 | `registry+https://github.com/rust-lang/crates.io-index` | `Unlicense OR MIT` | [https://github.com/BurntSushi/memchr](https://github.com/BurntSushi/memchr) |
 | memmap2 | 0.9.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RazrFalcon/memmap2-rs](https://github.com/RazrFalcon/memmap2-rs) |
@@ -197,6 +200,8 @@ External locked package versions: **429**. Packages with no discovered readable 
 | miniz_oxide | 0.8.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
 | miniz_oxide | 0.9.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
 | mint | 0.5.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/kvark/mint](https://github.com/kvark/mint) |
+| mlua | 0.12.2 | `vendored:third_party/mlua` | `MIT` | [https://github.com/mlua-rs/mlua](https://github.com/mlua-rs/mlua) |
+| mlua-sys | 0.13.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mlua-rs/mlua](https://github.com/mlua-rs/mlua) |
 | moxcms | 0.8.1 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-3-Clause OR Apache-2.0` | [https://github.com/awxkee/moxcms.git](https://github.com/awxkee/moxcms.git) |
 | naga | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
 | naga-types | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
@@ -384,6 +389,7 @@ External locked package versions: **429**. Packages with no discovered readable 
 | wgpu-hal | 30.0.1 | `vendored:third_party/wgpu-hal` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
 | wgpu-naga-bridge | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
 | wgpu-types | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
+| which | 8.0.6 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/harryfei/which-rs.git](https://github.com/harryfei/which-rs.git) |
 | winapi | 0.3.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/retep998/winapi-rs](https://github.com/retep998/winapi-rs) |
 | winapi-i686-pc-windows-gnu | 0.4.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/retep998/winapi-rs](https://github.com/retep998/winapi-rs) |
 | winapi-util | 0.1.11 | `registry+https://github.com/rust-lang/crates.io-index` | `Unlicense OR MIT` | [https://github.com/BurntSushi/winapi-util](https://github.com/BurntSushi/winapi-util) |
@@ -477,6 +483,7 @@ No readable matching source text was found for the following packages; metadata 
 - `jni-sys-macros 0.4.1`
 - `khronos_api 3.1.0`
 - `malloc_buf 0.0.6`
+- `mlua-sys 0.13.0`
 - `ndk 0.9.0`
 - `ndk-context 0.1.1`
 - `ndk-sys 0.6.0+11769913`

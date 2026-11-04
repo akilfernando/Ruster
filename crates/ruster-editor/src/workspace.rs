@@ -32,9 +32,11 @@ pub(super) enum Action {
     Isometric,
     FreeView,
     Quit,
+    FindObjects,
+    FindContent,
 }
 impl Action {
-    pub const ALL: [Self; 24] = [
+    pub const ALL: [Self; 26] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -59,6 +61,8 @@ impl Action {
         Self::Isometric,
         Self::FreeView,
         Self::Quit,
+        Self::FindObjects,
+        Self::FindContent,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -86,6 +90,8 @@ impl Action {
             Self::Isometric => "Isometric view",
             Self::FreeView => "Free view",
             Self::Quit => "Close window",
+            Self::FindObjects => "Search objects",
+            Self::FindContent => "Search Content",
         }
     }
 }
@@ -97,19 +103,22 @@ pub(super) enum Side {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct Binding {
     pub action: Action,
-    pub key: egui::Key,
+    pub key: Option<egui::Key>,
     pub ctrl: bool,
     pub shift: bool,
     pub alt: bool,
 }
 impl Binding {
     pub fn text(self) -> String {
+        let Some(key) = self.key else {
+            return "Unbound".into();
+        };
         format!(
             "{}{}{}{}",
             if self.ctrl { "Ctrl+" } else { "" },
             if self.alt { "Alt+" } else { "" },
             if self.shift { "Shift+" } else { "" },
-            self.key.name()
+            key.name()
         )
     }
     fn modifiers(self) -> egui::Modifiers {
@@ -121,7 +130,8 @@ impl Binding {
         }
     }
     fn same_keys(self, other: Self) -> bool {
-        self.key == other.key
+        self.key.is_some()
+            && self.key == other.key
             && self.ctrl == other.ctrl
             && self.shift == other.shift
             && self.alt == other.alt
@@ -135,6 +145,7 @@ pub(super) struct Preferences {
     pub inspector_side: Side,
     pub hierarchy_visible: bool,
     pub inspector_visible: bool,
+    pub content_visible: bool,
     pub scale: f32,
     pub movement_speed: f32,
     pub recent: Vec<PathBuf>,
@@ -169,6 +180,8 @@ impl Default for Preferences {
             (Action::Isometric, Key::Num0, false, false),
             (Action::FreeView, Key::Home, false, false),
             (Action::Quit, Key::Q, true, false),
+            (Action::FindObjects, Key::F, true, false),
+            (Action::FindContent, Key::F, true, true),
         ];
         Self {
             hierarchy_width: 180.0,
@@ -177,6 +190,7 @@ impl Default for Preferences {
             inspector_side: Side::Right,
             hierarchy_visible: true,
             inspector_visible: true,
+            content_visible: true,
             scale: 1.0,
             movement_speed: 4.0,
             recent: Vec::new(),
@@ -185,7 +199,7 @@ impl Default for Preferences {
                 .into_iter()
                 .map(|(action, key, ctrl, shift)| Binding {
                     action,
-                    key,
+                    key: Some(key),
                     ctrl,
                     shift,
                     alt: false,
@@ -196,7 +210,7 @@ impl Default for Preferences {
 }
 impl Preferences {
     fn json(&self) -> Value {
-        json!({"format":"ruster-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.name(),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
+        json!({"format":"ruster-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
     }
     fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() > 64 * 1024 {
@@ -216,6 +230,7 @@ impl Preferences {
             "inspector_side",
             "hierarchy_visible",
             "inspector_visible",
+            "content_visible",
             "ui_scale",
             "movement_speed",
             "recent",
@@ -223,7 +238,7 @@ impl Preferences {
             "bindings",
         ];
         let map = v.as_object().ok_or("Preferences must be an object.")?;
-        if map.len() != keys.len()
+        if !(keys.len() - 1..=keys.len()).contains(&map.len())
             || map.keys().any(|k| !keys.contains(&k.as_str()))
             || v["format"] != "ruster-editor-preferences"
             || v["version"] != 1
@@ -329,11 +344,17 @@ impl Preferences {
                 .into_iter()
                 .find(|a| Some(a.name()) == b["action"].as_str())
                 .ok_or("Unknown shortcut action.")?;
-            let key = b["key"]
-                .as_str()
-                .and_then(egui::Key::from_name)
-                .ok_or("Unknown shortcut key.")?;
-            if key == egui::Key::Escape {
+            let key = if b["key"].is_null() {
+                None
+            } else {
+                Some(
+                    b["key"]
+                        .as_str()
+                        .and_then(egui::Key::from_name)
+                        .ok_or("Unknown shortcut key.")?,
+                )
+            };
+            if key == Some(egui::Key::Escape) {
                 return Err("Escape is reserved for cancelling edits.".into());
             }
             let binding = Binding {
@@ -352,16 +373,17 @@ impl Preferences {
             bindings.push(binding);
         }
         // Missing known actions receive their default binding without rewriting
-        // existing choices. Unknown actions and conflicting defaults stay visible.
+        // existing choices. A newly conflicting default remains visibly Unbound.
         for default in Self::default().bindings {
             if !bindings
                 .iter()
                 .any(|binding| binding.action == default.action)
             {
-                if bindings.iter().any(|binding| binding.same_keys(default)) {
-                    return Err(format!("New shortcut {} conflicts with saved keys; resolve preferences explicitly.",default.action.name()));
+                let mut binding = default;
+                if bindings.iter().any(|old| old.same_keys(default)) {
+                    binding.key = None;
                 }
-                bindings.push(default);
+                bindings.push(binding);
             }
         }
         Ok(Self {
@@ -371,6 +393,12 @@ impl Preferences {
             inspector_side: side("inspector_side")?,
             hierarchy_visible: boolean("hierarchy_visible")?,
             inspector_visible: boolean("inspector_visible")?,
+            content_visible: match v.get("content_visible") {
+                None => true,
+                Some(value) => value
+                    .as_bool()
+                    .ok_or("Invalid content visibility preference.")?,
+            },
             scale: number("ui_scale", 0.75, 2.0)?,
             movement_speed: number("movement_speed", 0.05, 1000.0)?,
             recent,
@@ -614,7 +642,7 @@ impl Workspace {
                 ctx.input_mut(|i| i.consume_key(modifiers, key));
                 let candidate = Binding {
                     action,
-                    key,
+                    key: Some(key),
                     ctrl: modifiers.ctrl || modifiers.command,
                     alt: modifiers.alt,
                     shift: modifiers.shift,
@@ -646,12 +674,13 @@ impl Workspace {
         }
         // Exact modifiers prevent Ctrl+Shift+S being consumed as Ctrl+S.
         self.prefs.bindings.iter().find_map(|binding| {
+            let key = binding.key?;
             ctx.input_mut(|i| {
                 let m = i.modifiers;
                 (m.ctrl == binding.ctrl
                     && m.shift == binding.shift
                     && m.alt == binding.alt
-                    && i.consume_key(binding.modifiers(), binding.key))
+                    && i.consume_key(binding.modifiers(), key))
                 .then_some(binding.action)
             })
         })
@@ -706,6 +735,7 @@ impl Workspace {
                     });
                     ui.checkbox(&mut self.prefs.hierarchy_visible, "Show hierarchy");
                     ui.checkbox(&mut self.prefs.inspector_visible, "Show inspector");
+                    ui.checkbox(&mut self.prefs.content_visible,"Show Content browser");
                     for (label, side) in [
                         ("Hierarchy side", &mut self.prefs.hierarchy_side),
                         ("Inspector side", &mut self.prefs.inspector_side),
@@ -724,6 +754,7 @@ impl Workspace {
                         self.prefs.inspector_side = defaults.inspector_side;
                         self.prefs.hierarchy_visible = true;
                         self.prefs.inspector_visible = true;
+                        self.prefs.content_visible = true;
                     }
                     ui.separator();
                     ui.label(
@@ -1072,11 +1103,18 @@ mod tests {
         );
         assert!(w.capture.is_none());
         let mut previous = w.prefs.json();
+        previous.as_object_mut().unwrap().remove("content_visible");
         previous["bindings"]
             .as_array_mut()
             .unwrap()
-            .retain(|binding| binding["action"] != Action::Quit.name());
+            .retain(|binding| {
+                ![Action::Quit, Action::FindObjects, Action::FindContent]
+                    .iter()
+                    .any(|action| binding["action"] == action.name())
+            });
         let upgraded = Preferences::parse(&serde_json::to_vec(&previous).unwrap()).unwrap();
+        assert!(upgraded.content_visible);
+        assert_eq!(upgraded.bindings.len(), Action::ALL.len());
         assert_eq!(
             upgraded
                 .bindings
@@ -1084,7 +1122,7 @@ mod tests {
                 .find(|binding| binding.action == Action::Frame)
                 .unwrap()
                 .key,
-            egui::Key::G
+            Some(egui::Key::G)
         );
         assert_eq!(
             upgraded
@@ -1093,7 +1131,59 @@ mod tests {
                 .find(|binding| binding.action == Action::Quit)
                 .unwrap()
                 .key,
-            egui::Key::Q
+            Some(egui::Key::Q)
+        );
+        // A previously valid remap owns its keys when a new action is added.
+        let old_frame = previous["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|binding| binding["action"] == Action::Frame.name())
+            .unwrap();
+        old_frame["key"] = "F".into();
+        old_frame["ctrl"] = true.into();
+        let migrated = Preferences::parse(&serde_json::to_vec(&previous).unwrap()).unwrap();
+        assert_eq!(
+            migrated
+                .bindings
+                .iter()
+                .find(|b| b.action == Action::FindObjects)
+                .unwrap()
+                .key,
+            None
+        );
+        assert_eq!(
+            Preferences::parse(&serde_json::to_vec(&migrated.json()).unwrap()).unwrap(),
+            migrated
+        );
+        let mut old_workspace = Workspace::detached();
+        old_workspace.prefs = migrated;
+        assert_eq!(old_workspace.shortcut_text(Action::FindObjects), "Unbound");
+        assert_eq!(
+            frame(
+                &mut old_workspace,
+                true,
+                key(egui::Key::F, egui::Modifiers::CTRL),
+                false
+            ),
+            Some(Action::Frame)
+        );
+        old_workspace.capture = Some(Action::FindObjects);
+        frame(
+            &mut old_workspace,
+            true,
+            key(egui::Key::H, egui::Modifiers::CTRL),
+            false,
+        );
+        assert_eq!(old_workspace.capture, None);
+        assert_eq!(
+            frame(
+                &mut old_workspace,
+                true,
+                key(egui::Key::H, egui::Modifiers::CTRL),
+                false
+            ),
+            Some(Action::FindObjects)
         );
         let mut duplicate = w.prefs.json();
         duplicate["bindings"][13]["key"] = "S".into();

@@ -40,6 +40,8 @@ Default base is HEAD. The runner includes changes since the merge base plus work
 
 The runner uses Cargo's normal incremental cache and `--locked` for builds/tests. Missing Cargo/toolchain, stale lockfiles and nonzero child exits are visible failures. Bootstrap commands for a deliberately changed dependency/lockfile must be explicit in the task evidence. No pass-result cache or silent retry loop exists.
 
+Formatting uses ordinary `cargo fmt` for the full virtual workspace (which has no `default-members` restriction), or explicit affected packages. Do not add `--all`: Cargo also traverses excluded vendored path dependencies under that flag. Preserve their upstream bytes and review declared patches instead. If a future workspace adds `default-members`, update full formatting selection to explicitly enumerate every member.
+
 ## Risk-specific evidence
 
 | Change | Additional evidence, when applicable |

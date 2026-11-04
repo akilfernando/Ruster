@@ -11,17 +11,18 @@ Familiarity for experienced Unity and Unreal creators, including everyday editor
 
 **Early development:** milestones M0–M7 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines.
 
-![Ruster scene editor with procedural 3D objects and transform inspector](docs/evidence/m5-scene-editor.png)
+![Ruster scene editor with imported meshes, content browser and transform tools](docs/evidence/m8-content-recovery-drag.png)
 
 ## What works today
 
-- **Shared 3D viewport:** depth-tested procedural cubes, simple colored materials, perspective camera, orbit/zoom and object picking, rendered through wgpu's Vulkan backend in both the editor and standalone viewer.
-- **Scene authoring:** stable object IDs, position/rotation/scale editing, validation, bounded undo/redo, atomic saves and cooperating-writer conflict detection.
+- **Shared 3D viewport:** depth-tested cubes/imported meshes, simple colored materials, perspective/orthographic and axis/isometric views, orbit/pan/fly/frame navigation, picking and bounded hardware antialiasing through wgpu's Vulkan backend.
+- **Scene authoring:** create/name/duplicate/delete, multi-selection/internal copy-paste, move/rotate/scale tools, snapping/pivots/local axes, precise fields and bounded shared undo/redo. Atomic saves detect cooperating-writer conflicts.
 - **Human and agent workflows:** an offline native editor and CLI, plus an optional native MCP adapter that edits the displayed session with identity/revision checks and draft protection.
 - **Repeatable previews:** authored state stays separate from runtime snapshots. The scene preview is a static arrangement with explicit lifecycle ticks and Reset; it does not imply physics or gameplay simulation.
-- **Content iteration:** import a triangle-only OBJ, assign its stable asset ID, refresh after source edits and recover from invalid input while retaining the last good geometry/pipeline. The catalog and originals are authored; the cache is disposable.
+- **Content iteration:** search objects/assets, use contextual actions and drag a registered mesh onto an object. Explicit OBJ/shader refresh retains last-good content; derived binary caches and shared snapshots avoid unchanged parsing/full payload copies. Catalog/originals are authored; cache is disposable.
+- **Recoverable workspace:** remappable shortcuts, remembered layout/scale/camera/recent files and bounded background checkpoints. Crash recovery retains unfinished authored data and invalid field/name drafts as an unsaved copy, preserving externally changed originals. Physical-focus/human familiarity acceptance remains separate.
 - **A standalone application kit:** application-owned behavior, shared input/lifecycle/rendering and read-only resources; an editable delivery challenge and source/binary packaging tools.
-- **An experimental scripting loop:** Motion Lab attaches Rhai behaviors to objects, exposes numeric properties and applies validated source changes through Reset. Rust remains the native application path; the final scripting language and IDE workflow are still open.
+- **Provisional scripting foundations:** language-neutral scene5 sources/bindings/properties, guarded CLI authoring, and a separate bounded Lua5.4 runtime/headless consumer. Generic editor behavior/tooling integration remains unfinished. The earlier Rhai Motion Lab experiment stays available; Rust remains the native application path and no permanent scripting language is selected.
 - **A logistics reference application:** integer throughput simulation, saved scenarios, a schematic viewer and the original authoring workflow remain available separately.
 
 The current scene limit is 256 objects and one viewport. M6 adds bounded triangle-only OBJ mesh import, stable references, rebuildable caches and controlled asset/WGSL refresh. Textures/MTL, general mesh formats, physics/audio and a general ECS remain later work. M7 supplies the bounded application kit and Linux development packaging described below. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope.
@@ -31,6 +32,7 @@ The current scene limit is 256 objects and one viewport. M6 adds bounded triangl
 ### Requirements
 
 - Git and [Rust via rustup](https://rust-lang.org/tools/install/). The repository pins the tested Rust 1.99.1 toolchain, including rustfmt and Clippy.
+- A working native C compiler/linker. The provisional Lua backend builds its pinned Lua5.4.9 VM from bundled source; no system Lua installation is required.
 - Python 3.11 or newer for verification and application packaging.
 - For graphical tools: a Linux Wayland/X11 desktop and a working Vulkan driver. A display is not required for the headless CLI or ordinary tests.
 
@@ -43,6 +45,8 @@ git clone https://github.com/akilfernando/Ruster.git
 cd Ruster
 cargo run --locked -p ruster-editor -- --scene examples/arrangement.scene.json
 ```
+
+Run `cargo run --locked -p ruster-editor` for a blank creation workspace. Scene sources, workspace preferences and local recovery records have separate lifetimes; see the [editor guide](crates/ruster-editor/README.md).
 
 Select an object in the hierarchy or click a cube. Edit a transform, then choose **Apply transform**. Invalid text is preserved for correction. Right-drag to orbit, scroll to zoom, and use **Fit** to frame the scene. **Undo transform** reverses an authored change. Use **Save scene as…** to keep experiments separate from the checked-in example.
 

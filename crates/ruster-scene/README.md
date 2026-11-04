@@ -57,6 +57,24 @@ V5 history is a flat nonrecursive record with optional nonempty `scene`, `source
 
 The CLI reports byte-pressure removal on stderr after a successful save, retaining its existing revision line on stdout. The editor shows a nonmodal notice; its successful command responses expose the cumulative session count as `history_evictions`.
 
+`Session::snapshot_bytes()` exports the complete admitted current-format document without changing the live save baseline/path/history. `Session::from_snapshot_bytes(&bytes)` uses the same strict decoder/migrations/capacity checks, retaining authoring/history but restoring with no path/saved baseline. This supports recovery as an unsaved copy: it grants no authority to replace the origin or another existing destination. Asset origin and bounded frontend drafts remain separate editor recovery context, not scene geometry fields.
+
+## Headless source and binding edits
+
+`ruster-scene --help` lists the data-only authoring commands:
+
+```sh
+ruster-scene sources /tmp/my-scene.json
+ruster-scene source-set /tmp/my-scene.json 2 movement /tmp/source.json
+ruster-scene binding-set /tmp/my-scene.json 3 mover /tmp/binding.json
+ruster-scene diagnostics /tmp/my-scene.json
+ruster-scene source /tmp/my-scene.json movement
+```
+
+`Session::create_behavior(revision, source_id, source, binding_id, binding)` creates a fresh source and its attachment atomically in one revision/Undo. Its binding must reference that source; both identities must be fresh across live/history/dangling reservations. Owner conflicts, stale state, mismatched references and capacity rejection leave neither half behind. `behavior-create FILE REV SOURCE_ID BINDING_ID JSON_FILE` exposes the same operation with a `{"source": BehaviorSource, "binding": BehaviorBinding}` input object. Use `set_binding`/`binding-set` to attach an existing source, and explicit source upserts for repair.
+
+Use the actual current revision. The input files describe one `BehaviorSource` or `BehaviorBinding` using the schema above; inputs must be regular JSON files no larger than1MiB, with the stricter typed source/property limits still enforced. `source-remove FILE REV ID` and `binding-remove FILE REV ID` are reversible edits, not filesystem deletion. Removing a referenced source deliberately leaves repairable bindings. `sources`, `bindings` and `diagnostics` accept an optional numeric offset and return16-item summary pages. Singular `source`/`binding` returns the complete requested value; `inspect` also reports authoring counts. All mutations share guarded Save/Undo and report byte-pressure history removal after successful persistence. This CLI stores unfinished/unknown-language source; it does not execute an interpreter or turn invalid code into a save error. The geometry-only `run` command rejects authoring-bearing documents rather than stripping them.
+
 `inspect_sources(offset, limit)`, `inspect_bindings(offset, limit)` and `authoring_diagnostics(offset, limit)` return total/continuation metadata with at most16 entries per page (requested limits are clamped to1..16); source summaries exclude source text and binding summaries exclude property bodies. Structural diagnostics currently identify missing sources and unresolved ObjectRef values. Retrieve source bodies/full bindings explicitly through their accessors; transport consumers must separately bound encoded property replies. Unknown languages, unavailable host APIs/assets and runtime/source diagnostics belong to the relevant host, rather than a hardcoded backend list here.
 
 `Scene::load` rejects documents with live or reversible behavior authoring and directs callers to `Session::open`; geometry-only readers cannot silently drop authored behavior. An authoring-aware caller can explicitly export geometry by saving `session.scene()` to a separate destination. Empty-authoring files continue to load through existing geometry readers. `Scene`/`Object` serialization and fingerprints remain unchanged; generic authoring shares the scene's monotonically increasing revision but is not part of its geometry fingerprint.

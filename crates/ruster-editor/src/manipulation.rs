@@ -232,6 +232,15 @@ struct Clipboard {
     objects: Vec<Object>,
 }
 
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct DraftSnapshot {
+    precision: [String; 9],
+    mixed: [bool; 9],
+    edited: [bool; 9],
+    revision: Option<u64>,
+    delta: [String; 3],
+}
 pub(super) struct Manipulation {
     pub ids: Vec<String>,
     pub local: bool,
@@ -251,6 +260,7 @@ pub(super) struct Manipulation {
     gesture: Option<Gesture>,
     clipboard: Option<Clipboard>,
     suppress_pointer: bool,
+    draft_generation: u64,
 }
 impl Default for Manipulation {
     fn default() -> Self {
@@ -273,14 +283,64 @@ impl Default for Manipulation {
             gesture: None,
             clipboard: None,
             suppress_pointer: false,
+            draft_generation: 0,
         }
     }
 }
 impl Manipulation {
+    pub fn draft_generation(&self) -> u64 {
+        self.draft_generation
+    }
+    pub fn draft_changed(&mut self) {
+        self.draft_generation = self.draft_generation.wrapping_add(1);
+    }
+    pub fn offset_pending(&self) -> bool {
+        self.delta.iter().any(|text| text != "0")
+    }
+    pub fn snapshot_drafts(&self) -> DraftSnapshot {
+        DraftSnapshot {
+            precision: self.precision.clone(),
+            mixed: self.mixed,
+            edited: self.edited,
+            revision: self.precision_revision,
+            delta: self.delta.clone(),
+        }
+    }
+    pub fn restore_drafts(&mut self, scene: &Scene, draft: DraftSnapshot) -> Result<(), String> {
+        self.reset_precision(scene);
+        if draft
+            .precision
+            .iter()
+            .chain(draft.delta.iter())
+            .any(|text| text.chars().count() > 1024)
+            || draft.mixed != self.mixed
+            || draft.revision
+                != draft
+                    .edited
+                    .iter()
+                    .any(|edited| *edited)
+                    .then_some(scene.revision)
+            || (self.ids.is_empty() && draft.edited.iter().any(|edited| *edited))
+            || draft
+                .precision
+                .iter()
+                .enumerate()
+                .any(|(i, text)| !draft.edited[i] && text != &self.precision[i])
+        {
+            return Err("Recovery precision drafts have invalid selection, masks, revision or text bounds; checkpoint preserved.".into());
+        }
+        self.precision = draft.precision;
+        self.edited = draft.edited;
+        self.precision_revision = draft.revision;
+        self.delta = draft.delta;
+        self.draft_changed();
+        Ok(())
+    }
     pub fn precision_pending(&self) -> bool {
         self.edited.iter().any(|v| *v)
     }
     pub fn reset_precision(&mut self, scene: &Scene) {
+        self.draft_changed();
         self.edited = [false; 9];
         self.precision_revision = None;
         self.precision_had_focus = false;
@@ -391,12 +451,13 @@ impl Manipulation {
                     ui.allocate_ui_with_layout(egui::vec2(group_width,ui.spacing().interact_size.y),egui::Layout::left_to_right(egui::Align::Center),|ui| {
                         ui.label(label);
                         let response = ui.add_sized([ui.available_width().max(48.0),ui.spacing().interact_size.y],
-                            egui::TextEdit::singleline(&mut self.precision[i])
+                            egui::TextEdit::singleline(&mut self.precision[i]).char_limit(1024)
                                 .hint_text(if self.mixed[i] { "—" } else { "" }));
                         let response=response.on_hover_text("Editing this component changes only this axis/property for all selected objects. Other components keep their individual values.");
                         focused |= response.has_focus() || response.lost_focus();
                         field_has_focus |= response.has_focus();
                         if response.changed() {
+                            self.draft_changed();
                             self.edited[i] = true;
                             self.precision_revision.get_or_insert(session.scene().revision);
                         }

@@ -1,6 +1,6 @@
 # 0019 — Provisional Lua5.4 generic behavior backend
 
-Date:2026-11-04. Status: accepted for the next bounded implementation; production integration and acceptance remain unfinished. Agent-selected, not a user-selected or permanent language commitment.
+Date:2026-11-04. Status: accepted bounded library/headless implementation; generic editor/tooling integration and creator acceptance remain unfinished. Agent-selected, not a user-selected or permanent language commitment.
 
 ## Context and evidence
 
@@ -21,3 +21,9 @@ Diagnostics carry source identity/hash, binding/object context, phase and bounde
 Retaining Rhai as the only path would ignore observed tooling gaps; rewriting it or writing a new language/debugger is unjustified. Luau has credible static tooling and its definition navigation needs ordinary generated modules; it remains an alternative. C# may fit Unity users but requires a real SDK/tooling/distribution trial before comparative conclusions. Language-neutral authoring keeps these options open without silently translating existing sources.
 
 Compiled-main/fresh-closure was simpler and locally faster than bytecode reload in the small trial, with a distinct retained-memory tradeoff. Cache cleanup must release previous environments on both success and error. Backend limits/defaults are initial measured engineering choices, not guarantees for every maximum document. Production readiness requires bundled-VM tests, actual editor/source/debug acceptance, recovery and distribution/notices verification; feasibility evidence does not close M8.
+
+## Implemented evidence
+
+The bundled Lua54 branch of lua-src551.0.2 selects Lua5.4.9, verified against headers/runtime family. Six library tests and strict Clippy passed, including scoped resolver release independent of GC and cancellation immediately before commit. Review caught and corrected old Rust snapshot retention outside the VM memory counter. The headless check/run consumer adds one actual file/argument/diagnostic journey; its failures retain source/hash/line/binding/object context and never modify authored bytes. The combined139Rust/20tooling gate passed20.99s.
+
+[Production cost](../evidence/M8-behavior-cost.md) records the pinned whole-step baseline; no claim against other interpreters or engines.435-version inventory/notices are regenerated and the omitted mlua-sys readable license is retained from its exact VCS commit in packaging supplements. No new interpreter dependency was added to ruster-app. Generic editor execution, working-copy conflicts, source navigation and debugger remain the [next stages](../BEHAVIOR-AUTHORING.md).

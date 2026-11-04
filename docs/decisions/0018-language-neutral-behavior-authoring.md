@@ -1,6 +1,6 @@
 # 0018 — Language-neutral behavior authoring and bounded history
 
-Date:2026-11-04. Status: accepted agent-selected storage implementation after focused checks and independent review; combined change gate pending. This does not select a permanent language or complete generic scripting UX.
+Date:2026-11-04. Status: accepted agent-selected storage implementation after independent review, combined gate and native recovery. This does not select a permanent language or complete generic scripting UX.
 
 ## Context
 
@@ -28,4 +28,4 @@ Reject-only capacity policy blocks routine editing after history fills. Oldest-U
 
 The [historical writer archive](../evidence/m8-v4-writer-fixture.tar.gz) retains exact source/licenses/isolated lock/generator/provenance and compressed actual output. Archive SHA-256: `e170c28236dcbe1321bd6da7fc1dfea01ce47c70958a500f28ed7b7ee4e6eb8d`. Old writer admitted/saved1,028,346bytes, revision33,31Undo/1Redo; raw JSON SHA-256 `54fcde3f63c0bc4d31d2d229481ad4b5eb3cf076267a2896f73804afcffdc379`. The regression reconstructs byte-identical historical DTO/pretty output, verifies provenance size/hash, opens without rewriting and preserves all history through compact save/reopen.
 
-Full combined change gate remains pending. CLI/editor/MCP source editing, runtime backend, external editor/LSP/debugging and user recovery acceptance remain separate work; no runtime capability follows from storage support alone.
+The final139Rust/20tooling combined gate passed20.99s. Snapshot export/detached restoration preserve full authoring/history without granting origin overwrite authority; native recovery verifies actual invalid field/name data and asset context. `create_behavior` commits fresh source+attachment in one change and rejects owner/identity/reference failures atomically. CLI data editing and the separate headless Lua consumer are implemented; generic editor/MCP source editing, external editor/LSP/debugging and full creator acceptance remain open. No editor runtime capability follows from storage support alone.

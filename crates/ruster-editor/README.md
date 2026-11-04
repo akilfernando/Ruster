@@ -259,6 +259,40 @@ All selected objects share nine precise **Position / Rotation (radians) / Scale*
 
 ### Workspace, startup and navigation
 
+The **Objects** search filters display names and immutable IDs without changing
+selection. Its count identifies selected objects hidden by the filter. Enter
+selects the first match; Escape clears the query. Right-click an object for
+Create, Rename, Duplicate, Delete, Copy, Paste and Frame selected. These use the
+same guarded operations as the toolbar: valid precision edits commit before
+changing selection, while invalid fields remain available to repair or revert.
+
+The resizable **Content** browser searches cached catalog IDs, relative source
+paths and Ready/Missing/Invalid status. Enter selects the first match; Escape
+clears its search. **Workspace** can show/hide the browser or focus either search
+(default Ctrl+F for objects, Ctrl+Shift+F for content; remappable). A selected
+object's mesh reference offers **Locate mesh in Content**. Asset context actions
+assign to the active object, select referencing objects, or explicitly refresh
+or rename its source. Source paths retain their existing relative organization;
+this slice adds no folder management.
+Contextual **Rename source…** focuses the destination path; Enter submits that
+rename and Escape cancels it. The generic source-tools dialog keeps its three
+different operations as explicit buttons.
+
+Drag a resolved mesh from Content onto a hierarchy row or the active inspector's
+mesh reference to assign that exact object, including within a larger selection.
+Each successful assignment is one scene Undo step; preview content stays frozen
+until Reset. Drags are internal typed references, tied to the current project
+catalog, catalog revision, scene revision and editor session. Foreign/stale drags,
+pending drafts and dialogs reject assignment with feedback. External file drops
+and system clipboard import are outside this workflow. Import/Refresh/Rename
+remain explicit, immediately persisted catalog operations outside scene Undo;
+failed refresh can retain the last-good mesh while displaying its diagnostic.
+Unresolved scene references use a bounded summary with **Locate missing content**;
+catalog diagnostics remain scrollable. New search defaults preserve earlier
+shortcut remaps: if their keys are already assigned, the new action appears
+**Unbound** until captured in Workspace settings. Unbound actions persist safely
+and never consume input.
+
 No arguments opens an empty generic scene with explicit New/Open/recent choices. A recent scene is never opened automatically. `--scene PATH` opens a chosen scene; legacy logistics requires `--scenario PATH`. An untouched empty welcome scene closes without a discard prompt; authored changes and invalid drafts retain their recovery guards.
 
 The **Workspace** menu lists shortcuts and opens **Workspace and shortcuts…**. Hierarchy and inspector can be resized, hidden/shown and assigned to left/right slots; **Reset layout** restores the defaults. This is bounded rearrangement, not a general docking framework. UI scale and navigation speed are adjustable. Binding capture rejects conflicts, reserves Escape for cancellation, and offers reset. Default scene shortcuts are Ctrl+N/O/S/Shift+S, Ctrl+Z/Shift+Z, Ctrl+C/V/D, Delete, W/E/R for tools and F to frame selection. These are agent-selected defaults, not an accepted Unity/Unreal preset. Focused text fields, recovery/settings dialogs and active gestures own their input. Object and text clipboards remain separate as described above.
@@ -274,6 +308,52 @@ Dialog keyboard behavior: rename and scene-path fields receive focus when opened
 
 
 **Workspace → Close window** and the default remappable Ctrl+Q shortcut use the same close request as the window manager: transient gestures cancel, preferences flush, and unsaved scenes/fields require Save/Discard/Cancel. Pending name/New dialogs must be resolved first. A clean window closes normally through the host; the action never sends a close command around dirty-state safeguards. Focused text and recovery dialogs retain keyboard ownership.
+
+### Local crash recovery
+
+Generic scene windows checkpoint authored scenes/history and bounded unapplied
+precision, offset and name fields after two quiet seconds, with a fifteen-second
+cap during continuous edits. Runtime previews and active gizmo candidates are
+excluded. Pristine blank scenes allocate no checkpoint. Recovery performs no
+idle scene serialization or filesystem polling; scans occur at startup or an
+explicit **Workspace → Recovery checkpoints…** refresh. A failed checkpoint
+preserves its previous completed record and displays a persistent warning;
+another edit or **Retry recovery checkpoint** schedules another attempt.
+One serial worker performs snapshot encoding, hashing and disk writes. The UI
+copies current authored state only when dispatching an idle worker; further edits
+coalesce without queuing more document copies. Scene changes and retirement use
+acknowledged boundaries so an older checkpoint cannot reappear after cleanup.
+
+Startup offers **Restore as unsaved copy**, **Keep for later** and explicit
+**Discard checkpoint**. Escape keeps entries for later. Restore refuses to
+replace current unsaved work: first Save it or complete a guarded New scene.
+Invalid numeric text and a pending name stay unapplied. Recovered scenes retain
+their original catalog origin but have no project-save path or overwrite
+authority. Save requests a fresh filename; mesh-bearing recovered scenes must
+save beside their original catalog. If that catalog is missing, restore it at
+the displayed origin and use **Retry recovered content** in Content. References
+are preserved rather than silently rebased.
+
+The window holds its checkpoint lease through recovery. Successful Save retires
+it only when no unapplied field remains; apply or **Reset translation offset**
+before Save-and-close, or explicitly discard the draft. Successful New/Open and
+explicit discard/normal close retire the previous checkpoint after the guarded
+transition succeeds. Cancel keeps it. Cleanup conflicts preserve externally
+changed records and remain visible in Recovery. At most sixteen records are
+retained; quota pressure never silently evicts another window's work.
+Reverting the last field on an otherwise clean scene also retires its obsolete
+checkpoint. Closing remains responsive while cleanup finishes; a cleanup error
+keeps the window open with its actual diagnostic and **Close anyway** or
+**Cancel closing**. Cancelling while cleanup is finishing keeps authored work and
+reschedules recovery when needed. Worker shutdown completes before normal exit;
+abrupt window/process termination preserves the last completed checkpoint.
+
+Set absolute **RUSTER_RECOVERY_DIR** to choose an isolated recovery directory.
+With **RUSTER_EDITOR_STATE** set, recovery defaults to a `recovery` directory
+beside that state file. Otherwise it uses `XDG_STATE_HOME/ruster/recovery` or
+`~/.local/state/ruster/recovery`. Unit constructors disable recovery unless a
+test explicitly supplies a temporary store. Recovery is local crash mitigation,
+not a substitute for deliberate project saves or universal power-loss safety.
 
 
 The asset dialog focuses its stable-ID field initially and Escape closes it without invoking import/refresh/rename; Tab reaches the separate explicit operation buttons. Camera navigation and viewport selection remain blocked while it owns input. Shortcut capture consumes both accepted and conflicting key attempts before controls render, so Enter/Space cannot immediately reactivate the capture button.

@@ -15,3 +15,12 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0009](0009-spirv-validation-compatibility.md) | Bounded SPIR-V compatibility patch and corrected validation evidence |
 | [0010](0010-standalone-application-kit.md) | Application-owned behavior, reusable host and standalone development packages |
 | [0011](0011-behavior-scripting-experiment.md) | Two authoring paths and a provisional bounded Rhai behavior experiment |
+| [0012](0012-motion-lab-project.md) | Separate authored Motion Lab project and runtime state |
+| [0013](0013-scene-object-lifecycle.md) | Generic construction, display names and stable identities |
+| [0014](0014-group-authoring-and-gizmo.md) | Atomic grouped authoring and bounded gizmo toolkit |
+| [0015](0015-keyboard-workspace-and-camera.md) | Keyboard ownership, persisted workspace and projection/navigation |
+| [0016](0016-derived-mesh-cache-and-snapshots.md) | Packed derived cache and shared immutable mesh snapshots |
+| [0017](0017-viewport-antialiasing.md) | Capability-aware bounded hardware antialiasing |
+| [0018](0018-language-neutral-behavior-authoring.md) | Scene5 source/binding/property data and byte-pressure history |
+| [0019](0019-provisional-lua-backend.md) | Provisional isolated Lua backend, preserving language-neutral data |
+| [0020](0020-local-recovery-checkpoints.md) | Detached recovery checkpoints and measured serial-worker ownership |

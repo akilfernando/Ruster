@@ -13,11 +13,22 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
     time::{Duration, Instant},
 };
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
 struct Fields {
     translation: [String; 3],
     rotation: [String; 3],
     scale: [String; 3],
+}
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RecoveryDrafts {
+    version: u32,
+    revision: u64,
+    selection: Vec<String>,
+    fields: Option<Fields>,
+    pending_name: Option<String>,
+    manipulation: crate::manipulation::DraftSnapshot,
 }
 impl From<&Transform> for Fields {
     fn from(t: &Transform) -> Self {
@@ -48,7 +59,136 @@ impl Fields {
         Ok(t)
     }
 }
+#[derive(Clone)]
+struct AssetDrag {
+    catalog_root: PathBuf,
+    catalog_revision: u64,
+    generation: u64,
+    scene_revision: u64,
+    asset_id: String,
+}
+#[derive(Clone, Copy)]
+enum ContextAction {
+    Create,
+    Rename,
+    Duplicate,
+    Delete,
+    Copy,
+    Paste,
+    Frame,
+}
+struct HierarchyRow {
+    id: String,
+    name: String,
+    search: String,
+    tooltip: String,
+}
+#[derive(Default)]
+struct HierarchySearch {
+    revision: Option<u64>,
+    query: String,
+    rows: Vec<HierarchyRow>,
+    visible: Vec<usize>,
+}
+impl HierarchySearch {
+    fn update(&mut self, scene: &Scene, query: &str) {
+        let changed = self.revision != Some(scene.revision);
+        if changed {
+            self.rows = scene
+                .objects
+                .iter()
+                .map(|object| HierarchyRow {
+                    id: object.id.clone(),
+                    name: object.display_name().to_string(),
+                    search: format!("{}\n{}", object.id, object.display_name()).to_lowercase(),
+                    tooltip:format!("Stable ID: {}\nRight-click for object actions. Drop a project mesh to assign it to this object only.",object.id),
+                })
+                .collect();
+            self.revision = Some(scene.revision);
+        }
+        if changed || self.query != query {
+            self.query = query.to_string();
+            let query = query.to_lowercase();
+            self.visible = self
+                .rows
+                .iter()
+                .enumerate()
+                .filter_map(|(i, row)| row.search.contains(&query).then_some(i))
+                .collect();
+        }
+    }
+}
+struct ContentRow {
+    info: ruster_assets::AssetInfo,
+    label: String,
+    search: String,
+}
+#[derive(Default)]
+struct ContentSearch {
+    key: Option<(PathBuf, u64)>,
+    query: String,
+    rows: Vec<ContentRow>,
+    visible: Vec<usize>,
+}
+impl ContentSearch {
+    fn update(&mut self, store: Option<&AssetStore>, query: &str) {
+        let changed = match (&self.key, store) {
+            (Some((root, revision)), Some(store)) => {
+                root != store.root() || *revision != store.revision()
+            }
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            self.rows = store
+                .map(|store| {
+                    store
+                        .inspect()
+                        .into_iter()
+                        .map(|info| {
+                            let status = match info.status {
+                                ruster_assets::AssetStatus::Ready => "Ready",
+                                ruster_assets::AssetStatus::Missing => "Missing",
+                                ruster_assets::AssetStatus::Invalid => "Invalid",
+                            };
+                            let label = format!("{} · {status} · {}", info.id, info.source);
+                            ContentRow {
+                                search: label.to_lowercase(),
+                                info,
+                                label,
+                            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            self.key = store.map(|store| (store.root().to_path_buf(), store.revision()));
+        }
+        if changed || self.query != query {
+            self.query = query.to_string();
+            let query = query.to_lowercase();
+            self.visible = self
+                .rows
+                .iter()
+                .enumerate()
+                .filter_map(|(i, row)| row.search.contains(&query).then_some(i))
+                .collect();
+        }
+    }
+}
+
 static GENERATION: AtomicU64 = AtomicU64::new(1);
+enum RecoveryTransition {
+    Replace {
+        request: u64,
+        next: Box<SceneEditor>,
+        clipboard: bool,
+        shader: bool,
+    },
+    Close {
+        request: u64,
+        cancelled: bool,
+    },
+}
 
 pub struct SceneEditor {
     session: Session,
@@ -57,9 +197,29 @@ pub struct SceneEditor {
     draft: Option<Fields>,
     baseline_fields: Option<Fields>,
     workspace: Workspace,
+    recovery: crate::recovery_ui::RecoveryUi,
+    recovery_transition: Option<RecoveryTransition>,
+    close_cleanup_error: Option<String>,
+    close_shutdown: bool,
+    close_ready_to_exit: bool,
+    draft_generation: u64,
+    asset_origin: Option<PathBuf>,
+    recovered_origin: Option<PathBuf>,
     navigation: ruster_render::NavigationOptions,
     queued_selection: Option<(Option<String>, bool)>,
     queued_action: Option<Action>,
+    queued_context: Option<(Option<String>, ContextAction)>,
+    queued_drop: Option<(String, AssetDrag)>,
+    queued_references: Option<String>,
+    queued_refresh: Option<String>,
+    hierarchy_query: String,
+    hierarchy_focus: bool,
+    hierarchy_search: HierarchySearch,
+    content_query: String,
+    content_focus: bool,
+    content_selected: Option<String>,
+    content_scroll_to: bool,
+    content_search: ContentSearch,
     scale_applied: f32,
     preview: Preview,
     show_preview: bool,
@@ -84,6 +244,8 @@ pub struct SceneEditor {
     preview_assets: BTreeMap<String, Arc<Mesh>>,
     asset_dialog: bool,
     asset_focused: bool,
+    asset_source_focus: bool,
+    asset_rename_intent: bool,
     asset_id: String,
     asset_source: String,
     render: Option<eframe::egui_wgpu::RenderState>,
@@ -92,16 +254,22 @@ pub struct SceneEditor {
 }
 impl SceneEditor {
     fn new(session: Session) -> Self {
-        Self::with_workspace(
+        let mut editor = Self::with_workspace(
             session,
             if cfg!(test) {
                 Workspace::detached()
             } else {
                 Workspace::load()
             },
-        )
+        );
+        editor.recovery = crate::recovery_ui::RecoveryUi::load();
+        editor
     }
     fn with_workspace(session: Session, workspace: Workspace) -> Self {
+        let asset_origin = session
+            .path()
+            .and_then(|path| path.parent())
+            .map(std::path::Path::to_path_buf);
         let selected = session.scene().objects.first().map(|o| o.id.clone());
         let draft = session
             .scene()
@@ -138,6 +306,14 @@ impl SceneEditor {
             manipulation,
             baseline_fields: draft.clone(),
             workspace,
+            recovery: crate::recovery_ui::RecoveryUi::disabled(),
+            recovery_transition: None,
+            close_cleanup_error: None,
+            close_shutdown: false,
+            close_ready_to_exit: false,
+            draft_generation: 0,
+            asset_origin,
+            recovered_origin: None,
             navigation: ruster_render::NavigationOptions {
                 camera,
                 reset: camera.is_none(),
@@ -145,6 +321,18 @@ impl SceneEditor {
             },
             queued_selection: None,
             queued_action: None,
+            queued_context: None,
+            queued_drop: None,
+            queued_references: None,
+            queued_refresh: None,
+            hierarchy_query: String::new(),
+            hierarchy_focus: false,
+            hierarchy_search: HierarchySearch::default(),
+            content_query: String::new(),
+            content_focus: false,
+            content_selected: None,
+            content_scroll_to: false,
+            content_search: ContentSearch::default(),
             scale_applied: 0.0,
             draft,
             preview,
@@ -170,6 +358,8 @@ impl SceneEditor {
             preview_assets,
             asset_dialog: false,
             asset_focused: false,
+            asset_source_focus: false,
+            asset_rename_intent: false,
             asset_id: "pyramid".into(),
             asset_source: "meshes/pyramid.obj".into(),
             render: None,
@@ -179,6 +369,335 @@ impl SceneEditor {
     }
     fn drafts(&self) -> bool {
         self.manipulation.precision_pending() || self.draft != self.baseline_fields
+    }
+    fn pending_recovery_drafts(&self) -> bool {
+        self.drafts() || self.rename_pending || self.manipulation.offset_pending()
+    }
+    #[cfg(test)]
+    fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
+        let drafts = RecoveryDrafts {
+            version: 1,
+            revision: self.session.scene().revision,
+            selection: self.manipulation.ids.clone(),
+            fields: self.draft.clone(),
+            pending_name: self.rename_pending.then(|| self.name_text.clone()),
+            manipulation: self.manipulation.snapshot_drafts(),
+        };
+        let mut snapshot = crate::recovery::Snapshot::capture(
+            &self.session,
+            self.asset_origin.clone(),
+            &serde_json::to_value(drafts).map_err(|e| e.to_string())?,
+        )?;
+        if self.session.path().is_none() {
+            snapshot.origin = self.recovered_origin.clone();
+        }
+        Ok(snapshot)
+    }
+    fn restore_recovery_drafts(&mut self, value: Value) -> Result<(), String> {
+        let draft: RecoveryDrafts = serde_json::from_value(value)
+            .map_err(|e| format!("Unsupported recovery drafts: {e}; checkpoint preserved."))?;
+        let scene = self.session.scene();
+        if draft.version != 1
+            || draft.revision != scene.revision
+            || draft.selection.len() > ruster_scene::MAX_OBJECTS
+            || draft.selection.iter().enumerate().any(|(i, id)| {
+                draft.selection[..i].contains(id)
+                    || !scene.objects.iter().any(|object| &object.id == id)
+            })
+            || draft.fields.is_some() == draft.selection.is_empty()
+            || draft.fields.as_ref().is_some_and(|fields| {
+                fields
+                    .translation
+                    .iter()
+                    .chain(&fields.rotation)
+                    .chain(&fields.scale)
+                    .any(|text| text.chars().count() > 1024)
+            })
+            || draft
+                .pending_name
+                .as_ref()
+                .is_some_and(|text| text.chars().count() > 128 || draft.selection.len() != 1)
+        {
+            return Err("Recovery drafts have unsupported version, selection, revision or text bounds; checkpoint preserved.".into());
+        }
+        self.manipulation.ids = draft.selection;
+        self.selected = self.manipulation.selected();
+        self.sync_draft();
+        self.manipulation
+            .restore_drafts(self.session.scene(), draft.manipulation)?;
+        self.draft = draft.fields;
+        if let Some(name) = draft.pending_name {
+            self.name_text = name;
+            self.rename_pending = true;
+        }
+        Ok(())
+    }
+    fn restore_checkpoint(&mut self, id: &str) -> Result<(), String> {
+        if self.recovery.boundary_pending() || self.recovery_transition.is_some() {
+            return Err(
+                "Recovery is finishing the previous boundary; retry once it completes.".into(),
+            );
+        }
+        if self.needs_recovery()
+            || self.pending_recovery_drafts()
+            || self.manipulation.active()
+            || self.dialog.is_some()
+            || self.asset_dialog
+            || self.new_scene_pending
+            || self.close_pending
+        {
+            return Err("Save your current work or use New scene and resolve its recovery first, then restore this checkpoint. Current work was preserved.".into());
+        }
+        let (journal, snapshot) = self
+            .recovery
+            .store
+            .as_ref()
+            .ok_or("Recovery store unavailable.")?
+            .claim(id)?;
+        let session = snapshot.restore()?;
+        let mut next = Self::with_workspace(session, Workspace::detached());
+        next.restore_recovery_drafts(snapshot.drafts()?)?;
+        next.asset_origin = snapshot.asset_origin.clone();
+        next.recovered_origin = snapshot.origin.clone();
+        next.assets = match &next.asset_origin {
+            Some(root) => match AssetStore::open(root) {
+                Ok(store) => Some(store),
+                Err(error) => {
+                    next.error = format!("Recovery catalog {} is unavailable: {error}. Restore the original catalog at that path, then Retry recovered content. References were preserved.", root.display());
+                    None
+                }
+            },
+            None => None,
+        };
+        next.asset_snapshot();
+        next.preview_assets = next.resolved.clone();
+        let render = self.render.clone();
+        if let Some(render) = render.as_ref().filter(|_| self.shader_revision > 0) {
+            ruster_render::refresh_shader(render, ruster_render::default_shader())?;
+        }
+        next.workspace.welcome = false;
+        next.render = render;
+        next.notice = "Recovered as an unsaved copy. Save requests a fresh filename; original project unchanged.".into();
+        if let Some(origin) = snapshot.origin.as_ref().or(snapshot.asset_origin.as_ref()) {
+            let parent = if snapshot.origin.is_some() {
+                origin.parent().unwrap_or(origin)
+            } else {
+                origin.as_path()
+            };
+            next.path_text = parent.join("recovered-scene.json").display().to_string();
+        }
+        self.recovery
+            .candidates
+            .retain(|candidate| candidate.id != id);
+        self.begin_replacement(next, Some(journal), false, true);
+        Ok(())
+    }
+    fn recovery_frame(&mut self, ctx: &egui::Context) {
+        if let Some(intent) = self.recovery.ui(ctx) {
+            let result = match intent {
+                crate::recovery_ui::Intent::Restore(id) => self.restore_checkpoint(&id),
+                crate::recovery_ui::Intent::Discard(id) => self
+                    .recovery
+                    .store
+                    .as_ref()
+                    .ok_or_else(|| "Recovery store unavailable.".to_string())
+                    .and_then(|store| store.discard(&id)),
+            };
+            match result {
+                Ok(()) => self.recovery.refresh(),
+                Err(error) => self.recovery.set_warning(error),
+            }
+        }
+        let now = Instant::now();
+        let pending = self.needs_recovery() || self.pending_recovery_drafts();
+        self.recovery.observe(
+            self.session.scene().revision,
+            self.manipulation.draft_generation(),
+            self.draft_generation,
+            pending,
+            now,
+        );
+        if self.recovery.due(now)
+            && pending
+            && self.recovery_transition.is_none()
+            && !self.close_approved
+        {
+            let session = self.session.clone();
+            let asset_origin = self.asset_origin.clone();
+            let recovered_origin = self.recovered_origin.clone();
+            let drafts = RecoveryDrafts {
+                version: 1,
+                revision: session.scene().revision,
+                selection: self.manipulation.ids.clone(),
+                fields: self.draft.clone(),
+                pending_name: self.rename_pending.then(|| self.name_text.clone()),
+                manipulation: self.manipulation.snapshot_drafts(),
+            };
+            let capture = Box::new(move || {
+                let mut snapshot = crate::recovery::Snapshot::capture(
+                    &session,
+                    asset_origin,
+                    &serde_json::to_value(drafts).map_err(|e| e.to_string())?,
+                )?;
+                if session.path().is_none() {
+                    snapshot.origin = recovered_origin;
+                }
+                Ok(snapshot)
+            });
+            if let Err(error) = self.recovery.dispatch(capture) {
+                self.recovery.set_warning(error);
+            }
+        }
+        self.recovery.schedule(ctx, now);
+    }
+    fn begin_replacement(
+        &mut self,
+        next: Self,
+        adopt: Option<crate::recovery::Journal>,
+        clipboard: bool,
+        shader: bool,
+    ) {
+        self.remember_camera();
+        self.manipulation.cancel();
+        self.running = false;
+        self.recovery.open = false;
+        self.dialog = None;
+        self.new_scene_pending = false;
+        let request = match adopt {
+            Some(journal) => self.recovery.adopt(journal),
+            None => self.recovery.retire(),
+        };
+        self.recovery_transition = Some(RecoveryTransition::Replace {
+            request,
+            next: Box::new(next),
+            clipboard,
+            shader,
+        });
+        self.process_recovery_ack();
+    }
+    fn process_recovery_ack(&mut self) {
+        let Some((id, result)) = self.recovery.take_ack() else {
+            return;
+        };
+        let Some(transition) = self.recovery_transition.take() else {
+            return;
+        };
+        match transition {
+            RecoveryTransition::Replace {
+                request,
+                mut next,
+                clipboard,
+                shader,
+            } if request == id => {
+                next.workspace = std::mem::replace(&mut self.workspace, Workspace::detached());
+                next.workspace.welcome = clipboard
+                    && next.session.path().is_none()
+                    && next.session.scene().objects.is_empty()
+                    && next.session.authoring().is_empty();
+                if let Some(path) = next.session.path() {
+                    next.workspace.remember(path);
+                }
+                if clipboard {
+                    next.manipulation.clipboard_from(&mut self.manipulation);
+                }
+                next.recovery = std::mem::replace(
+                    &mut self.recovery,
+                    crate::recovery_ui::RecoveryUi::disabled(),
+                );
+                if let Err(error) = result {
+                    next.recovery.set_warning(format!("Previous recovery cleanup failed: {error}. Preserved entry remains in Recovery."));
+                }
+                *self = *next;
+                if shader
+                    && self
+                        .asset_origin
+                        .as_ref()
+                        .is_some_and(|root| root.join("scene.wgsl").is_file())
+                {
+                    if let Err(error) = self.refresh_shader() {
+                        self.shader_notice = format!("Recovered shader unavailable: {error}");
+                    }
+                }
+            }
+            RecoveryTransition::Close { request, cancelled } if request == id => {
+                if cancelled {
+                    self.close_approved = false;
+                    self.close_pending = false;
+                    self.recovery.reschedule();
+                } else {
+                    match result {
+                        Ok(()) => {
+                            self.recovery.shutdown();
+                            self.close_shutdown = true;
+                        }
+                        Err(error) => self.close_cleanup_error = Some(error),
+                    }
+                }
+            }
+            other => self.recovery_transition = Some(other),
+        }
+    }
+    fn close_finalization_ui(&mut self, ctx: &egui::Context) {
+        if let Some(error) = self.close_cleanup_error.clone() {
+            egui::Modal::new(egui::Id::unique("close_recovery_failed")).show(ctx,|ui| {
+                ui.set_width((ctx.content_rect().width()-48.0).clamp(220.0,520.0));
+                ui.heading("Recovery cleanup failed");
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-130.0).max(48.0)).show(ui,|ui| {
+                    ui.label(&error);
+                    ui.label("The preserved checkpoint may reappear next launch. Close anyway, or keep this window open.");
+                });
+                ui.horizontal_wrapped(|ui| {
+                if ui.button("Close anyway").clicked() {self.close_cleanup_error=None;self.recovery.shutdown();self.close_shutdown=true;}
+                let cancel=ui.button("Cancel closing");
+                if self.confirm_focused!=Some("cleanup-error") {cancel.request_focus();self.confirm_focused=Some("cleanup-error");}
+                if cancel.clicked() || ui.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape)) {
+                    self.close_cleanup_error=None;self.close_approved=false;self.close_pending=false;self.recovery.reschedule();
+                }
+                });
+            });
+        } else if let Some(RecoveryTransition::Close { cancelled, .. }) =
+            &mut self.recovery_transition
+        {
+            if !*cancelled {
+                egui::Modal::new(egui::Id::unique("close_recovery_wait")).show(ctx, |ui| {
+                    ui.heading("Finishing recovery cleanup…");
+                    if ui.button("Cancel closing").clicked()
+                        || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+                    {
+                        *cancelled = true;
+                        self.close_approved = false;
+                        self.close_pending = false;
+                    }
+                });
+            }
+        } else if matches!(
+            self.recovery_transition,
+            Some(RecoveryTransition::Replace { .. })
+        ) {
+            egui::Modal::new(egui::Id::unique("recovery_replacement_wait")).show(ctx, |ui| {
+                ui.label("Finishing recovery boundary before switching scenes…");
+            });
+        }
+    }
+    fn start_close_cleanup(&mut self) {
+        if self.close_approved
+            && self.recovery_transition.is_none()
+            && self.close_cleanup_error.is_none()
+            && !self.close_shutdown
+        {
+            self.close_pending = false;
+            let request = self.recovery.retire();
+            self.recovery_transition = Some(RecoveryTransition::Close {
+                request,
+                cancelled: false,
+            });
+            self.process_recovery_ack();
+        }
+    }
+    #[cfg(test)]
+    fn wait_recovery(&mut self) {
+        self.recovery.wait_idle();
+        self.process_recovery_ack();
     }
     fn reconcile_selection(&mut self) {
         self.manipulation.reconcile(self.session.scene());
@@ -198,6 +717,8 @@ impl SceneEditor {
             || self.new_scene_pending
             || self.close_pending
             || self.workspace.settings_open
+            || self.recovery.open
+            || self.recovery_transition.is_some()
         {
             return;
         }
@@ -237,6 +758,8 @@ impl SceneEditor {
             || self.close_pending
             || self.close_approved
             || self.workspace.settings_open
+            || self.recovery.open
+            || self.recovery_transition.is_some()
         {
             Err("recovery_pending".into())
         } else {
@@ -297,7 +820,13 @@ impl SceneEditor {
         let path = self.session.path().map(|p| p.to_path_buf());
         if let Some(path) = path {
             match self.save_scene(path) {
-                Ok(()) => self.notice = "Scene saved.".into(),
+                Ok(()) => {
+                    if self.pending_recovery_drafts() {
+                        self.error="Scene saved, but unapplied fields remain. Cancel the close/New dialog and apply or reset the translation offset, or explicitly discard it.".into();
+                    } else {
+                        self.notice = "Scene saved.".into();
+                    }
+                }
                 Err(e) => self.error = e.to_string(),
             }
         } else {
@@ -404,21 +933,19 @@ impl SceneEditor {
                 return;
             }
         }
-        let workspace = std::mem::replace(&mut self.workspace, Workspace::detached());
         let mut next = Self::with_workspace(
             Session::new(Scene::empty("untitled")).expect("empty scene is valid"),
-            workspace,
+            Workspace::detached(),
         );
-        next.manipulation.clipboard_from(&mut self.manipulation);
-        *self = next;
-        self.render = render;
+        next.render = render;
+        self.begin_replacement(next, None, true, false);
     }
     fn clipboard_action(&mut self, paste: bool) {
         if let Err(error) = self.guard() {
             self.error = error;
             return;
         }
-        let root = self.assets.as_ref().map(|s| s.root().to_path_buf());
+        let root = self.asset_origin.clone();
         let result = if paste {
             self.manipulation.paste(&mut self.session, root.as_deref())
         } else {
@@ -486,9 +1013,14 @@ impl SceneEditor {
                     .zip(&mut self.manipulation.delta)
                 {
                     ui.label(axis);
-                    ui.add(egui::TextEdit::singleline(text).desired_width(50.0));
+                    let response = ui.add(egui::TextEdit::singleline(text).char_limit(1024).desired_width(50.0));
+                    if response.changed() { self.draft_generation = self.draft_generation.wrapping_add(1); }
                 }
             });
+            if ui.button("Reset translation offset").clicked() {
+                self.manipulation.delta=std::array::from_fn(|_|"0".into());
+                self.draft_generation=self.draft_generation.wrapping_add(1);
+            }
             if ui
                 .add_enabled(
                     !self.manipulation.ids.is_empty(),
@@ -501,6 +1033,7 @@ impl SceneEditor {
                     .and_then(|()| self.manipulation.apply_delta(&mut self.session));
                 match result {
                     Ok(()) => {
+                        self.manipulation.delta = std::array::from_fn(|_| "0".into());
                         self.sync_draft();
                         self.error.clear();
                         self.notice =
@@ -516,6 +1049,7 @@ impl SceneEditor {
         }
     }
     fn asset_snapshot(&mut self) {
+        self.content_search.key = None;
         self.resolved = self
             .assets
             .as_ref()
@@ -534,7 +1068,7 @@ impl SceneEditor {
             .unwrap_or(std::path::Path::new("."))
             .canonicalize()
             .map_err(|e| e.to_string())?;
-        let old_root = self.assets.as_ref().map(|s| s.root().to_path_buf());
+        let old_root = self.asset_origin.clone();
         if self.session.has_asset_references() && old_root.as_ref() != Some(&parent) {
             return Err("Save As across asset roots is unavailable while scene or undo/redo history references meshes; save beside the existing project.".into());
         }
@@ -553,35 +1087,150 @@ impl SceneEditor {
             self.shader_revision = 0;
             self.shader_notice = "Built-in scene shader".into();
         }
+        self.asset_origin = Some(parent);
+        self.recovered_origin = None;
+        self.draft_generation = self.draft_generation.wrapping_add(1);
         if let Some(path) = self.session.path() {
             self.workspace.remember(path);
         }
         self.remember_camera();
         self.workspace.flush();
+        if !self.pending_recovery_drafts() {
+            self.recovery.retire();
+        } else {
+            self.notice="Scene saved; unapplied fields remain. Apply or reset the translation offset before closing, or explicitly discard it.".into();
+        }
         Ok(())
     }
     fn assign_mesh(&mut self, mesh: Option<String>) -> Result<u64, String> {
-        if self.drafts() || self.manipulation.active() {
-            return Err(
-                "Apply or revert transform fields and finish the gesture before assigning a mesh."
-                    .into(),
-            );
-        }
-        if let Some(id) = &mesh {
-            if !self.resolved.contains_key(id) {
+        let id = self.selected.clone().ok_or("Select an object first")?;
+        self.assign_mesh_to(&id, mesh)
+    }
+    fn assign_mesh_to(&mut self, id: &str, mesh: Option<String>) -> Result<u64, String> {
+        self.guard().map_err(|error| {
+            format!("{error}: finish drafts/gestures or resolve dialogs before assigning a mesh.")
+        })?;
+        if let Some(asset) = &mesh {
+            if !self.resolved.contains_key(asset) {
                 return Err(format!(
-                    "Mesh {id} is unavailable; import or repair its source first."
+                    "Mesh {asset} is unavailable; import or repair its source first."
                 ));
             }
         }
-        let id = self.selected.as_deref().ok_or("Select an object first")?;
         let revision = self
             .session
             .set_mesh(self.session.scene().revision, id, mesh)
             .map_err(|e| e.to_string())?;
-        self.notice =
-            format!("Mesh assigned at revision {revision}; preview unchanged until Reset.");
+        self.notice=format!("Mesh assigned to {id} only, revision{revision}; Undo restores the assignment, preview unchanged until Reset.");
         Ok(revision)
+    }
+    fn asset_payload(&self, id: &str) -> Result<AssetDrag, String> {
+        let store = self
+            .assets
+            .as_ref()
+            .ok_or("Open a saved scene with a valid content catalog first.")?;
+        if !self.resolved.contains_key(id) {
+            return Err(format!("Asset {id} has no valid mesh to assign."));
+        }
+        Ok(AssetDrag {
+            catalog_root: store.root().to_path_buf(),
+            catalog_revision: store.revision(),
+            generation: self.generation,
+            scene_revision: self.session.scene().revision,
+            asset_id: id.to_string(),
+        })
+    }
+    fn accept_asset_drop(&mut self, target: &str, payload: &AssetDrag) -> Result<u64, String> {
+        self.guard()
+            .map_err(|e| format!("{e}: finish drafts or dialogs before dropping content."))?;
+        if payload.generation != self.generation {
+            return Err(
+                "The content drag belongs to an older/different scene session; drag it again."
+                    .into(),
+            );
+        }
+        if payload.scene_revision != self.session.scene().revision {
+            return Err("The scene changed during the content drag; drag the asset again.".into());
+        }
+        let store = self
+            .assets
+            .as_ref()
+            .ok_or("Content catalog is unavailable; reopen the scene.")?;
+        if payload.catalog_root != store.root() {
+            return Err(
+                "Content belongs to another project catalog; import it into this project first."
+                    .into(),
+            );
+        }
+        if payload.catalog_revision != store.revision() {
+            return Err(
+                "The catalog changed during the content drag; inspect it and drag again.".into(),
+            );
+        }
+        self.assign_mesh_to(target, Some(payload.asset_id.clone()))
+    }
+    fn process_content_intents(&mut self) {
+        if let Some(id) = self.queued_refresh.take() {
+            self.refresh_content_asset(&id);
+        }
+        if let Some(asset) = self.queued_references.take() {
+            if self.drafts() && !self.apply() {
+                return;
+            }
+            if let Err(error) = self.guard() {
+                self.error = error;
+                return;
+            }
+            self.manipulation.ids = self
+                .session
+                .scene()
+                .objects
+                .iter()
+                .filter(|o| o.mesh.as_deref() == Some(asset.as_str()))
+                .map(|o| o.id.clone())
+                .collect();
+            self.selected = self.manipulation.selected();
+            self.sync_draft();
+        }
+        if let Some((target, action)) = self.queued_context.take() {
+            if let Some(target) = target {
+                if !self.manipulation.ids.contains(&target) {
+                    self.queued_selection = Some((Some(target.clone()), false));
+                    self.process_queued_selection();
+                    if self.selected.as_ref() != Some(&target) {
+                        return;
+                    }
+                }
+            }
+            if let Err(error) = self.guard() {
+                self.error = error;
+                return;
+            }
+            match action {
+                ContextAction::Create => self.object_action("create"),
+                ContextAction::Rename => {
+                    if self.manipulation.ids.len() == 1 {
+                        self.rename_pending = true;
+                    } else {
+                        self.error = "Select one object to rename.".into();
+                    }
+                }
+                ContextAction::Duplicate => self.object_action("duplicate"),
+                ContextAction::Delete => self.object_action("delete"),
+                ContextAction::Copy => self.clipboard_action(false),
+                ContextAction::Paste => self.clipboard_action(true),
+                ContextAction::Frame => self.navigation.frame_selected = true,
+            }
+        }
+        if let Some((target, payload)) = self.queued_drop.take() {
+            match self.accept_asset_drop(&target, &payload) {
+                Ok(_) => {
+                    self.error.clear();
+                    self.sync_draft();
+                }
+                Err(error) => self.error = error,
+            }
+        }
     }
     fn refresh_shader(&mut self) -> Result<(), String> {
         let root = self
@@ -703,12 +1352,20 @@ impl SceneEditor {
                 "Inspect current session before retrying".into(),
             ));
         }
-        self.guard().map_err(|code| {
-            err(
-                &code,
-                "Apply/revert drafts or resolve dialogs before content operations".into(),
-            )
-        })?;
+        self.guard()
+            .and_then(|()| {
+                if self.manipulation.offset_pending() {
+                    Err("drafts_pending".into())
+                } else {
+                    Ok(())
+                }
+            })
+            .map_err(|code| {
+                err(
+                    &code,
+                    "Apply/revert drafts or resolve dialogs before content operations".into(),
+                )
+            })?;
         if number("expected_revision")? != self.session.scene().revision {
             return Err(err("stale_revision", "Inspect authored scene again".into()));
         }
@@ -912,19 +1569,27 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open,"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
             return Err(err("stale_session"));
         }
         if op != "scene_replay" {
-            self.guard().map_err(|e| {
-                (
-                    e.clone(),
-                    format!("{e}: apply/revert drafts or resolve dialog, then inspect again"),
-                )
-            })?;
+            self.guard()
+                .and_then(|()| {
+                    if self.manipulation.offset_pending() {
+                        Err("drafts_pending".into())
+                    } else {
+                        Ok(())
+                    }
+                })
+                .map_err(|e| {
+                    (
+                        e.clone(),
+                        format!("{e}: apply/revert drafts or resolve dialog, then inspect again"),
+                    )
+                })?;
         }
         let revision = number(&args["expected_revision"])?;
         if revision != self.session.scene().revision {
@@ -1126,6 +1791,437 @@ impl SceneEditor {
             json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"dirty":self.session.is_dirty()}),
         )
     }
+    fn hierarchy_contents(&mut self, ui: &mut egui::Ui) {
+        ui.heading("Objects");
+        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
+        let search = ui.add(
+            egui::TextEdit::singleline(&mut self.hierarchy_query)
+                .hint_text("Search objects (name or ID)")
+                .char_limit(128)
+                .desired_width(f32::INFINITY),
+        );
+        if self.hierarchy_focus {
+            search.request_focus();
+            search.scroll_to_me(Some(egui::Align::Min));
+            self.hierarchy_focus = false;
+        }
+        if (search.has_focus() || search.lost_focus()) && escape {
+            self.hierarchy_query.clear();
+            search.surrender_focus();
+        }
+        self.hierarchy_search
+            .update(self.session.scene(), &self.hierarchy_query);
+        if (search.has_focus() || search.lost_focus()) && enter {
+            if let Some(index) = self.hierarchy_search.visible.first() {
+                self.queued_selection =
+                    Some((Some(self.hierarchy_search.rows[*index].id.clone()), false));
+                search.surrender_focus();
+            } else {
+                self.notice = "No objects match the search.".into();
+            }
+        }
+        ui.horizontal_wrapped(|ui| {
+            if ui.button("Create cube").clicked() {
+                self.queued_context = Some((None, ContextAction::Create));
+            }
+            if ui
+                .add_enabled(
+                    !self.manipulation.ids.is_empty(),
+                    egui::Button::new("Duplicate"),
+                )
+                .clicked()
+            {
+                self.queued_context = Some((None, ContextAction::Duplicate));
+            }
+            if ui
+                .add_enabled(
+                    !self.manipulation.ids.is_empty(),
+                    egui::Button::new("Delete"),
+                )
+                .clicked()
+            {
+                self.queued_context = Some((None, ContextAction::Delete));
+            }
+        });
+        let hidden = self
+            .manipulation
+            .ids
+            .iter()
+            .filter(|id| {
+                !self
+                    .hierarchy_search
+                    .visible
+                    .iter()
+                    .any(|i| &self.hierarchy_search.rows[*i].id == *id)
+            })
+            .count();
+        ui.small(format!(
+            "{} / {} objects · {} selected · {hidden} hidden selected",
+            self.hierarchy_search.visible.len(),
+            self.hierarchy_search.rows.len(),
+            self.manipulation.ids.len()
+        ));
+        if !self.hierarchy_query.is_empty() && ui.button("Clear object search").clicked() {
+            self.hierarchy_query.clear();
+            self.hierarchy_search.update(self.session.scene(), "");
+        }
+        let mut clicked = None;
+        let mut context = None;
+        let mut dropped = None;
+        egui::ScrollArea::vertical()
+            .id_salt("scene_object_scroll")
+            .show(ui, |ui| {
+                for index in &self.hierarchy_search.visible {
+                    let row = &self.hierarchy_search.rows[*index];
+                    let response = ui
+                        .selectable_label(self.manipulation.ids.contains(&row.id), &row.name)
+                        .on_hover_text(&row.tooltip);
+                    if response.clicked() {
+                        clicked = Some((
+                            Some(row.id.clone()),
+                            ui.input(|i| {
+                                i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift
+                            }),
+                        ));
+                    }
+                    response.context_menu(|ui| {
+                        for (label, action) in [
+                            ("Create cube", ContextAction::Create),
+                            ("Rename object", ContextAction::Rename),
+                            ("Duplicate", ContextAction::Duplicate),
+                            ("Delete", ContextAction::Delete),
+                            ("Copy objects", ContextAction::Copy),
+                            ("Paste objects", ContextAction::Paste),
+                            ("Frame selected", ContextAction::Frame),
+                        ] {
+                            if ui.button(label).clicked() {
+                                context = Some((Some(row.id.clone()), action));
+                                ui.close();
+                            }
+                        }
+                    });
+                    if response.dnd_hover_payload::<AssetDrag>().is_some() {
+                        ui.painter().rect_stroke(
+                            response.rect,
+                            3.0,
+                            egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                            egui::StrokeKind::Inside,
+                        );
+                    }
+                    if let Some(payload) = response.dnd_release_payload::<AssetDrag>() {
+                        dropped = Some((row.id.clone(), (*payload).clone()));
+                    }
+                }
+            });
+        if let Some(intent) = clicked {
+            self.queued_selection = Some(intent);
+        }
+        if let Some(intent) = context {
+            self.queued_context = Some(intent);
+        }
+        if let Some(intent) = dropped {
+            self.queued_drop = Some(intent);
+        }
+    }
+    fn locate_mesh(&mut self, id: &str) {
+        self.workspace.prefs.content_visible = true;
+        self.workspace.changed();
+        self.content_query.clear();
+        self.content_selected = Some(id.into());
+        self.content_scroll_to = true;
+    }
+    fn mesh_reference_ui(&mut self, ui: &mut egui::Ui) {
+        let Some(id) = self.selected.clone() else {
+            return;
+        };
+        let Some(mesh) = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == id)
+            .map(|object| object.mesh.clone())
+        else {
+            return;
+        };
+        let response = egui::Frame::group(ui.style())
+            .show(ui, |ui| {
+                ui.label(format!(
+                    "Mesh: {}",
+                    mesh.as_deref().unwrap_or("Procedural cube")
+                ));
+                ui.small("Drop a project mesh here (active object only).");
+                if let Some(mesh) = &mesh {
+                    if ui.button("Locate mesh in Content").clicked() {
+                        self.locate_mesh(mesh);
+                    }
+                }
+            })
+            .response;
+        response.context_menu(|ui| {
+            if ui.button("Use procedural cube").clicked() {
+                match self.assign_mesh_to(&id, None) {
+                    Ok(_) => self.error.clear(),
+                    Err(error) => self.error = error,
+                }
+                ui.close();
+            }
+            if let Some(mesh) = &mesh {
+                if ui.button("Locate mesh in Content").clicked() {
+                    self.locate_mesh(mesh);
+                    ui.close();
+                }
+            }
+        });
+        if response.dnd_hover_payload::<AssetDrag>().is_some() {
+            ui.painter().rect_stroke(
+                response.rect,
+                3.0,
+                egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
+                egui::StrokeKind::Inside,
+            );
+        }
+        if let Some(payload) = response.dnd_release_payload::<AssetDrag>() {
+            self.queued_drop = Some((id, (*payload).clone()));
+        }
+    }
+    fn refresh_content_asset(&mut self, id: &str) {
+        let result = self.guard().and_then(|()| {
+            self.assets
+                .as_mut()
+                .ok_or_else(|| "Open a saved scene with a valid catalog first.".to_string())
+                .and_then(|store| {
+                    store
+                        .refresh_at(store.revision(), id)
+                        .map_err(|e| e.to_string())
+                })
+        });
+        self.asset_snapshot();
+        match result {
+            Ok(info) => {
+                self.error.clear();
+                self.notice=format!("Refreshed {} in the immediately saved catalog; scene undo and preview are unchanged.",info.id);
+            }
+            Err(error) => self.error = error,
+        }
+    }
+    fn browser_contents(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.heading("Content");
+            if ui.button("Import / source tools…").clicked() {
+                self.asset_dialog = true;
+                self.asset_focused = false;
+                self.asset_source_focus = false;
+                self.asset_rename_intent = false;
+            }
+            if ui.button("Hide Content").clicked() {
+                self.workspace.prefs.content_visible = false;
+                self.workspace.changed();
+            }
+        });
+        let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+        let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
+        let search = ui.add(
+            egui::TextEdit::singleline(&mut self.content_query)
+                .hint_text("Search content (ID, source path, status)")
+                .char_limit(128)
+                .desired_width(f32::INFINITY),
+        );
+        if self.content_focus {
+            search.request_focus();
+            search.scroll_to_me(Some(egui::Align::Min));
+            self.content_focus = false;
+        }
+        if (search.has_focus() || search.lost_focus()) && escape {
+            self.content_query.clear();
+            search.surrender_focus();
+        }
+        self.content_search
+            .update(self.assets.as_ref(), &self.content_query);
+        if (search.has_focus() || search.lost_focus()) && enter {
+            if let Some(index) = self.content_search.visible.first() {
+                self.content_selected = Some(self.content_search.rows[*index].info.id.clone());
+                self.content_scroll_to = true;
+                search.surrender_focus();
+            }
+        }
+        if self.assets.is_none() {
+            if let Some(root) = self.asset_origin.clone() {
+                ui.label(format!("Recovered content origin: {}", root.display()));
+                if ui.button("Retry recovered content").clicked() {
+                    match AssetStore::open(&root) {
+                        Ok(store) => { self.assets=Some(store); self.asset_snapshot(); self.error.clear(); }
+                        Err(error) => self.error=format!("Cannot reopen {}: {error}. Restore the catalog at this original path; references will not be rebased.",root.display()),
+                    }
+                }
+            }
+            ui.label("Save or open a scene to use its project-relative content catalog.");
+            return;
+        }
+        ui.small(format!(
+            "{} / {} assets · drag a mesh onto an object or its inspector reference",
+            self.content_search.visible.len(),
+            self.content_search.rows.len()
+        ));
+        let mut selected = None;
+        let mut assign = None;
+        let mut refresh = None;
+        let mut edit = None;
+        let mut refs = None;
+        egui::ScrollArea::vertical()
+            .id_salt("content_assets_scroll")
+            .show(ui, |ui| {
+                for index in &self.content_search.visible {
+                    let row = &self.content_search.rows[*index];
+                    let available = self.resolved.contains_key(&row.info.id);
+                    let response = ui.add(
+                        egui::Button::selectable(
+                            self.content_selected.as_ref() == Some(&row.info.id),
+                            &row.label,
+                        )
+                        .sense(if available {
+                            egui::Sense::click_and_drag()
+                        } else {
+                            egui::Sense::click()
+                        }),
+                    );
+                    if response.clicked() {
+                        selected = Some(row.info.id.clone());
+                    }
+                    if self.content_scroll_to
+                        && self.content_selected.as_ref() == Some(&row.info.id)
+                    {
+                        response.scroll_to_me(Some(egui::Align::Center));
+                    }
+                    if response.drag_started() {
+                        match self.asset_payload(&row.info.id) {
+                            Ok(payload) => response.dnd_set_drag_payload(payload),
+                            Err(error) => self.error = error,
+                        }
+                    }
+                    response.context_menu(|ui| {
+                        if ui
+                            .add_enabled(
+                                available && self.selected.is_some(),
+                                egui::Button::new("Assign to active object"),
+                            )
+                            .clicked()
+                        {
+                            assign = Some(row.info.id.clone());
+                            ui.close();
+                        }
+                        if ui.button("Refresh source").clicked() {
+                            refresh = Some(row.info.id.clone());
+                            ui.close();
+                        }
+                        if ui.button("Rename source…").clicked() {
+                            edit = Some((row.info.id.clone(), row.info.source.clone()));
+                            ui.close();
+                        }
+                        if ui.button("Select referencing objects").clicked() {
+                            refs = Some(row.info.id.clone());
+                            ui.close();
+                        }
+                    });
+                    if let Some(error) = &row.info.diagnostic {
+                        response.on_hover_text(error);
+                    }
+                }
+            });
+        self.content_scroll_to = false;
+        if let Some(id) = selected {
+            self.content_selected = Some(id);
+        }
+        if let Some(id) = assign {
+            if let Some(target) = self.selected.clone() {
+                match self.asset_payload(&id) {
+                    Ok(payload) => self.queued_drop = Some((target, payload)),
+                    Err(error) => self.error = error,
+                }
+            }
+        }
+        if let Some(id) = refresh {
+            self.queued_refresh = Some(id);
+        }
+        if let Some((id, source)) = edit {
+            self.asset_id = id;
+            self.asset_source = source;
+            self.asset_rename_intent = true;
+            self.asset_source_focus = true;
+            self.asset_focused = false;
+            self.asset_dialog = true;
+        }
+        if let Some(id) = refs {
+            self.queued_references = Some(id);
+        }
+        if let Some(id) = &self.content_selected {
+            if let Some(row) = self
+                .content_search
+                .rows
+                .iter()
+                .find(|row| &row.info.id == id)
+            {
+                ui.separator();
+                ui.label(&row.label);
+                if let Some(error) = &row.info.diagnostic {
+                    ui.colored_label(egui::Color32::YELLOW, error);
+                }
+                if self.resolved.contains_key(id)
+                    && row.info.status != ruster_assets::AssetStatus::Ready
+                {
+                    ui.small(
+                        "Last-good mesh remains available; fix and explicitly refresh the source.",
+                    );
+                }
+                ui.small(
+                    "Catalog Import/Refresh/Rename persists immediately, outside scene Undo/Save.",
+                );
+            } else {
+                ui.label(format!("Reference {id} is not registered in this catalog; import or repair its source."));
+            }
+        }
+    }
+
+    fn content_diagnostics_ui(&mut self, ui: &mut egui::Ui) {
+        let missing = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .filter(|object| {
+                object
+                    .mesh
+                    .as_ref()
+                    .is_some_and(|id| !self.resolved.contains_key(id))
+            })
+            .count();
+        if missing > 0 {
+            ui.horizontal_wrapped(|ui| {
+                        ui.colored_label(egui::Color32::YELLOW, format!("{missing} objects have unresolved mesh references; placeholder cubes shown."));
+                        if ui.button("Locate missing content").clicked() {
+                            let id = self.session.scene().objects.iter().filter_map(|o| o.mesh.as_ref()).find(|id| !self.resolved.contains_key(*id)).cloned();
+                            if let Some(id) = id { self.locate_mesh(&id); }
+                        }
+                    });
+        }
+        egui::ScrollArea::vertical()
+            .id_salt("content_diagnostics")
+            .max_height(48.0)
+            .show(ui, |ui| {
+                for row in self
+                    .content_search
+                    .rows
+                    .iter()
+                    .filter(|row| row.info.diagnostic.is_some())
+                    .take(3)
+                {
+                    if let Some(error) = &row.info.diagnostic {
+                        ui.colored_label(egui::Color32::YELLOW, error);
+                    }
+                }
+            });
+    }
     fn content_ui(&mut self, ctx: &egui::Context) {
         if !self.asset_dialog {
             self.asset_focused = false;
@@ -1136,34 +2232,71 @@ impl SceneEditor {
             self.asset_focused = false;
             return;
         }
-        egui::Modal::new(egui::Id::unique("asset_dialog")).show(ctx,|ui| {
-            ui.heading("Project mesh assets");
+        self.content_search
+            .update(self.assets.as_ref(), &self.content_query);
+        egui::Modal::new(egui::Id::unique("asset_dialog")).show(ctx, |ui| {
+            ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 520.0));
+            ui.heading(if self.asset_rename_intent { "Rename mesh source" } else { "Project mesh assets" });
+            egui::ScrollArea::vertical().id_salt("asset_tools_body").max_height((ctx.content_rect().height() - 110.0).max(80.0)).show(ui, |ui| {
             ui.label("Imports and source renames save the asset catalog immediately. Scene Undo reverses assignments only.");
-            ui.label("Stable asset ID");let field=ui.text_edit_singleline(&mut self.asset_id);if !self.asset_focused{field.request_focus();self.asset_focused=true;}
-            ui.label("Project-relative OBJ source / rename destination");ui.text_edit_singleline(&mut self.asset_source);
-            let mut operation=None;
-            ui.horizontal(|ui| {
-                if ui.button("Import mesh asset").clicked(){operation=Some("import");}
-                if ui.button("Refresh mesh asset").clicked(){operation=Some("refresh");}
-                if ui.button("Rename mesh source").clicked(){operation=Some("rename");}
-            });
-            if let Some(op)=operation {
-                if self.drafts(){self.error="Apply/revert transform drafts before asset operations.".into();}
-                else {
-                    let id=self.asset_id.clone();let source=self.asset_source.clone();
-                    let result=self.assets.as_mut().ok_or_else(||"Asset catalog unavailable; reopen a saved project".to_string()).and_then(|store| {
-                        match op {"import"=>store.import(&id,&source),"refresh"=>store.refresh(&id),_=>store.rename(&id,&source)}.map_err(|e|e.to_string())
-                    });
-                    self.asset_snapshot();
-                    match result {Ok(info)=>{self.notice=format!("Asset {} ready; preview unchanged until Reset.",info.id);self.error.clear();},Err(e)=>self.error=e}
+            ui.label("Stable asset ID");
+            if self.asset_rename_intent {
+                ui.label(&self.asset_id);
+            } else {
+                let field = ui.text_edit_singleline(&mut self.asset_id);
+                if !self.asset_focused && !self.asset_source_focus {
+                    field.request_focus(); self.asset_focused = true;
                 }
             }
-            if let Some(store)=&self.assets {
-                ui.label(format!("Catalog revision {}",store.revision()));
-                egui::ScrollArea::vertical().max_height(180.).show(ui,|ui| {for info in store.inspect(){ui.label(format!("{} · {} · {:?}",info.id,info.source,info.status));if let Some(error)=info.diagnostic {ui.colored_label(egui::Color32::LIGHT_RED,error);}}});
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+            ui.label("Project-relative OBJ source / rename destination");
+            let source = ui.text_edit_singleline(&mut self.asset_source);
+            if !self.asset_focused && self.asset_source_focus {
+                source.request_focus(); source.scroll_to_me(Some(egui::Align::Center)); self.asset_focused = true;
             }
-            if !self.error.is_empty(){ui.colored_label(egui::Color32::LIGHT_RED,&self.error);}
-            if ui.button("Close assets").clicked(){self.asset_dialog=false;self.asset_focused=false;}
+            let mut operation = None;
+            if self.asset_rename_intent && enter && (source.has_focus() || source.lost_focus()) {
+                operation = Some("rename");
+            }
+            ui.horizontal_wrapped(|ui| {
+                if !self.asset_rename_intent {
+                    if ui.button("Import mesh asset").clicked() { operation = Some("import"); }
+                    if ui.button("Refresh mesh asset").clicked() { operation = Some("refresh"); }
+                }
+                if ui.button("Rename mesh source").clicked() { operation = Some("rename"); }
+            });
+            if let Some(op) = operation {
+                if self.drafts() || self.manipulation.active() {
+                    self.error = "Apply/revert transform drafts and finish gestures before asset operations.".into();
+                } else {
+                    let id = self.asset_id.clone(); let source = self.asset_source.clone();
+                    let result = self.assets.as_mut().ok_or_else(|| "Asset catalog unavailable; reopen a saved project".to_string()).and_then(|store| {
+                        match op { "import" => store.import(&id, &source), "refresh" => store.refresh(&id), _ => store.rename(&id, &source) }.map_err(|e| e.to_string())
+                    });
+                    self.asset_snapshot();
+                    self.content_search.update(self.assets.as_ref(), &self.content_query);
+                    match result {
+                        Ok(info) => {
+                            self.notice = format!("Asset {} ready; catalog saved, preview unchanged until Reset.", info.id);
+                            self.error.clear();
+                            if self.asset_rename_intent { self.asset_dialog = false; self.asset_focused = false; }
+                        }
+                        Err(error) => self.error = error,
+                    }
+                }
+            }
+            if let Some(store) = &self.assets {
+                ui.label(format!("Catalog revision {}", store.revision()));
+                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() * 0.25).min(180.0)).show(ui, |ui| {
+                    for row in &self.content_search.rows {
+                        ui.label(&row.label);
+                        if let Some(error) = &row.info.diagnostic { ui.colored_label(egui::Color32::LIGHT_RED, error); }
+                    }
+                });
+            }
+            if !self.error.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.error).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&self.error); }
+            });
+            if ui.button("Close assets").clicked() { self.asset_dialog = false; self.asset_focused = false; }
         });
     }
     fn rename_dialog(&mut self, ctx: &egui::Context) {
@@ -1177,7 +2310,10 @@ impl SceneEditor {
             let enter_pressed =
                 ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
             let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
-            let edit = ui.text_edit_singleline(&mut self.name_text);
+            let edit = ui.add(egui::TextEdit::singleline(&mut self.name_text).char_limit(128));
+            if edit.changed() {
+                self.draft_generation = self.draft_generation.wrapping_add(1);
+            }
             if !self.rename_focused {
                 edit.request_focus();
                 self.rename_focused = true;
@@ -1217,16 +2353,26 @@ impl SceneEditor {
     }
     fn needs_recovery(&self) -> bool {
         self.drafts()
+            || self.manipulation.offset_pending()
             || (self.session.is_dirty()
                 && !(self.session.path().is_none()
                     && self.session.scene().objects.is_empty()
+                    && self.session.authoring().is_empty()
                     && self.session.undo_len() == 0
                     && self.session.redo_len() == 0))
     }
     fn request_close(&mut self) {
+        if self.recovery_transition.is_some() {
+            self.error =
+                "Recovery cleanup is still finishing; retry Close once it completes.".into();
+            return;
+        }
         self.manipulation.cancel();
         self.remember_camera();
         self.workspace.flush();
+        if self.recovery.open {
+            self.recovery.open = false;
+        }
         if self.new_scene_pending {
             self.error = "Resolve or cancel New scene before closing.".into();
             self.running = false;
@@ -1252,9 +2398,12 @@ impl SceneEditor {
         let blocked = self.manipulation.active()
             || self.dialog.is_some()
             || self.close_pending
+            || self.close_approved
             || self.rename_pending
             || self.new_scene_pending
             || self.asset_dialog
+            || self.recovery.open
+            || self.recovery_transition.is_some()
             || ctx.input(|i| i.pointer.button_down(egui::PointerButton::Secondary));
         let Some(action) = self.workspace.shortcuts(ctx, blocked) else {
             return;
@@ -1265,7 +2414,10 @@ impl SceneEditor {
         let Some(action) = self.queued_action.take() else {
             return;
         };
-        if self.workspace.settings_open
+        if self.close_approved
+            || self.workspace.settings_open
+            || self.recovery.open
+            || self.recovery_transition.is_some()
             || self.rename_pending
             || self.asset_dialog
             || self.close_pending
@@ -1298,6 +2450,16 @@ impl SceneEditor {
                         _ => crate::manipulation::Tool::Scale,
                     };
                 }
+            }
+            Action::FindObjects => {
+                self.workspace.prefs.hierarchy_visible = true;
+                self.workspace.changed();
+                self.hierarchy_focus = true;
+            }
+            Action::FindContent => {
+                self.workspace.prefs.content_visible = true;
+                self.workspace.changed();
+                self.content_focus = true;
             }
             Action::Frame => {
                 if self.guard().is_ok() {
@@ -1334,13 +2496,19 @@ impl SceneEditor {
     }
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.recovery.poll(&ctx);
+        self.process_recovery_ack();
+        self.content_search
+            .update(self.assets.as_ref(), &self.content_query);
         if self.scale_applied != self.workspace.prefs.scale {
             ctx.set_zoom_factor(self.workspace.prefs.scale);
             self.scale_applied = self.workspace.prefs.scale;
         }
-        if ctx.input(|i| i.viewport().close_requested()) && !self.close_approved {
+        if ctx.input(|i| i.viewport().close_requested()) && !self.close_ready_to_exit {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            self.request_close();
+            if !self.close_approved {
+                self.request_close();
+            }
         }
         if self.manipulation.active()
             && (ctx.input(|i| !i.focused || i.key_pressed(egui::Key::Escape))
@@ -1349,7 +2517,8 @@ impl SceneEditor {
                 || self.close_pending
                 || self.close_approved
                 || self.new_scene_pending
-                || self.rename_pending)
+                || self.rename_pending
+                || self.recovery.open)
         {
             self.manipulation.cancel();
             self.notice = "Transform cancelled; authored state unchanged.".into();
@@ -1379,6 +2548,37 @@ impl SceneEditor {
                         .clicked()
                     {
                         self.navigation.frame_selected = true;
+                        ui.close();
+                    }
+                    if ui
+                        .checkbox(
+                            &mut self.workspace.prefs.content_visible,
+                            "Show Content browser",
+                        )
+                        .changed()
+                    {
+                        self.workspace.changed();
+                    }
+                    if ui
+                        .button("Search objects")
+                        .on_hover_text(self.workspace.shortcut_text(Action::FindObjects))
+                        .clicked()
+                    {
+                        self.queued_action = Some(Action::FindObjects);
+                        ui.close();
+                    }
+                    if ui
+                        .button("Search Content")
+                        .on_hover_text(self.workspace.shortcut_text(Action::FindContent))
+                        .clicked()
+                    {
+                        self.queued_action = Some(Action::FindContent);
+                        ui.close();
+                    }
+                    if ui.button("Recovery checkpoints…").clicked() {
+                        self.recovery.show_picker();
+                        self.manipulation.cancel();
+                        self.running = false;
                         ui.close();
                     }
                     if ui.button("Reset camera").clicked() {
@@ -1422,6 +2622,8 @@ impl SceneEditor {
                 }
                 if ui.button("Assets…").clicked() {
                     self.asset_dialog = true;
+                    self.asset_rename_intent = false;
+                    self.asset_source_focus = false;
                 }
                 ui.menu_button("Assign mesh…", |ui| {
                     let ids: Vec<_> = self
@@ -1473,6 +2675,7 @@ impl SceneEditor {
         });
         egui::Panel::bottom("scene_status").show(ui, |ui| {
             ui.label(&self.notice);
+            self.recovery.warning_ui(ui);
             if !self.workspace.error.is_empty() {
                 ui.colored_label(egui::Color32::YELLOW, &self.workspace.error);
                 if ui.button("Recover workspace preferences…").clicked() {
@@ -1483,6 +2686,18 @@ impl SceneEditor {
                 ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
             }
         });
+        if self.workspace.prefs.content_visible {
+            let max_height = (ctx.content_rect().height() * 0.45).max(64.0);
+            egui::Panel::bottom("content_browser")
+                .default_size((ctx.content_rect().height() * 0.25).clamp(80.0, 200.0))
+                .resizable(true)
+                .size_range(64.0..=max_height)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("content_panel_scroll")
+                        .show(ui, |ui| self.browser_contents(ui));
+                });
+        }
         if self.workspace.prefs.hierarchy_visible {
             let panel = match self.workspace.prefs.hierarchy_side {
                 Side::Left => {
@@ -1497,46 +2712,9 @@ impl SceneEditor {
                 .resizable(true)
                 .size_range(120.0..=800.0)
                 .show(ui, |ui| {
-                    ui.heading("Objects");
-                    if ui.button("Create cube").clicked() {
-                        self.object_action("create");
-                    }
-                    ui.horizontal(|ui| {
-                        if ui
-                            .add_enabled(self.selected.is_some(), egui::Button::new("Duplicate"))
-                            .clicked()
-                        {
-                            self.object_action("duplicate");
-                        }
-                        if ui
-                            .add_enabled(self.selected.is_some(), egui::Button::new("Delete"))
-                            .clicked()
-                        {
-                            self.object_action("delete");
-                        }
-                    });
-                    let ids: Vec<_> = self
-                        .session
-                        .scene()
-                        .objects
-                        .iter()
-                        .map(|o| (o.id.clone(), o.display_name().to_string()))
-                        .collect();
                     egui::ScrollArea::vertical()
-                        .id_salt("scene_object_scroll")
-                        .show(ui, |ui| {
-                            for (id, name) in ids {
-                                if ui
-                                    .selectable_label(self.manipulation.ids.contains(&id), name)
-                                    .clicked()
-                                {
-                                    let additive = ui.input(|i| {
-                                        i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift
-                                    });
-                                    self.queued_selection = Some((Some(id), additive));
-                                }
-                            }
-                        });
+                        .id_salt("hierarchy_panel_scroll")
+                        .show(ui, |ui| self.hierarchy_contents(ui));
                 });
             let width = output.response.rect.width().clamp(120.0, 800.0);
             if (width - self.workspace.prefs.hierarchy_width).abs() > 0.5 {
@@ -1563,10 +2741,10 @@ impl SceneEditor {
             }
             self.manipulation_ui(ui);
             ui.heading("Transform");
-            if let Some(object)=self.selected.as_ref().and_then(|id|self.session.scene().objects.iter().find(|o|&o.id==id)) {ui.label(format!("Mesh: {}",object.mesh.as_deref().unwrap_or("Procedural cube")));}
+            self.mesh_reference_ui(ui);
             ui.label(format!("Loaded scene format v{}; Save writes v{}.",self.session.loaded_format_version(),ruster_scene::FORMAT_VERSION));
             ui.add_enabled_ui(!self.manipulation.ids.is_empty() && !self.manipulation.active(), |ui| {
-                match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open) {
+                match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                     Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                     Ok(false)=>{},Err(error)=>self.error=error,
                 }
@@ -1589,6 +2767,7 @@ impl SceneEditor {
         }
         self.process_queued_action();
         self.process_queued_selection();
+        self.process_content_intents();
         if !self.asset_dialog && self.dialog.is_none() && !self.close_pending {
             egui::Panel::bottom("content_status").show(ui,|ui| {
                 ui.horizontal(|ui| {
@@ -1605,8 +2784,7 @@ impl SceneEditor {
                     }
                     ui.label(&self.shader_notice);
                 });
-                for object in &self.session.scene().objects {if let Some(id)=&object.mesh {if !self.resolved.contains_key(id){ui.colored_label(egui::Color32::YELLOW,format!("Missing mesh {id} for {}; placeholder cube shown. Import or repair its source.",object.id));}}}
-                if let Some(store)=&self.assets {for info in store.inspect().into_iter().filter(|i|i.diagnostic.is_some()).take(3){ui.colored_label(egui::Color32::YELLOW,format!("{}: {}",info.id,info.diagnostic.unwrap_or_default()));}}
+                self.content_diagnostics_ui(ui);
             });
         }
         egui::CentralPanel::default().show(ui, |ui| {
@@ -1628,7 +2806,7 @@ impl SceneEditor {
                 None
             };
             let selected: Vec<_> = self.manipulation.ids.iter().map(String::as_str).collect();
-            self.navigation.enabled=!self.manipulation.active() && !self.workspace.settings_open && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending;
+            self.navigation.enabled=!self.close_approved && !self.manipulation.active() && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none() && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending;
             self.navigation.keyboard_enabled=self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
             self.navigation.movement_speed=self.workspace.prefs.movement_speed;
             let viewport = ruster_render::viewport_with_navigation(
@@ -1653,7 +2831,7 @@ impl SceneEditor {
                 && !self.close_pending
                 && !self.close_approved
                 && !self.new_scene_pending
-                && !self.rename_pending && !self.workspace.settings_open;
+                && !self.rename_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none();
             let overlay_owns = if may_draw {
                 let before = self.session.scene().revision;
                 let result = self.manipulation.draw(ui, &viewport, &mut self.session);
@@ -1671,7 +2849,7 @@ impl SceneEditor {
             } else {
                 false
             };
-            if viewport.response.clicked() && !overlay_owns && !self.manipulation.active() && !self.workspace.settings_open && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending {
+            if viewport.response.clicked() && !overlay_owns && !self.manipulation.active() && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none() && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending {
                 let id = viewport
                     .picked
                     .filter(|id| self.session.scene().objects.iter().any(|o| &o.id == id));
@@ -1709,7 +2887,7 @@ impl SceneEditor {
                 }
                 if save.clicked() {
                     self.save();
-                    if !self.session.is_dirty() && !self.drafts() {
+                    if !self.session.is_dirty() && !self.pending_recovery_drafts() {
                         self.replace_with_empty();
                     }
                 }
@@ -1718,6 +2896,9 @@ impl SceneEditor {
                 }
                 if ui.button("Cancel new scene").clicked() {
                     self.new_scene_pending = false;
+                }
+                if !self.error.is_empty() {
+                    ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
                 }
             });
         }
@@ -1739,13 +2920,13 @@ impl SceneEditor {
                                 Ok(session)=> {
                                     let render=self.render.clone();
                                     let reset=if self.shader_revision>0 {render.as_ref().map(|r|ruster_render::refresh_shader(r,ruster_render::default_shader())).unwrap_or(Ok(()))} else {Ok(())};
-                                    match reset {Ok(())=>{self.remember_camera();let workspace=std::mem::replace(&mut self.workspace,Workspace::detached());let mut next=Self::with_workspace(session,workspace);next.manipulation.clipboard_from(&mut self.manipulation);if let Some(path)=next.session.path(){next.workspace.remember(path);}next.workspace.welcome=false;*self=next;self.render=render;},Err(error)=>self.error=error}
+                                    match reset {Ok(())=>{let mut next=Self::with_workspace(session,Workspace::detached());next.render=render;next.workspace.welcome=false;self.begin_replacement(next,None,true,false);},Err(error)=>self.error=error}
                                 },
                                 Err(error)=>self.error=error.to_string()
                             }
                         } else {
                             match self.save_scene(path) {
-                                Ok(())=>{self.dialog=None;if self.close_pending {self.close_approved=true;}self.notice="Scene saved.".into();if self.new_scene_pending {self.replace_with_empty();}},
+                                Ok(())=>{self.dialog=None;if self.close_pending && !self.pending_recovery_drafts() {self.close_approved=true;}self.notice="Scene saved.".into();if self.new_scene_pending && !self.pending_recovery_drafts() {self.replace_with_empty();}},
                                 Err(e)=>self.error=e.to_string()
                             }
                         }
@@ -1772,7 +2953,7 @@ impl SceneEditor {
                 }
                 if save.clicked() {
                     self.save();
-                    if !self.session.is_dirty() && !self.drafts() {
+                    if !self.session.is_dirty() && !self.pending_recovery_drafts() {
                         self.close_approved = true;
                     }
                 }
@@ -1782,15 +2963,31 @@ impl SceneEditor {
                 if ui.button("Cancel closing scene").clicked() {
                     self.close_pending = false;
                 }
+                if !self.error.is_empty() {
+                    ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+                }
             });
+        }
+        if !self.close_approved {
+            self.recovery_frame(&ctx);
+        }
+        if self.hierarchy_focus || self.content_focus {
+            ctx.request_repaint();
         }
         if self.observe_history_evictions() {
             ctx.request_repaint();
         }
-        if self.close_approved {
-            self.remember_camera();
-            self.workspace.flush();
-            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        self.close_finalization_ui(&ctx);
+        self.start_close_cleanup();
+        if self.close_shutdown {
+            if self.recovery.shutdown_finished() {
+                self.close_ready_to_exit = true;
+                self.remember_camera();
+                self.workspace.flush();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else {
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
         }
     }
 }
@@ -1868,6 +3065,398 @@ fn run_session(session: Session) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Recovery must preserve unapplied invalid text and asset provenance without
+    // granting overwrite authority to the original project, even if it changed.
+    #[test]
+    fn recovery_restores_invalid_drafts_and_assets_as_a_leased_unsaved_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        std::fs::create_dir(&project).unwrap();
+        let path = project.join("scene.json");
+        std::fs::write(
+            project.join("triangle.obj"),
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        Session::new(Scene::demo()).unwrap().save(&path).unwrap();
+        let store = crate::recovery::Store::open(dir.path().join("recovery")).unwrap();
+        let mut e = SceneEditor::new(Session::open(&path).unwrap());
+        assert!(
+            e.recovery.store.is_none(),
+            "test constructors never open user recovery storage"
+        );
+        e.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
+        e.assets
+            .as_mut()
+            .unwrap()
+            .import("triangle", "triangle.obj")
+            .unwrap();
+        e.asset_snapshot();
+        e.assign_mesh(Some("triangle".into())).unwrap();
+        e.sync_draft();
+        let mut draft = serde_json::to_value(RecoveryDrafts {
+            version: 1,
+            revision: e.session.scene().revision,
+            selection: e.manipulation.ids.clone(),
+            fields: e.draft.clone(),
+            pending_name: Some("Unapplied name".into()),
+            manipulation: e.manipulation.snapshot_drafts(),
+        })
+        .unwrap();
+        draft["manipulation"]["precision"][0] = "-".into();
+        draft["manipulation"]["edited"][0] = true.into();
+        draft["manipulation"]["revision"] = e.session.scene().revision.into();
+        draft["manipulation"]["delta"][1] = "-".into();
+        e.restore_recovery_drafts(draft).unwrap();
+        let snapshot = e.recovery_snapshot();
+        e.recovery.checkpoint(snapshot);
+        assert!(e.recovery.warning.is_empty(), "{}", e.recovery.warning);
+        assert!(
+            store.scan().unwrap().is_empty(),
+            "live window retains the lease"
+        );
+        e.recovery.disconnect_wait();
+        drop(e); // Simulate a crash: do not retire the journal.
+        let id = store.scan().unwrap().remove(0).id;
+        std::fs::write(&path, "external project replacement").unwrap();
+        let mut restored = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
+        restored.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
+        restored.restore_checkpoint(&id).unwrap();
+        restored.wait_recovery();
+        assert!(
+            store.scan().unwrap().is_empty(),
+            "adoption keeps the claimed lease"
+        );
+        assert!(restored.session.path().is_none());
+        assert_eq!(restored.session.undo_len(), 1);
+        assert_eq!(restored.asset_origin.as_deref(), Some(project.as_path()));
+        assert!(restored.resolved.contains_key("triangle"));
+        assert!(restored.rename_pending);
+        assert_eq!(restored.name_text, "Unapplied name");
+        let recovered = serde_json::to_value(restored.manipulation.snapshot_drafts()).unwrap();
+        assert_eq!(recovered["precision"][0], "-");
+        assert_eq!(recovered["delta"][1], "-");
+        assert_eq!(
+            restored.session.scene().objects[0].transform.translation[0],
+            -2.0
+        );
+        assert!(!restored.running);
+        assert!(!restored.manipulation.active());
+        assert!(restored.save_scene(path.clone()).is_err());
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "external project replacement"
+        );
+        assert!(restored
+            .save_scene(dir.path().join("rebased.json"))
+            .is_err());
+        // Save committed scene data while drafts remain: the recovery lease stays.
+        restored
+            .save_scene(project.join("partial-save.json"))
+            .unwrap();
+        assert!(store.scan().unwrap().is_empty());
+        restored.recovery.disconnect_wait();
+        drop(restored);
+        assert_eq!(
+            store.scan().unwrap().len(),
+            1,
+            "saving with drafts does not retire recovery"
+        );
+        let mut final_copy = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
+        final_copy.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
+        final_copy.restore_checkpoint(&id).unwrap();
+        final_copy.wait_recovery();
+        final_copy.rename_pending = false;
+        final_copy.sync_draft();
+        final_copy.manipulation.delta = std::array::from_fn(|_| "0".into());
+        final_copy
+            .save_scene(project.join("recovered.json"))
+            .unwrap();
+        final_copy.recovery.disconnect_wait();
+        drop(final_copy);
+        assert!(
+            store.scan().unwrap().is_empty(),
+            "successful draft-free save retires recovery"
+        );
+        assert_eq!(
+            std::fs::read_to_string(path).unwrap(),
+            "external project replacement"
+        );
+    }
+
+    #[test]
+    fn recovery_rejects_unsupported_drafts_before_replacing_current_work() {
+        let dir = tempfile::tempdir().unwrap();
+        let store = crate::recovery::Store::open(dir.path().join("recovery")).unwrap();
+        let mut source = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let mut drafts = serde_json::to_value(RecoveryDrafts {
+            version: 1,
+            revision: source.session.scene().revision,
+            selection: source.manipulation.ids.clone(),
+            fields: source.draft.clone(),
+            pending_name: None,
+            manipulation: source.manipulation.snapshot_drafts(),
+        })
+        .unwrap();
+        drafts["version"] = 99.into();
+        let mut journal = store.allocate().unwrap();
+        journal
+            .checkpoint(crate::recovery::Snapshot::capture(&source.session, None, &drafts).unwrap())
+            .unwrap();
+        drop(journal);
+        let id = store.scan().unwrap().remove(0).id;
+        source.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
+        let before = source.session.scene().clone();
+        assert!(source
+            .restore_checkpoint(&id)
+            .unwrap_err()
+            .contains("Save your current work"));
+        assert_eq!(source.session.scene(), &before);
+        let (started, begin) = std::sync::mpsc::channel();
+        let (release, gate) = std::sync::mpsc::channel();
+        let snapshot = source.recovery_snapshot();
+        source
+            .recovery
+            .dispatch(Box::new(move || {
+                started.send(()).unwrap();
+                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+                snapshot
+            }))
+            .unwrap();
+        begin.recv_timeout(Duration::from_secs(5)).unwrap();
+        source.replace_with_empty();
+        assert_eq!(
+            source.session.scene(),
+            &before,
+            "prepared New must wait for the recovery boundary acknowledgement"
+        );
+        release.send(()).unwrap();
+        source.wait_recovery();
+        let before = source.session.scene().clone();
+        assert!(source
+            .restore_checkpoint(&id)
+            .unwrap_err()
+            .contains("unsupported version"));
+        assert_eq!(source.session.scene(), &before);
+        assert_eq!(
+            store.scan().unwrap().len(),
+            1,
+            "unsupported drafts preserve the checkpoint and release its temporary claim"
+        );
+    }
+    #[test]
+    fn close_cleanup_conflict_keeps_window_visible_and_escape_cancels() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        Session::new(Scene::demo()).unwrap().save(&path).unwrap();
+        let recovery_dir = dir.path().join("recovery");
+        let store = crate::recovery::Store::open(recovery_dir.clone()).unwrap();
+        let mut e = SceneEditor::new(Session::open(path).unwrap());
+        e.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
+        let snapshot = e.recovery_snapshot();
+        e.recovery.checkpoint(snapshot);
+        let record = std::fs::read_dir(recovery_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .find(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .starts_with("window-")
+            })
+            .unwrap()
+            .join("checkpoint.json");
+        std::fs::write(&record, "external replacement").unwrap();
+        e.request_close();
+        assert!(e.close_approved);
+        e.start_close_cleanup();
+        e.wait_recovery();
+        assert!(e
+            .close_cleanup_error
+            .as_ref()
+            .unwrap()
+            .contains("changed outside"));
+        assert!(!e.close_shutdown);
+        assert!(!e.close_ready_to_exit);
+        assert!(!e.close_pending);
+        let ctx = egui::Context::default();
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |_| e.close_finalization_ui(&ctx),
+        );
+        output.textures_delta.clear();
+        assert!(!e.close_approved);
+        assert!(e.close_cleanup_error.is_none());
+        assert_eq!(
+            std::fs::read_to_string(record).unwrap(),
+            "external replacement"
+        );
+        e.recovery.disconnect_wait();
+        assert_eq!(store.scan().unwrap().len(), 1);
+    }
+    // Search is view state: filtering must not edit or silently discard hidden
+    // selection, while Enter selection still observes the normal draft guard.
+    #[test]
+    fn hierarchy_search_keyboard_and_context_actions_preserve_invalid_drafts() {
+        let mut e = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let count = e.session.scene().objects.len();
+        let ctx = egui::Context::default();
+        let frame = |e: &mut SceneEditor, key: Option<egui::Key>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: key
+                        .into_iter()
+                        .map(|key| egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+                |ui| e.hierarchy_contents(ui),
+            );
+            output.textures_delta.clear();
+            e.process_queued_selection();
+        };
+        e.hierarchy_query = "RIGHT".into();
+        e.hierarchy_focus = true;
+        frame(&mut e, None);
+        assert_eq!(e.hierarchy_search.visible.len(), 1);
+        assert_eq!(e.selected.as_deref(), Some("left"));
+        e.draft.as_mut().unwrap().translation[0] = "-".into();
+        frame(&mut e, Some(egui::Key::Enter));
+        assert_eq!(e.selected.as_deref(), Some("left"));
+        e.queued_context = Some((Some("right".into()), ContextAction::Delete));
+        e.process_content_intents();
+        assert_eq!(e.session.scene().objects.len(), count);
+        assert_eq!(e.draft.as_ref().unwrap().translation[0], "-");
+        e.sync_draft();
+        e.hierarchy_focus = true;
+        frame(&mut e, None);
+        frame(&mut e, Some(egui::Key::Enter));
+        assert_eq!(e.selected.as_deref(), Some("right"));
+        e.hierarchy_focus = true;
+        frame(&mut e, None);
+        frame(&mut e, Some(egui::Key::Escape));
+        assert!(e.hierarchy_query.is_empty());
+        assert_eq!(e.hierarchy_search.visible.len(), count);
+        assert_eq!(e.selected.as_deref(), Some("right"));
+        e.queued_context = Some((Some("right".into()), ContextAction::Duplicate));
+        e.process_content_intents();
+        assert_eq!(e.session.scene().objects.len(), count + 1);
+        assert_eq!(e.session.undo_len(), 1);
+    }
+
+    // Exercise egui's typed release path, not just the assignment helper. A
+    // drag freezes both catalog and scene provenance and edits only its target.
+    #[test]
+    fn internal_mesh_drop_is_single_target_undoable_and_rejects_stale_provenance() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        std::fs::write(
+            dir.path().join("triangle.obj"),
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        Session::new(Scene::demo()).unwrap().save(&path).unwrap();
+        let mut e = SceneEditor::new(Session::open(&path).unwrap());
+        e.assets
+            .as_mut()
+            .unwrap()
+            .import("triangle", "triangle.obj")
+            .unwrap();
+        e.asset_snapshot();
+        let payload = e.asset_payload("triangle").unwrap();
+        let ctx = egui::Context::default();
+        let mut rect = egui::Rect::NOTHING;
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            e.mesh_reference_ui(ui);
+            rect = ui.min_rect();
+        });
+        output.textures_delta.clear();
+        let pos = rect.center();
+        for pressed in [true, false] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: vec![
+                        egui::Event::PointerMoved(pos),
+                        egui::Event::PointerButton {
+                            pos,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::DragAndDrop::set_payload(&ctx, payload.clone());
+                    e.mesh_reference_ui(ui);
+                },
+            );
+            output.textures_delta.clear();
+        }
+        assert!(
+            e.queued_drop.is_some(),
+            "the inspector must receive the typed egui drop"
+        );
+        e.process_content_intents();
+        assert!(e.error.is_empty(), "{}", e.error);
+        assert_eq!(
+            e.session.scene().objects[0].mesh.as_deref(),
+            Some("triangle")
+        );
+        assert_eq!(e.session.scene().objects[1].mesh, None);
+        assert_eq!(e.session.undo_len(), 1);
+        assert!(e.preview.scene.objects.iter().all(|o| o.mesh.is_none()));
+        assert!(e
+            .accept_asset_drop("right", &payload)
+            .unwrap_err()
+            .contains("scene changed"));
+        let fresh = e.asset_payload("triangle").unwrap();
+        let unchanged = e.session.scene().clone();
+        let mut old_session = fresh.clone();
+        old_session.generation += 1;
+        assert!(e
+            .accept_asset_drop("right", &old_session)
+            .unwrap_err()
+            .contains("scene session"));
+        let mut foreign = fresh.clone();
+        foreign.catalog_root = dir.path().join("other-project");
+        assert!(e
+            .accept_asset_drop("right", &foreign)
+            .unwrap_err()
+            .contains("another project"));
+        let mut obsolete = fresh.clone();
+        obsolete.catalog_revision += 1;
+        assert!(e
+            .accept_asset_drop("right", &obsolete)
+            .unwrap_err()
+            .contains("catalog changed"));
+        e.draft.as_mut().unwrap().scale[0] = "-".into();
+        assert!(e.accept_asset_drop("right", &fresh).is_err());
+        assert_eq!(e.draft.as_ref().unwrap().scale[0], "-");
+        assert_eq!(e.session.scene(), &unchanged);
+        assert_eq!(e.session.undo_len(), 1);
+        e.sync_draft();
+        e.history(false);
+        assert!(e.session.scene().objects.iter().all(|o| o.mesh.is_none()));
+    }
     // Unique UI boundary risk: an unfocused name field in a modal must not let
     // Ctrl+S apply/sync another draft and destroy the pending text.
     #[test]
@@ -2069,6 +3658,15 @@ mod tests {
             !empty.needs_recovery(),
             "untouched welcome scene has no work to discard"
         );
+        let source_only = json!({"format":"ruster-scene","format_version":5,"scene":Scene::empty("source-only"),"authoring":{"sources":{"script":{"label":null,"language_id":"unknown-backend","host_api_version":1,"text":"unfinished ("}},"bindings":{}},"undo":[],"redo":[]});
+        let source_only = SceneEditor::new(
+            Session::from_snapshot_bytes(&serde_json::to_vec(&source_only).unwrap()).unwrap(),
+        );
+        assert_eq!(source_only.session.undo_len(), 0);
+        assert!(
+            source_only.needs_recovery(),
+            "a detached source-only document is authored work, even with zero history/objects"
+        );
     }
 
     // Unique integration risk: object membership changes need ID-based diffs,
@@ -2178,6 +3776,8 @@ mod tests {
         assert!(!Arc::ptr_eq(&e.resolved["triangle"], &frozen));
         assert!(Arc::ptr_eq(&e.preview_assets["triangle"], &frozen));
         let last_good = e.resolved["triangle"].clone();
+        e.content_search.update(e.assets.as_ref(), "Ready");
+        assert_eq!(e.content_search.visible.len(), 1);
         std::fs::write(&source, "broken mesh").unwrap();
         args["expected_asset_revision"] = "2".into();
         assert_eq!(
@@ -2186,6 +3786,10 @@ mod tests {
         );
         assert!(Arc::ptr_eq(&e.resolved["triangle"], &last_good));
         assert_eq!(e.assets.as_ref().unwrap().revision(), 2);
+        // Failed refresh changes diagnostics without advancing catalog revision.
+        e.content_search.update(e.assets.as_ref(), "Invalid");
+        assert_eq!(e.content_search.visible.len(), 1);
+        assert!(e.content_search.rows[0].info.diagnostic.is_some());
         e.history(false);
         assert_eq!(e.session.scene().objects[0].mesh, None);
         assert!(e.assets.as_ref().unwrap().mesh("triangle").is_some());
@@ -2200,6 +3804,83 @@ mod tests {
         assert_eq!(
             e.command("test", "scene_mesh", missing_asset)["error"]["code"],
             "invalid_arguments"
+        );
+        // Contextual Rename has a single Enter intent; generic asset tools above
+        // deliberately keep their three operations explicit.
+        e.asset_dialog = true;
+        e.asset_rename_intent = true;
+        e.asset_source_focus = true;
+        e.asset_id = "triangle".into();
+        e.asset_source = "renamed.obj".into();
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut SceneEditor, key: Option<egui::Key>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: key
+                        .into_iter()
+                        .map(|key| egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+                |_| editor.content_ui(&ctx),
+            );
+            output.textures_delta.clear();
+        };
+        // Repair the source first: rename validates source content too.
+        std::fs::write(&source, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
+        frame(&mut e, None);
+        assert!(ctx.memory(|memory| memory.focused().is_some()));
+        frame(&mut e, Some(egui::Key::Escape));
+        assert!(!e.asset_dialog);
+        assert!(source.exists());
+        e.asset_dialog = true;
+        frame(&mut e, None);
+        frame(&mut e, Some(egui::Key::Enter));
+        assert!(!e.asset_dialog, "{}", e.error);
+        assert!(dir.path().join("renamed.obj").exists());
+        assert!(!source.exists());
+        assert_eq!(e.assets.as_ref().unwrap().revision(), 3);
+    }
+
+    #[test]
+    fn missing_content_summary_is_bounded_at_minimum_two_times_scale() {
+        let mut scene = Scene::demo();
+        let prototype = scene.objects[0].clone();
+        scene.objects = (0..256)
+            .map(|i| {
+                let mut object = prototype.clone();
+                object.id = format!("object-{i}");
+                object.mesh = Some(format!("missing-{i}"));
+                object
+            })
+            .collect();
+        let mut e = SceneEditor::new(Session::new(scene).unwrap());
+        let ctx = egui::Context::default();
+        let mut bounds = egui::Rect::NOTHING;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(480.0, 320.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                e.content_diagnostics_ui(ui);
+                bounds = ui.min_rect();
+            },
+        );
+        output.textures_delta.clear();
+        assert!(
+            bounds.height() < 128.0,
+            "unresolved references must not consume the viewport: {bounds:?}"
         );
     }
 
@@ -2233,6 +3914,25 @@ mod tests {
             "drafts_pending"
         );
         editor.sync_draft();
+        editor.manipulation.delta[0] = "-".into();
+        let unchanged = editor.session.snapshot_bytes().unwrap();
+        let inspection = editor.command("host", "scene_inspect", json!({}));
+        assert_eq!(inspection["result"]["drafts_pending"], true);
+        assert_eq!(
+            editor.command("host", "scene_transform", args.clone())["error"]["code"],
+            "drafts_pending"
+        );
+        assert_eq!(editor.command("host","asset_import",json!({"expected_session_token":before["session_token"],"expected_revision":before["revision"],"expected_asset_revision":"0","asset_id":"triangle","source":"triangle.obj"}))["error"]["code"],"drafts_pending");
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        assert_eq!(editor.session.undo_len(), 0);
+        assert_eq!(editor.manipulation.delta[0], "-");
+        editor.close_approved = true;
+        assert_eq!(
+            editor.command("host", "scene_inspect", json!({}))["result"]["recovery_pending"],
+            true
+        );
+        editor.close_approved = false;
+        editor.manipulation.delta[0] = "0".into();
         let preview = editor.preview.scene.clone();
         assert_eq!(
             editor.command("host", "scene_transform", args.clone())["ok"],
