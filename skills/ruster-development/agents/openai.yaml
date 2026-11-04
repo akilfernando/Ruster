@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ruster Development"
+  short_description: "Adaptive model delegation for Ruster development"
+  default_prompt: "Use $ruster-development to continue Ruster work with current model routing and documented verification."
+policy:
+  allow_implicit_invocation: true

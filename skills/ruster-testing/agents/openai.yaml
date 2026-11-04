@@ -1,0 +1,6 @@
+interface:
+  display_name: "Ruster Testing"
+  short_description: "Risk-based checks without redundant test growth"
+  default_prompt: "Use $ruster-testing to select, run, and document proportionate checks for this Ruster change."
+policy:
+  allow_implicit_invocation: true

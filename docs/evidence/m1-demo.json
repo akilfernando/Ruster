@@ -1,0 +1,79 @@
+[
+  {
+    "command": "create <temp>/project.json --id milestone-demo",
+    "exit": 0,
+    "elapsed_ms": 1.404,
+    "stdout": "Scenario: milestone-demo | Revision: 0\nInitial stock: 0 | Production per tick: 3 | Transfer capacity: 2\nAuthored undo: 0 | Redo: 0\n",
+    "stderr": ""
+  },
+  {
+    "command": "inspect <temp>/project.json",
+    "exit": 0,
+    "elapsed_ms": 1.774,
+    "stdout": "Scenario: milestone-demo | Revision: 0\nInitial stock: 0 | Production per tick: 3 | Transfer capacity: 2\nAuthored undo: 0 | Redo: 0\n",
+    "stderr": ""
+  },
+  {
+    "command": "run <temp>/project.json --ticks 10",
+    "exit": 0,
+    "elapsed_ms": 1.613,
+    "stdout": "Scenario: milestone-demo | Revision: 0\nRuster logistics demo: 10 ticks complete\nProduced: 30 | Stock: 10 | Delivered: 20\n",
+    "stderr": ""
+  },
+  {
+    "command": "edit <temp>/project.json --revision 0 --transfer 4",
+    "exit": 0,
+    "elapsed_ms": 1.812,
+    "stdout": "Scenario: milestone-demo | Revision: 1\nInitial stock: 0 | Production per tick: 3 | Transfer capacity: 4\nAuthored undo: 1 | Redo: 0\n",
+    "stderr": ""
+  },
+  {
+    "command": "run <temp>/project.json --ticks 10",
+    "exit": 0,
+    "elapsed_ms": 2.145,
+    "stdout": "Scenario: milestone-demo | Revision: 1\nRuster logistics demo: 10 ticks complete\nProduced: 30 | Stock: 0 | Delivered: 30\n",
+    "stderr": ""
+  },
+  {
+    "command": "edit <temp>/project.json --revision 0 --transfer 7",
+    "exit": 1,
+    "elapsed_ms": 2.205,
+    "stdout": "",
+    "stderr": "Error: stale revision: expected 0, current 1; inspect and retry\n"
+  },
+  {
+    "command": "undo <temp>/project.json --revision 1",
+    "exit": 0,
+    "elapsed_ms": 2.728,
+    "stdout": "Scenario: milestone-demo | Revision: 2\nInitial stock: 0 | Production per tick: 3 | Transfer capacity: 2\nAuthored undo: 0 | Redo: 1\n",
+    "stderr": ""
+  },
+  {
+    "command": "redo <temp>/project.json --revision 2",
+    "exit": 0,
+    "elapsed_ms": 3.475,
+    "stdout": "Scenario: milestone-demo | Revision: 3\nInitial stock: 0 | Production per tick: 3 | Transfer capacity: 4\nAuthored undo: 1 | Redo: 0\n",
+    "stderr": ""
+  },
+  {
+    "command": "save <temp>/project.json <temp>/copy.json",
+    "exit": 0,
+    "elapsed_ms": 2.957,
+    "stdout": "Scenario: milestone-demo | Revision: 3\nInitial stock: 0 | Production per tick: 3 | Transfer capacity: 4\nAuthored undo: 1 | Redo: 0\n",
+    "stderr": ""
+  },
+  {
+    "command": "replay <temp>/copy.json --ticks 10",
+    "exit": 0,
+    "elapsed_ms": 3.059,
+    "stdout": "Scenario: milestone-demo | Revision: 3\nRuster logistics demo: 10 ticks complete\nProduced: 30 | Stock: 0 | Delivered: 30\n",
+    "stderr": ""
+  },
+  {
+    "command": "reset <temp>/project.json",
+    "exit": 0,
+    "elapsed_ms": 2.61,
+    "stdout": "Scenario: milestone-demo | Revision: 3\nRuster logistics demo: 0 ticks complete\nProduced: 0 | Stock: 0 | Delivered: 0\n",
+    "stderr": ""
+  }
+]
