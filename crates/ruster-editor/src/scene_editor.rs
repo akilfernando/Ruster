@@ -69,6 +69,27 @@ impl Fields {
         Ok(t)
     }
 }
+// A temporary layout constraint never becomes the user's preferred panel size.
+fn sidebar_budget(width: f32, hierarchy: Option<f32>, inspector: Option<f32>) -> (bool, f32, f32) {
+    let h = hierarchy.unwrap_or(0.0);
+    let i = inspector.unwrap_or(0.0);
+    let hmin = if hierarchy.is_some() { 120.0 } else { 0.0 };
+    let imin = if inspector.is_some() { 240.0 } else { 0.0 };
+    let available = (width - 304.0).max(hmin + imin);
+    if h + i <= available {
+        return (false, h, i);
+    }
+    let surplus = (available - hmin - imin).max(0.0);
+    let requested = (h - hmin).max(0.0) + (i - imin).max(0.0);
+    if requested == 0.0 {
+        return (true, hmin, imin);
+    }
+    (
+        true,
+        hmin + surplus * (h - hmin).max(0.0) / requested,
+        imin + surplus * (i - imin).max(0.0) / requested,
+    )
+}
 #[derive(Clone)]
 struct AssetDrag {
     catalog_root: PathBuf,
@@ -1254,36 +1275,111 @@ impl SceneEditor {
             Err(error) => self.error = error,
         }
     }
+    fn tool_options_ui(&mut self, ui: &mut egui::Ui) {
+        use crate::manipulation::{Pivot, Tool};
+        ui.label("Space");
+        egui::ComboBox::from_id_salt("tool_space")
+            .width(64.0)
+            .selected_text(if self.manipulation.local {
+                "Local"
+            } else {
+                "World"
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(&mut self.manipulation.local, false, "World");
+                ui.selectable_value(&mut self.manipulation.local, true, "Local");
+            })
+            .response
+            .on_hover_text("Local uses the active object's axes");
+        ui.label("Pivot");
+        egui::ComboBox::from_id_salt("tool_pivot")
+            .width(120.0)
+            .selected_text(match self.manipulation.pivot {
+                Pivot::Individual => "Individual origins",
+                Pivot::Center => "Selection center",
+                Pivot::Active => "Active object",
+            })
+            .show_ui(ui, |ui| {
+                ui.selectable_value(
+                    &mut self.manipulation.pivot,
+                    Pivot::Individual,
+                    "Individual origins",
+                );
+                ui.selectable_value(
+                    &mut self.manipulation.pivot,
+                    Pivot::Center,
+                    "Selection center",
+                );
+                ui.selectable_value(&mut self.manipulation.pivot, Pivot::Active, "Active object");
+            })
+            .response
+            .on_hover_text("Selection center is the mean of object origins");
+        ui.checkbox(&mut self.manipulation.snap, "Snap");
+        if self.manipulation.snap {
+            match self.manipulation.tool {
+                Tool::Translate => {
+                    ui.add(
+                        egui::DragValue::new(&mut self.manipulation.snap_distance)
+                            .range(0.001..=1000.0)
+                            .speed(0.1)
+                            .suffix(" units"),
+                    )
+                    .on_hover_text("Snap distance in scene units");
+                }
+                Tool::Rotate => {
+                    ui.add(
+                        egui::DragValue::new(&mut self.manipulation.snap_degrees)
+                            .range(0.1..=180.0)
+                            .speed(1.0)
+                            .suffix("°"),
+                    )
+                    .on_hover_text("Snap angle in degrees");
+                }
+                Tool::Scale => {
+                    ui.add(
+                        egui::DragValue::new(&mut self.manipulation.snap_scale)
+                            .range(0.001..=10.0)
+                            .speed(0.05),
+                    )
+                    .on_hover_text("Scale-factor increment");
+                }
+            }
+        }
+        if self.manipulation.tool == Tool::Scale
+            && !(self.manipulation.local && self.manipulation.pivot == Pivot::Individual)
+        {
+            ui.label("Uniform scale").on_hover_text("Choose Local and Individual origins for nonuniform scaling. World nonuniform scaling would require shear.");
+        }
+    }
     fn manipulation_tools_ui(&mut self, ui: &mut egui::Ui) {
         let editable = self.guard().is_ok() && !self.runtime.visible;
-        ui.add_enabled_ui(editable,|ui| {
-            use crate::manipulation::{Tool,Pivot};
+        let compact = ui.available_width() < 560.0;
+        ui.add_enabled_ui(editable, |ui| {
             ui.horizontal_wrapped(|ui| {
-                ui.selectable_value(&mut self.manipulation.tool,Tool::Translate,"Move").on_hover_text("Move selected objects · remappable shortcut in Workspace settings");
-                ui.selectable_value(&mut self.manipulation.tool,Tool::Rotate,"Rotate");
-                ui.selectable_value(&mut self.manipulation.tool,Tool::Scale,"Scale");
-                ui.separator();
-                ui.label("Space");
-                egui::ComboBox::from_id_salt("tool_space").width(64.0).selected_text(if self.manipulation.local {"Local"} else {"World"}).show_ui(ui,|ui| {
-                    ui.selectable_value(&mut self.manipulation.local,false,"World");
-                    ui.selectable_value(&mut self.manipulation.local,true,"Local");
-                }).response.on_hover_text("Space · Local uses the active object's axes");
-                ui.label("Pivot");
-                egui::ComboBox::from_id_salt("tool_pivot").width(120.0).selected_text(match self.manipulation.pivot {Pivot::Individual=>"Individual origins",Pivot::Center=>"Selection center",Pivot::Active=>"Active object"}).show_ui(ui,|ui| {
-                    ui.selectable_value(&mut self.manipulation.pivot,Pivot::Individual,"Individual origins");
-                    ui.selectable_value(&mut self.manipulation.pivot,Pivot::Center,"Selection center");
-                    ui.selectable_value(&mut self.manipulation.pivot,Pivot::Active,"Active object");
-                }).response.on_hover_text("Pivot · Selection center is the mean of object origins");
-                ui.checkbox(&mut self.manipulation.snap,"Snap");
-                if self.manipulation.snap {
-                    match self.manipulation.tool {
-                        Tool::Translate=>{ui.add(egui::DragValue::new(&mut self.manipulation.snap_distance).range(0.001..=1000.0).speed(0.1).suffix(" units")).on_hover_text("Snap distance in scene units");},
-                        Tool::Rotate=>{ui.add(egui::DragValue::new(&mut self.manipulation.snap_degrees).range(0.1..=180.0).speed(1.0).suffix("°")).on_hover_text("Snap angle in degrees");},
-                        Tool::Scale=>{ui.add(egui::DragValue::new(&mut self.manipulation.snap_scale).range(0.001..=10.0).speed(0.05)).on_hover_text("Scale-factor increment");},
-                    }
+                if compact {
+                    ui.spacing_mut().item_spacing.x = 4.0;
+                    ui.spacing_mut().button_padding.x = 6.0;
                 }
-                if self.manipulation.tool==Tool::Scale && !(self.manipulation.local && self.manipulation.pivot==Pivot::Individual) {
-                    ui.label("Uniform scale").on_hover_text("Choose Local and Individual origins for nonuniform scaling. World nonuniform scaling would require shear.");
+                use crate::manipulation::Tool;
+                ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move")
+                    .on_hover_text(self.workspace.shortcut_text(Action::Move));
+                ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate")
+                    .on_hover_text(self.workspace.shortcut_text(Action::Rotate));
+                ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale")
+                    .on_hover_text(self.workspace.shortcut_text(Action::Scale));
+                if compact {
+                    let label = match (self.manipulation.local, self.manipulation.snap) {
+                        (true, true) => "Local · Snap",
+                        (true, false) => "Local options",
+                        (false, true) => "Snap options",
+                        _ => "Tool options",
+                    };
+                    ui.menu_button(label, |ui| self.tool_options_ui(ui))
+                        .response
+                        .on_hover_text("Tool options · Space, Pivot and Snap");
+                } else {
+                    ui.separator();
+                    self.tool_options_ui(ui);
                 }
             });
         });
@@ -1541,6 +1637,9 @@ impl SceneEditor {
             .ok_or("shader revision exhausted")?;
         ruster_render::refresh_shader(render, &source)?;
         self.shader_revision = next_revision;
+        if self.error == self.shader_notice {
+            self.error.clear();
+        }
         self.shader_notice = format!("Project shader revision {} active", self.shader_revision);
         Ok(())
     }
@@ -2447,11 +2546,13 @@ impl SceneEditor {
                 self.asset_source_focus = false;
                 self.asset_rename_intent = false;
             }
+            ui.menu_button("Tools", |ui| self.shader_tools_ui(ui));
             if ui.button("Hide Content").clicked() {
                 self.workspace.prefs.content_visible = false;
                 self.workspace.changed();
             }
         });
+        self.content_diagnostics_ui(ui);
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
         let search = ui.add(
@@ -2946,6 +3047,357 @@ impl SceneEditor {
             }
         }
     }
+    fn command_menu_item(&mut self, ui: &mut egui::Ui, label: &str, action: Action) {
+        if ui
+            .add(egui::Button::new(label).shortcut_text(self.workspace.shortcut_text(action)))
+            .clicked()
+        {
+            self.queued_action = Some(action);
+            ui.close();
+        }
+    }
+    fn shader_tools_ui(&mut self, ui: &mut egui::Ui) {
+        if ui.button("Create shader source").clicked() {
+            use std::io::Write;
+            let result = self
+                .assets
+                .as_ref()
+                .ok_or_else(|| "Open a saved project first".to_string())
+                .and_then(|store| {
+                    std::fs::OpenOptions::new()
+                        .write(true)
+                        .create_new(true)
+                        .open(store.root().join("scene.wgsl"))
+                        .and_then(|mut file| {
+                            file.write_all(ruster_render::default_shader().as_bytes())
+                        })
+                        .map_err(|error| error.to_string())
+                });
+            match result {
+                Ok(()) => {
+                    self.notice = "Created scene.wgsl; edit it, then Refresh scene shader.".into()
+                }
+                Err(error) => self.error = error,
+            }
+            ui.close();
+        }
+        if ui.button("Refresh scene shader").clicked() {
+            if self.drafts() || self.manipulation.active() {
+                self.error =
+                    "Apply/revert transform drafts and finish the gesture before shader refresh."
+                        .into();
+            } else if let Err(error) = self.refresh_shader() {
+                self.shader_notice = format!(
+                    "Shader rejected; last good pipeline retained: {}",
+                    error.chars().take(256).collect::<String>()
+                );
+                self.error = self.shader_notice.clone();
+            }
+            ui.close();
+        }
+        ui.label(&self.shader_notice);
+    }
+    fn status_problem_ui(ui: &mut egui::Ui, error: &str, shader: Option<&str>) {
+        let primary = if error.is_empty() {
+            shader
+        } else {
+            Some(error)
+        };
+        let Some(primary) = primary else {
+            return;
+        };
+        let secondary = shader.filter(|message| *message != primary);
+        let summary = primary
+            .lines()
+            .find(|line| !line.trim().is_empty())
+            .unwrap_or("Operation failed")
+            .trim();
+        // Allocate the action first from the right so even a long summary
+        // cannot displace access to the retained diagnostic.
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                ui.menu_button("Details", |ui| {
+                    ui.set_max_width((ui.ctx().content_rect().width() - 48.0).clamp(160.0, 600.0));
+                    egui::ScrollArea::vertical()
+                        .id_salt("status_problem_details")
+                        .max_height((ui.ctx().content_rect().height() * 0.5).clamp(96.0, 320.0))
+                        .show(ui, |ui| {
+                            ui.add(egui::Label::new(primary).wrap());
+                            if let Some(secondary) = secondary {
+                                ui.separator();
+                                ui.add(egui::Label::new(secondary).wrap());
+                            }
+                        });
+                });
+                ui.add(
+                    egui::Label::new(egui::RichText::new(summary).color(egui::Color32::LIGHT_RED))
+                        .truncate(),
+                );
+            },
+        );
+        if let Some(secondary) = secondary {
+            let summary = secondary
+                .lines()
+                .find(|line| !line.trim().is_empty())
+                .unwrap_or("Operation failed")
+                .trim();
+            ui.add(
+                egui::Label::new(egui::RichText::new(summary).color(egui::Color32::YELLOW))
+                    .truncate(),
+            );
+        }
+    }
+    fn scene_menus(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.menu_button("File", |ui| {
+                for (label, action) in [
+                    ("New scene", Action::New),
+                    ("Open scene…", Action::Open),
+                    ("Save", Action::Save),
+                    ("Save as…", Action::SaveAs),
+                ] {
+                    self.command_menu_item(ui, label, action);
+                }
+                ui.menu_button("Recent scenes", |ui| {
+                    if self.workspace.prefs.recent.is_empty() {
+                        ui.label("No recent scenes.");
+                    }
+                    for path in self.workspace.prefs.recent.clone() {
+                        if ui.button(path.display().to_string()).clicked() {
+                            self.path_text = path.display().to_string();
+                            self.queued_action = Some(Action::Open);
+                            ui.close();
+                        }
+                    }
+                });
+                ui.separator();
+                if ui.button("Recovery checkpoints…").clicked() {
+                    self.recovery.show_picker();
+                    self.manipulation.cancel();
+                    ui.close();
+                }
+                if ui.button("Workspace and shortcuts…").clicked() {
+                    self.workspace.settings_open = true;
+                    ui.close();
+                }
+                self.command_menu_item(ui, "Close window", Action::Quit);
+            });
+            ui.menu_button("Edit", |ui| {
+                for action in [
+                    Action::Undo,
+                    Action::Redo,
+                    Action::Copy,
+                    Action::Paste,
+                    Action::Duplicate,
+                    Action::Delete,
+                    Action::Rename,
+                    Action::SelectAll,
+                ] {
+                    self.command_menu_item(ui, action.name(), action);
+                }
+                ui.menu_button("Tools", |ui| {
+                    for action in [Action::Move, Action::Rotate, Action::Scale] {
+                        self.command_menu_item(ui, action.name(), action);
+                    }
+                });
+                ui.separator();
+                if ui.button("Create cube").clicked() {
+                    self.queued_context = Some((None, ContextAction::Create));
+                    ui.close();
+                }
+                ui.menu_button("Assign mesh…", |ui| {
+                    if ui.button("Procedural cube").clicked() {
+                        if let Err(error) = self.assign_mesh(None) {
+                            self.error = error;
+                        }
+                        ui.close();
+                    }
+                    for id in self
+                        .assets
+                        .as_ref()
+                        .map(|store| {
+                            store
+                                .inspect()
+                                .into_iter()
+                                .map(|asset| asset.id)
+                                .collect::<Vec<_>>()
+                        })
+                        .unwrap_or_default()
+                    {
+                        if ui.button(&id).clicked() {
+                            if let Err(error) = self.assign_mesh(Some(id.clone())) {
+                                self.error = error;
+                            }
+                            ui.close();
+                        }
+                    }
+                });
+            });
+            ui.menu_button("View", |ui| {
+                let mut visibility_changed = false;
+                for (label, visible) in [
+                    ("Objects", &mut self.workspace.prefs.hierarchy_visible),
+                    ("Inspector", &mut self.workspace.prefs.inspector_visible),
+                    ("Content browser", &mut self.workspace.prefs.content_visible),
+                ] {
+                    visibility_changed |= ui.checkbox(visible, label).changed();
+                }
+                if visibility_changed {
+                    self.workspace.changed();
+                }
+                ui.separator();
+                for action in [
+                    Action::Frame,
+                    Action::Projection,
+                    Action::FindObjects,
+                    Action::FindContent,
+                ] {
+                    self.command_menu_item(ui, action.name(), action);
+                }
+                ui.menu_button("View presets", |ui| {
+                    for action in [
+                        Action::Front,
+                        Action::Back,
+                        Action::Left,
+                        Action::Right,
+                        Action::Top,
+                        Action::Bottom,
+                        Action::Isometric,
+                        Action::FreeView,
+                    ] {
+                        self.command_menu_item(ui, action.name(), action);
+                    }
+                });
+                if ui.button("Reset camera").clicked() {
+                    self.navigation.reset = true;
+                    ui.close();
+                }
+            });
+            ui.menu_button("Content", |ui| {
+                if ui.button("Assets / import…").clicked() {
+                    self.asset_dialog = true;
+                    self.asset_rename_intent = false;
+                    self.asset_source_focus = false;
+                    self.asset_focused = false;
+                    ui.close();
+                }
+                self.shader_tools_ui(ui);
+            });
+            ui.separator();
+            let dirty = self.session.is_dirty() || self.pending_recovery_drafts();
+            let mode = if self.runtime.frame.is_some() {
+                if self.runtime.visible {
+                    if self.runtime.stale {
+                        "Runtime (stale) · "
+                    } else {
+                        "Runtime · "
+                    }
+                } else if self.runtime.stale {
+                    "Authored / stale runtime · "
+                } else {
+                    "Authored · "
+                }
+            } else {
+                ""
+            };
+            let title = format!(
+                "{}{}{}",
+                if dirty { "* " } else { "" },
+                mode,
+                self.session.scene().id
+            );
+            let width = (ui.available_width() - 64.0).clamp(48.0, 240.0);
+            ui.add_sized(
+                [width, ui.spacing().interact_size.y],
+                egui::Label::new(&title).truncate(),
+            )
+            .on_hover_text(format!(
+                "{} · {}",
+                self.session.scene().id,
+                if dirty { "Unsaved changes" } else { "Saved" }
+            ));
+            if ui
+                .button("Save")
+                .on_hover_text(self.workspace.shortcut_text(Action::Save))
+                .clicked()
+            {
+                self.queued_action = Some(Action::Save);
+            }
+        });
+    }
+    fn scene_sidebars(&mut self, ui: &mut egui::Ui) {
+        let (constrained, hierarchy_width, inspector_width) = sidebar_budget(
+            ui.available_width(),
+            self.workspace
+                .prefs
+                .hierarchy_visible
+                .then_some(self.workspace.prefs.hierarchy_width),
+            self.workspace
+                .prefs
+                .inspector_visible
+                .then_some(self.workspace.prefs.inspector_width),
+        );
+        if self.workspace.prefs.hierarchy_visible {
+            let panel = match (constrained, self.workspace.prefs.hierarchy_side) {
+                (true, Side::Left) => egui::Panel::left("scene_hierarchy_constrained"),
+                (true, Side::Right) => egui::Panel::right("scene_hierarchy_constrained"),
+                (false, Side::Left) => {
+                    egui::Panel::left(("scene_hierarchy", self.workspace.layout_generation))
+                }
+                (false, Side::Right) => {
+                    egui::Panel::right(("scene_hierarchy", self.workspace.layout_generation))
+                }
+            };
+            let panel = if constrained {
+                panel.resizable(false).exact_size(hierarchy_width)
+            } else {
+                panel
+                    .default_size(hierarchy_width)
+                    .resizable(true)
+                    .size_range(120.0..=800.0)
+            };
+            let output = panel.show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("hierarchy_panel_scroll")
+                    .show(ui, |ui| self.hierarchy_contents(ui));
+            });
+            let width = output.response.rect.width().clamp(120.0, 800.0);
+            if !constrained && (width - self.workspace.prefs.hierarchy_width).abs() > 0.5 {
+                self.workspace.prefs.hierarchy_width = width;
+                self.workspace.changed();
+            }
+        }
+        if self.workspace.prefs.inspector_visible {
+            let panel = match (constrained, self.workspace.prefs.inspector_side) {
+                (true, Side::Left) => egui::Panel::left("scene_inspector_constrained"),
+                (true, Side::Right) => egui::Panel::right("scene_inspector_constrained"),
+                (false, Side::Left) => {
+                    egui::Panel::left(("scene_inspector", self.workspace.layout_generation))
+                }
+                (false, Side::Right) => {
+                    egui::Panel::right(("scene_inspector", self.workspace.layout_generation))
+                }
+            };
+            let panel = if constrained {
+                panel.resizable(false).exact_size(inspector_width)
+            } else {
+                panel
+                    .default_size(inspector_width)
+                    .resizable(true)
+                    .size_range(240.0..=1000.0)
+            };
+            let output = panel.show(ui, |ui| {
+                egui::ScrollArea::vertical().show(ui, |ui| self.inspector_contents(ui));
+            });
+            let width = output.response.rect.width().clamp(240.0, 1000.0);
+            if !constrained && (width - self.workspace.prefs.inspector_width).abs() > 0.5 {
+                self.workspace.prefs.inspector_width = width;
+                self.workspace.changed();
+            }
+        }
+    }
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let focused = ctx.input(|input| input.focused);
@@ -2982,224 +3434,74 @@ impl SceneEditor {
             self.notice = "Transform cancelled; authored state unchanged.".into();
         }
         self.route_shortcuts(&ctx);
-        egui::Panel::top("scene_top").show(ui, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                ui.heading("Ruster Scene Editor");
-                ui.menu_button("Workspace", |ui| {
-                    if ui.button("Workspace and shortcuts…").clicked() {
-                        self.workspace.settings_open = true;
-                        ui.close();
-                    }
-                    if ui
-                        .button("Frame selected")
-                        .on_hover_text(self.workspace.shortcut_text(Action::Frame))
-                        .clicked()
-                    {
-                        self.navigation.frame_selected = true;
-                        ui.close();
-                    }
-                    if ui
-                        .checkbox(
-                            &mut self.workspace.prefs.content_visible,
-                            "Show Content browser",
-                        )
-                        .changed()
-                    {
-                        self.workspace.changed();
-                    }
-                    if ui
-                        .button("Search objects")
-                        .on_hover_text(self.workspace.shortcut_text(Action::FindObjects))
-                        .clicked()
-                    {
-                        self.queued_action = Some(Action::FindObjects);
-                        ui.close();
-                    }
-                    if ui
-                        .button("Search Content")
-                        .on_hover_text(self.workspace.shortcut_text(Action::FindContent))
-                        .clicked()
-                    {
-                        self.queued_action = Some(Action::FindContent);
-                        ui.close();
-                    }
-                    if ui.button("Recovery checkpoints…").clicked() {
-                        self.recovery.show_picker();
-                        self.manipulation.cancel();
-                        ui.close();
-                    }
-                    if ui.button("Reset camera").clicked() {
-                        self.navigation.reset = true;
-                        ui.close();
-                    }
-                    ui.separator();
-                    if ui
-                        .button(format!(
-                            "Close window · {}",
-                            self.workspace.shortcut_text(Action::Quit)
-                        ))
-                        .clicked()
-                    {
-                        self.queued_action = Some(Action::Quit);
-                        ui.close();
-                    }
-                    ui.separator();
-                    for action in Action::ALL {
-                        ui.label(format!(
-                            "{} · {}",
-                            action.name(),
-                            self.workspace.shortcut_text(action)
-                        ));
-                    }
-                });
-                ui.menu_button("Recent scenes", |ui| {
-                    if self.workspace.prefs.recent.is_empty() {
-                        ui.label("No successfully opened/saved scenes yet.");
-                    }
-                    for path in self.workspace.prefs.recent.clone() {
-                        if ui.button(path.display().to_string()).clicked() {
-                            self.path_text = path.display().to_string();
-                            self.queued_action = Some(Action::Open);
-                            ui.close();
-                        }
-                    }
-                });
-                if ui.button("New scene").clicked() {
-                    self.queued_action = Some(Action::New);
-                }
-                if ui.button("Assets…").clicked() {
-                    self.asset_dialog = true;
-                    self.asset_rename_intent = false;
-                    self.asset_source_focus = false;
-                }
-                ui.menu_button("Assign mesh…", |ui| {
-                    let ids: Vec<_> = self
-                        .assets
-                        .as_ref()
-                        .map(|s| s.inspect().into_iter().map(|i| i.id).collect())
-                        .unwrap_or_default();
-                    if ui.button("Procedural cube").clicked() {
-                        if let Err(e) = self.assign_mesh(None) {
-                            self.error = e;
-                        }
-                        ui.close();
-                    }
-                    for id in ids {
-                        if ui.button(&id).clicked() {
-                            if let Err(e) = self.assign_mesh(Some(id)) {
-                                self.error = e;
-                            }
-                            ui.close();
-                        }
-                    }
-                });
-                if ui.button("Open scene…").clicked() {
-                    self.queued_action = Some(Action::Open);
-                }
-                if ui.button("Save scene").clicked() {
-                    self.queued_action = Some(Action::Save);
-                }
-                if ui.button("Save scene as…").clicked() {
-                    self.queued_action = Some(Action::SaveAs);
-                }
-                if ui.button("Undo authored edit").clicked() {
-                    self.queued_action = Some(Action::Undo);
-                }
-                if ui.button("Redo authored edit").clicked() {
-                    self.queued_action = Some(Action::Redo);
-                }
-            });
-            ui.label(format!(
-                "{} · revision {} · {}",
-                self.session.scene().id,
-                self.session.scene().revision,
-                if self.session.is_dirty() || self.drafts() {
-                    "UNSAVED"
-                } else {
-                    "Saved"
-                }
-            ));
-        });
+        egui::Panel::top("scene_top").show(ui, |ui| self.scene_menus(ui));
         egui::Panel::bottom("scene_status").show(ui, |ui| {
-            ui.label(&self.notice);
-            if !self.external.status.is_empty() {
-                ui.add(egui::Label::new(&self.external.status).truncate())
-                    .on_hover_text(&self.external.status);
-                if ui.button("Working-copy details").clicked() {
-                    self.external.open = true;
-                }
-            }
-            self.recovery.warning_ui(ui);
-            if !self.workspace.error.is_empty() {
-                ui.colored_label(egui::Color32::YELLOW, &self.workspace.error);
-                if ui.button("Recover workspace preferences…").clicked() {
-                    self.workspace.settings_open = true;
-                }
-            }
-            if !self.error.is_empty() {
-                ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
-            }
+            egui::ScrollArea::vertical()
+                .id_salt("global_status_scroll")
+                .max_height(96.0)
+                .show(ui, |ui| {
+                    let shader = (self.shader_notice.contains("rejected")
+                        || self.shader_notice.contains("unavailable"))
+                    .then_some(self.shader_notice.as_str());
+                    Self::status_problem_ui(ui, &self.error, shader);
+                    self.recovery.warning_ui(ui);
+                    if !self.workspace.error.is_empty() {
+                        ui.colored_label(egui::Color32::YELLOW, &self.workspace.error);
+                        if ui.button("Recover workspace preferences…").clicked() {
+                            self.workspace.settings_open = true;
+                        }
+                    }
+
+                    if !self.runtime.status.is_empty() {
+                        ui.add(egui::Label::new(&self.runtime.status).truncate())
+                            .on_hover_text(&self.runtime.status);
+                    }
+                    if !self.notice.is_empty() {
+                        ui.add(egui::Label::new(&self.notice).truncate())
+                            .on_hover_text(&self.notice);
+                    }
+                    if !self.external.status.is_empty() {
+                        ui.add(egui::Label::new(&self.external.status).truncate())
+                            .on_hover_text(&self.external.status);
+                        if ui.button("Working-copy details").clicked() {
+                            self.external.open = true;
+                        }
+                    }
+                });
         });
         if self.workspace.prefs.content_visible {
-            let max_height = (ctx.content_rect().height() * 0.45).max(64.0);
-            egui::Panel::bottom("content_browser")
-                .default_size((ctx.content_rect().height() * 0.25).clamp(80.0, 200.0))
-                .resizable(true)
-                .size_range(64.0..=max_height)
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("content_panel_scroll")
-                        .show(ui, |ui| self.browser_contents(ui));
-                });
-        }
-        if self.workspace.prefs.hierarchy_visible {
-            let panel = match self.workspace.prefs.hierarchy_side {
-                Side::Left => {
-                    egui::Panel::left(("scene_hierarchy", self.workspace.layout_generation))
-                }
-                Side::Right => {
-                    egui::Panel::right(("scene_hierarchy", self.workspace.layout_generation))
-                }
+            let remaining = ui.available_height();
+            // Reserve 160 points for compact tools/runtime/view chrome and
+            // about 180 for the viewport, after global status/menu bars.
+            let max_height = (remaining - 340.0).clamp(32.0, 200.0);
+            let default_height = (ctx.content_rect().height() * 0.25).clamp(80.0, 200.0);
+            let preferred_height = egui::containers::panel::PanelState::load(
+                &ctx,
+                ui.scope_id().with("content_browser"),
+            )
+            .map(|state| state.size().y)
+            .unwrap_or(default_height);
+            // Never let a temporary cap overwrite the normal panel's remembered
+            // divider height. The constrained instance has one stable identity.
+            let panel = if preferred_height > max_height {
+                egui::Panel::bottom("content_browser_constrained")
+                    .resizable(false)
+                    .exact_size(max_height)
+            } else {
+                egui::Panel::bottom("content_browser")
+                    .default_size(preferred_height)
+                    .resizable(true)
+                    .size_range(32.0..=max_height)
             };
-            let output = panel
-                .default_size(self.workspace.prefs.hierarchy_width)
-                .resizable(true)
-                .size_range(120.0..=800.0)
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("hierarchy_panel_scroll")
-                        .show(ui, |ui| self.hierarchy_contents(ui));
-                });
-            let width = output.response.rect.width().clamp(120.0, 800.0);
-            if (width - self.workspace.prefs.hierarchy_width).abs() > 0.5 {
-                self.workspace.prefs.hierarchy_width = width;
-                self.workspace.changed();
-            }
+            panel.show(ui, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("content_panel_scroll")
+                    .min_scrolled_height(0.0)
+                    .max_height(ui.available_height())
+                    .show(ui, |ui| self.browser_contents(ui));
+            });
         }
-        if self.workspace.prefs.inspector_visible {
-            let panel = match self.workspace.prefs.inspector_side {
-                Side::Left => {
-                    egui::Panel::left(("scene_inspector", self.workspace.layout_generation))
-                }
-                Side::Right => {
-                    egui::Panel::right(("scene_inspector", self.workspace.layout_generation))
-                }
-            };
-            let output = panel
-                .default_size(self.workspace.prefs.inspector_width)
-                .resizable(true)
-                .size_range(240.0..=1000.0)
-                .show(ui, |ui| {
-                    egui::ScrollArea::vertical().show(ui, |ui| {
-                        self.inspector_contents(ui);
-                    });
-                });
-            let width = output.response.rect.width().clamp(240.0, 1000.0);
-            if (width - self.workspace.prefs.inspector_width).abs() > 0.5 {
-                self.workspace.prefs.inspector_width = width;
-                self.workspace.changed();
-            }
-        }
+        self.scene_sidebars(ui);
         self.process_queued_action();
         self.process_queued_selection();
         self.process_content_intents();
@@ -3209,25 +3511,6 @@ impl SceneEditor {
             self.assets.as_ref().map(|store| store.revision()),
             self.shader_revision,
         );
-        if !self.asset_dialog && self.dialog.is_none() && !self.close_pending {
-            egui::Panel::bottom("content_status").show(ui,|ui| {
-                ui.horizontal(|ui| {
-                    if ui.button("Create shader source").clicked(){
-                        use std::io::Write;
-                        let result=self.assets.as_ref().ok_or_else(||"Open a saved project first".to_string()).and_then(|store| {
-                            std::fs::OpenOptions::new().write(true).create_new(true).open(store.root().join("scene.wgsl")).and_then(|mut f|f.write_all(ruster_render::default_shader().as_bytes())).map_err(|e|e.to_string())
-                        });
-                        match result {Ok(())=>self.notice="Created scene.wgsl; edit it, then Refresh scene shader.".into(),Err(e)=>self.error=e}
-                    }
-                    if ui.button("Refresh scene shader").clicked(){
-                        if self.drafts() || self.manipulation.active(){self.error="Apply/revert transform drafts and finish the gesture before shader refresh.".into();}
-                        else if let Err(e)=self.refresh_shader(){self.shader_notice=format!("Shader rejected; last good pipeline retained: {}",e.chars().take(256).collect::<String>());self.error=self.shader_notice.clone();}
-                    }
-                    ui.label(&self.shader_notice);
-                });
-                self.content_diagnostics_ui(ui);
-            });
-        }
         egui::CentralPanel::default().show(ui, |ui| {
             if self.workspace.welcome && self.session.scene().objects.is_empty() {
                 ui.heading("Start creating");ui.label("Create a cube in the hierarchy, open a scene, or choose a recent scene. Your last project is never opened automatically.");
@@ -3238,13 +3521,10 @@ impl SceneEditor {
             let blocked=self.guard().is_err() || self.manipulation.offset_pending();
             if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.reset_assets=Some((key,self.resolved.clone()));}
             if let Some(diagnostic)=&self.runtime.diagnostic {
-                egui::ScrollArea::vertical().id_salt("behavior_diagnostics").max_height(88.0).show(ui,|ui| {
-                    ui.colored_label(egui::Color32::LIGHT_RED,&diagnostic.message);
-                    ui.label(format!("source {} · hash {} · line {} · object {} · binding {}",diagnostic.source_id.as_deref().unwrap_or("—"),diagnostic.source_hash.as_deref().unwrap_or("—"),diagnostic.line.map(|line|line.to_string()).as_deref().unwrap_or("—"),diagnostic.object_id.as_deref().unwrap_or("—"),diagnostic.binding_id.as_deref().unwrap_or("—")));
+                ui.horizontal(|ui| {
+                    if ui.button("Open location").clicked() {if let Err(error)=self.behavior.navigate_diagnostic(&self.session,diagnostic,self.runtime.captured.as_deref()){self.error=error;}}
+                    ui.add(egui::Label::new(egui::RichText::new(format!("{}: {}",if self.runtime.stale {"Stale runtime"}else{"Runtime error"},diagnostic.message)).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&diagnostic.message);
                 });
-                if ui.button("Open diagnostic location").clicked() {
-                    if let Err(error)=self.behavior.navigate_diagnostic(&self.session,diagnostic,self.runtime.captured.as_deref()) {self.error=error;}
-                }
             }
             self.runtime.observe(self.generation,self.session.scene().revision,self.assets.as_ref().map(|store|store.revision()),self.shader_revision);
             let transient = if !self.runtime.visible {
@@ -3531,6 +3811,274 @@ fn run_session(session: Session) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // A small window must constrain only its temporary panel instances, not
+    // erase preferred widths or leave the actual viewport behind the chrome.
+    #[test]
+    fn compact_layout_preserves_viewport_and_restores_preferred_panels() {
+        let project = tempfile::tempdir().unwrap();
+        let mut store = AssetStore::open(project.path()).unwrap();
+        for (id, path) in [
+            ("triangle", "triangle.obj"),
+            ("triangle_2", "triangle_2.obj"),
+            ("triangle_3", "triangle_3.obj"),
+        ] {
+            std::fs::write(
+                project.path().join(path),
+                "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+            )
+            .unwrap();
+            store.import(id, path).unwrap();
+        }
+        drop(store);
+        for swapped in [false, true] {
+            let ctx = egui::Context::default();
+            crate::editor_theme::configure(&ctx);
+            let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+            editor.assets = Some(AssetStore::open(project.path()).unwrap());
+            editor.asset_snapshot();
+            editor.workspace.prefs.hierarchy_width = 320.0;
+            editor.workspace.prefs.inspector_width = 400.0;
+            editor.workspace.prefs.hierarchy_side = if swapped { Side::Right } else { Side::Left };
+            editor.workspace.prefs.inspector_side = if swapped { Side::Left } else { Side::Right };
+            let preferred = (320.0, 400.0);
+            let events = std::cell::RefCell::new(Vec::new());
+            let details_center = std::cell::Cell::new(None);
+            let full_problem_count = std::cell::Cell::new(0);
+            let content_rect = std::cell::Cell::new(None);
+            let asset_row_visible = std::cell::Cell::new(false);
+            let mut time = 0.0;
+            let mut frame = |editor: &mut SceneEditor, size| {
+                time += 0.1;
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        events: std::mem::take(&mut *events.borrow_mut()),
+                        time: Some(time),
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        editor.ui(ui);
+                        content_rect.set(
+                            egui::containers::panel::PanelState::load(
+                                ui.ctx(),
+                                ui.scope_id().with("content_browser"),
+                            )
+                            .map(|state| state.outer_rect),
+                        );
+                    },
+                );
+                output.textures_delta.clear();
+                let viewport = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Callback(callback) => {
+                        Some(callback.rect.intersect(shape.clip_rect))
+                    }
+                    _ => None,
+                });
+                if editor.runtime.frame.is_some() {
+                    let mode = if editor.runtime.visible {
+                        "Runtime"
+                    } else {
+                        "Authored"
+                    };
+                    assert!(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.contains(mode) && text.galley.job.text.contains(&editor.session.scene().id))),"rendered scene label must identify the displayed view");
+                }
+                details_center.set(output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text)
+                        if text.galley.job.text == "Details"
+                            && text.pos.y > ctx.content_rect().center().y =>
+                    {
+                        Some(text.pos + text.galley.size() / 2.0)
+                    }
+                    _ => None,
+                }));
+                if !editor.error.is_empty() && editor.shader_notice.contains("rejected") {
+                    for (index, message) in [&editor.error, &editor.shader_notice]
+                        .into_iter()
+                        .enumerate()
+                    {
+                        if index == 1 && editor.error == editor.shader_notice {
+                            continue;
+                        }
+                        let first_line = message.lines().next().unwrap();
+                        assert_eq!(output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==first_line)).count(),1,"each distinct problem must retain a concise visible summary");
+                    }
+                }
+                if editor.error.contains('\n') && editor.error == editor.shader_notice {
+                    let summary = editor.error.lines().next().unwrap();
+                    let summary_count=output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==summary)).count();
+                    assert_eq!(summary_count,1,"identical multiline error/shader messages must share one concise footer summary");
+                    full_problem_count.set(output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==editor.error)).count());
+                }
+                asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("triangle · Ready") && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
+                viewport.expect("production viewport callback must remain present")
+            };
+            let normal_size = egui::vec2(1280.0, 800.0);
+            frame(&mut editor, normal_size);
+            frame(&mut editor, normal_size);
+            assert!(
+                asset_row_visible.get(),
+                "real asset row must be visible before the resize journey"
+            );
+            let before = content_rect.get().expect("normal Content panel state");
+            let divider = egui::pos2(before.center().x, before.top());
+            let pointer = |pos, pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            events.borrow_mut().push(egui::Event::PointerMoved(divider));
+            frame(&mut editor, normal_size);
+            events.borrow_mut().push(pointer(divider, true));
+            frame(&mut editor, normal_size);
+            let dragged = divider + egui::vec2(0.0, 10.0);
+            events.borrow_mut().push(egui::Event::PointerMoved(dragged));
+            frame(&mut editor, normal_size);
+            events.borrow_mut().push(pointer(dragged, false));
+            frame(&mut editor, normal_size);
+            frame(&mut editor, normal_size);
+            let preferred_content_height = content_rect.get().unwrap().height();
+            assert!((preferred_content_height-(before.height()-10.0)).abs()<2.0,"real divider drag must establish a non-default preferred height: {preferred_content_height}");
+            let mut original: Option<egui::Rect> = None;
+            for size in [
+                egui::vec2(1280.0, 800.0),
+                egui::vec2(700.0, 500.0),
+                egui::vec2(640.0, 480.0),
+                egui::vec2(1280.0, 800.0),
+            ] {
+                frame(&mut editor, size);
+                let viewport = frame(&mut editor, size);
+                assert!(
+                    viewport.width() >= 256.0,
+                    "viewport width {} at {size:?}",
+                    viewport.width()
+                );
+                assert!(
+                    viewport.height() >= 180.0,
+                    "viewport height {} at {size:?}",
+                    viewport.height()
+                );
+                assert_eq!(
+                    (
+                        editor.workspace.prefs.hierarchy_width,
+                        editor.workspace.prefs.inspector_width
+                    ),
+                    preferred,
+                    "temporary constraints must not become saved widths"
+                );
+                if size.x == 1280.0 {
+                    assert!(
+                        (content_rect.get().unwrap().height() - preferred_content_height).abs()
+                            < 1.0,
+                        "expansion must restore the dragged Content height"
+                    );
+                    assert!(
+                        asset_row_visible.get(),
+                        "asset row must be visible again after restoring the normal window"
+                    );
+                    if let Some(before) = original {
+                        assert!(
+                            (viewport.left() - before.left()).abs() < 1.0
+                                && (viewport.right() - before.right()).abs() < 1.0,
+                            "expansion must restore actual preferred panel instances"
+                        );
+                    } else {
+                        original = Some(viewport);
+                    }
+                }
+            }
+            editor
+                .runtime
+                .reset(&ctx, &editor.session, editor.generation)
+                .unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            while editor.runtime.frame.is_none() {
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "runtime reset must publish a committed frame"
+                );
+                frame(&mut editor, egui::vec2(640.0, 480.0));
+                std::thread::yield_now();
+            }
+            editor.error =
+                "Repair or revert the unfinished value; entered text is preserved.".into();
+            editor.shader_notice = "Shader rejected; last good pipeline retained.".into();
+            editor.runtime.stale = true;
+            editor.runtime.diagnostic = Some(ruster_behavior::Diagnostic {
+                code: ruster_behavior::DiagnosticCode::Runtime,
+                source_id: Some("script".into()),
+                source_hash: Some("hash".into()),
+                binding_id: None,
+                object_id: None,
+                phase: ruster_behavior::Phase::Update,
+                message: "Runtime error: repair the source and Reset.".into(),
+                line: Some(3),
+            });
+            editor.manipulation.local = true;
+            editor.manipulation.snap = true;
+            frame(&mut editor, egui::vec2(640.0, 480.0));
+            let viewport = frame(&mut editor, egui::vec2(640.0, 480.0));
+            assert!(
+                viewport.height() >= 180.0,
+                "errors and stale status must not displace the viewport: {}",
+                viewport.height()
+            );
+            editor.error=concat!("Shader rejected; last good pipeline retained: scene shader rejected; previous pipeline retained:\n",
+                "Validation Error\n\nCaused by:\n  In Device::create_render_pipeline\n    Shader validation failed in fragment entry point\n    Missing output at location 0\n",
+                "The last good pipeline is still active.").into();
+            editor.shader_notice = editor.error.clone();
+            let retained = editor.error.clone();
+            frame(&mut editor, egui::vec2(640.0, 480.0));
+            let viewport = frame(&mut editor, egui::vec2(640.0, 480.0));
+            assert!(
+                viewport.height() >= 180.0,
+                "multiline diagnostics must not consume the viewport"
+            );
+            let details = details_center
+                .get()
+                .expect("error Details action must remain visible");
+            assert!(ctx.content_rect().contains(details));
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos: details,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            events
+                .borrow_mut()
+                .extend([egui::Event::PointerMoved(details), pointer(true)]);
+            frame(&mut editor, egui::vec2(640.0, 480.0));
+            events.borrow_mut().push(pointer(false));
+            frame(&mut editor, egui::vec2(640.0, 480.0));
+            // egui deliberately hides a popup's first sizing pass.
+            frame(&mut editor, egui::vec2(640.0, 480.0));
+            assert_eq!(
+                full_problem_count.get(),
+                1,
+                "Details must expose the full retained message once"
+            );
+            assert_eq!(editor.error, retained);
+            assert_eq!(editor.shader_notice, retained);
+            events.borrow_mut().push(egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            });
+            frame(&mut editor, egui::vec2(640.0, 480.0));
+            editor.runtime.visible = false;
+            frame(&mut editor, egui::vec2(640.0, 480.0));
+            editor.workspace.prefs.hierarchy_visible = false;
+            editor.workspace.prefs.inspector_visible = false;
+            let viewport = frame(&mut editor, egui::vec2(640.0, 480.0));
+            assert!(
+                viewport.width() > 600.0,
+                "hidden panels must release their budget"
+            );
+        }
+    }
     // Folding advanced controls must never hide recovered/invalid input, and
     // its keyboard actions must preserve invalid data until explicit cancellation.
     #[test]

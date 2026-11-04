@@ -200,7 +200,7 @@ bounds, supported OBJ directives, cache recipe, failure behavior and CLI command
 There is no background watcher, texture/MTL import or general polygon importer.
 
 The editor runtime freezes authored scene data and resolved geometry on a successful
-**Reset behavior runtime**.
+**Reset**.
 Refreshing authored content leaves that snapshot intact and marks it stale.
 Missing references keep their IDs and display a diagnostic placeholder. Save As
 to another asset root is blocked when current state or undo/redo can restore mesh
@@ -229,7 +229,7 @@ set, against a disposable scene whose first object is still a procedural cube.
 
 ### Generic scene construction
 
-In generic scene mode, **New scene** starts an empty authored scene. Unsaved work offers Save, Discard or Cancel; Save As must complete successfully before replacement. **Create cube** creates a procedural object and selects it. **Duplicate** creates a new stable identity, **Delete** removes the selected object, and **Undo authored edit** / **Redo authored edit** share the scene's bounded persisted history. Runtime transforms remain separate from authored scene data.
+In generic scene mode, **File → New scene** starts an empty authored scene. Unsaved work offers Save, Discard or Cancel; Save As must complete successfully before replacement. **Create cube** creates a procedural object and selects it. **Duplicate** creates a new stable identity, **Delete** removes the selected object, and **Edit → Undo / Redo** share the scene's bounded persisted history. Runtime transforms remain separate from authored scene data.
 
 **Rename object** opens a focused display-name dialog: Enter or **Apply name** submits, Escape or **Cancel rename** cancels. Tab can move to buttons and Enter activates the focused choice. Names can change without changing stable IDs or references. Resolve pending transform fields before object operations; resolve the name dialog before changing selection or closing. The hierarchy shows display names; the inspector’s collapsed Details section contains the immutable stable ID. Newly generated IDs avoid current objects and identities retained by undo/redo. The translation slice below adds multi-selection, a window-owned object clipboard and translation gizmos; the transform/pivot and mixed-precision continuation below extends that route.
 
@@ -269,7 +269,7 @@ changing selection, while invalid fields remain available to repair or revert.
 
 The resizable **Content** browser searches cached catalog IDs, relative source
 paths and Ready/Missing/Invalid status. Enter selects the first match; Escape
-clears its search. **Workspace** can show/hide the browser or focus either search
+clears its search. **View** can show/hide the browser or focus either search
 (default Ctrl+F for objects, Ctrl+Shift+F for content; remappable). A selected
 object's mesh reference offers **Locate mesh in Content**. Asset context actions
 assign to the active object, select referencing objects, or explicitly refresh
@@ -296,7 +296,7 @@ and never consume input.
 
 No arguments opens an empty generic scene with explicit New/Open/recent choices. A recent scene is never opened automatically. `--scene PATH` opens a chosen scene; legacy logistics requires `--scenario PATH`. An untouched empty welcome scene closes without a discard prompt; authored changes and invalid drafts retain their recovery guards.
 
-The **Workspace** menu lists shortcuts and opens **Workspace and shortcuts…**. Hierarchy and inspector can be resized, hidden/shown and assigned to left/right slots; **Reset layout** restores the defaults. This is bounded rearrangement, not a general docking framework. UI scale and navigation speed are adjustable. Binding capture rejects conflicts, reserves Escape for cancellation, and offers reset. Default scene shortcuts are Ctrl+N/O/S/Shift+S, Ctrl+Z/Shift+Z, Ctrl+C/V/D, Delete, W/E/R for tools and F to frame selection. F2 renames the active object while retaining a larger selection; Ctrl+A selects every scene object, including filtered objects. Both are remappable and retain normal text-selection ownership inside fields. These are agent-selected defaults, not an accepted Unity/Unreal preset. Focused text fields, recovery/settings dialogs and active gestures own their input. Object and text clipboards remain separate as described above.
+File/Edit/View command menus show current shortcuts. **File → Workspace and shortcuts…** configures bindings and layout. Hierarchy and inspector can be resized, hidden/shown and assigned to left/right slots; **Reset layout** restores the defaults. This is bounded rearrangement, not a general docking framework. UI scale and navigation speed are adjustable. Binding capture rejects conflicts, reserves Escape for cancellation, and offers reset. Default scene shortcuts are Ctrl+N/O/S/Shift+S, Ctrl+Z/Shift+Z, Ctrl+C/V/D, Delete, W/E/R for tools and F to frame selection. F2 renames the active object while retaining a larger selection; Ctrl+A selects every scene object, including filtered objects. Both are remappable and retain normal text-selection ownership inside fields. These are agent-selected defaults, not an accepted Unity/Unreal preset. Focused text fields, recovery/settings dialogs and active gestures own their input. Object and text clipboards remain separate as described above.
 
 Navigation uses right-drag orbit, middle-drag or Shift-right-drag pan, wheel zoom, **Fit** for the scene, and **Frame selected** / F for selected bounds. **Reset camera** restores the scene view. Hold right mouse over the viewport for W/A/S/D plus Q/E down/up movement; movement is bounded per frame and disabled while text/modal/gesture owns keyboard input. Speed is configured in scene units/second. The **Perspective/Orthographic** toggle and **View presets** menu provide front/back/left/right/top/bottom, isometric and free-perspective views. Fit and Frame selected preserve the current projection/orientation; Reset camera restores the scene view. Default remappable camera keys are5 for projection,1/3/7 for front/right/top, Ctrl+1/3/7 for back/left/bottom,0 for isometric and Home for free view. These are discoverable agent-selected bindings, not a required preset. The current camera is retained for up to ten successfully opened/saved canonical scene paths and restored only after a successful Open; fresh untitled scenes use default framing.
 
@@ -308,7 +308,7 @@ Preferences are separate version1 JSON, bounded to64KiB, under `$XDG_CONFIG_HOME
 Dialog keyboard behavior: rename and scene-path fields receive focus when opened; Enter submits and Escape cancels. Save/discard recovery prompts initially focus the safe Save action, with Tab/Shift+Tab traversal and Enter activating the focused button; Escape cancels the pending operation. Shortcut capture consumes Escape to cancel capture before a subsequent Escape closes settings. Human toolbar actions are deferred until fields process their current-frame input, so Save does not silently replace freshly typed text with an older draft.
 
 
-**Workspace → Close window** and the default remappable Ctrl+Q shortcut use the same close request as the window manager: transient gestures cancel, preferences flush, and unsaved scenes/fields require Save/Discard/Cancel. Pending name/New dialogs must be resolved first. A clean window closes normally through the host; the action never sends a close command around dirty-state safeguards. Focused text and recovery dialogs retain keyboard ownership.
+**File → Close window** and the default remappable Ctrl+Q shortcut use the same close request as the window manager: transient gestures cancel, preferences flush, and unsaved scenes/fields require Save/Discard/Cancel. Pending name/New dialogs must be resolved first. A clean window closes normally through the host; the action never sends a close command around dirty-state safeguards. Focused text and recovery dialogs retain keyboard ownership.
 
 ### Local crash recovery
 
@@ -317,7 +317,7 @@ precision, offset and name fields after two quiet seconds, with a fifteen-second
 cap during continuous edits. Runtime previews and active gizmo candidates are
 excluded. Pristine blank scenes allocate no checkpoint. Recovery performs no
 idle scene serialization or filesystem polling; scans occur at startup or an
-explicit **Workspace → Recovery checkpoints…** refresh. A failed checkpoint
+explicit **File → Recovery checkpoints…** refresh. A failed checkpoint
 preserves its previous completed record and displays a persistent warning;
 another edit or **Retry recovery checkpoint** schedules another attempt.
 One serial worker performs snapshot encoding, hashing and disk writes. The UI
@@ -385,17 +385,15 @@ crash recovery. Source text is bounded to16KiB UTF-8; oversized insertions are
 rejected with feedback rather than silently truncated. Property/core document
 limits remain visible and failures preserve working copies.
 
-**Reset behavior runtime** snapshots authored objects, source and properties on
+**Reset** snapshots authored objects, source and properties on
 the VM worker. Reset succeeds atomically or retains the previous runtime as
 explicitly stale. **Step** commits one fixed tick, **Play/Pause** controls fixed
-ticks, and **Stop (authored view)** cancels execution and returns to authored
+ticks, and **Stop** cancels execution and returns to authored
 objects. Authoring/content changes cancel the active run and require Reset.
 Runtime movement never becomes scene history or project-save data. A failed
-tick retains its last committed scene/tick. **View last runtime (stale; Reset
-required)** permits explicit inspection of the retained frame.
+tick retains its last committed scene/tick. **Runtime → View retained runtime (stale)** permits explicit inspection of the retained frame.
 
-Diagnostics show source ID/hash/line and object/attachment context. **Open
-diagnostic location** navigates matching current code, or opens the captured
+Diagnostics show source ID/hash/line and object/attachment context. **Open location** navigates matching current code, or opens the captured
 version read-only when the working source has changed. No Lua handles cross into
 the UI. Close cancellation and worker shutdown remain nonblocking. The external
 working-copy workflow follows below; debugger integration remains a separate
@@ -440,7 +438,7 @@ The final epoch check is the launch authorization point: a change observed befor
 it cancels launch; later edits or close cannot retract an already-authorized OS
 spawn. Pending jobs request bounded repaint polls until completion, then stop.
 
-**Workspace and shortcuts… → External code editor · Zed** configures an executable
+**File → Workspace and shortcuts… → External code editor · Zed** configures an executable
 and a JSON argument vector. The default is `zeditor` with
 `["--new", "{workspace}", "{file}:{line}"]`. Arguments are passed directly; no shell
 is used. Enter in the executable field or Ctrl+Enter applies, and Ctrl+S applies
@@ -470,3 +468,7 @@ Choose **Behavior debugger…**, select an embedded source and enter a1-based li
 The viewport retains its last committed frame while a tick is stopped or fails; runtime transforms never enter authored Save, Undo or recovery. Native/SDK acceptance is recorded separately from physical-focus and experienced-human familiarity evidence. Source-hash mismatch opens captured code read-only rather than highlighting a different current version.
 
 The inspector starts with the selected object name and **Transform**, followed by **Mesh** and **Behavior**. Object operations and clipboard actions are in **Actions**, context menus and remappable shortcuts. Technical identity/format and script backend information is in **Details** / **Script details**. Move/Rotate/Scale, World/Local, Pivot and Snap are on the viewport toolbar. **Adjust selection** contains world translation offsets and opens automatically while an offset draft is pending, including invalid recovered input. Enter applies the focused offset group; Escape resets it. Pending precision and behavior drafts retain their explicit Apply/Revert controls and visible errors. Draft repair and source-reopen controls remain available with no object selected. With multiple objects selected, Transform edits the selection; the visible Active object label scopes Mesh and Behavior to the last selected object.
+
+File/Edit/View menus expose scene, object and navigation commands with the current remapped shortcuts. The scene name and unsaved marker remain beside Save. Content/import and shader tools are available from the Content menu even when the browser is hidden; shader failures remain in the status area. Runtime uses Reset, Play/Pause, Step and Stop with debugger/retained-view details in its Runtime menu; stopped, stale and error states stay visible. Narrow viewport columns group Space/Pivot/Snap under Tool options and show active Local/Snap states. Temporary small-window panel constraints preserve preferred widths and restore them when space returns; visible panel minima stay 120/240 points and hidden panels consume no budget. Content height yields to viewport space rather than reserving a fraction of the entire window. Temporary compression preserves the normal divider height and restores it when room returns.
+
+Footer problems show concise first-line summaries with **Details** for the full retained message in a bounded scroll area. Distinct current and shader problems remain visible; exact duplicate messages appear once. This presentation preserves existing diagnostic limits and does not restore compiler text omitted before reaching the editor.

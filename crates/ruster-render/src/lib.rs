@@ -418,7 +418,6 @@ pub fn viewport_with_navigation(
     navigation.reset = false;
     navigation.frame_selected = false;
     ui.horizontal_wrapped(|ui| {
-        ui.label("3D · Left select · Right orbit · Middle/Shift-right pan · Wheel zoom");
         if ui
             .add_enabled(
                 navigation_enabled,
@@ -434,6 +433,9 @@ pub fn viewport_with_navigation(
             camera.orthographic = !camera.orthographic;
         }
         ui.menu_button("View presets", |ui| {
+            ui.label("Navigation");
+            ui.label("Left-click selects. Right-drag orbits. Middle-drag or Shift-right pans. Wheel zooms. Fit frames all objects.");
+            ui.separator();
             for (label, preset) in [
                 ("Front (+Z)", ViewPreset::Front),
                 ("Back (-Z)", ViewPreset::Back),

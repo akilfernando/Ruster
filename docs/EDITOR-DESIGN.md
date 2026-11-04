@@ -37,6 +37,8 @@ Native single/multiple/empty-selection captures confirm the new hierarchy. Root 
 
 The same captures show remaining chrome consumes too much viewport height. The next bounded presentation proposal is File/Edit/View menus with actual shortcut hints, a compact contextual runtime strip and less permanent instructional/shader chrome. Reuse existing guarded actions; errors, active debugger stops, stale-runtime warnings and recovery choices must remain discoverable. No new command implementation or general UI framework is selected.
 
+That follow-up is now implemented and passes its bounded source/native review: [responsive editor evidence](evidence/M9-responsive-editor.md). Minimum logical layouts retain the viewport, error summaries lead to explicit Details, and temporary side/Content constraints preserve normal layout intent. Native testing caught and repaired duplicated shader diagnostics, a stale rejection after valid refresh and Content retaining its compressed height. Both named NVIDIA/Intel devices pass functional validation/resize/shader recovery. This remains an agent-selected visual implementation; physical input, accessibility, broader adoption and the user's aesthetic approval are separate gates.
+
 ## Primary references and observations
 
 Accessed2026-11-05; source lessons are guidance, while the Ruster mapping is our inference.

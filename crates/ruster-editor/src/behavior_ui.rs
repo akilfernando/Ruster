@@ -1484,11 +1484,13 @@ impl RuntimeUi {
     ) -> Option<RunKey> {
         let mut reset = None;
         ui.horizontal_wrapped(|ui| {
+            ui.spacing_mut().item_spacing.x=4.0;
+            ui.spacing_mut().button_padding.x=6.0;
             if ui
                 .add_enabled(
                     !blocked && !self.shutdown,
-                    egui::Button::new("Reset behavior runtime"),
-                )
+                    egui::Button::new("Reset"),
+                ).on_hover_text("Reset behavior runtime from the current scene; runtime changes never edit the scene.")
                 .clicked()
             {
                 match self.reset(ui.ctx(), session, generation) {
@@ -1526,35 +1528,41 @@ impl RuntimeUi {
             if ui
                 .add_enabled(
                     self.worker.is_some() && !self.shutdown,
-                    egui::Button::new("Stop (authored view)"),
+                    egui::Button::new("Stop"),
                 )
                 .clicked()
             {
                 self.stop(generation, session.scene().revision);
             }
+            ui.menu_button("Runtime",|ui| {
+                if ui.button("Behavior debugger…").clicked(){self.debug.open=true;ui.close();}
+                ui.add_enabled(self.frame.is_some(),egui::Checkbox::new(&mut self.visible,if self.stale {"View retained runtime (stale)"}else{"View runtime"}));
+                if let Some(frame)=&self.frame {ui.label(format!("Committed tick {}",frame.tick));}
+                if !self.status.is_empty(){ui.label(&self.status);}
+                if let Some(diagnostic)=&self.diagnostic {ui.collapsing("Diagnostic details",|ui| {
+                    ui.set_max_width(360.0);
+                    egui::ScrollArea::vertical().id_salt("runtime_diagnostic_details").max_height(160.0).show(ui,|ui| {
+                    ui.colored_label(egui::Color32::LIGHT_RED,&diagnostic.message);
+                    ui.label(format!("Source {} · hash {} · line {} · object {} · binding {}",diagnostic.source_id.as_deref().unwrap_or("—"),diagnostic.source_hash.as_deref().unwrap_or("—"),diagnostic.line.map(|line|line.to_string()).as_deref().unwrap_or("—"),diagnostic.object_id.as_deref().unwrap_or("—"),diagnostic.binding_id.as_deref().unwrap_or("—")));
+                    });
+                });}
+            });
         });
-        ui.horizontal_wrapped(|ui| {
-            if ui.button("Behavior debugger…").clicked() {
-                self.debug.open = true;
-            }
-            ui.add_enabled(
-                self.frame.is_some(),
-                egui::Checkbox::new(
-                    &mut self.visible,
-                    if self.stale {
-                        "View last runtime (stale; Reset required)"
-                    } else {
-                        "View runtime"
-                    },
+        if let Some(stop) = self.debug_snapshot() {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                format!(
+                    "Paused · {}:{} · tick {}",
+                    stop.source_id,
+                    stop.line
+                        .map(|line| line.to_string())
+                        .as_deref()
+                        .unwrap_or("?"),
+                    stop.committed_tick
                 ),
             );
-            ui.label(format!(
-                "Runtime tick {}",
-                self.frame.as_ref().map(|frame| frame.tick).unwrap_or(0)
-            ));
-        });
-        if !self.status.is_empty() {
-            ui.label(&self.status);
+        } else if self.stale && self.diagnostic.is_none() {
+            ui.colored_label(egui::Color32::YELLOW, "Runtime stale · Reset required");
         }
         self.flush();
         reset

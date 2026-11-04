@@ -9,9 +9,9 @@ Ruster's purpose is to help people turn their own ideas into working creations. 
 
 Familiarity for experienced Unity and Unreal creators, including everyday editor conveniences, is a core requirement. The [editor experience baseline](docs/EDITOR-EXPERIENCE.md) describes the target and the gaps still to close.
 
-**Early development:** milestones M0–M8 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan and editor evidence is Linux-only on the recorded development machine; Windows and other GPU classes remain unverified. Physical-focus and experienced-creator acceptance also remain open. The current [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the newly reported selection/live-inspector blockers and platform limits.
+**Early development:** milestones M0–M8 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan/editor smoke covers NVIDIA RTX4060 Laptop and Intel Iris Xe on the recorded Linux workstation; Windows and other machines remain unverified. Physical repaired-build input and experienced-creator acceptance also remain open. The [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the interaction repairs and remaining adoption/platform limits.
 
-![Ruster scene editor with imported meshes, content browser and transform tools](docs/evidence/m8-content-recovery-drag.png)
+![Ruster scene editor with command menus, transform inspector and content browser](docs/evidence/m9-editor-overview.png)
 
 ## What works today
 
@@ -39,7 +39,7 @@ The current scene limit is 256 objects and one viewport. Scene format v5 carries
 
 A documented [upstream SPIR-V compatibility patch](third_party/wgpu-hal/RUSTER-PATCH.md) is included with full source and licenses; newer GPU feature requirements must revisit this temporary boundary.
 
-Native Vulkan runtime verification currently covers CachyOS with an NVIDIA RTX 4060 Laptop GPU. Windows runtime and other GPU classes are not yet verified. Development-library package names vary by distribution; the [Linux CI workflow](.github/workflows/ci.yml) shows the Ubuntu build prerequisites.
+Native Vulkan smoke currently covers CachyOS with NVIDIA RTX4060 Laptop and Intel Iris Xe graphics. This is a named-workstation check, not a broad support matrix. Windows and clean-machine runtime remain unverified. Development-library package names vary by distribution; the [Linux CI workflow](.github/workflows/ci.yml) shows the Ubuntu build prerequisites.
 
 ```sh
 git clone https://github.com/akilfernando/Ruster.git
@@ -49,7 +49,14 @@ cargo run --locked -p ruster-editor -- --scene examples/arrangement.scene.json
 
 Run `cargo run --locked -p ruster-editor` for a blank creation workspace. Scene sources, workspace preferences and local recovery records have separate lifetimes; see the [editor guide](crates/ruster-editor/README.md).
 
-Select an object in the hierarchy or click a cube. Edit a transform, then choose **Apply transform**. Invalid text is preserved for correction. Right-drag to orbit, scroll to zoom, and use **Fit** to frame the scene. **Undo transform** reverses an authored change. Use **Save scene as…** to keep experiments separate from the checked-in example.
+Select an object in the hierarchy or click a cube. Edit a Position, Rotation or Scale component, then press Enter or choose **Apply transform components**. Escape reverts a pending component edit; invalid text stays available for correction. Right-drag to orbit, scroll to zoom, and use **Fit** to frame the scene. **Edit → Undo** reverses an authored change. Use **File → Save as…** to keep experiments separate from the checked-in example.
+
+For a first creation from the blank workspace, using the default shortcuts:
+
+1. Choose **Create cube**, press F2, type a name and press Enter.
+2. Use W/E/R for Move/Rotate/Scale. Drag a handle, or enter transform values in the inspector; Escape cancels an unfinished edit.
+3. Press Ctrl+D to duplicate, then Ctrl+Z to undo. **View** lists navigation commands and their current shortcuts; **Perspective/Orthographic** and **View presets** are beside the viewport.
+4. Use **File → Save as…** to save a new scene, then **File → Open scene…** to reopen it. Recovery checkpoints are under **File → Recovery checkpoints…**; restoring one creates an unsaved copy.
 
 Open the same scene in the standalone renderer:
 
@@ -86,7 +93,7 @@ cargo run --locked -p ruster-editor -- --scene examples/motion-lab/resources/gen
 cargo run --locked -p ruster-motion-lab -- --scene examples/motion-lab/resources/generic.scene.json --headless --ticks 10
 ```
 
-Select an object to inspect its attached behavior. To add one, create/select an unattached object and choose **Behavior → Add behavior… → Lua follower**. Edit source or typed properties, then use **Reset behavior runtime** and **Play**. Save/reopen retains behavior data with the scene; source and property edits participate in shared undo and recovery. For external editing, export or open the working copy in Zed; the editor generates LuaLS configuration and host/property types. The in-editor debugger supports source breakpoints, bounded locals, Next and Continue. Lua remains provisional, and human physical-focus/familiarity acceptance is still open. The separate legacy Rhai `project1` workflow remains available and is not silently converted to Scene5. See the [editor behavior guide](crates/ruster-editor/README.md#embedded-behavior-authoring-and-execution), [Motion Lab guide](examples/motion-lab/README.md), [behavior backend](crates/ruster-behavior/README.md) and [language decision gate](docs/decisions/0011-behavior-scripting-experiment.md).
+Select an object to inspect its attached behavior. To add one, create/select an unattached object and choose **Behavior → Add behavior… → Lua follower**. Edit source or typed properties, then use **Reset** and **Play** above the viewport. Save/reopen retains behavior data with the scene; source and property edits participate in shared undo and recovery. For external editing, export or open the working copy in Zed; the editor generates LuaLS configuration and host/property types. The in-editor debugger supports source breakpoints, bounded locals, Next and Continue. Lua remains provisional, and human physical-focus/familiarity acceptance is still open. The separate legacy Rhai `project1` workflow remains available and is not silently converted to Scene5. See the [editor behavior guide](crates/ruster-editor/README.md#embedded-behavior-authoring-and-execution), [Motion Lab guide](examples/motion-lab/README.md), [behavior backend](crates/ruster-behavior/README.md) and [language decision gate](docs/decisions/0011-behavior-scripting-experiment.md).
 
 ### Imported content example
 

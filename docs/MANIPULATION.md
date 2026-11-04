@@ -1,10 +1,10 @@
 # M8 manipulation implementation notes
 
-Date: 2026-11-04. Working design under authorized autonomous delivery; not a completed manipulation gate. The [roadmap](ROADMAP.md) and [experience baseline](EDITOR-EXPERIENCE.md) own requirements. User prioritizes a lean optimized app; measure useful costs rather than introducing speculative architecture.
+Initial design: 2026-11-04; current integration note added2026-11-05 below. The planning sections retain their historical scope; bounded tools are implemented, while physical repaired-build acceptance remains open. The [roadmap](ROADMAP.md) and [experience baseline](EDITOR-EXPERIENCE.md) own current requirements. User prioritizes a lean optimized app; measure useful costs rather than introducing speculative architecture.
 
 ## Creator journey and ownership
 
-Next runnable result: select two objects, copy/paste them with fresh identities, move them with a snapped viewport gesture or precise multi-object fields, cancel an attempt, commit another, undo once and save/reopen. Rotation/scale/pivot behavior follows through the same gesture boundary; translation alone does not close the allocated manipulation gate.
+Initial targeted journey: select two objects, copy/paste them with fresh identities, move them with a snapped viewport gesture or precise multi-object fields, cancel an attempt, commit another, undo once and save/reopen. Rotation/scale/pivot behavior follows through the same gesture boundary; translation alone does not close the allocated manipulation gate.
 
 Keep ordered selected IDs plus active object in the editor. Hierarchy/viewport selection agree; plain click replaces, modifier clicks add/toggle, empty viewport clears. Text fields retain clipboard/shortcut ownership. Gizmo gestures capture starting state and revision, display a transient candidate and commit one validated transaction only on release. Escape/focus loss/stale state/document replacement cancels; unrelated mutations are blocked while a gesture owns drafts. Runtime/Preview remains separate.
 
@@ -54,3 +54,5 @@ Maintain stored ZYX Euler construction (`qz*qy*qx`); convert with ZYX and compar
 
 
 2026-11-04 tools verification: exact rotation/scale/pivots and percomponent mixed precision passed19editor tests and the99Rust/20tooling integrated behavioral gate. [Native controls/editing evidence](evidence/M8-manipulation-tools-native.md) verifies UI availability and mixedcomponent edit/undo/save/reopen. Initial Mixed truncation was corrected with a native-checked dash/legend layout. Physical focus-dependent handle input remains open. [Measured authoring costs](evidence/M8-authoring-cost.md) support invariant reuse for Undo/Redo without capacity changes.
+
+2026-11-05 current integration: the earlier planning/open-tool wording above is historical. Move/rotate/scale, pivots, snapping and degree/mixed precision are implemented in the bounded M8 scope. Human M9 feedback then reproduced competing gizmo/viewport input and missing live values. The editor bypasses the adapter's interactive wrapper, owns pointer routing through the viewport response, and paints toolkit output directly. Candidate values appear read-only in the existing inspector without authored/draft/history mutation. [Decision0014's refinement](decisions/0014-group-authoring-and-gizmo.md#input-ownership-refinement--2026-11-05) and [repair evidence](evidence/M9-interaction-fix.md) prevent reintroducing the known click-stealing integration. Physical repaired-build retest remains open.
