@@ -32,6 +32,14 @@ fn read_batch<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T, Box<dyn 
 
 use ruster_scene::{Object, Preview, Scene, Session, FORMAT_VERSION};
 
+fn report_revision(session: &Session, revision: u64) {
+    println!("revision {revision}");
+    let removed = session.history_evictions();
+    if removed > 0 {
+        eprintln!("Removed {removed} oldest Undo steps to keep this edit saveable.");
+    }
+}
+
 fn main() {
     if let Err(error) = run() {
         eprintln!("{error}");
@@ -72,7 +80,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 _ => unreachable!(),
             };
             session.save(path)?;
-            println!("revision {revision}");
+            report_revision(&session, revision);
         }
         ("inspect", 2) => {
             let session = Session::open(&args[1])?;
@@ -101,7 +109,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             }
             let revision = session.edit(expected, &args[3], &transform)?;
             session.save(path)?;
-            println!("revision {revision}");
+            report_revision(&session, revision);
         }
         ("mesh", 5) => {
             let path = Path::new(&args[1]);
@@ -113,7 +121,7 @@ fn run() -> Result<(), Box<dyn Error>> {
             };
             let revision = session.set_mesh(args[2].parse()?, &args[3], mesh)?;
             session.save(path)?;
-            println!("revision {revision}");
+            report_revision(&session, revision);
         }
         ("transforms" | "duplicates" | "deletes", 4) => {
             let path = Path::new(&args[1]);
@@ -143,7 +151,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 }
             };
             session.save(path)?;
-            println!("revision {revision}");
+            report_revision(&session, revision);
         }
         ("undo" | "redo", 3) => {
             let path = Path::new(&args[1]);
@@ -155,7 +163,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 session.redo(expected)?
             };
             session.save(path)?;
-            println!("revision {revision}");
+            report_revision(&session, revision);
         }
         ("run", 3) => {
             let ticks: u64 = args[2].parse()?;

@@ -35,7 +35,7 @@ fn cli_import_inspect_rename_and_failure_exit() {
 // Run the real CLI in a bounded child so a regression cannot hang this suite.
 #[cfg(unix)]
 #[test]
-fn nonregular_source_catalog_cache_and_lock_do_not_block() {
+fn nonregular_files_and_held_asset_lock_do_not_block() {
     use std::{
         path::Path,
         process::Stdio,
@@ -60,7 +60,7 @@ fn nonregular_source_catalog_cache_and_lock_do_not_block() {
             if Instant::now() >= deadline {
                 child.kill().unwrap();
                 child.wait().unwrap();
-                panic!("CLI blocked on a nonregular asset file: {args:?}");
+                panic!("CLI blocked on an asset filesystem boundary: {args:?}");
             }
             thread::sleep(Duration::from_millis(10));
         }
@@ -107,8 +107,37 @@ fn nonregular_source_catalog_cache_and_lock_do_not_block() {
         .path();
     fs::remove_file(&cache).unwrap();
     fifo(&cache);
-    // Cache rejection is recoverable: valid unchanged source rebuilds it.
+    // Cache rejection is recoverable in memory. Publication refuses to replace
+    // special files; inspect exposes the rebuild diagnostic for explicit repair.
     let cache_result = run(&["inspect", path]);
     assert!(cache_result.status.success());
-    assert!(fs::symlink_metadata(cache).unwrap().file_type().is_file());
+    assert!(!fs::symlink_metadata(&cache).unwrap().file_type().is_file());
+    let inspected: serde_json::Value = serde_json::from_slice(&cache_result.stdout).unwrap();
+    assert!(inspected["assets"][0]["diagnostic"]
+        .as_str()
+        .unwrap()
+        .contains("cache rebuild failed"));
+    fs::remove_file(cache).unwrap();
+
+    // A real held cooperative lock returns visible Busy rather than waiting for
+    // another operation. The failed child must not change catalog or source.
+    use fs2::FileExt;
+    let catalog_path = root.path().join(".ruster-assets.json");
+    let before = fs::read(&catalog_path).unwrap();
+    let held = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .open(root.path().join(".ruster-assets.lock"))
+        .unwrap();
+    held.lock_exclusive().unwrap();
+    let busy = run(&["rename", path, "owned", "renamed.obj"]);
+    assert!(!busy.status.success());
+    assert!(String::from_utf8(busy.stderr).unwrap().contains("Busy"));
+    assert_eq!(fs::read(&catalog_path).unwrap(), before);
+    assert!(root.path().join("owned.obj").exists());
+    assert!(!root.path().join("renamed.obj").exists());
+    FileExt::unlock(&held).unwrap();
+    assert!(run(&["rename", path, "owned", "renamed.obj"])
+        .status
+        .success());
 }

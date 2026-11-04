@@ -15,6 +15,8 @@ const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MAX_SAMPLES: usize = 4096;
 const MAX_MESHES: usize = ruster_assets::MAX_ASSETS;
 const MAX_MESH_INDICES: usize = ruster_assets::MAX_TRIANGLES * 3;
+// Retained attachment payload only, excluding driver allocations and resize overlap.
+const MAX_TARGET_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_SHADER_BYTES: usize = 64 * 1024;
 
 /// Built-in source is a starting point for project-local scene.wgsl edits.
@@ -33,16 +35,18 @@ pub fn refresh_shader(render: &egui_wgpu::RenderState, source: &str) -> Result<(
         .callback_resources
         .get_mut::<Resources>()
         .ok_or("scene renderer is not installed")?;
-    r.pipeline = validated_pipeline(&render.device, &r.pipeline_layout, source)?;
+    r.pipeline = validated_pipeline(&render.device, &r.pipeline_layout, source, r.sample_count)?;
     Ok(())
 }
 
-/// Enable optional timestamps only where supported; no optional feature is required to render.
+/// Enable optional timestamps and native format sample counts only where supported.
 pub fn configure_setup(setup: &mut egui_wgpu::WgpuSetupCreateNew) {
     let previous = setup.device_descriptor.clone();
     setup.device_descriptor = Arc::new(move |adapter| {
         let mut desc = previous(adapter);
-        desc.required_features |= adapter.features() & wgpu::Features::TIMESTAMP_QUERY;
+        desc.required_features |= adapter.features()
+            & (wgpu::Features::TIMESTAMP_QUERY
+                | wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES);
         desc
     });
 }
@@ -61,6 +65,8 @@ pub struct Metrics {
     pub draw_calls: usize,
     pub instance_capacity_bytes: u64,
     pub target_bytes: u64,
+    pub target_size: [u32; 2],
+    pub sample_count: u32,
     pub objects: usize,
     pub timestamp_enabled: bool,
 }
@@ -69,30 +75,111 @@ pub type MetricsHandle = Arc<Mutex<Metrics>>;
 /// Install once on the eframe device; resources are dropped with that device/renderer.
 /// The current bounded integration supports one scene viewport per eframe renderer.
 pub fn install(render: &egui_wgpu::RenderState) -> MetricsHandle {
-    let resources = Resources::new(&render.device, render.target_format);
+    let requested = match std::env::var("RUSTER_MSAA_SAMPLES") {
+        Ok(value) => match value.as_str() {
+            "1" => 1,
+            "2" => 2,
+            "4" => 4,
+            _ => {
+                eprintln!("RUSTER_MSAA_SAMPLES must be 1, 2 or 4; using provisional default 4");
+                4
+            }
+        },
+        Err(_) => 4,
+    };
+    let sample_count = supported_samples(&render.adapter, &render.device, requested);
+    let resources = Resources::new(&render.device, render.target_format, sample_count);
     let metrics = resources.metrics.clone();
     eprintln!(
-        "Ruster shared 3D: adapter={} backend={:?} timestamps={}",
+        "Ruster shared 3D: adapter={} backend={:?} timestamps={} msaa_requested={} msaa_effective={} target_payload_cap_bytes={}",
         render.adapter.get_info().name,
         render.adapter.get_info().backend,
-        resources.timestamps.is_some()
+        resources.timestamps.is_some(), requested, sample_count, MAX_TARGET_BYTES
     );
     render.renderer.write().callback_resources.insert(resources);
     metrics
 }
 
+/// Validated frontend-owned navigation context; it contains no GPU resources.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct CameraState {
+    pub target: [f32; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: f32,
+    pub orthographic: bool,
+}
+impl CameraState {
+    pub fn is_valid(self) -> bool {
+        self.target
+            .into_iter()
+            .all(|v| v.is_finite() && v.abs() <= 1.0e7)
+            && self.yaw.is_finite()
+            && self.pitch.is_finite()
+            && self.pitch.abs() <= std::f32::consts::FRAC_PI_2
+            && self.distance.is_finite()
+            && (0.01..=1.0e7).contains(&self.distance)
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ViewPreset {
+    Front,
+    Back,
+    Left,
+    Right,
+    Top,
+    Bottom,
+    Isometric,
+    Free,
+}
+/// Optional editor navigation. Keyboard movement requires focused viewport input
+/// and RMB held; frontends must disable it while text, modal or gesture owns input.
+#[derive(Clone, Debug)]
+pub struct NavigationOptions {
+    pub enabled: bool,
+    pub keyboard_enabled: bool,
+    pub frame_selected: bool,
+    pub reset: bool,
+    pub movement_speed: f32,
+    pub camera: Option<CameraState>,
+    pub toggle_projection: bool,
+    pub view_preset: Option<ViewPreset>,
+}
+impl Default for NavigationOptions {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            keyboard_enabled: false,
+            frame_selected: false,
+            reset: false,
+            movement_speed: 4.0,
+            camera: None,
+            toggle_projection: false,
+            view_preset: None,
+        }
+    }
+}
 #[derive(Clone, Copy, Debug)]
 struct Camera {
     target: Vec3,
     yaw: f32,
     pitch: f32,
     distance: f32,
+    orthographic: bool,
 }
 impl Camera {
     fn fit(scene: &Scene, meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>) -> Self {
+        Self::fit_objects(scene.objects.iter(), meshes)
+    }
+    fn fit_objects<'a>(
+        objects: impl Iterator<Item = &'a Object>,
+        meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+    ) -> Self {
+        let mut count = 0;
         let mut low = Vec3::splat(f32::INFINITY);
         let mut high = Vec3::splat(f32::NEG_INFINITY);
-        for object in &scene.objects {
+        for object in objects {
+            count += 1;
             let matrix = model(object);
             if let Some(mesh) = object_mesh(object, meshes) {
                 for vertex in &mesh.vertices {
@@ -112,7 +199,7 @@ impl Camera {
                 }
             }
         }
-        let (target, distance) = if scene.objects.is_empty() {
+        let (target, distance) = if count == 0 {
             (Vec3::ZERO, 8.0)
         } else {
             ((low + high) * 0.5, (high - low).length().max(1.0) * 1.5)
@@ -122,6 +209,78 @@ impl Camera {
             yaw: 0.65,
             pitch: 0.45,
             distance,
+            orthographic: false,
+        }
+    }
+    fn state(self) -> CameraState {
+        CameraState {
+            target: self.target.to_array(),
+            yaw: self.yaw,
+            pitch: self.pitch,
+            distance: self.distance,
+            orthographic: self.orthographic,
+        }
+    }
+    fn from_state(state: CameraState) -> Self {
+        Self {
+            target: Vec3::from_array(state.target),
+            yaw: state.yaw,
+            pitch: state.pitch,
+            distance: state.distance,
+            orthographic: state.orthographic,
+        }
+    }
+    fn direction(self) -> Vec3 {
+        Vec3::new(
+            self.yaw.sin() * self.pitch.cos(),
+            self.pitch.sin(),
+            self.yaw.cos() * self.pitch.cos(),
+        )
+    }
+    fn up(self) -> Vec3 {
+        if self.direction().y.abs() > 0.999 {
+            Vec3::Z
+        } else {
+            Vec3::Y
+        }
+    }
+    fn set_preset(&mut self, preset: ViewPreset) {
+        let (yaw, pitch) = match preset {
+            ViewPreset::Front => (0.0, 0.0),
+            ViewPreset::Back => (std::f32::consts::PI, 0.0),
+            ViewPreset::Left => (-std::f32::consts::FRAC_PI_2, 0.0),
+            ViewPreset::Right => (std::f32::consts::FRAC_PI_2, 0.0),
+            ViewPreset::Top => (0.0, std::f32::consts::FRAC_PI_2),
+            ViewPreset::Bottom => (0.0, -std::f32::consts::FRAC_PI_2),
+            ViewPreset::Isometric => (
+                std::f32::consts::FRAC_PI_4,
+                (1.0_f32 / 2.0_f32.sqrt()).atan(),
+            ),
+            ViewPreset::Free => (0.65, 0.45),
+        };
+        self.yaw = yaw;
+        self.pitch = pitch;
+        self.orthographic = preset != ViewPreset::Free;
+    }
+    fn frame(&mut self, fitted: Self) {
+        self.target = fitted.target;
+        self.distance = fitted.distance;
+    }
+    fn fit_aspect(&mut self, aspect: f32) {
+        // The diagonal-derived sphere already fits the vertical field of view.
+        // Portrait viewports need more distance to fit its horizontal extent.
+        self.distance /= aspect.clamp(f32::EPSILON, 1.0);
+    }
+    fn navigate(&mut self, delta: egui::Vec2, pan: bool, speed: f32, height: f32) {
+        if pan {
+            let right = self.up().cross(self.direction()).normalize();
+            let up = self.direction().cross(right);
+            let factor = 2.0 * self.distance * (22.5_f32.to_radians()).tan() / height.max(1.0)
+                * (speed / 4.0);
+            self.target += (-right * delta.x + up * delta.y) * factor;
+        } else {
+            self.yaw -= delta.x * 0.008;
+            self.pitch = (self.pitch + delta.y * 0.008).clamp(-1.45, 1.45);
         }
     }
     /// Separate view and projections keep toolkit clip-depth conventions explicit.
@@ -131,19 +290,29 @@ impl Camera {
             self.pitch.sin(),
             self.yaw.cos() * self.pitch.cos(),
         );
-        let view = Mat4::look_at_rh(
+        let view = Mat4::look_to_rh(
             self.target + direction * self.distance,
-            self.target,
-            Vec3::Y,
+            -direction,
+            self.up(),
         );
         let fov = 45.0_f32.to_radians();
         let near = self.distance * 0.001;
         let far = self.distance * 100.0;
-        (
-            view,
-            Mat4::perspective_rh(fov, aspect, near, far),
-            Mat4::perspective_rh_gl(fov, aspect, near, far),
-        )
+        if self.orthographic {
+            let height = self.distance * (fov * 0.5).tan();
+            let width = height * aspect;
+            (
+                view,
+                Mat4::orthographic_rh(-width, width, -height, height, near, far),
+                Mat4::orthographic_rh_gl(-width, width, -height, height, near, far),
+            )
+        } else {
+            (
+                view,
+                Mat4::perspective_rh(fov, aspect, near, far),
+                Mat4::perspective_rh_gl(fov, aspect, near, far),
+            )
+        }
     }
 }
 fn model(object: &Object) -> Mat4 {
@@ -199,34 +368,148 @@ pub fn viewport_interactive(
     meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
     navigation_enabled: bool,
 ) -> ViewportInteraction {
+    let mut navigation = NavigationOptions {
+        enabled: navigation_enabled,
+        ..Default::default()
+    };
+    viewport_with_navigation(ui, scene, selected, meshes, &mut navigation)
+}
+
+/// Navigation-enabled variant retaining the same renderer/GPU ownership.
+pub fn viewport_with_navigation(
+    ui: &mut egui::Ui,
+    scene: &Scene,
+    selected: &[&str],
+    meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+    navigation: &mut NavigationOptions,
+) -> ViewportInteraction {
+    let navigation_enabled = navigation.enabled;
     let camera_id = ui.scope_id().with(("ruster-3d-camera", &scene.id));
-    let mut camera = ui
-        .ctx()
-        .data_mut(|data| data.get_temp::<Camera>(camera_id))
-        .unwrap_or_else(|| Camera::fit(scene, meshes));
-    ui.horizontal(|ui| {
-        ui.label("3D · Left click selects · Right drag orbits · Wheel zooms");
+    let stored_camera = ui.ctx().data_mut(|data| data.get_temp::<Camera>(camera_id));
+    let mut fitted = stored_camera.is_none();
+    let mut camera = stored_camera.unwrap_or_else(|| Camera::fit(scene, meshes));
+    if let Some(state) = navigation.camera.filter(|state| state.is_valid()) {
+        camera = Camera::from_state(state);
+        fitted = false;
+    }
+    if navigation_enabled && navigation.reset {
+        camera = Camera::fit(scene, meshes);
+        fitted = true;
+    }
+    if navigation_enabled && navigation.frame_selected && !selected.is_empty() {
+        camera.frame(Camera::fit_objects(
+            scene
+                .objects
+                .iter()
+                .filter(|o| selected.contains(&o.id.as_str())),
+            meshes,
+        ));
+        fitted = true;
+    }
+    if navigation_enabled && navigation.toggle_projection {
+        camera.orthographic = !camera.orthographic;
+    }
+    if navigation_enabled {
+        if let Some(preset) = navigation.view_preset.take() {
+            camera.set_preset(preset);
+        }
+    }
+    navigation.toggle_projection = false;
+    navigation.reset = false;
+    navigation.frame_selected = false;
+    ui.horizontal_wrapped(|ui| {
+        ui.label("3D · Left select · Right orbit · Middle/Shift-right pan · Wheel zoom");
+        if ui
+            .add_enabled(
+                navigation_enabled,
+                egui::Button::new(if camera.orthographic {
+                    "Orthographic"
+                } else {
+                    "Perspective"
+                }),
+            )
+            .on_hover_text("Toggle perspective/orthographic projection")
+            .clicked()
+        {
+            camera.orthographic = !camera.orthographic;
+        }
+        ui.menu_button("View presets", |ui| {
+            for (label, preset) in [
+                ("Front (+Z)", ViewPreset::Front),
+                ("Back (-Z)", ViewPreset::Back),
+                ("Left (-X)", ViewPreset::Left),
+                ("Right (+X)", ViewPreset::Right),
+                ("Top (+Y)", ViewPreset::Top),
+                ("Bottom (-Y)", ViewPreset::Bottom),
+                ("Isometric", ViewPreset::Isometric),
+                ("Free perspective", ViewPreset::Free),
+            ] {
+                if ui
+                    .add_enabled(navigation_enabled, egui::Button::new(label))
+                    .clicked()
+                {
+                    camera.set_preset(preset);
+                    ui.close();
+                }
+            }
+        });
         if ui
             .add_enabled(navigation_enabled, egui::Button::new("Fit"))
             .clicked()
         {
-            camera = Camera::fit(scene, meshes);
+            camera.frame(Camera::fit(scene, meshes));
+            fitted = true;
         }
     });
     let (rect, response) = ui.allocate_exact_size(
         ui.available_size().max(egui::vec2(1.0, 1.0)),
         egui::Sense::click_and_drag(),
     );
-    if navigation_enabled && response.dragged_by(egui::PointerButton::Secondary) {
-        let delta = ui.input(|input| input.pointer.delta());
-        camera.yaw -= delta.x * 0.008;
-        camera.pitch = (camera.pitch + delta.y * 0.008).clamp(-1.45, 1.45);
+    if fitted {
+        camera.fit_aspect(rect.aspect_ratio());
+    }
+    let speed = navigation.movement_speed.clamp(0.05, 1000.0);
+    let pan = response.dragged_by(egui::PointerButton::Middle)
+        || (response.dragged_by(egui::PointerButton::Secondary) && ui.input(|i| i.modifiers.shift));
+    if navigation_enabled && (pan || response.dragged_by(egui::PointerButton::Secondary)) {
+        camera.navigate(
+            ui.input(|input| input.pointer.delta()),
+            pan,
+            speed,
+            rect.height(),
+        );
     }
     if navigation_enabled && response.hovered() {
         camera.distance = (camera.distance
             * (-ui.input(|input| input.smooth_scroll_delta.y) * 0.002).exp())
         .clamp(0.01, 1.0e7);
+        if navigation.keyboard_enabled
+            && ui.input(|i| i.focused && i.pointer.button_down(egui::PointerButton::Secondary))
+        {
+            let movement = ui.input(|i| {
+                Vec3::new(
+                    f32::from(u8::from(i.key_down(egui::Key::D)))
+                        - f32::from(u8::from(i.key_down(egui::Key::A))),
+                    f32::from(u8::from(i.key_down(egui::Key::E)))
+                        - f32::from(u8::from(i.key_down(egui::Key::Q))),
+                    f32::from(u8::from(i.key_down(egui::Key::S)))
+                        - f32::from(u8::from(i.key_down(egui::Key::W))),
+                )
+            });
+            if movement != Vec3::ZERO {
+                let direction = camera.direction();
+                let right = camera.up().cross(direction).normalize();
+                let dt = ui.input(|i| i.stable_dt).min(0.05);
+                camera.target +=
+                    (right * movement.x + Vec3::Y * movement.y + direction * movement.z)
+                        .normalize_or_zero()
+                        * speed
+                        * dt;
+                ui.ctx().request_repaint();
+            }
+        }
     }
+    navigation.camera = Some(camera.state());
     ui.ctx()
         .data_mut(|data| data.insert_temp(camera_id, camera));
     let (view, projection, gizmo_projection) = camera.matrices(rect.aspect_ratio());
@@ -417,11 +700,87 @@ fn cube() -> (Vec<Vertex>, Vec<u32>) {
     (vertices, indices)
 }
 
+fn choose_samples(
+    color: wgpu::TextureFormatFeatureFlags,
+    depth: wgpu::TextureFormatFeatureFlags,
+    requested: u32,
+) -> u32 {
+    [4, 2, 1]
+        .into_iter()
+        .find(|&count| {
+            count <= requested
+                && (count == 1
+                    || (color.contains(wgpu::TextureFormatFeatureFlags::MULTISAMPLE_RESOLVE)
+                        && color.sample_count_supported(count)
+                        && depth.sample_count_supported(count)))
+        })
+        .unwrap_or(1)
+}
+fn supported_samples(adapter: &wgpu::Adapter, device: &wgpu::Device, requested: u32) -> u32 {
+    let flags = |format: wgpu::TextureFormat| {
+        let adapter_flags = adapter.get_texture_format_features(format).flags;
+        if device
+            .features()
+            .contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
+        {
+            adapter_flags
+        } else {
+            adapter_flags & format.guaranteed_format_features(device.features()).flags
+        }
+    };
+    choose_samples(flags(COLOR), flags(DEPTH), requested)
+}
+fn target_bytes(size: [u32; 2], samples: u32) -> u64 {
+    let bytes_per_pixel = if samples == 1 { 8 } else { 4 + 8 * samples };
+    u64::from(size[0]) * u64::from(size[1]) * u64::from(bytes_per_pixel)
+}
+fn target_size(size: egui::Vec2, pixels_per_point: f32, max: u32, samples: u32) -> [u32; 2] {
+    let width = (f64::from(size.x) * f64::from(pixels_per_point))
+        .round()
+        .max(1.0);
+    let height = (f64::from(size.y) * f64::from(pixels_per_point))
+        .round()
+        .max(1.0);
+    let pixels = MAX_TARGET_BYTES / target_bytes([1, 1], samples);
+    let scale = 1.0_f64
+        .min(f64::from(max) / width)
+        .min(f64::from(max) / height)
+        .min((pixels as f64 / (width * height)).sqrt());
+    // Uniform scaling retains the logical camera/picking aspect up to pixel rounding.
+    let width = (width * scale).floor().max(1.0) as u32;
+    let height = (height * scale).floor().max(1.0) as u32;
+    [width.min((pixels / u64::from(height)) as u32), height]
+}
+
 struct Target {
     color: wgpu::TextureView,
+    multisample: Option<wgpu::TextureView>,
     depth: wgpu::TextureView,
     bind: wgpu::BindGroup,
     size: [u32; 2],
+}
+impl Target {
+    fn color_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
+        wgpu::RenderPassColorAttachment {
+            view: self.multisample.as_ref().unwrap_or(&self.color),
+            resolve_target: self.multisample.as_ref().map(|_| &self.color),
+            depth_slice: None,
+            ops: wgpu::Operations {
+                load: wgpu::LoadOp::Clear(wgpu::Color {
+                    r: 0.025,
+                    g: 0.035,
+                    b: 0.055,
+                    a: 1.0,
+                }),
+                // The resolved single-sample image is always stored by the resolve.
+                store: if self.multisample.is_some() {
+                    wgpu::StoreOp::Discard
+                } else {
+                    wgpu::StoreOp::Store
+                },
+            },
+        }
+    }
 }
 struct Timestamps {
     queries: wgpu::QuerySet,
@@ -440,11 +799,12 @@ struct Resources {
     camera: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
     target: Option<Target>,
+    sample_count: u32,
     timestamps: Option<Timestamps>,
     metrics: MetricsHandle,
 }
 impl Resources {
-    fn new(device: &wgpu::Device, output: wgpu::TextureFormat) -> Self {
+    fn new(device: &wgpu::Device, output: wgpu::TextureFormat, sample_count: u32) -> Self {
         let composite_shader = device.create_shader_module(wgpu::include_wgsl!("composite.wgsl"));
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fixed scene camera ABI"),
@@ -464,7 +824,7 @@ impl Resources {
             bind_group_layouts: &[Some(&camera_layout)],
             immediate_size: 0,
         });
-        let pipeline = scene_pipeline(device, &pipeline_layout, default_shader());
+        let pipeline = scene_pipeline(device, &pipeline_layout, default_shader(), sample_count);
         let composite = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("Ruster scene composite"),
             layout: None,
@@ -532,6 +892,7 @@ impl Resources {
             mesh_uploads: 1,
             mesh_upload_bytes: mesh_bytes,
             timestamp_enabled: timestamps.is_some(),
+            sample_count,
             ..Default::default()
         }));
         Self {
@@ -545,6 +906,7 @@ impl Resources {
             camera,
             camera_bind,
             target: None,
+            sample_count,
             timestamps,
             metrics,
         }
@@ -557,7 +919,7 @@ impl Resources {
         {
             return;
         }
-        let texture = |format, usage| {
+        let texture = |format, usage, sample_count| {
             device
                 .create_texture(&wgpu::TextureDescriptor {
                     label: Some("Ruster viewport target"),
@@ -567,7 +929,7 @@ impl Resources {
                         depth_or_array_layers: 1,
                     },
                     mip_level_count: 1,
-                    sample_count: 1,
+                    sample_count,
                     dimension: wgpu::TextureDimension::D2,
                     format,
                     usage,
@@ -578,8 +940,20 @@ impl Resources {
         let color = texture(
             COLOR,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            1,
         );
-        let depth = texture(DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT);
+        let multisample = (self.sample_count > 1).then(|| {
+            texture(
+                COLOR,
+                wgpu::TextureUsages::RENDER_ATTACHMENT,
+                self.sample_count,
+            )
+        });
+        let depth = texture(
+            DEPTH,
+            wgpu::TextureUsages::RENDER_ATTACHMENT,
+            self.sample_count,
+        );
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene sampling"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -602,6 +976,7 @@ impl Resources {
         });
         self.target = Some(Target {
             color,
+            multisample,
             depth,
             bind,
             size,
@@ -620,9 +995,10 @@ fn validated_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     source: &str,
+    sample_count: u32,
 ) -> Result<wgpu::RenderPipeline, String> {
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-    let candidate = scene_pipeline(device, layout, source);
+    let candidate = scene_pipeline(device, layout, source, sample_count);
     if let Some(error) = pollster::block_on(scope.pop()) {
         return Err(format!(
             "scene shader rejected; previous pipeline retained: {error}"
@@ -634,6 +1010,7 @@ fn scene_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     source: &str,
+    sample_count: u32,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Ruster refreshable scene shader"),
@@ -675,7 +1052,10 @@ fn scene_pipeline(
             stencil: Default::default(),
             bias: Default::default(),
         }),
-        multisample: Default::default(),
+        multisample: wgpu::MultisampleState {
+            count: sample_count,
+            ..Default::default()
+        },
         multiview_mask: None,
         cache: None,
     })
@@ -737,15 +1117,12 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         let Some(r) = resources.get_mut::<Resources>() else {
             return Vec::new();
         };
-        let max = device.limits().max_texture_dimension_2d;
-        let size = [
-            (self.size.x * screen.pixels_per_point)
-                .round()
-                .clamp(1.0, max as f32) as u32,
-            (self.size.y * screen.pixels_per_point)
-                .round()
-                .clamp(1.0, max as f32) as u32,
-        ];
+        let size = target_size(
+            self.size,
+            screen.pixels_per_point,
+            device.limits().max_texture_dimension_2d,
+            r.sample_count,
+        );
         r.resize(device, size);
         let instance_count = self
             .groups
@@ -837,20 +1214,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Ruster 3D scene"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target.color,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.025,
-                            g: 0.035,
-                            b: 0.055,
-                            a: 1.0,
-                        }),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
+                color_attachments: &[Some(target.color_attachment())],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
@@ -925,7 +1289,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.objects = instance_count;
         metrics.mesh_bytes = r.cube.bytes + r.meshes.values().map(|mesh| mesh.bytes).sum::<u64>();
         metrics.instance_capacity_bytes = (r.capacity * size_of::<Instance>()) as u64;
-        metrics.target_bytes = u64::from(size[0]) * u64::from(size[1]) * 8;
+        metrics.target_bytes = target_bytes(size, r.sample_count);
+        metrics.target_size = size;
         Vec::new()
     }
     fn paint(
@@ -947,6 +1312,184 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Resized side panels can make the viewport portrait. Fit must keep all
+    // transformed corners visible in both projections and preserve view intent.
+    #[test]
+    fn framing_fits_portrait_and_wide_viewports() {
+        let mut scene = Scene::demo();
+        scene.objects.truncate(1);
+        scene.objects[0].transform.scale = [6.0, 2.0, 3.0];
+        scene.objects[0].transform.rotation = [0.2, 0.7, 0.4];
+        let meshes = BTreeMap::new();
+        for aspect in [0.2, 1.0, 3.0] {
+            for preset in [
+                ViewPreset::Free,
+                ViewPreset::Front,
+                ViewPreset::Top,
+                ViewPreset::Isometric,
+            ] {
+                let mut camera = Camera::fit(&scene, &meshes);
+                camera.set_preset(preset);
+                camera.fit_aspect(aspect);
+                let (view, projection, _) = camera.matrices(aspect);
+                for x in [-0.5, 0.5] {
+                    for y in [-0.5, 0.5] {
+                        for z in [-0.5, 0.5] {
+                            let world =
+                                model(&scene.objects[0]).transform_point3(Vec3::new(x, y, z));
+                            let projected = (projection * view).project_point3(world);
+                            assert!(projected.x.abs() < 1.0 && projected.y.abs() < 1.0);
+                            assert!((0.0..=1.0).contains(&projected.z));
+                        }
+                    }
+                }
+            }
+        }
+    }
+    // Orthographic and perspective overlays must use matching screen x/y,
+    // but their GPU/toolkit clip-depth endpoints differ. Axis views stay finite.
+    #[test]
+    fn view_presets_orthographic_projection_and_picking_match_overlay_rays() {
+        let mut scene = Scene::demo();
+        scene.objects.truncate(1);
+        scene.objects[0].transform.translation = [1.2, -0.4, 0.7];
+        let meshes = BTreeMap::new();
+        let mut camera = Camera::fit(&scene, &meshes);
+        for preset in [
+            ViewPreset::Front,
+            ViewPreset::Back,
+            ViewPreset::Left,
+            ViewPreset::Right,
+            ViewPreset::Top,
+            ViewPreset::Bottom,
+            ViewPreset::Isometric,
+            ViewPreset::Free,
+        ] {
+            camera.set_preset(preset);
+            assert!(camera.state().is_valid());
+            let (view, projection, overlay) = camera.matrices(1.6);
+            assert!(view.is_finite() && projection.is_finite() && overlay.is_finite());
+            let point = Vec3::from(scene.objects[0].transform.translation);
+            let gpu = (projection * view).project_point3(point);
+            let tool = (overlay * view).project_point3(point);
+            assert!((gpu.x - tool.x).abs() < 1e-5 && (gpu.y - tool.y).abs() < 1e-5);
+            assert_eq!(
+                pick(&scene, &meshes, projection * view, gpu.x, gpu.y),
+                Some("left".into())
+            );
+            for (depth, expected_gpu, expected_tool) in [
+                (camera.distance * 0.001, 0.0, -1.0),
+                (camera.distance * 100.0, 1.0, 1.0),
+            ] {
+                let point = Vec3::new(depth * 0.2, depth * (-0.1), -depth);
+                let gpu = projection.project_point3(point);
+                let tool = overlay.project_point3(point);
+                assert!((gpu.z - expected_gpu).abs() < 1e-5);
+                assert!((tool.z - expected_tool).abs() < 1e-5);
+                assert!((gpu.x - tool.x).abs() < 1e-5 && (gpu.y - tool.y).abs() < 1e-5);
+            }
+            let old = camera.state();
+            camera.frame(Camera::fit(&Scene::demo(), &meshes));
+            assert_eq!(camera.yaw, old.yaw);
+            assert_eq!(camera.pitch, old.pitch);
+            assert_eq!(camera.orthographic, old.orthographic);
+        }
+    }
+
+    // Unique UI contract: navigation options frame exact selected content,
+    // pan without rotating and gate RMB flight on frontend text/focus ownership.
+    #[test]
+    fn navigation_frames_selection_and_preserves_camera_when_input_is_owned() {
+        let scene = Scene::demo();
+        let meshes = BTreeMap::new();
+        let selected =
+            Camera::fit_objects(scene.objects.iter().filter(|o| o.id == "right"), &meshes);
+        assert!(selected.target.abs_diff_eq(Vec3::new(2.0, 0.0, 0.0), 1e-5));
+        let mut pan = selected;
+        pan.navigate(egui::vec2(20.0, 10.0), true, 4.0, 600.0);
+        assert_ne!(pan.target, selected.target);
+        assert_eq!(pan.yaw, selected.yaw);
+        assert_eq!(pan.pitch, selected.pitch);
+        let mut orbit = selected;
+        orbit.navigate(egui::vec2(20.0, 10.0), false, 4.0, 600.0);
+        assert_eq!(orbit.target, selected.target);
+        assert_ne!(orbit.yaw, selected.yaw);
+        let ctx = egui::Context::default();
+        let mut navigation = NavigationOptions {
+            frame_selected: true,
+            keyboard_enabled: true,
+            ..Default::default()
+        };
+        let frame = |navigation: &mut NavigationOptions, focused, events: Vec<egui::Event>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    viewport_with_navigation(ui, &scene, &["right"], &meshes, navigation);
+                },
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut navigation, true, vec![]);
+        let initial = navigation.camera.unwrap();
+        assert!(initial.is_valid());
+        assert_eq!(initial.target, selected.target.to_array());
+        let pos = egui::pos2(400.0, 300.0);
+        let keys = || {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Secondary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::Key {
+                    key: egui::Key::W,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        frame(&mut navigation, false, keys());
+        assert_eq!(navigation.camera.unwrap(), initial);
+        navigation.keyboard_enabled = false;
+        frame(&mut navigation, true, keys());
+        assert_eq!(navigation.camera.unwrap(), initial);
+        navigation.keyboard_enabled = true;
+        frame(&mut navigation, true, keys());
+        assert_ne!(navigation.camera.unwrap().target, initial.target);
+        let after = navigation.camera.unwrap();
+        navigation.enabled = false;
+        navigation.reset = true;
+        frame(
+            &mut navigation,
+            true,
+            vec![egui::Event::MouseWheel {
+                unit: egui::MouseWheelUnit::Point,
+                phase: egui::TouchPhase::Move,
+                source: egui::MouseWheelSource::Unknown,
+                delta: egui::vec2(0.0, 100.0),
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert_eq!(navigation.camera.unwrap(), after);
+        let invalid = CameraState {
+            distance: f32::NAN,
+            ..initial
+        };
+        assert!(!invalid.is_valid());
+    }
+
     #[test]
     fn ray_pick_respects_transforms_and_nearest_depth() {
         let mut scene = Scene::demo();
@@ -971,6 +1514,7 @@ mod tests {
             yaw: 0.0,
             pitch: 0.0,
             distance: 6.0,
+            orthographic: false,
         };
         let (view, projection, gizmo_projection) = camera.matrices(1.4);
         for (depth, gpu_z, gizmo_z) in [
@@ -1047,10 +1591,66 @@ mod tests {
         assert!((camera.distance - Vec3::new(2.4, 1.6, 0.0).length() * 1.5).abs() < 1.0e-5);
     }
 
+    #[test]
+    fn antialiasing_capabilities_and_target_budget() {
+        use wgpu::TextureFormatFeatureFlags as F;
+        let both = F::MULTISAMPLE_X2 | F::MULTISAMPLE_X4;
+        let resolved = both | F::MULTISAMPLE_RESOLVE;
+        for (color, depth, requested, expected) in [
+            (resolved, both, 4, 4),
+            (resolved, F::MULTISAMPLE_X2, 4, 2),
+            (resolved, F::empty(), 4, 1),
+            (both, both, 4, 1),
+            (resolved, both, 2, 2),
+            (resolved, both, 1, 1),
+        ] {
+            assert_eq!(choose_samples(color, depth, requested), expected);
+        }
+        for (samples, bytes_per_pixel) in [(1, 8), (2, 20), (4, 36)] {
+            assert_eq!(target_bytes([1, 1], samples), bytes_per_pixel);
+            for (width, height, scale, limit) in [
+                (1100.0, 760.0, 1.0, 16384),
+                (3840.0, 2160.0, 1.0, 16384),
+                (8000.0, 2000.0, 2.0, 4096),
+                (2000.0, 8000.0, 2.0, 4096),
+                (1.0, 1.0, 1.0, 16384),
+                (1.0, 1.0e9, 1.0, 16384),
+            ] {
+                let size = target_size(egui::vec2(width, height), scale, limit, samples);
+                assert!(size.into_iter().all(|v| v > 0 && v <= limit));
+                assert!(target_bytes(size, samples) <= MAX_TARGET_BYTES);
+                // Rounding may change each physical dimension by less than one pixel.
+                let ratio = f64::from(width) / f64::from(height);
+                assert!((f64::from(size[0]) - f64::from(size[1]) * ratio).abs() <= ratio.max(1.0));
+            }
+            assert_eq!(
+                target_size(egui::vec2(1100.0, 760.0), 1.0, 16384, samples),
+                [1100, 760]
+            );
+        }
+    }
+
     /// GPU boundary evidence: run explicitly on a Vulkan-capable host.
     #[test]
     #[ignore = "requires a Vulkan device; root runs for rendering changes"]
     fn shader_rejection_preserves_renderable_pipeline() {
+        // Vulkan's wgpu debug callback logs through `log`; without a sink a clean
+        // captured stderr would omit driver validation diagnostics entirely.
+        struct Diagnostics;
+        impl log::Log for Diagnostics {
+            fn enabled(&self, metadata: &log::Metadata<'_>) -> bool {
+                metadata.level() <= log::Level::Warn
+            }
+            fn log(&self, record: &log::Record<'_>) {
+                if self.enabled(record.metadata()) {
+                    eprintln!("{} {}: {}", record.level(), record.target(), record.args());
+                }
+            }
+            fn flush(&self) {}
+        }
+        static DIAGNOSTICS: Diagnostics = Diagnostics;
+        log::set_logger(&DIAGNOSTICS).expect("GPU probe diagnostics logger");
+        log::set_max_level(log::LevelFilter::Warn);
         let instance = wgpu::Instance::new(wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
             ..wgpu::InstanceDescriptor::new_without_display_handle()
@@ -1058,55 +1658,81 @@ mod tests {
         let adapter =
             pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions::default()))
                 .expect("Vulkan adapter");
+        let descriptor = wgpu::DeviceDescriptor {
+            required_features: adapter.features()
+                & wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES,
+            ..Default::default()
+        };
         let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor::default()))
-                .expect("Vulkan device");
-        let mut r = Resources::new(&device, COLOR);
-        r.pipeline = validated_pipeline(&device, &r.pipeline_layout, default_shader())
-            .expect("valid replacement");
-        for source in [
-            "invalid shader",
-            &default_shader().replace("@binding(0)", "@binding(1)"),
-        ] {
-            assert!(validated_pipeline(&device, &r.pipeline_layout, source).is_err());
+            pollster::block_on(adapter.request_device(&descriptor)).expect("Vulkan device");
+        for samples in [1, 2, 4] {
+            if supported_samples(&adapter, &device, samples) != samples {
+                eprintln!("GPU probe: {samples}x unsupported; skipped");
+                continue;
+            }
+            let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+            let mut r = Resources::new(&device, COLOR, samples);
+            r.pipeline = validated_pipeline(&device, &r.pipeline_layout, default_shader(), samples)
+                .expect("valid replacement");
+            for source in [
+                "invalid shader",
+                &default_shader().replace("@binding(0)", "@binding(1)"),
+            ] {
+                assert!(validated_pipeline(&device, &r.pipeline_layout, source, samples).is_err());
+            }
+            let camera = Camera::fit(&Scene::demo(), &BTreeMap::new()).matrices(1.0);
+            queue.write_buffer(
+                &r.camera,
+                0,
+                bytemuck::cast_slice(&(camera.1 * camera.0).to_cols_array()),
+            );
+            let object = Instance {
+                model: Mat4::IDENTITY.to_cols_array_2d(),
+                normal: [
+                    [1.0, 0.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0, 0.0],
+                    [0.0, 0.0, 1.0, 0.0],
+                ],
+                color: [1.0; 4],
+            };
+            queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&object));
+            // The second submission replaces attachments while prior work may be pending.
+            for size in [[32, 32], [67, 41]] {
+                r.resize(&device, size);
+                let target = r.target.as_ref().unwrap();
+                let mut encoder = device.create_command_encoder(&Default::default());
+                {
+                    let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("post-rejection render and resize"),
+                        color_attachments: &[Some(target.color_attachment())],
+                        depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                            view: &target.depth,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Discard,
+                            }),
+                            stencil_ops: None,
+                        }),
+                        ..Default::default()
+                    });
+                    pass.set_pipeline(&r.pipeline);
+                    pass.set_bind_group(0, &r.camera_bind, &[]);
+                    pass.set_vertex_buffer(0, r.cube.vertices.slice(..));
+                    pass.set_vertex_buffer(1, r.instances.slice(..));
+                    pass.set_index_buffer(r.cube.indices.slice(..), wgpu::IndexFormat::Uint32);
+                    pass.draw_indexed(0..r.cube.count, 0, 0..1);
+                }
+                queue.submit([encoder.finish()]);
+            }
+            drop(r);
+            device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("submitted work");
+            assert!(
+                pollster::block_on(scope.pop()).is_none(),
+                "{samples}x pipeline/target mismatch"
+            );
+            eprintln!("GPU probe: {samples}x shader rejection, resize and shutdown passed");
         }
-        let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-        r.resize(&device, [32, 32]);
-        let target = r.target.as_ref().unwrap();
-        let mut encoder = device.create_command_encoder(&Default::default());
-        {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("post-rejection render"),
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &target.color,
-                    resolve_target: None,
-                    depth_slice: None,
-                    ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
-                        store: wgpu::StoreOp::Store,
-                    },
-                })],
-                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &target.depth,
-                    depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
-                        store: wgpu::StoreOp::Discard,
-                    }),
-                    stencil_ops: None,
-                }),
-                ..Default::default()
-            });
-            pass.set_pipeline(&r.pipeline);
-            pass.set_bind_group(0, &r.camera_bind, &[]);
-            pass.set_vertex_buffer(0, r.cube.vertices.slice(..));
-            pass.set_vertex_buffer(1, r.instances.slice(..));
-            pass.set_index_buffer(r.cube.indices.slice(..), wgpu::IndexFormat::Uint32);
-            pass.draw_indexed(0..r.cube.count, 0, 0..1);
-        }
-        queue.submit([encoder.finish()]);
-        device
-            .poll(wgpu::PollType::wait_indefinitely())
-            .expect("submitted work");
-        assert!(pollster::block_on(scope.pop()).is_none());
     }
 }

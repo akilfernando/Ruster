@@ -177,11 +177,11 @@ fn percentile(samples: &[f64], fraction: f64) -> Option<f64> {
 impl Drop for Runtime {
     fn drop(&mut self) {
         let metrics = self.metrics.lock().expect("metrics lock");
-        eprintln!("Ruster shared 3D summary: scene={} fingerprint={} revision={} tick={} frames={} objects={} warmup=10 samples_cpu={} cpu_prepare_us_p50={:?} cpu_prepare_us_p95={:?} samples_gpu={} gpu_scene_us_p50={:?} gpu_scene_us_p95={:?} timestamps_enabled={} mesh_bytes={} mesh_uploads={} mesh_upload_bytes={} scene_draw_calls={} instance_capacity_bytes={} color_depth_bytes={}",
+        eprintln!("Ruster shared 3D summary: scene={} fingerprint={} revision={} tick={} frames={} objects={} warmup=10 samples_cpu={} cpu_prepare_us_p50={:?} cpu_prepare_us_p95={:?} samples_gpu={} gpu_scene_us_p50={:?} gpu_scene_us_p95={:?} timestamps_enabled={} mesh_bytes={} mesh_uploads={} mesh_upload_bytes={} scene_draw_calls={} instance_capacity_bytes={} color_depth_bytes={} target_width={} target_height={} msaa_effective={}",
             self.preview.scene.id, self.preview.scene.fingerprint(), self.preview.scene.revision, self.preview.tick, metrics.frames, metrics.objects,
             metrics.cpu_prepare_us.len(), percentile(&metrics.cpu_prepare_us, 0.5), percentile(&metrics.cpu_prepare_us, 0.95),
             metrics.gpu_scene_us.len(), percentile(&metrics.gpu_scene_us, 0.5), percentile(&metrics.gpu_scene_us, 0.95),
-            metrics.timestamp_enabled, metrics.mesh_bytes, metrics.mesh_uploads, metrics.mesh_upload_bytes, metrics.draw_calls, metrics.instance_capacity_bytes, metrics.target_bytes);
+            metrics.timestamp_enabled, metrics.mesh_bytes, metrics.mesh_uploads, metrics.mesh_upload_bytes, metrics.draw_calls, metrics.instance_capacity_bytes, metrics.target_bytes, metrics.target_size[0], metrics.target_size[1], metrics.sample_count);
     }
 }
 fn read_shader(path: &std::path::Path) -> Result<String, String> {

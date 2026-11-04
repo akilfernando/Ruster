@@ -26,6 +26,8 @@ The user-confirmed [project ethos](docs/DIRECTION.md#project-ethos-serve-the-cre
 
 The user requires immediate familiarity for experienced Unity/Unreal creators and treats everyday editor quality of life as non-negotiable. Follow [EDITOR-EXPERIENCE.md](docs/EDITOR-EXPERIENCE.md) for relevant workflow acceptance; do not defer routine usability as optional polish or infer it from system tests.
 
+The target creator is comfortable using a keyboard. Treat Enter-to-submit, Escape-to-cancel, keyboard traversal, discoverable/remappable shortcuts and focus ownership as required workflow behavior, including dialogs and numeric/name fields. The 2026-11-04 Unity walkthrough also requires usable antialiasing and perspective/orthographic (ISO) plus axis-view navigation; verify actual quality/cost and interaction rather than relying on system tests.
+
 ## Local desktop testing
 
 The user works on workspace 1. Open Ruster test windows on Hyprland workspace 2 silently, without switching the active workspace or stealing focus. A local `ruster-development-workspace` window rule in `~/.config/hypr/hyprland.lua` routes initial Ruster viewer/editor titles there. Verify routing before UI automation; target the exact test window and never send global input to the user's active window. Do not change the user's clipboard for unattended tests. Hidden-workspace rendering may be throttled: label performance evidence accordingly and compare matching conditions. Visual interaction that cannot run in isolation must wait for a suitable opportunity rather than interrupt the user.

@@ -1,0 +1,8 @@
+    Checking wgpu-core-deps-windows-linux-android v30.0.1
+    Checking ruster-assets v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-assets)
+    Checking wgpu-core v30.0.1
+    Checking wgpu v30.0.1
+    Checking egui-wgpu v0.37.0
+    Checking eframe v0.37.0
+    Checking ruster-render v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-render)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 6.71s

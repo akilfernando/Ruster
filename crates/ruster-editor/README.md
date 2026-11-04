@@ -1,6 +1,6 @@
 # Ruster Editor
 
-The native editor has two explicit modes: generic 3D scenes with M6 content iteration, and the legacy v1 logistics scenario. Start the current content example with:
+The native editor opens a blank generic scene by default. Run `cargo run --locked -p ruster-editor` to start creating without a sample project. It has two modes: generic 3D scenes with M6 content iteration, and the legacy v1 logistics scenario. Start the current content example with:
 
 ```sh
 cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
@@ -17,7 +17,6 @@ persistence. Runtime observation uses the same core `Simulation` as the CLI.
 From the repository root:
 
 ```sh
-cargo run --locked -p ruster-editor
 cargo run --locked -p ruster-editor -- --scenario examples/logistics.scenario.json
 cargo run --locked -p ruster-editor -- --help
 ```
@@ -231,7 +230,7 @@ set, against a disposable scene whose first object is still a procedural cube.
 
 In generic scene mode, **New scene** starts an empty authored scene. Unsaved work offers Save, Discard or Cancel; Save As must complete successfully before replacement. **Create cube** creates a procedural object and selects it. **Duplicate** creates a new stable identity, **Delete** removes the selected object, and **Undo authored edit** / **Redo authored edit** share the scene's bounded persisted history. Preview stays a separate snapshot until Reset preview.
 
-**Rename object** opens an explicit display-name Apply/Cancel dialog. Names can change without changing stable IDs or references. Resolve pending transform fields before object operations; resolve the name dialog before changing selection or closing. The hierarchy shows display names and the inspector shows the immutable stable ID. Newly generated IDs avoid current objects and identities retained by undo/redo. The translation slice below adds multi-selection, a window-owned object clipboard and translation gizmos; the transform/pivot and mixed-precision continuation below extends that route.
+**Rename object** opens a focused display-name dialog: Enter or **Apply name** submits, Escape or **Cancel rename** cancels. Tab can move to buttons and Enter activates the focused choice. Names can change without changing stable IDs or references. Resolve pending transform fields before object operations; resolve the name dialog before changing selection or closing. The hierarchy shows display names and the inspector shows the immutable stable ID. Newly generated IDs avoid current objects and identities retained by undo/redo. The translation slice below adds multi-selection, a window-owned object clipboard and translation gizmos; the transform/pivot and mixed-precision continuation below extends that route.
 
 The live command surface additionally exposes `scene_create` (`object_id`, `name`), `scene_rename` (`object_id`, `name`), `scene_duplicate` (`object_id`, `new_object_id`, `name`) and `scene_delete` (`object_id`). All require exact inspected `expected_session_token` and decimal `expected_revision`, refuse pending human drafts/recovery, remain unsaved until human Save, and use the same Session operations/history as the buttons. Object diffs are keyed by stable ID. Existing `before`/`after` transform and `before_mesh`/`after_mesh` fields retain their semantics; additive `before_object`/`after_object` fields contain complete objects. Null represents creation/deletion. A replaced scene receives a fresh session token. New scene is a human-owned destructive recovery flow, not an MCP command.
 
@@ -256,3 +255,28 @@ World rotation and local group rotation rotate positions and orientations togeth
 **Snapping** displays the relevant distance in scene units, angle in degrees or scale-factor increment. Transform storage remains fixed-axis XYZ Euler radians (`qz*qy*qx`); changed rotations use a nearby equivalent Euler branch while untouched/no-op values retain their stored bits.
 
 All selected objects share nine precise **Position / Rotation (radians) / Scale** component fields. A differing component displays **—**, with a visible mixed-value legend and a tooltip explaining per-component editing. Fields expand with the inspector and wrap as axis groups when space is narrow. Typing into one field changes only that component for all selected objects; the other components keep their individual values. **Apply transform components** or Enter validates and commits all explicitly edited fields as one undo step. **Revert transform components** or Escape discards the draft. Selection, agent mutations and object operations are guarded while a precision draft is pending. Invalid or stale edits preserve the fields for repair. Save validates/applies supported precision drafts before persistence. The explicit translation-offset controls remain available for relative movement.
+
+
+### Workspace, startup and navigation
+
+No arguments opens an empty generic scene with explicit New/Open/recent choices. A recent scene is never opened automatically. `--scene PATH` opens a chosen scene; legacy logistics requires `--scenario PATH`. An untouched empty welcome scene closes without a discard prompt; authored changes and invalid drafts retain their recovery guards.
+
+The **Workspace** menu lists shortcuts and opens **Workspace and shortcuts…**. Hierarchy and inspector can be resized, hidden/shown and assigned to left/right slots; **Reset layout** restores the defaults. This is bounded rearrangement, not a general docking framework. UI scale and navigation speed are adjustable. Binding capture rejects conflicts, reserves Escape for cancellation, and offers reset. Default scene shortcuts are Ctrl+N/O/S/Shift+S, Ctrl+Z/Shift+Z, Ctrl+C/V/D, Delete, W/E/R for tools and F to frame selection. These are agent-selected defaults, not an accepted Unity/Unreal preset. Focused text fields, recovery/settings dialogs and active gestures own their input. Object and text clipboards remain separate as described above.
+
+Navigation uses right-drag orbit, middle-drag or Shift-right-drag pan, wheel zoom, **Fit** for the scene, and **Frame selected** / F for selected bounds. **Reset camera** restores the scene view. Hold right mouse over the viewport for W/A/S/D plus Q/E down/up movement; movement is bounded per frame and disabled while text/modal/gesture owns keyboard input. Speed is configured in scene units/second. The **Perspective/Orthographic** toggle and **View presets** menu provide front/back/left/right/top/bottom, isometric and free-perspective views. Fit and Frame selected preserve the current projection/orientation; Reset camera restores the scene view. Default remappable camera keys are5 for projection,1/3/7 for front/right/top, Ctrl+1/3/7 for back/left/bottom,0 for isometric and Home for free view. These are discoverable agent-selected bindings, not a required preset. The current camera is retained for up to ten successfully opened/saved canonical scene paths and restored only after a successful Open; fresh untitled scenes use default framing.
+
+Valid precision components commit when focus leaves the component group or a different object is selected. Invalid fields retain the current selection and entered text with an actionable error. Explicit Apply/Enter and Revert/Escape remain available. Agent operations still refuse pending human drafts.
+
+Preferences are separate version1 JSON, bounded to64KiB, under `$XDG_CONFIG_HOME/ruster/editor.json` (or `~/.config/ruster/editor.json`). `RUSTER_EDITOR_STATE=/absolute/disposable/editor.json` overrides the file for isolated native tests. Layout, scale, navigation speed, bindings, ten recent paths and matching camera context persist through guarded atomic writes. Corrupt/unsupported settings use defaults with a visible recovery message; **Reset preferences** explicitly replaces them. Other-window/external changes are not silently overwritten: reopen to accept that baseline. Unreadable, oversized or nonregular settings cannot be replaced by Reset: move aside the exact state path displayed in settings (or repair its access), then reopen. Readable malformed JSON/schema can use Reset directly. A nonblocking sibling lock coordinates cooperating preference writers; busy/stale saves preserve both baselines. These trusted local guards are not a hostile-filesystem or universal power-loss guarantee. Preferences do not alter scenes, authored history or runtime state.
+
+
+Dialog keyboard behavior: rename and scene-path fields receive focus when opened; Enter submits and Escape cancels. Save/discard recovery prompts initially focus the safe Save action, with Tab/Shift+Tab traversal and Enter activating the focused button; Escape cancels the pending operation. Shortcut capture consumes Escape to cancel capture before a subsequent Escape closes settings. Human toolbar actions are deferred until fields process their current-frame input, so Save does not silently replace freshly typed text with an older draft.
+
+
+**Workspace → Close window** and the default remappable Ctrl+Q shortcut use the same close request as the window manager: transient gestures cancel, preferences flush, and unsaved scenes/fields require Save/Discard/Cancel. Pending name/New dialogs must be resolved first. A clean window closes normally through the host; the action never sends a close command around dirty-state safeguards. Focused text and recovery dialogs retain keyboard ownership.
+
+
+The asset dialog focuses its stable-ID field initially and Escape closes it without invoking import/refresh/rename; Tab reaches the separate explicit operation buttons. Camera navigation and viewport selection remain blocked while it owns input. Shortcut capture consumes both accepted and conflicting key attempts before controls render, so Enter/Space cannot immediately reactivate the capture button.
+
+
+When the serialized undo budget removes older reversible steps under pressure, the editor adds a nonmodal notice stating how many steps were removed. This session-local cumulative `history_evictions` count is also included in successful live command responses; opening/replacing a session resets its reporting baseline. Ordinary edits remain usable without a blocking dialog, while the reduced Undo reach is explicit.

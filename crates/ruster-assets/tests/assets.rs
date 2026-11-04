@@ -21,35 +21,58 @@ fn import_reopen_cache_rebuild_and_explicit_refresh() {
     let cache = root
         .path()
         .join(".ruster-cache/meshes")
-        .join(format!("v1-{}.json", info.hash.unwrap()));
-    fs::write(&cache, "{broken").unwrap();
-    let rebuilt = AssetStore::open(root.path()).unwrap();
-    assert_eq!(rebuilt.mesh("triangle"), Some(&original));
-    assert!(serde_json::from_slice::<serde_json::Value>(&fs::read(&cache).unwrap()).is_ok());
-    // A parseable payload/version mutation is rejected too, not merely bad JSON.
-    for field in ["checksum", "version", "coordinate"] {
-        let mut value: serde_json::Value =
-            serde_json::from_slice(&fs::read(&cache).unwrap()).unwrap();
-        if field == "checksum" {
-            value["mesh"]["indices"][0] = serde_json::json!(99);
-        } else if field == "version" {
-            value["version"] = serde_json::json!(2);
-        } else {
-            // Even a self-consistent checksum cannot exempt cached geometry
-            // from the source coordinate domain contract.
-            use sha2::{Digest, Sha256};
-            value["mesh"]["vertices"][0]["position"][0] = serde_json::json!(1e9);
-            let mesh: ruster_assets::Mesh = serde_json::from_value(value["mesh"].clone()).unwrap();
-            value["mesh_hash"] = serde_json::json!(format!(
-                "{:x}",
-                Sha256::digest(serde_json::to_vec(&mesh).unwrap())
-            ));
+        .join(format!("v2-{}.bin", info.hash.unwrap()));
+    let valid_cache = fs::read(&cache).unwrap();
+    assert_eq!(valid_cache.len(), 116 + 3 * 24 + 3 * 4);
+    // Reject malformed structure, semantic-header mutations, payload corruption
+    // and self-checksummed geometry outside the supported domain. A broken
+    // source proves none of these corrupt caches supplies accepted geometry.
+    for field in [
+        "magic",
+        "version",
+        "source",
+        "counts",
+        "checksum",
+        "coordinate",
+        "truncated",
+        "trailing",
+    ] {
+        let mut bytes = valid_cache.clone();
+        match field {
+            "magic" => bytes[0] ^= 1,
+            "version" => bytes[8] ^= 1,
+            "source" => bytes[20] ^= 1,
+            "counts" => bytes[12..16].copy_from_slice(&u32::MAX.to_le_bytes()),
+            "checksum" => bytes[116] ^= 1,
+            "coordinate" => {
+                use sha2::{Digest, Sha256};
+                bytes[116..120].copy_from_slice(&1e9f32.to_le_bytes());
+                let mut hasher = Sha256::new();
+                hasher.update(&bytes[..84]);
+                hasher.update(&bytes[116..]);
+                bytes[84..116].copy_from_slice(&hasher.finalize());
+            }
+            "truncated" => {
+                bytes.pop();
+            }
+            "trailing" => bytes.push(0),
+            _ => unreachable!(),
         }
-        fs::write(&cache, serde_json::to_vec(&value).unwrap()).unwrap();
+        fs::write(&cache, bytes).unwrap();
+        fs::write(root.path().join("mesh.obj"), "broken source").unwrap();
+        assert!(
+            AssetStore::open(root.path())
+                .unwrap()
+                .mesh("triangle")
+                .is_none(),
+            "accepted {field}"
+        );
+        fs::write(root.path().join("mesh.obj"), TRIANGLE).unwrap();
         assert_eq!(
             AssetStore::open(root.path()).unwrap().mesh("triangle"),
             Some(&original)
         );
+        assert_eq!(fs::read(&cache).unwrap(), valid_cache);
     }
     fs::remove_dir_all(root.path().join(".ruster-cache")).unwrap();
     let rebuilt = AssetStore::open(root.path()).unwrap();
@@ -67,6 +90,95 @@ fn import_reopen_cache_rebuild_and_explicit_refresh() {
         AssetStore::open(root.path()).unwrap().meshes(),
         reopened.meshes()
     );
+}
+
+// The supported v1 format remains readable, including last-good recovery when
+// v2 is corrupt and the authoritative source is unavailable or malformed.
+#[test]
+fn legacy_cache_fallback_and_nondestructive_v2_publication() {
+    use sha2::{Digest, Sha256};
+    let root = project();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let info = store.import("triangle", "mesh.obj").unwrap();
+    let hash = info.hash.unwrap();
+    let original = store.mesh("triangle").unwrap().clone();
+    let directory = root.path().join(".ruster-cache/meshes");
+    let v2 = directory.join(format!("v2-{hash}.bin"));
+    let v1 = directory.join(format!("v1-{hash}.json"));
+    let legacy = serde_json::to_vec(&serde_json::json!({
+        "format": "ruster-mesh", "version": 1, "source_hash": hash,
+        "mesh_hash": format!("{:x}", Sha256::digest(serde_json::to_vec(&original).unwrap())),
+        "mesh": original,
+    }))
+    .unwrap();
+    fs::write(&v1, &legacy).unwrap();
+    fs::write(&v2, "broken current cache").unwrap();
+    fs::remove_file(root.path().join("mesh.obj")).unwrap();
+    let missing = AssetStore::open(root.path()).unwrap();
+    assert_eq!(missing.mesh("triangle"), Some(&original));
+    assert_eq!(missing.inspect()[0].status, AssetStatus::Missing);
+    fs::write(root.path().join("mesh.obj"), "v NaN 0 0").unwrap();
+    let invalid = AssetStore::open(root.path()).unwrap();
+    assert_eq!(invalid.mesh("triangle"), Some(&original));
+    assert_eq!(invalid.inspect()[0].status, AssetStatus::Invalid);
+    // Unsupported/corrupt legacy data cannot supply last-good geometry either.
+    fs::write(&v1, legacy.as_slice().get(..legacy.len() - 1).unwrap()).unwrap();
+    assert!(AssetStore::open(root.path())
+        .unwrap()
+        .mesh("triangle")
+        .is_none());
+    fs::write(&v1, &legacy).unwrap();
+    fs::write(root.path().join("mesh.obj"), TRIANGLE).unwrap();
+    store.refresh("triangle").unwrap();
+    assert_eq!(store.revision(), 1);
+    assert_eq!(fs::read(&v1).unwrap(), legacy);
+    assert!(fs::read(&v2).unwrap().starts_with(b"RUSTMESH"));
+    assert_eq!(
+        AssetStore::open(root.path()).unwrap().mesh("triangle"),
+        Some(&original)
+    );
+}
+
+// Immutable snapshots identify exactly the accepted meshes that changed; a
+// caller can retain GPU resources for all other entries without geometry copies.
+#[test]
+fn snapshots_preserve_identity_except_for_successful_content_change() {
+    use std::sync::Arc;
+    let root = project();
+    fs::write(root.path().join("other.obj"), TRIANGLE).unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    store.import("one", "mesh.obj").unwrap();
+    let first = store.mesh_snapshots();
+    store.import("two", "other.obj").unwrap();
+    let both = store.mesh_snapshots();
+    assert!(Arc::ptr_eq(&first["one"], &both["one"]));
+    store.refresh("two").unwrap();
+    assert!(Arc::ptr_eq(&both["two"], &store.mesh_snapshots()["two"]));
+    store.rename("two", "renamed.obj").unwrap();
+    assert!(Arc::ptr_eq(&both["two"], &store.mesh_snapshots()["two"]));
+    fs::write(
+        root.path().join("renamed.obj"),
+        format!("{TRIANGLE}# source-only edit\n"),
+    )
+    .unwrap();
+    let revision = store.revision();
+    store.refresh("two").unwrap();
+    assert_eq!(store.revision(), revision + 1);
+    assert!(Arc::ptr_eq(&both["two"], &store.mesh_snapshots()["two"]));
+    fs::write(root.path().join("renamed.obj"), "broken source").unwrap();
+    assert!(store.refresh("two").is_err());
+    assert!(Arc::ptr_eq(&both["two"], &store.mesh_snapshots()["two"]));
+    fs::write(
+        root.path().join("renamed.obj"),
+        TRIANGLE.replace("v 1 0 0", "v 2 0 0"),
+    )
+    .unwrap();
+    store.refresh("two").unwrap();
+    let changed = store.mesh_snapshots();
+    assert!(Arc::ptr_eq(&both["one"], &changed["one"]));
+    assert!(!Arc::ptr_eq(&both["two"], &changed["two"]));
+    assert_eq!(both["two"].vertices[1].position, [1.0, 0.0, 0.0]);
+    assert_eq!(store.meshes()["two"], *changed["two"]);
 }
 
 // Broken/missing source diagnostics must not destroy the last accepted mesh or

@@ -1,0 +1,15 @@
+   Compiling ruster-assets v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-assets)
+   Compiling ruster-render v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-render)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 4.02s
+     Running unittests src/lib.rs (target/debug/deps/ruster_render-708cf3ee5b222b2f)
+
+running 6 tests
+test tests::shader_rejection_preserves_renderable_pipeline ... ignored, requires a Vulkan device; root runs for rendering changes
+test tests::antialiasing_capabilities_and_target_budget ... ok
+test tests::imported_triangle_controls_pick_and_exact_fit_bounds ... ok
+test tests::ray_pick_respects_transforms_and_nearest_depth ... ok
+test tests::view_presets_orthographic_projection_and_picking_match_overlay_rays ... ok
+test tests::navigation_frames_selection_and_preserves_camera_when_input_is_owned ... ok
+
+test result: ok. 5 passed; 0 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.04s
+

@@ -1,0 +1,10 @@
+   Compiling wgpu-hal v30.0.1 (/home/akilf/Projects/Ruster/third_party/wgpu-hal)
+   Compiling ruster-scene v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-scene)
+   Compiling ruster-assets v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-assets)
+   Compiling wgpu-core-deps-windows-linux-android v30.0.1
+   Compiling wgpu-core v30.0.1
+   Compiling wgpu v30.0.1
+   Compiling egui-wgpu v0.37.0
+   Compiling eframe v0.37.0
+   Compiling ruster-render v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-render)
+    Finished `release` profile [optimized] target(s) in 24.03s

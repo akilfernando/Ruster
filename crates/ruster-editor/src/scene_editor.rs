@@ -1,4 +1,5 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
+use crate::workspace::{Action, Side, Workspace};
 use eframe::{
     egui,
     egui_wgpu::{WgpuSetup, WgpuSetupCreateNew},
@@ -54,6 +55,12 @@ pub struct SceneEditor {
     selected: Option<String>,
     manipulation: crate::manipulation::Manipulation,
     draft: Option<Fields>,
+    baseline_fields: Option<Fields>,
+    workspace: Workspace,
+    navigation: ruster_render::NavigationOptions,
+    queued_selection: Option<(Option<String>, bool)>,
+    queued_action: Option<Action>,
+    scale_applied: f32,
     preview: Preview,
     show_preview: bool,
     running: bool,
@@ -61,10 +68,14 @@ pub struct SceneEditor {
     generation: u64,
     error: String,
     notice: String,
+    seen_history_evictions: usize,
     path_text: String,
     name_text: String,
     new_scene_pending: bool,
     rename_pending: bool,
+    rename_focused: bool,
+    path_focused: bool,
+    confirm_focused: Option<&'static str>,
     dialog: Option<bool>,
     close_pending: bool,
     close_approved: bool,
@@ -72,6 +83,7 @@ pub struct SceneEditor {
     resolved: BTreeMap<String, Arc<Mesh>>,
     preview_assets: BTreeMap<String, Arc<Mesh>>,
     asset_dialog: bool,
+    asset_focused: bool,
     asset_id: String,
     asset_source: String,
     render: Option<eframe::egui_wgpu::RenderState>,
@@ -80,6 +92,16 @@ pub struct SceneEditor {
 }
 impl SceneEditor {
     fn new(session: Session) -> Self {
+        Self::with_workspace(
+            session,
+            if cfg!(test) {
+                Workspace::detached()
+            } else {
+                Workspace::load()
+            },
+        )
+    }
+    fn with_workspace(session: Session, workspace: Workspace) -> Self {
         let selected = session.scene().objects.first().map(|o| o.id.clone());
         let draft = session
             .scene()
@@ -96,12 +118,7 @@ impl SceneEditor {
         };
         let resolved: BTreeMap<String, Arc<Mesh>> = assets
             .as_ref()
-            .map(|s| {
-                s.meshes()
-                    .into_iter()
-                    .map(|(k, v)| (k, Arc::new(v)))
-                    .collect()
-            })
+            .map(|s| s.mesh_snapshots())
             .unwrap_or_default();
         let preview_assets = resolved.clone();
         let mut manipulation = crate::manipulation::Manipulation::default();
@@ -113,10 +130,22 @@ impl SceneEditor {
             .first()
             .map(|o| o.display_name().to_string())
             .unwrap_or_default();
+        let camera = session.path().and_then(|p| workspace.camera_for(p));
+        let seen_history_evictions = session.history_evictions();
         Self {
             session,
             selected,
             manipulation,
+            baseline_fields: draft.clone(),
+            workspace,
+            navigation: ruster_render::NavigationOptions {
+                camera,
+                reset: camera.is_none(),
+                ..Default::default()
+            },
+            queued_selection: None,
+            queued_action: None,
+            scale_applied: 0.0,
             draft,
             preview,
             show_preview: false,
@@ -125,10 +154,14 @@ impl SceneEditor {
             generation: GENERATION.fetch_add(1, Ordering::Relaxed),
             error: asset_error,
             notice: "Ready. Right-drag to orbit; scroll to zoom.".into(),
+            seen_history_evictions,
             path_text: String::new(),
             name_text,
             new_scene_pending: false,
             rename_pending: false,
+            rename_focused: false,
+            path_focused: false,
+            confirm_focused: None,
             dialog: None,
             close_pending: false,
             close_approved: false,
@@ -136,6 +169,7 @@ impl SceneEditor {
             resolved,
             preview_assets,
             asset_dialog: false,
+            asset_focused: false,
             asset_id: "pyramid".into(),
             asset_source: "meshes/pyramid.obj".into(),
             render: None,
@@ -144,13 +178,7 @@ impl SceneEditor {
         }
     }
     fn drafts(&self) -> bool {
-        self.manipulation.precision_pending()
-            || self
-                .selected
-                .as_ref()
-                .and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id))
-                .map(|o| Some(Fields::from(&o.transform)).as_ref() != self.draft.as_ref())
-                .unwrap_or(false)
+        self.manipulation.precision_pending() || self.draft != self.baseline_fields
     }
     fn reconcile_selection(&mut self) {
         self.manipulation.reconcile(self.session.scene());
@@ -159,6 +187,24 @@ impl SceneEditor {
                 .select_only(self.session.scene().objects.first().map(|o| o.id.clone()));
         }
         self.selected = self.manipulation.selected();
+    }
+    fn process_queued_selection(&mut self) {
+        let Some((id, additive)) = self.queued_selection.take() else {
+            return;
+        };
+        if self.manipulation.active()
+            || self.dialog.is_some()
+            || self.rename_pending
+            || self.new_scene_pending
+            || self.close_pending
+            || self.workspace.settings_open
+        {
+            return;
+        }
+        if self.drafts() && !self.apply() {
+            return;
+        }
+        self.select_object(id, additive);
     }
     fn select_object(&mut self, id: Option<String>, additive: bool) {
         self.manipulation.select(id, additive);
@@ -179,6 +225,7 @@ impl SceneEditor {
             .as_ref()
             .and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id))
             .map(|o| Fields::from(&o.transform));
+        self.baseline_fields = self.draft.clone();
     }
     fn guard(&self) -> Result<(), String> {
         if self.drafts() || self.manipulation.active() {
@@ -189,6 +236,7 @@ impl SceneEditor {
             || self.rename_pending
             || self.close_pending
             || self.close_approved
+            || self.workspace.settings_open
         {
             Err("recovery_pending".into())
         } else {
@@ -346,6 +394,7 @@ impl SceneEditor {
         }
     }
     fn replace_with_empty(&mut self) {
+        self.remember_camera();
         let render = self.render.clone();
         if let Some(render) = render.as_ref().filter(|_| self.shader_revision > 0) {
             if let Err(error) =
@@ -355,8 +404,11 @@ impl SceneEditor {
                 return;
             }
         }
-        let mut next =
-            Self::new(Session::new(Scene::empty("untitled")).expect("empty scene is valid"));
+        let workspace = std::mem::replace(&mut self.workspace, Workspace::detached());
+        let mut next = Self::with_workspace(
+            Session::new(Scene::empty("untitled")).expect("empty scene is valid"),
+            workspace,
+        );
         next.manipulation.clipboard_from(&mut self.manipulation);
         *self = next;
         self.render = render;
@@ -464,23 +516,16 @@ impl SceneEditor {
         }
     }
     fn asset_snapshot(&mut self) {
-        let meshes = self
+        self.resolved = self
             .assets
             .as_ref()
-            .map(|store| store.meshes())
+            .map(|store| store.mesh_snapshots())
             .unwrap_or_default();
-        self.resolved = meshes
-            .into_iter()
-            .map(|(id, mesh)| {
-                let shared = self
-                    .resolved
-                    .get(&id)
-                    .filter(|old| old.as_ref() == &mesh)
-                    .cloned()
-                    .unwrap_or_else(|| Arc::new(mesh));
-                (id, shared)
-            })
-            .collect();
+    }
+    fn remember_camera(&mut self) {
+        if let (Some(path), Some(camera)) = (self.session.path(), self.navigation.camera) {
+            self.workspace.remember_camera(path, camera);
+        }
     }
     fn save_scene(&mut self, path: PathBuf) -> Result<(), String> {
         let parent = path
@@ -508,6 +553,11 @@ impl SceneEditor {
             self.shader_revision = 0;
             self.shader_notice = "Built-in scene shader".into();
         }
+        if let Some(path) = self.session.path() {
+            self.workspace.remember(path);
+        }
+        self.remember_camera();
+        self.workspace.flush();
         Ok(())
     }
     fn assign_mesh(&mut self, mesh: Option<String>) -> Result<u64, String> {
@@ -776,7 +826,16 @@ impl SceneEditor {
     pub fn command(&mut self, nonce: &str, op: &str, args: Value) -> Value {
         let token = format!("{nonce}:scene:{}", self.generation);
         match self.execute(&token, op, &args) {
-            Ok(v) => json!({"ok":true,"result":v}),
+            Ok(mut value) => {
+                if let Some(result) = value.as_object_mut() {
+                    result.insert(
+                        "history_evictions".into(),
+                        self.session.history_evictions().into(),
+                    );
+                }
+                self.observe_history_evictions();
+                json!({"ok":true,"result":value})
+            }
             Err((code, message)) => {
                 json!({"ok":false,"error":{"code":code,"message":message,"session_token":token,"revision":self.session.scene().revision.to_string()}})
             }
@@ -853,7 +912,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.asset_dialog||self.new_scene_pending||self.rename_pending,"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open,"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -1069,12 +1128,18 @@ impl SceneEditor {
     }
     fn content_ui(&mut self, ctx: &egui::Context) {
         if !self.asset_dialog {
+            self.asset_focused = false;
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.asset_dialog = false;
+            self.asset_focused = false;
             return;
         }
         egui::Modal::new(egui::Id::unique("asset_dialog")).show(ctx,|ui| {
             ui.heading("Project mesh assets");
             ui.label("Imports and source renames save the asset catalog immediately. Scene Undo reverses assignments only.");
-            ui.label("Stable asset ID");ui.text_edit_singleline(&mut self.asset_id);
+            ui.label("Stable asset ID");let field=ui.text_edit_singleline(&mut self.asset_id);if !self.asset_focused{field.request_focus();self.asset_focused=true;}
             ui.label("Project-relative OBJ source / rename destination");ui.text_edit_singleline(&mut self.asset_source);
             let mut operation=None;
             ui.horizontal(|ui| {
@@ -1098,61 +1163,184 @@ impl SceneEditor {
                 egui::ScrollArea::vertical().max_height(180.).show(ui,|ui| {for info in store.inspect(){ui.label(format!("{} · {} · {:?}",info.id,info.source,info.status));if let Some(error)=info.diagnostic {ui.colored_label(egui::Color32::LIGHT_RED,error);}}});
             }
             if !self.error.is_empty(){ui.colored_label(egui::Color32::LIGHT_RED,&self.error);}
-            if ui.button("Close assets").clicked(){self.asset_dialog=false;}
+            if ui.button("Close assets").clicked(){self.asset_dialog=false;self.asset_focused=false;}
         });
     }
-    fn route_shortcuts(&mut self, ctx: &egui::Context) {
-        if self.manipulation.active() {
+    fn rename_dialog(&mut self, ctx: &egui::Context) {
+        if !self.rename_pending {
+            self.rename_focused = false;
             return;
         }
-        if !ctx.egui_wants_keyboard_input()
-            && self.dialog.is_none()
-            && !self.close_pending
-            && !self.rename_pending
-            && !self.new_scene_pending
-            && !self.asset_dialog
+        egui::Modal::new(egui::Id::unique("rename_object_dialog")).show(ctx, |ui| {
+            ui.heading("Rename object");
+            ui.label("Display name; the stable object ID stays unchanged.");
+            let enter_pressed =
+                ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+            let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
+            let edit = ui.text_edit_singleline(&mut self.name_text);
+            if !self.rename_focused {
+                edit.request_focus();
+                self.rename_focused = true;
+            }
+            let enter = (edit.has_focus() || edit.lost_focus()) && enter_pressed;
+            if ui.button("Apply name").clicked() || enter {
+                self.rename_pending = false;
+                self.object_action("rename");
+                if !self.error.is_empty() {
+                    self.rename_pending = true;
+                }
+            }
+            if ui.button("Cancel rename").clicked() || escape {
+                self.rename_pending = false;
+                self.sync_draft();
+            }
+            if !self.error.is_empty() {
+                ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+            }
+        });
+        if !self.rename_pending {
+            self.rename_focused = false;
+        }
+    }
+    fn observe_history_evictions(&mut self) -> bool {
+        let count = self.session.history_evictions();
+        let removed = count.saturating_sub(self.seen_history_evictions);
+        self.seen_history_evictions = count;
+        if removed == 0 {
+            return false;
+        }
+        self.notice.push_str(&format!(
+            " Undo budget: {removed} older step(s) removed; {} pressure removals in this session.",
+            count
+        ));
+        true
+    }
+    fn needs_recovery(&self) -> bool {
+        self.drafts()
+            || (self.session.is_dirty()
+                && !(self.session.path().is_none()
+                    && self.session.scene().objects.is_empty()
+                    && self.session.undo_len() == 0
+                    && self.session.redo_len() == 0))
+    }
+    fn request_close(&mut self) {
+        self.manipulation.cancel();
+        self.remember_camera();
+        self.workspace.flush();
+        if self.new_scene_pending {
+            self.error = "Resolve or cancel New scene before closing.".into();
+            self.running = false;
+        } else if self.rename_pending {
+            self.error = "Apply or cancel the name edit before closing.".into();
+            self.running = false;
+        } else if self.needs_recovery() {
+            self.close_pending = true;
+            self.running = false;
+        } else {
+            self.close_approved = true;
+        }
+    }
+    fn request_new(&mut self) {
+        if self.needs_recovery() {
+            self.new_scene_pending = true;
+            self.running = false;
+        } else {
+            self.replace_with_empty();
+        }
+    }
+    fn route_shortcuts(&mut self, ctx: &egui::Context) {
+        let blocked = self.manipulation.active()
+            || self.dialog.is_some()
+            || self.close_pending
+            || self.rename_pending
+            || self.new_scene_pending
+            || self.asset_dialog
+            || ctx.input(|i| i.pointer.button_down(egui::PointerButton::Secondary));
+        let Some(action) = self.workspace.shortcuts(ctx, blocked) else {
+            return;
+        };
+        self.queued_action = Some(action);
+    }
+    fn process_queued_action(&mut self) {
+        let Some(action) = self.queued_action.take() else {
+            return;
+        };
+        if self.workspace.settings_open
+            || self.rename_pending
+            || self.asset_dialog
+            || self.close_pending
+            || self.dialog.is_some()
+            || self.new_scene_pending
         {
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
-                self.save();
+            return;
+        }
+        match action {
+            Action::New => self.request_new(),
+            Action::Quit => self.request_close(),
+            Action::Open => self.dialog = Some(true),
+            Action::Save => self.save(),
+            Action::SaveAs => {
+                if self.apply() {
+                    self.dialog = Some(false);
+                }
             }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::C)) {
-                self.clipboard_action(false);
+            Action::Undo => self.history(false),
+            Action::Redo => self.history(true),
+            Action::Copy => self.clipboard_action(false),
+            Action::Paste => self.clipboard_action(true),
+            Action::Duplicate => self.object_action("duplicate"),
+            Action::Delete => self.object_action("delete"),
+            Action::Move | Action::Rotate | Action::Scale => {
+                if self.guard().is_ok() {
+                    self.manipulation.tool = match action {
+                        Action::Move => crate::manipulation::Tool::Translate,
+                        Action::Rotate => crate::manipulation::Tool::Rotate,
+                        _ => crate::manipulation::Tool::Scale,
+                    };
+                }
             }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::V)) {
-                self.clipboard_action(true);
+            Action::Frame => {
+                if self.guard().is_ok() {
+                    self.navigation.frame_selected = true;
+                }
             }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::D)) {
-                self.object_action("duplicate");
+            Action::Projection => {
+                if self.guard().is_ok() {
+                    self.navigation.toggle_projection = true;
+                }
             }
-            if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Delete)) {
-                self.object_action("delete");
-            }
-            if ctx.input_mut(|i| {
-                i.consume_key(egui::Modifiers::CTRL | egui::Modifiers::SHIFT, egui::Key::Z)
-            }) {
-                self.history(true);
-            } else if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Z)) {
-                self.history(false);
+            Action::Front
+            | Action::Back
+            | Action::Left
+            | Action::Right
+            | Action::Top
+            | Action::Bottom
+            | Action::Isometric
+            | Action::FreeView => {
+                if self.guard().is_ok() {
+                    self.navigation.view_preset = Some(match action {
+                        Action::Front => ruster_render::ViewPreset::Front,
+                        Action::Back => ruster_render::ViewPreset::Back,
+                        Action::Left => ruster_render::ViewPreset::Left,
+                        Action::Right => ruster_render::ViewPreset::Right,
+                        Action::Top => ruster_render::ViewPreset::Top,
+                        Action::Bottom => ruster_render::ViewPreset::Bottom,
+                        Action::Isometric => ruster_render::ViewPreset::Isometric,
+                        _ => ruster_render::ViewPreset::Free,
+                    });
+                }
             }
         }
     }
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        if self.scale_applied != self.workspace.prefs.scale {
+            ctx.set_zoom_factor(self.workspace.prefs.scale);
+            self.scale_applied = self.workspace.prefs.scale;
+        }
         if ctx.input(|i| i.viewport().close_requested()) && !self.close_approved {
-            self.manipulation.cancel();
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            if self.new_scene_pending {
-                self.error = "Resolve or cancel New scene before closing.".into();
-                self.running = false;
-            } else if self.rename_pending {
-                self.error = "Apply or cancel the name edit before closing.".into();
-                self.running = false;
-            } else if self.session.is_dirty() || self.drafts() {
-                self.close_pending = true;
-                self.running = false;
-            } else {
-                self.close_approved = true;
-            }
+            self.request_close();
         }
         if self.manipulation.active()
             && (ctx.input(|i| !i.focused || i.key_pressed(egui::Key::Escape))
@@ -1180,13 +1368,57 @@ impl SceneEditor {
         egui::Panel::top("scene_top").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.heading("Ruster Scene Editor");
-                if ui.button("New scene").clicked() {
-                    if self.session.is_dirty() || self.drafts() {
-                        self.new_scene_pending = true;
-                        self.running = false;
-                    } else {
-                        self.replace_with_empty();
+                ui.menu_button("Workspace", |ui| {
+                    if ui.button("Workspace and shortcuts…").clicked() {
+                        self.workspace.settings_open = true;
+                        ui.close();
                     }
+                    if ui
+                        .button("Frame selected")
+                        .on_hover_text(self.workspace.shortcut_text(Action::Frame))
+                        .clicked()
+                    {
+                        self.navigation.frame_selected = true;
+                        ui.close();
+                    }
+                    if ui.button("Reset camera").clicked() {
+                        self.navigation.reset = true;
+                        ui.close();
+                    }
+                    ui.separator();
+                    if ui
+                        .button(format!(
+                            "Close window · {}",
+                            self.workspace.shortcut_text(Action::Quit)
+                        ))
+                        .clicked()
+                    {
+                        self.queued_action = Some(Action::Quit);
+                        ui.close();
+                    }
+                    ui.separator();
+                    for action in Action::ALL {
+                        ui.label(format!(
+                            "{} · {}",
+                            action.name(),
+                            self.workspace.shortcut_text(action)
+                        ));
+                    }
+                });
+                ui.menu_button("Recent scenes", |ui| {
+                    if self.workspace.prefs.recent.is_empty() {
+                        ui.label("No successfully opened/saved scenes yet.");
+                    }
+                    for path in self.workspace.prefs.recent.clone() {
+                        if ui.button(path.display().to_string()).clicked() {
+                            self.path_text = path.display().to_string();
+                            self.queued_action = Some(Action::Open);
+                            ui.close();
+                        }
+                    }
+                });
+                if ui.button("New scene").clicked() {
+                    self.queued_action = Some(Action::New);
                 }
                 if ui.button("Assets…").clicked() {
                     self.asset_dialog = true;
@@ -1213,19 +1445,19 @@ impl SceneEditor {
                     }
                 });
                 if ui.button("Open scene…").clicked() {
-                    self.dialog = Some(true);
+                    self.queued_action = Some(Action::Open);
                 }
                 if ui.button("Save scene").clicked() {
-                    self.save();
+                    self.queued_action = Some(Action::Save);
                 }
-                if ui.button("Save scene as…").clicked() && self.apply() {
-                    self.dialog = Some(false);
+                if ui.button("Save scene as…").clicked() {
+                    self.queued_action = Some(Action::SaveAs);
                 }
                 if ui.button("Undo authored edit").clicked() {
-                    self.history(false)
+                    self.queued_action = Some(Action::Undo);
                 }
                 if ui.button("Redo authored edit").clicked() {
-                    self.history(true)
+                    self.queued_action = Some(Action::Redo);
                 }
             });
             ui.label(format!(
@@ -1241,61 +1473,87 @@ impl SceneEditor {
         });
         egui::Panel::bottom("scene_status").show(ui, |ui| {
             ui.label(&self.notice);
+            if !self.workspace.error.is_empty() {
+                ui.colored_label(egui::Color32::YELLOW, &self.workspace.error);
+                if ui.button("Recover workspace preferences…").clicked() {
+                    self.workspace.settings_open = true;
+                }
+            }
             if !self.error.is_empty() {
                 ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
             }
         });
-        egui::Panel::left("scene_hierarchy")
-            .default_size(180.)
-            .show(ui, |ui| {
-                ui.heading("Objects");
-                if ui.button("Create cube").clicked() {
-                    self.object_action("create");
+        if self.workspace.prefs.hierarchy_visible {
+            let panel = match self.workspace.prefs.hierarchy_side {
+                Side::Left => {
+                    egui::Panel::left(("scene_hierarchy", self.workspace.layout_generation))
                 }
-                ui.horizontal(|ui| {
-                    if ui
-                        .add_enabled(self.selected.is_some(), egui::Button::new("Duplicate"))
-                        .clicked()
-                    {
-                        self.object_action("duplicate");
+                Side::Right => {
+                    egui::Panel::right(("scene_hierarchy", self.workspace.layout_generation))
+                }
+            };
+            let output = panel
+                .default_size(self.workspace.prefs.hierarchy_width)
+                .resizable(true)
+                .size_range(120.0..=800.0)
+                .show(ui, |ui| {
+                    ui.heading("Objects");
+                    if ui.button("Create cube").clicked() {
+                        self.object_action("create");
                     }
-                    if ui
-                        .add_enabled(self.selected.is_some(), egui::Button::new("Delete"))
-                        .clicked()
-                    {
-                        self.object_action("delete");
-                    }
-                });
-                let ids: Vec<_> = self
-                    .session
-                    .scene()
-                    .objects
-                    .iter()
-                    .map(|o| (o.id.clone(), o.display_name().to_string()))
-                    .collect();
-                egui::ScrollArea::vertical()
-                    .id_salt("scene_object_scroll")
-                    .show(ui, |ui| {
-                        for (id, name) in ids {
-                            if ui
-                                .selectable_label(self.manipulation.ids.contains(&id), name)
-                                .clicked()
-                            {
-                                if self.guard().is_err() {
-                                    self.error =
-                                        "Apply or revert transform before changing selection."
-                                            .into();
-                                } else {
+                    ui.horizontal(|ui| {
+                        if ui
+                            .add_enabled(self.selected.is_some(), egui::Button::new("Duplicate"))
+                            .clicked()
+                        {
+                            self.object_action("duplicate");
+                        }
+                        if ui
+                            .add_enabled(self.selected.is_some(), egui::Button::new("Delete"))
+                            .clicked()
+                        {
+                            self.object_action("delete");
+                        }
+                    });
+                    let ids: Vec<_> = self
+                        .session
+                        .scene()
+                        .objects
+                        .iter()
+                        .map(|o| (o.id.clone(), o.display_name().to_string()))
+                        .collect();
+                    egui::ScrollArea::vertical()
+                        .id_salt("scene_object_scroll")
+                        .show(ui, |ui| {
+                            for (id, name) in ids {
+                                if ui
+                                    .selectable_label(self.manipulation.ids.contains(&id), name)
+                                    .clicked()
+                                {
                                     let additive = ui.input(|i| {
                                         i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift
                                     });
-                                    self.select_object(Some(id), additive);
+                                    self.queued_selection = Some((Some(id), additive));
                                 }
                             }
-                        }
-                    });
-            });
-        egui::Panel::right("scene_inspector").default_size(320.).resizable(true).show(ui,|ui| {
+                        });
+                });
+            let width = output.response.rect.width().clamp(120.0, 800.0);
+            if (width - self.workspace.prefs.hierarchy_width).abs() > 0.5 {
+                self.workspace.prefs.hierarchy_width = width;
+                self.workspace.changed();
+            }
+        }
+        if self.workspace.prefs.inspector_visible {
+            let panel = match self.workspace.prefs.inspector_side {
+                Side::Left => {
+                    egui::Panel::left(("scene_inspector", self.workspace.layout_generation))
+                }
+                Side::Right => {
+                    egui::Panel::right(("scene_inspector", self.workspace.layout_generation))
+                }
+            };
+            let output=panel.default_size(self.workspace.prefs.inspector_width).resizable(true).size_range(240.0..=1000.0).show(ui,|ui| {
             egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("Object");
             if let Some(id) = &self.selected { ui.small(format!("Stable ID: {id}")); }
@@ -1308,7 +1566,7 @@ impl SceneEditor {
             if let Some(object)=self.selected.as_ref().and_then(|id|self.session.scene().objects.iter().find(|o|&o.id==id)) {ui.label(format!("Mesh: {}",object.mesh.as_deref().unwrap_or("Procedural cube")));}
             ui.label(format!("Loaded scene format v{}; Save writes v{}.",self.session.loaded_format_version(),ruster_scene::FORMAT_VERSION));
             ui.add_enabled_ui(!self.manipulation.ids.is_empty() && !self.manipulation.active(), |ui| {
-                match self.manipulation.precision_ui(ui,&mut self.session) {
+                match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open) {
                     Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                     Ok(false)=>{},Err(error)=>self.error=error,
                 }
@@ -1323,6 +1581,14 @@ impl SceneEditor {
             ui.label("Static arrangement: ticks advance lifecycle only; no sample gameplay is implied.");
             });
         });
+            let width = output.response.rect.width().clamp(240.0, 1000.0);
+            if (width - self.workspace.prefs.inspector_width).abs() > 0.5 {
+                self.workspace.prefs.inspector_width = width;
+                self.workspace.changed();
+            }
+        }
+        self.process_queued_action();
+        self.process_queued_selection();
         if !self.asset_dialog && self.dialog.is_none() && !self.close_pending {
             egui::Panel::bottom("content_status").show(ui,|ui| {
                 ui.horizontal(|ui| {
@@ -1344,6 +1610,11 @@ impl SceneEditor {
             });
         }
         egui::CentralPanel::default().show(ui, |ui| {
+            if self.workspace.welcome && self.session.scene().objects.is_empty() {
+                ui.heading("Start creating");ui.label("Create a cube in the hierarchy, open a scene, or choose a recent scene. Your last project is never opened automatically.");
+                ui.horizontal(|ui| {if ui.button("Open a scene…").clicked(){self.dialog=Some(true);}
+                if ui.button("Workspace settings…").clicked(){self.workspace.settings_open=true;}});
+            }
             ui.horizontal(|ui| {
                 ui.add_enabled(
                     !self.manipulation.active(),
@@ -1357,7 +1628,10 @@ impl SceneEditor {
                 None
             };
             let selected: Vec<_> = self.manipulation.ids.iter().map(String::as_str).collect();
-            let viewport = ruster_render::viewport_interactive(
+            self.navigation.enabled=!self.manipulation.active() && !self.workspace.settings_open && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending;
+            self.navigation.keyboard_enabled=self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
+            self.navigation.movement_speed=self.workspace.prefs.movement_speed;
+            let viewport = ruster_render::viewport_with_navigation(
                 ui,
                 if self.show_preview {
                     &self.preview.scene
@@ -1370,7 +1644,7 @@ impl SceneEditor {
                 } else {
                     &self.resolved
                 },
-                !self.manipulation.active(),
+                &mut self.navigation,
             );
             let may_draw = !self.show_preview
                 && !self.drafts()
@@ -1379,7 +1653,7 @@ impl SceneEditor {
                 && !self.close_pending
                 && !self.close_approved
                 && !self.new_scene_pending
-                && !self.rename_pending;
+                && !self.rename_pending && !self.workspace.settings_open;
             let overlay_owns = if may_draw {
                 let before = self.session.scene().revision;
                 let result = self.manipulation.draw(ui, &viewport, &mut self.session);
@@ -1397,41 +1671,43 @@ impl SceneEditor {
             } else {
                 false
             };
-            if viewport.response.clicked() && !overlay_owns && self.guard().is_ok() {
+            if viewport.response.clicked() && !overlay_owns && !self.manipulation.active() && !self.workspace.settings_open && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending {
                 let id = viewport
                     .picked
                     .filter(|id| self.session.scene().objects.iter().any(|o| &o.id == id));
                 let additive =
                     ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
-                self.select_object(id, additive);
+                self.queued_selection=Some((id,additive));
             }
         });
-        if self.rename_pending {
-            egui::Modal::new(egui::Id::unique("rename_object_dialog")).show(&ctx, |ui| {
-                ui.heading("Rename object");
-                ui.label("Display name; the stable object ID stays unchanged.");
-                ui.text_edit_singleline(&mut self.name_text);
-                if ui.button("Apply name").clicked() {
-                    self.rename_pending = false;
-                    self.object_action("rename");
-                    if !self.error.is_empty() {
-                        self.rename_pending = true;
-                    }
-                }
-                if ui.button("Cancel rename").clicked() {
-                    self.rename_pending = false;
-                    self.sync_draft();
-                }
-                if !self.error.is_empty() {
-                    ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
-                }
-            });
+        self.process_queued_selection();
+        self.workspace.settings_ui(&ctx);
+        if ctx.input(|i| i.pointer.any_released()) {
+            self.remember_camera();
+            self.workspace.flush();
+        }
+        self.rename_dialog(&ctx);
+        if self.dialog.is_none() {
+            self.path_focused = false;
+        }
+        if !self.new_scene_pending && !self.close_pending {
+            self.confirm_focused = None;
         }
         if self.new_scene_pending && self.dialog.is_none() {
             egui::Modal::new(egui::Id::unique("new_scene_dialog")).show(&ctx, |ui| {
                 ui.heading("New scene — unsaved work");
                 ui.label("Save your current scene, discard it, or cancel.");
-                if ui.button("Save before new scene").clicked() {
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                    self.new_scene_pending = false;
+                    self.confirm_focused = None;
+                    return;
+                }
+                let save = ui.button("Save before new scene");
+                if self.confirm_focused != Some("new") {
+                    save.request_focus();
+                    self.confirm_focused = Some("new");
+                }
+                if save.clicked() {
                     self.save();
                     if !self.session.is_dirty() && !self.drafts() {
                         self.replace_with_empty();
@@ -1448,19 +1724,22 @@ impl SceneEditor {
         if let Some(open) = self.dialog {
             egui::Modal::new(egui::Id::unique("scene_path_dialog")).show(&ctx,|ui| {
                 ui.heading(if open {"Open scene"}else{"Save scene as"});
-                ui.label("Absolute scene path");ui.text_edit_singleline(&mut self.path_text);
+                self.confirm_focused=None;
+                ui.label("Absolute scene path");let enter_pressed=ui.input(|i|i.key_pressed(egui::Key::Enter)&&i.modifiers.is_none());let cancel=ui.input(|i|i.key_pressed(egui::Key::Escape)&&i.modifiers.is_none());let edit=ui.text_edit_singleline(&mut self.path_text);
+                if !self.path_focused {edit.request_focus();self.path_focused=true;}
+                let submit=(edit.has_focus()||edit.lost_focus())&&enter_pressed;
                 if open && (self.session.is_dirty()||self.drafts()) {
                     ui.colored_label(egui::Color32::YELLOW,"Opening discards current unsaved scene and drafts. Cancel to preserve them.");
                 }
                 ui.horizontal(|ui| {
-                    if ui.button(if open {"Open and discard current"}else{"Save to new path"}).clicked() {
+                    if ui.button(if open {"Open and discard current"}else{"Save to new path"}).clicked()||submit {
                         let path=PathBuf::from(self.path_text.trim());
                         if open {
                             match Session::open(path) {
                                 Ok(session)=> {
                                     let render=self.render.clone();
-                                    let reset=render.as_ref().map(|r|ruster_render::refresh_shader(r,ruster_render::default_shader())).unwrap_or(Ok(()));
-                                    match reset {Ok(())=>{let mut next=Self::new(session);next.manipulation.clipboard_from(&mut self.manipulation);*self=next;self.render=render;},Err(error)=>self.error=error}
+                                    let reset=if self.shader_revision>0 {render.as_ref().map(|r|ruster_render::refresh_shader(r,ruster_render::default_shader())).unwrap_or(Ok(()))} else {Ok(())};
+                                    match reset {Ok(())=>{self.remember_camera();let workspace=std::mem::replace(&mut self.workspace,Workspace::detached());let mut next=Self::with_workspace(session,workspace);next.manipulation.clipboard_from(&mut self.manipulation);if let Some(path)=next.session.path(){next.workspace.remember(path);}next.workspace.welcome=false;*self=next;self.render=render;},Err(error)=>self.error=error}
                                 },
                                 Err(error)=>self.error=error.to_string()
                             }
@@ -1471,8 +1750,9 @@ impl SceneEditor {
                             }
                         }
                     }
-                    if ui.button("Cancel scene dialog").clicked() {self.dialog=None;}
+                    if ui.button("Cancel scene dialog").clicked()||cancel {self.dialog=None;self.path_focused=false;}
                 });
+                if !self.error.is_empty(){ui.colored_label(egui::Color32::LIGHT_RED,&self.error);}
             });
         }
         self.content_ui(&ctx);
@@ -1480,7 +1760,17 @@ impl SceneEditor {
         {
             egui::Modal::new(egui::Id::unique("scene_close_dialog")).show(&ctx, |ui| {
                 ui.label("Save, discard or cancel before closing.");
-                if ui.button("Save and close scene").clicked() {
+                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                    self.close_pending = false;
+                    self.confirm_focused = None;
+                    return;
+                }
+                let save = ui.button("Save and close scene");
+                if self.confirm_focused != Some("close") {
+                    save.request_focus();
+                    self.confirm_focused = Some("close");
+                }
+                if save.clicked() {
                     self.save();
                     if !self.session.is_dirty() && !self.drafts() {
                         self.close_approved = true;
@@ -1494,7 +1784,12 @@ impl SceneEditor {
                 }
             });
         }
+        if self.observe_history_evictions() {
+            ctx.request_repaint();
+        }
         if self.close_approved {
+            self.remember_camera();
+            self.workspace.flush();
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
     }
@@ -1515,8 +1810,14 @@ impl eframe::App for Host {
         }
     }
 }
+pub fn run_empty() -> Result<(), String> {
+    run_session(Session::new(Scene::empty("untitled")).map_err(|e| e.to_string())?)
+}
 pub fn run(path: PathBuf) -> Result<(), String> {
     let session = Session::open(path).map_err(|e| e.to_string())?;
+    run_session(session)
+}
+fn run_session(session: Session) -> Result<(), String> {
     let mut setup = WgpuSetupCreateNew::without_display_handle();
     setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
     ruster_render::configure_setup(&mut setup);
@@ -1549,6 +1850,10 @@ pub fn run(path: PathBuf) -> Result<(), String> {
             Ok(Box::new(Host {
                 editor: {
                     let mut editor = SceneEditor::new(session);
+                    if let Some(path) = editor.session.path() {
+                        editor.workspace.remember(path);
+                        editor.workspace.welcome = false;
+                    }
                     editor.render = cc.wgpu_render_state.clone();
                     editor
                 },
@@ -1600,6 +1905,170 @@ mod tests {
             assert!(e.session.path().is_none());
             assert_eq!(e.dialog, if modal == 3 { Some(true) } else { None });
         }
+    }
+
+    #[test]
+    fn asset_dialog_focus_and_escape_preserve_scene_and_enter_does_not_import() {
+        let mut e = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let before = e.session.scene().clone();
+        e.asset_dialog = true;
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut SceneEditor, events: Vec<egui::Event>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |_| editor.content_ui(&ctx),
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut e, vec![]);
+        assert!(ctx.memory(|m| m.focused().is_some()));
+        let key = |key| {
+            vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        frame(&mut e, key(egui::Key::Enter));
+        assert!(e.asset_dialog);
+        assert_eq!(e.session.scene(), &before);
+        assert!(e.assets.is_none());
+        frame(&mut e, key(egui::Key::Escape));
+        assert!(!e.asset_dialog);
+        assert!(!e.asset_focused);
+        assert_eq!(e.session.scene(), &before);
+    }
+
+    #[test]
+    fn close_shortcut_uses_the_same_dirty_and_name_recovery_as_native_close() {
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut SceneEditor| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: vec![
+                        egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                        egui::Event::Key {
+                            key: egui::Key::Q,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::CTRL,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |_| {
+                    editor.route_shortcuts(&ctx);
+                    editor.process_queued_action();
+                },
+            );
+            output.textures_delta.clear();
+        };
+        let mut dirty = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        dirty.draft.as_mut().unwrap().translation[0] = "-".into();
+        let before = dirty.session.scene().clone();
+        frame(&mut dirty);
+        assert!(dirty.close_pending);
+        assert!(!dirty.close_approved);
+        assert_eq!(dirty.session.scene(), &before);
+        assert_eq!(dirty.draft.as_ref().unwrap().translation[0], "-");
+        let mut clean = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
+        frame(&mut clean);
+        assert!(clean.close_approved);
+        assert!(!clean.close_pending);
+        let mut named = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        named.rename_pending = true;
+        named.name_text = "Unapplied".into();
+        named.request_close();
+        assert!(!named.close_approved);
+        assert!(!named.close_pending);
+        assert!(named.rename_pending);
+        assert_eq!(named.name_text, "Unapplied");
+        named.rename_pending = false;
+        named.new_scene_pending = true;
+        named.request_close();
+        assert!(!named.close_approved);
+        assert!(!named.close_pending);
+        assert!(named.new_scene_pending);
+    }
+
+    #[test]
+    fn rename_dialog_accepts_enter_tab_and_escape_with_real_focus() {
+        let mut e = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut SceneEditor, events: Vec<egui::Event>| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |_| editor.rename_dialog(&ctx),
+            );
+            output.textures_delta.clear();
+        };
+        let key = |key| {
+            vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        e.rename_pending = true;
+        e.name_text = "Entered name".into();
+        frame(&mut e, vec![]);
+        frame(&mut e, key(egui::Key::Enter));
+        assert!(!e.rename_pending);
+        assert_eq!(e.session.scene().objects[0].display_name(), "Entered name");
+        e.rename_pending = true;
+        e.name_text = "Discard name".into();
+        frame(&mut e, vec![]);
+        frame(&mut e, key(egui::Key::Escape));
+        assert!(!e.rename_pending);
+        assert_eq!(e.session.scene().objects[0].display_name(), "Entered name");
+        assert_eq!(e.name_text, "Entered name");
+        e.rename_pending = true;
+        e.name_text = "Tabbed name".into();
+        frame(&mut e, vec![]);
+        frame(&mut e, key(egui::Key::Tab));
+        frame(&mut e, key(egui::Key::Enter));
+        assert!(!e.rename_pending);
+        assert_eq!(e.session.scene().objects[0].display_name(), "Tabbed name");
+    }
+
+    #[test]
+    fn fresh_editor_state_is_detached_and_human_selection_commits_valid_drafts() {
+        let mut e = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        assert!(
+            e.workspace.state_path().is_none(),
+            "unit editor constructors never use the user's preference path"
+        );
+        e.draft.as_mut().unwrap().translation[0] = "5.5".into();
+        e.queued_selection = Some((Some("right".into()), false));
+        e.process_queued_selection();
+        assert_eq!(e.selected.as_deref(), Some("right"));
+        assert_eq!(e.session.scene().objects[0].transform.translation[0], 5.5);
+        assert_eq!(e.session.undo_len(), 1);
+        e.draft.as_mut().unwrap().translation[0] = "-".into();
+        e.queued_selection = Some((Some("left".into()), false));
+        e.process_queued_selection();
+        assert_eq!(e.selected.as_deref(), Some("right"));
+        assert_eq!(e.draft.as_ref().unwrap().translation[0], "-");
+        assert_eq!(e.session.undo_len(), 1);
+        let empty = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
+        assert!(
+            !empty.needs_recovery(),
+            "untouched welcome scene has no work to discard"
+        );
     }
 
     // Unique integration risk: object membership changes need ID-based diffs,

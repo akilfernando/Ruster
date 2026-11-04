@@ -1,0 +1,36 @@
+{
+  "roi_xyxy": [
+    540,
+    450,
+    665,
+    590
+  ],
+  "roi_pixels": 17500,
+  "msaa1_unique_rgb": 4,
+  "msaa4_unique_rgb": 20,
+  "msaa4_partial_color_pixels": 372,
+  "msaa4_partial_pixels_adjacent_to_background": 251,
+  "base_rgb": [
+    [
+      44,
+      53,
+      66
+    ],
+    [
+      113,
+      172,
+      136
+    ],
+    [
+      125,
+      189,
+      150
+    ],
+    [
+      136,
+      205,
+      163
+    ]
+  ],
+  "definition": "Partial means RGB differs from all four 1x ROI colors; adjacent means any eight-neighbor equals clear background. Descriptive coverage evidence, not an error score."
+}

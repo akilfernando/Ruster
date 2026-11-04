@@ -1,0 +1,4 @@
+   Compiling ruster-assets v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-assets)
+   Compiling ruster-render v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-render)
+   Compiling ruster-editor v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-editor)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 9.32s

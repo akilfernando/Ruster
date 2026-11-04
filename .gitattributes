@@ -5,3 +5,6 @@ third_party/wgpu-hal/src/vulkan/descriptor.rs -text whitespace=blank-at-eol,blan
 
 # Supplemental upstream license hashes require byte-for-byte preservation.
 packaging/licenses/*.txt -text
+
+# Raw AA captures retain the tool's terminating blank line verbatim.
+docs/evidence/m8-aa-*.txt whitespace=-blank-at-eof

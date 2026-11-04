@@ -1,0 +1,18 @@
+    Checking wgpu-hal v30.0.1 (/home/akilf/Projects/Ruster/third_party/wgpu-hal)
+    Checking ruster-scene v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-scene)
+    Checking ruster-assets v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-assets)
+error[E0425]: cannot find function `decode_cache` in this scope
+   --> crates/ruster-assets/src/lib.rs:469:31
+    |
+469 |             .and_then(|bytes| decode_cache(&bytes, hash))
+    |                               ^^^^^^^^^^^^ not found in this scope
+
+error[E0425]: cannot find function `encode_cache` in this scope
+   --> crates/ruster-assets/src/lib.rs:487:21
+    |
+487 |         let bytes = encode_cache(hash, mesh)?;
+    |                     ^^^^^^^^^^^^ not found in this scope
+
+For more information about this error, try `rustc --explain E0425`.
+error: could not compile `ruster-assets` (lib) due to 2 previous errors
+warning: build failed, waiting for other jobs to finish...

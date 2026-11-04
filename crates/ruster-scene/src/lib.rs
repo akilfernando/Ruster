@@ -3,7 +3,7 @@
 //! Public values permit code-first construction. Call `validate` at ingestion;
 //! [`Session`] validates transactional edits and owns bounded persisted history.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -12,7 +12,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 4;
+pub const FORMAT_VERSION: u32 = 5;
+
+mod authoring;
+mod strict_json;
+pub use authoring::*;
 pub const MAX_OBJECTS: usize = 256;
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub const HISTORY_LIMIT: usize = 32;
@@ -179,7 +183,17 @@ impl Scene {
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, SceneError> {
-        Ok(Document::load(path.as_ref())?.scene)
+        let document = Document::load(path.as_ref())?;
+        if !document.authoring.is_empty()
+            || document
+                .undo
+                .iter()
+                .chain(&document.redo)
+                .any(Change::has_authoring)
+        {
+            return Err(SceneError::Invalid("document contains behavior authoring; use Session::open and an authoring-aware runtime, or explicitly export Session::scene() as geometry".into()));
+        }
+        Ok(document.scene)
     }
 
     /// Atomic replacement; caller manages concurrency. History starts empty.
@@ -218,7 +232,12 @@ pub enum SceneError {
     Format(serde_json::Error),
     UnsupportedVersion(u64),
     Invalid(String),
-    StaleRevision { expected: u64, actual: u64 },
+    /// The validated authored payload and required history exceed the serialized budget.
+    Capacity,
+    StaleRevision {
+        expected: u64,
+        actual: u64,
+    },
     RevisionOverflow,
     TickOverflow,
     ObjectNotFound(String),
@@ -238,6 +257,7 @@ impl fmt::Display for SceneError {
                 "unsupported scene version {version}; supported versions are 1 through {FORMAT_VERSION}"
             ),
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
+            Self::Capacity => write!(f, "authored state and required reversible history exceed 1 MiB; reduce content or edit size before retrying"),
             Self::StaleRevision { expected, actual } => write!(
                 f,
                 "stale revision: expected {expected}, current {actual}; inspect and retry"
@@ -294,7 +314,7 @@ struct IndexedObject {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum Change {
+enum SceneDelta {
     Transforms {
         changes: Vec<TransformDelta>,
     },
@@ -327,7 +347,7 @@ enum Change {
     },
 }
 
-impl Change {
+impl SceneDelta {
     fn references_asset(&self) -> bool {
         match self {
             Self::Mesh { before, after, .. } => before.is_some() || after.is_some(),
@@ -485,6 +505,126 @@ impl Change {
     }
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ValueDelta<T> {
+    id: String,
+    before: Option<T>,
+    after: Option<T>,
+}
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Change {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    scene: Vec<SceneDelta>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    sources: Vec<ValueDelta<BehaviorSource>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    bindings: Vec<ValueDelta<BehaviorBinding>>,
+}
+impl From<SceneDelta> for Change {
+    fn from(delta: SceneDelta) -> Self {
+        Self {
+            scene: vec![delta],
+            ..Self::default()
+        }
+    }
+}
+fn apply_values<T: Clone + PartialEq>(
+    deltas: &[ValueDelta<T>],
+    values: &mut BTreeMap<String, T>,
+    undo: bool,
+) -> Result<(), SceneError> {
+    let mut ids = HashSet::new();
+    for delta in deltas {
+        validate_id(&delta.id)?;
+        let (expected, replacement) = if undo {
+            (&delta.after, &delta.before)
+        } else {
+            (&delta.before, &delta.after)
+        };
+        if !ids.insert(&delta.id)
+            || delta.before == delta.after
+            || values.get(&delta.id) != expected.as_ref()
+        {
+            return Err(SceneError::Invalid(
+                "inconsistent authored value history".into(),
+            ));
+        }
+        if let Some(value) = replacement {
+            values.insert(delta.id.clone(), value.clone());
+        } else {
+            values.remove(&delta.id);
+        }
+    }
+    Ok(())
+}
+impl Change {
+    fn has_authoring(&self) -> bool {
+        !self.sources.is_empty() || !self.bindings.is_empty()
+    }
+    fn references_asset(&self) -> bool {
+        self.scene.iter().any(SceneDelta::references_asset)
+            || self
+                .bindings
+                .iter()
+                .flat_map(|d| [&d.before, &d.after])
+                .flatten()
+                .any(|b| {
+                    b.properties
+                        .values()
+                        .any(|v| matches!(v, PropertyValue::AssetRef(Some(_))))
+                })
+    }
+    fn object_ids(&self) -> impl Iterator<Item = &str> {
+        self.bindings
+            .iter()
+            .flat_map(|d| [&d.before, &d.after])
+            .flatten()
+            .flat_map(|b| {
+                std::iter::once(b.object_id.as_str()).chain(b.properties.values().filter_map(|v| {
+                    match v {
+                        PropertyValue::ObjectRef(Some(id)) => Some(id.as_str()),
+                        _ => None,
+                    }
+                }))
+            })
+    }
+    fn contains_id(&self, id: &str) -> bool {
+        self.scene.iter().any(|d| d.contains_id(id)) || self.object_ids().any(|used| used == id)
+    }
+    fn apply(
+        &self,
+        scene: &mut Scene,
+        authoring: &mut Authoring,
+        undo: bool,
+    ) -> Result<(), SceneError> {
+        if self.scene.is_empty() && !self.has_authoring()
+            || self.scene.len() > MAX_OBJECTS
+            || self.sources.len() > MAX_SOURCES
+            || self.bindings.len() > MAX_BINDINGS
+        {
+            return Err(SceneError::Invalid(
+                "empty or oversized authored history change".into(),
+            ));
+        }
+        if undo {
+            for delta in self.scene.iter().rev() {
+                delta.apply(scene, true)?;
+            }
+        } else {
+            for delta in &self.scene {
+                delta.apply(scene, false)?;
+            }
+        }
+        // All three sections form one atomic authored state. Validate only after all apply.
+        apply_values(&self.sources, &mut authoring.sources, undo)?;
+        apply_values(&self.bindings, &mut authoring.bindings, undo)?;
+        scene.validate()?;
+        authoring.validate(scene)
+    }
+}
+
 // Decode v1 through its exact schema: even `mesh: null` must be rejected.
 // Its untagged transform history is migrated without losing undo or redo.
 #[derive(Deserialize)]
@@ -503,7 +643,7 @@ struct LegacyScene {
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct LegacyChange {
+struct LegacySceneDelta {
     id: String,
     before: Transform,
     after: Transform,
@@ -514,12 +654,12 @@ struct LegacyDocument {
     format: String,
     format_version: u32,
     scene: LegacyScene,
-    undo: Vec<LegacyChange>,
-    redo: Vec<LegacyChange>,
+    undo: Vec<LegacySceneDelta>,
+    redo: Vec<LegacySceneDelta>,
 }
 impl From<LegacyDocument> for Document {
     fn from(old: LegacyDocument) -> Self {
-        let migrate = |change: LegacyChange| Change::Transform {
+        let migrate = |change: LegacySceneDelta| SceneDelta::Transform {
             id: change.id,
             before: change.before,
             after: change.after,
@@ -543,8 +683,19 @@ impl From<LegacyDocument> for Document {
                     })
                     .collect(),
             },
-            undo: old.undo.into_iter().map(migrate).collect(),
-            redo: old.redo.into_iter().map(migrate).collect(),
+            authoring: Authoring::default(),
+            undo: old
+                .undo
+                .into_iter()
+                .map(migrate)
+                .map(Change::from)
+                .collect(),
+            redo: old
+                .redo
+                .into_iter()
+                .map(migrate)
+                .map(Change::from)
+                .collect(),
         }
     }
 }
@@ -567,7 +718,7 @@ struct V2Scene {
 }
 #[derive(Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-enum V2Change {
+enum V2SceneDelta {
     Transform {
         id: String,
         before: Transform,
@@ -585,14 +736,16 @@ struct V2Document {
     format: String,
     format_version: u32,
     scene: V2Scene,
-    undo: Vec<V2Change>,
-    redo: Vec<V2Change>,
+    undo: Vec<V2SceneDelta>,
+    redo: Vec<V2SceneDelta>,
 }
 impl From<V2Document> for Document {
     fn from(old: V2Document) -> Self {
         let migrate = |c| match c {
-            V2Change::Transform { id, before, after } => Change::Transform { id, before, after },
-            V2Change::Mesh { id, before, after } => Change::Mesh { id, before, after },
+            V2SceneDelta::Transform { id, before, after } => {
+                SceneDelta::Transform { id, before, after }
+            }
+            V2SceneDelta::Mesh { id, before, after } => SceneDelta::Mesh { id, before, after },
         };
         Self {
             format: old.format,
@@ -613,8 +766,42 @@ impl From<V2Document> for Document {
                     })
                     .collect(),
             },
-            undo: old.undo.into_iter().map(migrate).collect(),
-            redo: old.redo.into_iter().map(migrate).collect(),
+            authoring: Authoring::default(),
+            undo: old
+                .undo
+                .into_iter()
+                .map(migrate)
+                .map(Change::from)
+                .collect(),
+            redo: old
+                .redo
+                .into_iter()
+                .map(migrate)
+                .map(Change::from)
+                .collect(),
+        }
+    }
+}
+
+// Exact pre-authoring envelope and history: future fields are rejected, including null.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V4Document {
+    format: String,
+    format_version: u32,
+    scene: Scene,
+    undo: Vec<SceneDelta>,
+    redo: Vec<SceneDelta>,
+}
+impl From<V4Document> for Document {
+    fn from(old: V4Document) -> Self {
+        Self {
+            format: old.format,
+            format_version: old.format_version,
+            scene: old.scene,
+            authoring: Authoring::default(),
+            undo: old.undo.into_iter().map(Change::from).collect(),
+            redo: old.redo.into_iter().map(Change::from).collect(),
         }
     }
 }
@@ -625,6 +812,8 @@ struct Document {
     format: String,
     format_version: u32,
     scene: Scene,
+    #[serde(default, skip_serializing_if = "Authoring::is_empty")]
+    authoring: Authoring,
     undo: Vec<Change>,
     redo: Vec<Change>,
 }
@@ -634,12 +823,14 @@ impl Document {
             format: "ruster-scene".into(),
             format_version: FORMAT_VERSION,
             scene,
+            authoring: Authoring::default(),
             undo: Vec::new(),
             redo: Vec::new(),
         }
     }
     fn validate(&self) -> Result<(), SceneError> {
         self.scene.validate()?;
+        self.authoring.validate(&self.scene)?;
         if self.undo.len() + self.redo.len() > HISTORY_LIMIT {
             return Err(SceneError::Invalid(format!(
                 "history exceeds {HISTORY_LIMIT} changes"
@@ -647,6 +838,7 @@ impl Document {
         }
         check_serialized_size(
             &self.scene,
+            &self.authoring,
             &self.undo.iter().collect::<Vec<_>>(),
             &self.redo.iter().collect::<Vec<_>>(),
         )
@@ -660,7 +852,7 @@ impl Document {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(SceneError::Invalid("file exceeds 1 MiB".into()));
         }
-        let value: serde_json::Value = serde_json::from_slice(&bytes)?;
+        let value = strict_json::parse(&bytes)?;
         if value.get("format").and_then(|v| v.as_str()) != Some("ruster-scene") {
             return Err(SceneError::Invalid("expected ruster-scene format; logistics v1 scenarios remain a separate format and are not migrated".into()));
         }
@@ -671,15 +863,19 @@ impl Document {
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
-            3 | 4 => serde_json::from_value(value)?,
+            3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
+            5 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version == 3
-            && document
-                .undo
-                .iter()
-                .chain(&document.redo)
-                .any(|c| matches!(c, Change::Transforms { .. } | Change::Objects { .. }))
+            && document.undo.iter().chain(&document.redo).any(|c| {
+                c.scene.iter().any(|d| {
+                    matches!(
+                        d,
+                        SceneDelta::Transforms { .. } | SceneDelta::Objects { .. }
+                    )
+                })
+            })
         {
             return Err(SceneError::Invalid(
                 "scene v3 does not support grouped history".into(),
@@ -693,10 +889,10 @@ impl Document {
         self.validate()?;
         let mut upgraded = self.clone();
         upgraded.format_version = FORMAT_VERSION;
-        let mut bytes = serde_json::to_vec_pretty(&upgraded)?;
+        let mut bytes = serde_json::to_vec(&upgraded)?;
         bytes.push(b'\n');
         if bytes.len() as u64 > MAX_FILE_BYTES {
-            return Err(SceneError::Invalid("serialized file exceeds 1 MiB".into()));
+            return Err(SceneError::Capacity);
         }
         let parent = path
             .parent()
@@ -724,9 +920,11 @@ impl Document {
 }
 
 // Count history once and reserve the largest scene reachable through Undo/Redo.
-// This includes restored deleted objects, maximum revision width and stack formatting.
+// This includes restored deleted objects/sources and maximum revision width.
+// Compact encoding is shared with the writer; concatenating stacks is conservative.
 fn check_serialized_size(
     scene: &Scene,
+    authoring: &Authoring,
     undo: &[&Change],
     redo: &[&Change],
 ) -> Result<(), SceneError> {
@@ -748,20 +946,28 @@ fn check_serialized_size(
     #[derive(Serialize)]
     struct SceneOnly<'a> {
         scene: SceneView<'a>,
+        #[serde(skip_serializing_if = "Authoring::is_empty")]
+        authoring: &'a Authoring,
     }
     #[derive(Serialize)]
     struct View<'a> {
         format: &'static str,
         format_version: u32,
         scene: SceneView<'a>,
+        #[serde(skip_serializing_if = "Authoring::is_empty")]
+        authoring: &'a Authoring,
         undo: &'a [&'a Change],
         redo: &'a [&'a Change],
     }
-    struct Counter(u64);
+    struct Counter {
+        bytes: u64,
+        exceeded: bool,
+    }
     impl Write for Counter {
         fn write(&mut self, bytes: &[u8]) -> std::io::Result<usize> {
-            self.0 += bytes.len() as u64;
-            if self.0 > MAX_FILE_BYTES {
+            self.bytes += bytes.len() as u64;
+            if self.bytes > MAX_FILE_BYTES {
+                self.exceeded = true;
                 return Err(std::io::Error::other("serialized scene exceeds 1 MiB"));
             }
             Ok(bytes.len())
@@ -771,42 +977,68 @@ fn check_serialized_size(
         }
     }
     fn size(value: &impl Serialize) -> Result<u64, SceneError> {
-        let mut counter = Counter(0);
-        serde_json::to_writer_pretty(&mut counter, value)
-            .map_err(|e| SceneError::Invalid(format!("scene cannot be saved within 1 MiB: {e}")))?;
-        Ok(counter.0)
+        let mut counter = Counter {
+            bytes: 0,
+            exceeded: false,
+        };
+        if let Err(error) = serde_json::to_writer(&mut counter, value) {
+            return Err(if counter.exceeded {
+                SceneError::Capacity
+            } else {
+                SceneError::Format(error)
+            });
+        }
+        Ok(counter.bytes)
     }
     let all: Vec<_> = undo.iter().chain(redo).copied().collect();
     let envelope = size(&View {
         format: "ruster-scene",
         format_version: FORMAT_VERSION,
         scene: scene.into(),
+        authoring,
         undo: &all,
         redo: &[],
     })?;
-    // Match the nested scene's indentation; the wrapper's constant bytes cancel.
+    // Wrapper constant bytes cancel when replacing the current authored payload.
     let current = size(&SceneOnly {
         scene: scene.into(),
+        authoring,
     })?;
     let mut largest = current;
     for (history, reversing) in [(undo, true), (redo, false)] {
         let mut candidate = scene.clone();
+        let mut candidate_authoring = authoring.clone();
         for change in history.iter().rev() {
-            change.apply(&mut candidate, reversing)?;
+            change.apply(&mut candidate, &mut candidate_authoring, reversing)?;
             candidate.validate()?;
             largest = largest.max(size(&SceneOnly {
                 scene: (&candidate).into(),
+                authoring: &candidate_authoring,
             })?);
         }
     }
-    // Splitting a nonempty stack into two adds at most two pretty-format bytes.
-    let stack_headroom = if all.len() >= 2 { 2 } else { 0 };
-    if envelope - current + largest + stack_headroom + 1 > MAX_FILE_BYTES {
-        return Err(SceneError::Invalid(
-            "scene or reversible history cannot be saved within 1 MiB".into(),
-        ));
+    // Splitting compact stacks removes one comma when both are nonempty, so the
+    // concatenated envelope bounds every split. Reserve the writer's final newline.
+    if envelope - current + largest + 1 > MAX_FILE_BYTES {
+        return Err(SceneError::Capacity);
     }
     Ok(())
+}
+
+fn allocate_ids(
+    prefix: &str,
+    count: usize,
+    limit: usize,
+    used: HashSet<&str>,
+) -> Result<Vec<String>, SceneError> {
+    if count > limit {
+        return Err(SceneError::Invalid(format!("ID request exceeds{limit}")));
+    }
+    Ok((1..=used.len() + count)
+        .map(|n| format!("{prefix}-{n}"))
+        .filter(|id| !used.contains(id.as_str()))
+        .take(count)
+        .collect())
 }
 
 /// Authored state with bounded object, name, transform and mesh deltas. Runtime state belongs elsewhere.
@@ -816,6 +1048,7 @@ pub struct Session {
     path: Option<PathBuf>,
     saved: Option<Document>,
     loaded_format_version: u32,
+    history_evictions: usize,
 }
 impl Session {
     pub fn new(scene: Scene) -> Result<Self, SceneError> {
@@ -827,6 +1060,7 @@ impl Session {
             path: None,
             saved: None,
             loaded_format_version: FORMAT_VERSION,
+            history_evictions: 0,
         })
     }
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
@@ -834,6 +1068,7 @@ impl Session {
         let document = Document::load(&lock.path)?;
         Ok(Self {
             loaded_format_version: document.format_version,
+            history_evictions: 0,
             saved: Some(document.clone()),
             document,
             path: Some(lock.path.clone()),
@@ -841,6 +1076,235 @@ impl Session {
     }
     pub fn scene(&self) -> &Scene {
         &self.document.scene
+    }
+    pub fn authoring(&self) -> &Authoring {
+        &self.document.authoring
+    }
+    pub fn source(&self, id: &str) -> Option<&BehaviorSource> {
+        self.authoring().sources.get(id)
+    }
+    pub fn binding(&self, id: &str) -> Option<&BehaviorBinding> {
+        self.authoring().bindings.get(id)
+    }
+    pub fn inspect_sources(&self, offset: usize, limit: usize) -> AuthoringPage<SourceSummary> {
+        authoring::page(
+            self.authoring()
+                .sources
+                .iter()
+                .map(|(id, s)| SourceSummary {
+                    id: id.clone(),
+                    label: s.label.clone(),
+                    language_id: s.language_id.clone(),
+                    host_api_version: s.host_api_version,
+                    text_bytes: s.text.len(),
+                }),
+            offset,
+            limit,
+        )
+    }
+    pub fn inspect_bindings(&self, offset: usize, limit: usize) -> AuthoringPage<BindingSummary> {
+        authoring::page(
+            self.authoring()
+                .bindings
+                .iter()
+                .map(|(id, b)| BindingSummary {
+                    id: id.clone(),
+                    object_id: b.object_id.clone(),
+                    source_id: b.source_id.clone(),
+                    enabled: b.enabled,
+                    property_count: b.properties.len(),
+                }),
+            offset,
+            limit,
+        )
+    }
+    /// Structural diagnostics only. Backend/schema/asset availability belongs to their owning hosts.
+    pub fn authoring_diagnostics(
+        &self,
+        offset: usize,
+        limit: usize,
+    ) -> AuthoringPage<AuthoringDiagnostic> {
+        let mut diagnostics = Vec::new();
+        for (id, b) in &self.authoring().bindings {
+            if !self.authoring().sources.contains_key(&b.source_id) {
+                diagnostics.push(AuthoringDiagnostic {
+                    code: AuthoringDiagnosticCode::MissingSource,
+                    binding_id: id.clone(),
+                    property: None,
+                    reference_id: b.source_id.clone(),
+                });
+            }
+            for (name, value) in &b.properties {
+                if let PropertyValue::ObjectRef(Some(target)) = value {
+                    if !self.scene().objects.iter().any(|o| &o.id == target) {
+                        diagnostics.push(AuthoringDiagnostic {
+                            code: AuthoringDiagnosticCode::MissingObjectReference,
+                            binding_id: id.clone(),
+                            property: Some(name.clone()),
+                            reference_id: target.clone(),
+                        });
+                    }
+                }
+            }
+        }
+        authoring::page(diagnostics.into_iter(), offset, limit)
+    }
+    /// Explicit upsert of a stable source identity; broken/unknown-language text is saveable.
+    pub fn set_source(
+        &mut self,
+        expected_revision: u64,
+        id: &str,
+        source: Option<BehaviorSource>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(id)?;
+        if let Some(source) = &source {
+            source.validate()?;
+        }
+        let before = self.source(id).cloned();
+        if before == source {
+            return Ok(self.scene().revision);
+        }
+        self.commit_change(Change {
+            sources: vec![ValueDelta {
+                id: id.into(),
+                before,
+                after: source,
+            }],
+            ..Change::default()
+        })
+    }
+    /// Explicit upsert preserves all supplied property values, independent of source schemas.
+    pub fn set_binding(
+        &mut self,
+        expected_revision: u64,
+        id: &str,
+        binding: Option<BehaviorBinding>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(id)?;
+        if let Some(binding) = &binding {
+            binding.validate()?;
+        }
+        let before = self.binding(id).cloned();
+        if before == binding {
+            return Ok(self.scene().revision);
+        }
+        self.commit_change(Change {
+            bindings: vec![ValueDelta {
+                id: id.into(),
+                before,
+                after: binding,
+            }],
+            ..Change::default()
+        })
+    }
+    fn reserved_source_ids(&self) -> HashSet<&str> {
+        let mut used: HashSet<_> = self
+            .authoring()
+            .sources
+            .keys()
+            .map(String::as_str)
+            .collect();
+        used.extend(
+            self.authoring()
+                .bindings
+                .values()
+                .map(|b| b.source_id.as_str()),
+        );
+        for change in self.document.undo.iter().chain(&self.document.redo) {
+            used.extend(change.sources.iter().map(|d| d.id.as_str()));
+            used.extend(
+                change
+                    .bindings
+                    .iter()
+                    .flat_map(|d| [&d.before, &d.after])
+                    .flatten()
+                    .map(|b| b.source_id.as_str()),
+            );
+        }
+        used
+    }
+    pub fn contains_source_id(&self, id: &str) -> bool {
+        self.reserved_source_ids().contains(id)
+    }
+    pub fn contains_binding_id(&self, id: &str) -> bool {
+        self.authoring().bindings.contains_key(id)
+            || self
+                .document
+                .undo
+                .iter()
+                .chain(&self.document.redo)
+                .any(|c| c.bindings.iter().any(|d| d.id == id))
+    }
+    pub fn allocate_source_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        allocate_ids("source", count, MAX_SOURCES, self.reserved_source_ids())
+    }
+    pub fn allocate_binding_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        let mut used: HashSet<_> = self
+            .authoring()
+            .bindings
+            .keys()
+            .map(String::as_str)
+            .collect();
+        used.extend(
+            self.document
+                .undo
+                .iter()
+                .chain(&self.document.redo)
+                .flat_map(|c| c.bindings.iter().map(|d| d.id.as_str())),
+        );
+        allocate_ids("binding", count, MAX_BINDINGS, used)
+    }
+    fn owned_binding_deletions(&self, ids: &[&str]) -> Vec<ValueDelta<BehaviorBinding>> {
+        self.authoring()
+            .bindings
+            .iter()
+            .filter(|(_, b)| ids.contains(&b.object_id.as_str()))
+            .map(|(id, b)| ValueDelta {
+                id: id.clone(),
+                before: Some(b.clone()),
+                after: None,
+            })
+            .collect()
+    }
+    fn cloned_bindings(
+        &self,
+        pairs: &[(String, String)],
+    ) -> Result<Vec<ValueDelta<BehaviorBinding>>, SceneError> {
+        let originals: Vec<_> = pairs
+            .iter()
+            .flat_map(|(source, target)| {
+                self.authoring()
+                    .bindings
+                    .values()
+                    .filter(move |b| &b.object_id == source)
+                    .map(move |b| (target, b))
+            })
+            .collect();
+        let ids = self.allocate_binding_ids(originals.len())?;
+        Ok(originals
+            .into_iter()
+            .zip(ids)
+            .map(|((target, b), id)| {
+                let mut binding = b.clone();
+                binding.object_id.clone_from(target);
+                for value in binding.properties.values_mut() {
+                    if let PropertyValue::ObjectRef(Some(reference)) = value {
+                        if let Some((_, replacement)) =
+                            pairs.iter().find(|(original, _)| original == reference)
+                        {
+                            reference.clone_from(replacement);
+                        }
+                    }
+                }
+                ValueDelta {
+                    id,
+                    before: None,
+                    after: Some(binding),
+                }
+            })
+            .collect())
     }
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
@@ -852,6 +1316,11 @@ impl Session {
     pub fn is_dirty(&self) -> bool {
         self.saved.as_ref() != Some(&self.document)
     }
+    /// Cumulative oldest Undo entries trimmed by byte pressure in this session.
+    /// Does not count ordinary 32-step age eviction; resets on Open/new Session.
+    pub fn history_evictions(&self) -> usize {
+        self.history_evictions
+    }
     pub fn undo_len(&self) -> usize {
         self.document.undo.len()
     }
@@ -862,6 +1331,7 @@ impl Session {
     /// Hosts use this to avoid relocating a scene away from its catalog.
     pub fn has_asset_references(&self) -> bool {
         self.scene().objects.iter().any(|o| o.mesh.is_some())
+            || self.document.authoring.has_asset_references()
             || self
                 .document
                 .undo
@@ -872,6 +1342,7 @@ impl Session {
     /// IDs retained by reversible history are reserved, preventing accidental identity reuse.
     pub fn contains_object_id(&self, id: &str) -> bool {
         self.scene().objects.iter().any(|o| o.id == id)
+            || self.document.authoring.object_ids().any(|used| used == id)
             || self
                 .document
                 .undo
@@ -886,21 +1357,25 @@ impl Session {
             return Err(SceneError::Invalid("ID request exceeds256 objects".into()));
         }
         let mut used: HashSet<&str> = self.scene().objects.iter().map(|o| o.id.as_str()).collect();
+        used.extend(self.document.authoring.object_ids());
         for change in self.document.undo.iter().chain(&self.document.redo) {
-            match change {
-                Change::Create { object, .. } | Change::Delete { object, .. } => {
-                    used.insert(&object.id);
-                }
-                Change::Name { id, .. }
-                | Change::Transform { id, .. }
-                | Change::Mesh { id, .. } => {
-                    used.insert(id);
-                }
-                Change::Transforms { changes } => {
-                    used.extend(changes.iter().map(|e| e.id.as_str()));
-                }
-                Change::Objects { created, deleted } => {
-                    used.extend(created.iter().chain(deleted).map(|e| e.object.id.as_str()));
+            used.extend(change.object_ids());
+            for delta in &change.scene {
+                match delta {
+                    SceneDelta::Create { object, .. } | SceneDelta::Delete { object, .. } => {
+                        used.insert(&object.id);
+                    }
+                    SceneDelta::Name { id, .. }
+                    | SceneDelta::Transform { id, .. }
+                    | SceneDelta::Mesh { id, .. } => {
+                        used.insert(id);
+                    }
+                    SceneDelta::Transforms { changes } => {
+                        used.extend(changes.iter().map(|e| e.id.as_str()));
+                    }
+                    SceneDelta::Objects { created, deleted } => {
+                        used.extend(created.iter().chain(deleted).map(|e| e.object.id.as_str()));
+                    }
                 }
             }
         }
@@ -924,7 +1399,7 @@ impl Session {
                 object.id
             )));
         }
-        self.commit_change(Change::Create { object, index })
+        self.commit_change(SceneDelta::Create { object, index })
     }
     /// Duplicate immediately after the source, preserving its properties and optional name.
     /// A supplied name overrides the source label; object identity is always newly supplied.
@@ -947,9 +1422,21 @@ impl Session {
         if name.is_some() {
             object.name = name;
         }
-        self.insert_object(object, index + 1)
+        object.validate()?;
+        if self.contains_object_id(new_id) {
+            return Err(SceneError::Invalid(
+                "duplicate object ID is present or reserved".into(),
+            ));
+        }
+        let mut change: Change = SceneDelta::Create {
+            object,
+            index: index + 1,
+        }
+        .into();
+        change.bindings = self.cloned_bindings(&[(source.into(), new_id.into())])?;
+        self.commit_change(change)
     }
-    /// Change only the displayed name. None restores the immutable ID as its label.
+    /// SceneDelta only the displayed name. None restores the immutable ID as its label.
     pub fn rename(
         &mut self,
         expected_revision: u64,
@@ -967,7 +1454,7 @@ impl Session {
         if object.name == name {
             return Ok(self.scene().revision);
         }
-        self.commit_change(Change::Name {
+        self.commit_change(SceneDelta::Name {
             id: id.into(),
             before: object.name.clone(),
             after: name,
@@ -981,33 +1468,42 @@ impl Session {
             .iter()
             .position(|o| o.id == id)
             .ok_or_else(|| SceneError::ObjectNotFound(id.into()))?;
-        self.commit_change(Change::Delete {
+        let mut change: Change = SceneDelta::Delete {
             object: self.scene().objects[index].clone(),
             index,
-        })
+        }
+        .into();
+        change.bindings = self.owned_binding_deletions(&[id]);
+        self.commit_change(change)
     }
-    fn commit_change(&mut self, change: Change) -> Result<u64, SceneError> {
+    fn commit_change(&mut self, change: impl Into<Change>) -> Result<u64, SceneError> {
+        let change = change.into();
         let next = self
             .scene()
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
         let mut candidate = self.scene().clone();
-        change.apply(&mut candidate, false)?;
+        let mut authoring = self.document.authoring.clone();
+        change.apply(&mut candidate, &mut authoring, false)?;
         candidate.revision = next;
         candidate.validate()?;
-        let mut undo: Vec<_> = self
-            .document
-            .undo
-            .iter()
-            .skip(usize::from(self.document.undo.len() == HISTORY_LIMIT))
-            .collect();
+        let age_evictions = usize::from(self.document.undo.len() == HISTORY_LIMIT);
+        let mut undo: Vec<_> = self.document.undo.iter().skip(age_evictions).collect();
         undo.push(&change);
-        check_serialized_size(&candidate, &undo, &[])?;
-        self.document.scene = candidate;
-        if self.document.undo.len() == HISTORY_LIMIT {
-            self.document.undo.remove(0);
+        let mut byte_evictions = 0;
+        loop {
+            match check_serialized_size(&candidate, &authoring, &undo[byte_evictions..], &[]) {
+                Ok(()) => break,
+                Err(SceneError::Capacity) if byte_evictions + 1 < undo.len() => byte_evictions += 1,
+                Err(error) => return Err(error),
+            }
         }
+        // No mutation occurs until a suffix retaining the newest delta is admitted.
+        self.document.scene = candidate;
+        self.document.authoring = authoring;
+        self.document.undo.drain(..age_evictions + byte_evictions);
+        self.history_evictions = self.history_evictions.saturating_add(byte_evictions);
         self.document.undo.push(change);
         self.document.redo.clear();
         Ok(next)
@@ -1048,7 +1544,7 @@ impl Session {
         if changes.is_empty() {
             return Ok(self.scene().revision);
         }
-        self.commit_change(Change::Transforms { changes })
+        self.commit_change(SceneDelta::Transforms { changes })
     }
     /// Append a copied group atomically. IDs must be fresh in current and reversible state.
     pub fn create_many(
@@ -1083,7 +1579,7 @@ impl Session {
                 index: start + i,
             })
             .collect();
-        self.commit_change(Change::Objects {
+        self.commit_change(SceneDelta::Objects {
             created,
             deleted: Vec::new(),
         })
@@ -1121,10 +1617,14 @@ impl Session {
             });
         }
         deleted.sort_unstable_by_key(|e| e.index);
-        self.commit_change(Change::Objects {
+        let mut change: Change = SceneDelta::Objects {
             created: Vec::new(),
             deleted,
-        })
+        }
+        .into();
+        change.bindings =
+            self.owned_binding_deletions(&ids.iter().map(String::as_str).collect::<Vec<_>>());
+        self.commit_change(change)
     }
     /// Copy selected objects in caller order, appending the copies as one undo step.
     pub fn duplicate_many(
@@ -1154,7 +1654,38 @@ impl Session {
             object.id.clone_from(id);
             objects.push(object);
         }
-        self.create_many(expected_revision, objects)
+        if objects.is_empty() {
+            return Ok(self.scene().revision);
+        }
+        if self.scene().objects.len() + objects.len() > MAX_OBJECTS {
+            return Err(SceneError::Invalid(
+                "object group exceeds256 objects".into(),
+            ));
+        }
+        let mut ids = HashSet::new();
+        for object in &objects {
+            object.validate()?;
+            if !ids.insert(&object.id) || self.contains_object_id(&object.id) {
+                return Err(SceneError::Invalid(
+                    "new object ID collides with current or reversible state".into(),
+                ));
+            }
+        }
+        let start = self.scene().objects.len();
+        let mut change: Change = SceneDelta::Objects {
+            created: objects
+                .into_iter()
+                .enumerate()
+                .map(|(i, object)| IndexedObject {
+                    object,
+                    index: start + i,
+                })
+                .collect(),
+            deleted: Vec::new(),
+        }
+        .into();
+        change.bindings = self.cloned_bindings(pairs)?;
+        self.commit_change(change)
     }
     fn check_revision(&self, expected: u64) -> Result<(), SceneError> {
         let actual = self.scene().revision;
@@ -1181,7 +1712,7 @@ impl Session {
         if &object.transform == transform {
             return Ok(self.document.scene.revision);
         }
-        self.commit_change(Change::Transform {
+        self.commit_change(SceneDelta::Transform {
             id: id.into(),
             before: object.transform.clone(),
             after: transform.clone(),
@@ -1210,7 +1741,7 @@ impl Session {
         if object.mesh == mesh {
             return Ok(self.document.scene.revision);
         }
-        self.commit_change(Change::Mesh {
+        self.commit_change(SceneDelta::Mesh {
             id: object_id.into(),
             before: object.mesh.clone(),
             after: mesh,
@@ -1236,7 +1767,8 @@ impl Session {
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
         let mut candidate = self.scene().clone();
-        change.apply(&mut candidate, undo)?;
+        let mut authoring = self.document.authoring.clone();
+        change.apply(&mut candidate, &mut authoring, undo)?;
         candidate.revision = next;
         candidate.validate()?;
         // Admission/load already bounded every reachable scene with maximum revision
@@ -1247,6 +1779,7 @@ impl Session {
             self.document.redo.pop().ok_or(SceneError::NoRedo)?
         };
         self.document.scene = candidate;
+        self.document.authoring = authoring;
         if undo {
             self.document.redo.push(change);
         } else {
@@ -1360,8 +1893,506 @@ impl Preview {
 mod tests {
     use super::*;
 
+    fn legacy_value(document: &Document) -> serde_json::Value {
+        let mut value = serde_json::to_value(document).unwrap();
+        value.as_object_mut().unwrap().remove("authoring");
+        for stack in ["undo", "redo"] {
+            value[stack] = serde_json::to_value(
+                (if stack == "undo" {
+                    &document.undo
+                } else {
+                    &document.redo
+                })
+                .iter()
+                .map(|c| {
+                    assert!(!c.has_authoring());
+                    assert_eq!(c.scene.len(), 1);
+                    &c.scene[0]
+                })
+                .collect::<Vec<_>>(),
+            )
+            .unwrap();
+        }
+        value
+    }
+
+    fn source(text: &str) -> BehaviorSource {
+        BehaviorSource {
+            label: Some("Recoverable draft".into()),
+            language_id: "unknown-backend".into(),
+            host_api_version: 1,
+            text: text.into(),
+        }
+    }
+    fn binding(owner: &str, source: &str) -> BehaviorBinding {
+        BehaviorBinding {
+            object_id: owner.into(),
+            source_id: source.into(),
+            enabled: true,
+            properties: BTreeMap::new(),
+        }
+    }
+
+    // Unique risk: broken source, absent backends/references and obsolete property values
+    // must survive actual storage, while geometry readers must never silently strip them.
+    #[test]
+    fn unfinished_authoring_roundtrips_and_duplicate_keys_fail_closed() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("authoring.json");
+        let mut session = Session::new(Scene::demo()).unwrap();
+        session
+            .set_source(0, "source-1", Some(source("function broken(\n")))
+            .unwrap();
+        let mut b = binding("left", "missing-source");
+        b.properties = BTreeMap::from([
+            ("old_number".into(), PropertyValue::Number(f64::MAX)),
+            ("enabled".into(), PropertyValue::Bool(false)),
+            (
+                "title".into(),
+                PropertyValue::Text("unfinished\ntext".into()),
+            ),
+            ("velocity".into(), PropertyValue::Vec3([1.0, 2.0, 3.0])),
+            (
+                "target".into(),
+                PropertyValue::ObjectRef(Some("missing-object".into())),
+            ),
+            (
+                "asset".into(),
+                PropertyValue::AssetRef(Some("missing-asset".into())),
+            ),
+            ("unset".into(), PropertyValue::ObjectRef(None)),
+        ]);
+        session
+            .set_binding(1, "binding-1", Some(b.clone()))
+            .unwrap();
+        let before = session.document.clone();
+        assert_eq!(
+            session
+                .set_binding(2, "binding-1", Some(b.clone()))
+                .unwrap(),
+            2
+        );
+        assert!(session.set_binding(1, "binding-1", None).is_err());
+        let mut invalid = b.clone();
+        invalid.object_id = "absent-owner".into();
+        assert!(session.set_binding(2, "binding-2", Some(invalid)).is_err());
+        assert!(session
+            .set_binding(2, "binding-2", Some(b.clone()))
+            .is_err());
+        let mut invalid = source("draft");
+        invalid.text = "x".repeat(MAX_SOURCE_BYTES + 1);
+        assert!(session.set_source(2, "oversize", Some(invalid)).is_err());
+        let mut invalid = b.clone();
+        invalid
+            .properties
+            .insert("bad".into(), PropertyValue::Number(f64::NAN));
+        assert!(session.set_binding(2, "binding-1", Some(invalid)).is_err());
+        assert_eq!(session.document, before);
+        assert_eq!(session.authoring_diagnostics(0, 16).total, 2);
+        assert_eq!(
+            session.inspect_sources(0, usize::MAX).items[0].text_bytes,
+            "function broken(\n".len()
+        );
+        assert!(!serde_json::to_string(&session.inspect_sources(0, 16))
+            .unwrap()
+            .contains("function broken"));
+        assert_eq!(session.inspect_bindings(0, 16).items[0].property_count, 7);
+        assert!(session.has_asset_references());
+        session.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.authoring(), session.authoring());
+        assert!(!reopened.is_dirty());
+        assert!(Scene::load(&path)
+            .unwrap_err()
+            .to_string()
+            .contains("Session::open"));
+        reopened.set_binding(2, "binding-1", None).unwrap();
+        reopened.set_source(3, "source-1", None).unwrap();
+        reopened.save(&path).unwrap();
+        assert!(reopened.authoring().is_empty());
+        assert!(
+            Scene::load(&path).is_err(),
+            "reversible behavior must not be discarded either"
+        );
+        reopened.undo(4).unwrap();
+        reopened.undo(5).unwrap();
+        assert_eq!(reopened.authoring(), session.authoring());
+        // Explicit geometry export is an intentional caller operation.
+        let geometry = dir.path().join("geometry.json");
+        reopened.scene().save(&geometry).unwrap();
+        assert_eq!(Scene::load(&geometry).unwrap(), *reopened.scene());
+
+        let source_json = serde_json::to_string(&source("unfinished (")).unwrap();
+        let binding_json = serde_json::to_string(&b).unwrap();
+        let scene_json = serde_json::to_string(session.scene()).unwrap();
+        let envelope = |authoring: String| {
+            format!("{{\"format\":\"ruster-scene\",\"format_version\":5,\"scene\":{scene_json},\"authoring\":{authoring},\"undo\":[],\"redo\":[]}}")
+        };
+        let good = envelope(format!(
+            "{{\"sources\":{{\"s\":{source_json}}},\"bindings\":{{\"b\":{binding_json}}}}}"
+        ));
+        let duplicates = [
+            good.replacen("\"format_version\":5", "\"format_version\":5,\"format_version\":5", 1),
+            envelope("{\"sources\":{},\"sources\":{},\"bindings\":{}}".into()),
+            envelope(format!("{{\"sources\":{{\"s\":{source_json},\"s\":{source_json}}},\"bindings\":{{}}}}")),
+            envelope(format!("{{\"sources\":{{\"s\":{}}},\"bindings\":{{}}}}", source_json.replacen("\"language_id\":", "\"language_id\":\"other\",\"language_id\":", 1))),
+            envelope(format!("{{\"sources\":{{}},\"bindings\":{{\"b\":{binding_json},\"b\":{binding_json}}}}}")),
+            good.replacen("\"enabled\":true", "\"enabled\":true,\"enabled\":false", 1),
+            good.replacen("\"properties\":{", "\"properties\":{\"duplicate\":{\"type\":\"bool\",\"value\":true},\"duplicat\\u0065\":{\"type\":\"bool\",\"value\":false},", 1),
+        ];
+        for duplicate in duplicates {
+            std::fs::write(&path, &duplicate).unwrap();
+            assert!(
+                Session::open(&path).is_err(),
+                "duplicate keys must fail in original bytes"
+            );
+            assert_eq!(std::fs::read_to_string(&path).unwrap(), duplicate);
+        }
+    }
+
+    // Unique risk: deleting/duplicating objects must transact owned bindings with the
+    // geometry and remap only references inside the copied selection, including self refs.
+    #[test]
+    fn behavior_lifecycle_is_one_undo_and_reserves_dangling_references() {
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let mut a = binding("left", "source-1");
+        a.properties.insert(
+            "internal".into(),
+            PropertyValue::ObjectRef(Some("right".into())),
+        );
+        a.properties.insert(
+            "external".into(),
+            PropertyValue::ObjectRef(Some("center".into())),
+        );
+        let mut b = binding("right", "source-1");
+        b.properties.insert(
+            "self_ref".into(),
+            PropertyValue::ObjectRef(Some("right".into())),
+        );
+        b.properties.insert(
+            "dangling".into(),
+            PropertyValue::ObjectRef(Some("object-1".into())),
+        );
+        session.set_binding(0, "binding-1", Some(a)).unwrap();
+        session.set_binding(1, "binding-2", Some(b)).unwrap();
+        assert_eq!(session.allocate_object_ids(1).unwrap(), ["object-2"]);
+        assert_eq!(session.allocate_source_ids(1).unwrap(), ["source-2"]);
+        let original = session.document.clone();
+        let pairs = [
+            ("left".into(), "copy-left".into()),
+            ("right".into(), "copy-right".into()),
+        ];
+        session.duplicate_many(2, &pairs).unwrap();
+        assert_eq!(session.undo_len(), 3);
+        let copy = session
+            .authoring()
+            .bindings
+            .values()
+            .find(|b| b.object_id == "copy-left")
+            .unwrap();
+        assert_eq!(
+            copy.properties["internal"],
+            PropertyValue::ObjectRef(Some("copy-right".into()))
+        );
+        assert_eq!(
+            copy.properties["external"],
+            PropertyValue::ObjectRef(Some("center".into()))
+        );
+        let copy = session
+            .authoring()
+            .bindings
+            .values()
+            .find(|b| b.object_id == "copy-right")
+            .unwrap();
+        assert_eq!(
+            copy.properties["self_ref"],
+            PropertyValue::ObjectRef(Some("copy-right".into()))
+        );
+        assert_eq!(
+            copy.properties["dangling"],
+            PropertyValue::ObjectRef(Some("object-1".into()))
+        );
+        session.undo(3).unwrap();
+        assert_eq!(session.authoring(), &original.authoring);
+        assert_eq!(session.scene().objects, original.scene.objects);
+        session.redo(4).unwrap();
+        let copied = session.authoring().clone();
+        session
+            .delete_many(5, &["left".into(), "copy-right".into()])
+            .unwrap();
+        assert_eq!(session.authoring().bindings.len(), 2);
+        session.undo(6).unwrap();
+        assert_eq!(session.authoring(), &copied);
+        session.delete(7, "right").unwrap();
+        session.undo(8).unwrap();
+        assert_eq!(session.authoring(), &copied);
+        session.duplicate(9, "right", "single-copy", None).unwrap();
+        assert!(session
+            .authoring()
+            .bindings
+            .values()
+            .any(|b| b.object_id == "single-copy"
+                && b.properties["self_ref"]
+                    == PropertyValue::ObjectRef(Some("single-copy".into()))));
+        session.set_binding(10, "binding-2", None).unwrap();
+        assert!(
+            session.contains_object_id("object-1"),
+            "history references reserve dangling identities"
+        );
+        assert!(session.create(11, Object::cube("object-1", None)).is_err());
+        assert!(session.contains_source_id("source-1"));
+        // Explicit source upsert repairs a referred identity instead of reallocating it.
+        session
+            .set_source(11, "source-1", Some(source("broken draft")))
+            .unwrap();
+        assert!(session.source("source-1").is_some());
+    }
+
+    // Unique risk: v4 grouped histories must migrate without rewriting, and old
+    // versions cannot silently accept new authoring envelope/history fields, even null.
+    #[test]
+    fn v4_history_migrates_strictly_and_preserves_open_baseline() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v4.json");
+        let mut old = Session::new(Scene::demo()).unwrap();
+        old.duplicate_many(0, &[("left".into(), "copy".into())])
+            .unwrap();
+        old.delete_many(1, &["left".into(), "right".into()])
+            .unwrap();
+        old.undo(2).unwrap();
+        old.document.format_version = 4;
+        let value = legacy_value(&old.document);
+        let bytes = serde_json::to_vec(&value).unwrap();
+        std::fs::write(&path, &bytes).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert!(!reopened.is_dirty());
+        assert_eq!(reopened.loaded_format_version(), 4);
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert_eq!((reopened.undo_len(), reopened.redo_len()), (1, 1));
+        reopened.redo(3).unwrap();
+        reopened.undo(4).unwrap();
+        reopened.undo(5).unwrap();
+        assert_eq!(reopened.scene().objects, Scene::demo().objects);
+        reopened.save(&path).unwrap();
+        assert_eq!(reopened.loaded_format_version(), 5);
+        assert_eq!(Session::open(&path).unwrap().redo_len(), 2);
+        for version in [3, 4] {
+            for location in ["envelope", "history"] {
+                let mut bad = value.clone();
+                bad["format_version"] = version.into();
+                if location == "envelope" {
+                    bad["authoring"] = serde_json::Value::Null;
+                } else {
+                    bad["undo"][0]["sources"] = serde_json::Value::Null;
+                }
+                std::fs::write(&path, serde_json::to_vec(&bad).unwrap()).unwrap();
+                assert!(Session::open(&path).is_err());
+            }
+        }
+    }
+
+    // Unique risk: a near-cap file admitted by the actual v4 writer must retain
+    // every old Undo/Redo entry, rather than fail due to new wrapper indentation.
+    #[test]
+    fn actual_near_cap_v4_writer_recipe_migrates_without_history_loss() {
+        let mut scene = Scene::empty("v4-near-cap");
+        scene.objects = (0..256)
+            .map(|n| Object::cube(format!("object-{n:03}"), None))
+            .collect();
+        let mut session = Session::new(scene).unwrap();
+        // Historical aaacef9's writer admits five256-object groups, then27 scalar
+        // groups to32 entries. The sixth large group was actually rejected there.
+        for step in 0..32 {
+            let count = if step < 5 { 256 } else { 1 };
+            let edits = session
+                .scene()
+                .objects
+                .iter()
+                .take(count)
+                .map(|o| {
+                    let mut transform = o.transform.clone();
+                    transform.translation[0] = if transform.translation[0] == 0.0 {
+                        0.001
+                    } else {
+                        0.0
+                    };
+                    (o.id.clone(), transform)
+                })
+                .collect::<Vec<_>>();
+            session
+                .edit_transforms(session.scene().revision, &edits)
+                .unwrap();
+        }
+        session.undo(session.scene().revision).unwrap();
+        let old = V4Document {
+            format: "ruster-scene".into(),
+            format_version: 4,
+            scene: session.scene().clone(),
+            undo: session
+                .document
+                .undo
+                .iter()
+                .map(|c| {
+                    assert_eq!(c.scene.len(), 1);
+                    c.scene[0].clone()
+                })
+                .collect(),
+            redo: session
+                .document
+                .redo
+                .iter()
+                .map(|c| c.scene[0].clone())
+                .collect(),
+        };
+        let mut bytes = serde_json::to_vec_pretty(&old).unwrap();
+        bytes.push(b'\n');
+        // This exact byte count/hash was independently matched to the actual old
+        // Session::save output, retained compressed with provenance in evidence.
+        assert_eq!(bytes.len(), 1_028_346);
+        let hash = bytes.iter().fold(0xcbf29ce484222325u64, |h, b| {
+            (h ^ u64::from(*b)).wrapping_mul(0x100000001b3)
+        });
+        assert_eq!(hash, 0x392c41b401123383);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("v4.json");
+        std::fs::write(&path, &bytes).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!((reopened.undo_len(), reopened.redo_len()), (31, 1));
+        assert_eq!(reopened.history_evictions(), 0);
+        assert_eq!(reopened.loaded_format_version(), 4);
+        assert!(!reopened.is_dirty());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        assert!(
+            serde_json::to_vec_pretty(&reopened.document).unwrap().len() > MAX_FILE_BYTES as usize,
+            "pretty v5 wrappers reproduce the migration overflow"
+        );
+        let objects = reopened.scene().objects.clone();
+        reopened.redo(33).unwrap();
+        reopened.undo(34).unwrap();
+        assert_eq!(reopened.scene().objects, objects);
+        reopened.save(&path).unwrap();
+        assert_eq!(reopened.loaded_format_version(), 5);
+        assert_eq!((reopened.undo_len(), reopened.redo_len()), (31, 1));
+        let compact = std::fs::read(&path).unwrap();
+        assert!(compact.len() <= MAX_FILE_BYTES as usize);
+        assert_eq!(compact.iter().filter(|b| **b == b'\n').count(), 1);
+        let reopened = Session::open(&path).unwrap();
+        assert_eq!((reopened.undo_len(), reopened.redo_len()), (31, 1));
+        assert_eq!(reopened.history_evictions(), 0);
+    }
+
+    // Unique risk: source deletion can shrink current state while Undo grows it;
+    // admission must reserve all reachable authored payloads plus retained history once.
+    #[test]
+    fn source_history_byte_admission_preserves_saveable_undo_and_failure_atomicity() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("bounded.json");
+        let mut session = Session::new(Scene::empty("bounded")).unwrap();
+        for n in 0..50 {
+            let text = format!("{}{n:03}", "\u{0001}".repeat(MAX_SOURCE_BYTES - 3));
+            session
+                .set_source(session.scene().revision, "source-1", Some(source(&text)))
+                .unwrap();
+        }
+        assert!(
+            session.history_evictions() > 0,
+            "source editing must continue by trimming oldest history"
+        );
+        assert!(session.undo_len() < HISTORY_LIMIT);
+        let latest = session.source("source-1").unwrap().clone();
+        let evictions = session.history_evictions();
+        let before = session.document.clone();
+        assert!(session
+            .set_source(session.scene().revision - 1, "source-1", None)
+            .is_err());
+        assert_eq!(
+            session
+                .set_source(session.scene().revision, "source-1", Some(latest.clone()))
+                .unwrap(),
+            session.scene().revision
+        );
+        let mut invalid = latest.clone();
+        invalid.text.push('x');
+        assert!(session
+            .set_source(session.scene().revision, "source-1", Some(invalid))
+            .is_err());
+        assert_eq!(session.document, before);
+        assert_eq!(session.history_evictions(), evictions);
+        session.undo(session.scene().revision).unwrap();
+        assert!(session.source("source-1").unwrap().text.ends_with("048"));
+        assert_eq!(session.history_evictions(), evictions);
+        session.redo(session.scene().revision).unwrap();
+        assert_eq!(session.source("source-1"), Some(&latest));
+        assert_eq!(session.history_evictions(), evictions);
+        session
+            .set_source(session.scene().revision, "source-1", None)
+            .unwrap();
+        session.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(
+            reopened.history_evictions(),
+            0,
+            "byte-pressure reporting is session-local"
+        );
+        reopened.document.scene.revision = 98;
+        reopened.undo(98).unwrap();
+        reopened.redo(99).unwrap();
+        reopened.save(&path).unwrap();
+        assert!(std::fs::metadata(&path).unwrap().len() <= MAX_FILE_BYTES);
+        assert_eq!(
+            Session::open(&path).unwrap().authoring(),
+            reopened.authoring()
+        );
+        // A valid group whose new payload plus its own newest delta cannot fit
+        // remains rejected atomically, even when every older Undo could be trimmed.
+        let mut scene = Scene::empty("oversized-group");
+        scene.objects = (0..8)
+            .map(|n| Object::cube(format!("owner-{n}"), None))
+            .collect();
+        let mut group = Session::new(scene).unwrap();
+        for n in 0..8 {
+            let mut binding = binding(&format!("owner-{n}"), "missing-source");
+            binding.properties = (0..MAX_PROPERTIES)
+                .map(|p| {
+                    (
+                        format!("property-{p}"),
+                        PropertyValue::Text("x".repeat(MAX_PROPERTY_TEXT_BYTES)),
+                    )
+                })
+                .collect();
+            group
+                .set_binding(
+                    group.scene().revision,
+                    &format!("binding-{n}"),
+                    Some(binding),
+                )
+                .unwrap();
+        }
+        let before = group.document.clone();
+        let evictions = group.history_evictions();
+        let pairs = (0..8)
+            .map(|n| (format!("owner-{n}"), format!("copy-{n}")))
+            .collect::<Vec<_>>();
+        assert!(matches!(
+            group.duplicate_many(group.scene().revision, &pairs),
+            Err(SceneError::Capacity)
+        ));
+        assert_eq!(group.document, before);
+        assert_eq!(group.history_evictions(), evictions);
+        let mut pages = Session::new(Scene::empty("pages")).unwrap();
+        for i in 0..17 {
+            pages
+                .set_source(i, &format!("source-{i}"), Some(source("")))
+                .unwrap();
+        }
+        assert_eq!(pages.inspect_sources(0, usize::MAX).items.len(), 16);
+        assert_eq!(pages.inspect_sources(0, usize::MAX).next_offset, Some(16));
+        assert_eq!(pages.inspect_sources(16, 16).items.len(), 1);
+        assert!(pages.inspect_sources(usize::MAX, 16).items.is_empty());
+    }
+
     // Unique risk: partial multi-object mutations and per-object undo steps break a
-    // gesture's atomicity; oversized retained deltas must not create unsaveable state.
+    // gesture's atomicity; byte-limited recent history must keep every accepted state saveable.
     #[test]
     fn grouped_edits_are_atomic_one_step_and_byte_bounded() {
         let mut session = Session::new(Scene::demo()).unwrap();
@@ -1447,8 +2478,7 @@ mod tests {
                     .collect(),
             )
             .unwrap();
-        let mut rejected = false;
-        for n in 1..=HISTORY_LIMIT {
+        for n in 1..=HISTORY_LIMIT + 4 {
             let edits: Vec<_> = large
                 .scene()
                 .objects
@@ -1459,18 +2489,15 @@ mod tests {
                     (o.id.clone(), t)
                 })
                 .collect();
-            let before = large.document.clone();
-            match large.edit_transforms(large.scene().revision, &edits) {
-                Ok(_) => assert!(large.document.validate().is_ok()),
-                Err(SceneError::Invalid(_)) => {
-                    assert_eq!(large.document, before);
-                    rejected = true;
-                    break;
-                }
-                Err(e) => panic!("unexpected error: {e}"),
-            }
+            large
+                .edit_transforms(large.scene().revision, &edits)
+                .unwrap();
         }
-        assert!(rejected, "history must reject before becoming unsaveable");
+        assert!(
+            large.history_evictions() > 0,
+            "large group edits must keep the newest step and trim older history when needed"
+        );
+        assert!(large.document.validate().is_ok());
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("large.json");
         large.save(&path).unwrap();
@@ -1509,16 +2536,22 @@ mod tests {
         let mut doc = Document::new(Scene::demo());
         doc.format_version = 3;
         doc.scene.objects[0].name = Some("Named".into());
-        doc.undo.push(Change::Name {
-            id: "left".into(),
-            before: None,
-            after: Some("Named".into()),
-        });
-        doc.redo.push(Change::Delete {
-            object: doc.scene.objects[1].clone(),
-            index: 1,
-        });
-        std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        doc.undo.push(
+            SceneDelta::Name {
+                id: "left".into(),
+                before: None,
+                after: Some("Named".into()),
+            }
+            .into(),
+        );
+        doc.redo.push(
+            SceneDelta::Delete {
+                object: doc.scene.objects[1].clone(),
+                index: 1,
+            }
+            .into(),
+        );
+        std::fs::write(&path, serde_json::to_vec(&legacy_value(&doc)).unwrap()).unwrap();
         let mut session = Session::open(&path).unwrap();
         assert_eq!(session.loaded_format_version(), 3);
         session.redo(0).unwrap();
@@ -1526,15 +2559,16 @@ mod tests {
         session.undo(2).unwrap();
         assert!(session.scene().objects[0].name.is_none());
         session.save(&path).unwrap();
-        assert_eq!(session.loaded_format_version(), 4);
-        doc.undo = vec![Change::Transforms {
+        assert_eq!(session.loaded_format_version(), FORMAT_VERSION);
+        doc.undo = vec![SceneDelta::Transforms {
             changes: vec![TransformDelta {
                 id: "left".into(),
                 before: Transform::default(),
                 after: doc.scene.objects[0].transform.clone(),
             }],
-        }];
-        std::fs::write(&path, serde_json::to_vec(&doc).unwrap()).unwrap();
+        }
+        .into()];
+        std::fs::write(&path, serde_json::to_vec(&legacy_value(&doc)).unwrap()).unwrap();
         assert!(Session::open(&path).is_err());
     }
 
@@ -1697,15 +2731,17 @@ mod tests {
         assert!(session.delete(u64::MAX, "object-0").is_err());
         assert_eq!(session.document, before);
         let mut corrupt = Document::new(Scene::empty("bad-history"));
-        corrupt.redo = vec![Change::Create {
+        corrupt.redo = vec![SceneDelta::Create {
             object: Object::cube("same", None),
             index: 1,
-        }];
+        }
+        .into()];
         assert!(corrupt.validate().is_err());
-        corrupt.redo = vec![Change::Delete {
+        corrupt.redo = vec![SceneDelta::Delete {
             object: Object::cube("absent", None),
             index: 0,
-        }];
+        }
+        .into()];
         assert!(corrupt.validate().is_err());
     }
 
@@ -1772,6 +2808,11 @@ mod tests {
             session.edit(i - 1, "left", &change).unwrap();
         }
         assert_eq!(session.undo_len(), HISTORY_LIMIT);
+        assert_eq!(
+            session.history_evictions(),
+            0,
+            "normal age eviction is not byte-pressure eviction"
+        );
         for i in 0..HISTORY_LIMIT {
             session.undo(40 + i as u64).unwrap();
         }
@@ -1823,8 +2864,8 @@ mod tests {
         let stored: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
         assert_eq!(stored["format_version"], FORMAT_VERSION);
-        assert_eq!(stored["undo"][0]["kind"], "transform");
-        assert_eq!(stored["redo"][0]["kind"], "transform");
+        assert_eq!(stored["undo"][0]["scene"][0]["kind"], "transform");
+        assert_eq!(stored["redo"][0]["scene"][0]["kind"], "transform");
         let mut reopened = Session::open(&path).unwrap();
         assert_eq!(reopened.scene().fingerprint(), fingerprint);
         reopened.redo(3).unwrap();
@@ -2005,11 +3046,12 @@ mod tests {
         }
         let mut session = Session::new(Scene::demo()).unwrap();
         session.document.undo = vec![
-            Change::Transform {
+            SceneDelta::Transform {
                 id: "left".into(),
                 before: Transform::default(),
                 after: Transform::default()
-            };
+            }
+            .into();
             HISTORY_LIMIT + 1
         ];
         assert!(session.document.validate().is_err());

@@ -20,7 +20,7 @@ The following is the working breakdown of that requirement, selected by the agen
 | Script behavior | Select an object, create/attach a behavior, open a configured code editor, discover the API, expose properties/references in the inspector, save/run quickly, navigate errors to source and inspect execution with a debugger. Script/property edits participate in project save/reopen and undo. |
 | Make the workspace comfortable | Resizable/rearrangeable panels and persisted layouts, readable scaling, keyboard traversal, visible focus, adequate contrast and cues beyond color, sensible defaults and ways to restore them. |
 
-Exact shortcuts, navigation presets, layout technology and persistence/recovery mechanisms are not yet selected. Unity and Unreal users may bring different habits: inspect current primary documentation and observe representative users before choosing defaults; use configurable controls or compatibility presets where needed. Familiarity must be demonstrated in interaction, not inferred from a similar-looking screenshot. This requirement does not itself promise project-file compatibility, asset-format parity or the complete feature catalog of either engine.
+Current agent-selected shortcut, navigation and workspace defaults are recorded in [decision0015](decisions/0015-keyboard-workspace-and-camera.md) and the editor guide. They remain subject to creator feedback; autosave/recovery remains unfinished. Unity and Unreal users may bring different habits: use primary documentation and representative observations to revise defaults. Familiarity must be demonstrated in interaction, not inferred from a similar-looking screenshot. This requirement does not itself promise project-file compatibility, asset-format parity or the complete feature catalog of either engine.
 
 ## Delivery and acceptance
 
@@ -34,9 +34,9 @@ Exact shortcuts, navigation presets, layout technology and persistence/recovery 
 
 At M6, the inspected generic scene editor provides a hierarchy, viewport selection, transform text fields, mesh assignment, bounded scene undo/redo, save/open, dirty/draft guards, orbit/zoom and Fit. Existing native and MCP verification proves the documented narrow journeys. External human familiarity remains untested.
 
-The generic scene editor still lacks the ordinary create/duplicate/delete object workflow and the complete manipulation, discovery and workspace experience described above. The current text transform flow requires Apply/Revert; object selection can be blocked by a pending draft. Undo buttons still say “Undo transform”/“Redo transform” although history includes mesh assignments. Asset catalog operations persist separately from scene undo. These are concrete design/review inputs, not accepted permanent friction or evidence that the baseline is satisfied.
+Those M6 gaps drove the construction/manipulation updates below. Current construction, grouped history and tools are implemented; workspace/keyboard/camera refinements are undergoing integrated acceptance. Valid numeric drafts now commit when selection/focus changes, while invalid edits are preserved for repair. Asset catalog operations still persist separately from scene undo. Discovery/context/drag-drop, autosave/recovery and generic behavior/tooling remain unfinished.
 
-Implementation evidence inspected: `crates/ruster-editor/src/scene_editor.rs`, its README, the scene Session/Preview API and the post-M6 review. This record adds requirements and acceptance guidance only; no UI behavior changed or new user study was conducted.
+Implementation evidence: `crates/ruster-editor/src/scene_editor.rs`, `workspace.rs`, the renderer camera API, editor guide and linked native evidence. The first actual creator feedback is recorded below; automated checks alone do not establish familiarity.
 
 ## Relationship to the roadmap
 
@@ -65,3 +65,10 @@ The [post-M8 persistence reassessment](ROADMAP-REVIEW.md#post-m8-persistence-rea
 
 
 2026-11-04 manipulation update: ordered multi-selection, window-local copy/paste, grouped commands, transient translation/rotation/scale tools, three pivots, snapping and mixed-component fields are implemented. Real egui and [native controls/property evidence](evidence/M8-manipulation-tools-native.md) distinguish checked behavior from still-unverified physical focused handle input/human familiarity. Exact supported scale semantics exclude shear-producing world nonuniform group scaling; this is explicit UI/guide behavior, not silent approximation. Content/workspace/navigation/remapping/recovery and generic behavior/tooling integration remain open.
+
+
+## First creator feedback — 2026-11-04
+
+The user (mainly Unity experience) tried the verified manipulation build in a disposable workspace2 scene and reported it was good overall. Reported blockers/friction: visibly aliased cubes, Enter did not submit rename (button click required), and missing expected perspective/ISO views. The user explicitly reinforced keyboard fluency: Enter submission, traversal, shortcuts and hotkeys are central quality-of-life requirements. This is one actual creator's qualitative feedback, not completion of the full M9 journey or an Unreal-user study; individual task success/timings were not reported.
+
+Actions before M8 closure: keyboard-submit/cancel audit (starting with rename), perspective/orthographic toggle and visible axis/isometric presets, antialiasing with measured quality/GPU/memory tradeoffs. The reviewed build was perspective-only and single-sample; the user did not miss an existing projection toggle. The current candidate implements those controls and4× MSAA with local quality/cost evidence; integrated workspace verification and human follow-up remain open. Exact defaults remain agent-selected, as recorded in decisions0015/0017.

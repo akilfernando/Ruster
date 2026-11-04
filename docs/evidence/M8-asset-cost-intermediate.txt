@@ -1,0 +1,45 @@
+Command:
+  CARGO_TARGET_DIR=/home/akilf/Projects/Ruster/target /home/akilf/.cargo/bin/cargo run --release --offline --manifest-path /tmp/ruster-asset-cost/Cargo.toml
+
+Recorded immediately before run:
+  UTC: 2026-11-04T09:55:24.275298+00:00
+  git HEAD: aaacef9f35179f519d3575221bde9553054711d8
+  crates/ruster-assets/src/lib.rs SHA-256: 686e545337da51f5abb2af00d240c3acb746aa0254784e5ef87465201a019702
+  docs/evidence/M8-asset-cost-harness.rs SHA-256: 0a2f4c45f6885316039174e2351af3d18f830ede33da712147cf800f4f2870d4
+  docs/evidence/M8-asset-cost-after-harness.rs SHA-256: 5923e98f2d514ea45a4a04fd56c087f63c26da82e2c8a1685a9df1304af6c049
+  /tmp/ruster-asset-cost/Cargo.toml SHA-256: 5d21a2070e656e8447ef3ec06bac38ee62799f02710b17e2129bf9990099affd
+  /tmp/ruster-asset-cost/Cargo.lock SHA-256: 06dc71424ce712b067419be3e9ce1a91fc55a853e8757dc642d6b16faa66a6d8
+  Kernel: Linux 7.3.1-1-cachyos x86_64 GNU/Linux
+  Governor: powersave
+  rustc 1.99.1 (58cf8f9c3 2026-10-13)
+  cargo 1.99.1 (5f94df478 2026-08-27)
+
+Harness adaptation: metadata lookup prefers v2-HASH.bin with v1-HASH.json fallback; cache_bytes neutral label. Timed calls, inputs, five samples and zero separate warmups unchanged. Original baseline harness retained unchanged.
+No other Cargo build ran during timed workload (root-controlled exclusive slot).
+
+Raw stdout:
+ruster-assets public API release timing; warmups=0; fixed trials=5
+WORKLOAD triangles=1000 trials=5
+FIXTURE source_bytes=8024 resolved_logical_payload_bytes=84000 cache_bytes=84116 final_revision=3
+import_api_after_open: ns=[531632, 572105, 588201, 614379, 748952] median_ns=588201
+reopen_api: ns=[252606, 256040, 256069, 275183, 359110] median_ns=256069
+refresh_unchanged_api: ns=[535764, 544719, 581845, 590579, 634661] median_ns=581845
+refresh_changed_api: ns=[531306, 543585, 555035, 559058, 569642] median_ns=555035
+refresh_invalid_failure_api: ns=[24588, 24773, 25602, 27027, 29034] median_ns=25602
+refresh_recovery_api: ns=[504685, 505251, 518351, 543120, 629187] median_ns=518351
+WORKLOAD triangles=32768 trials=5
+FIXTURE source_bytes=262168 resolved_logical_payload_bytes=2752512 cache_bytes=2752628 final_revision=3
+import_api_after_open: ns=[11542487, 13487499, 13533913, 13726141, 17312854] median_ns=13533913
+reopen_api: ns=[6178332, 6244084, 6279079, 6424918, 8527892] median_ns=6279079
+refresh_unchanged_api: ns=[11092196, 11147274, 11221494, 11316340, 12954097] median_ns=11221494
+refresh_changed_api: ns=[10885934, 11703771, 11774270, 11779955, 11792709] median_ns=11774270
+refresh_invalid_failure_api: ns=[25367, 27545, 27598, 27749, 28435] median_ns=27598
+refresh_recovery_api: ns=[10758461, 10829335, 10866715, 10925719, 11959708] median_ns=10866715
+
+Raw stderr:
+   Compiling ruster-assets v0.1.0 (/home/akilf/Projects/Ruster/crates/ruster-assets)
+   Compiling ruster-asset-cost v0.1.0 (/tmp/ruster-asset-cost)
+    Finished `release` profile [optimized] target(s) in 2.27s
+     Running `target/release/ruster-asset-cost`
+
+Exit code: 0; total compile+run wall seconds: 2.675

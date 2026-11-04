@@ -1,0 +1,30 @@
+Command:
+  CARGO_TARGET_DIR=/home/akilf/Projects/Ruster/target \
+    /home/akilf/.cargo/bin/cargo run --release --offline \
+    --manifest-path /tmp/ruster-asset-cost/Cargo.toml
+
+Recorded immediately before run:
+  git HEAD: aaacef9f35179f519d3575221bde9553054711d8
+  crates/ruster-assets/src/lib.rs SHA-256: 87e5453fa23534e387b3d64b28eae90a77e68541ed6fc745a8d4d26cb242d78f
+  harness SHA-256: 0a2f4c45f6885316039174e2351af3d18f830ede33da712147cf800f4f2870d4
+  Linux 7.3.1-1-cachyos x86_64; Intel Core i9-13900H; powersave governor (400–5400 MHz range)
+  rustc 1.99.1 (58cf8f9c3 2026-10-13); cargo 1.99.1 (5f94df478 2026-08-27)
+
+Raw program output:
+ruster-assets public API release timing; warmups=0; fixed trials=5
+WORKLOAD triangles=1000 trials=5
+FIXTURE source_bytes=8024 resolved_logical_payload_bytes=84000 cache_json_bytes=164120 final_revision=3
+import_api_after_open: ns=[1201880, 1664287, 1832004, 1919306, 2403229] median_ns=1832004
+reopen_api: ns=[1609236, 2056632, 2379025, 2384999, 2622937] median_ns=2379025
+refresh_unchanged_api: ns=[1267945, 1608506, 1887546, 2105287, 2154516] median_ns=1887546
+refresh_changed_api: ns=[1179315, 1406231, 1732832, 1876481, 1924387] median_ns=1732832
+refresh_invalid_failure_api: ns=[17979, 20974, 24322, 28047, 39280] median_ns=24322
+refresh_recovery_api: ns=[1211067, 1232259, 1728691, 1744945, 1928529] median_ns=1728691
+WORKLOAD triangles=32768 trials=5
+FIXTURE source_bytes=262168 resolved_logical_payload_bytes=2752512 cache_json_bytes=5494144 final_revision=3
+import_api_after_open: ns=[39519843, 39644908, 39650089, 42265317, 44647584] median_ns=39650089
+reopen_api: ns=[50694862, 50757132, 50884197, 50993313, 51733753] median_ns=50884197
+refresh_unchanged_api: ns=[40367933, 40382971, 40589911, 40609373, 40616776] median_ns=40589911
+refresh_changed_api: ns=[40102005, 40399843, 40420971, 40945135, 41055429] median_ns=40420971
+refresh_invalid_failure_api: ns=[22976, 23501, 24367, 24399, 24403] median_ns=24367
+refresh_recovery_api: ns=[38881662, 38937314, 38980162, 38986565, 39073725] median_ns=38980162

@@ -6,6 +6,7 @@ mod manipulation;
 mod model;
 mod scene_editor;
 mod ui;
+mod workspace;
 
 use std::path::PathBuf;
 
@@ -32,7 +33,7 @@ impl log::Log for Diagnostics {
 
 static DIAGNOSTICS: Diagnostics = Diagnostics;
 
-const HELP: &str = "Ruster Editor — visual scenario authoring\n\nUsage: ruster-editor [--scenario PATH]\n       ruster-editor --scene PATH\n       ruster-editor --help\n\nDefault: examples/logistics.scenario.json (relative to the working directory).\nRequires a desktop session and Vulkan adapter. Ctrl+N/O/S, Ctrl+Shift+S,\nCtrl+Z / Ctrl+Shift+Z; Space runs/pauses outside text fields.\n";
+const HELP: &str = "Ruster Editor — scene authoring\n\nUsage: ruster-editor\n       ruster-editor --scene PATH\n       ruster-editor --scenario PATH\n       ruster-editor --help\n\nDefault: empty generic scene with New/Open and recent project choices.\nLegacy logistics mode: --scenario PATH.\nRequires a desktop session and Vulkan adapter. Workspace menu lists and remaps\nscene shortcuts. Legacy scenario mode uses Space to run/pause outside text fields.\n";
 
 fn arguments(arguments: impl Iterator<Item = String>) -> Result<Option<PathBuf>, String> {
     let mut arguments = arguments;
@@ -91,13 +92,25 @@ impl eframe::App for EditorApp {
     }
 }
 
-fn run() -> Result<(), String> {
-    let args: Vec<String> = std::env::args().skip(1).collect();
-    if args.first().is_some_and(|arg| arg == "--scene") {
-        if args.len() != 2 {
+fn scene_argument(args: &[String]) -> Result<Option<Option<PathBuf>>, String> {
+    if args.is_empty() {
+        return Ok(Some(None));
+    }
+    if args[0] == "--scene" {
+        if args.len() != 2 || args[1].starts_with('-') {
             return Err("--scene requires exactly one scene file path".into());
         }
-        return scene_editor::run(PathBuf::from(&args[1]));
+        return Ok(Some(Some(PathBuf::from(&args[1]))));
+    }
+    Ok(None)
+}
+fn run() -> Result<(), String> {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if let Some(path) = scene_argument(&args)? {
+        return match path {
+            Some(path) => scene_editor::run(path),
+            None => scene_editor::run_empty(),
+        };
     }
     let Some(path) = arguments(args.into_iter())? else {
         print!("{HELP}");
@@ -145,6 +158,12 @@ mod tests {
 
     #[test]
     fn arguments_fail_before_desktop_initialization() {
+        assert_eq!(scene_argument(&[]).unwrap(), Some(None));
+        assert_eq!(
+            scene_argument(&["--scene".into(), "custom.json".into()]).unwrap(),
+            Some(Some(PathBuf::from("custom.json")))
+        );
+        assert!(scene_argument(&["--scene".into()]).is_err());
         assert_eq!(arguments(["--help".into()].into_iter()).unwrap(), None);
         assert!(arguments(["--scenario".into()].into_iter()).is_err());
         assert!(arguments(["--typo".into()].into_iter()).is_err());

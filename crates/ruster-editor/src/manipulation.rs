@@ -243,6 +243,7 @@ pub(super) struct Manipulation {
     mixed: [bool; 9],
     edited: [bool; 9],
     precision_revision: Option<u64>,
+    precision_had_focus: bool,
     pub snap: bool,
     pub snap_distance: f32,
     pub delta: [String; 3],
@@ -264,6 +265,7 @@ impl Default for Manipulation {
             mixed: [false; 9],
             edited: [false; 9],
             precision_revision: None,
+            precision_had_focus: false,
             snap: false,
             snap_distance: 0.5,
             delta: std::array::from_fn(|_| "0".into()),
@@ -281,6 +283,7 @@ impl Manipulation {
     pub fn reset_precision(&mut self, scene: &Scene) {
         self.edited = [false; 9];
         self.precision_revision = None;
+        self.precision_had_focus = false;
         let mut values = self
             .ids
             .iter()
@@ -365,8 +368,13 @@ impl Manipulation {
         &mut self,
         ui: &mut egui::Ui,
         session: &mut Session,
+        auto_commit: bool,
     ) -> Result<bool, String> {
+        let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+        let escape_pressed =
+            ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
         let mut focused = false;
+        let mut field_has_focus = false;
         if self.mixed.iter().any(|mixed| *mixed) {
             ui.small("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected objects; other components keep their individual values.");
         }
@@ -387,6 +395,7 @@ impl Manipulation {
                                 .hint_text(if self.mixed[i] { "—" } else { "" }));
                         let response=response.on_hover_text("Editing this component changes only this axis/property for all selected objects. Other components keep their individual values.");
                         focused |= response.has_focus() || response.lost_focus();
+                        field_has_focus |= response.has_focus();
                         if response.changed() {
                             self.edited[i] = true;
                             self.precision_revision.get_or_insert(session.scene().revision);
@@ -395,8 +404,11 @@ impl Manipulation {
                 }
             });
         }
-        let mut apply = focused && ui.input(|i| i.key_pressed(egui::Key::Enter));
-        let mut cancel = focused && ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let mut apply = focused && enter_pressed;
+        apply |=
+            auto_commit && self.precision_had_focus && !field_has_focus && self.precision_pending();
+        self.precision_had_focus = field_has_focus;
+        let mut cancel = focused && escape_pressed;
         ui.horizontal_wrapped(|ui| {
             apply |= ui
                 .add_enabled(
@@ -860,6 +872,52 @@ mod tests {
         assert_eq!(session.scene(), &before);
         m.reset_precision(session.scene());
         assert!(!m.precision_pending());
+        let ctx = egui::Context::default();
+        m.precision[0] = "9".into();
+        m.edited[0] = true;
+        m.precision_revision = Some(session.scene().revision);
+        m.precision_had_focus = true;
+        let mut applied = false;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                ..Default::default()
+            },
+            |ui| applied = m.precision_ui(ui, &mut session, true).unwrap(),
+        );
+        output.textures_delta.clear();
+        assert!(applied);
+        assert!(!m.precision_pending());
+        m.precision[0] = "-".into();
+        m.edited[0] = true;
+        m.precision_revision = Some(session.scene().revision);
+        m.precision_had_focus = true;
+        let before = session.scene().clone();
+        let mut error = false;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                ..Default::default()
+            },
+            |ui| error = m.precision_ui(ui, &mut session, true).is_err(),
+        );
+        output.textures_delta.clear();
+        assert!(error);
+        assert_eq!(session.scene(), &before);
+        assert_eq!(m.precision[0], "-");
+        m.precision_had_focus = true;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                ..Default::default()
+            },
+            |ui| assert!(!m.precision_ui(ui, &mut session, false).unwrap()),
+        );
+        output.textures_delta.clear();
+        assert!(
+            m.precision_pending(),
+            "modal focus loss preserves the draft instead of committing or discarding it"
+        );
     }
 
     // Unique boundary: copied membership/mesh origins and group precision edits
@@ -932,204 +990,214 @@ mod tests {
     // release, then commits exactly one authored group; Escape/focus loss cancel.
     #[test]
     fn real_off_axis_gizmo_commits_once_and_cancels_without_history() {
-        let rect = Rect::from_min_max(Pos2::new(173.0, 91.0), Pos2::new(973.0, 691.0));
-        let yaw = 0.65_f64;
-        let pitch = 0.45_f64;
-        let eye = DVec3::new(
-            yaw.sin() * pitch.cos(),
-            pitch.sin(),
-            yaw.cos() * pitch.cos(),
-        ) * 8.0;
-        let view = DMat4::look_at_rh(eye, DVec3::ZERO, DVec3::Y);
-        let projection = DMat4::perspective_rh_gl(45_f64.to_radians(), 800.0 / 600.0, 0.008, 800.0);
-        let median = DVec3::new(2.0, 1.0, -1.0);
-        let scale = (projection * view * median.extend(1.0)).w / projection.x_axis.x / 800.0 * 2.0;
-        let project = |world: DVec3| {
-            let ndc = (projection * view).project_point3(world);
-            Pos2::new(
-                rect.center().x + (ndc.x * 400.0) as f32,
-                rect.center().y - (ndc.y * 300.0) as f32,
-            )
-        };
-        let start = project(median + DVec3::X * scale * 40.0);
-        let end = project(median + DVec3::X * scale * 65.0);
-        let mut scene = Scene::demo();
-        scene.objects.truncate(2);
-        scene.objects[0].transform.translation = [1.0, 1.0, -1.0];
-        scene.objects[0].transform.rotation = [0.0, 0.7, 0.0];
-        scene.objects[1].transform.translation = [3.0, 1.0, -1.0];
-        let ctx = egui::Context::default();
-        let frame = |m: &mut Manipulation, session: &mut Session, events: Vec<Event>, focused| {
-            let mut outcome = Ok(false);
-            let mut output = ctx.run_ui(
-                RawInput {
-                    focused,
-                    screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(1200.0, 800.0))),
-                    events,
-                    ..Default::default()
-                },
-                |ui| {
-                    let response = ui.interact(
-                        rect,
-                        ui.scope_id().with("viewport"),
-                        egui::Sense::click_and_drag(),
-                    );
-                    outcome = m.draw(
-                        ui,
-                        &ruster_render::ViewportInteraction {
+        for orthographic in [false, true] {
+            let rect = Rect::from_min_max(Pos2::new(173.0, 91.0), Pos2::new(973.0, 691.0));
+            let yaw = 0.65_f64;
+            let pitch = 0.45_f64;
+            let eye = DVec3::new(
+                yaw.sin() * pitch.cos(),
+                pitch.sin(),
+                yaw.cos() * pitch.cos(),
+            ) * 8.0;
+            let view = DMat4::look_at_rh(eye, DVec3::ZERO, DVec3::Y);
+            let projection = if orthographic {
+                DMat4::orthographic_rh_gl(-5.0, 5.0, -3.75, 3.75, 0.008, 800.0)
+            } else {
+                DMat4::perspective_rh_gl(45_f64.to_radians(), 800.0 / 600.0, 0.008, 800.0)
+            };
+            let median = DVec3::new(2.0, 1.0, -1.0);
+            let scale =
+                (projection * view * median.extend(1.0)).w / projection.x_axis.x / 800.0 * 2.0;
+            let project = |world: DVec3| {
+                let ndc = (projection * view).project_point3(world);
+                Pos2::new(
+                    rect.center().x + (ndc.x * 400.0) as f32,
+                    rect.center().y - (ndc.y * 300.0) as f32,
+                )
+            };
+            let start = project(median + DVec3::X * scale * 40.0);
+            let end = project(median + DVec3::X * scale * 65.0);
+            let mut scene = Scene::demo();
+            scene.objects.truncate(2);
+            scene.objects[0].transform.translation = [1.0, 1.0, -1.0];
+            scene.objects[0].transform.rotation = [0.0, 0.7, 0.0];
+            scene.objects[1].transform.translation = [3.0, 1.0, -1.0];
+            let ctx = egui::Context::default();
+            let frame = |m: &mut Manipulation,
+                         session: &mut Session,
+                         events: Vec<Event>,
+                         focused| {
+                let mut outcome = Ok(false);
+                let mut output = ctx.run_ui(
+                    RawInput {
+                        focused,
+                        screen_rect: Some(Rect::from_min_max(Pos2::ZERO, Pos2::new(1200.0, 800.0))),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        let response = ui.interact(
                             rect,
-                            response,
-                            picked: None,
-                            view: view.to_cols_array_2d().map(|row| row.map(|v| v as f32)),
-                            projection: projection
-                                .to_cols_array_2d()
-                                .map(|row| row.map(|v| v as f32)),
-                            gizmo_projection: projection
-                                .to_cols_array_2d()
-                                .map(|row| row.map(|v| v as f32)),
-                        },
-                        session,
-                    );
-                },
-            );
-            output.textures_delta.clear();
-            assert!(
-                !output.shapes.is_empty(),
-                "selected gizmo remains visible even when input is blocked"
-            );
-            outcome.unwrap();
-        };
-        let mut session = Session::new(scene.clone()).unwrap();
-        let mut m = Manipulation {
-            local: true,
-            ids: scene.objects.iter().map(|o| o.id.clone()).collect(),
-            ..Default::default()
-        };
-        let pointer = |pos, pressed| Event::PointerButton {
-            pos,
-            button: PointerButton::Primary,
-            pressed,
-            modifiers: Modifiers::NONE,
-        };
-        frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
-        frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
-        frame(&mut m, &mut session, vec![pointer(start, true)], true);
-        assert!(m.active());
-        frame(&mut m, &mut session, vec![Event::PointerMoved(end)], true);
-        assert_eq!(session.scene(), &scene);
-        assert_eq!(session.undo_len(), 0);
-        frame(&mut m, &mut session, vec![pointer(end, false)], true);
-        assert!(!m.active());
-        assert_eq!(session.undo_len(), 1);
-        let delta = session.scene().objects[0].transform.translation[0]
-            - scene.objects[0].transform.translation[0];
-        assert!((delta - (scale * 25.0) as f32).abs() < 1e-3);
-        assert!(
-            (session.scene().objects[1].transform.translation[0]
-                - scene.objects[1].transform.translation[0]
-                - delta)
-                .abs()
-                < 1e-5
-        );
-        session.undo(1).unwrap();
-        for cancel in [false, true] {
+                            ui.scope_id().with("viewport"),
+                            egui::Sense::click_and_drag(),
+                        );
+                        outcome = m.draw(
+                            ui,
+                            &ruster_render::ViewportInteraction {
+                                rect,
+                                response,
+                                picked: None,
+                                view: view.to_cols_array_2d().map(|row| row.map(|v| v as f32)),
+                                projection: projection
+                                    .to_cols_array_2d()
+                                    .map(|row| row.map(|v| v as f32)),
+                                gizmo_projection: projection
+                                    .to_cols_array_2d()
+                                    .map(|row| row.map(|v| v as f32)),
+                            },
+                            session,
+                        );
+                    },
+                );
+                output.textures_delta.clear();
+                assert!(
+                    !output.shapes.is_empty(),
+                    "selected gizmo remains visible even when input is blocked"
+                );
+                outcome.unwrap();
+            };
+            let mut session = Session::new(scene.clone()).unwrap();
+            let mut m = Manipulation {
+                local: true,
+                ids: scene.objects.iter().map(|o| o.id.clone()).collect(),
+                ..Default::default()
+            };
+            let pointer = |pos, pressed| Event::PointerButton {
+                pos,
+                button: PointerButton::Primary,
+                pressed,
+                modifiers: Modifiers::NONE,
+            };
             frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
             frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
             frame(&mut m, &mut session, vec![pointer(start, true)], true);
             assert!(m.active());
             frame(&mut m, &mut session, vec![Event::PointerMoved(end)], true);
-            let events = if cancel {
-                vec![Event::Key {
-                    key: egui::Key::Escape,
-                    physical_key: None,
-                    pressed: true,
-                    repeat: false,
-                    modifiers: Modifiers::NONE,
-                }]
-            } else {
-                vec![]
-            };
-            frame(&mut m, &mut session, events, cancel);
-            assert!(!m.active());
-            assert_eq!(session.scene().objects, scene.objects);
+            assert_eq!(session.scene(), &scene);
             assert_eq!(session.undo_len(), 0);
             frame(&mut m, &mut session, vec![pointer(end, false)], true);
-        }
-        let snap_end = project(median + DVec3::X * scale * 120.0);
-        m.snap = true;
-        m.snap_distance = 0.5;
-        frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
-        frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
-        frame(&mut m, &mut session, vec![pointer(start, true)], true);
-        frame(
-            &mut m,
-            &mut session,
-            vec![Event::PointerMoved(snap_end)],
-            true,
-        );
-        frame(&mut m, &mut session, vec![pointer(snap_end, false)], true);
-        let snapped = session.scene().objects[0].transform.translation[0]
-            - scene.objects[0].transform.translation[0];
-        assert!(snapped.abs() > 0.1);
-        assert!((snapped / 0.5 - (snapped / 0.5).round()).abs() < 1e-4);
-        session.undo(session.scene().revision).unwrap();
-        for tool in [Tool::Rotate, Tool::Scale] {
-            m.tool = tool;
-            m.local = false;
-            m.pivot = Pivot::Center;
-            let center = project(median);
-            let ring_start = center + egui::vec2(82.0, 0.0);
-            let ring_end = if tool == Tool::Rotate {
-                center + egui::vec2(0.0, 82.0)
-            } else {
-                center + egui::vec2(123.0, 0.0)
-            };
-            frame(
-                &mut m,
-                &mut session,
-                vec![Event::PointerMoved(ring_start)],
-                true,
-            );
-            frame(
-                &mut m,
-                &mut session,
-                vec![Event::PointerMoved(ring_start)],
-                true,
-            );
-            frame(&mut m, &mut session, vec![pointer(ring_start, true)], true);
-            assert!(
-                m.active(),
-                "{tool:?} ring must start a real toolkit gesture"
-            );
-            frame(
-                &mut m,
-                &mut session,
-                vec![Event::PointerMoved(ring_end)],
-                true,
-            );
-            assert_eq!(
-                session.scene().objects,
-                scene.objects,
-                "tool preview must not mutate authored objects"
-            );
-            frame(&mut m, &mut session, vec![pointer(ring_end, false)], true);
+            assert!(!m.active());
             assert_eq!(session.undo_len(), 1);
-            let actual = &session.scene().objects[0].transform;
-            if tool == Tool::Rotate {
-                assert_ne!(actual.rotation, scene.objects[0].transform.rotation);
-                assert_eq!(actual.scale, scene.objects[0].transform.scale);
-            } else {
-                assert_eq!(actual.rotation, scene.objects[0].transform.rotation);
-                assert!((actual.scale[0] - 1.5).abs() < 1e-4);
+            let delta = session.scene().objects[0].transform.translation[0]
+                - scene.objects[0].transform.translation[0];
+            assert!((delta - (scale * 25.0) as f32).abs() < 1e-3);
+            assert!(
+                (session.scene().objects[1].transform.translation[0]
+                    - scene.objects[1].transform.translation[0]
+                    - delta)
+                    .abs()
+                    < 1e-5
+            );
+            session.undo(1).unwrap();
+            for cancel in [false, true] {
+                frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
+                frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
+                frame(&mut m, &mut session, vec![pointer(start, true)], true);
+                assert!(m.active());
+                frame(&mut m, &mut session, vec![Event::PointerMoved(end)], true);
+                let events = if cancel {
+                    vec![Event::Key {
+                        key: egui::Key::Escape,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: Modifiers::NONE,
+                    }]
+                } else {
+                    vec![]
+                };
+                frame(&mut m, &mut session, events, cancel);
+                assert!(!m.active());
+                assert_eq!(session.scene().objects, scene.objects);
+                assert_eq!(session.undo_len(), 0);
+                frame(&mut m, &mut session, vec![pointer(end, false)], true);
             }
+            let snap_end = project(median + DVec3::X * scale * 120.0);
+            m.snap = true;
+            m.snap_distance = 0.5;
+            frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
+            frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
+            frame(&mut m, &mut session, vec![pointer(start, true)], true);
+            frame(
+                &mut m,
+                &mut session,
+                vec![Event::PointerMoved(snap_end)],
+                true,
+            );
+            frame(&mut m, &mut session, vec![pointer(snap_end, false)], true);
+            let snapped = session.scene().objects[0].transform.translation[0]
+                - scene.objects[0].transform.translation[0];
+            assert!(snapped.abs() > 0.1);
+            assert!((snapped / 0.5 - (snapped / 0.5).round()).abs() < 1e-4);
             session.undo(session.scene().revision).unwrap();
+            for tool in [Tool::Rotate, Tool::Scale] {
+                m.tool = tool;
+                m.local = false;
+                m.pivot = Pivot::Center;
+                let center = project(median);
+                let ring_start = center + egui::vec2(82.0, 0.0);
+                let ring_end = if tool == Tool::Rotate {
+                    center + egui::vec2(0.0, 82.0)
+                } else {
+                    center + egui::vec2(123.0, 0.0)
+                };
+                frame(
+                    &mut m,
+                    &mut session,
+                    vec![Event::PointerMoved(ring_start)],
+                    true,
+                );
+                frame(
+                    &mut m,
+                    &mut session,
+                    vec![Event::PointerMoved(ring_start)],
+                    true,
+                );
+                frame(&mut m, &mut session, vec![pointer(ring_start, true)], true);
+                assert!(
+                    m.active(),
+                    "{tool:?} ring must start a real toolkit gesture"
+                );
+                frame(
+                    &mut m,
+                    &mut session,
+                    vec![Event::PointerMoved(ring_end)],
+                    true,
+                );
+                assert_eq!(
+                    session.scene().objects,
+                    scene.objects,
+                    "tool preview must not mutate authored objects"
+                );
+                frame(&mut m, &mut session, vec![pointer(ring_end, false)], true);
+                assert_eq!(session.undo_len(), 1);
+                let actual = &session.scene().objects[0].transform;
+                if tool == Tool::Rotate {
+                    assert_ne!(actual.rotation, scene.objects[0].transform.rotation);
+                    assert_eq!(actual.scale, scene.objects[0].transform.scale);
+                } else {
+                    assert_eq!(actual.rotation, scene.objects[0].transform.rotation);
+                    assert!((actual.scale[0] - 1.5).abs() < 1e-4);
+                }
+                session.undo(session.scene().revision).unwrap();
+            }
+            // A stale revision cannot apply a captured candidate over another edit.
+            let mut gesture = Gesture::begin(&session, &m.ids).unwrap();
+            gesture.candidate[0].1.translation[0] += 1.0;
+            session
+                .rename(session.scene().revision, "left", Some("Changed".into()))
+                .unwrap();
+            assert!(gesture.commit(&mut session).is_err());
         }
-        // A stale revision cannot apply a captured candidate over another edit.
-        let mut gesture = Gesture::begin(&session, &m.ids).unwrap();
-        gesture.candidate[0].1.translation[0] += 1.0;
-        session
-            .rename(session.scene().revision, "left", Some("Changed".into()))
-            .unwrap();
-        assert!(gesture.commit(&mut session).is_err());
     }
 }
