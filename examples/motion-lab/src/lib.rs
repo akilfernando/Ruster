@@ -1,4 +1,4 @@
-//! Persisted motion authoring over the same application runtime as Yard.
+//! Shared Scene5 motion comparison and legacy Rhai project1 compatibility over ruster-app.
 
 use std::{
     collections::BTreeMap,
@@ -9,6 +9,7 @@ use ruster_app::{egui, Application, Content, MeshMap, Step};
 use ruster_scene::Scene;
 use ruster_script::{Behavior, Properties};
 
+pub mod generic;
 mod project;
 
 pub const DEFAULT_SOURCE: &str = include_str!("../resources/motion.rhai");

@@ -21,6 +21,7 @@ inspection = ["ruster-app/inspection"]
 ruster-app = { path = "../../crates/ruster-app" }
 ruster-scene = { path = "../../crates/ruster-scene" }
 ruster-script = { path = "../../crates/ruster-script" }
+ruster-behavior = { path = "../../crates/ruster-behavior" }
 ruster-assets = { path = "../../crates/ruster-assets" }
 
 serde = { version = "1", features = ["derive"] }

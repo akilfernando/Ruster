@@ -1,6 +1,33 @@
 # Motion Lab
 
-A small runnable motion-authoring prototype using `ruster-app`, its shared Vulkan viewport and the same fixed-step `Runtime` as Yard. Select procedural objects, attach a Rhai behavior, edit per-object numeric properties and inspect motion. This slice is not the completed M8 editor or an IDE integration.
+A non-game motion comparison application using `ruster-app`, its shared Vulkan viewport and the same fixed-step `Runtime` as Yard. Its generic Scene5/Lua mode consumes authored sources, typed properties/references and history from the shared editor. The legacy Rhai project1 mode remains compatible. Neither mode establishes full M8 creator acceptance.
+
+## Shared Scene5 motion comparison
+
+```sh
+cargo run --locked -p ruster-motion-lab -- --generic-demo --headless --ticks 10
+cargo run --locked -p ruster-motion-lab -- --generic-demo
+cargo run --locked -p ruster-editor -- --scene examples/motion-lab/resources/generic.scene.json
+cargo run --locked -p ruster-motion-lab -- --scene examples/motion-lab/resources/generic.scene.json --headless --ticks 10 --speed 3
+```
+
+The embedded procedural demo compares two samples moving toward a shared target using the same Lua source and different numeric speed properties (1 and2). At ten100ms ticks their X positions are−1 and0; target X remains2. Use the generic editor to change/create sources, bindings, typed properties/references, geometry or history; save and reopen this viewer. The consumer has no competing source/property/history/recovery editor. Its application-owned UI selects samples and compares authored/runtime positions, rotation and displacement. Native mode starts paused; **Reset** snapshots and validates enabled behavior at dt0, then **Run**/**Step** uses100ms ticks. Space retains the shared host's Run/Pause behavior when text does not own focus.
+
+`--scene PATH` reads a regular bounded scene document as a complete `Session`, including source data and Undo/Redo. It creates no save authority, lock or cache file and never writes the input. Storage-valid unfinished/unknown-language sources load; enabled unsupported or invalid sources fail at explicit Reset/headless run with source ID/hash/line, binding/object and phase diagnostics. Failed Reset retains the previous committed runtime; failed Step commits neither transforms nor tick and pauses the host. Authoring and run state remain separate. The Lua backend is an application dependency; the kit still has no mandatory interpreter.
+
+Headless mode Resets, runs0–10000 ticks and prints JSON with `authored_scene`, `runtime_scene`, authored revision, committed tick, fixed dt and the optional override. `--speed N` overrides only enabled bindings already exposing a numeric `speed` in the Reset snapshot; it requires at least one match and never changes authored properties/history/file bytes. Other properties and disabled bindings are preserved. Identical files/options/tick counts replay identically within the supported backend. This is a motion comparison workflow; the Yard application retains its own game rules.
+
+Imported mesh IDs are preserved and require explicit read-only OBJ mappings:
+
+```sh
+cargo run --locked -p ruster-motion-lab -- --scene my.scene.json --resources my-assets --mesh marker=marker.obj --headless --ticks 10
+```
+
+Use at most64 unique mappings. Relative mesh paths resolve beneath the explicit canonical resource root; missing mappings, escapes and invalid/oversized resources fail before running. Immutable mesh snapshots pass through the shared `Content` path. The embedded generic demo uses procedural cubes and requires no resources directory. There is no asset catalog refresh/cache ownership in this consumer.
+
+`--scene` and `--generic-demo` are mutually exclusive and cannot be combined with legacy `--script`, `--project` or `--save-project`. Omitting both preserves the existing Rhai startup. Generic mode is the bounded shared-mechanism consumer; independent modification/export/package and native creator evidence remain separate acceptance work.
+
+## Legacy Rhai project1 compatibility
 
 ```sh
 cargo run --locked -p ruster-motion-lab
@@ -41,4 +68,4 @@ The focused integration checks use the real host Runtime to protect draft/applic
 cargo test --locked -p ruster-motion-lab
 ```
 
-Native tests must follow the project's workspace2 isolation procedure in `AGENTS.md`. Human Unity/Unreal familiarity, generic editor controls, persisted undo/autosave, IDE launch and full M8 acceptance remain unfinished.
+Native tests must follow the project's workspace2 isolation procedure in `AGENTS.md`. The legacy mode has no generic-editor recovery or IDE integration; use the shared Scene5 workflow above for new authoring. Human Unity/Unreal familiarity and full M8 acceptance remain separate project gates.

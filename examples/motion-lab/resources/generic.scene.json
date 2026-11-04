@@ -1,0 +1,143 @@
+{
+  "format": "ruster-scene",
+  "format_version": 5,
+  "scene": {
+    "id": "motion-comparison",
+    "revision": 0,
+    "objects": [
+      {
+        "id": "sample-slow",
+        "name": "Slow sample",
+        "transform": {
+          "translation": [
+            -2,
+            -1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "color": [
+          0.12,
+          0.58,
+          0.85,
+          1
+        ]
+      },
+      {
+        "id": "sample-fast",
+        "name": "Fast sample",
+        "transform": {
+          "translation": [
+            -2,
+            1,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "color": [
+          0.9,
+          0.4,
+          0.16,
+          1
+        ]
+      },
+      {
+        "id": "target",
+        "name": "Reference target",
+        "transform": {
+          "translation": [
+            2,
+            0,
+            0
+          ],
+          "rotation": [
+            0,
+            0,
+            0
+          ],
+          "scale": [
+            1,
+            1,
+            1
+          ]
+        },
+        "color": [
+          0.3,
+          0.75,
+          0.45,
+          1
+        ]
+      }
+    ]
+  },
+  "authoring": {
+    "sources": {
+      "follower": {
+        "label": "Compare linear motion",
+        "language_id": "lua54",
+        "host_api_version": 1,
+        "text": "-- Properties: speed (Number), enabled (Bool), target (ObjectRef).\nreturn {\n    update = function(transform, props, dt, host)\n        if not props.enabled then return transform end\n        local target = host.resolve(props.target)\n        if not target then return transform end\n        local distance = target.translation[1] - transform.translation[1]\n        local step = math.max(0, props.speed) * dt\n        transform.translation[1] = transform.translation[1]\n            + math.min(step, math.max(-step, distance))\n        return transform\n    end\n}\n"
+      }
+    },
+    "bindings": {
+      "motion-slow": {
+        "object_id": "sample-slow",
+        "source_id": "follower",
+        "enabled": true,
+        "properties": {
+          "speed": {
+            "type": "number",
+            "value": 1
+          },
+          "enabled": {
+            "type": "bool",
+            "value": true
+          },
+          "target": {
+            "type": "object_ref",
+            "value": "target"
+          }
+        }
+      },
+      "motion-fast": {
+        "object_id": "sample-fast",
+        "source_id": "follower",
+        "enabled": true,
+        "properties": {
+          "speed": {
+            "type": "number",
+            "value": 2
+          },
+          "enabled": {
+            "type": "bool",
+            "value": true
+          },
+          "target": {
+            "type": "object_ref",
+            "value": "target"
+          }
+        }
+      }
+    }
+  },
+  "undo": [],
+  "redo": []
+}

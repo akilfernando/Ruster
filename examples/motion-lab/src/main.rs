@@ -1,15 +1,20 @@
 use std::{path::PathBuf, time::Duration};
 
-use ruster_app::{Application, HostOptions, Runtime};
+use ruster_app::{Application, HostOptions, MeshMap, ResourceRoot, Runtime};
+use ruster_motion_lab::generic::{self, GenericMotionLab};
 use ruster_motion_lab::{read_source, MotionLab, DEFAULT_SOURCE};
 
-const HELP: &str = "Ruster Motion Lab — attach and author a small behavior
+const HELP: &str = "Ruster Motion Lab — compare authored motion or open a legacy Rhai project
 
 Usage: ruster-motion-lab [OPTIONS]
   --headless       Attach the behavior to left, Reset, run fixed ticks, print transforms
   --ticks N        Headless ticks, 0–10000 (default 10)
-  --speed N        Override the attached left object's speed property
+  --speed N        Legacy: left property; generic: runtime-only numeric speed override
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
+  --scene PATH     Read a generic Scene5 snapshot (sources, bindings and history retained)
+  --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
+  --resources PATH Explicit read-only mesh resource directory for generic mode
+  --mesh ID=PATH   Map a Scene mesh ID to a relative OBJ resource (repeat, at most 64)
   --project PATH   Open an authored Motion Lab project (instead of --script)
   --save-project PATH Save authored state before running
   --frames N       Close native window after 1–10000 frames
@@ -19,7 +24,15 @@ Native mode starts paused with no attachments. Select an object, Attach behavior
 edit numeric properties, then Reset and Run or Step. Source/properties are drafts
 until Reset; invalid candidates preserve the last applied runtime. Script files
 are read only; use Reload from disk after editing externally. Projects embed source and attachments; external script files are never written.
-The default script is embedded, so the command works from any directory.";
+The default script is embedded, so the command works from any directory.
+
+Generic mode consumes Scene5/Lua through the shared behavior backend. Native mode
+loads authored data without compiling it; Reset validates at dt0, Run/Step uses
+fixed dt0.1. Author/edit/save in ruster-editor, then reopen this read-only viewer.
+Headless generic mode Resets and prints JSON with separate authored/runtime scenes.
+--speed changes only the runtime snapshot of enabled numeric speed properties.
+Mesh references require explicit --resources ROOT --mesh ID=relative.obj mappings;
+missing meshes are errors. No scene, script, catalog, lock or cache file is written.";
 
 #[derive(Default)]
 struct Options {
@@ -30,6 +43,10 @@ struct Options {
     project: Option<PathBuf>,
     save_project: Option<PathBuf>,
     speed: Option<f64>,
+    scene: Option<PathBuf>,
+    generic_demo: bool,
+    resources: Option<PathBuf>,
+    meshes: Vec<(String, PathBuf)>,
 }
 
 fn parse() -> Result<Option<Options>, String> {
@@ -39,11 +56,31 @@ fn parse() -> Result<Option<Options>, String> {
         match arg.as_str() {
             "--help" | "-h" => return Ok(None),
             "--headless" => options.headless = true,
-            "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project" => {
+            "--generic-demo" => options.generic_demo = true,
+            "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project"
+            | "--scene" | "--resources" | "--mesh" => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{arg} requires a value. See --help."))?;
                 match arg.as_str() {
+                    "--scene" => options.scene = Some(value.into()),
+                    "--resources" => options.resources = Some(value.into()),
+                    "--mesh" => {
+                        let (id, path) =
+                            value.split_once('=').ok_or("Use --mesh ID=RELATIVE.obj")?;
+                        if id.is_empty() || id.len() > 128 || path.is_empty() {
+                            return Err(
+                                "Use --mesh ID=RELATIVE.obj with a nonempty ID of at most128 bytes"
+                                    .into(),
+                            );
+                        }
+                        if options.meshes.len() >= 64
+                            || options.meshes.iter().any(|(existing, _)| existing == id)
+                        {
+                            return Err("Use at most64 unique --mesh mappings".into());
+                        }
+                        options.meshes.push((id.into(), path.into()));
+                    }
                     "--project" => options.project = Some(value.into()),
                     "--save-project" => options.save_project = Some(value.into()),
                     "--script" => options.script = Some(value.into()),
@@ -88,10 +125,28 @@ fn parse() -> Result<Option<Options>, String> {
     if options.project.is_some() && options.script.is_some() {
         return Err("Use either --project or --script.".into());
     }
+    let generic = options.scene.is_some() || options.generic_demo;
+    if options.scene.is_some() && options.generic_demo {
+        return Err("Use either --scene or --generic-demo".into());
+    }
+    if generic
+        && (options.project.is_some() || options.script.is_some() || options.save_project.is_some())
+    {
+        return Err("Generic mode uses --scene or --generic-demo; --project, --script and --save-project belong to legacy Rhai mode".into());
+    }
+    if !generic && (options.resources.is_some() || !options.meshes.is_empty()) {
+        return Err("--resources and --mesh require --scene or --generic-demo".into());
+    }
+    if !options.meshes.is_empty() && options.resources.is_none() {
+        return Err("--mesh requires an explicit --resources directory".into());
+    }
     Ok(Some(options))
 }
 
 fn execute(options: Options) -> Result<(), String> {
+    if options.scene.is_some() || options.generic_demo {
+        return execute_generic(options);
+    }
     let source = match &options.script {
         Some(path) => read_source(path)?,
         None => DEFAULT_SOURCE.into(),
@@ -150,6 +205,58 @@ fn execute(options: Options) -> Result<(), String> {
     }
 }
 
+fn execute_generic(options: Options) -> Result<(), String> {
+    let session = match &options.scene {
+        Some(path) => generic::read_session(path)?,
+        None => {
+            ruster_scene::Session::from_snapshot_bytes(generic::DEMO).map_err(|e| e.to_string())?
+        }
+    };
+    let mut meshes = MeshMap::new();
+    if let Some(root) = options.resources {
+        let root = ResourceRoot::new(root)?;
+        for (id, path) in options.meshes {
+            meshes.insert(id, root.mesh(path)?);
+        }
+    }
+    let mut app = GenericMotionLab::new(session, meshes, generic::FIXED_DT)?;
+    app.set_speed_override(options.speed)?;
+    if options.headless {
+        let mut runtime = Runtime::new(app, generic::FIXED_DT)?;
+        runtime.reset()?;
+        for _ in 0..options.ticks.unwrap_or(10) {
+            runtime.step()?;
+        }
+        let app = runtime.app();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mode": "generic_motion_comparison",
+                "scene_id": app.session().scene().id,
+                "authored_revision": app.session().scene().revision.to_string(),
+                "tick": runtime.tick().to_string(),
+                "fixed_dt": generic::FIXED_DT.as_secs_f64(),
+                "runtime_speed_override": options.speed,
+                "authored_scene": app.session().scene(),
+                "runtime_scene": app.content().scene(),
+            }))
+            .map_err(|e| e.to_string())?
+        );
+        Ok(())
+    } else {
+        ruster_app::run(
+            app,
+            HostOptions {
+                title: "Motion Lab — Shared behavior comparison".into(),
+                app_id: "ruster-motion-lab".into(),
+                tick_duration: generic::FIXED_DT,
+                max_frames: options.frames,
+                start_running: false,
+            },
+        )
+    }
+}
+
 fn main() {
     let result = match parse() {
         Ok(None) => {
@@ -160,7 +267,9 @@ fn main() {
         Err(error) => Err(error),
     };
     if let Err(error) = result {
-        eprintln!("Motion Lab: {error}\nFix the script/options and retry. See --help.");
+        eprintln!(
+            "Motion Lab: {error}\nFix the authored scene/script/options and retry. See --help."
+        );
         std::process::exit(2);
     }
 }

@@ -1,8 +1,6 @@
 # Standalone application and development distribution
 
-Updated 2026-11-04. This is the bounded M7 Linux x86_64 development workflow,
-not a public binary release or a supported OS/GPU matrix. The application kit
-is `crates/ruster-app`; its example is `examples/yard-app` (`ruster-yard`).
+Updated 2026-11-04. This is the bounded Linux x86_64 development workflow for M7 Yard and the M8 Motion Lab consumer, not a public binary release or supported OS/GPU matrix. The shared kit is `crates/ruster-app`. Yard remains the default `--app yard`; `--app motion-lab` selects the non-game Scene5/Lua consumer and its legacy Rhai compatibility mode. [M8 independent source/build/package evidence](evidence/M8-independent-reuse.md) passed on the recorded local configuration; native presentation remains a separate check.
 The app owns its logistics rules, challenge settings, scene and UI. The kit
 supplies bounded ticking, lifecycle, read-only resource access and the shared
 Vulkan host. Editor and MCP are independent authoring tools, not runtime
@@ -46,6 +44,19 @@ offline during generation to reduce the copied lockfile to this workspace
 without updating selected versions. An unavailable cached dependency fails the
 export visibly. Native desktop/GPU requirements still apply.
 
+## Export the non-game application
+
+```sh
+python3 scripts/new_app.py --app motion-lab /tmp/my-motion-lab
+cd /tmp/my-motion-lab
+cargo run --locked --offline -p ruster-motion-lab -- --generic-demo --headless --ticks 10
+cargo run --locked --offline -p ruster-motion-lab -- --generic-demo
+```
+
+The selected source export includes only Motion Lab, the common kit and its optional `ruster-script`/`ruster-behavior` backends, the reviewed mlua source/patch and required templates. Owned resources are exactly `motion.rhai` and `generic.scene.json`; arbitrary project files remain excluded. Lua is bundled at build time; a C compiler/linker is needed, but system Lua is not. The kit itself gains no mandatory interpreter. The new consumer reads Scene5 snapshots, leaving source/history authoring to the generic editor; it adds no competing source editor. Existing Rhai project1 files stay distinct and are not silently converted.
+
+Both selectors preserve previous locked registry versions. Use a fresh destination. `--app` is an explicit known-example selector, not an arbitrary filesystem/package upload. Source manifests identify the selected application; binary manifests and archive roots use the same identity. No M9 release work is authorized in this run.
+
 ## Package the built application
 
 Build with local compiler paths remapped before creating an archive:
@@ -59,6 +70,15 @@ cd /tmp
 /tmp/relocated-yard/ruster-yard/ruster-yard --headless
 /tmp/relocated-yard/ruster-yard/ruster-yard --headless --capacity 3
 ```
+
+For Motion Lab, remap both Rust and bundled-C compiler paths and select it explicitly:
+
+```sh
+CFLAGS="-ffile-prefix-map=$PWD=/ruster-source -ffile-prefix-map=$HOME=/ruster-build" RUSTFLAGS="--remap-path-prefix=$PWD=/ruster-source --remap-path-prefix=$HOME=/ruster-build -C debuginfo=0" cargo build --locked --offline --release -p ruster-motion-lab
+python3 scripts/package_app.py --app motion-lab --binary /absolute/path/to/ruster-motion-lab --output /tmp/my-motion-lab.tar.gz
+```
+
+Its payload contains the two owned resources, application-specific README and active backend notices. Use `--generic-demo` or `--scene resources/generic.scene.json`; no checkout/editor is a runtime prerequisite. The original no-argument/`--script`/`--project` modes remain the separate legacy experiment.
 
 `--binary PATH` selects a different built executable. The packager requires a
 regular executable Linux x86_64 ELF, rejects binary bytes containing the current
@@ -198,3 +218,7 @@ Independent creator edit/rebuild and native release validation belong in the
 M7 evidence/status handoff. The package mechanics/source export alone do not
 establish GPU or experienced-human usability acceptance. No public binary release
 was published.
+
+## Motion Lab notice supplement
+
+The first independent Motion Lab package attempt correctly refused missing readable `rhai_codegen3.3.0` license text. Its registry metadata declares MIT OR Apache-2.0 and records upstream commit `aaf90906bfa7eae090fc236b8572a67528cab3ed` with `dirty=true`. The exact upstream [MIT](https://raw.githubusercontent.com/rhaiscript/rhai/aaf90906bfa7eae090fc236b8572a67528cab3ed/LICENSE-MIT.txt) and [Apache](https://raw.githubusercontent.com/rhaiscript/rhai/aaf90906bfa7eae090fc236b8572a67528cab3ed/LICENSE-APACHE.txt) payloads were retained in packaging supplements on2026-11-04, with hashes and that provenance caveat. The cached Rhai1.27.0 at the same commit has matching text with CRLF endings; the initial raw-byte equality check failed on those line endings, then normalized-text comparison passed while the stored upstream payloads remained unchanged. No clean codegen publication tree is inferred. The actual missing-package notice check now passes; package relocation acceptance remains separately recorded.

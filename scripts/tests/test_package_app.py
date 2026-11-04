@@ -117,6 +117,48 @@ class DistributionTests(unittest.TestCase):
                 package_app.package(self.root, binary, output)
         self.assertEqual(output.read_bytes(), original)
 
+    @unittest.skipUnless(sys.platform == "linux" and shutil.which("readelf"), "Linux ELF tooling required")
+    def test_motion_selection_carries_optional_backend_and_owned_resources(self):
+        """The second app exports its own closure/templates/vendor and packages its own payload."""
+        put = lambda name, text: package_app.put(self.root, name, text.encode())
+        for name in ("ruster-script", "ruster-behavior"):
+            put(f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion.workspace = true\n')
+            put(f"crates/{name}/src/lib.rs", "pub fn run() {}\n")
+        put("crates/ruster-behavior/templates/follower.lua", "return {}\n")
+        put("examples/motion-lab/Cargo.toml", '[package]\nname = "ruster-motion-lab"\nversion.workspace = true\n')
+        put("examples/motion-lab/src/main.rs", "fn main() {}\n")
+        put("examples/motion-lab/resources/motion.rhai", "fn update() {}\n")
+        put("examples/motion-lab/resources/generic.scene.json", "{}\n")
+        put("examples/motion-lab/resources/private.json", "SECRET")
+        put("packaging/MOTION-SOURCE-README.md", "Motion source\n")
+        put("packaging/MOTION-BINARY-README.txt", "Motion binary\n")
+        for name in new_app.MLUA_FILES:
+            put("third_party/mlua/" + name, "pinned upstream fixture\n")
+        for directory in ("src", "docs", "tests", "examples", "benches"):
+            put(f"third_party/mlua/{directory}/fixture.rs", "// pinned fixture\n")
+        source = self.base / "motion-source"
+        manifest = new_app.export(self.root, source, normalize_lock=False, app="motion-lab")
+        self.assertEqual(manifest["application"], "ruster-motion-lab")
+        cargo = tomllib.loads((source / "Cargo.toml").read_text())
+        self.assertIn("crates/ruster-behavior", cargo["workspace"]["members"])
+        self.assertIn("third_party/mlua", cargo["workspace"]["exclude"])
+        self.assertTrue((source / "third_party/mlua/RUSTER-PATCH.md").is_file())
+        self.assertTrue((source / "crates/ruster-behavior/templates/follower.lua").is_file())
+        self.assertFalse((source / "examples/yard-app").exists())
+        self.assertFalse((source / "examples/motion-lab/resources/private.json").exists())
+        meta = {"packages": [{"id":"motion", "name":"ruster-motion-lab", "version":"0.1.0", "source":None}],
+                "resolve":{"nodes":[{"id":"motion", "deps":[]}]}}
+        output = self.base / "motion.tar.gz"
+        with patch.object(package_app, "metadata", return_value=meta):
+            binary = package_app.package(self.root, Path(shutil.which("true")).resolve(), output, app="motion-lab")
+        self.assertEqual(binary["application"], "ruster-motion-lab")
+        with tarfile.open(output) as archive:
+            names = set(archive.getnames())
+            self.assertIn("ruster-motion-lab/resources/generic.scene.json", names)
+            self.assertIn("ruster-motion-lab/ruster-motion-lab", names)
+            self.assertNotIn("ruster-motion-lab/resources/truck.obj", names)
+            self.assertEqual(archive.extractfile("ruster-motion-lab/README.txt").read(), b"Motion binary\n")
+
     def test_missing_notices_or_corrupted_supplements_are_blocking(self):
         """Declared SPDX metadata cannot silently replace readable redistribution notices."""
         depdir = self.base / "dependency"

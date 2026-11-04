@@ -233,6 +233,32 @@
           "version": "551.0.2"
         }
       ]
+    },
+    {
+      "path": "licenses/rhai_codegen-LICENSE-MIT.txt",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "source": "https://raw.githubusercontent.com/rhaiscript/rhai/aaf90906bfa7eae090fc236b8572a67528cab3ed/LICENSE-MIT.txt",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "rhai_codegen",
+          "version": "3.3.0"
+        }
+      ],
+      "notes": "Registry codegen package omits readable license files; .cargo_vcs_info.json names this commit with dirty=true. Exact upstream bytes retained. Cached Rhai1.27.0 at the same commit has matching license text with CRLF line endings. No clean codegen publication tree is inferred."
+    },
+    {
+      "path": "licenses/rhai_codegen-LICENSE-APACHE.txt",
+      "sha256": "a6cba85bc92e0cff7a450b1d873c0eaa2e9fc96bf472df0247a26bec77bf3ff9",
+      "source": "https://raw.githubusercontent.com/rhaiscript/rhai/aaf90906bfa7eae090fc236b8572a67528cab3ed/LICENSE-APACHE.txt",
+      "accessed": "2026-11-04",
+      "packages": [
+        {
+          "name": "rhai_codegen",
+          "version": "3.3.0"
+        }
+      ],
+      "notes": "Registry codegen package omits readable license files; .cargo_vcs_info.json names this commit with dirty=true. Exact upstream bytes retained. Cached Rhai1.27.0 at the same commit has matching license text with CRLF line endings. No clean codegen publication tree is inferred."
     }
   ]
 }

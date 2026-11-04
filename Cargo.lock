@@ -3012,6 +3012,7 @@ dependencies = [
  "fs2",
  "ruster-app",
  "ruster-assets",
+ "ruster-behavior",
  "ruster-scene",
  "ruster-script",
  "serde",
