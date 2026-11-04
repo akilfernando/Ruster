@@ -2,9 +2,11 @@
 
 Date: 2026-11-04. Status: implemented Linux M4 working contract under the accepted roadmap. Scope defaults and transport were selected by the agent; see decision 0005. See [status](STATUS.md) for delivered evidence.
 
+This is the delivered M4/legacy logistics baseline. The [current adapter guide](../crates/ruster-mcp/README.md) documents M5 scene and M6 content extensions. In particular, scene edits stay unsaved while asset catalog import/refresh/rename persist immediately under [decision0008](decisions/0008-content-import-and-refresh.md); the original five-tool surface below is not the complete current API.
+
 ## Authority and identity
 
-The editor owns its ProjectSession, inspector drafts and preview runtime. Live commands must execute serially on the editor thread, against that exact session; a second process editing its file is not live parity. A future headless host may own a separate session through the same command boundary, but must identify itself as headless and cannot claim attachment to an open editor. Implement the editor attachment first.
+The editor owns its ProjectSession, inspector drafts and preview runtime. Live commands must execute serially on the editor thread, against that exact session; a second process editing its file is not live parity. A future headless host may own a separate session through the same command boundary, but must identify itself as headless and cannot claim attachment to an open editor. The editor attachment is delivered; a headless host remains outside current scope.
 
 Inspection returns an opaque process/session token, scenario ID and authored revision. Every authored mutation supplies token and expected revision. Tokens distinguish editor restarts and every successful New, Duplicate or Open, even reopening the same ID/revision. Keep the bridge identity outside Editor::execute's whole-model replacement. Save As preserves this identity because it preserves the authored session; remote path operations are excluded from the first surface.
 
@@ -30,7 +32,7 @@ No remote shell, arbitrary file read/write, project replacement, Save As or prev
 
 Selected: an explicitly enabled private Unix editor bridge plus a native stdio MCP adapter. Stdio keeps the MCP process scoped to the client; the bridge uses a private same-user directory/socket capability, bounded framing/queueing and explicit shutdown behavior. Do not reuse the optional egui inspection HTTP service. Neither loopback nor a local socket alone establishes authorization. An unauthenticated general network listener is outside scope.
 
-The [transport decision](decisions/0005-live-mcp.md) records primary MCP specification/SDK sources and protocol revision negotiation, supported capabilities, transport framing, origin/authorization where applicable, and a named available real client. The official Python SDK 2.3.0 completed the native proof; this is the tested client. Headless hosting is deferred until the live editor proof works.
+The [transport decision](decisions/0005-live-mcp.md) records primary MCP specification/SDK sources and protocol revision negotiation, supported capabilities, transport framing, origin/authorization where applicable, and a named available real client. The official Python SDK 2.3.0 completed the native proof; this is the tested client. The live editor proof passed; headless hosting remains outside current scope.
 
 1. Delivered foundation: explicit-revision ProjectSession methods delegate to Scenario validation/history; existing human convenience methods retain behavior.
 2. Implemented and tested: the editor-thread command dispatch, session generation, guards and bounded replay, using this contract. Test same-ID reopen, draft/modal rejection, human interleaving, shared undo and runtime isolation.

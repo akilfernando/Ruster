@@ -1,6 +1,6 @@
 # 0004 First editor and shared sessions
 
-Date: 2026-11-04. Status: implemented M3 working architecture; revisit viewport integration for M5.
+Date: 2026-11-04. Status: implemented M3/legacy logistics architecture. [Decision0006](0006-scene-and-shared-3d.md) supersedes the deferred viewport integration choice for new 3D work. The original schematic scope below is historical and remains supported separately.
 
 ## Decision
 

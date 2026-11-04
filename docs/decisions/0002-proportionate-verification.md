@@ -14,7 +14,7 @@ Reuse valid final-state evidence across agents, add tests for unique observable 
 
 Always running every suite is simple but scales poorly. Filename-only package selection misses dependent behavior; reverse dependency closure is safer. A sophisticated historical test-impact cache might be faster at scale but introduces stale evidence and maintenance complexity; Cargo incremental caching is sufficient now.
 
-The runner is deliberately conservative and cannot prove semantic impact or substitute for GPU validation. No hosted CI or branch protection is configured by this decision. Before remote PR workflows begin, wire the same policy into CI and define the authoritative merge-result check.
+The runner is deliberately conservative and cannot prove semantic impact or substitute for GPU validation. This initial decision did not configure hosted CI or branch protection. Hosted Linux CI now follows this policy under [decision0007](0007-open-source-publication.md); its actual base selection is documented in [TESTING.md](../TESTING.md). Branch protection and a merge queue remain unclaimed.
 
 ## Revisit
 

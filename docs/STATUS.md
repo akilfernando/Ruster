@@ -6,19 +6,15 @@ Last updated: 2026-11-04.
 
 The user authorized continuing the next milestone after M5/public-source hosting. **M0–M6 are complete within their documented Linux prototype scopes.** Rust, Vulkan, openness, native MCP, manual/agent parity, developer experience, documentation continuity and proportionate verification remain confirmed priorities. M7 standalone application kit is next; no M7 implementation has started.
 
-## Product checkpoint — 2026-11-04
+## Product alignment and audit — 2026-11-04
 
-The user explicitly reaffirmed that systems must serve end users and help them create what they want to create. This is now recorded as the [project ethos](DIRECTION.md#project-ethos-serve-the-creator), linked from AGENTS.md and the public README. It expresses long-term creative freedom without claiming universal current capability. No milestone scope/order change was requested or made.
+Confirmed requirements: systems must serve creators and their own intended creations; experienced Unity/Unreal users should feel at home, with everyday editor quality of life treated as non-negotiable. [DIRECTION.md](DIRECTION.md) owns the ethos; [EDITOR-EXPERIENCE.md](EDITOR-EXPERIENCE.md) owns the working experience baseline and human acceptance gate. Historical M0–M6 prototype completion does not imply editor readiness.
 
-The [post-M6 review](ROADMAP-REVIEW.md#post-m6-creator-outcome-review--2026-11-04) retains M7 → M8 → M9. Current strengths are shared scene/content operations, recovery and ownership. Main gaps are application behavior/template/packaging, general object creation in the scene editor, independent reuse and human usability evidence. M7 remains the next creation-oriented proof; review recommendations do not silently add new features to its accepted scope.
+The [alignment audit](ROADMAP-REVIEW.md#documentation-alignment-audit--2026-11-04) reconciled current guides, roadmap, research and decision supersession against code/configuration. Fixed legacy/current editor scope and shortcuts, delivered MCP wording, catalog revision/persistence semantics, scene-v2 extensions, M5 validation correction, and completed licensing/CI state. Research remains dated context, not independently validated demand or current competitor evidence.
 
-Documentation-only verification: `python3 scripts/check.py --base origin/main` and `git diff --check` passed; no engine behavior changed and no Rust/GPU rerun was needed. Existing M6 source evidence below remains applicable.
+M7 → M8 → M9 remains the sequence. At M7 planning, allocate everyday-experience gaps to concrete slices before M9; the detailed implementation schedule is still open. Application behavior/template/packaging, general editor object creation, independent reuse and experienced-human usability remain unfinished. Binary prerequisites/notices, Windows/other-GPU feasibility and the temporary HAL patch remain explicit engineering gates.
 
-## Editor experience requirement — 2026-11-04
-
-The user made immediate familiarity for experienced Unity/Unreal creators and everyday quality-of-life behavior non-negotiable. [EDITOR-EXPERIENCE.md](EDITOR-EXPERIENCE.md) records this confirmed requirement, an agent-selected working breakdown and acceptance guidance. M6 does not meet that baseline: basic generic object creation/manipulation/discovery/workspace gaps and untested human familiarity remain. Existing prototype completion is not editor readiness.
-
-M7–M9 ordering is retained. Relevant usability must accompany affected workflows; remaining gaps require explicit planning before editor/public-alpha acceptance. Exact controls/presets and a possible dedicated completion slice remain undecided. Documentation-only change; links/whitespace checked with `python3 scripts/check.py --base origin/main` and `git diff --check`; no new Rust/GPU execution or usability study.
+Verification: documentation-only `python3 scripts/check.py --base origin/main`, `git diff --check` and `python3 scripts/dependency_notices.py --check` passed. Inventory remains406 external versions with61 declared-license packages lacking bundled readable texts; resolve applicable distribution notices during M7 packaging. Public personal GitHub/main ownership was rechecked. No engine behavior changed, no Rust/GPU rerun or user study was performed, and external research URLs/claims were not comprehensively revalidated. Existing M6 source evidence below remains applicable.
 
 ## Implemented state
 
@@ -48,7 +44,7 @@ Local full source gate `python3 scripts/check.py --base origin/main` selected fu
 
 The real32MiB capacity test costs about22s; the initial M6 gate was30.87s, and the changed-HAL gate included ~23s of compilation. This exceeds the initial warm feedback target in these runs. The costly test protects aggregate/open-time capacity and was retained; no rerun was used to manufacture an under-budget number or drop failures. Future suite work should reduce fixture serialization/IO or define a scoped capacity lane with preserved coverage. Other focused results are reused where inputs remain valid.
 
-A cache-free project copy reproduced accepted IDs/hashes/Ready status before rendering. Three release1000-triangle source observations measured import5.44–7.90ms, cache-open3.86–10.24ms, refresh6.16–16.39ms and rebuild4.13–8.28ms including startup/IO. These are uncontrolled-workstation ranges, not percentiles, production budgets or cache-speedup claims. GPU timing/upload payloads are scoped, not full-frame or totalVRAM evidence. See evidence/PERFORMANCE.md for limits.
+A cache-free project copy reproduced accepted IDs/hashes/Ready status before rendering. Three release1000-triangle source observations measured import5.44–7.90ms, cache-open3.86–10.24ms, refresh6.16–16.39ms and rebuild4.13–8.28ms including startup/IO. These are uncontrolled-workstation ranges, not percentiles, production budgets or cache-speedup claims. GPU timing/upload payloads are scoped, not full-frame or totalVRAM evidence. See [PERFORMANCE.md](PERFORMANCE.md) for limits.
 
 ## Next scope and limits
 

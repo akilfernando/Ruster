@@ -25,10 +25,10 @@ Researched 2026-11-04 through a delegated Astra research pass using primary sour
 - [Unity accessibility module](https://docs.unity.com/en-us/engine/6000.6/manual/accessibility/module-intro) and [Godot 4.5 release](https://godotengine.org/releases/4.5/) document accessibility support. Historical Godot coverage limitations are not evidence of current limitations.
 - [Unreal PCG guides](https://dev.epicgames.com/documentation/en-us/unreal-engine/pcg-development-guides) document extensive procedural workflows.
 
-## Recommendation and validation
+## Historical recommendation and outstanding validation
 
-Investigate an open engine for inspectable, reproducible simulation games. A tiny logistics reference game could exercise this direction; it is an alternative to the earlier puzzle/exploration proposal, not an accepted replacement. Keep deterministic multiplayer, unrestricted code mods and vast worlds outside the first slice.
+The initial research recommended an open engine for inspectable, reproducible simulation games. [Decision0001](decisions/0001-product-foundation.md) subsequently adopted the logistics reference and superseded the earlier puzzle/exploration proposal under development authorization. Current [direction](DIRECTION.md) includes non-game creation and the required familiar editor experience; the niche rankings above remain research hypotheses, not restrictions on creative use. Deterministic multiplayer, unrestricted code mods and vast worlds remain outside current scope.
 
 Proposed next research: interview 6–8 developers working on management/strategy games. Ask them to demonstrate actual save bugs, simulation regressions, balance changes or desync investigations. Record frequency, effort, workarounds and switching constraints. Walk through a mock scenario: reproduce state, compare runs, edit a recipe, review the diff and rerun checks.
 
-Proposed gate: several independent developers identify the same recurring pain, and at least two contribute a real evaluation scenario. This is a suggested decision rule, not an observed result or user-approved commitment. After implementation authorization, compare task completion and correctness against current tools. If a Bevy/Godot adapter captures the value, reconsider whether a new engine is necessary.
+Proposed gate: several independent developers identify the same recurring pain, and at least two contribute a real evaluation scenario. This is a suggested decision rule, not an observed result or user-approved commitment. Development is authorized and underway; comparative task completion and correctness against current tools remain unvalidated. If a Bevy/Godot adapter captures the value, reconsider whether a new engine is necessary.

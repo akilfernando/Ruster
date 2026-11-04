@@ -85,7 +85,7 @@ M0 through M6 are complete within their documented local scope; see [M1/M2 evide
 **Exit criteria:**
 
 - Edits, errors and undo agree between CLI and editor.
-- Demonstrate a small throughput-inspection workflow with no player or win-state concepts; keep logistics-specific behavior out of shared public APIs. This is an early application-neutrality check, not the complete M6 visualizer.
+- Demonstrate a small throughput-inspection workflow with no player or win-state concepts; keep logistics-specific behavior out of shared public APIs. This is an early application-neutrality check, not the complete M8 non-game reuse application.
 - Keyboard navigation, focus behavior, readable labels and a visible unsaved-state indicator work for the demonstrated journey.
 - Closing with unsaved changes offers an explicit recovery choice.
 - A developer other than the implementing agent completes the core journey using the quickstart; record blockers and fix critical ones before declaring completion.
@@ -197,7 +197,7 @@ M6 delivered scope: bounded triangle-only OBJ import, stable-ID catalog with its
 
 Seek an external human walkthrough of the current editor before major UI expansion. Keep agent-assisted timing distinct from human usability evidence. Choose representative workloads and hardware tiers before performance claims; measure tail latency, memory, idle use and iteration/build cost. Establish Windows runtime feasibility and another GPU class where access permits before distribution decisions harden.
 
-Select the license before public collaboration/distribution. Introduce scoped CI when a remote PR workflow begins, using TESTING.md rather than accumulating every subsystem check into every PR. Keep CLI/editor/MCP semantics and schema compatibility aligned as facilities grow.
+Source licensing, public hosting and scoped Linux CI are delivered under decision0007. Maintain dependency notices and use TESTING.md as workflows evolve; binary distribution obligations still need review in M7. Keep CLI/editor/MCP semantics and schema compatibility aligned as facilities grow.
 
 After alpha, choose evidence-driven tracks such as richer rendering/animation, larger simulations, networking, extensibility or enterprise integrations. These are future directions, not simultaneous scope commitments or a claim of Unity/Unreal parity.
 
@@ -205,7 +205,7 @@ After alpha, choose evidence-driven tracks such as richer rendering/animation, l
 
 At each close record: artifact/launch command, demo steps, acceptance evidence, UX/performance observations, remaining limitations, architectural decisions and the next slice. Reference existing valid test results rather than rerunning everything to prepare the demonstration. If an exit criterion fails, fix it or explicitly revise scope and rationale; never silently mark it complete.
 
-Estimate only the next milestone after a short task breakdown. Do not assign calendar dates across the entire roadmap without capacity and measured velocity. License selection, access to Windows/GPU testing and independent usability participants are explicit dependencies to arrange before they block the relevant gates.
+Estimate only the next milestone after a short task breakdown. Do not assign calendar dates across the entire roadmap without capacity and measured velocity. Binary distribution prerequisites/notices, access to Windows/GPU testing and independent usability participants are explicit dependencies to arrange before they block the relevant gates. Source license selection is complete. At M7 planning, allocate the relevant EDITOR-EXPERIENCE.md gaps to concrete implementation slices before M9 acceptance; the accepted requirement currently has a baseline and gate, not a completed implementation schedule.
 
 ## Completed M1 slices
 

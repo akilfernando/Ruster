@@ -2,6 +2,8 @@
 
 Date: 2026-11-04. Status: agent-selected M5 working architecture under the user's authorization to complete M5; implemented and locally verified within the scope in STATUS.md. Supersedes decision0004's deferred 3D integration choice for new 3D work, not legacy schematic support.
 
+M6 [decision0008](0008-content-import-and-refresh.md) extends the original cube-only/format1/transform-history scope below with asset references, scene format2 and mixed transform/mesh history. The shared ownership boundary remains current. [Decision0009](0009-spirv-validation-compatibility.md) supersedes the original M5 release-Vulkan validation acceptance with corrected evidence.
+
 ## Context and decision
 
 M0–M4 exercise a logistics scenario. Its Config/Simulation/history do not form a general scene. The ash viewer clears rectangles while the editor uses eframe/wgpu Vulkan; expanding both would duplicate 3D infrastructure. Introduce neutral ruster-scene and ruster-render crates with no dependency on logistics core, editor or MCP. Keep existing logistics-v1 files and tools working explicitly as a legacy/reference application. No silent format migration.

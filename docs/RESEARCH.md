@@ -21,6 +21,10 @@ Research date: 2026-11-04. Sources below were consulted during the initial conve
 - Rust: [ABI guidance](https://github.com/rust-lang/unsafe-code-guidelines/blob/master/reference/src/glossary.md). Do not promise stable Rust binary plugin compatibility.
 - MCP: [versioned tools specification](https://modelcontextprotocol.io/specification/2025-11-25/server/tools), [official Rust SDK](https://github.com/modelcontextprotocol/rust-sdk). This recorded specification version is not a claim about the latest version. Select and verify supported versions before implementation.
 
+## Relationship to current implementation
+
+This is the initial dated survey, not the current design specification or proof of competitor behavior today. [DIRECTION.md](DIRECTION.md), [ROADMAP.md](ROADMAP.md) and the [decision index](decisions/README.md) own current choices. Implemented MCP pins protocol2025-06-18 under decision0005; the different specification linked above was research context. Familiarity research should now inspect concrete Unity/Unreal interaction conventions and validate them with experienced users under [EDITOR-EXPERIENCE.md](EDITOR-EXPERIENCE.md), before selecting exact control defaults.
+
 ## Further research
 
 Inspect concrete implementations and test representative workflows for scene transactions, asset imports, persistence migrations, headless automation, and Rust build/reload latency. Compare the new-engine proposal with extending an existing engine. Validate demand with real developers and comparable tasks before treating the value proposition as established.

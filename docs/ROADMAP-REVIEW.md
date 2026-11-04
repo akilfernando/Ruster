@@ -110,3 +110,23 @@ Recommendations for interpreting the existing gates, not newly accepted feature 
 The object creation gap should be considered when choosing a visual authoring journey; it does not automatically require inserting a new editor milestone before the code-first M7. Likewise, textures, hierarchy, scripting, physics or audio should follow demonstrated creation needs rather than an engine feature checklist. The long-term aspiration supports diverse creations; each delivered release must state which workflows actually work.
 
 **Conclusion:** the sequence remains appropriate. The immediate product test is whether M7 turns today's scene/content facilities into a comprehensible path to an application of the creator's own. Human usability, distribution/platform feasibility and independent reuse remain open evidence gaps, not completed work.
+
+
+## Documentation alignment audit — 2026-11-04
+
+Requested quick audit after the creator ethos and Unity/Unreal familiarity requirement. Root reviewed canonical direction, roadmap, status, experience baseline, research/performance/market context, actual workspace and relevant APIs/configuration. Two bounded read-only specialists checked user guides/contracts against code and research/decisions/evidence for supersession. No engine implementation changed.
+
+Corrections applied:
+
+- Scoped the editor guide's logistics journey, shortcuts and schematic limitations to legacy mode; added the actual generic scene entry point. Corrected scenario docs that still described MCP as future work.
+- Corrected the asset API's stale-token wording to catalog revisions. Marked M4's original unsaved-edit/five-tool contract as the legacy baseline and linked current scene/content extensions and immediate catalog persistence.
+- Updated decision0004's resolved viewport choice, decision0006's M6 format2/mesh-history extension and decision0005's persistence boundary; linked delivered CI from decision0002.
+- Marked the initial market recommendation as adopted/superseded where appropriate while retaining unvalidated market hypotheses. Kept the research MCP specification distinct from the implemented protocol pin.
+- Updated performance adoption triggers to the existing shared 3D/retained-mesh path. Put the M5 validation correction at the start of its evidence and changed the completed M6 repair from pending to delivered.
+- Removed stale roadmap M6-visualizer, license-selection and CI-setup tasks, corrected the performance document reference, and consolidated current status to avoid accumulating competing checkpoints.
+
+No fundamental conflict was found between the accepted direction and the M7–M9 sequence. One planning gap remains explicit: the non-negotiable editor experience has a working baseline and release gate but no detailed allocation yet. M7 planning must assign that work to concrete slices before M9 acceptance; this audit does not silently add a new milestone or call the experience delivered.
+
+Current private/public repository state and notices were checked: public personal repository on main; generated inventory matches locked dependencies, including the HAL patch. The recorded61 packages without bundled readable license texts remain a distribution-review input, not newly resolved by this audit. Documentation links/whitespace and notice checks passed. Existing source/native evidence was reused; no fresh functional, human-usability or performance validation was claimed.
+
+Scope limit: this was an internal alignment audit, not a complete code correctness/security audit or a re-fetch of every external research link. Dated source claims remain research snapshots and must be rechecked when used for a new consequential choice. Historical proposals, milestone counts and failed evidence are retained as history with current pointers rather than rewritten as past success.

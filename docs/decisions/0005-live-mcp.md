@@ -1,6 +1,6 @@
 # 0005 Live editor MCP proof
 
-Date: 2026-11-04. Status: agent-selected M4 implementation decision under accepted roadmap; verification tracked in status/evidence. Supersedes no prior decision. Revisit for cross-platform hosting and broader scene operations.
+Date: 2026-11-04. Status: agent-selected M4 implementation decision under accepted roadmap; verification tracked in status/evidence. Supersedes no prior decision. M5/M6 extend the domain surface; see the [current adapter guide](../../crates/ruster-mcp/README.md). Cross-platform/headless hosting remains unverified.
 
 ## Context and decision
 
@@ -16,7 +16,7 @@ Editor UI thread serializes command checks and mutation after human input. A pro
 
 Direct file editing cannot protect live drafts or share editor history. A headless-only host would miss the required interleaving proof. HTTP requires additional Origin/authentication/lifecycle policy and a public listener; Unix socket plus stdio keeps the initial scope smaller. A full MCP framework could cover more protocol behavior but adds dependencies and unused facilities; the narrow implementation requires explicit wire tests and a real SDK client. Reassess SDK adoption before extending the protocol surface. Linux-only native attachment is a deliberate limitation, not Windows support.
 
-Read-only replay captures authored configuration/revision and runs <=10,000 ticks independently of preview. It is permitted while drafts/dialogs exist because results explicitly identify committed authored input. Mutations are blocked until drafts/recovery/dialogs are resolved. Agent edits remain unsaved until the human uses ordinary save controls.
+Read-only replay captures authored configuration/revision and runs <=10,000 ticks independently of preview. It is permitted while drafts/dialogs exist because results explicitly identify committed authored input. Mutations are blocked until drafts/recovery/dialogs are resolved. Scenario and scene edits remain unsaved until the human uses ordinary save controls. M6 asset catalog import/refresh/rename persist immediately with a separate revision; [decision0008](0008-content-import-and-refresh.md) extends the original contract without adding arbitrary filesystem access.
 
 ## Sources
 

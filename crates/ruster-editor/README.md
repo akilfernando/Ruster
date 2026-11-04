@@ -1,6 +1,16 @@
 # Ruster Editor
 
-The first authoring frontend for the v1 logistics scenario. The editor uses
+The native editor has two explicit modes: generic 3D scenes with M6 content iteration, and the legacy v1 logistics scenario. Start the current content example with:
+
+```sh
+cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
+```
+
+See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-content-and-shader-iteration-m6) below for their controls. The [editor experience baseline](../../docs/EDITOR-EXPERIENCE.md) records required usability still to deliver.
+
+## Legacy logistics mode
+
+The first authoring frontend supports the v1 logistics scenario. The editor uses
 `ruster-core::ProjectSession` for authored operations, conflict detection and
 persistence. Runtime observation uses the same core `Simulation` as the CLI.
 
@@ -21,7 +31,7 @@ compiling optional presentation backends that this frontend never selects.
 This narrows dependencies; no build-time or size improvement is claimed without
 measurement.
 
-## First authoring journey
+## Legacy logistics authoring journey
 
 1. Select **Transport** in the project list or click its viewport card. Change
    **Transport capacity** to `4`, then **Apply properties**. The unsaved marker
@@ -52,7 +62,7 @@ ticks. The title and toolbar include an unsaved indicator. Properties are whole
 unsigned 64-bit integers; zero production/initial stock are valid, zero transport
 is rejected by core.
 
-## Keyboard and focus
+## Legacy logistics keyboard and focus
 
 - **Tab / Shift+Tab** move widget focus. Focused selectable widgets use egui's
   normal keyboard activation; the project list offers the same selection as
@@ -80,10 +90,11 @@ screenshot capture needs a rendered surface and can time out for an occluded or
 minimized window. Feature availability does not establish a successful native
 walkthrough; recorded project evidence states what was actually exercised.
 
-## Deliberate limits
+## Legacy logistics limits
 
-No file browser, docking, arbitrary entity/component authoring or 3D editing is
-provided. There is one authored scenario and a schematic throughput viewport.
+This mode edits one authored scenario through a schematic throughput viewport;
+3D authoring is available in the separate scene mode below. The editor does not
+yet provide a file browser, docking or general entity/component creation.
 Runtime uses a 250 ms scheduled tick without catch-up after suspend; it is an
 inspection control, not a wall-clock simulation guarantee. Read the project
 status/evidence for verified environments and remaining milestone limitations.

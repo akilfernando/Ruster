@@ -15,8 +15,8 @@ Primary pages consulted 2026-11-04. The Ruster mappings below distinguish implem
 | Source technique | Documented lesson and cost | Ruster application and adoption trigger |
 | --- | --- | --- |
 | Unreal Slate/UMG invalidation | Cache stable widget geometry and recalculate affected data. Frequently changing widgets can spend cache memory without benefiting from reuse. | M3 implements event-driven viewer redraw and a retained geometry cache. The bounded results are linked below. General UI invalidation and static/dynamic scene separation still require workload-specific evidence. |
-| Unity GPU Resident Drawer | GPU instancing reduces draw calls/CPU work, with compatibility restrictions and additional shader build cost. | When replacing clear-rectangle rendering, evaluate batched geometry/text and persistent buffers. Measure command count, CPU preparation, uploads and GPU work rather than assuming fewer calls always means faster execution. |
-| Unreal Render Dependency Graph | Explicit pass/resource dependencies enable lifetime optimization, pass culling and CPU/GPU scheduling. | Keep resource reads/writes and lifetimes explicit as rendering grows. Introduce a graph when real multipass dependencies justify it; a one-pass schematic does not yet need the framework. |
+| Unity GPU Resident Drawer | GPU instancing reduces draw calls/CPU work, with compatibility restrictions and additional shader build cost. | M5 delivered shared instanced 3D; M6 retains mesh buffers and groups draws by mesh. Further batching or instance-upload caching needs a measured workload. Measure command count, CPU preparation, uploads and GPU work rather than assuming fewer calls always means faster execution. |
+| Unreal Render Dependency Graph | Explicit pass/resource dependencies enable lifetime optimization, pass culling and CPU/GPU scheduling. | Keep resource reads/writes and lifetimes explicit as rendering grows. Introduce a graph when real multipass dependencies justify it; the current small offscreen scene/composite path does not itself justify a general graph framework. |
 
 Sources:
 
@@ -33,7 +33,7 @@ The viewer baseline/redraw/cache investigation is implemented; [measurement evid
 3. Measure geometry/text rebuilds and allocations. Reuse buffers and cache stable geometry if the before/after evidence supports it.
 4. Record conclusions and any architectural consequences before expanding M3. Keep larger-scale scene, batching and concurrency experiments tied to actual new workloads.
 
-No production scalability claim can be drawn from the current tiny logistics scene. Current evidence is in [M3 performance verification](evidence/m3-performance.md); [M1/M2 verification](evidence/M1-M2.md) retains the earlier debug diagnostic baseline. Allocation counts and input latency distributions have not yet been measured.
+No production scalability claim can be drawn from the current tiny logistics scene. Historical schematic evidence is in [M3 performance verification](evidence/m3-performance.md); [M1/M2 verification](evidence/M1-M2.md) retains the earlier debug diagnostic baseline. Allocation counts and input latency distributions have not yet been measured.
 
 ## Ongoing scorecard
 

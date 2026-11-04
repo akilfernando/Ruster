@@ -1,6 +1,6 @@
 # Reproducible scenarios
 
-M1's authored scenario is a versioned JSON document, not a runtime save game. The example is [logistics.scenario.json](../examples/logistics.scenario.json).
+This guide covers the legacy logistics workflow; generic 3D scenes have a [separate format and guide](../crates/ruster-scene/README.md). M1's authored scenario is a versioned JSON document, not a runtime save game. The example is [logistics.scenario.json](../examples/logistics.scenario.json).
 
 ## First workflow
 
@@ -39,6 +39,6 @@ Writes use a temporary sibling file, sync its contents and replace atomically. F
 
 ## Programmatic use
 
-`Scenario::load(path)` yields validated authored data. `config()` returns a copy for `Simulation::new`, and `simulation()` starts a new runtime. `edit(expected_revision, config)`, `undo(expected_revision)` and `redo(expected_revision)` are the common authoring operations. The CLI and editor use these same authored operations; MCP is planned for M4.
+`Scenario::load(path)` yields validated authored data. `config()` returns a copy for `Simulation::new`, and `simulation()` starts a new runtime. `edit(expected_revision, config)`, `undo(expected_revision)` and `redo(expected_revision)` are the common authoring operations. The CLI and editor use these same authored operations; the delivered [editor-owned MCP adapter](../crates/ruster-mcp/README.md) invokes the same operations with live-session guards.
 
 `ProjectSession` adds an optional file association and the full saved authored baseline. New and duplicated sessions are dirty until saved. `save()` compares the current disk scenario to that baseline while holding `ProjectLock`, rejecting conflicting edits (including valid same-revision manual changes). `save_as()` creates a new file and changes the association only after success. Failed saves preserve in-memory work. Undo may restore identical configuration while remaining dirty because revision/history changed. Runtime simulation and draft UI text stay outside this session. Direct `Scenario::save` callers still manage locking themselves.
