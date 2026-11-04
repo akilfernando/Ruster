@@ -1,5 +1,5 @@
 [workspace]
-members = ["crates/ruster-core", "crates/ruster-cli", "crates/ruster-viewer", "crates/ruster-editor", "crates/ruster-mcp", "crates/ruster-scene", "crates/ruster-render", "crates/ruster-assets", "crates/ruster-app", "examples/yard-app"]
+members = ["crates/ruster-core", "crates/ruster-cli", "crates/ruster-viewer", "crates/ruster-editor", "crates/ruster-mcp", "crates/ruster-scene", "crates/ruster-render", "crates/ruster-assets", "crates/ruster-app", "crates/ruster-script", "examples/yard-app", "examples/motion-lab"]
 resolver = "2"
 exclude = ["third_party/wgpu-hal"]
 

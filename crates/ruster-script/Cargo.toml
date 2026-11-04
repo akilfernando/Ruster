@@ -1,0 +1,17 @@
+[package]
+name = "ruster-script"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+ruster-scene = { path = "../ruster-scene" }
+rhai = { version = "=1.27.0", features = ["no_module", "no_time"] }
+
+[lints]
+workspace = true

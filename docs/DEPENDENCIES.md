@@ -5,7 +5,7 @@ This inventory covers every external package in the locked workspace resolution,
 Cargo's declared SPDX license expression is metadata supplied by each package. Its presence is not an independent license review or certification.
 Project source licensing does not change the licenses of dependencies.
 
-External locked package versions: **406**. Packages with no discovered readable license text: **61**.
+External locked package versions: **417**. Packages with no discovered readable license text: **62**.
 
 | Package | Version | Cargo source | Declared license expression | Upstream repository |
 | --- | --- | --- | --- | --- |
@@ -64,6 +64,7 @@ External locked package versions: **406**. Packages with no discovered readable 
 | calloop | 0.14.5 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/Smithay/calloop](https://github.com/Smithay/calloop) |
 | calloop-wayland-source | 0.3.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/smithay/calloop-wayland-source](https://github.com/smithay/calloop-wayland-source) |
 | calloop-wayland-source | 0.4.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/smithay/calloop-wayland-source](https://github.com/smithay/calloop-wayland-source) |
+| castaway | 0.2.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/sagebind/castaway](https://github.com/sagebind/castaway) |
 | cc | 1.11.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cc-rs](https://github.com/rust-lang/cc-rs) |
 | cfg-if | 1.0.5 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/cfg-if](https://github.com/rust-lang/cfg-if) |
 | cfg_aliases | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/katharostech/cfg_aliases](https://github.com/katharostech/cfg_aliases) |
@@ -74,7 +75,10 @@ External locked package versions: **406**. Packages with no discovered readable 
 | codespan-reporting | 0.13.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://github.com/brendanzab/codespan](https://github.com/brendanzab/codespan) |
 | color | 0.3.3 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/linebender/color](https://github.com/linebender/color) |
 | combine | 4.6.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/Marwes/combine](https://github.com/Marwes/combine) |
+| compact_str | 0.10.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/ParkMyCar/compact_str](https://github.com/ParkMyCar/compact_str) |
 | concurrent-queue | 2.5.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/concurrent-queue](https://github.com/smol-rs/concurrent-queue) |
+| const-random | 0.1.18 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/tkaitchuck/constrandom](https://github.com/tkaitchuck/constrandom) |
+| const-random-macro | 0.1.16 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/tkaitchuck/constrandom](https://github.com/tkaitchuck/constrandom) |
 | core-foundation | 0.9.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
 | core-foundation-sys | 0.8.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
 | core-graphics | 0.23.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
@@ -133,6 +137,7 @@ External locked package versions: **406**. Packages with no discovered readable 
 | futures-util | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | generic-array | 0.14.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/fizyk20/generic-array.git](https://github.com/fizyk20/generic-array.git) |
 | gethostname | 1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://codeberg.org/swsnr/gethostname.rs.git](https://codeberg.org/swsnr/gethostname.rs.git) |
+| getrandom | 0.2.17 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-random/getrandom](https://github.com/rust-random/getrandom) |
 | getrandom | 0.3.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-random/getrandom](https://github.com/rust-random/getrandom) |
 | getrandom | 0.4.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-random/getrandom](https://github.com/rust-random/getrandom) |
 | gl_generator | 0.14.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://github.com/brendanzab/gl-rs/](https://github.com/brendanzab/gl-rs/) |
@@ -267,6 +272,8 @@ External locked package versions: **406**. Packages with no discovered readable 
 | redox_syscall | 0.5.18 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://gitlab.redox-os.org/redox-os/syscall](https://gitlab.redox-os.org/redox-os/syscall) |
 | redox_syscall | 0.9.5 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://gitlab.redox-os.org/redox-os/kernel](https://gitlab.redox-os.org/redox-os/kernel) |
 | renderdoc-sys | 1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/ebkalderon/renderdoc-rs](https://github.com/ebkalderon/renderdoc-rs) |
+| rhai | 1.27.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rhaiscript/rhai](https://github.com/rhaiscript/rhai) |
+| rhai_codegen | 3.3.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rhaiscript/rhai](https://github.com/rhaiscript/rhai) |
 | rustc-hash | 1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0/MIT` | [https://github.com/rust-lang-nursery/rustc-hash](https://github.com/rust-lang-nursery/rustc-hash) |
 | rustc-hash | 2.1.3 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/rust-lang/rustc-hash](https://github.com/rust-lang/rustc-hash) |
 | rustc_version | 0.4.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/djc/rustc-version-rs](https://github.com/djc/rustc-version-rs) |
@@ -296,6 +303,7 @@ External locked package versions: **406**. Packages with no discovered readable 
 | slab | 0.4.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/tokio-rs/slab](https://github.com/tokio-rs/slab) |
 | slotmap | 1.1.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib` | [https://github.com/orlp/slotmap](https://github.com/orlp/slotmap) |
 | smallvec | 1.16.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/rust-smallvec](https://github.com/servo/rust-smallvec) |
+| smartstring | 1.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MPL-2.0+` | [https://github.com/bodil/smartstring](https://github.com/bodil/smartstring) |
 | smithay-client-toolkit | 0.19.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/smithay/client-toolkit](https://github.com/smithay/client-toolkit) |
 | smithay-client-toolkit | 0.20.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/smithay/client-toolkit](https://github.com/smithay/client-toolkit) |
 | smithay-clipboard | 0.7.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/smithay/smithay-clipboard](https://github.com/smithay/smithay-clipboard) |
@@ -306,11 +314,13 @@ External locked package versions: **406**. Packages with no discovered readable 
 | syn | 2.0.119 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/syn](https://github.com/dtolnay/syn) |
 | syn | 3.0.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/syn](https://github.com/dtolnay/syn) |
 | tempfile | 3.27.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/Stebalien/tempfile](https://github.com/Stebalien/tempfile) |
+| thin-vec | 0.2.21 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/mozilla/thin-vec](https://github.com/mozilla/thin-vec) |
 | thiserror | 1.0.69 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/thiserror](https://github.com/dtolnay/thiserror) |
 | thiserror | 2.0.21 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/thiserror](https://github.com/dtolnay/thiserror) |
 | thiserror-impl | 1.0.69 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/thiserror](https://github.com/dtolnay/thiserror) |
 | thiserror-impl | 2.0.21 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/thiserror](https://github.com/dtolnay/thiserror) |
 | tiff | 0.11.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/image-rs/image-tiff](https://github.com/image-rs/image-tiff) |
+| tiny-keccak | 2.0.2 | `registry+https://github.com/rust-lang/crates.io-index` | `CC0-1.0` | (not declared) |
 | tiny-skia | 0.11.4 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-3-Clause` | [https://github.com/RazrFalcon/tiny-skia](https://github.com/RazrFalcon/tiny-skia) |
 | tiny-skia-path | 0.11.4 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-3-Clause` | [https://github.com/RazrFalcon/tiny-skia/tree/master/path](https://github.com/RazrFalcon/tiny-skia/tree/master/path) |
 | tokio | 1.54.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
@@ -335,6 +345,7 @@ External locked package versions: **406**. Packages with no discovered readable 
 | vello_cpu | 0.2.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/linebender/vello](https://github.com/linebender/vello) |
 | version_check | 0.9.5 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/SergioBenitez/version_check](https://github.com/SergioBenitez/version_check) |
 | walkdir | 2.5.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Unlicense/MIT` | [https://github.com/BurntSushi/walkdir](https://github.com/BurntSushi/walkdir) |
+| wasi | 0.11.1+wasi-snapshot-preview1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/bytecodealliance/wasi](https://github.com/bytecodealliance/wasi) |
 | wasip2 | 1.0.4+wasi-0.2.12 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 WITH LLVM-exception OR Apache-2.0 OR MIT` | [https://github.com/bytecodealliance/wasi-rs](https://github.com/bytecodealliance/wasi-rs) |
 | wasm-bindgen | 0.2.130 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/wasm-bindgen/wasm-bindgen](https://github.com/wasm-bindgen/wasm-bindgen) |
 | wasm-bindgen-futures | 0.4.80 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/futures) |
@@ -484,6 +495,7 @@ No readable matching source text was found for the following packages; metadata 
 - `profiling 1.0.18`
 - `r-efi 5.3.0`
 - `r-efi 6.0.0`
+- `rhai_codegen 3.3.0`
 - `spirv 0.4.0+sdk-1.4.341.0`
 - `winapi-i686-pc-windows-gnu 0.4.0`
 - `winapi-x86_64-pc-windows-gnu 0.4.0`

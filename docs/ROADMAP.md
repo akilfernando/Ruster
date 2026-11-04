@@ -8,7 +8,7 @@ The user accepted the [post-M3 review](ROADMAP-REVIEW.md) on 2026-11-04. This ca
 
 Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Apply the user-confirmed [creator ethos](DIRECTION.md#project-ethos-serve-the-creator): explain what someone can create or change with the delivered systems, and where the workflow still limits them. This clarifies the existing user-outcome gates; it does not expand milestone scope. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
 
-M0 through M7 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M8 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
+M0 through M7 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M8 is in progress. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
 
 | Milestone | Demonstrable deliverable | Status |
 | --- | --- | --- |
@@ -20,7 +20,7 @@ M0 through M7 are complete within their documented local scope; see [M1/M2 evide
 | M5 Shared scene and 3D | Minimal scene and rendering shared by editor/runtime | Complete, bounded Linux procedural-scene scope |
 | M6 Content and iteration | Asset import, stable references and recoverable refresh | Complete, bounded OBJ/WGSL Linux scope |
 | M7 Standalone application kit | Code-first template and packaged interactive example | Complete, Linux development-kit scope |
-| M8 Independent reuse proof | A meaningfully different non-game application | Planned |
+| M8 Independent reuse proof | A meaningfully different non-game application | In progress; scripting experiment first |
 | M9 Public alpha candidate | Usable release on an explicitly tested support matrix | Planned |
 
 ## M0 Engineering seed
@@ -172,6 +172,8 @@ M7 delivered scope: ruster-app shared host with application-owned behavior, read
 **Demo:** inspect and change application data without player, score or win-state concepts, then package/run it independently. An independent developer modifies both examples.
 
 **Working implementation slices:** the [experience allocation](EDITOR-EXPERIENCE.md#implementation-allocation) assigns generic object/manipulation, content/workspace and recovery work alongside the second application before reuse acceptance. These are concrete follow-on requirements; the current prototype does not already provide a familiar editor.
+
+2026-11-04: the user accepted Rust plus approachable behavior scripting. Begin with a bounded non-game Motion Lab experiment over the same application kit, under [decision0011](decisions/0011-behavior-scripting-experiment.md). Test per-object behavior, exposed properties, source replacement and error recovery. Rhai is an agent-selected prototype dependency, not the settled product language. This slice does not complete M8: project persistence, generic editor/command integration, IDE/source navigation/debugging, the allocated everyday editor interactions and independent distribution/reuse evidence still need delivery. Preserve the final language/tooling gate rather than letting the prototype become a decision by inertia.
 
 **Exit criteria:** no copying engine internals into the second example; shared mechanisms remain domain-neutral; exposed coupling is corrected; representative performance and iteration costs are recorded. Two differently presented logistics demos alone do not establish broad reuse.
 

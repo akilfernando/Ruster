@@ -21,6 +21,7 @@ Familiarity for experienced Unity and Unreal creators, including everyday editor
 - **Repeatable previews:** authored state stays separate from runtime snapshots. The scene preview is a static arrangement with explicit lifecycle ticks and Reset; it does not imply physics or gameplay simulation.
 - **Content iteration:** import a triangle-only OBJ, assign its stable asset ID, refresh after source edits and recover from invalid input while retaining the last good geometry/pipeline. The catalog and originals are authored; the cache is disposable.
 - **A standalone application kit:** application-owned behavior, shared input/lifecycle/rendering and read-only resources; an editable delivery challenge and source/binary packaging tools.
+- **An experimental scripting loop:** Motion Lab attaches Rhai behaviors to objects, exposes numeric properties and applies validated source changes through Reset. Rust remains the native application path; the final scripting language and IDE workflow are still open.
 - **A logistics reference application:** integer throughput simulation, saved scenarios, a schematic viewer and the original authoring workflow remain available separately.
 
 The current scene limit is 256 objects and one viewport. M6 adds bounded triangle-only OBJ mesh import, stable references, rebuildable caches and controlled asset/WGSL refresh. Textures/MTL, general mesh formats, physics/audio and a general ECS remain later work. M7 supplies the bounded application kit and Linux development packaging described below. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope.
@@ -69,6 +70,15 @@ python3 scripts/new_app.py /tmp/my-ruster-app
 ```
 
 Use Run/Pause, Step and Reset. The default truck capacity misses the delivery target; capacity 3 completes it. Change the application rules in `examples/yard-app/src/lib.rs`, rebuild and package your result. Export requires the pinned dependencies in the local Cargo cache; see the [application guide](examples/yard-app/README.md), [kit API](crates/ruster-app/README.md) and [distribution workflow](docs/DISTRIBUTION.md). The Linux development package runs outside the checkout with resources beside its executable; editor/MCP services are not required.
+
+### Try behavior scripting
+
+```sh
+cargo run --locked -p ruster-motion-lab -- --script examples/motion-lab/resources/motion.rhai
+cargo run --locked -p ruster-motion-lab -- --headless --ticks 10 --speed 2
+```
+
+Select an object, attach a behavior, edit its numeric properties, then Reset and Run. Edit the script in the app or in your own text editor and reload it. Invalid candidates keep the last applied behavior and scene. This is a bounded M8 experiment: attachments, property values and in-app source drafts are session-only; there is no project save, generic-editor integration or configured IDE/debugger yet. See the [Motion Lab guide](examples/motion-lab/README.md) and [language decision gate](docs/decisions/0011-behavior-scripting-experiment.md). The existing export/package tools still target Yard.
 
 ### Imported content example
 

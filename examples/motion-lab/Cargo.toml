@@ -1,0 +1,27 @@
+[package]
+name = "ruster-motion-lab"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[[bin]]
+name = "ruster-motion-lab"
+path = "src/main.rs"
+
+[features]
+default = []
+inspection = ["ruster-app/inspection"]
+
+[dependencies]
+ruster-app = { path = "../../crates/ruster-app" }
+ruster-scene = { path = "../../crates/ruster-scene" }
+ruster-script = { path = "../../crates/ruster-script" }
+ruster-assets = { path = "../../crates/ruster-assets" }
+
+[lints]
+workspace = true
