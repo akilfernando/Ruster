@@ -1,4 +1,6 @@
 //! Native authoring frontend. egui paints through wgpu's Vulkan backend only.
+mod behavior_external;
+mod behavior_files;
 mod behavior_ui;
 mod behavior_worker;
 #[cfg(unix)]

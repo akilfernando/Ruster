@@ -304,6 +304,14 @@ fn cancel_disconnect_and_later_binding_failure_are_atomic() {
         engine.set_debugger(Some(foreign)).unwrap_err().code,
         DiagnosticCode::InvalidLimits
     );
+    let (session, detached) =
+        DebugSession::new(DebugRunId::new(10), engine.cancellation(), vec![], None).unwrap();
+    engine.set_debugger(Some(session)).unwrap();
+    engine.set_debugger(None).unwrap();
+    assert_eq!(
+        detached.set_breakpoints(vec![]),
+        Err(DebugError::Disconnected)
+    );
     // A stale handle must not poison an Engine token subsequently reused by a new run.
     let cancel = Arc::new(AtomicBool::new(false));
     let (old, handle) =

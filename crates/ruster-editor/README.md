@@ -141,7 +141,7 @@ cargo run --locked -p ruster-render -- --scene /tmp/ruster-layout.json --ticks 1
 ```
 
 Choose a new destination for `demo`. Select an object in the hierarchy or by
-clicking its cube. Edit X/Y/Z position, rotation (radians) or positive scale,
+clicking its cube. Edit X/Y/Z position, rotation (degrees) or positive scale,
 then **Apply transform**. Invalid/incomplete text stays visible and leaves the
 scene unchanged. **Revert transform** discards only those fields. Undo/Redo use
 the shared revisioned history; Ctrl+Z/Ctrl+Shift+Z and Ctrl+S work outside text
@@ -255,7 +255,7 @@ World rotation and local group rotation rotate positions and orientations togeth
 
 **Snapping** displays the relevant distance in scene units, angle in degrees or scale-factor increment. Transform storage remains fixed-axis XYZ Euler radians (`qz*qy*qx`); changed rotations use a nearby equivalent Euler branch while untouched/no-op values retain their stored bits.
 
-All selected objects share nine precise **Position / Rotation (radians) / Scale** component fields. A differing component displays **—**, with a visible mixed-value legend and a tooltip explaining per-component editing. Fields expand with the inspector and wrap as axis groups when space is narrow. Typing into one field changes only that component for all selected objects; the other components keep their individual values. **Apply transform components** or Enter validates and commits all explicitly edited fields as one undo step. **Revert transform components** or Escape discards the draft. Selection, agent mutations and object operations are guarded while a precision draft is pending. Invalid or stale edits preserve the fields for repair. Save validates/applies supported precision drafts before persistence. The explicit translation-offset controls remain available for relative movement.
+All selected objects share nine precise **Position / Rotation (degrees) / Scale** component fields. A differing component displays **—**, with a visible mixed-value legend and a tooltip explaining per-component editing. Fields expand with the inspector and wrap as axis groups when space is narrow. Typing into one field changes only that component for all selected objects; the other components keep their individual values. **Apply transform components** or Enter validates and commits all explicitly edited fields as one undo step. **Revert transform components** or Escape discards the draft. Selection, agent mutations and object operations are guarded while a precision draft is pending. Invalid or stale edits preserve the fields for repair. Save validates/applies supported precision drafts before persistence. The explicit translation-offset controls remain available for relative movement.
 
 
 ### Workspace, startup and navigation
@@ -296,7 +296,7 @@ and never consume input.
 
 No arguments opens an empty generic scene with explicit New/Open/recent choices. A recent scene is never opened automatically. `--scene PATH` opens a chosen scene; legacy logistics requires `--scenario PATH`. An untouched empty welcome scene closes without a discard prompt; authored changes and invalid drafts retain their recovery guards.
 
-The **Workspace** menu lists shortcuts and opens **Workspace and shortcuts…**. Hierarchy and inspector can be resized, hidden/shown and assigned to left/right slots; **Reset layout** restores the defaults. This is bounded rearrangement, not a general docking framework. UI scale and navigation speed are adjustable. Binding capture rejects conflicts, reserves Escape for cancellation, and offers reset. Default scene shortcuts are Ctrl+N/O/S/Shift+S, Ctrl+Z/Shift+Z, Ctrl+C/V/D, Delete, W/E/R for tools and F to frame selection. These are agent-selected defaults, not an accepted Unity/Unreal preset. Focused text fields, recovery/settings dialogs and active gestures own their input. Object and text clipboards remain separate as described above.
+The **Workspace** menu lists shortcuts and opens **Workspace and shortcuts…**. Hierarchy and inspector can be resized, hidden/shown and assigned to left/right slots; **Reset layout** restores the defaults. This is bounded rearrangement, not a general docking framework. UI scale and navigation speed are adjustable. Binding capture rejects conflicts, reserves Escape for cancellation, and offers reset. Default scene shortcuts are Ctrl+N/O/S/Shift+S, Ctrl+Z/Shift+Z, Ctrl+C/V/D, Delete, W/E/R for tools and F to frame selection. F2 renames the active object while retaining a larger selection; Ctrl+A selects every scene object, including filtered objects. Both are remappable and retain normal text-selection ownership inside fields. These are agent-selected defaults, not an accepted Unity/Unreal preset. Focused text fields, recovery/settings dialogs and active gestures own their input. Object and text clipboards remain separate as described above.
 
 Navigation uses right-drag orbit, middle-drag or Shift-right-drag pan, wheel zoom, **Fit** for the scene, and **Frame selected** / F for selected bounds. **Reset camera** restores the scene view. Hold right mouse over the viewport for W/A/S/D plus Q/E down/up movement; movement is bounded per frame and disabled while text/modal/gesture owns keyboard input. Speed is configured in scene units/second. The **Perspective/Orthographic** toggle and **View presets** menu provide front/back/left/right/top/bottom, isometric and free-perspective views. Fit and Frame selected preserve the current projection/orientation; Reset camera restores the scene view. Default remappable camera keys are5 for projection,1/3/7 for front/right/top, Ctrl+1/3/7 for back/left/bottom,0 for isometric and Home for free view. These are discoverable agent-selected bindings, not a required preset. The current camera is retained for up to ten successfully opened/saved canonical scene paths and restored only after a successful Open; fresh untitled scenes use default framing.
 
@@ -395,12 +395,74 @@ required)** permits explicit inspection of the retained frame.
 Diagnostics show source ID/hash/line and object/attachment context. **Open
 diagnostic location** navigates matching current code, or opens the captured
 version read-only when the working source has changed. No Lua handles cross into
-the UI. Close cancellation and worker shutdown remain nonblocking. External IDE
-working copies, LuaLS and debugging are separate unfinished stages; this pane
-does not claim those capabilities.
+the UI. Close cancellation and worker shutdown remain nonblocking. The external
+working-copy workflow follows below; debugger integration remains a separate
+unfinished stage. Actual Zed/LuaLS acceptance is recorded in
+[project status](../../docs/STATUS.md).
+
+### External working copies and Zed
+
+Save a scene, apply/revert embedded source/property drafts, then use the source
+pane's **External editor / Zed…** menu: **Export working copy**, **Open in Zed** or
+**Refresh working copy**. Files live beside that saved project under
+`.ruster-behaviors/<scene-path-hash>/src/<stable-source-id>.lua` (or `.txt` for
+other backend/API combinations). Labels do not determine filenames. Unsaved
+restored scenes must first Save to a fresh project path. Save As establishes a
+new working-copy context and leaves old files in place.
+
+Embedded source stays authoritative. Refresh compares the current embedded
+body, observed regular file and synchronization base. A file-only change imports
+through shared scene Undo; an embedded-only change rewrites only the unchanged
+expected working file. Two-sided changes preserve both versions and open
+**External working copy** details. **Import observed file through Undo** chooses
+that exact observed version; **Replace observed file with embedded source**
+checks the observed file hash before replacing it. **Open observed file in Zed
+(keep both versions)** examines a conflict without importing or overwriting
+either source. If either side changes after
+observation, Refresh again. Missing files are recreated only by explicit Export;
+language/API changes require an explicit new export. No arbitrary external file
+drop/import is added.
+
+Synchronization bases persist only when an independent read of the saved scene
+matches their source ID, backend/API and body hash. Unsaved exports/imports keep
+live bases, so a restart cannot mistake their newer file for safely replaceable
+saved data. Project Save promotes matching bases; New/Open/Restore clear the live
+context. Generated LuaLS configuration/type ownership is tracked separately.
+Generation/revision/source-hash and pending-draft checks prevent a completed
+background job from importing into changed work. Focus return checks a linked
+working source; there is no idle filesystem polling. One off-UI job runs at a
+time, and normal close waits responsively for it without killing Zed.
+File preparation returns to the UI before process launch is authorized. The
+document/revision/source/draft/close state and observed file hash are rechecked.
+The final epoch check is the launch authorization point: a change observed before
+it cancels launch; later edits or close cannot retract an already-authorized OS
+spawn. Pending jobs request bounded repaint polls until completion, then stop.
+
+**Workspace and shortcuts… → External code editor · Zed** configures an executable
+and a JSON argument vector. The default is `zeditor` with
+`["--new", "{workspace}", "{file}:{line}"]`. Arguments are passed directly; no shell
+is used. Enter in the executable field or Ctrl+Enter applies, and Ctrl+S applies
+and saves preferences while those fields own focus. Invalid configuration keeps
+the prior settings and editable draft. Apply/Revert are also explicit buttons.
+
+Export/Open generates project-local `.luarc.json`, host API declarations and
+property types from actual attachments, including optional fields and unions
+for shared sources. It preserves customized/unowned generated files with clear
+conflict feedback. Newly created known follower templates include their source
+type annotation hint; existing arbitrary code is never rewritten to add hints.
+Launching Zed does not itself prove completion/definition/debugger acceptance.
 
 
 The asset dialog focuses its stable-ID field initially and Escape closes it without invoking import/refresh/rename; Tab reaches the separate explicit operation buttons. Camera navigation and viewport selection remain blocked while it owns input. Shortcut capture consumes both accepted and conflicting key attempts before controls render, so Enter/Space cannot immediately reactivate the capture button.
 
 
 When the serialized undo budget removes older reversible steps under pressure, the editor adds a nonmodal notice stating how many steps were removed. This session-local cumulative `history_evictions` count is also included in successful live command responses; opening/replacing a session resets its reporting baseline. Ordinary edits remain usable without a blocking dialog, while the reduced Undo reach is explicit.
+
+Rotation precision uses degrees; scene files, internal transforms and MCP use radians. Recovery draft v3 records units explicitly. Pending v1/v2 radian drafts retain their exact text and display a recovered-radians label until applied or reverted; clean baselines adopt degrees.
+
+
+### Behavior debugger
+
+Choose **Behavior debugger…**, select an embedded source and enter a1-based line; Enter adds the exact current source/hash breakpoint. Reset arms the first nonempty configuration, then Step or Play reaches it. Breakpoint edits remain session-local. The window opens on a new stop, shows bounded stack/local values, and offers **Next (step over)**, **Continue behavior** and exact-hash source navigation. Tab/Enter traverses controls; Escape in the line field hides the window. Next skips nested calls unless explicitly breakpointed; reaching the root return pauses after the complete tick commits. Continue resumes the same execution. Stop, authored edits and normal close cancel a paused script independently of the command queue. Default execution keeps count-only hooks; no expression evaluator, variable mutation or external DAP server is enabled. New/Open clears breakpoints.
+
+The viewport retains its last committed frame while a tick is stopped or fails; runtime transforms never enter authored Save, Undo or recovery. Native/SDK acceptance is recorded separately from physical-focus and experienced-human familiarity evidence. Source-hash mismatch opens captured code read-only rather than highlighting a different current version.

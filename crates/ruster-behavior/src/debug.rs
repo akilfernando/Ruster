@@ -153,7 +153,7 @@ impl DebugHandle {
         Ok(())
     }
     pub fn set_breakpoints(&self, points: Vec<Breakpoint>) -> Result<(), DebugError> {
-        validate(&points)?;
+        validate_breakpoints(&points)?;
         let mut state = self.shared.lock();
         if state.disconnected {
             return Err(DebugError::Disconnected);
@@ -186,7 +186,8 @@ impl Drop for DebugHandle {
         self.shared.wake.notify_all();
     }
 }
-fn validate(points: &[Breakpoint]) -> Result<(), DebugError> {
+/// Validate bounded source/hash/line identities without creating a VM or debugger.
+pub fn validate_breakpoints(points: &[Breakpoint]) -> Result<(), DebugError> {
     if points.len() > MAX_BREAKPOINTS
         || points.iter().any(|p| {
             p.line == 0
@@ -237,6 +238,17 @@ pub struct DebugSession {
     next: Option<StepTarget>,
     pause_requested: bool,
 }
+impl Drop for DebugSession {
+    fn drop(&mut self) {
+        // Detaching or an owner-thread unwind retires every outstanding reference.
+        // A former session must never cancel a later run's shared engine token.
+        let mut state = self.shared.lock();
+        state.disconnected = true;
+        state.stop = None;
+        state.resume = None;
+        self.shared.wake.notify_all();
+    }
+}
 impl DebugSession {
     /// The optional notifier must be nonblocking (for example, request a repaint).
     pub fn new(
@@ -245,7 +257,7 @@ impl DebugSession {
         breakpoints: Vec<Breakpoint>,
         notify: Option<Arc<dyn Fn() + Send + Sync>>,
     ) -> Result<(Self, DebugHandle), DebugError> {
-        validate(&breakpoints)?;
+        validate_breakpoints(&breakpoints)?;
         let shared = Arc::new(Shared {
             state: Mutex::new(State {
                 breakpoints,

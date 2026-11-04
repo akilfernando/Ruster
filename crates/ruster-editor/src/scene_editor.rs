@@ -1,5 +1,6 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
 mod behavior_commands;
+mod runtime_commands;
 use crate::workspace::{Action, Side, Workspace};
 use eframe::{
     egui,
@@ -20,6 +21,8 @@ struct Fields {
     translation: [String; 3],
     rotation: [String; 3],
     scale: [String; 3],
+    #[serde(default)]
+    rotation_unit: crate::manipulation::AngleUnit,
 }
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -35,14 +38,18 @@ struct RecoveryDrafts {
 }
 impl From<&Transform> for Fields {
     fn from(t: &Transform) -> Self {
-        Self {
-            translation: t.translation.map(|v| v.to_string()),
-            rotation: t.rotation.map(|v| v.to_string()),
-            scale: t.scale.map(|v| v.to_string()),
-        }
+        Self::with_unit(t, crate::manipulation::AngleUnit::Degrees)
     }
 }
 impl Fields {
+    fn with_unit(t: &Transform, unit: crate::manipulation::AngleUnit) -> Self {
+        Self {
+            translation: t.translation.map(|v| v.to_string()),
+            rotation: t.rotation.map(|v| unit.display(v).to_string()),
+            scale: t.scale.map(|v| v.to_string()),
+            rotation_unit: unit,
+        }
+    }
     fn parse(&self) -> Result<Transform, String> {
         fn triple(values: &[String; 3]) -> Result<[f32; 3], String> {
             let mut result = [0.; 3];
@@ -55,7 +62,7 @@ impl Fields {
         }
         let t = Transform {
             translation: triple(&self.translation)?,
-            rotation: triple(&self.rotation)?,
+            rotation: triple(&self.rotation)?.map(|value| self.rotation_unit.radians(value)),
             scale: triple(&self.scale)?,
         };
         t.validate().map_err(|e| e.to_string())?;
@@ -199,6 +206,9 @@ pub struct SceneEditor {
     manipulation: crate::manipulation::Manipulation,
     behavior: crate::behavior_ui::BehaviorUi,
     runtime: crate::behavior_ui::RuntimeUi,
+    external: crate::behavior_external::External,
+    external_focused: bool,
+    queued_external: Option<(String, crate::behavior_external::Intent)>,
     reset_assets: Option<(crate::behavior_worker::RunKey, BTreeMap<String, Arc<Mesh>>)>,
     draft: Option<Fields>,
     baseline_fields: Option<Fields>,
@@ -309,6 +319,9 @@ impl SceneEditor {
             manipulation,
             behavior: crate::behavior_ui::BehaviorUi::default(),
             runtime: crate::behavior_ui::RuntimeUi::default(),
+            external: crate::behavior_external::External::default(),
+            external_focused: false,
+            queued_external: None,
             reset_assets: None,
             baseline_fields: draft.clone(),
             workspace,
@@ -395,6 +408,14 @@ impl SceneEditor {
     }
     fn behavior_action(&mut self, action: crate::behavior_ui::Action) {
         use crate::behavior_ui::Action;
+        if matches!(action, Action::ExternalStatus) {
+            self.external.open = true;
+            return;
+        }
+        if let Action::External { source_id, intent } = action {
+            self.queued_external = Some((source_id, intent));
+            return;
+        }
         if !self.behavior_editable() {
             self.error="Resolve transform fields, gestures and modal dialogs before behavior edits; drafts preserved.".into();
             return;
@@ -432,6 +453,78 @@ impl SceneEditor {
             }
         }
     }
+    fn external_action(
+        &mut self,
+        ctx: &egui::Context,
+        source_id: &str,
+        intent: crate::behavior_external::Intent,
+    ) {
+        let result = self.guard().and_then(|()| {
+            if self.manipulation.offset_pending() {
+                Err("Apply or reset translation offsets before external source operations.".into())
+            } else {
+                self.external.request(
+                    ctx,
+                    &self.session,
+                    self.generation,
+                    source_id,
+                    intent,
+                    &self.workspace.prefs.external_editor,
+                )
+            }
+        });
+        if let Err(error) = result {
+            self.external.status = error;
+        }
+    }
+    fn external_frame(&mut self, ctx: &egui::Context) {
+        self.external.set_closing(
+            self.close_pending
+                || self.close_approved
+                || self.close_shutdown
+                || matches!(
+                    self.recovery_transition,
+                    Some(RecoveryTransition::Close { .. })
+                ),
+        );
+        let blocked = self.guard().is_err() || self.manipulation.offset_pending();
+        if let Some(import) = self.external.poll(
+            ctx,
+            &self.session,
+            self.generation,
+            blocked,
+            self.behavior.active_source(),
+            &self.workspace.prefs.external_editor,
+        ) {
+            if !blocked {
+                match self.session.set_source(
+                    self.session.scene().revision,
+                    &import.source_id,
+                    Some(import.source),
+                ) {
+                    Ok(_) => {
+                        self.external
+                            .imported(import.next_base, self.session.scene().revision);
+                        self.sync_draft();
+                        self.observe_runtime();
+                        self.notice="Imported the observed working-file version through scene Undo. Save to keep it.".into();
+                        self.error.clear();
+                        ctx.request_repaint();
+                    }
+                    Err(error) => self.external.status = error.to_string(),
+                }
+            }
+        }
+        if let Some((source, intent)) =
+            self.external
+                .ui(ctx, !blocked, self.session.scene().revision)
+        {
+            self.queued_external = Some((source, intent));
+        }
+        if let Some((source, intent)) = self.queued_external.take() {
+            self.external_action(ctx, &source, intent);
+        }
+    }
     fn observe_runtime(&mut self) {
         self.runtime.observe(
             self.generation,
@@ -465,7 +558,7 @@ impl SceneEditor {
     #[cfg(test)]
     fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
         let drafts = RecoveryDrafts {
-            version: 2,
+            version: 3,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -485,11 +578,27 @@ impl SceneEditor {
     }
     fn restore_recovery_drafts(&mut self, value: Value) -> Result<(), String> {
         let behavior_field = value.get("behavior").is_some();
+        let version = value.get("version").and_then(Value::as_u64);
+        let manipulation_unit = value.pointer("/manipulation/rotation_unit").is_some();
+        let fields_unit = value
+            .get("fields")
+            .filter(|v| !v.is_null())
+            .map(|v| v.get("rotation_unit").is_some());
+        if !match version {
+            Some(1 | 2) => !manipulation_unit && fields_unit != Some(true),
+            Some(3) => manipulation_unit && fields_unit != Some(false),
+            _ => false,
+        } {
+            return Err(
+                "Recovery drafts have unsupported version or rotation units; checkpoint preserved."
+                    .into(),
+            );
+        }
         let draft: RecoveryDrafts = serde_json::from_value(value)
             .map_err(|e| format!("Unsupported recovery drafts: {e}; checkpoint preserved."))?;
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || (draft.version == 2 && draft.behavior.is_some()))
+            || ((draft.version == 2 || draft.version == 3) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -508,7 +617,7 @@ impl SceneEditor {
             || draft
                 .pending_name
                 .as_ref()
-                .is_some_and(|text| text.chars().count() > 128 || draft.selection.len() != 1)
+                .is_some_and(|text| text.chars().count() > 128 || draft.selection.is_empty())
         {
             return Err("Recovery drafts have unsupported version, selection, revision or text bounds; checkpoint preserved.".into());
         }
@@ -517,7 +626,27 @@ impl SceneEditor {
         self.sync_draft();
         self.manipulation
             .restore_drafts(self.session.scene(), draft.manipulation)?;
-        self.draft = draft.fields;
+        if let (Some(fields), Some(id)) = (&draft.fields, &self.selected) {
+            let transform = &self
+                .session
+                .scene()
+                .objects
+                .iter()
+                .find(|object| &object.id == id)
+                .unwrap()
+                .transform;
+            let baseline = Fields::with_unit(transform, fields.rotation_unit);
+            if fields == &baseline {
+                // Clean legacy baselines can use the current degree presentation.
+                self.draft = Some(Fields::from(transform));
+                self.baseline_fields = self.draft.clone();
+            } else {
+                self.baseline_fields = Some(baseline);
+                self.draft = draft.fields;
+            }
+        } else {
+            self.draft = draft.fields;
+        }
         if let Some(behavior) = draft.behavior {
             if behavior.pending()
                 && (self.manipulation.precision_pending()
@@ -629,7 +758,7 @@ impl SceneEditor {
             let asset_origin = self.asset_origin.clone();
             let recovered_origin = self.recovered_origin.clone();
             let drafts = RecoveryDrafts {
-                version: 2,
+                version: 3,
                 revision: session.scene().revision,
                 selection: self.manipulation.ids.clone(),
                 fields: self.draft.clone(),
@@ -706,6 +835,9 @@ impl SceneEditor {
                     next.manipulation.clipboard_from(&mut self.manipulation);
                 }
                 next.runtime = std::mem::take(&mut self.runtime);
+                next.external = std::mem::take(&mut self.external);
+                next.external
+                    .observe_document(&next.session, next.generation);
                 next.runtime.observe(
                     next.generation,
                     next.session.scene().revision,
@@ -790,6 +922,21 @@ impl SceneEditor {
             egui::Modal::new(egui::Id::unique("recovery_replacement_wait")).show(ctx, |ui| {
                 ui.label("Finishing recovery boundary before switching scenes…");
             });
+        } else if self.close_approved && !self.close_shutdown && !self.external.finished() {
+            egui::Modal::new(egui::Id::unique("external_close_wait")).show(ctx, |ui| {
+                ui.label("Finishing the current working-copy job before closing…");
+                let cancel = ui.button("Cancel closing");
+                cancel.request_focus();
+                if cancel.clicked()
+                    || ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    })
+                {
+                    self.close_approved = false;
+                    self.close_pending = false;
+                    self.external.cancel_close();
+                }
+            });
         }
     }
     fn start_close_cleanup(&mut self) {
@@ -797,6 +944,7 @@ impl SceneEditor {
             && self.recovery_transition.is_none()
             && self.close_cleanup_error.is_none()
             && !self.close_shutdown
+            && self.external.finished()
         {
             self.close_pending = false;
             let request = self.recovery.retire();
@@ -889,6 +1037,10 @@ impl SceneEditor {
             return false;
         }
         self.observe_runtime();
+        if self.manipulation.precision_pending() && self.draft != self.baseline_fields {
+            self.error = "Both recovered transform drafts are pending. Revert transform drafts to discard them, or keep this checkpoint for repair; no text was applied.".into();
+            return false;
+        }
         if self.manipulation.precision_pending() {
             match self.manipulation.apply_precision(&mut self.session) {
                 Ok(()) => {
@@ -908,13 +1060,31 @@ impl SceneEditor {
         let Some(fields) = self.draft.clone() else {
             return true;
         };
-        let draft = match fields.parse() {
+        if self.draft == self.baseline_fields {
+            return true;
+        }
+        let mut draft = match fields.parse() {
             Ok(t) => t,
             Err(e) => {
                 self.error = e;
                 return false;
             }
         };
+        if let Some(baseline) = &self.baseline_fields {
+            if let Some(object) = self
+                .session
+                .scene()
+                .objects
+                .iter()
+                .find(|object| object.id == id)
+            {
+                for axis in 0..3 {
+                    if fields.rotation[axis] == baseline.rotation[axis] {
+                        draft.rotation[axis] = object.transform.rotation[axis];
+                    }
+                }
+            }
+        }
         match self
             .session
             .edit(self.session.scene().revision, &id, &draft)
@@ -1213,6 +1383,7 @@ impl SceneEditor {
         }
         self.remember_camera();
         self.workspace.flush();
+        self.external.saved(&self.session, self.generation);
         if !self.pending_recovery_drafts() {
             self.recovery.retire();
         } else {
@@ -1617,6 +1788,9 @@ impl SceneEditor {
         }
     }
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
+        if runtime_commands::supported(op) {
+            return self.runtime_command(token, op, args);
+        }
         if op.starts_with("behavior_") {
             return self.behavior_command(token, op, args);
         }
@@ -1690,7 +1864,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -2593,6 +2767,28 @@ impl SceneEditor {
                 self.workspace.changed();
                 self.content_focus = true;
             }
+            Action::Rename => {
+                if self.guard().is_ok() && self.selected.is_some() {
+                    self.rename_pending = true;
+                }
+            }
+            Action::SelectAll => {
+                if self.manipulation.active() {
+                    return;
+                }
+                if self.drafts() && !self.apply() {
+                    return;
+                }
+                self.manipulation.ids = self
+                    .session
+                    .scene()
+                    .objects
+                    .iter()
+                    .map(|object| object.id.clone())
+                    .collect();
+                self.selected = self.manipulation.selected();
+                self.sync_draft();
+            }
             Action::Frame => {
                 if self.guard().is_ok() {
                     self.navigation.frame_selected = true;
@@ -2628,6 +2824,11 @@ impl SceneEditor {
     }
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        let focused = ctx.input(|input| input.focused);
+        if focused && !self.external_focused {
+            self.external.focus_returned();
+        }
+        self.external_focused = focused;
         self.recovery.poll(&ctx);
         self.process_recovery_ack();
         self.poll_runtime(&ctx);
@@ -2797,6 +2998,13 @@ impl SceneEditor {
         });
         egui::Panel::bottom("scene_status").show(ui, |ui| {
             ui.label(&self.notice);
+            if !self.external.status.is_empty() {
+                ui.add(egui::Label::new(&self.external.status).truncate())
+                    .on_hover_text(&self.external.status);
+                if ui.button("Working-copy details").clicked() {
+                    self.external.open = true;
+                }
+            }
             self.recovery.warning_ui(ui);
             if !self.workspace.error.is_empty() {
                 ui.colored_label(egui::Color32::YELLOW, &self.workspace.error);
@@ -2867,7 +3075,28 @@ impl SceneEditor {
             ui.heading("Transform");
             self.mesh_reference_ui(ui);
             ui.label(format!("Loaded scene format v{}; Save writes v{}.",self.session.loaded_format_version(),ruster_scene::FORMAT_VERSION));
-            ui.add_enabled_ui(!self.behavior.pending() && !self.manipulation.ids.is_empty() && !self.manipulation.active(), |ui| {
+            if self.draft != self.baseline_fields {
+                ui.add_enabled_ui(!self.behavior.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+                    ui.label("Recovered transform fields — repair or revert before other precision edits");
+                    let mut enter=false;
+                    let mut escape=false;
+                    if let Some(fields)=&mut self.draft {
+                        for (label, values) in [("Position", &mut fields.translation), (fields.rotation_unit.label(), &mut fields.rotation), ("Scale", &mut fields.scale)] {
+                            ui.label(label);
+                            ui.horizontal_wrapped(|ui| { for (axis,text) in ["X","Y","Z"].into_iter().zip(values) {
+                                ui.label(axis);
+                                let response=ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(1024));
+                                let owned=response.has_focus() || ui.memory(|m|m.had_focus_last_frame(response.id));
+                                enter|=owned && ui.input(|i|i.key_pressed(egui::Key::Enter));
+                                escape|=owned && ui.input(|i|i.key_pressed(egui::Key::Escape));
+                            }});
+                        }
+                    }
+                    if ui.button("Apply recovered transform fields").clicked() || enter {self.apply();}
+                    if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
+                });
+            }
+            ui.add_enabled_ui(self.draft == self.baseline_fields && !self.behavior.pending() && !self.manipulation.ids.is_empty() && !self.manipulation.active(), |ui| {
                 match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                     Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                     Ok(false)=>{},Err(error)=>self.error=error,
@@ -3069,6 +3298,16 @@ impl SceneEditor {
             self.behavior_action(action);
         }
         self.behavior.captured_window(&ctx, editable);
+        let blocked = self.guard().is_err() || self.manipulation.offset_pending();
+        if let Some(diagnostic) = self.runtime.debug_window(&ctx, &self.session, blocked) {
+            if let Err(error) = self.behavior.navigate_diagnostic(
+                &self.session,
+                &diagnostic,
+                self.runtime.captured.as_deref(),
+            ) {
+                self.error = error;
+            }
+        }
         if self.close_pending && self.dialog.is_none() && !self.asset_dialog && !self.rename_pending
         {
             egui::Modal::new(egui::Id::unique("scene_close_dialog")).show(&ctx, |ui| {
@@ -3103,6 +3342,7 @@ impl SceneEditor {
         if !self.close_approved {
             self.recovery_frame(&ctx);
         }
+        self.external_frame(&ctx);
         if self.hierarchy_focus || self.content_focus {
             ctx.request_repaint();
         }
@@ -3112,7 +3352,10 @@ impl SceneEditor {
         self.close_finalization_ui(&ctx);
         self.start_close_cleanup();
         if self.close_shutdown {
-            if self.recovery.shutdown_finished() && self.runtime.finished() {
+            if self.recovery.shutdown_finished()
+                && self.runtime.finished()
+                && self.external.finished()
+            {
                 self.close_ready_to_exit = true;
                 self.remember_camera();
                 self.workspace.flush();
@@ -3197,6 +3440,136 @@ fn run_session(session: Session) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn degree_fields_roundtrip_and_legacy_recovery_keep_original_units() {
+        let mut scene = Scene::demo();
+        scene.objects[0].transform.rotation = [0.2, 0.3, 0.4];
+        let original = scene.objects[0].transform.clone();
+        let fields = Fields::from(&original);
+        assert_eq!(fields.rotation[0], 0.2_f32.to_degrees().to_string());
+        for (actual, expected) in fields
+            .parse()
+            .unwrap()
+            .rotation
+            .into_iter()
+            .zip(original.rotation)
+        {
+            assert!((actual - expected).abs() < 1e-6);
+        }
+        let mut e = SceneEditor::new(Session::new(scene).unwrap());
+        assert!(e.apply());
+        assert_eq!(e.session.undo_len(), 0);
+        assert_eq!(e.session.scene().objects[0].transform, original);
+        for version in [1, 2] {
+            let mut payload = e.recovery_snapshot().unwrap().drafts().unwrap();
+            payload["version"] = version.into();
+            if version == 1 {
+                payload.as_object_mut().unwrap().remove("behavior");
+            }
+            payload["fields"] = serde_json::to_value(Fields::with_unit(
+                &original,
+                crate::manipulation::AngleUnit::Radians,
+            ))
+            .unwrap();
+            payload["fields"]
+                .as_object_mut()
+                .unwrap()
+                .remove("rotation_unit");
+            payload["fields"]["rotation"][0] = "-".into();
+            let mut legacy = crate::manipulation::Manipulation::default();
+            legacy.ids = e.manipulation.ids.clone();
+            // The genuine old clean precision baseline stores radians.
+            let mut manipulation = serde_json::to_value(legacy.snapshot_drafts()).unwrap();
+            for (i, value) in original
+                .translation
+                .into_iter()
+                .chain(original.rotation)
+                .chain(original.scale)
+                .enumerate()
+            {
+                manipulation["precision"][i] = value.to_string().into();
+            }
+            manipulation
+                .as_object_mut()
+                .unwrap()
+                .remove("rotation_unit");
+            payload["manipulation"] = manipulation;
+            e.restore_recovery_drafts(payload).unwrap();
+            assert_eq!(e.draft.as_ref().unwrap().rotation[0], "-");
+            assert!(!e.apply());
+            assert_eq!(
+                e.recovery_snapshot().unwrap().drafts().unwrap()["fields"]["rotation_unit"],
+                "radians"
+            );
+            e.draft.as_mut().unwrap().rotation[0] = "1".into();
+            assert!(e.apply(), "{}", e.error);
+            assert_eq!(
+                e.session.scene().objects[0].transform.rotation,
+                [1.0, 0.3, 0.4]
+            );
+            e.session.undo(e.session.scene().revision).unwrap();
+            e.sync_draft();
+        }
+    }
+    #[test]
+    fn remappable_rename_and_select_all_respect_text_focus_and_keep_active_identity() {
+        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut SceneEditor,
+                     key: egui::Key,
+                     modifiers: egui::Modifiers,
+                     text_focus: bool| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: vec![
+                        egui::Event::ModifiersChanged(modifiers),
+                        egui::Event::Key {
+                            key,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |ui| {
+                    if text_focus {
+                        let mut text = "text-owned shortcut".to_string();
+                        ui.text_edit_singleline(&mut text).request_focus();
+                    }
+                    editor.route_shortcuts(&ctx);
+                    editor.process_queued_action();
+                },
+            );
+            output.textures_delta.clear();
+        };
+        frame(&mut editor, egui::Key::A, egui::Modifiers::CTRL, true);
+        assert_eq!(editor.manipulation.ids.len(), 1);
+        ctx.memory_mut(|memory| {
+            if let Some(id) = memory.focused() {
+                memory.surrender_focus(id);
+            }
+        });
+        frame(&mut editor, egui::Key::A, egui::Modifiers::CTRL, false);
+        let selection = editor.manipulation.ids.clone();
+        assert_eq!(selection.len(), 3);
+        assert_eq!(editor.selected.as_deref(), Some("right"));
+        frame(&mut editor, egui::Key::F2, egui::Modifiers::NONE, false);
+        assert!(editor.rename_pending);
+        assert_eq!(editor.manipulation.ids, selection);
+        editor.name_text = "Active name draft".into();
+        let snapshot = editor.recovery_snapshot().unwrap();
+        let mut restored = SceneEditor::new(snapshot.restore().unwrap());
+        restored
+            .restore_recovery_drafts(snapshot.drafts().unwrap())
+            .unwrap();
+        assert_eq!(restored.manipulation.ids, selection);
+        assert_eq!(restored.selected.as_deref(), Some("right"));
+        assert!(restored.rename_pending);
+        assert_eq!(restored.name_text, "Active name draft");
+    }
     #[test]
     fn runtime_content_snapshot_changes_only_for_matching_published_run() {
         let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
@@ -3287,7 +3660,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 2);
+        assert_eq!(payload["version"], 3);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -3364,6 +3737,14 @@ mod tests {
             behavior: None,
         })
         .unwrap();
+        draft["manipulation"]
+            .as_object_mut()
+            .unwrap()
+            .remove("rotation_unit");
+        draft["fields"]
+            .as_object_mut()
+            .unwrap()
+            .remove("rotation_unit");
         draft["manipulation"]["precision"][0] = "-".into();
         draft["manipulation"]["edited"][0] = true.into();
         draft["manipulation"]["revision"] = e.session.scene().revision.into();

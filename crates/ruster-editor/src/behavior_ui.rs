@@ -1,4 +1,5 @@
 //! Bounded embedded source/property working copies. Session owns authored data.
+mod runtime_debug;
 use eframe::egui;
 use ruster_scene::{BehaviorBinding, BehaviorSource, PropertyValue, Session};
 use serde::{Deserialize, Serialize};
@@ -10,6 +11,19 @@ fn fingerprint(value: &impl Serialize) -> String {
         "{:x}",
         Sha256::digest(serde_json::to_vec(value).expect("finite authored values"))
     )
+}
+fn annotated_follower(source_id: &str) -> Result<String, String> {
+    let hint =
+        crate::behavior_files::annotation_hint(source_id).map_err(|error| error.to_string())?;
+    let annotations = hint
+        .lines()
+        .map(|line| format!("    {line}\n"))
+        .collect::<String>();
+    Ok(ruster_behavior::FOLLOWER_TEMPLATE.replacen(
+        "    update = function",
+        &format!("{annotations}    update = function"),
+        1,
+    ))
 }
 // Reject a complete oversized insertion, restoring a selection replaced by it.
 // Backups are allocated only for an actual deletion, never an idle source frame.
@@ -205,8 +219,16 @@ impl Drafts {
     }
 }
 pub(super) enum Action {
+    External {
+        source_id: String,
+        intent: crate::behavior_external::Intent,
+    },
+    ExternalStatus,
     Create(String),
-    Attach { object: String, source: String },
+    Attach {
+        object: String,
+        source: String,
+    },
     Detach(String),
     Enable(String, bool),
     OpenSource(String),
@@ -246,6 +268,7 @@ pub(super) struct BehaviorUi {
     new_type: usize,
     pub error: String,
     source_line: Option<u32>,
+    source_cursor: usize,
     captured_view: Option<CapturedSource>,
     #[cfg(test)]
     source_footer: Option<egui::Rect>,
@@ -258,6 +281,9 @@ struct CapturedSource {
     scroll: bool,
 }
 impl BehaviorUi {
+    pub fn active_source(&self) -> Option<&str> {
+        self.source.as_ref().map(|source| source.id.as_str())
+    }
     pub fn navigate_diagnostic(
         &mut self,
         session: &Session,
@@ -536,7 +562,7 @@ impl BehaviorUi {
                             label: Some("Follower".into()),
                             language_id: ruster_behavior::LANGUAGE_ID.into(),
                             host_api_version: ruster_behavior::HOST_API_VERSION,
-                            text: ruster_behavior::FOLLOWER_TEMPLATE.into(),
+                            text: annotated_follower(&source)?,
                         },
                         &binding,
                         BehaviorBinding {
@@ -652,6 +678,11 @@ impl BehaviorUi {
                 self.new_property.clear();
             }
             Action::Save => self.apply_all(session)?,
+            Action::External { .. } | Action::ExternalStatus => {
+                return Err(
+                    "External editor actions are handled by the document controller.".into(),
+                )
+            }
         }
         self.changed();
         self.error.clear();
@@ -875,6 +906,7 @@ impl BehaviorUi {
                         let mut output=egui::TextEdit::multiline(&mut ByteBuffer{text:&mut source.text,limit:ruster_scene::MAX_SOURCE_BYTES,rejected:&mut rejected,removed:None}).id(field_ids[0]).interactive(ui.is_enabled()).code_editor().desired_rows(14).desired_width(f32::INFINITY).show(ui);
                         if self.source_focus {output.response.request_focus();output.response.scroll_to_me(Some(egui::Align::Min));self.source_focus=false;}
                         if let Some(line)=self.source_line.take() {scroll_line(ui,&mut output,&source.text,line);}
+                        if let Some(cursor)=output.cursor_range {self.source_cursor=cursor.primary.index.0;}
                         changed|=output.response.changed();
                         if rejected {ui.colored_label(egui::Color32::LIGHT_RED,"Insertion rejected: field byte limit exceeded; previous text preserved.");}
                     });
@@ -887,8 +919,17 @@ impl BehaviorUi {
                     if revert.clicked() {action=Some(Action::RevertSource);}
                     let close=ui.button("Close source (keep draft)");
                     self.source_footer_ids[2]=Some(close.id);
-                    #[cfg(test)] {self.source_footer=Some(close.rect);}
                     if close.clicked()||hide {self.source_open=false;}
+                    let _external=ui.menu_button("External editor / Zed…",|ui| {
+                        ui.add_enabled_ui(editable&&!self.source_dirty&&!self.property_dirty,|ui| {
+                            for (label,intent) in [("Export working copy",crate::behavior_external::Intent::Export),("Open in Zed",crate::behavior_external::Intent::Open{line:1+source.text.chars().take(self.source_cursor).filter(|c|*c=='\n').count() as u32}),("Refresh working copy",crate::behavior_external::Intent::Refresh)] {
+                                if ui.button(label).clicked() {action=Some(Action::External{source_id:source.id.clone(),intent});ui.close();}
+                            }
+                        });
+                        if self.source_dirty||self.property_dirty {ui.label("Apply or Revert embedded drafts before external editor actions.");}
+                        if ui.button("Working-copy details").clicked() {action=Some(Action::ExternalStatus);ui.close();}
+                    });
+                    #[cfg(test)] {self.source_footer=Some(close.rect.union(_external.response.rect));}
                 });
             });
         if changed {
@@ -1071,6 +1112,9 @@ impl Request {
 }
 #[derive(Default)]
 pub(super) struct RuntimeUi {
+    debug: runtime_debug::DebugUi,
+    context: Option<egui::Context>,
+    awaiting: Option<(RunKey, Operation)>,
     worker: Option<VmWorker>,
     pending: Option<Request>,
     identity: Option<(u64, u64, Option<u64>, u64)>,
@@ -1105,6 +1149,7 @@ impl RuntimeUi {
             return;
         }
         let previous = self.identity.replace(next);
+        self.supersede_operation();
         self.clear_reset();
         if let Some(worker) = &mut self.worker {
             if self.shutdown {
@@ -1123,6 +1168,7 @@ impl RuntimeUi {
                     .into();
         }
         if previous.is_some_and(|old| old.0 != generation) {
+            self.clear_debug_document();
             self.frame = None;
             self.captured = None;
             self.diagnostic = None;
@@ -1144,9 +1190,13 @@ impl RuntimeUi {
         generation: u64,
     ) -> Result<RunKey, String> {
         self.ensure_worker(ctx)?;
+        self.supersede_operation();
         let worker = self.worker.as_mut().unwrap();
         let key = worker
             .advance(generation, session.scene().revision)
+            .map_err(|e| e.to_string())?;
+        worker
+            .set_breakpoints(key, self.debug.points.clone())
             .map_err(|e| e.to_string())?;
         let authoring = Arc::new(session.authoring().clone());
         self.captured = Some(authoring.clone());
@@ -1216,10 +1266,24 @@ impl RuntimeUi {
             return;
         };
         match worker.try_request(request.command()) {
-            Ok(()) => self.pending = None,
+            Ok(()) => {
+                self.awaiting = Some((
+                    request.command().key(),
+                    match request {
+                        Request::Reset { .. } => Operation::Reset,
+                        Request::Play(_) => Operation::Play,
+                        Request::Pause(_) => Operation::Pause,
+                        Request::Step(_) => Operation::Step,
+                        Request::Invalidate(_) => Operation::Invalidate,
+                        Request::Stop(_) => Operation::Stop,
+                    },
+                ));
+                self.pending = None;
+            }
             Err(error) if error.kind == RequestErrorKind::Busy => {}
             Err(error) => {
                 self.status = error.to_string();
+                self.fail_operation();
                 self.pending = None;
                 self.ready = false;
                 self.playing = false;
@@ -1227,6 +1291,7 @@ impl RuntimeUi {
         }
     }
     pub fn poll(&mut self, ctx: &egui::Context) {
+        self.context = Some(ctx.clone());
         loop {
             let event = self.worker.as_ref().map(VmWorker::poll_event);
             match event {
@@ -1234,6 +1299,7 @@ impl RuntimeUi {
                     if !self.worker.as_ref().unwrap().accepts(event.key()) {
                         continue;
                     }
+                    self.accept_operation(&event);
                     match event {
                         VmEvent::Reset { key, run } => self.acknowledge_reset(key, run.tick),
                         VmEvent::Step { run, .. } => {
@@ -1327,6 +1393,7 @@ impl RuntimeUi {
                     }
                 }
                 Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                    self.fail_operation();
                     if !self.shutdown {
                         self.status =
                             "Behavior worker disconnected; authored work remains available.".into();
@@ -1349,18 +1416,23 @@ impl RuntimeUi {
             }
         }
         self.flush();
+        self.show_new_debug_stop();
         if self.pending.is_some() || self.reset_ack.is_some() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
     pub fn stop(&mut self, generation: u64, revision: u64) {
+        self.supersede_operation();
         self.clear_reset();
         if self.shutdown {
             return;
         }
         if let Some(worker) = &mut self.worker {
             match worker.stop_immediate(generation, revision) {
-                Ok(_) => self.pending = None,
+                Ok(key) => {
+                    self.pending = None;
+                    self.awaiting = Some((key, Operation::Stop));
+                }
                 Err(error) if error.kind == RequestErrorKind::Busy => {
                     self.pending = Some(Request::Stop(error.key))
                 }
@@ -1415,7 +1487,13 @@ impl RuntimeUi {
                     Err(error) => self.status = error,
                 }
             }
-            let ready = self.ready && !blocked && self.pending.is_none() && !self.shutdown;
+            let stopped = self.debug_snapshot().is_some();
+            let ready = self.ready
+                && !blocked
+                && self.pending.is_none()
+                && self.awaiting.is_none()
+                && !stopped
+                && !self.shutdown;
             if ui
                 .add_enabled(
                     ready,
@@ -1447,6 +1525,9 @@ impl RuntimeUi {
             }
         });
         ui.horizontal_wrapped(|ui| {
+            if ui.button("Behavior debugger…").clicked() {
+                self.debug.open = true;
+            }
             ui.add_enabled(
                 self.frame.is_some(),
                 egui::Checkbox::new(

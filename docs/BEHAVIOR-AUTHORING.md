@@ -2,6 +2,8 @@
 
 Updated2026-11-04. Agent-selected next implementation stages under autonomous M8 development. This is a plan for unfinished editor/tooling work, not a claim that attaching/running/debugging scripts already works in the generic editor. Lua5.4 remains provisional; C# is untested and the Rhai/Motion Lab compatibility path remains separate.
 
+User steering2026-11-04: finish M8 in this run; defer M9. The stages below retain allocated M8 requirements, with milestone evaluation at completion.
+
 ## Verified foundations
 
 Scene5 persists sources, bindings and typed properties/references without requiring runnable code. Sources/bindings share guarded history; `create_behavior` creates a new source plus attachment atomically. CLI source/binding commands and the headless `ruster-behavior check/run` consumer exercise that document. The Lua library has bounded capabilities, fresh environments/modules, scoped resolver callbacks, atomic copied-state ticks, cancellation and contextual diagnostics. [Decision0018](decisions/0018-language-neutral-behavior-authoring.md), [0019](decisions/0019-provisional-lua-backend.md) and [production cost](evidence/M8-behavior-cost.md) own the accepted scope. None implies editor runtime integration.
@@ -39,3 +41,12 @@ Breakpoints bind exact source ID/hash/line, optionally one binding. Combine line
 Keep source/property bodies out of lists. For the64KiB MCP frame, source get/set can use base64 (16KiB text becomes about22KiB), strict decoded UTF-8/length checks and source hashes; no multipart upload framework is needed. Read/write individual property values instead of oversized binding maps. Preflight actual encoded frames and retain session/revision/draft guards. Async runtime operations return run/operation identity and expose completion through inspection.
 
 Finally make the non-game application consume shared mechanisms rather than expand its competing editor. Preserve legacy project compatibility explicitly; do not silently translate Rhai into Lua. Independently modify/export/package both applications and record actual iteration/resource/notices evidence. These stages retain the allocated M8 workflow gates; M8/M9 are not complete merely because the foundations pass tests.
+
+### Stage3 backend checkpoint — 2026-11-04
+
+The owner-thread debugger backend is integrated atf54246c after independent review. Reset suppresses stops; armed line/call/return events preserve count-event instruction charging. A single owned, bounded stop snapshot supports raw locals and actual step-over/Continue, exact stop identities and cancellation wakeup without interpreter handles escaping. Review repairs reject a different Engine/session cancellation token and preserve UTF-8 boundaries when clipping each displayed string to256bytes. Six library, one CLI and four debugger tests pass; strict backend lint passed before the final clipping refinement. The first compile failed on mlua import paths and was repaired. This checkpoint does not establish editor UI, MCP or Zed debugger acceptance; those integrations remain open.
+
+
+### M8 closeout — 2026-11-04
+
+All three planned stages now pass their bounded native/API gates: generic recoverable data editing and owning runtime; explicit derived Zed working copies with conflict/Undo/durable saved-base authority and actual generated LuaLS; owned in-app locals/Next/Continue with asynchronous runtime/debug MCP parity. Actual Zed workspace launch is observed; focused Zed GUI/DAP is not claimed. Review and native checks repaired receipt identities/terminal failures, cancelled-hook replacement and Enter focus retention. Final source/property/precision recovery uses drafts-v3 with legacy-unit preservation. See [tooling](evidence/M8-integrated-tooling.md), [debugger](evidence/M8-debugger-native.md) and [milestone evaluation](ROADMAP-REVIEW.md#m8-completion-evaluation--2026-11-04). M8 is complete in recorded Linux scope; M9 is deferred at the user’s request. Earlier next-stage paragraphs are historical planning, superseded by this closeout.

@@ -34,9 +34,11 @@ pub(super) enum Action {
     Quit,
     FindObjects,
     FindContent,
+    Rename,
+    SelectAll,
 }
 impl Action {
-    pub const ALL: [Self; 26] = [
+    pub const ALL: [Self; 28] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -63,6 +65,8 @@ impl Action {
         Self::Quit,
         Self::FindObjects,
         Self::FindContent,
+        Self::Rename,
+        Self::SelectAll,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -92,6 +96,8 @@ impl Action {
             Self::Quit => "Close window",
             Self::FindObjects => "Search objects",
             Self::FindContent => "Search Content",
+            Self::Rename => "Rename active object",
+            Self::SelectAll => "Select all scene objects",
         }
     }
 }
@@ -151,6 +157,7 @@ pub(super) struct Preferences {
     pub recent: Vec<PathBuf>,
     pub cameras: Vec<(PathBuf, ruster_render::CameraState)>,
     pub bindings: Vec<Binding>,
+    pub external_editor: crate::behavior_files::LaunchSpec,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -182,6 +189,8 @@ impl Default for Preferences {
             (Action::Quit, Key::Q, true, false),
             (Action::FindObjects, Key::F, true, false),
             (Action::FindContent, Key::F, true, true),
+            (Action::Rename, Key::F2, false, false),
+            (Action::SelectAll, Key::A, true, false),
         ];
         Self {
             hierarchy_width: 180.0,
@@ -195,6 +204,10 @@ impl Default for Preferences {
             movement_speed: 4.0,
             recent: Vec::new(),
             cameras: Vec::new(),
+            external_editor: crate::behavior_files::LaunchSpec {
+                executable: PathBuf::from("zeditor"),
+                args: vec!["--new".into(), "{workspace}".into(), "{file}:{line}".into()],
+            },
             bindings: defaults
                 .into_iter()
                 .map(|(action, key, ctrl, shift)| Binding {
@@ -210,7 +223,7 @@ impl Default for Preferences {
 }
 impl Preferences {
     fn json(&self) -> Value {
-        json!({"format":"ruster-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
+        json!({"format":"ruster-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
     }
     fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() > 64 * 1024 {
@@ -236,9 +249,10 @@ impl Preferences {
             "recent",
             "cameras",
             "bindings",
+            "external_editor",
         ];
         let map = v.as_object().ok_or("Preferences must be an object.")?;
-        if !(keys.len() - 1..=keys.len()).contains(&map.len())
+        if !(keys.len() - 2..=keys.len()).contains(&map.len())
             || map.keys().any(|k| !keys.contains(&k.as_str()))
             || v["format"] != "ruster-editor-preferences"
             || v["version"] != 1
@@ -386,6 +400,16 @@ impl Preferences {
                 bindings.push(binding);
             }
         }
+        let external_editor = match v.get("external_editor") {
+            Some(value) => {
+                serde_json::from_value::<crate::behavior_files::LaunchSpec>(value.clone())
+                    .map_err(|error| format!("Invalid external editor settings: {error}"))?
+            }
+            None => Self::default().external_editor,
+        };
+        external_editor
+            .validate()
+            .map_err(|error| error.to_string())?;
         Ok(Self {
             hierarchy_width: number("hierarchy_width", 120.0, 800.0)?,
             inspector_width: number("inspector_width", 240.0, 1000.0)?,
@@ -404,6 +428,7 @@ impl Preferences {
             recent,
             cameras,
             bindings,
+            external_editor,
         })
     }
 }
@@ -459,6 +484,9 @@ pub(super) struct Workspace {
     storage: Storage,
     dirty: bool,
     recovery_required: bool,
+    editor_executable: String,
+    editor_args: String,
+    editor_dirty: bool,
 }
 impl Workspace {
     pub fn detached() -> Self {
@@ -490,6 +518,9 @@ impl Workspace {
             },
             dirty: false,
             recovery_required: false,
+            editor_executable: String::new(),
+            editor_args: String::new(),
+            editor_dirty: false,
         };
         if let Some(path) = &workspace.storage.path {
             if path.exists() || path.symlink_metadata().is_ok() {
@@ -501,10 +532,91 @@ impl Workspace {
         } else {
             workspace.error="Editor preferences path unavailable; this window still works without saving preferences.".into();
         }
+        workspace.reset_editor_draft();
         workspace
     }
     pub fn state_path(&self) -> Option<&Path> {
         self.storage.path.as_deref()
+    }
+    fn reset_editor_draft(&mut self) {
+        self.editor_executable = self
+            .prefs
+            .external_editor
+            .executable
+            .to_string_lossy()
+            .into_owned();
+        self.editor_args = serde_json::to_string_pretty(&self.prefs.external_editor.args)
+            .expect("string vector is serializable");
+        self.editor_dirty = false;
+    }
+    fn apply_editor_draft(&mut self) -> Result<(), String> {
+        if !self.editor_dirty {
+            return Ok(());
+        }
+        let args: Vec<String> = serde_json::from_str(&self.editor_args).map_err(|error| {
+            format!("Editor arguments must be a JSON array of strings; draft preserved: {error}")
+        })?;
+        let config = crate::behavior_files::LaunchSpec {
+            executable: PathBuf::from(&self.editor_executable),
+            args,
+        };
+        config.validate().map_err(|error| error.to_string())?;
+        self.prefs.external_editor = config;
+        self.editor_dirty = false;
+        self.dirty = true;
+        Ok(())
+    }
+    fn editor_settings_ui(&mut self, ui: &mut egui::Ui) {
+        ui.heading("External code editor · Zed");
+        ui.label("Executable and argument vector; no shell is used. Placeholders: {workspace}, {file}, {line}.");
+        let ids = [
+            egui::Id::unique("external-editor-executable"),
+            egui::Id::unique("external-editor-arguments"),
+        ];
+        let owns = ui.memory(|memory| ids.iter().any(|id| memory.focused() == Some(*id)));
+        let ctrl_enter = owns
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::Enter));
+        let save =
+            owns && ui.input_mut(|input| input.consume_key(egui::Modifiers::CTRL, egui::Key::S));
+        let enter =
+            ui.input(|input| input.modifiers.is_none() && input.key_pressed(egui::Key::Enter));
+        ui.label("Editor executable");
+        let executable = ui.add(
+            egui::TextEdit::singleline(&mut self.editor_executable)
+                .id(ids[0])
+                .char_limit(4096),
+        );
+        self.editor_dirty |= executable.changed();
+        ui.label("Arguments (JSON string array)");
+        self.editor_dirty |= ui
+            .add(
+                egui::TextEdit::multiline(&mut self.editor_args)
+                    .id(ids[1])
+                    .char_limit(16 * 1024)
+                    .desired_rows(4)
+                    .desired_width(f32::INFINITY),
+            )
+            .changed();
+        let mut apply =
+            ctrl_enter || (enter && (executable.has_focus() || executable.lost_focus()));
+        ui.horizontal_wrapped(|ui| {
+            apply |= ui.button("Apply editor configuration").clicked();
+            if ui.button("Revert editor configuration draft").clicked() {
+                self.reset_editor_draft();
+            }
+        });
+        if self.editor_dirty {
+            ui.small("Unapplied editor configuration · Enter in executable / Ctrl+Enter applies · Ctrl+S applies and saves preferences.");
+        }
+        if apply || save {
+            match self
+                .apply_editor_draft()
+                .and_then(|()| if save { self.persist() } else { Ok(()) })
+            {
+                Ok(()) => self.error.clear(),
+                Err(error) => self.error = error,
+            }
+        }
     }
     pub fn persist(&mut self) -> Result<(), String> {
         if self.recovery_required {
@@ -552,6 +664,7 @@ impl Workspace {
     }
     fn reset_preferences(&mut self) {
         self.prefs = Preferences::default();
+        self.reset_editor_draft();
         self.layout_generation = self.layout_generation.wrapping_add(1);
         self.capture = None;
         self.dirty = true;
@@ -757,6 +870,8 @@ impl Workspace {
                         self.prefs.content_visible = true;
                     }
                     ui.separator();
+                    self.editor_settings_ui(ui);
+                    ui.separator();
                     ui.label(
                         "Select a binding, then press the new combination. Escape cancels capture.",
                     );
@@ -791,7 +906,7 @@ impl Workspace {
             ui.horizontal_wrapped(|ui| {
                 let save=ui.button("Save workspace preferences");footer[0]=save.rect;
                 if save.clicked() {
-                    match self.persist() {
+                    match self.apply_editor_draft().and_then(|()|self.persist()) {
                         Ok(()) => self.error.clear(),
                         Err(e) => self.error = e,
                     }
@@ -816,6 +931,83 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn editor_configuration_keyboard_applies_valid_argv_and_preserves_invalid_drafts() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("state.json");
+        let mut workspace = Workspace::at(Some(path.clone()));
+        let ctx = egui::Context::default();
+        let frame =
+            |workspace: &mut Workspace, events: Vec<egui::Event>, focus: Option<egui::Id>| {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| {
+                        if let Some(focus) = focus {
+                            ui.memory_mut(|memory| memory.request_focus(focus));
+                        }
+                        workspace.editor_settings_ui(ui);
+                    },
+                );
+                output.textures_delta.clear();
+            };
+        let key = |key, modifiers| {
+            vec![
+                egui::Event::ModifiersChanged(modifiers),
+                egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                },
+            ]
+        };
+        workspace.editor_executable = "/tmp/editor with spaces".into();
+        workspace.editor_args = "[not valid JSON".into();
+        workspace.editor_dirty = true;
+        let original = workspace.prefs.external_editor.clone();
+        frame(
+            &mut workspace,
+            key(egui::Key::Enter, egui::Modifiers::CTRL),
+            Some(egui::Id::unique("external-editor-arguments")),
+        );
+        assert_eq!(workspace.prefs.external_editor, original);
+        assert_eq!(workspace.editor_args, "[not valid JSON");
+        assert!(workspace.editor_dirty);
+        assert!(!path.exists());
+        workspace.editor_args = "[\"--new\", \"{workspace}\", \"{file}:{line}\"]".into();
+        frame(
+            &mut workspace,
+            key(egui::Key::S, egui::Modifiers::CTRL),
+            Some(egui::Id::unique("external-editor-arguments")),
+        );
+        assert!(!workspace.editor_dirty, "{}", workspace.error);
+        assert_eq!(
+            workspace.prefs.external_editor.executable,
+            PathBuf::from("/tmp/editor with spaces")
+        );
+        assert_eq!(
+            Workspace::at(Some(path)).prefs.external_editor,
+            workspace.prefs.external_editor
+        );
+        workspace.editor_args = "[broken again".into();
+        workspace.editor_dirty = true;
+        let before = workspace.prefs.external_editor.clone();
+        frame(
+            &mut workspace,
+            key(egui::Key::Enter, egui::Modifiers::CTRL),
+            Some(egui::Id::unique("another-widget")),
+        );
+        assert_eq!(workspace.prefs.external_editor, before);
+        assert!(
+            workspace.editor_dirty,
+            "unrelated widget must retain CtrlEnter ownership"
+        );
+    }
     #[test]
     fn preferences_roundtrip_recovery_conflict_and_recent_paths() {
         let dir = tempfile::tempdir().unwrap();
@@ -1104,16 +1296,27 @@ mod tests {
         assert!(w.capture.is_none());
         let mut previous = w.prefs.json();
         previous.as_object_mut().unwrap().remove("content_visible");
+        previous.as_object_mut().unwrap().remove("external_editor");
         previous["bindings"]
             .as_array_mut()
             .unwrap()
             .retain(|binding| {
-                ![Action::Quit, Action::FindObjects, Action::FindContent]
-                    .iter()
-                    .any(|action| binding["action"] == action.name())
+                ![
+                    Action::Quit,
+                    Action::FindObjects,
+                    Action::FindContent,
+                    Action::Rename,
+                    Action::SelectAll,
+                ]
+                .iter()
+                .any(|action| binding["action"] == action.name())
             });
         let upgraded = Preferences::parse(&serde_json::to_vec(&previous).unwrap()).unwrap();
         assert!(upgraded.content_visible);
+        assert_eq!(
+            upgraded.external_editor,
+            Preferences::default().external_editor
+        );
         assert_eq!(upgraded.bindings.len(), Action::ALL.len());
         assert_eq!(
             upgraded

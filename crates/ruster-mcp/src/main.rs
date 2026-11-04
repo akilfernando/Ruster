@@ -1,5 +1,6 @@
 //! Narrow MCP 2025-06-18 stdio profile. See the crate README for limits.
 mod behavior_tools;
+mod runtime_tools;
 use serde_json::{json, Map, Value};
 use std::io::{self, BufRead, BufReader, Write};
 
@@ -84,6 +85,9 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if runtime_tools::supported(name) {
+        return runtime_tools::valid(name, arguments);
+    }
     if behavior_tools::supported(name) {
         return behavior_tools::valid(name, arguments);
     }
@@ -355,6 +359,7 @@ fn tools() -> Value {
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
     tools.extend(behavior_tools::list());
+    tools.extend(runtime_tools::list());
     json!({"tools":tools})
 }
 
@@ -478,6 +483,7 @@ impl Server {
                     ]
                     .contains(&name)
                         && !behavior_tools::supported(name)
+                        && !runtime_tools::supported(name)
                 {
                     Err((-32602, "Unknown tool or tools/call parameters"))
                 } else if !valid_arguments(name, &arguments) {
@@ -736,7 +742,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 33);
+        assert_eq!(tools.len(), 44);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -776,7 +782,18 @@ mod tests {
                 "behavior_binding_set",
                 "behavior_binding_remove",
                 "behavior_property",
-                "behavior_property_set"
+                "behavior_property_set",
+                "behavior_runtime_inspect",
+                "behavior_runtime_reset",
+                "behavior_runtime_play",
+                "behavior_runtime_pause",
+                "behavior_runtime_step",
+                "behavior_runtime_stop",
+                "behavior_breakpoints",
+                "behavior_breakpoint_set",
+                "behavior_debug_inspect",
+                "behavior_debug_next",
+                "behavior_debug_continue"
             ]
         );
         for tool in tools {
@@ -797,6 +814,21 @@ mod tests {
         let base =
             json!({"expected_session_token":"session","expected_revision":"18446744073709551615"});
         assert!(valid_arguments("undo", &base));
+        let mut debug = base.clone();
+        debug["expected_run_id"] = json!("1:2:3");
+        debug["expected_stop_id"] = json!("18446744073709551615");
+        assert!(valid_arguments("behavior_debug_next", &debug));
+        debug["expected_stop_id"] = json!("01");
+        assert!(!valid_arguments("behavior_debug_next", &debug));
+        debug["expected_stop_id"] = json!("1");
+        debug["expression"] = json!("do_not_evaluate()");
+        assert!(!valid_arguments("behavior_debug_next", &debug));
+        assert!(valid_arguments(
+            "behavior_runtime_inspect",
+            &json!({"operation_id":"2","offset":"0"})
+        ));
+        assert!(!valid_arguments("behavior_runtime_step", &base));
+
         for bad in [
             json!(1),
             json!(null),

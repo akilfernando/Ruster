@@ -25,3 +25,6 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0019](0019-provisional-lua-backend.md) | Provisional isolated Lua backend, preserving language-neutral data |
 | [0020](0020-local-recovery-checkpoints.md) | Detached recovery checkpoints and measured serial-worker ownership |
 | [0021](0021-editor-behavior-runtime.md) | Embedded behavior editing, keyed owning VM worker and bounded data parity |
+| [0022](0022-independent-scene5-consumer.md) | Non-game Scene5 consumer and selected independent app exports |
+| [0023](0023-derived-behavior-working-copies.md) | Derived working copies, explicit conflicts and saved-base authority |
+| [0024](0024-owned-behavior-debug-stops.md) | Owned debug stops, exact stepping and asynchronous cancellation |

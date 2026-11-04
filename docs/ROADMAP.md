@@ -167,7 +167,7 @@ M7 delivered scope: ruster-app shared host with application-owned behavior, read
 
 **User outcome:** demonstrate that the kit supports applications with genuinely different behavior and data needs.
 
-**Deliverable:** a small non-game application using the same kit as M7. Define its requirements in M5 so they guide extraction, then implement it here. A simple object/product configurator is a candidate; exact sample selection remains open.
+**Deliverable:** a small non-game application using the same kit as M7. Define its requirements in M5 so they guide extraction, then implement it here. The selected implementation is Motion Lab’s non-game Scene5 motion-comparison consumer; decision0022 records why it supersedes the earlier configurator candidate.
 
 **Demo:** inspect and change application data without player, score or win-state concepts, then package/run it independently. An independent developer modifies both examples.
 
@@ -188,6 +188,8 @@ Report reuse, editor baseline and behavior/tooling as separate open gates. This 
 **Exit criteria:** no copying engine internals into the second example; shared mechanisms remain domain-neutral; exposed coupling is corrected; representative performance and iteration costs are recorded. Two differently presented logistics demos alone do not establish broad reuse.
 
 **Boundaries:** no enterprise connector, CAD/BIM, certified simulation or digital-twin synchronization promise. Live external datasets are unnecessary for this proof.
+
+M8 completion,2026-11-04: independent application changes/exports/relocation, allocated generic editor authoring/recovery, actual Zed/LuaLS and native/SDK debugging passed within the recorded Linux development scope. See [completion evaluation](ROADMAP-REVIEW.md#m8-completion-evaluation--2026-11-04) and [current handoff](STATUS.md). The preceding implementation sequence is historical; no allocated M8 feature was silently moved to M9. Full human/platform/adoption evidence remains separate. The user deferred M9 and this run stops at M8.
 
 ## M9 Public alpha candidate
 

@@ -232,6 +232,33 @@ struct Clipboard {
     objects: Vec<Object>,
 }
 
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum AngleUnit {
+    #[default]
+    Radians,
+    Degrees,
+}
+impl AngleUnit {
+    pub fn display(self, radians: f32) -> f32 {
+        match self {
+            Self::Radians => radians,
+            Self::Degrees => radians.to_degrees(),
+        }
+    }
+    pub fn radians(self, value: f32) -> f32 {
+        match self {
+            Self::Radians => value,
+            Self::Degrees => value.to_radians(),
+        }
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Radians => "Rotation (radians · recovered draft)",
+            Self::Degrees => "Rotation (degrees)",
+        }
+    }
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DraftSnapshot {
@@ -240,6 +267,8 @@ pub(super) struct DraftSnapshot {
     edited: [bool; 9],
     revision: Option<u64>,
     delta: [String; 3],
+    #[serde(default)]
+    rotation_unit: AngleUnit,
 }
 pub(super) struct Manipulation {
     pub ids: Vec<String>,
@@ -253,6 +282,7 @@ pub(super) struct Manipulation {
     edited: [bool; 9],
     precision_revision: Option<u64>,
     precision_had_focus: bool,
+    rotation_unit: AngleUnit,
     pub snap: bool,
     pub snap_distance: f32,
     pub delta: [String; 3],
@@ -276,6 +306,7 @@ impl Default for Manipulation {
             edited: [false; 9],
             precision_revision: None,
             precision_had_focus: false,
+            rotation_unit: AngleUnit::Degrees,
             snap: false,
             snap_distance: 0.5,
             delta: std::array::from_fn(|_| "0".into()),
@@ -304,10 +335,11 @@ impl Manipulation {
             edited: self.edited,
             revision: self.precision_revision,
             delta: self.delta.clone(),
+            rotation_unit: self.rotation_unit,
         }
     }
     pub fn restore_drafts(&mut self, scene: &Scene, draft: DraftSnapshot) -> Result<(), String> {
-        self.reset_precision(scene);
+        self.reset_precision_unit(scene, draft.rotation_unit);
         if draft
             .precision
             .iter()
@@ -333,6 +365,9 @@ impl Manipulation {
         self.edited = draft.edited;
         self.precision_revision = draft.revision;
         self.delta = draft.delta;
+        if !self.precision_pending() {
+            self.reset_precision(scene);
+        }
         self.draft_changed();
         Ok(())
     }
@@ -340,6 +375,10 @@ impl Manipulation {
         self.edited.iter().any(|v| *v)
     }
     pub fn reset_precision(&mut self, scene: &Scene) {
+        self.reset_precision_unit(scene, AngleUnit::Degrees);
+    }
+    fn reset_precision_unit(&mut self, scene: &Scene, unit: AngleUnit) {
+        self.rotation_unit = unit;
         self.draft_changed();
         self.edited = [false; 9];
         self.precision_revision = None;
@@ -366,7 +405,15 @@ impl Manipulation {
             self.precision[i] = if self.mixed[i] {
                 String::new()
             } else {
-                first.map(|v| v[i].to_string()).unwrap_or_default()
+                first
+                    .map(|v| {
+                        if (3..6).contains(&i) {
+                            unit.display(v[i]).to_string()
+                        } else {
+                            v[i].to_string()
+                        }
+                    })
+                    .unwrap_or_default()
             };
         }
     }
@@ -405,7 +452,10 @@ impl Manipulation {
                         if i < 3 {
                             next.translation[i] = value;
                         } else if i < 6 {
-                            next.rotation[i - 3] = value;
+                            let axis = i - 3;
+                            if value != self.rotation_unit.display(next.rotation[axis]) {
+                                next.rotation[axis] = self.rotation_unit.radians(value);
+                            }
                         } else {
                             next.scale[i - 6] = value;
                         }
@@ -438,7 +488,7 @@ impl Manipulation {
         if self.mixed.iter().any(|mixed| *mixed) {
             ui.small("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected objects; other components keep their individual values.");
         }
-        for (row, label) in ["Position", "Rotation (radians)", "Scale"]
+        for (row, label) in ["Position", self.rotation_unit.label(), "Scale"]
             .into_iter()
             .enumerate()
         {
@@ -870,6 +920,57 @@ mod tests {
             let next = (DQuat::from_rotation_z(0.01) * q).normalize();
             assert_orientation(nearby_euler(next, original), next);
         }
+    }
+
+    #[test]
+    fn degree_precision_preserves_untouched_bits_and_legacy_radian_drafts() {
+        let mut scene = Scene::demo();
+        scene.objects[0].transform.rotation = [0.2, 0.3, 0.4];
+        let mut session = Session::new(scene).unwrap();
+        let mut m = Manipulation {
+            ids: vec!["left".into()],
+            ..Default::default()
+        };
+        m.reset_precision(session.scene());
+        assert_eq!(m.precision[3], 0.2_f32.to_degrees().to_string());
+        let original = session.scene().objects[0].transform.clone();
+        m.edited[3] = true;
+        m.precision_revision = Some(0);
+        m.apply_precision(&mut session).unwrap();
+        assert_eq!(
+            session.undo_len(),
+            0,
+            "same displayed angle is a bit-exact no-op"
+        );
+        m.precision[4] = "90".into();
+        m.edited[4] = true;
+        m.precision_revision = Some(0);
+        m.apply_precision(&mut session).unwrap();
+        let after = &session.scene().objects[0].transform;
+        assert_eq!(
+            after.rotation,
+            [
+                original.rotation[0],
+                std::f32::consts::FRAC_PI_2,
+                original.rotation[2]
+            ]
+        );
+        assert_eq!(session.undo_len(), 1);
+        m.reset_precision_unit(session.scene(), AngleUnit::Radians);
+        let mut old = serde_json::to_value(m.snapshot_drafts()).unwrap();
+        old.as_object_mut().unwrap().remove("rotation_unit");
+        old["precision"][3] = "-".into();
+        old["edited"][3] = true.into();
+        old["revision"] = session.scene().revision.into();
+        m.restore_drafts(session.scene(), serde_json::from_value(old).unwrap())
+            .unwrap();
+        assert_eq!(m.precision[3], "-");
+        assert!(m.rotation_unit.label().contains("radians"));
+        assert!(m.apply_precision(&mut session).is_err());
+        m.precision[3] = "1".into();
+        m.apply_precision(&mut session).unwrap();
+        assert_eq!(session.scene().objects[0].transform.rotation[0], 1.0);
+        assert_eq!(m.rotation_unit, AngleUnit::Degrees);
     }
 
     // Unique authoring risk: mixed fields replace only explicit components,

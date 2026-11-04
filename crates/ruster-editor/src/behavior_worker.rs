@@ -9,6 +9,9 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use ruster_behavior::debug::{
+    Breakpoint, DebugError, DebugHandle, DebugRunId, DebugSession, Resume, StopId, StopSnapshot,
+};
 use ruster_behavior::{Diagnostic, Engine, Limits, Runtime};
 use ruster_scene::{Authoring, Scene};
 
@@ -164,6 +167,33 @@ impl std::fmt::Display for RequestError {
         })
     }
 }
+/// Configured points are hash-bound. ResetRequired is explicit: an empty Reset
+/// retains count-only hooks; adding its first point does not silently arm a VM.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum BreakpointState {
+    Armed,
+    ResetRequired,
+    Disabled,
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DebugRequestError {
+    StaleKey,
+    Busy,
+    Unavailable,
+    Disconnected,
+    Backend(DebugError),
+}
+impl std::fmt::Display for DebugRequestError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::StaleKey => f.write_str("Debugger request belongs to an obsolete run."),
+            Self::Busy => f.write_str("Debugger control is busy; retry this request."),
+            Self::Unavailable => f.write_str("No armed debugger for this run; Reset is required."),
+            Self::Disconnected => f.write_str("Behavior worker disconnected."),
+            Self::Backend(error) => write!(f, "{error}"),
+        }
+    }
+}
 #[cfg(test)]
 struct TestGate {
     reached: SyncSender<()>,
@@ -182,12 +212,27 @@ struct Shared {
     cancel: Arc<AtomicBool>,
     shutdown: AtomicBool,
     latest: Mutex<Option<Frame>>,
+    debugger: Mutex<Option<(RunKey, DebugHandle)>>,
+    // A generation mismatch logically clears points on New/Open. Epoch/revision
+    // changes in the same document preserve the exact hash-bound configuration.
+    breakpoints: Mutex<(u64, Vec<Breakpoint>)>,
     #[cfg(test)]
     activation_gate: Mutex<Option<TestGate>>,
     #[cfg(test)]
     ack_full_gate: Mutex<Option<TestGate>>,
     #[cfg(test)]
     park_gate: Mutex<Option<TestGate>>,
+}
+impl Shared {
+    fn wake_debugger(&self) {
+        // This short ownership mutex never spans Lua evaluation, snapshot capture,
+        // channel sends or I/O. Cancellation must wake even when command queues
+        // are full; a failed try_lock would leave a paused hook stranded.
+        let slot = self.debugger.lock().unwrap_or_else(|p| p.into_inner());
+        if let Some((_, handle)) = slot.as_ref() {
+            handle.wake_cancelled();
+        }
+    }
 }
 pub(super) struct Worker {
     commands: Option<SyncSender<Command>>,
@@ -213,6 +258,8 @@ impl Worker {
             cancel: Arc::new(AtomicBool::new(false)),
             shutdown: AtomicBool::new(false),
             latest: Mutex::new(None),
+            debugger: Mutex::new(None),
+            breakpoints: Mutex::new((0, Vec::new())),
             #[cfg(test)]
             activation_gate: Mutex::new(None),
             #[cfg(test)]
@@ -269,9 +316,109 @@ impl Worker {
         key == self.current && self.shared.epoch.load(Ordering::SeqCst) == key.reset_epoch
     }
     fn wake(&self) {
+        if self.shared.cancel.load(Ordering::SeqCst) || self.shared.shutdown.load(Ordering::SeqCst)
+        {
+            self.shared.wake_debugger();
+        }
         if let Some(wake) = &self.wake {
             let _ = wake.try_send(());
         }
+    }
+    fn debug_key(&self, key: RunKey) -> Result<(), DebugRequestError> {
+        if !self.accepts(key) {
+            return Err(DebugRequestError::StaleKey);
+        }
+        if self.shared.shutdown.load(Ordering::SeqCst) {
+            return Err(DebugRequestError::Disconnected);
+        }
+        Ok(())
+    }
+    /// Copies bounded configuration only on explicit UI action. Caller obtains
+    /// source IDs/hashes from the current authoring document, never source labels.
+    pub fn set_breakpoints(
+        &self,
+        key: RunKey,
+        points: Vec<Breakpoint>,
+    ) -> Result<BreakpointState, DebugRequestError> {
+        self.debug_key(key)?;
+        ruster_behavior::debug::validate_breakpoints(&points)
+            .map_err(DebugRequestError::Backend)?;
+        let mut configured = self
+            .shared
+            .breakpoints
+            .try_lock()
+            .map_err(|_| DebugRequestError::Busy)?;
+        let slot = self
+            .shared
+            .debugger
+            .try_lock()
+            .map_err(|_| DebugRequestError::Busy)?;
+        self.debug_key(key)?;
+        let state = if let Some((_, handle)) = slot.as_ref().filter(|(run, _)| *run == key) {
+            handle
+                .set_breakpoints(points.clone())
+                .map_err(DebugRequestError::Backend)?;
+            BreakpointState::Armed
+        } else if points.is_empty() {
+            BreakpointState::Disabled
+        } else {
+            BreakpointState::ResetRequired
+        };
+        *configured = (key.generation, points);
+        Ok(state)
+    }
+    #[cfg(test)]
+    pub fn configured_breakpoints(
+        &self,
+        key: RunKey,
+    ) -> Result<Vec<Breakpoint>, DebugRequestError> {
+        self.debug_key(key)?;
+        let configured = self
+            .shared
+            .breakpoints
+            .try_lock()
+            .map_err(|_| DebugRequestError::Busy)?;
+        Ok(if configured.0 == key.generation {
+            configured.1.clone()
+        } else {
+            Vec::new()
+        })
+    }
+    /// Owned snapshots are safe to render, but only this exact run/stop can resume.
+    pub fn debug_stop(&self, key: RunKey) -> Result<Option<Arc<StopSnapshot>>, DebugRequestError> {
+        self.debug_key(key)?;
+        let slot = self
+            .shared
+            .debugger
+            .try_lock()
+            .map_err(|_| DebugRequestError::Busy)?;
+        let stop = slot
+            .as_ref()
+            .filter(|(run, _)| *run == key)
+            .and_then(|(_, handle)| handle.stop());
+        self.debug_key(key)?;
+        Ok(stop)
+    }
+    pub fn debug_resume(
+        &self,
+        key: RunKey,
+        stop: StopId,
+        action: Resume,
+    ) -> Result<(), DebugRequestError> {
+        self.debug_key(key)?;
+        let slot = self
+            .shared
+            .debugger
+            .try_lock()
+            .map_err(|_| DebugRequestError::Busy)?;
+        self.debug_key(key)?;
+        let (_, handle) = slot
+            .as_ref()
+            .filter(|(run, _)| *run == key)
+            .ok_or(DebugRequestError::Unavailable)?;
+        handle
+            .resume(stop, action)
+            .map_err(DebugRequestError::Backend)
     }
     pub fn try_request(&self, command: Command) -> Result<(), RequestError> {
         let key = command.key();
@@ -419,6 +566,10 @@ impl Execution {
         self.due = None;
         self.runtime = None;
         self.key = None;
+        if let Some(engine) = self.engine.as_mut() {
+            let _ = engine.set_debugger(None);
+        }
+        *shared.debugger.lock().unwrap_or_else(|p| p.into_inner()) = None;
         *shared.latest.lock().unwrap_or_else(|p| p.into_inner()) = None;
     }
 }
@@ -530,6 +681,46 @@ fn process(
             if !active(shared, key) || shared.cancel.load(Ordering::SeqCst) {
                 return None;
             }
+            let points = {
+                let configured = shared.breakpoints.lock().unwrap_or_else(|p| p.into_inner());
+                if configured.0 == key.generation {
+                    configured.1.clone()
+                } else {
+                    Vec::new()
+                }
+            };
+            let (session, handle) =
+                if points.is_empty() {
+                    (None, None)
+                } else {
+                    match DebugSession::new(
+                        DebugRunId::new(key.reset_epoch),
+                        shared.cancel.clone(),
+                        points,
+                        repaint.clone(),
+                    ) {
+                        Ok((session, handle)) => (Some(session), Some(handle)),
+                        Err(_) => return Some(reject(
+                            execution,
+                            key,
+                            operation,
+                            "Invalid breakpoint configuration; repair source/hash/line and Reset.",
+                        )),
+                    }
+                };
+            let engine = execution.engine.as_mut().expect("engine constructed above");
+            if let Err(diagnostic) = engine.set_debugger(session) {
+                return Some(Event::Error {
+                    key,
+                    operation,
+                    diagnostic,
+                    last_good: execution.info(),
+                });
+            }
+            // Install first: dropping a replaced client handle disconnects only its
+            // former session and cannot cancel the newly attached VM session.
+            *shared.debugger.lock().unwrap_or_else(|p| p.into_inner()) =
+                handle.map(|handle| (key, handle));
             match execution
                 .engine
                 .as_mut()
@@ -617,13 +808,29 @@ fn process(
 }
 fn step(execution: &mut Execution, shared: &Shared, repaint: &Option<Repaint>) -> Option<Event> {
     let key = execution.key?;
+    let was_playing = execution.playing;
     let result = execution.engine.as_mut()?.step(execution.runtime.as_mut()?);
     if !active(shared, key) {
         return None;
     }
     match result {
         Ok(()) => {
+            let pause = execution
+                .engine
+                .as_ref()
+                .is_some_and(Engine::take_debug_pause_requested);
+            if pause {
+                execution.playing = false;
+                execution.due = None;
+            }
             frame(shared, execution, repaint);
+            if pause && was_playing {
+                return Some(Event::State {
+                    key,
+                    state: State::Paused,
+                    last_good: execution.info(),
+                });
+            }
             Some(Event::Step {
                 key,
                 run: execution.info().expect("step retains runtime"),
@@ -847,6 +1054,214 @@ mod tests {
             matches!(wait_event(worker,pulses),Event::Reset{key:accepted,run:RunInfo{tick:0,..}} if accepted==key)
         );
         key
+    }
+
+    fn debug_fixture() -> (Arc<Scene>, Arc<Authoring>, Breakpoint) {
+        let (scene, authoring) = fixture(false);
+        let mut authoring = (*authoring).clone();
+        let source = authoring.sources.get_mut("source").unwrap();
+        source.text = "return {update=function(o,p,dt)\n o.translation[1]=o.translation[1]+dt\n return o\nend}".into();
+        let point = Breakpoint {
+            source_id: "source".into(),
+            source_hash: ruster_behavior::source_hash(&source.text),
+            line: 3,
+            binding_id: Some("binding-a".into()),
+        };
+        (scene, Arc::new(authoring), point)
+    }
+    fn wait_stop(worker: &Worker, pulses: &Receiver<()>, key: RunKey) -> Arc<StopSnapshot> {
+        let until = Instant::now() + Duration::from_secs(5);
+        loop {
+            match worker.debug_stop(key) {
+                Ok(Some(stop)) => return stop,
+                Ok(None) | Err(DebugRequestError::Busy) => {}
+                Err(error) => panic!("{error}"),
+            }
+            pulses
+                .recv_timeout(until.saturating_duration_since(Instant::now()))
+                .expect("debug stop deadline");
+        }
+    }
+    // Unique actor boundary: a hook pause exposes no staged viewport; Next at
+    // root return pauses automatic Play only after both bindings commit. Config
+    // survives same-document Reset and old run/stop identities cannot resume it.
+    #[test]
+    fn debugger_next_commits_atomically_and_configuration_requires_explicit_reset() {
+        let (mut worker, pulses) = worker(Limits::default());
+        let (scene, authoring, point) = debug_fixture();
+        let initial = reset(&mut worker, &pulses, 1, scene.clone(), authoring.clone());
+        assert_eq!(
+            worker
+                .set_breakpoints(initial, vec![point.clone()])
+                .unwrap(),
+            BreakpointState::ResetRequired
+        );
+        assert!(worker.debug_stop(initial).unwrap().is_none());
+        let key = reset(&mut worker, &pulses, 1, scene.clone(), authoring.clone());
+        assert_eq!(
+            worker.configured_breakpoints(key).unwrap().as_slice(),
+            std::slice::from_ref(&point)
+        );
+        worker.try_request(Command::Play { key }).unwrap();
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::State {
+                state: State::Playing,
+                ..
+            }
+        ));
+        let stopped = wait_stop(&worker, &pulses, key);
+        assert_eq!(stopped.run, DebugRunId::new(key.reset_epoch));
+        assert_eq!(stopped.committed_tick, 0);
+        let before = worker.last_good_frame().unwrap();
+        assert_eq!(before.tick, 0);
+        assert_eq!(*before.scene, *scene);
+        worker
+            .debug_resume(key, stopped.stop, Resume::Next)
+            .unwrap();
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::State {
+                state: State::Paused,
+                last_good: Some(RunInfo { tick: 1, .. }),
+                ..
+            }
+        ));
+        let committed = worker.last_good_frame().unwrap();
+        assert_eq!(committed.tick, 1);
+        assert!(committed
+            .scene
+            .objects
+            .iter()
+            .all(|o| (o.transform.translation[0] - 1.0 / 60.0).abs() < 1e-6));
+        assert!(matches!(
+            worker.debug_resume(key, stopped.stop, Resume::Continue),
+            Err(DebugRequestError::Backend(DebugError::StaleStop))
+        ));
+        worker.try_request(Command::Step { key }).unwrap();
+        let second = wait_stop(&worker, &pulses, key);
+        assert_ne!(second.stop, stopped.stop);
+        worker
+            .debug_resume(key, second.stop, Resume::Continue)
+            .unwrap();
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::Step {
+                run: RunInfo { tick: 2, .. },
+                ..
+            }
+        ));
+        // Removing points updates an armed session; Reset then restores count-only.
+        assert_eq!(
+            worker.set_breakpoints(key, vec![]).unwrap(),
+            BreakpointState::Armed
+        );
+        let quiet = reset(&mut worker, &pulses, 1, scene, authoring);
+        assert_eq!(
+            worker.set_breakpoints(quiet, vec![]).unwrap(),
+            BreakpointState::Disabled
+        );
+        assert_eq!(
+            worker.debug_resume(key, second.stop, Resume::Next),
+            Err(DebugRequestError::StaleKey)
+        );
+        worker.set_breakpoints(quiet, vec![point]).unwrap();
+        let replaced = worker.advance(2, 0).unwrap();
+        assert!(worker.configured_breakpoints(replaced).unwrap().is_empty());
+        close(&mut worker);
+    }
+    // Unique actor boundary: queued controls cannot wake a hook; cancellation
+    // must notify its separate condition variable before any queue capacity exists.
+    #[test]
+    fn paused_debugger_stop_invalidate_and_shutdown_wake_without_actor_service() {
+        for action in 0..3 {
+            let (mut worker, pulses) = worker(Limits::default());
+            let (scene, authoring, point) = debug_fixture();
+            let key = worker.advance(3, 0).unwrap();
+            assert_eq!(
+                worker.set_breakpoints(key, vec![point]).unwrap(),
+                BreakpointState::ResetRequired
+            );
+            worker
+                .try_request(Command::Reset {
+                    key,
+                    scene: scene.clone(),
+                    authoring: authoring.clone(),
+                })
+                .unwrap();
+            assert!(matches!(wait_event(&worker, &pulses), Event::Reset { .. }));
+            worker.try_request(Command::Step { key }).unwrap();
+            let stopped = wait_stop(&worker, &pulses, key);
+            assert_eq!(*worker.last_good_frame().unwrap().scene, *scene);
+            match action {
+                0 => {
+                    worker.try_request(Command::Play { key }).unwrap();
+                    worker.try_request(Command::Pause { key }).unwrap();
+                    // Seed real priority capacity while Lua cannot service it.
+                    // These entries become stale at Stop's epoch publication.
+                    for _ in 0..CONTROL_CAPACITY {
+                        assert!(worker
+                            .controls
+                            .as_ref()
+                            .unwrap()
+                            .try_send(Command::Invalidate { key })
+                            .is_ok());
+                    }
+                    let result = worker.stop_immediate(4, 0);
+                    let current = worker.current_key();
+                    assert!(worker.shared.cancel.load(Ordering::SeqCst));
+                    if let Err(error) = result {
+                        assert_eq!(error.kind, RequestErrorKind::Busy);
+                        let until = Instant::now() + Duration::from_secs(5);
+                        loop {
+                            match worker.try_request(Command::Stop { key: current }) {
+                                Ok(()) => break,
+                                Err(error) if error.kind == RequestErrorKind::Busy => {
+                                    assert!(Instant::now() < until);
+                                    thread::park_timeout(Duration::from_millis(1));
+                                }
+                                Err(error) => panic!("{error}"),
+                            }
+                        }
+                    }
+                    assert_eq!(
+                        worker.debug_resume(key, stopped.stop, Resume::Continue),
+                        Err(DebugRequestError::StaleKey)
+                    );
+                    assert!(matches!(
+                        wait_event(&worker, &pulses),
+                        Event::State {
+                            state: State::Stopped,
+                            ..
+                        }
+                    ));
+                    assert!(worker.last_good_frame().is_none());
+                    close(&mut worker);
+                }
+                1 => {
+                    let invalidated = worker.advance(3, 1).unwrap();
+                    worker
+                        .try_request(Command::Invalidate { key: invalidated })
+                        .unwrap();
+                    assert!(matches!(
+                        wait_event(&worker, &pulses),
+                        Event::State {
+                            state: State::Invalidated,
+                            last_good: Some(RunInfo { tick: 0, .. }),
+                            ..
+                        }
+                    ));
+                    assert_eq!(
+                        worker.debug_resume(key, stopped.stop, Resume::Next),
+                        Err(DebugRequestError::StaleKey)
+                    );
+                    assert_eq!(*worker.last_good_frame().unwrap().scene, *scene);
+                    reset(&mut worker, &pulses, 3, scene, authoring);
+                    close(&mut worker);
+                }
+                _ => close(&mut worker),
+            }
+        }
     }
 
     // Unique risk: Stop between the initial epoch check and cancel clear must not

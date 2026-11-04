@@ -31,3 +31,8 @@ A synchronous VM path is smaller initially but blocks interaction on script work
 ## Evidence and remaining gates
 
 `python3 scripts/check.py --base origin/main` passed full workspace tests,20tooling, formatting, strict Clippy and Markdown in29.02s; editor52tests include worker ordering/boundedness/rollback, real-egui focus/draft recovery and keyed frame/resource pairing. The official Python MCP SDK2.3.0 discovered33tools, round-tripped16KiB control-bearing source and1024-byte typed text, rejected stale/invalid input and restored authored state through3Undo operations without Save. The [native journey](../evidence/M8-behavior-native.md) passed attachment/properties/run/save-invalid/reopen/repair and source-draft crash/restore, with exact authored bytes protected. A later static Playing-label correction passed five focused UI tests and strict editor Clippy; unchanged lifecycle evidence is reused. Physical focused input/human familiarity, external working-copy conflicts/LuaLS/Zed and bounded debugger acceptance remain separate. [The implementation plan](../BEHAVIOR-AUTHORING.md) owns those next stages. No performance superiority, OS sandbox or hard wall-time guarantee follows from this design.
+
+
+## M8 closeout supersession — 2026-11-04
+
+Recovery-v3 now explicitly tags degree/radian precision units while retaining valid legacy v1/v2 payloads and exact invalid radian drafts. This supersedes the v2-only current format described above; source/property authority is unchanged. Derived working copies and owned debugging are delivered under decisions[0023](0023-derived-behavior-working-copies.md)/[0024](0024-owned-behavior-debug-stops.md), with final native/SDK evidence. Full focused human/platform acceptance remains separate.

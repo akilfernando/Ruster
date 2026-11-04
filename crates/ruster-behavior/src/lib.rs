@@ -192,6 +192,7 @@ pub struct Engine {
     limits: Limits,
     cache: BTreeMap<String, CachedMain>,
     cancel: Arc<AtomicBool>,
+    hook_ready: Cell<bool>,
     binding_count: Rc<Cell<u64>>,
     tick_count: Rc<Cell<u64>>,
     failure: Rc<Cell<Option<DiagnosticCode>>>,
@@ -219,6 +220,7 @@ impl Engine {
             limits,
             cache: BTreeMap::new(),
             cancel,
+            hook_ready: Cell::new(false),
             binding_count,
             tick_count,
             failure,
@@ -252,6 +254,11 @@ impl Engine {
             .is_some_and(debug::DebugSession::take_pause_requested)
     }
     fn install_hook(&self, armed: bool) -> Result<(), Diagnostic> {
+        // mlua builds the hook wrapper through protected Lua calls. Retire an old
+        // cancelled hook before those calls, or its callback can reject the switch.
+        // If allocation fails, begin() refuses unbudgeted execution until repaired.
+        self.hook_ready.set(false);
+        self.lua.remove_hook();
         let (c, b, t, f, debugger) = (
             self.cancel.clone(),
             self.binding_count.clone(),
@@ -300,7 +307,11 @@ impl Engine {
                 }
                 Ok(VmState::Continue)
             })
-            .map_err(|e| Diagnostic::plain(DiagnosticCode::Runtime, Phase::Setup, &e.to_string()))
+            .map_err(|e| {
+                Diagnostic::plain(DiagnosticCode::Runtime, Phase::Setup, &e.to_string())
+            })?;
+        self.hook_ready.set(true);
+        Ok(())
     }
     fn begin_debug(&self, tick: u64, suppressed: bool) {
         if let Some(session) = self.debugger.borrow_mut().as_mut() {
@@ -322,6 +333,13 @@ impl Engine {
         self.lua.used_memory()
     }
     fn begin(&self) -> Result<(), Diagnostic> {
+        if !self.hook_ready.get() {
+            return Err(Diagnostic::plain(
+                DiagnosticCode::Runtime,
+                Phase::Setup,
+                "instruction hook unavailable; repair debugger setup before execution",
+            ));
+        }
         self.binding_count.set(0);
         self.tick_count.set(0);
         self.failure.set(None);
