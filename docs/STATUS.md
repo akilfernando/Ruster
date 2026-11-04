@@ -4,48 +4,51 @@ Last updated: 2026-11-04.
 
 ## Requirements and authorization
 
-Rust, Vulkan, intended open source, native MCP, human/AI workflows, application-neutral simulation/visualization, developer experience, current documentation and proportionate verification are confirmed priorities. The user authorized M3 after M0–M2. **M3 is complete within its local Linux authoring scope.** The revised roadmap is accepted; M4 is the next development scope and has not been implemented.
+Rust, Vulkan, intended open source, native MCP, human/AI workflows, application-neutral simulation/visualization, developer experience, documentation continuity and proportionate verification are confirmed priorities. The user authorized completing M5. **M0–M5 are complete within their documented local scopes.** M5 is a Linux procedural-scene foundation, not a general production engine. M6 content/iteration is next in the accepted roadmap.
 
-## Implemented and demonstrated
+## Implemented state
 
-- M0: Rust workspace, logistics seed, development/testing skills and affected-package runner.
-- M1: validated JSON v1 scenarios, stable authored ID, bounded persisted undo/redo, revisions, atomic saves and cooperating-writer CLI edits.
-- M2: direct ash Vulkan schematic viewer with playback, step/reset, camera, diagnostics and replay-equivalence smoke.
-- M3: native egui editor rendered through Vulkan, selectable hierarchy/schematic, inspector, validation/recovery, New/Duplicate/Open/Save/Save As, authored undo/redo and explicit runtime Reset. Shared ProjectSession tracks full saved baselines and preserves work on conflicting/failed saves. CLI/editor share a nonblocking lock protocol.
-- Viewer redraw now sleeps when idle and caches unchanged geometry. Matched release samples on this workstation reduced median paused CPU from 9.66% to 0.67% of one core; this tiny-scene result is not a scalability or power claim.
+- M0–M4: logistics CLI/persisted authoring, direct ash schematic viewer, egui Vulkan scenario editor and native MCP proof with shared history/draft/conflict guards. Legacy logistics-v1 format and workflows remain supported. See [M3 evidence](evidence/M3.md), [M4 evidence](evidence/M4.md) and [history](HISTORY.md).
+- M5 scene: neutral `ruster-scene` crate, stable scene/object IDs, bounded vector storage, validated translation/fixed-axis rotation/positive scale and color, revision-aware transform edits and bounded persisted delta history, atomic/conflict-aware saves and separate static Preview lifecycle. CLI supports create/inspect/full-transform/undo/redo/save/reopen/run.
+- M5 rendering: `ruster-render` shares one actual wgpu/Vulkan cube/depth/camera/picking path between standalone and scene editor. New3D work uses this path; the old ash schematic remains legacy/reference support. Optional asynchronous GPU timestamps and bounded CPU/resource diagnostics are implemented.
+- M5 scene editor: hierarchy/viewport selection, explicit text transform drafts with invalid-input preservation, Apply/Revert, shared Undo/Redo, save/open/conflict/unsaved-close recovery, static preview step/run/reset and authored/preview view selection. Native MCP adds paginated scene inspection, transform/history and isolated scene replay over the same displayed session.
 
-Run `cargo run --locked -p ruster-editor` from the repository root. Read the [editor quickstart](../crates/ruster-editor/README.md), [M3 evidence](evidence/M3.md), [viewer measurements](evidence/m3-performance.md) and [roadmap](ROADMAP.md). [Decision 0004](decisions/0004-editor-session-and-ui.md) explains the separate editor/viewer graphics paths and shared authoring boundary.
+New generic scene format `ruster-scene` version1 is explicitly separate from logistics scenario version1; wrong formats are rejected without silent migration. Neutral scene/render crates do not depend on logistics core, editor or MCP. See [decision0006](decisions/0006-scene-and-shared-3d.md), [application briefs](M5-BRIEFS.md) and [M5 evidence](evidence/M5.md). These scope/storage/backend choices are agent-selected defaults under authorized development, not newly asserted user preferences.
 
-## Verified
+## Run and inspect
 
-Final integrated local gate: 13 tooling tests, 26 Rust tests, formatting, strict Clippy and docs checks; 3.53 seconds warm after the recovery fix. Optional inspection-feature checks also passed. An independent agent completed actual authoring, error/recovery, keyboard, save/reopen and unsaved-close journeys; framebuffer and compact layout were inspected. A stale validation message found during that journey was fixed and confirmed in the native UI. This is agent-assisted engineering evidence, not an external human usability study.
+```sh
+cargo run --locked -p ruster-editor -- --scene examples/arrangement.scene.json
+cargo run --locked -p ruster-render -- --scene examples/arrangement.scene.json --ticks 10
+cargo run --locked -p ruster-scene -- run examples/arrangement.scene.json 10
+```
 
-The ash viewer's 90-frame synchronization-validation smoke passed exact headless replay with zero warnings/errors. The editor ran on NVIDIA/Vulkan with Khronos synchronization validation, resize and shutdown; no validation defect was reported. Expected loader notices about enabling the layer are retained in evidence. Windows GNU compilation was assessed, but no Windows runtime or linked package is verified. Actual minimize state remains unverified on this compositor.
+Use a disposable copy when editing the checked-in example. Legacy scenario mode remains `cargo run --locked -p ruster-editor`. Read the [editor quickstart](../crates/ruster-editor/README.md), [scene API](../crates/ruster-scene/README.md), [renderer guide](../crates/ruster-render/README.md) and [MCP guide](../crates/ruster-mcp/README.md). Opt-in MCP needs RUSTER_MCP_ENABLE=1 plus an explicitly configured private socket; normal human workflows do not require it.
 
-## Roadmap review
+## Verification
 
-The user accepted the post-M3 revision and continuation. [ROADMAP.md](ROADMAP.md) now records M4–M9: bounded MCP proof, shared scene/3D, content, standalone kit, independent reuse and alpha. The [review](ROADMAP-REVIEW.md) preserves the rationale. M4 is the active next development scope; later phases remain sequential.
+Final source gate `python3 scripts/check.py` against HEAD selected full workspace for shared workspace/lock/script changes:48 Rust tests,13 tooling tests, formatting, strict Clippy and Markdown checks passed in7.16s warm. Inspection-feature editor build and final official Python MCP SDK2.3.0 scene smoke passed. Documentation-only final updates use link/whitespace checks, reusing valid source evidence. The subsequently generated checked-in scene example was loaded/inspected through the real CLI.
 
-## Next milestone
+An independent Terra native journey passed actual3D selection, transform/draft rejection/recovery, shared Undo, human/agent conflicts, preview Step10/Reset equivalence, save/reopen and stale session rejection. Root verified actual1100×760 compositor resize and Close/Cancel/Discard recovery, then repeated SDK/native close on the final editor build. This is instrumented agent evidence, not external human usability validation.
 
-M4: native MCP adapter over the same authored operations, with bounded discovery/inspection/edit/run results, stale-state protection, a tested real client and an interleaved human/agent conflict demonstration. Keep the human-only workflow complete. First produce the live-session/command contract: editor versus headless ownership, expected revisions, unapplied drafts, runtime ownership and how agent edits appear in the UI. Then choose transport/version/capability boundaries and implement the narrow client-backed proof. Do not confuse optional egui test inspection with MCP.
+Khronos synchronization validation covered native standalone3D rendering and editor edit/resize/shutdown on RTX4060 Laptop/NVIDIA615.78.08 Vulkan. No validation/synchronization defect was reported; expected loader notices are retained. Saved revision3 preview fingerprint `e06c7667fa4709e1` and tick10 agreed across headless/standalone; editor snapshot parity passed through MCP.
 
-## Limits and unresolved choices
+Three matched release repeats each at3/256 cubes recorded CPU preparation, actual GPU scene timestamps and payload memory estimates. At256objects p95 CPU was82.313–106.487µs and p95 GPU45.056–48.128µs, meeting provisional scene sub-budgets. Hidden rendering was throttled (~15fps); these are not full-frame throughput, allocatedVRAM, production scalability or competitive claims. See evidence for timing exclusions, resource costs and raw-summary reproduction.
 
-One authored logistics scenario is supported; its source/transport/destination are views, not generic ECS entities. Both frontends are schematics, not a 3D mesh/material pipeline. No general ECS, MCP server, physics/audio, asset pipeline, packaged application or hosted CI exists. Release license, wider hardware support and production performance budgets remain unresolved. No engine superiority, enterprise integration or simulation accuracy guarantee has been established.
+## Next milestone and limits
 
-Advisory locks protect cooperating writers only. Direct Scenario saves require caller-managed concurrency. Atomic replacement is not a universal power-loss guarantee. Version 1 is the only file format. Accessibility plumbing is enabled, but screen-reader support has not been audited.
+M6: choose one useful asset-import route, stable source/derived references, rebuildable cache and recoverable refresh; extend CLI/editor/MCP parity. Reuse M5 scene/render boundaries and declare format compatibility before adding asset data. No M6 implementation yet. Later phases remain sequential in [ROADMAP.md](ROADMAP.md).
 
-## Local setup and continuity
+Current shared scene supports <=256 procedural cubes, simple opaque RGB (stored alpha reserved), flat transforms and one viewport; no hierarchy/components/general ECS, mesh import, physics/audio, material asset pipeline or full standalone application kit. Preview ticks count a static arrangement lifecycle; they do not implement logistics/gameplay/physics. Camera/selection are session views. The logistics sample retains its own integer simulation. Broader non-game application implementation remains M8.
 
-Rust 1.99.1 uses standard user directories. Validation layers and screenshot tools are extracted under `~/.local/share/ruster-tools`; no root installation was required. Skills are discovered through local symlinks and AGENTS.md. Model refresh is instruction-driven; no main-model/global-settings switch occurred.
+MCP is Linux/editor-owned, protocol2025-06-18 with official SDK2.3.0 tested; other clients/platforms, headless hosting, concurrent cancellation and hostile same-user isolation are unverified/outside scope. Commands depend on the UI processing frames and can expire while fully throttled. Advisory locks protect cooperating writers; atomic replacement is not universal power-loss durability. Windows runtime, another GPU class, external human usability, supported binary distribution and production performance budgets remain unresolved. Original source now uses MIT OR Apache-2.0 with preserved third-party terms; personal public GitHub/CI publication is in progress under decision0007. Do not infer support or architectural stability from prototype milestones.
 
-The user works on workspace 1. Test windows must launch silently on workspace 2 without stealing focus or using global input/clipboard automation. A local Hyprland rule persists this routing. Temporary forced-background rendering used for native editor verification must be removed after tests; see AGENTS.md and TESTING.md.
+## Session handoff — 2026-11-04, M5 complete
 
-Read [HISTORY.md](HISTORY.md) and [delegation log](workflow/DELEGATION-LOG.md) for chronology. Inspect actual code/git state before relying on this snapshot.
+Astra reviewed scene/renderer/UI boundaries and identified concrete issues fixed before acceptance (text drafts/canonicalization, error codes, hierarchy bounds, gamma and far-plane picking). Sol workers owned disjoint scene/render/adapter scopes; root integrated editor/bridge/docs/evidence, tested final state and reused valid focused checks. Details, failures and limitations are in [M5 evidence](evidence/M5.md) and the [delegation log](workflow/DELEGATION-LOG.md). No global model setting changed; the root-session routing snapshot was reused.
 
-## Session-close handoff — 2026-11-04
+All test windows stayed on workspace2 with workspace1 active; no global input or clipboard automation. Test windows/build/measurement workers are finished. Temporary background-rendering rule was removed via config-only reload; no compositor errors, persistent workspace2 routing retained. Final example and durable evidence are in the repository; local scripts/raw logs under /tmp/ruster-m5-evidence are ephemeral. M4+M5 changes remain uncommitted. Next session should inspect Git, read this status and continue M6 only within the accepted scope.
 
-The user is restarting with Sol as the main agent. The revised roadmap is accepted; M4 has not started implementation. Begin with the live-session/command contract described above, using Astra for consequential design/review and Sol for implementation/integration. Whole-roadmap and long-horizon strategy reviews explicitly involve the deep-reasoning role under the updated development skill; ordinary status recaps do not require delegation. Refresh the model snapshot once in the new root session.
+## Public source hosting — 2026-11-04, in progress
 
-M3 is committed as `9b8924e`; roadmap adoption is `6b3f74d`. No background worker, build or test application remained at handoff. The temporary background-rendering rule was removed; persistent workspace-2 routing remains. Generated sibling lock files are ignored by Git and deliberately retained for the locking protocol. No global model setting was changed. This closeout changes documentation/skill instructions and ignore rules only; existing implementation verification remains applicable.
+The user explicitly requested personal GitHub hosting, full open source and a proper README before M6. Prepared public `akilfernando/Ruster`, dual MIT OR Apache-2.0 original-source licensing with inherited Cargo metadata, contribution/security guidance, current README/screenshot/quickstart, locked dependency notices and a read-only Linux change-aware CI workflow. Identity verified through both GitHub connector and CLI; no new source milestone started. Final clean-checkout/remote/CI evidence pending publication. Existing history is preserved.

@@ -1,5 +1,9 @@
 //! Native authoring frontend. egui paints through wgpu's Vulkan backend only.
+#[cfg(unix)]
+mod bridge;
+mod commands;
 mod model;
+mod scene_editor;
 mod ui;
 
 use std::path::PathBuf;
@@ -27,7 +31,7 @@ impl log::Log for Diagnostics {
 
 static DIAGNOSTICS: Diagnostics = Diagnostics;
 
-const HELP: &str = "Ruster Editor — visual scenario authoring\n\nUsage: ruster-editor [--scenario PATH]\n       ruster-editor --help\n\nDefault: examples/logistics.scenario.json (relative to the working directory).\nRequires a desktop session and Vulkan adapter. Ctrl+N/O/S, Ctrl+Shift+S,\nCtrl+Z / Ctrl+Shift+Z; Space runs/pauses outside text fields.\n";
+const HELP: &str = "Ruster Editor — visual scenario authoring\n\nUsage: ruster-editor [--scenario PATH]\n       ruster-editor --scene PATH\n       ruster-editor --help\n\nDefault: examples/logistics.scenario.json (relative to the working directory).\nRequires a desktop session and Vulkan adapter. Ctrl+N/O/S, Ctrl+Shift+S,\nCtrl+Z / Ctrl+Shift+Z; Space runs/pauses outside text fields.\n";
 
 fn arguments(arguments: impl Iterator<Item = String>) -> Result<Option<PathBuf>, String> {
     let mut arguments = arguments;
@@ -66,8 +70,35 @@ fn main() -> std::process::ExitCode {
     }
 }
 
+struct EditorApp {
+    editor: Editor,
+    #[cfg(unix)]
+    bridge: Option<bridge::Bridge>,
+}
+
+impl eframe::App for EditorApp {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        eframe::App::ui(&mut self.editor, ui, frame);
+        #[cfg(unix)]
+        if let Some(bridge) = &mut self.bridge {
+            if bridge.dispatch(&mut self.editor) {
+                ui.ctx().request_repaint();
+            }
+            // Dispatch may update fields/notice after this frame's layout.
+            // Repaint only when external requests arrive (bridge wakes context).
+        }
+    }
+}
+
 fn run() -> Result<(), String> {
-    let Some(path) = arguments(std::env::args().skip(1))? else {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if args.first().is_some_and(|arg| arg == "--scene") {
+        if args.len() != 2 {
+            return Err("--scene requires exactly one scene file path".into());
+        }
+        return scene_editor::run(PathBuf::from(&args[1]));
+    }
+    let Some(path) = arguments(args.into_iter())? else {
         print!("{HELP}");
         return Ok(());
     };
@@ -99,7 +130,11 @@ fn run() -> Result<(), String> {
             editor.adapter = format!("{} · {:?}", adapter.name, adapter.backend);
             eprintln!("Ruster Editor renderer: {}", editor.adapter);
         }
-        Ok(Box::new(editor))
+        #[cfg(unix)]
+        let bridge = if std::env::var_os("RUSTER_MCP_ENABLE").as_deref() == Some(std::ffi::OsStr::new("1")) {
+            Some(bridge::Bridge::start(cc.egui_ctx.clone())?)
+        } else { None };
+        Ok(Box::new(EditorApp { editor, #[cfg(unix)] bridge }))
     })).map_err(|error| format!("desktop/Vulkan initialization failed: {error}. Verify the desktop session and Vulkan driver."))
 }
 

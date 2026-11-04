@@ -1,0 +1,9 @@
+WARN wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x5615545e1a90, name: ?)
+WARN wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x5615545e1a90, name: ?)
+Ruster shared 3D: adapter=NVIDIA GeForce RTX 4060 Laptop GPU backend=Vulkan timestamps=true
+Scene editor adapter: AdapterInfo { name: "NVIDIA GeForce RTX 4060 Laptop GPU", vendor: 4318, device: 10464, device_type: DiscreteGpu, device_pci_bus_id: "0000:01:00.0", driver: "NVIDIA", driver_info: "615.78.08", backend: Vulkan, subgroup_min_size: 32, subgroup_max_size: 32, transient_saves_memory: Some(false), limit_bucket: None }
+Ruster MCP bridge: /tmp/ruster-mcp-16l0Rlie2D1K7Bf6sfRiBkZ4/editor.sock (private same-user capability; opt-in)

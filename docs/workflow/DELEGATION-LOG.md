@@ -44,3 +44,21 @@ Record meaningful completed work, not every tool call. Unknown metrics remain un
 ## 2026-11-04 post-M3 roadmap review
 
 - `gpt-6-astra`, high, read-only: reviewed actual core/session and rendering boundaries against future milestone gates. Identified missing reusable foundations, overloaded M5, live MCP session ownership, weak differentiation between reuse proofs and late adoption/platform evidence. Root synthesized the proposed revision without changing accepted future scope. No builds, UI activity or nested delegation; cost metrics unknown.
+
+## 2026-11-04 — M4 command contract review
+
+Astra (`gpt-6-astra`, high effort), read-only bounded ownership review, using the root's refreshed snapshot. Consequential live-session identity and human/agent concurrency justified specialist review. Findings incorporated: rotate incarnation even on identical reopen; retain bridge outside whole-editor replacement; reject draft/modal/approved-close mutations; bound dispatch and cancellation; encode u64 wire values without JavaScript precision loss. Root added explicit revision session wrappers and reviewed actual source. No worker edits/tests or duplicate gate; no repair/escalation. Elapsed time and usage unknown. M4 transport/client and native journey remain unimplemented.
+
+## 2026-11-04 — M4 implementation and integrated review
+
+Two bounded Sol (`gpt-6.1-sol`, high) workers owned disjoint editor command/model and native adapter paths. Command worker returned4 focused passes; adapter worker returned4 protocol passes/strict lint. Root owned bridge, integration, lockfile, native SDK/UI proof, docs and final gate; focused checks were reused until integration inputs changed. Astra (`gpt-6-astra`, high), read-only boundary review, identified missing absolute queue expiry/total framing deadlines; root fixed both and added a specific expiration regression. No further blocking defect found. Final integrated gate36 Rust/13 tooling checks2.81s warm; SDK2.3.0 and isolated native journey passed final source. Review/usage/worker elapsed totals unknown; no savings claim. No child subdelegation.
+
+## 2026-11-04 — Post-M4 roadmap checkpoint
+
+Astra (`gpt-6-astra`, high), bounded read-only strategy assessment under the development skill; reused root session model snapshot. Root inspected implementation/Git/evidence and reconciled findings. Result: retain accepted M5–M9 sequence, start M5 scene/application data slice, surface scene-scale MCP wakeup/work bounds and history/inspection-size risks. Suggestions recorded in ROADMAP-REVIEW.md without promoting them to user decisions. No worker edits/tests/subdelegation or new external research; elapsed/usage unknown. No repair/escalation.
+
+## 2026-11-04 — M5 scene/shared 3D delivery
+
+Sol (`gpt-6.1-sol`, high) workers owned disjoint generic scene/CLI, renderer/standalone and MCP adapter/demo scopes. Scene worker returned7 focused tests+strict lint; render worker returned compile/lint/picking evidence before final refinements; MCP worker returned5 focused protocol tests+strict lint. Root integrated new SceneEditor, bridge generic dispatch/bounds, workspace/lock, docs, final gate and GPU measurements; a worker's bootstrap touched lock through Cargo, which root subsequently inspected/integrated (no manual competing lock edits). Root reused focused evidence until changed final inputs required the integrated gate.
+
+Astra (`gpt-6-astra`, high) bounded design and final ownership review found missing text-draft protection/canonicalization, hierarchy scrolling, domain error distinctions and far-plane picking; root/workers fixed these with proportional coverage. Gamma-path fix was rechecked. Terra (`gpt-6.1-terra`, high) independently exercised real SDK/native edit/recovery/undo/preview/save/reopen/picking and framebuffer; root completed actual compositor resize and close recovery. All input remained app-scoped on workspace2. No child subdelegation. First final gate failed on root scene-UI lints; corrected final gate48 Rust/13 tooling checks passed7.16s warm. Release renderer build54.52s, not a latency/quality comparison. Worker elapsed/usage totals unknown; no savings claim. Platform/human-adoption gaps remain explicit in milestone evidence.

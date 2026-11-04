@@ -37,7 +37,7 @@ The reference game must exercise the engine, not become a second large product. 
 
 ## Delivery sequence
 
-The canonical phase definitions, deliverables, scope limits and acceptance gates are in [ROADMAP.md](ROADMAP.md). M0–M3 now provide the local seed, saved-scenario workflow, first Vulkan schematic view and visual authoring. M4 MCP parity is next in the current plan. The accepted post-M3 revision separates shared scene/3D foundations, content iteration, standalone application kit, independent reuse proof and public alpha (M5–M9).
+The canonical phase definitions, deliverables, scope limits and acceptance gates are in [ROADMAP.md](ROADMAP.md). M0–M3 now provide the local seed, saved-scenario workflow, first Vulkan schematic view and visual authoring. M4 now provides the bounded native editor-owned MCP proof; M5 now supplies bounded neutral scenes and shared procedural3D; M6 content/iteration is next. The accepted post-M3 revision separates shared scene/3D foundations, content iteration, standalone application kit, independent reuse proof and public alpha (M5–M9).
 
 A dependency-free prototype is a temporary scope choice, not a ban on libraries. Authoring undo restores authored changes; simulation reset/replay is distinct from runtime rollback.
 
@@ -49,4 +49,4 @@ A dependency-free prototype is a temporary scope choice, not a ban on libraries.
 - A later editor or MCP client uses the same validated operations; failures are explainable without reading engine source.
 - Runtime builds do not require editor or MCP services.
 
-Market demand and comparative workflow advantage remain unvalidated. [Market research](MARKET-OPPORTUNITIES.md) supplies hypotheses, not proof. License choice, hardware floor, detailed rendering backend/dependencies and public release commitments remain unresolved.
+Market demand and comparative workflow advantage remain unvalidated. [Market research](MARKET-OPPORTUNITIES.md) supplies hypotheses, not proof. Source licensing is MIT OR Apache-2.0 under decision0007. Hardware floor and supported binary/alpha release commitments remain unresolved; new3D rendering follows decision0006.

@@ -1289,6 +1289,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "glam"
+version = "0.30.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "19fc433e8437a212d1b6f1e68c7824af3aed907da60afa994e7f542d18d12aa9"
+
+[[package]]
 name = "glifo"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2647,7 +2653,40 @@ dependencies = [
  "eframe",
  "log",
  "ruster-core",
+ "ruster-render",
+ "ruster-scene",
+ "serde_json",
+ "tempfile",
  "wgpu",
+]
+
+[[package]]
+name = "ruster-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde_json",
+]
+
+[[package]]
+name = "ruster-render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "eframe",
+ "glam",
+ "log",
+ "ruster-scene",
+ "wgpu",
+]
+
+[[package]]
+name = "ruster-scene"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

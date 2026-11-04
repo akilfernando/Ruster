@@ -1,11 +1,13 @@
 [workspace]
-members = ["crates/ruster-core", "crates/ruster-cli", "crates/ruster-viewer", "crates/ruster-editor"]
+members = ["crates/ruster-core", "crates/ruster-cli", "crates/ruster-viewer", "crates/ruster-editor", "crates/ruster-mcp", "crates/ruster-scene", "crates/ruster-render"]
 resolver = "2"
 
 [workspace.package]
 version = "0.1.0"
 edition = "2021"
 publish = false
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/akilfernando/Ruster"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"

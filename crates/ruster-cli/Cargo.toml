@@ -4,6 +4,8 @@ description = "Run the Ruster logistics foundation experiment"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 ruster-core = { path = "../ruster-core" }

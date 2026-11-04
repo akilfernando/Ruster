@@ -40,3 +40,9 @@ No production scalability claim can be drawn from the current tiny logistics sce
 Track simulation tick cost and tail latency, CPU rendering preparation, GPU time, allocations/memory, idle utilization, startup/import/build latency and edit-to-feedback latency. Specify workload scale and quality settings. Add target hardware tiers and numerical budgets as representative workloads emerge. A faster frame that worsens interaction latency, memory use or build iteration may be a poor trade.
 
 Keep performance verification proportionate under [TESTING.md](TESTING.md): relevant targeted regression checks, controlled larger benchmarks at subsystem/release gates, no full benchmark matrix on unrelated PRs. Preserve correctness and validation evidence across optimization changes.
+
+## M5 shared procedural 3D baseline
+
+The shared wgpu/Vulkan path replaces the temporary rendering split for new3D work; the ash schematic remains legacy/reference support. [M5 evidence](evidence/M5.md) declares3/256-object workloads, provisional scene sub-budgets and matched release repeats. Bounded asynchronous GPU timestamps distinguish scene-pass GPU work from CPU instance/upload preparation. Offscreen color/depth memory is explicitly estimated rather than called totalVRAM. Both provisional targets passed on this workstation; hidden rendering was throttled and full-frame/presentation/other-hardware performance remains unverified. This is the initial3D baseline, not an optimization win over schematics.
+
+Primary Bevy instancing and egui/wgpu ownership sources, costs and adoption limits are recorded in the [renderer guide](../crates/ruster-render/README.md). A future unchanged-instance upload/cache experiment should compare measured preparation/upload cost before and after at matching quality/hardware/workloads; no general render graph or speculative concurrency is justified by these small results.

@@ -173,15 +173,36 @@ impl ProjectSession {
     }
 
     pub fn edit(&mut self, config: Config) -> Result<u64, ScenarioError> {
-        self.scenario.edit(self.scenario.revision(), config)
+        self.edit_at(self.scenario.revision(), config)
     }
 
     pub fn undo(&mut self) -> Result<u64, ScenarioError> {
-        self.scenario.undo(self.scenario.revision())
+        self.undo_at(self.scenario.revision())
     }
 
     pub fn redo(&mut self) -> Result<u64, ScenarioError> {
-        self.scenario.redo(self.scenario.revision())
+        self.redo_at(self.scenario.revision())
+    }
+
+    /// Apply a validated replacement only to the revision the caller inspected.
+    /// Live adapters must additionally validate their session identity and UI
+    /// draft/recovery guards before calling this method.
+    pub fn edit_at(
+        &mut self,
+        expected_revision: u64,
+        config: Config,
+    ) -> Result<u64, ScenarioError> {
+        self.scenario.edit(expected_revision, config)
+    }
+
+    /// Undo shared authored history with optimistic concurrency protection.
+    pub fn undo_at(&mut self, expected_revision: u64) -> Result<u64, ScenarioError> {
+        self.scenario.undo(expected_revision)
+    }
+
+    /// Redo shared authored history with optimistic concurrency protection.
+    pub fn redo_at(&mut self, expected_revision: u64) -> Result<u64, ScenarioError> {
+        self.scenario.redo(expected_revision)
     }
 
     /// Save only if the full on-disk scenario still equals our saved baseline.
@@ -230,6 +251,51 @@ impl ProjectSession {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Unique boundary risk: an adapter must not silently replace its supplied
+    // revision with the current session revision, including no-op edits/history.
+    #[test]
+    fn explicit_revision_commands_reject_interleaved_changes_without_mutation() {
+        let mut session = ProjectSession::new("shared", Config::default()).unwrap();
+        let inspected = session.scenario().revision();
+        session
+            .edit(Config {
+                transfer_per_tick: 4,
+                ..Config::default()
+            })
+            .unwrap();
+        let before = session.scenario().clone();
+        for result in [
+            session.edit_at(inspected, before.config()),
+            session.undo_at(inspected),
+            session.redo_at(inspected),
+        ] {
+            assert!(matches!(
+                result,
+                Err(ScenarioError::StaleRevision {
+                    expected: 0,
+                    actual: 1
+                })
+            ));
+        }
+        assert_eq!(session.scenario(), &before);
+        assert!(session.is_dirty());
+        assert!(session.path().is_none());
+        assert!(session
+            .edit_at(
+                1,
+                Config {
+                    transfer_per_tick: 0,
+                    ..before.config()
+                }
+            )
+            .is_err());
+        assert_eq!(session.scenario(), &before);
+        assert_eq!(session.undo_at(1).unwrap(), 2);
+        assert_eq!(session.scenario().config(), Config::default());
+        assert_eq!(session.redo_at(2).unwrap(), 3);
+        assert_eq!(session.scenario().config(), before.config());
+    }
 
     #[test]
     fn authored_session_preserves_dirty_history_and_rejects_invalid_edits() {

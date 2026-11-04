@@ -16,7 +16,7 @@ Protect behavior, not test counts. Select checks by changed behavior and depende
 | Risk-specific | Change touches a sensitive boundary | Additional checks from the matrix below, required for that change before acceptance. |
 | Broad validation | Release candidate, toolchain/dependency changes, structural changes; periodic CI once introduced | Full workspace plus supported platform/feature/hardware coverage relevant to release. Avoid exhaustive feature cross-products. |
 
-There is currently no hosted CI, PR gate, merge queue, GPU suite, scheduled job, or release matrix configured. The local runner implements documentation/change/full-workspace checks only. Future CI should call the same runner against the actual target/merge result; it must not rerun overlapping jobs by default. Full validation is not automatically a GPU/performance/platform audit.
+The Linux GitHub Actions workflow in `.github/workflows/ci.yml` calls the same runner against the actual PR base SHA or previous push SHA, with full scope for initial publication/manual dispatch. Hosted execution results belong in STATUS.md; configuration alone is not a pass. There is no merge queue, GPU suite, scheduled job or supported release matrix. CI does not duplicate overlapping checks by default. Full validation is not automatically a GPU/performance/platform audit.
 
 ## Commands
 

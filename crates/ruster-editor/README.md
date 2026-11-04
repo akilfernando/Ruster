@@ -72,7 +72,7 @@ remains inactive unless `EGUI_INSPECTION` is explicitly set. For a local
 walkthrough, use `EGUI_INSPECTION=127.0.0.1:5719 cargo run --locked -p
 ruster-editor --features inspection`. The upstream protocol exposes the real
 widget tree, per-app input injection and framebuffer capture. This is frontend
-test instrumentation, separate from the engine's future native MCP API.
+test instrumentation, separate from the engine's native MCP API.
 
 Keep the listener on loopback: it provides unauthenticated control of the app
 and its screenshots. Background input/tree inspection is supported upstream;
@@ -87,3 +87,77 @@ provided. There is one authored scenario and a schematic throughput viewport.
 Runtime uses a 250 ms scheduled tick without catch-up after suspend; it is an
 inspection control, not a wall-clock simulation guarantee. Read the project
 status/evidence for verified environments and remaining milestone limitations.
+
+## Native MCP attachment (Linux)
+
+Build `cargo build --locked -p ruster-editor -p ruster-mcp`, then launch the editor
+on a disposable project with `RUSTER_MCP_ENABLE=1 cargo run --locked -p
+ruster-editor -- --scenario /absolute/path/demo.json`. Normal launches have no
+bridge. The editor prints a private socket path to stderr. Configure a stdio
+client with the absolute `target/debug/ruster-mcp` executable and that path in
+`RUSTER_MCP_SOCKET`; see the [adapter guide](../ruster-mcp/README.md).
+
+The tested real client is the official Python MCP SDK 2.3.0:
+
+```sh
+RUSTER_MCP_SOCKET=/absolute/private-directory/editor.sock \
+  uv run --with mcp==2.3.0 scripts/mcp_demo.py
+```
+
+Run from the repository root. The demo inspects, replays ten ticks, changes
+capacity to 4, compares replay, checks stale/invalid/oversized requests, then
+undoes its edit through shared history. Use the default example configuration
+(capacity 2) on a disposable copy; the demo intentionally does not save. Set
+`RUSTER_MCP_DEMO_KEEP=1` to leave the edit for inspection and human Undo.
+
+Agent edits appear as authored unsaved changes with a before/after notice.
+Inspector drafts or recovery dialogs block mutations; the client must inspect
+again after the human resolves them. Isolated replay uses authored values and
+never changes the live preview. No remote Save/Open/shell tools exist; ordinary
+human editing, runtime controls and saving remain available offline. A paused
+or hidden UI that cannot process commands yields an expired bridge request,
+not silent fallback to file editing. See [M4 evidence](../../docs/evidence/M4.md)
+for the tested desktop conditions and limitations.
+
+## Shared 3D scene mode (M5)
+
+The existing scenario editor remains available. Generic 3D scenes use a separate
+identified format; logistics-v1 scenarios are not silently converted.
+
+```sh
+cargo run --locked -p ruster-scene -- demo /tmp/ruster-layout.json
+cargo run --locked -p ruster-editor -- --scene /tmp/ruster-layout.json
+cargo run --locked -p ruster-render -- --scene /tmp/ruster-layout.json --ticks 10
+```
+
+Choose a new destination for `demo`. Select an object in the hierarchy or by
+clicking its cube. Edit X/Y/Z position, rotation (radians) or positive scale,
+then **Apply transform**. Invalid/incomplete text stays visible and leaves the
+scene unchanged. **Revert transform** discards only those fields. Undo/Redo use
+the shared revisioned history; Ctrl+Z/Ctrl+Shift+Z and Ctrl+S work outside text
+fields. Right-drag orbits the camera, the wheel zooms, and **Fit** frames the
+objects. Camera/selection are session views, not persisted scene transforms.
+
+**Save scene** persists the current file with conflict checks. **Save scene as…**
+creates a new path. **Open scene…** warns before discarding unsaved data; failed
+loads preserve the current scene. Closing unsaved work offers Save/Discard/Cancel.
+**Run preview** and **Step preview** count explicit static-arrangement lifecycle
+ticks. They do not imply physics or gameplay. **Show preview snapshot** shows the
+captured runtime scene; authored edits do not enter it until **Reset preview**.
+The standalone renderer and headless `ruster-scene run` use the same Preview.
+
+For native MCP, start scene mode with `RUSTER_MCP_ENABLE=1`, then attach the
+adapter using the printed private socket as described above. Scene mode uses
+`scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo`, `scene_replay`.
+Inspection pages at most16 objects; all edits require the exact live session
+identity/revision and resolved human drafts/dialogs. From the repository root:
+
+```sh
+RUSTER_MCP_SOCKET=/absolute/private-directory/editor.sock \
+  uv run --with mcp==2.3.0 scripts/mcp_scene_demo.py
+```
+
+Use a disposable scene. This official-SDK demo checks inspection/replay,
+transform diff, stale/invalid rejection and shared undo. It does not save. See
+the [scene API](../ruster-scene/README.md), [renderer guide](../ruster-render/README.md)
+and [M5 evidence](../../docs/evidence/M5.md) for exact scope and tested conditions.

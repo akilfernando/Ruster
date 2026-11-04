@@ -1,6 +1,6 @@
 # Model routing
 
-Checked 2026-11-04 for the current root session. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
+Checked 2026-11-04 at 04:52 UTC for the current root session. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
 
 ## Current routing
 
@@ -32,3 +32,7 @@ Refresh is an agent instruction executed when a root session follows AGENTS.md/t
 ## Main-model clarification, 2026-11-04
 
 The user reports that the main model is currently Astra and asks whether Sol better realizes the routing policy. Official Models and Subagents pages were rechecked; the active tool still exposes the same role candidates. Recommend GPT-6.1 Sol as the main developer with its client-default effort, escalating effort/model selectively. Astra as parent can still delegate to Sol/Luna/Terra, but parent reasoning/integration remains Astra work; delegation does not replace the parent. Explicit worker model/effort avoids accidental expensive parent inheritance. No main model or global configuration was changed. Actual project cost/latency savings remain unmeasured.
+
+## M4 session refresh — 2026-11-04
+
+Reopened all three official sources above and checked the active collaboration schema. Role assignments and supported effort/inheritance/slot limits remain unchanged. Used Astra at high effort for bounded M4 ownership review because session identity and draft/runtime conflicts are consequential; main implementation remains in the root. No cache inspection, API billing job or global model change. Actual subscription cost and active root model identity remain unmeasured.

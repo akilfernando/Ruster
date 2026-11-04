@@ -1,0 +1,56 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Linux checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Install native build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y pkg-config libwayland-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev libvulkan-dev
+      - name: Install pinned Rust toolchain
+        run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
+      - name: Cache Cargo builds
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-rust-1.99.1-${{ hashFiles('Cargo.lock', '**/Cargo.toml') }}
+          restore-keys: ${{ runner.os }}-rust-1.99.1-
+      - name: Run change-aware gate
+        env:
+          EVENT: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PUSH_BASE: ${{ github.event.before }}
+        run: |
+          if [ "$EVENT" = pull_request ]; then
+            python3 scripts/check.py --base "$PR_BASE"
+          elif [ "$EVENT" = push ] && [ -n "$PUSH_BASE" ] && [ "$PUSH_BASE" != 0000000000000000000000000000000000000000 ]; then
+            python3 scripts/check.py --base "$PUSH_BASE"
+          else
+            python3 scripts/check.py --full
+          fi
+      - name: Verify dependency inventory and notices
+        run: python3 scripts/dependency_notices.py --check

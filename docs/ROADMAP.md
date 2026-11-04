@@ -8,7 +8,7 @@ The user accepted the [post-M3 review](ROADMAP-REVIEW.md) on 2026-11-04. This ca
 
 Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
 
-M0 through M3 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M4 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
+M0 through M5 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M6 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
 
 | Milestone | Demonstrable deliverable | Status |
 | --- | --- | --- |
@@ -16,8 +16,8 @@ M0 through M3 are complete within their documented local scope; see [M1/M2 evide
 | M1 Reproducible project | Saved scenario that can be inspected, edited, undone and replayed | Complete |
 | M2 First Vulkan view | Interactive window showing the same simulation | Complete, Linux schematic scope |
 | M3 First authoring experience | Minimal editor for a complete create/edit/run/save workflow | Complete, Linux scenario scope |
-| M4 Native agent workflow | MCP client performs the same workflow with reviewable results | Planned |
-| M5 Shared scene and 3D | Minimal scene and rendering shared by editor/runtime | Planned |
+| M4 Native agent workflow | MCP client performs the same workflow with reviewable results | Complete, Linux editor-owned proof |
+| M5 Shared scene and 3D | Minimal scene and rendering shared by editor/runtime | Complete, bounded Linux procedural-scene scope |
 | M6 Content and iteration | Asset import, stable references and recoverable refresh | Planned |
 | M7 Standalone application kit | Code-first template and packaged interactive example | Planned |
 | M8 Independent reuse proof | A meaningfully different non-game application | Planned |
@@ -115,6 +115,8 @@ M0 through M3 are complete within their documented local scope; see [M1/M2 evide
 
 **Decision gate:** document transport, client compatibility, capability/permission boundary and protocol-version policy. First decide live-session ownership: editor session, headless session, or both; expected revisions, unapplied drafts, runtime ownership, cancellation/work limits and visibility of agent edits must be explicit. File locking alone does not provide live parity. Keep the first capability surface narrow and versioned; extend it alongside later scene/content operations.
 
+M4 delivered scope: editor-owned Linux attachment, protocol2025-06-18, official Python SDK2.3.0 client, shared native undo and interleaved conflict proof. See [M4 evidence](evidence/M4.md). Broader clients/platforms/headless hosting are unverified.
+
 ## M5 Shared scene and first 3D viewport
 
 **User outcome:** author objects in a reusable scene and see the same scene in the editor and standalone runtime.
@@ -130,6 +132,8 @@ M0 through M3 are complete within their documented local scope; see [M1/M2 evide
 **Exit criteria:** the slices work together; invalid/stale edits preserve the scene; rendering lifecycle passes relevant validation; the two applications' briefs fit without game/player concepts in shared APIs. Record compatibility treatment for existing v1 scenarios before changing stored data.
 
 **Decision gate:** resolve the current ash-viewer/egui-wgpu-editor rendering split before duplicating substantial 3D infrastructure. No backend winner, general render graph, plugin ABI, advanced GI or full editor framework is predetermined.
+
+M5 delivered scope: neutral bounded scene/session/Preview, separate identified scene format, shared procedural cube/depth/camera renderer in standalone/editor, guarded transform authoring and scene CLI/MCP parity. Static preview ticks do not imply simulation behavior. Existing logistics-v1 workflows remain legacy/reference support. Native client/UI/lifecycle and declared release workload evidence passed; see [M5 evidence](evidence/M5.md) and [decision0006](decisions/0006-scene-and-shared-3d.md). Full kit, asset import and complete second application remain later milestones.
 
 ## M6 Content and fast iteration
 

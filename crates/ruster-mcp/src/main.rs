@@ -1,0 +1,719 @@
+//! Narrow MCP 2025-06-18 stdio profile. See the crate README for limits.
+use serde_json::{json, Map, Value};
+use std::io::{self, BufRead, BufReader, Write};
+
+const PROTOCOL: &str = "2025-06-18";
+const MAX_FRAME: usize = 64 * 1024;
+const MAX_OUTPUT: usize = 256 * 1024;
+
+#[derive(Default, PartialEq, Debug)]
+enum Lifecycle {
+    #[default]
+    New,
+    Initializing,
+    Ready,
+}
+
+#[derive(Default)]
+struct Server {
+    lifecycle: Lifecycle,
+}
+
+fn rpc_error(id: Value, code: i64, message: &str) -> Value {
+    json!({"jsonrpc":"2.0", "id":id, "error":{"code":code,"message":message}})
+}
+
+fn tool_result(result: Value) -> Value {
+    json!({"content":[{"type":"text","text":result.to_string()}],
+        "structuredContent":result, "isError":result["ok"] != true})
+}
+
+fn domain_error(code: &str, message: &str) -> Value {
+    json!({"ok":false,"error":{"code":code,"message":message}})
+}
+
+/// Retains at most limit bytes even if a peer sends an arbitrarily long line.
+/// A truncated or oversized frame is fatal: it must never become another request.
+fn read_frame(reader: &mut impl BufRead, limit: usize) -> io::Result<Option<Vec<u8>>> {
+    let mut frame = Vec::new();
+    loop {
+        let available = reader.fill_buf()?;
+        if available.is_empty() {
+            return if frame.is_empty() {
+                Ok(None)
+            } else {
+                Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "truncated frame",
+                ))
+            };
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let count = newline.map_or(available.len(), |index| index + 1);
+        if frame.len() + count > limit {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "frame exceeds byte limit",
+            ));
+        }
+        frame.extend_from_slice(&available[..count]);
+        reader.consume(count);
+        if newline.is_some() {
+            frame.pop();
+            return Ok(Some(frame));
+        }
+    }
+}
+
+fn canonical_u64(value: &Value) -> bool {
+    let Some(text) = value.as_str() else {
+        return false;
+    };
+    !text.is_empty()
+        && (text == "0" || !text.starts_with('0'))
+        && text.bytes().all(|byte| byte.is_ascii_digit())
+        && text.parse::<u64>().is_ok()
+}
+
+fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str]) -> bool {
+    required.iter().all(|key| object.contains_key(*key))
+        && object
+            .keys()
+            .all(|key| required.contains(&key.as_str()) || optional.contains(&key.as_str()))
+}
+
+fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    let Some(args) = arguments.as_object() else {
+        return false;
+    };
+    if name == "inspect" {
+        return args.is_empty();
+    }
+    if name == "scene_inspect" {
+        return exact_keys(args, &[], &["offset"]) && args.get("offset").is_none_or(canonical_u64);
+    }
+    let extra = match name {
+        "edit" => "config",
+        "replay" | "scene_replay" => "ticks",
+        "scene_transform" => "object_id",
+        "undo" | "redo" | "scene_undo" | "scene_redo" => "",
+        _ => return false,
+    };
+    let mut keys = vec!["expected_session_token", "expected_revision"];
+    if !extra.is_empty() {
+        keys.push(extra);
+    }
+    if name == "scene_transform" {
+        keys.push("transform");
+    }
+    if !exact_keys(args, &keys, &[])
+        || !args["expected_session_token"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty() && s.len() <= 256)
+        || !canonical_u64(&args["expected_revision"])
+    {
+        return false;
+    }
+    match name {
+        "edit" => args["config"].as_object().is_some_and(|config| {
+            exact_keys(
+                config,
+                &["initial_stock", "production_per_tick", "transfer_per_tick"],
+                &[],
+            ) && config.values().all(canonical_u64)
+        }),
+        "replay" | "scene_replay" => canonical_u64(&args["ticks"]),
+        "scene_transform" => {
+            args["object_id"].is_string()
+                && args["transform"].as_object().is_some_and(|transform| {
+                    exact_keys(transform, &["translation", "rotation", "scale"], &[])
+                        && transform.values().all(|value| {
+                            value.as_array().is_some_and(|values| {
+                                values.len() == 3 && values.iter().all(Value::is_number)
+                            })
+                        })
+                })
+        }
+        _ => true,
+    }
+}
+
+fn object_schema(properties: Value, required: Vec<&str>) -> Value {
+    json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
+}
+
+fn tools() -> Value {
+    let decimal = json!({"type":"string", "pattern":"^(0|[1-9][0-9]*)$", "maxLength":20,
+        "description":"Canonical decimal u64; maximum 18446744073709551615."});
+    let mut tools = Vec::new();
+    for (name, description) in [
+        ("inspect", "Inspect the attached editor's session, authored configuration, revision and mutation guards. No history arrays, files or logs."),
+        ("edit", "Replace all three authored configuration fields. Requires the inspected identity/revision and clean human drafts. Unsaved; shares human undo; leaves preview unchanged."),
+        ("undo", "Undo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
+        ("redo", "Redo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
+        ("replay", "Replay the inspected authored snapshot in isolation for at most 10000 ticks; return one aggregate state. Does not alter editor playback."),
+        ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
+        ("scene_transform", "Replace one object's authored translation, Euler rotation in radians and scale. Requires the inspected identity/revision and clean human drafts. Unsaved; shares human undo; leaves preview unchanged."),
+        ("scene_undo", "Undo one authored scene transform in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
+        ("scene_redo", "Redo one authored scene transform in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
+        ("scene_replay", "Replay the inspected static scene snapshot in isolation for at most 10000 lifecycle ticks; return its fingerprint and object count. No gameplay or editor playback changes."),
+    ] {
+        let mut properties = Map::new();
+        let mut required = Vec::new();
+        if name != "inspect" && name != "scene_inspect" {
+            properties.insert("expected_session_token".into(), json!({"type":"string","minLength":1,"maxLength":256}));
+            properties.insert("expected_revision".into(), decimal.clone());
+            required.extend(["expected_session_token", "expected_revision"]);
+        }
+        if name == "edit" {
+            properties.insert("config".into(), object_schema(json!({"initial_stock":decimal, "production_per_tick":decimal, "transfer_per_tick":decimal}), vec!["initial_stock", "production_per_tick", "transfer_per_tick"]));
+            required.push("config");
+        }
+        if name == "scene_inspect" {
+            properties.insert("offset".into(), decimal.clone());
+        }
+        if name == "scene_transform" {
+            properties.insert("object_id".into(), json!({"type":"string", "description":"Exact stable object ID returned by scene_inspect."}));
+            let vector = json!({"type":"array", "items":{"type":"number"}, "minItems":3, "maxItems":3});
+            properties.insert("transform".into(), object_schema(json!({"translation":vector, "rotation":vector, "scale":vector}), vec!["translation", "rotation", "scale"]));
+            required.extend(["object_id", "transform"]);
+        }
+        if name == "replay" || name == "scene_replay" {
+            properties.insert("ticks".into(), decimal.clone());
+            required.push("ticks");
+        }
+        tools.push(json!({"name":name,"description":description,
+            "inputSchema":object_schema(Value::Object(properties),required),
+            "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay"), "openWorldHint":false}}));
+    }
+    json!({"tools":tools})
+}
+
+impl Server {
+    fn handle(
+        &mut self,
+        frame: &[u8],
+        mut bridge: impl FnMut(&str, &Value) -> Value,
+    ) -> Option<Value> {
+        let request: Value = match serde_json::from_slice(frame) {
+            Ok(value) => value,
+            Err(_) => return Some(rpc_error(Value::Null, -32700, "Invalid JSON")),
+        };
+        let Some(object) = request.as_object() else {
+            return Some(rpc_error(
+                Value::Null,
+                -32600,
+                "Expected one JSON-RPC object; batches are unsupported",
+            ));
+        };
+        let id = object.get("id").cloned();
+        if request["jsonrpc"] != "2.0"
+            || !request["method"].is_string()
+            || id
+                .as_ref()
+                .is_some_and(|id| !id.is_string() && !id.is_i64() && !id.is_u64())
+            || !exact_keys(object, &["jsonrpc", "method"], &["id", "params"])
+            || object
+                .get("params")
+                .is_some_and(|params| !params.is_object())
+        {
+            return Some(rpc_error(
+                id.filter(|id| id.is_string() || id.is_i64() || id.is_u64())
+                    .unwrap_or(Value::Null),
+                -32600,
+                "Invalid JSON-RPC request",
+            ));
+        }
+        let method = request["method"].as_str().expect("validated method");
+        let params = object.get("params").cloned().unwrap_or_else(|| json!({}));
+        // Notifications never receive replies, including unknown/malformed lifecycle notifications.
+        let Some(id) = id else {
+            if method == "notifications/initialized" && self.lifecycle == Lifecycle::Initializing {
+                self.lifecycle = Lifecycle::Ready;
+            }
+            // Bounded synchronous operations cannot be cancelled after dispatch. No jobs/queue.
+            return None;
+        };
+        let result = match method {
+            "ping" => Ok(json!({})),
+            "initialize" => {
+                if self.lifecycle != Lifecycle::New {
+                    Err((-32600, "Session is already initialized"))
+                } else if !params["protocolVersion"].is_string()
+                    || !params["capabilities"].is_object()
+                    || !params["clientInfo"].is_object()
+                    || !params["clientInfo"]["name"].is_string()
+                    || !params["clientInfo"]["version"].is_string()
+                {
+                    Err((
+                        -32602,
+                        "initialize requires protocolVersion, capabilities and clientInfo",
+                    ))
+                } else {
+                    self.lifecycle = Lifecycle::Initializing;
+                    Ok(
+                        json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},
+                        "serverInfo":{"name":"ruster-mcp","version":env!("CARGO_PKG_VERSION")},
+                        "instructions":"Local live editor attachment. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision. No retries. Cancellation cannot roll back dispatched commands; after disconnect/timeout inspect before deciding whether to retry. Edits remain unsaved until a human saves."}),
+                    )
+                }
+            }
+            _ if self.lifecycle != Lifecycle::Ready => Err((
+                -32002,
+                "Complete initialize and notifications/initialized first",
+            )),
+            "tools/list" => {
+                if params
+                    .as_object()
+                    .is_some_and(|params| exact_keys(params, &[], &["_meta"]))
+                {
+                    Ok(tools())
+                } else {
+                    Err((-32602, "No cursor or other parameters are supported"))
+                }
+            }
+            "tools/call" => {
+                let Some(params) = params.as_object() else {
+                    unreachable!()
+                };
+                let name = params.get("name").and_then(Value::as_str).unwrap_or("");
+                let arguments = params
+                    .get("arguments")
+                    .cloned()
+                    .unwrap_or_else(|| json!({}));
+                if !exact_keys(params, &["name"], &["arguments", "_meta"])
+                    || ![
+                        "inspect",
+                        "edit",
+                        "undo",
+                        "redo",
+                        "replay",
+                        "scene_inspect",
+                        "scene_transform",
+                        "scene_undo",
+                        "scene_redo",
+                        "scene_replay",
+                    ]
+                    .contains(&name)
+                {
+                    Err((-32602, "Unknown tool or tools/call parameters"))
+                } else if !valid_arguments(name, &arguments) {
+                    Ok(tool_result(domain_error("invalid_arguments", "Arguments must match the tool schema; u64 values are canonical decimal strings and transform vectors contain exactly three JSON numbers")))
+                } else {
+                    Ok(tool_result(bridge(name, &arguments)))
+                }
+            }
+            _ => Err((-32601, "Method not found")),
+        };
+        Some(match result {
+            Ok(result) => json!({"jsonrpc":"2.0","id":id,"result":result}),
+            Err((code, message)) => rpc_error(id, code, message),
+        })
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn call_bridge(name: &str, arguments: &Value) -> Value {
+    use std::fs;
+    use std::os::unix::fs::{FileTypeExt, MetadataExt};
+    use std::os::unix::net::UnixStream;
+    use std::path::PathBuf;
+    use std::time::{Duration, Instant};
+
+    struct DeadlineReader {
+        stream: UnixStream,
+        deadline: Instant,
+    }
+
+    impl io::Read for DeadlineReader {
+        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
+            let remaining = self.deadline.saturating_duration_since(Instant::now());
+            if remaining.is_zero() {
+                return Err(io::Error::new(
+                    io::ErrorKind::TimedOut,
+                    "Editor response deadline elapsed",
+                ));
+            }
+            self.stream.set_read_timeout(Some(remaining))?;
+            io::Read::read(&mut self.stream, output)
+        }
+    }
+
+    fn exchange(name: &str, arguments: &Value) -> io::Result<Value> {
+        let path = std::env::var_os("RUSTER_MCP_SOCKET")
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                io::Error::other("Set RUSTER_MCP_SOCKET to the explicitly enabled editor socket")
+            })?;
+        if !path.is_absolute() {
+            return Err(io::Error::other("RUSTER_MCP_SOCKET must be absolute"));
+        }
+        let parent = path
+            .parent()
+            .ok_or_else(|| io::Error::other("Socket has no parent directory"))?;
+        let dir = fs::symlink_metadata(parent)?;
+        let socket = fs::symlink_metadata(&path)?;
+        let own_uid = fs::metadata("/proc/self")?.uid();
+        if !dir.is_dir()
+            || dir.mode() & 0o777 != 0o700
+            || dir.uid() != own_uid
+            || !socket.file_type().is_socket()
+            || socket.mode() & 0o777 != 0o600
+            || socket.uid() != own_uid
+        {
+            return Err(io::Error::other(
+                "Require same-user socket0600 inside a private directory0700 (no symlinks)",
+            ));
+        }
+        let mut stream = UnixStream::connect(&path)?;
+        stream.set_write_timeout(Some(Duration::from_secs(3)))?;
+        let frame = json!({"operation":name,"arguments":arguments}).to_string();
+        if frame.len() + 1 > MAX_FRAME {
+            return Err(io::Error::other("Bridge request exceeds byte limit"));
+        }
+        stream.write_all(frame.as_bytes())?;
+        stream.write_all(b"\n")?;
+        let reader = DeadlineReader {
+            stream,
+            deadline: Instant::now() + Duration::from_secs(3),
+        };
+        let response = read_frame(&mut BufReader::new(reader), MAX_FRAME)?.ok_or_else(|| {
+            io::Error::other("Editor closed without a response; inspect before retrying")
+        })?;
+        let result: Value = serde_json::from_slice(&response)?;
+        if !result.is_object()
+            || !result["ok"].is_boolean()
+            || (result["ok"] == true && !result["result"].is_object())
+            || (result["ok"] == false
+                && (!result["error"]["code"].is_string()
+                    || !result["error"]["message"].is_string()))
+        {
+            return Err(io::Error::other(
+                "Malformed editor response; inspect before retrying",
+            ));
+        }
+        Ok(result)
+    }
+    exchange(name, arguments).unwrap_or_else(|error| {
+        domain_error(
+            "bridge_unavailable",
+            &format!(
+                "{error}. Commit status may be unknown after dispatch; inspect before any retry."
+            ),
+        )
+    })
+}
+
+#[cfg(not(target_os = "linux"))]
+fn call_bridge(_: &str, _: &Value) -> Value {
+    domain_error(
+        "bridge_unavailable",
+        "This adapter currently supports local Linux editor attachment only",
+    )
+}
+
+fn run(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
+    let mut server = Server::default();
+    while let Some(frame) = read_frame(reader, MAX_FRAME)? {
+        if let Some(response) = server.handle(&frame, call_bridge) {
+            let serialized = response.to_string();
+            if serialized.len() + 1 > MAX_OUTPUT {
+                return Err(io::Error::other(
+                    "MCP response exceeds byte limit; closing transport",
+                ));
+            }
+            writer.write_all(serialized.as_bytes())?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
+        }
+    }
+    Ok(())
+}
+
+fn main() {
+    if let Err(error) = run(&mut io::stdin().lock(), &mut io::stdout().lock()) {
+        eprintln!("ruster-mcp: {error}");
+        std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::io::Cursor;
+
+    fn request(server: &mut Server, method: &str, params: Value) -> Value {
+        server
+            .handle(
+                json!({"jsonrpc":"2.0","id":1,"method":method,"params":params})
+                    .to_string()
+                    .as_bytes(),
+                |_, _| panic!("unexpected bridge call"),
+            )
+            .unwrap()
+    }
+
+    fn ready() -> Server {
+        let mut server = Server::default();
+        let response = request(
+            &mut server,
+            "initialize",
+            json!({"protocolVersion":"2099-01-01","capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+        );
+        assert_eq!(response["result"]["protocolVersion"], PROTOCOL);
+        assert_eq!(response["result"]["capabilities"], json!({"tools":{}}));
+        assert!(server
+            .handle(
+                br#"{"jsonrpc":"2.0","method":"notifications/initialized"}"#,
+                |_, _| unreachable!()
+            )
+            .is_none());
+        assert_eq!(server.lifecycle, Lifecycle::Ready);
+        server
+    }
+
+    #[test]
+    fn framing_limits_truncation_utf8_and_parse_errors() {
+        let mut input = Cursor::new(b"123\n4\n");
+        assert_eq!(read_frame(&mut input, 4).unwrap().unwrap(), b"123");
+        assert_eq!(read_frame(&mut input, 4).unwrap().unwrap(), b"4");
+        assert!(read_frame(&mut input, 4).unwrap().is_none());
+        for input in [&b"1234\n"[..], b"123", b"\xff"] {
+            assert!(read_frame(&mut Cursor::new(input), 4).is_err());
+        }
+        let mut server = Server::default();
+        for input in [&b"\xff"[..], b"{", b""] {
+            assert_eq!(
+                server.handle(input, |_, _| unreachable!()).unwrap()["error"]["code"],
+                -32700
+            );
+        }
+        for input in [
+            &b"[]"[..],
+            b"null",
+            br#"{"jsonrpc":"2.0","id":null,"method":"ping"}"#,
+            br#"{"jsonrpc":"2.0","id":1.5,"method":"ping"}"#,
+        ] {
+            assert_eq!(
+                server.handle(input, |_, _| unreachable!()).unwrap()["error"]["code"],
+                -32600
+            );
+        }
+    }
+
+    #[test]
+    fn lifecycle_negotiates_and_requires_initialized() {
+        let mut server = Server::default();
+        assert_eq!(
+            request(&mut server, "tools/list", json!({}))["error"]["code"],
+            -32002
+        );
+        assert_eq!(request(&mut server, "ping", json!({}))["result"], json!({}));
+        assert_eq!(
+            request(&mut server, "initialize", json!({}))["error"]["code"],
+            -32602
+        );
+        assert_eq!(server.lifecycle, Lifecycle::New);
+        request(
+            &mut server,
+            "initialize",
+            json!({"protocolVersion":PROTOCOL,"capabilities":{},"clientInfo":{"name":"test","version":"1"}}),
+        );
+        assert_eq!(
+            request(&mut server, "tools/list", json!({}))["error"]["code"],
+            -32002
+        );
+        assert_eq!(
+            request(&mut server, "initialize", json!({}))["error"]["code"],
+            -32600
+        );
+        let mut server = ready();
+        assert_eq!(
+            request(&mut server, "unknown", json!({}))["error"]["code"],
+            -32601
+        );
+        for method in [
+            "notifications/cancelled",
+            "notifications/unknown",
+            "tools/call",
+        ] {
+            assert!(server
+                .handle(
+                    json!({"jsonrpc":"2.0","method":method,"params":{}})
+                        .to_string()
+                        .as_bytes(),
+                    |_, _| panic!("notifications cannot mutate")
+                )
+                .is_none());
+        }
+    }
+
+    #[test]
+    fn schemas_and_validation_prevent_unknown_or_rounded_arguments() {
+        let mut server = ready();
+        let listed = request(&mut server, "tools/list", json!({}));
+        let tools = listed["result"]["tools"].as_array().unwrap();
+        assert_eq!(tools.len(), 10);
+        let names: Vec<_> = tools
+            .iter()
+            .map(|tool| tool["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(
+            names,
+            [
+                "inspect",
+                "edit",
+                "undo",
+                "redo",
+                "replay",
+                "scene_inspect",
+                "scene_transform",
+                "scene_undo",
+                "scene_redo",
+                "scene_replay"
+            ]
+        );
+        for tool in tools {
+            assert_eq!(tool["inputSchema"]["additionalProperties"], false);
+        }
+        assert_eq!(
+            request(&mut server, "tools/list", json!({"cursor":"bad"}))["error"]["code"],
+            -32602
+        );
+        assert_eq!(
+            request(
+                &mut server,
+                "tools/call",
+                json!({"name":"shell","arguments":{}})
+            )["error"]["code"],
+            -32602
+        );
+        let base =
+            json!({"expected_session_token":"session","expected_revision":"18446744073709551615"});
+        assert!(valid_arguments("undo", &base));
+        for bad in [
+            json!(1),
+            json!(null),
+            json!(""),
+            json!("01"),
+            json!("+1"),
+            json!("-1"),
+            json!("1.0"),
+            json!("18446744073709551616"),
+        ] {
+            let mut args = base.clone();
+            args["expected_revision"] = bad;
+            let response = request(
+                &mut server,
+                "tools/call",
+                json!({"name":"undo","arguments":args}),
+            );
+            assert_eq!(response["result"]["isError"], true);
+            assert_eq!(
+                response["result"]["structuredContent"]["error"]["code"],
+                "invalid_arguments"
+            );
+        }
+        assert!(!valid_arguments("inspect", &json!({"path":"secret"})));
+        let mut args = base.clone();
+        args["config"] =
+            json!({"initial_stock":"1","production_per_tick":"2","transfer_per_tick":"3"});
+        assert!(valid_arguments("edit", &args));
+        args["config"]["extra"] = json!(0);
+        assert!(!valid_arguments("edit", &args));
+        let mut args = base;
+        args["ticks"] = json!("10001");
+        // Domain work limit belongs to the editor; do not silently clamp it here.
+        assert!(valid_arguments("replay", &args));
+        assert!(valid_arguments("scene_replay", &args));
+        assert!(valid_arguments("scene_inspect", &json!({})));
+        assert!(valid_arguments("scene_inspect", &json!({"offset":"16"})));
+        assert!(!valid_arguments("scene_inspect", &json!({"offset":16})));
+        assert!(!valid_arguments("scene_inspect", &json!({"offset":"01"})));
+        assert!(!valid_arguments("scene_inspect", &json!({"path":"secret"})));
+    }
+
+    #[test]
+    fn scene_shapes_are_strict_and_semantic_validation_stays_with_owner() {
+        let mut server = ready();
+        let arguments = json!({"expected_session_token":"scene-session","expected_revision":"7",
+            "object_id":"left","transform":{"translation":[1,2.5,-3],"rotation":[0,0,0],"scale":[1,1,1]}});
+        for vector in [
+            json!([1, 2]),
+            json!([1, 2, 3, 4]),
+            json!([1, "2", 3]),
+            json!(null),
+        ] {
+            let mut invalid = arguments.clone();
+            invalid["transform"]["translation"] = vector;
+            assert!(!valid_arguments("scene_transform", &invalid));
+        }
+        let mut invalid = arguments.clone();
+        invalid["transform"]["extra"] = json!(0);
+        assert!(!valid_arguments("scene_transform", &invalid));
+        let mut invalid = arguments.clone();
+        invalid["transform"]
+            .as_object_mut()
+            .unwrap()
+            .remove("rotation");
+        assert!(!valid_arguments("scene_transform", &invalid));
+        for (name, args) in [
+            ("scene_transform", arguments.clone()),
+            ("scene_inspect", json!({"offset":"16"})),
+            (
+                "scene_undo",
+                json!({"expected_session_token":"scene-session","expected_revision":"7"}),
+            ),
+            (
+                "scene_redo",
+                json!({"expected_session_token":"scene-session","expected_revision":"7"}),
+            ),
+            (
+                "scene_replay",
+                json!({"expected_session_token":"scene-session","expected_revision":"7","ticks":"10001"}),
+            ),
+        ] {
+            let response = server.handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}).to_string().as_bytes(), |forwarded_name, forwarded_args| {
+                assert_eq!(forwarded_name, name);
+                assert_eq!(forwarded_args, &args);
+                domain_error("owner_validation", "Editor owns semantic validation")
+            }).unwrap();
+            assert_eq!(
+                response["result"]["structuredContent"]["error"]["code"],
+                "owner_validation"
+            );
+        }
+        // Do not silently clamp scale, numeric range or work limits in the adapter.
+        let mut args = arguments;
+        args["transform"]["scale"] = json!([0, 1e100, -1]);
+        assert!(valid_arguments("scene_transform", &args));
+    }
+
+    #[test]
+    fn tool_forwarding_preserves_preconditions_and_domain_errors() {
+        let mut server = ready();
+        let arguments = json!({"expected_session_token":"old","expected_revision":"9"});
+        let domain = json!({"ok":false,"error":{"code":"stale_session","message":"Inspect again","session_token":"current","revision":"10"}});
+        let response = server.handle(json!({"jsonrpc":"2.0","id":"request","method":"tools/call","params":{"name":"undo","arguments":arguments}}).to_string().as_bytes(), |name, args| {
+            assert_eq!(name, "undo"); assert_eq!(args, &arguments); domain.clone()
+        }).unwrap();
+        assert_eq!(response["id"], "request");
+        assert_eq!(response["result"]["structuredContent"], domain);
+        assert_eq!(response["result"]["isError"], true);
+        let text: Value =
+            serde_json::from_str(response["result"]["content"][0]["text"].as_str().unwrap())
+                .unwrap();
+        assert_eq!(text, domain);
+        let response = server
+            .handle(
+                br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"inspect"}}"#,
+                |name, args| {
+                    assert_eq!(name, "inspect");
+                    assert_eq!(args, &json!({}));
+                    json!({"ok":true,"result":{"revision":"10"}})
+                },
+            )
+            .unwrap();
+        assert_eq!(response["result"]["isError"], false);
+    }
+}

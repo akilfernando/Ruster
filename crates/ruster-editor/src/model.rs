@@ -1,5 +1,6 @@
 //! Editor-only interaction state. Authored transactions and persistence belong to core.
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use ruster_core::{Config, ProjectSession, ScenarioError, Simulation};
@@ -72,7 +73,11 @@ pub enum PathMode {
     SaveAs,
 }
 
+static NEXT_PROJECT_GENERATION: AtomicU64 = AtomicU64::new(1);
+
 pub struct Editor {
+    /// Changes for each successful project replacement, including same-ID reopen.
+    pub project_generation: u64,
     pub project: ProjectSession,
     pub fields: Fields,
     pub simulation: Simulation,
@@ -97,6 +102,11 @@ impl Editor {
     pub fn new(project: ProjectSession) -> Self {
         let config = project.scenario().config();
         Self {
+            project_generation: NEXT_PROJECT_GENERATION
+                .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
+                    value.checked_add(1)
+                })
+                .expect("editor project generation exhausted"),
             fields: config.into(),
             simulation: Simulation::new(config).expect("validated scenario"),
             runtime_config: config,
@@ -231,7 +241,9 @@ impl Editor {
                 self.notice = "Project ready. Runtime starts from authored values.".into();
             }
             Err(error) => {
-                self.error = Some(format!("{error}. Current project and fields are preserved; choose a valid file or identifier and retry."));
+                self.error = Some(format!(
+                    "{error}. Current project and fields are preserved; choose a valid file or identifier and retry."
+                ));
                 self.pending = None;
             }
         }
@@ -253,7 +265,11 @@ impl Editor {
         }
         match self.project.save() {
             Ok(()) => self.saved(),
-            Err(error) => self.error = Some(format!("{error}. Your work is still in memory. Retry after resolving the conflict or use Save As with a new path.")),
+            Err(error) => {
+                self.error = Some(format!(
+                    "{error}. Your work is still in memory. Retry after resolving the conflict or use Save As with a new path."
+                ))
+            }
         }
     }
 

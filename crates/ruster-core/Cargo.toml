@@ -4,6 +4,8 @@ description = "A minimal deterministic logistics simulation experiment"
 version.workspace = true
 edition.workspace = true
 publish.workspace = true
+license.workspace = true
+repository.workspace = true
 
 [dependencies]
 fs2 = "0.4"

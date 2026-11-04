@@ -13,7 +13,7 @@
   "proc_clock_ticks": 100,
   "platform": [
     "Linux",
-    "Zeph",
+    "<hostname omitted>",
     "7.3.1-1-cachyos",
     "#1 SMP PREEMPT_DYNAMIC Sat, 31 Oct 2026 15:33:05 +0000",
     "x86_64"
@@ -23,10 +23,10 @@
     {
       "id": 2,
       "name": "DP-3",
-      "description": "HKC OVERSEAS LIMITED S2721PM 0000000000001",
+      "description": "HKC OVERSEAS LIMITED S2721PM",
       "make": "HKC OVERSEAS LIMITED",
       "model": "S2721PM",
-      "serial": "0000000000001",
+      "serial": "<omitted>",
       "width": 2560,
       "height": 1440,
       "physicalWidth": 600,
@@ -404,5 +404,6 @@
       "exit_code": 0,
       "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=31 mean_ms=0.0503 p95_ms=0.0648\nTiming cpu_redraw_including_acquire: samples=32 mean_ms=2.2920 p95_ms=2.9454\nTiming cpu_geometry_rebuild: samples=1 mean_ms=0.1392 p95_ms=0.1392\nGeometry: rebuilds=1 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=31 mean_ms=134.6454 p95_ms=119.9495\nViewer lifecycle: 32 frames in 4.583s\nViewer state: playing=false tick=0 stock=0 delivered=0 produced=0\nValidation enabled=false errors=0 warnings=0\n"
     }
-  ]
+  ],
+  "publication_note": "Non-secret hostname and display serial omitted from current snapshot; original measurement values unchanged. Historical Git evidence retains original metadata."
 }
