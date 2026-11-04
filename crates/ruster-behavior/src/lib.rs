@@ -1,7 +1,7 @@
 //! Provisional Lua5.4 execution over immutable authored data and copied runtime state.
 #![forbid(unsafe_code)]
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::collections::BTreeMap;
 use std::rc::Rc;
 use std::sync::{
@@ -10,9 +10,12 @@ use std::sync::{
 };
 
 use mlua::chunk::ChunkMode;
+use mlua::debug::DebugEvent;
 use mlua::{Function, HookTriggers, Lua, LuaOptions, StdLib, Table, Value, VmState};
 use ruster_scene::{Authoring, BehaviorBinding, BehaviorSource, PropertyValue, Scene, Transform};
 use sha2::{Digest, Sha256};
+
+pub mod debug;
 
 pub const LANGUAGE_ID: &str = "lua54";
 pub const HOST_API_VERSION: u32 = 1;
@@ -55,7 +58,11 @@ impl Limits {
             || self.cached_sources == 0
             || self.cached_sources > 256
         {
-            return Err(Diagnostic::plain(DiagnosticCode::InvalidLimits, Phase::Setup, "require finite dt in(0,1], positive bounded instruction/cache limits, hook interval within budgets, and VM64KiB..64MiB"));
+            return Err(Diagnostic::plain(
+                DiagnosticCode::InvalidLimits,
+                Phase::Setup,
+                "require finite dt in(0,1], positive bounded instruction/cache limits, hook interval within budgets, and VM64KiB..64MiB",
+            ));
         }
         Ok(())
     }
@@ -188,6 +195,7 @@ pub struct Engine {
     binding_count: Rc<Cell<u64>>,
     tick_count: Rc<Cell<u64>>,
     failure: Rc<Cell<Option<DiagnosticCode>>>,
+    debugger: Rc<RefCell<Option<debug::DebugSession>>>,
 }
 impl Engine {
     pub fn new(limits: Limits) -> Result<Self, Diagnostic> {
@@ -206,37 +214,7 @@ impl Engine {
         let binding_count = Rc::new(Cell::new(0u64));
         let tick_count = Rc::new(Cell::new(0u64));
         let failure = Rc::new(Cell::new(None));
-        let (c, b, t, f) = (
-            cancel.clone(),
-            binding_count.clone(),
-            tick_count.clone(),
-            failure.clone(),
-        );
-        let (interval, binding_limit, tick_limit) = (
-            limits.hook_interval,
-            limits.binding_instructions,
-            limits.tick_instructions,
-        );
-        lua.set_hook(
-            HookTriggers::new().every_nth_instruction(interval),
-            move |_, _| {
-                if c.load(Ordering::Relaxed) {
-                    f.set(Some(DiagnosticCode::Cancelled));
-                    return Err(mlua::Error::runtime("behavior cancelled"));
-                }
-                b.set(b.get().saturating_add(u64::from(interval)));
-                t.set(t.get().saturating_add(u64::from(interval)));
-                if b.get() > binding_limit || t.get() > tick_limit {
-                    f.set(Some(DiagnosticCode::InstructionLimit));
-                    return Err(mlua::Error::runtime(
-                        "behavior instruction budget exhausted",
-                    ));
-                }
-                Ok(VmState::Continue)
-            },
-        )
-        .map_err(|e| Diagnostic::plain(DiagnosticCode::Runtime, Phase::Setup, &e.to_string()))?;
-        Ok(Self {
+        let engine = Self {
             lua,
             limits,
             cache: BTreeMap::new(),
@@ -244,7 +222,95 @@ impl Engine {
             binding_count,
             tick_count,
             failure,
-        })
+            debugger: Rc::new(RefCell::new(None)),
+        };
+        engine.install_hook(false)?;
+        Ok(engine)
+    }
+    /// Owner-thread idle boundary only; attaching arms line/call/return hooks.
+    /// Reset validation still executes with stops suppressed.
+    pub fn set_debugger(&mut self, session: Option<debug::DebugSession>) -> Result<(), Diagnostic> {
+        if session
+            .as_ref()
+            .is_some_and(|session| !session.uses_cancellation(&self.cancel))
+        {
+            return Err(Diagnostic::plain(
+                DiagnosticCode::InvalidLimits,
+                Phase::Setup,
+                "debugger and engine must share the same cancellation token",
+            ));
+        }
+        self.install_hook(session.is_some())?;
+        *self.debugger.borrow_mut() = session;
+        Ok(())
+    }
+    /// Next reaching its root return asks the scheduler to pause after atomic commit.
+    pub fn take_debug_pause_requested(&self) -> bool {
+        self.debugger
+            .borrow_mut()
+            .as_mut()
+            .is_some_and(debug::DebugSession::take_pause_requested)
+    }
+    fn install_hook(&self, armed: bool) -> Result<(), Diagnostic> {
+        let (c, b, t, f, debugger) = (
+            self.cancel.clone(),
+            self.binding_count.clone(),
+            self.tick_count.clone(),
+            self.failure.clone(),
+            self.debugger.clone(),
+        );
+        let (interval, binding_limit, tick_limit) = (
+            self.limits.hook_interval,
+            self.limits.binding_instructions,
+            self.limits.tick_instructions,
+        );
+        let mut triggers = HookTriggers::new().every_nth_instruction(interval);
+        if armed {
+            triggers = triggers.every_line().on_calls().on_returns();
+        }
+        self.lua
+            .set_hook(triggers, move |lua, event| {
+                if c.load(Ordering::Relaxed)
+                    || debugger
+                        .borrow()
+                        .as_ref()
+                        .is_some_and(debug::DebugSession::cancelled)
+                {
+                    f.set(Some(DiagnosticCode::Cancelled));
+                    return Err(mlua::Error::runtime("behavior cancelled"));
+                }
+                // Line/call/return events must not consume instruction budget.
+                if event.event() == DebugEvent::Count {
+                    b.set(b.get().saturating_add(u64::from(interval)));
+                    t.set(t.get().saturating_add(u64::from(interval)));
+                    if b.get() > binding_limit || t.get() > tick_limit {
+                        f.set(Some(DiagnosticCode::InstructionLimit));
+                        return Err(mlua::Error::runtime(
+                            "behavior instruction budget exhausted",
+                        ));
+                    }
+                }
+                if let Some(session) = debugger.borrow_mut().as_mut() {
+                    if let Err(error) = session.hook(lua, event) {
+                        if session.cancelled() {
+                            f.set(Some(DiagnosticCode::Cancelled));
+                        }
+                        return Err(error);
+                    }
+                }
+                Ok(VmState::Continue)
+            })
+            .map_err(|e| Diagnostic::plain(DiagnosticCode::Runtime, Phase::Setup, &e.to_string()))
+    }
+    fn begin_debug(&self, tick: u64, suppressed: bool) {
+        if let Some(session) = self.debugger.borrow_mut().as_mut() {
+            session.begin(tick, suppressed);
+        }
+    }
+    fn debug_phase(&self, phase: Phase) {
+        if let Some(session) = self.debugger.borrow_mut().as_mut() {
+            session.phase(phase);
+        }
     }
     pub fn cancellation(&self) -> Arc<AtomicBool> {
         self.cancel.clone()
@@ -259,7 +325,13 @@ impl Engine {
         self.binding_count.set(0);
         self.tick_count.set(0);
         self.failure.set(None);
-        if self.cancel.load(Ordering::SeqCst) {
+        if self.cancel.load(Ordering::SeqCst)
+            || self
+                .debugger
+                .borrow()
+                .as_ref()
+                .is_some_and(debug::DebugSession::cancelled)
+        {
             return Err(Diagnostic::plain(
                 DiagnosticCode::Cancelled,
                 Phase::Setup,
@@ -269,7 +341,13 @@ impl Engine {
         Ok(())
     }
     fn check_cancelled(&self) -> Result<(), Diagnostic> {
-        if self.cancel.load(Ordering::SeqCst) {
+        if self.cancel.load(Ordering::SeqCst)
+            || self
+                .debugger
+                .borrow()
+                .as_ref()
+                .is_some_and(debug::DebugSession::cancelled)
+        {
             return Err(Diagnostic::plain(
                 DiagnosticCode::Cancelled,
                 Phase::Commit,
@@ -348,6 +426,7 @@ impl Engine {
                 )
             })?;
         self.begin()?;
+        self.begin_debug(0, true);
         let snapshot = Arc::new(scene.clone());
         for (id, binding) in &authoring.bindings {
             if !binding.enabled {
@@ -372,6 +451,7 @@ impl Engine {
             )
         })?;
         self.begin()?;
+        self.begin_debug(runtime.tick, false);
         let snapshot = Arc::new(runtime.scene.clone());
         let mut staged = runtime.scene.clone();
         for (id, binding) in &runtime.authoring.bindings {
@@ -415,8 +495,28 @@ impl Engine {
                 )
             })?;
             let main = self.compile(&binding.source_id, source)?;
+            if let Some(session) = self.debugger.borrow_mut().as_mut() {
+                session.context(debug::Context {
+                    source_id: binding.source_id.clone(),
+                    source_hash: self
+                        .cache
+                        .get(&binding.source_id)
+                        .expect("just compiled source")
+                        .hash
+                        .clone(),
+                    binding_id: id.into(),
+                    object_id: binding.object_id.clone(),
+                    phase: Phase::Module,
+                });
+            }
             self.binding_count.set(0);
-            if self.cancel.load(Ordering::SeqCst) {
+            if self.cancel.load(Ordering::SeqCst)
+                || self
+                    .debugger
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(debug::DebugSession::cancelled)
+            {
                 return Err(Diagnostic::plain(
                     DiagnosticCode::Cancelled,
                     Phase::Module,
@@ -446,6 +546,9 @@ impl Engine {
             }
             result
         })();
+        if let Some(session) = self.debugger.borrow_mut().as_mut() {
+            session.clear();
+        }
         // All evaluation handles have dropped before explicit collection, including
         // failed compilation or memory-pressure cleanup paths.
         if result.is_err() {
@@ -470,6 +573,7 @@ impl Engine {
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     main.set_environment(environment)
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+                    self.debug_phase(Phase::Module);
                     let module: Table = main
                         .call(())
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
@@ -492,6 +596,7 @@ impl Engine {
                             )
                             .map_err(|e| self.error(e, Phase::Update, DiagnosticCode::Runtime))?;
                     }
+                    self.debug_phase(Phase::Update);
                     let output: Value = update
                         .call((object, props, dt, host))
                         .map_err(|e| self.error(e, Phase::Update, DiagnosticCode::Runtime))?;
