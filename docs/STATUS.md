@@ -14,6 +14,12 @@ The [post-M6 review](ROADMAP-REVIEW.md#post-m6-creator-outcome-review--2026-11-0
 
 Documentation-only verification: `python3 scripts/check.py --base origin/main` and `git diff --check` passed; no engine behavior changed and no Rust/GPU rerun was needed. Existing M6 source evidence below remains applicable.
 
+## Editor experience requirement — 2026-11-04
+
+The user made immediate familiarity for experienced Unity/Unreal creators and everyday quality-of-life behavior non-negotiable. [EDITOR-EXPERIENCE.md](EDITOR-EXPERIENCE.md) records this confirmed requirement, an agent-selected working breakdown and acceptance guidance. M6 does not meet that baseline: basic generic object creation/manipulation/discovery/workspace gaps and untested human familiarity remain. Existing prototype completion is not editor readiness.
+
+M7–M9 ordering is retained. Relevant usability must accompany affected workflows; remaining gaps require explicit planning before editor/public-alpha acceptance. Exact controls/presets and a possible dedicated completion slice remain undecided. Documentation-only change; links/whitespace checked with `python3 scripts/check.py --base origin/main` and `git diff --check`; no new Rust/GPU execution or usability study.
+
 ## Implemented state
 
 - M0–M5: logistics reference workflow, persisted authoring, legacy ash schematic, egui Vulkan editor, bounded native MCP, neutral scene/Preview and shared procedural3D. Legacy logistics-v1 and scene-v1 remain readable within their explicit boundaries; see HISTORY.md and milestone evidence.

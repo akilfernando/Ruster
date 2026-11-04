@@ -24,6 +24,8 @@ The user has authorized engine development as of 2026-11-04. Follow `docs/DIRECT
 
 The user-confirmed [project ethos](docs/DIRECTION.md#project-ethos-serve-the-creator) is to make systems serve creators and their intended creations. Evaluate work by the creation workflow it enables, while preserving explicit milestone scope and distinguishing ambition from verified capability.
 
+The user requires immediate familiarity for experienced Unity/Unreal creators and treats everyday editor quality of life as non-negotiable. Follow [EDITOR-EXPERIENCE.md](docs/EDITOR-EXPERIENCE.md) for relevant workflow acceptance; do not defer routine usability as optional polish or infer it from system tests.
+
 ## Local desktop testing
 
 The user works on workspace 1. Open Ruster test windows on Hyprland workspace 2 silently, without switching the active workspace or stealing focus. A local `ruster-development-workspace` window rule in `~/.config/hypr/hyprland.lua` routes initial Ruster viewer/editor titles there. Verify routing before UI automation; target the exact test window and never send global input to the user's active window. Do not change the user's clipboard for unattended tests. Hidden-workspace rendering may be throttled: label performance evidence accordingly and compare matching conditions. Visual interaction that cannot run in isolation must wait for a suitable opportunity rather than interrupt the user.

@@ -18,6 +18,10 @@ This is a long-term design principle, not a claim that the current prototype can
 
 The user did not request a roadmap change with this clarification. The existing M7–M9 sequence remains in force; the [post-M6 assessment](ROADMAP-REVIEW.md#post-m6-creator-outcome-review--2026-11-04) records current gaps and recommendations separately from accepted scope.
 
+## Familiarity is a product requirement
+
+Confirmed by the user on 2026-11-04: creators who have spent their working lives in Unity or Unreal should feel at home immediately in Ruster. Everyday quality-of-life behavior is non-negotiable, including the small interactions people ordinarily take for granted. Treat it as part of delivering a workflow, not discretionary finishing work. The [editor experience baseline](EDITOR-EXPERIENCE.md) records the working breakdown, current gaps and required human acceptance evidence. Current prototype completion does not establish that this requirement is met.
+
 ## Pillars and observable outcomes
 
 | Pillar | Design rule | Evidence to collect |

@@ -192,6 +192,9 @@ M6 delivered scope: bounded triangle-only OBJ import, stable-ID catalog with its
 
 ## Continuous adoption and engineering gates
 
+**Non-negotiable editor experience:** the user requires experienced Unity/Unreal creators to feel at home immediately. Apply [EDITOR-EXPERIENCE.md](EDITOR-EXPERIENCE.md) alongside each affected workflow and before editor/public-alpha acceptance. Track missing everyday interactions as unfinished product work; historical prototype milestones do not satisfy this gate. Validate with experienced users from both backgrounds. The milestone sequence is retained, but remaining baseline gaps must be scheduled and resolved for the supported creation journeys.
+
+
 Seek an external human walkthrough of the current editor before major UI expansion. Keep agent-assisted timing distinct from human usability evidence. Choose representative workloads and hardware tiers before performance claims; measure tail latency, memory, idle use and iteration/build cost. Establish Windows runtime feasibility and another GPU class where access permits before distribution decisions harden.
 
 Select the license before public collaboration/distribution. Introduce scoped CI when a remote PR workflow begins, using TESTING.md rather than accumulating every subsystem check into every PR. Keep CLI/editor/MCP semantics and schema compatibility aligned as facilities grow.

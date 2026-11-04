@@ -7,6 +7,8 @@ Ruster's purpose is to help people turn their own ideas into working creations. 
 [![CI](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml/badge.svg)](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
+Familiarity for experienced Unity and Unreal creators, including everyday editor conveniences, is a core requirement. The [editor experience baseline](docs/EDITOR-EXPERIENCE.md) describes the target and the gaps still to close.
+
 **Early development:** milestones M0–M6 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines.
 
 ![Ruster scene editor with procedural 3D objects and transform inspector](docs/evidence/m5-scene-editor.png)
