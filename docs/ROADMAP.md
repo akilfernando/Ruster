@@ -31,7 +31,7 @@ M0 through M5 are complete within their documented local scope; see [M1/M2 evide
 
 **Exit evidence already recorded:** 11 Rust tests, 13 check-runner tests, formatting and Clippy pass on this Linux workstation. Current full warm gate measured 1.19 seconds. This is historical evidence, not a future timing guarantee.
 
-**Limits:** no generalized engine world, renderer, persistence, editor or MCP. A local baseline is established with M1/M2; hosted CI is not configured. M0 completion describes local functionality only, not release readiness.
+**Limits:** no generalized engine world, renderer, persistence, editor or MCP. A local baseline is established with M1/M2; hosted CI was not configured at M0 (current workflow is in TESTING.md). M0 completion describes local functionality only, not release readiness.
 
 ## M1 Reproducible project
 
@@ -157,7 +157,7 @@ M5 delivered scope: neutral bounded scene/session/Preview, separate identified s
 
 **Exit criteria:** no developer-local paths or secrets; explicit runtime prerequisites; clean-checkout build; source/asset provenance and dependency notices; an independent developer can change and rebuild the example.
 
-**Decision gate:** select the release license before external source sharing/contributions or distribution. Test Windows runtime feasibility before packaging assumptions harden, or explicitly narrow the support target. Add audio/physics/UI capabilities only where the chosen small application requires them.
+**Decision gate:** source licensing is now MIT OR Apache-2.0 under decision0007; retain notices and review binary distribution obligations before packaging. Test Windows runtime feasibility before packaging assumptions harden, or explicitly narrow the support target. Add audio/physics/UI capabilities only where the chosen small application requires them.
 
 ## M8 Independent reuse proof
 
