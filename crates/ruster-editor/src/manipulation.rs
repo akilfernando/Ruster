@@ -259,6 +259,52 @@ impl AngleUnit {
         }
     }
 }
+// Reserve room for a signed f32 value instead of squeezing three clipped
+// fields into every panel. Wrap complete axis/field groups at narrow widths.
+pub(super) fn component_group_width(ui: &egui::Ui) -> f32 {
+    let available = ui.available_width().max(1.0);
+    let spacing = ui.spacing().item_spacing.x;
+    let columns = ((available + spacing) / (144.0 + spacing))
+        .floor()
+        .clamp(1.0, 3.0);
+    ((available - (columns - 1.0) * spacing) / columns).max(1.0)
+}
+// Format only canonical syncs or an active preview, never all scene objects per idle frame.
+fn precision_components<'a>(
+    transforms: impl Iterator<Item = &'a Transform>,
+    unit: AngleUnit,
+) -> ([String; 9], [bool; 9]) {
+    let mut values = transforms.map(|transform| {
+        let mut values = [0.0_f32; 9];
+        values[..3].copy_from_slice(&transform.translation);
+        values[3..6].copy_from_slice(&transform.rotation);
+        values[6..].copy_from_slice(&transform.scale);
+        values
+    });
+    let first = values.next();
+    let mut mixed = [false; 9];
+    for value in values {
+        for i in 0..9 {
+            mixed[i] |= first.is_some_and(|first| first[i] != value[i]);
+        }
+    }
+    let text = std::array::from_fn(|i| {
+        if mixed[i] {
+            String::new()
+        } else {
+            first
+                .map(|value| {
+                    if (3..6).contains(&i) {
+                        unit.display(value[i]).to_string()
+                    } else {
+                        value[i].to_string()
+                    }
+                })
+                .unwrap_or_default()
+        }
+    });
+    (text, mixed)
+}
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct DraftSnapshot {
@@ -383,39 +429,21 @@ impl Manipulation {
         self.edited = [false; 9];
         self.precision_revision = None;
         self.precision_had_focus = false;
-        let mut values = self
-            .ids
-            .iter()
-            .filter_map(|id| scene.objects.iter().find(|o| &o.id == id))
-            .map(|o| {
-                let mut v = [0.0_f32; 9];
-                v[..3].copy_from_slice(&o.transform.translation);
-                v[3..6].copy_from_slice(&o.transform.rotation);
-                v[6..].copy_from_slice(&o.transform.scale);
-                v
-            });
-        let first = values.next();
-        self.mixed = [false; 9];
-        for value in values {
-            for i in 0..9 {
-                self.mixed[i] |= first.is_some_and(|v| v[i] != value[i]);
-            }
-        }
-        for i in 0..9 {
-            self.precision[i] = if self.mixed[i] {
-                String::new()
-            } else {
-                first
-                    .map(|v| {
-                        if (3..6).contains(&i) {
-                            unit.display(v[i]).to_string()
-                        } else {
-                            v[i].to_string()
-                        }
-                    })
-                    .unwrap_or_default()
-            };
-        }
+        (self.precision, self.mixed) = precision_components(
+            self.ids
+                .iter()
+                .filter_map(|id| scene.objects.iter().find(|o| &o.id == id))
+                .map(|object| &object.transform),
+            unit,
+        );
+    }
+    fn preview_precision(&self) -> Option<([String; 9], [bool; 9])> {
+        self.gesture.as_ref().map(|gesture| {
+            precision_components(
+                gesture.candidate.iter().map(|(_, transform)| transform),
+                AngleUnit::Degrees,
+            )
+        })
     }
     pub fn apply_precision(&mut self, session: &mut Session) -> Result<(), String> {
         if !self.precision_pending() {
@@ -480,33 +508,44 @@ impl Manipulation {
         session: &mut Session,
         auto_commit: bool,
     ) -> Result<bool, String> {
+        let mut preview = self.preview_precision();
+        let previewing = preview.is_some();
+        let mixed = preview
+            .as_ref()
+            .map(|(_, mixed)| *mixed)
+            .unwrap_or(self.mixed);
+        let unit = if previewing {
+            AngleUnit::Degrees
+        } else {
+            self.rotation_unit
+        };
         let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
         let escape_pressed =
             ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
         let mut focused = false;
         let mut field_has_focus = false;
-        if self.mixed.iter().any(|mixed| *mixed) {
-            ui.small("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected objects; other components keep their individual values.");
+        if mixed.iter().any(|mixed| *mixed) {
+            ui.label("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected objects; other components keep their individual values.");
         }
-        for (row, label) in ["Position", self.rotation_unit.label(), "Scale"]
-            .into_iter()
-            .enumerate()
-        {
+        for (row, label) in ["Position", unit.label(), "Scale"].into_iter().enumerate() {
             ui.label(label);
-            let spacing = ui.spacing().item_spacing.x;
-            let group_width = ((ui.available_width() - 2.0 * spacing) / 3.0).max(80.0);
+            let group_width = component_group_width(ui);
             ui.horizontal_wrapped(|ui| {
                 for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
                     let i = row * 3 + axis;
                     ui.allocate_ui_with_layout(egui::vec2(group_width,ui.spacing().interact_size.y),egui::Layout::left_to_right(egui::Align::Center),|ui| {
                         ui.label(label);
                         let response = ui.add_sized([ui.available_width().max(48.0),ui.spacing().interact_size.y],
-                            egui::TextEdit::singleline(&mut self.precision[i]).char_limit(1024)
-                                .hint_text(if self.mixed[i] { "—" } else { "" }));
-                        let response=response.on_hover_text("Editing this component changes only this axis/property for all selected objects. Other components keep their individual values.");
+                            egui::TextEdit::singleline(if let Some((text,_))=&mut preview {&mut text[i]} else {&mut self.precision[i]}).char_limit(1024).interactive(!previewing && ui.is_enabled())
+                                .hint_text(if mixed[i] { "—" } else { "" }));
+                        let response=response.on_hover_ui(|ui| {
+                            let value=preview.as_ref().map(|(text,_)|text[i].as_str()).unwrap_or(&self.precision[i]);
+                            if !value.is_empty() && value.chars().count()<=128 {ui.label(value);}
+                            ui.label("Editing changes only this component for selected objects. Long input stays in the field; use the cursor to scroll through it.");
+                        });
                         focused |= response.has_focus() || response.lost_focus();
                         field_has_focus |= response.has_focus();
-                        if response.changed() {
+                        if response.changed() && !previewing {
                             self.draft_changed();
                             self.edited[i] = true;
                             self.precision_revision.get_or_insert(session.scene().revision);
@@ -515,25 +554,31 @@ impl Manipulation {
                 }
             });
         }
+        if previewing {
+            ui.small("Drag preview · release to apply · Escape to cancel");
+            return Ok(false);
+        }
         let mut apply = focused && enter_pressed;
         apply |=
             auto_commit && self.precision_had_focus && !field_has_focus && self.precision_pending();
         self.precision_had_focus = field_has_focus;
         let mut cancel = focused && escape_pressed;
-        ui.horizontal_wrapped(|ui| {
-            apply |= ui
-                .add_enabled(
-                    self.precision_pending(),
-                    egui::Button::new("Apply transform components"),
-                )
-                .clicked();
-            cancel |= ui
-                .add_enabled(
-                    self.precision_pending(),
-                    egui::Button::new("Revert transform components"),
-                )
-                .clicked();
-        });
+        if self.precision_pending() {
+            ui.horizontal_wrapped(|ui| {
+                apply |= ui
+                    .add_enabled(
+                        self.precision_pending(),
+                        egui::Button::new("Apply transform components"),
+                    )
+                    .clicked();
+                cancel |= ui
+                    .add_enabled(
+                        self.precision_pending(),
+                        egui::Button::new("Revert transform components"),
+                    )
+                    .clicked();
+            });
+        }
         if cancel {
             self.reset_precision(session.scene());
             return Ok(false);
@@ -699,6 +744,7 @@ impl Manipulation {
                 .is_some_and(|g| g.revision != session.scene().revision);
         if cancelled && self.active() {
             self.cancel();
+            ui.ctx().request_repaint();
         }
         let blocked = !ui.input(|i| i.focused) || self.suppress_pointer;
         if self.suppress_pointer
@@ -719,6 +765,7 @@ impl Manipulation {
             )
             .into(),
             viewport: viewport.rect,
+            pixels_per_point: ui.ctx().pixels_per_point(),
             modes: match self.tool {
                 Tool::Translate => GizmoMode::all_translate(),
                 Tool::Rotate => GizmoMode::all_rotate(),
@@ -741,62 +788,74 @@ impl Manipulation {
             snap_scale: self.snap_scale,
             ..Default::default()
         });
+        let before_active = self.active();
+        let (cursor, pressed, down) = ui.input(|input| {
+            (
+                input.pointer.hover_pos().unwrap_or_default(),
+                input.pointer.button_pressed(egui::PointerButton::Primary),
+                input.pointer.button_down(egui::PointerButton::Primary),
+            )
+        });
+        let hovered = !blocked && viewport.response.hovered() && viewport.rect.contains(cursor);
+        // The viewport already owns pointer routing. Registering another widget
+        // at the cursor steals ordinary object clicks, even far from a handle.
+        let result = self.gizmo.update(
+            GizmoInteraction {
+                hovered,
+                drag_started: hovered && pressed,
+                dragging: !blocked && (down || pressed),
+                cursor_pos: (cursor.x, cursor.y),
+            },
+            &targets,
+        );
+        // Latch a real handle press even if the toolkit emits no transform yet.
+        // Treat coalesced press/release as an initial update, then release below.
+        // Retain that ownership through release, so a zero-motion handle click
+        // never selects an object or empty space behind the handle.
+        if !blocked && hovered && pressed && self.gizmo.is_focused() && self.gesture.is_none() {
+            self.gesture = Some(Gesture::configured(
+                session, &self.ids, self.tool, self.pivot, self.local,
+            )?);
+        }
+        if let Some((_, values)) = result {
+            if let Some(gesture) = &mut self.gesture {
+                if let Err(error) = gesture.transform(values[0]) {
+                    self.cancel();
+                    return Err(error);
+                }
+            }
+        }
+        let draw = self.gizmo.draw();
+        let vertices = draw
+            .vertices
+            .into_iter()
+            .zip(draw.colors)
+            .map(|(pos, [r, g, b, a])| egui::epaint::Vertex {
+                pos: pos.into(),
+                uv: egui::Pos2::ZERO,
+                color: egui::Rgba::from_rgba_premultiplied(r, g, b, a).into(),
+            })
+            .collect();
+        ui.painter().with_clip_rect(viewport.rect).add(egui::Mesh {
+            indices: draw.indices,
+            vertices,
+            ..Default::default()
+        });
         if blocked {
-            // Keep the overlay visible while inactive, without processing input.
-            self.gizmo.update(
-                GizmoInteraction {
-                    hovered: false,
-                    drag_started: false,
-                    dragging: false,
-                    cursor_pos: (0.0, 0.0),
-                },
-                &targets,
-            );
-            let draw = self.gizmo.draw();
-            let vertices = draw
-                .vertices
-                .into_iter()
-                .zip(draw.colors)
-                .map(|(pos, [r, g, b, a])| egui::epaint::Vertex {
-                    pos: pos.into(),
-                    uv: egui::Pos2::ZERO,
-                    color: egui::Rgba::from_rgba_premultiplied(r, g, b, a).into(),
-                })
-                .collect();
-            ui.painter().with_clip_rect(viewport.rect).add(egui::Mesh {
-                indices: draw.indices,
-                vertices,
-                ..Default::default()
-            });
             return Ok(true);
         }
-        let before_active = self.active();
-        let mut overlay_ui = ui.new_child(
-            egui::UiBuilder::new()
-                .id_salt("translation-overlay")
-                .max_rect(viewport.rect),
-        );
-        overlay_ui.set_clip_rect(viewport.rect);
-        if let Some((_, values)) = self.gizmo.interact(&overlay_ui, &targets) {
-            if self.gesture.is_none() {
-                self.gesture = Some(Gesture::configured(
-                    session, &self.ids, self.tool, self.pivot, self.local,
-                )?);
-            }
-            if let Err(error) = self.gesture.as_mut().unwrap().transform(values[0]) {
-                self.cancel();
-                return Err(error);
-            }
-        }
-        let focused = self.gizmo.is_focused();
         if self.active() && !ui.input(|i| i.pointer.button_down(egui::PointerButton::Primary)) {
             let gesture = self.gesture.take().unwrap();
             let result = gesture.commit(session);
             self.gizmo = Gizmo::default();
+            ui.ctx().request_repaint();
             result?;
             return Ok(true);
         }
-        Ok(before_active || self.active() || focused)
+        if self.active() {
+            ui.ctx().request_repaint();
+        }
+        Ok(before_active || self.active())
     }
 }
 
@@ -1181,15 +1240,17 @@ mod tests {
             let end = project(median + DVec3::X * scale * 65.0);
             let mut scene = Scene::demo();
             scene.objects.truncate(2);
-            scene.objects[0].transform.translation = [1.0, 1.0, -1.0];
+            scene.objects[0].transform.translation = [2.0, 1.0, 0.0];
             scene.objects[0].transform.rotation = [0.0, 0.7, 0.0];
-            scene.objects[1].transform.translation = [3.0, 1.0, -1.0];
+            scene.objects[1].transform.translation = [2.0, 1.0, -2.0];
             let ctx = egui::Context::default();
+            let viewport_enabled = std::cell::Cell::new(true);
             let frame = |m: &mut Manipulation,
                          session: &mut Session,
                          events: Vec<Event>,
                          focused| {
                 let mut outcome = Ok(false);
+                let mut viewport_clicked = false;
                 let mut output = ctx.run_ui(
                     RawInput {
                         focused,
@@ -1198,11 +1259,30 @@ mod tests {
                         ..Default::default()
                     },
                     |ui| {
-                        let response = ui.interact(
-                            rect,
-                            ui.scope_id().with("viewport"),
-                            egui::Sense::click_and_drag(),
-                        );
+                        if m.active() {
+                            let before = serde_json::to_value(m.snapshot_drafts()).unwrap();
+                            let generation = m.draft_generation();
+                            let mut inspector = ui.new_child(egui::UiBuilder::new().max_rect(
+                                Rect::from_min_max(Pos2::new(990.0, 0.0), Pos2::new(1200.0, 800.0)),
+                            ));
+                            assert!(!m.precision_ui(&mut inspector, session, true).unwrap());
+                            assert_eq!(
+                                serde_json::to_value(m.snapshot_drafts()).unwrap(),
+                                before,
+                                "live inspector must not mutate recovery drafts"
+                            );
+                            assert_eq!(m.draft_generation(), generation);
+                        }
+                        let response = ui
+                            .add_enabled_ui(viewport_enabled.get(), |ui| {
+                                ui.interact(
+                                    rect,
+                                    ui.scope_id().with("viewport"),
+                                    egui::Sense::click_and_drag(),
+                                )
+                            })
+                            .inner;
+                        viewport_clicked = response.clicked();
                         outcome = m.draw(
                             ui,
                             &ruster_render::ViewportInteraction {
@@ -1226,7 +1306,7 @@ mod tests {
                     !output.shapes.is_empty(),
                     "selected gizmo remains visible even when input is blocked"
                 );
-                outcome.unwrap();
+                (viewport_clicked, outcome.unwrap())
             };
             let mut session = Session::new(scene.clone()).unwrap();
             let mut m = Manipulation {
@@ -1240,15 +1320,112 @@ mod tests {
                 pressed,
                 modifiers: Modifiers::NONE,
             };
+            // A selected gizmo must not create an invisible cursor widget that
+            // steals ordinary object/empty-space clicks from the viewport.
+            let off_handle = rect.min + egui::vec2(24.0, 24.0);
+            for _ in 0..2 {
+                frame(
+                    &mut m,
+                    &mut session,
+                    vec![Event::PointerMoved(off_handle)],
+                    true,
+                );
+                frame(
+                    &mut m,
+                    &mut session,
+                    vec![Event::PointerMoved(off_handle)],
+                    true,
+                );
+                frame(&mut m, &mut session, vec![pointer(off_handle, true)], true);
+                let (clicked, owned) =
+                    frame(&mut m, &mut session, vec![pointer(off_handle, false)], true);
+                assert!(
+                    clicked,
+                    "off-handle viewport click must reach object selection"
+                );
+                assert!(!owned, "only a real handle may own a viewport click");
+                assert!(!m.active());
+                assert_eq!(session.scene(), &scene);
+                assert_eq!(session.undo_len(), 0);
+            }
+            m.reset_precision(session.scene());
+            // A zero-motion handle press owns release without touching history.
             frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
+            frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
+            let (_, owned) = frame(&mut m, &mut session, vec![pointer(start, true)], true);
+            assert!(owned && m.active());
+            let (_, owned) = frame(&mut m, &mut session, vec![pointer(start, false)], true);
+            assert!(owned && !m.active());
+            assert_eq!(session.undo_len(), 0);
+            assert!(m.preview_precision().is_none());
+            // Fast input may coalesce press and release into one egui frame.
+            let (_, owned) = frame(
+                &mut m,
+                &mut session,
+                vec![pointer(start, true), pointer(start, false)],
+                true,
+            );
+            assert!(
+                owned && !m.active(),
+                "coalesced handle click must consume release"
+            );
+            assert_eq!(session.undo_len(), 0);
+            frame(
+                &mut m,
+                &mut session,
+                vec![Event::PointerMoved(off_handle)],
+                true,
+            );
+            frame(
+                &mut m,
+                &mut session,
+                vec![Event::PointerMoved(off_handle)],
+                true,
+            );
+            let (clicked, owned) = frame(
+                &mut m,
+                &mut session,
+                vec![pointer(off_handle, true), pointer(off_handle, false)],
+                true,
+            );
+            assert!(
+                clicked && !owned,
+                "coalesced off-handle click must still select"
+            );
+            viewport_enabled.set(false);
+            frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
+            frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
+            frame(&mut m, &mut session, vec![pointer(start, true)], true);
+            assert!(
+                !m.active(),
+                "disabled viewport cannot authorize a handle press"
+            );
+            frame(&mut m, &mut session, vec![pointer(start, false)], true);
+            viewport_enabled.set(true);
             frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
             frame(&mut m, &mut session, vec![pointer(start, true)], true);
             assert!(m.active());
             frame(&mut m, &mut session, vec![Event::PointerMoved(end)], true);
+            let (display, mixed) = m.preview_precision().unwrap();
+            let candidate = &m.gesture.as_ref().unwrap().candidate[0].1;
+            assert_eq!(display[0], candidate.translation[0].to_string());
+            assert_ne!(
+                display[0], m.precision[0],
+                "existing inspector fields must show candidate, not authored baseline"
+            );
+            assert!(
+                mixed[2] && display[2].is_empty(),
+                "mixed selection stays mixed during drag"
+            );
             assert_eq!(session.scene(), &scene);
             assert_eq!(session.undo_len(), 0);
             frame(&mut m, &mut session, vec![pointer(end, false)], true);
             assert!(!m.active());
+            assert!(m.preview_precision().is_none());
+            assert_eq!(
+                session.scene().objects[0].transform.translation[0].to_string(),
+                display[0]
+            );
             assert_eq!(session.undo_len(), 1);
             let delta = session.scene().objects[0].transform.translation[0]
                 - scene.objects[0].transform.translation[0];
@@ -1280,6 +1457,10 @@ mod tests {
                 };
                 frame(&mut m, &mut session, events, cancel);
                 assert!(!m.active());
+                assert!(
+                    m.preview_precision().is_none(),
+                    "cancel returns inspector to authored values"
+                );
                 assert_eq!(session.scene().objects, scene.objects);
                 assert_eq!(session.undo_len(), 0);
                 frame(&mut m, &mut session, vec![pointer(end, false)], true);

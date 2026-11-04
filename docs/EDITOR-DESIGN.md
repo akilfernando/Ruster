@@ -26,8 +26,16 @@ Move/Rotate/Scale and their Space/Pivot/Snap settings belong with the viewport t
 - Essential labels and values must be readable at supported scale/width. No essential instruction depends on tiny helper text or a tooltip. Supplementary explanations use hover/focus help; empty states and errors provide relevant next actions.
 - Use typography and alignment to establish hierarchy. Reserve prominent headings for the selected object and main areas; keep section labels compact. Align related vector fields; show units once in their proper context. Preserve exact edited data even when presentation is compact.
 - Use quiet neutral surfaces, clear text contrast, restrained separators and one limited accent. Avoid oversized buttons, repeated boxed panels and a wall of equally emphasized actions. Preserve visible keyboard focus and distinguish hover, selected, edited, disabled and error states through more than color alone.
-- A warm-neutral dark starting palette and restrained accent are proposed Ruster defaults, not a copied Obsidian/Godot skin or a user-approved palette. Typography, spacing and component consistency matter as much as color. A later light variant must meet the same reading/interaction contracts.
+- A warm-neutral dark starting palette and restrained sand accent are proposed Ruster defaults, not a copied Obsidian/Godot skin or a user-approved palette. Typography, spacing and component consistency matter as much as color. A later light variant must meet the same reading/interaction contracts.
 - Keep the native egui implementation lean: central style values and existing controls/Session commands. No web layer, theme/plugin framework, new render pipeline or speculative UI dependency is selected.
+
+## First implementation review
+
+2026-11-05: the first slice implements the selected-name header, Transform-first inspector, viewport manipulation tools, contextual behavior actions, folded technical details and the warm-neutral style using existing egui controls/fonts. This records implementation, not user approval of the palette/layout. Pending transform/offset/source work remains visible or explicitly reopenable; recovery tests protect those paths.
+
+Native single/multiple/empty-selection captures confirm the new hierarchy. Root review of the narrow1030×689 capture found long numeric values still clipped and an offset axis label could wrap apart from its field. The follow-up uses complete axis/field groups with responsive1/2/3 columns and preserves exact text and stored precision. The native narrow-value/offset recheck passes, while the2×1400×1000 capture exposes a remaining missing-viewport blocker from chrome/side panels. Screenshots are functional layout observations, not physical-input, accessibility or performance acceptance.
+
+The same captures show remaining chrome consumes too much viewport height. The next bounded presentation proposal is File/Edit/View menus with actual shortcut hints, a compact contextual runtime strip and less permanent instructional/shader chrome. Reuse existing guarded actions; errors, active debugger stops, stale-runtime warnings and recovery choices must remain discoverable. No new command implementation or general UI framework is selected.
 
 ## Primary references and observations
 
@@ -46,3 +54,8 @@ The [Godot reference report](evidence/M9-godot-reference.md) retains the selecte
 ## Verification before acceptance
 
 First reproduce and repair picking/live-value failure; then capture the actual redesigned native inspector for single/multiple selection, active drag, invalid drafts, behavior properties and narrow/2× layouts. Exercise keyboard traversal/Enter/Escape and preserved Undo/save/recovery guards. Avoid screenshot-only acceptance and tests that merely assert a palette. The user is asleep and requested autonomous continuation; preserve their open project and request a focused physical retest when they return. M9 remains open until its real adoption and release gates are satisfied.
+
+
+### First style candidate measurements
+
+The generic-editor-only style candidate uses existing bundled fonts and egui controls. Agent-selected sizes are14pt body/button,18pt heading,12pt supplementary text and13pt monospace. Calculated sRGB contrast for its explicit color pairs: body/panel12.84:1, secondary/panel7.37:1, body/input13.62:1, body/selection8.39:1 and focus/panel8.37:1. These are static color calculations, not a full accessibility audit or a rendered-layout pass. Disabled/blended states, clipping, focus and scale still require native inspection. Legacy logistics styling is unchanged.

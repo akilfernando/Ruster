@@ -1254,87 +1254,78 @@ impl SceneEditor {
             Err(error) => self.error = error,
         }
     }
-    fn manipulation_ui(&mut self, ui: &mut egui::Ui) {
-        ui.label(format!(
-            "{} selected · last selected is active",
-            self.manipulation.ids.len()
-        ));
-        ui.horizontal(|ui| {
-            if ui.button("Copy objects").clicked() {
-                self.clipboard_action(false);
-            }
-            if ui.button("Paste objects").clicked() {
-                self.clipboard_action(true);
-            }
-        });
-        ui.small(
-            "Object clipboard stays in this window. Text fields keep normal clipboard behavior.",
-        );
-        ui.add_enabled_ui(!self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
+    fn manipulation_tools_ui(&mut self, ui: &mut egui::Ui) {
+        let editable = self.guard().is_ok() && !self.runtime.visible;
+        ui.add_enabled_ui(editable,|ui| {
             use crate::manipulation::{Tool,Pivot};
-            ui.horizontal(|ui| {
-                ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move");
-                ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate");
-                ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale");
-            });
-            ui.checkbox(&mut self.manipulation.local,"Local axes (active object)");
-            egui::ComboBox::from_label("Pivot").selected_text(match self.manipulation.pivot {Pivot::Individual=>"Individual origins",Pivot::Center=>"Selection center (mean origins)",Pivot::Active=>"Active object"}).show_ui(ui,|ui| {
-                ui.selectable_value(&mut self.manipulation.pivot,Pivot::Individual,"Individual origins");
-                ui.selectable_value(&mut self.manipulation.pivot,Pivot::Center,"Selection center (mean origins)");
-                ui.selectable_value(&mut self.manipulation.pivot,Pivot::Active,"Active object");
-            });
-            if self.manipulation.tool==Tool::Scale {
-                ui.small(if self.manipulation.local && self.manipulation.pivot==Pivot::Individual {"Local axis scaling at each object's origin."} else {"Uniform group scaling. For nonuniform scaling, choose Local + Individual origins. World nonuniform/shear is unsupported."});
-            }
-            ui.checkbox(&mut self.manipulation.snap,"Snapping");
-            ui.horizontal(|ui| {
-                match self.manipulation.tool {
-                    Tool::Translate=>{ui.label("Distance (scene units)");ui.add(egui::DragValue::new(&mut self.manipulation.snap_distance).range(0.001..=1000.0).speed(0.1));},
-                    Tool::Rotate=>{ui.label("Angle (degrees)");ui.add(egui::DragValue::new(&mut self.manipulation.snap_degrees).range(0.1..=180.0).speed(1.0));},
-                    Tool::Scale=>{ui.label("Scale factor increment");ui.add(egui::DragValue::new(&mut self.manipulation.snap_scale).range(0.001..=10.0).speed(0.05));},
-                }
-            });
-            ui.label("World translation offset for selected objects");
-            ui.horizontal(|ui| {
-                for (axis, text) in ["X", "Y", "Z"]
-                    .into_iter()
-                    .zip(&mut self.manipulation.delta)
-                {
-                    ui.label(axis);
-                    let response = ui.add(egui::TextEdit::singleline(text).char_limit(1024).desired_width(50.0));
-                    if response.changed() { self.draft_generation = self.draft_generation.wrapping_add(1); }
-                }
-            });
-            if ui.button("Reset translation offset").clicked() {
-                self.manipulation.delta=std::array::from_fn(|_|"0".into());
-                self.draft_generation=self.draft_generation.wrapping_add(1);
-            }
-            if ui
-                .add_enabled(
-                    !self.manipulation.ids.is_empty(),
-                    egui::Button::new("Apply translation offset"),
-                )
-                .clicked()
-            {
-                let result = self
-                    .guard()
-                    .and_then(|()| self.manipulation.apply_delta(&mut self.session));
-                match result {
-                    Ok(()) => {
-                        self.manipulation.delta = std::array::from_fn(|_| "0".into());
-                        self.sync_draft();
-                        self.error.clear();
-                        self.notice =
-                            "Translation offset applied; one Undo restores all selected objects."
-                                .into();
+            ui.horizontal_wrapped(|ui| {
+                ui.selectable_value(&mut self.manipulation.tool,Tool::Translate,"Move").on_hover_text("Move selected objects · remappable shortcut in Workspace settings");
+                ui.selectable_value(&mut self.manipulation.tool,Tool::Rotate,"Rotate");
+                ui.selectable_value(&mut self.manipulation.tool,Tool::Scale,"Scale");
+                ui.separator();
+                ui.label("Space");
+                egui::ComboBox::from_id_salt("tool_space").width(64.0).selected_text(if self.manipulation.local {"Local"} else {"World"}).show_ui(ui,|ui| {
+                    ui.selectable_value(&mut self.manipulation.local,false,"World");
+                    ui.selectable_value(&mut self.manipulation.local,true,"Local");
+                }).response.on_hover_text("Space · Local uses the active object's axes");
+                ui.label("Pivot");
+                egui::ComboBox::from_id_salt("tool_pivot").width(120.0).selected_text(match self.manipulation.pivot {Pivot::Individual=>"Individual origins",Pivot::Center=>"Selection center",Pivot::Active=>"Active object"}).show_ui(ui,|ui| {
+                    ui.selectable_value(&mut self.manipulation.pivot,Pivot::Individual,"Individual origins");
+                    ui.selectable_value(&mut self.manipulation.pivot,Pivot::Center,"Selection center");
+                    ui.selectable_value(&mut self.manipulation.pivot,Pivot::Active,"Active object");
+                }).response.on_hover_text("Pivot · Selection center is the mean of object origins");
+                ui.checkbox(&mut self.manipulation.snap,"Snap");
+                if self.manipulation.snap {
+                    match self.manipulation.tool {
+                        Tool::Translate=>{ui.add(egui::DragValue::new(&mut self.manipulation.snap_distance).range(0.001..=1000.0).speed(0.1).suffix(" units")).on_hover_text("Snap distance in scene units");},
+                        Tool::Rotate=>{ui.add(egui::DragValue::new(&mut self.manipulation.snap_degrees).range(0.1..=180.0).speed(1.0).suffix("°")).on_hover_text("Snap angle in degrees");},
+                        Tool::Scale=>{ui.add(egui::DragValue::new(&mut self.manipulation.snap_scale).range(0.001..=10.0).speed(0.05)).on_hover_text("Scale-factor increment");},
                     }
-                    Err(error) => self.error = error,
                 }
-            }
+                if self.manipulation.tool==Tool::Scale && !(self.manipulation.local && self.manipulation.pivot==Pivot::Individual) {
+                    ui.label("Uniform scale").on_hover_text("Choose Local and Individual origins for nonuniform scaling. World nonuniform scaling would require shear.");
+                }
+            });
         });
-        if self.manipulation.active() {
-            ui.label("Transform preview — release to commit, Escape to cancel.");
+    }
+    fn manipulation_ui(&mut self, ui: &mut egui::Ui) {
+        let pending = self.manipulation.offset_pending();
+        if pending {
+            ui.label("Unapplied translation offset");
         }
+        egui::CollapsingHeader::new("Adjust selection").id_salt("selection_adjustments").open(pending.then_some(true)).show(ui,|ui| {
+            ui.label("World translation offset");
+            ui.add_enabled_ui(!self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
+                let mut enter=false;
+                let mut escape=false;
+                let group_width=crate::manipulation::component_group_width(ui);
+                ui.horizontal_wrapped(|ui| {
+                    for (axis,text) in ["X","Y","Z"].into_iter().zip(&mut self.manipulation.delta) {
+                        ui.allocate_ui_with_layout(egui::vec2(group_width,ui.spacing().interact_size.y),egui::Layout::left_to_right(egui::Align::Center),|ui| {
+                            ui.label(axis);
+                            let response=ui.add_sized([ui.available_width().max(48.0),ui.spacing().interact_size.y],egui::TextEdit::singleline(text).id(egui::Id::unique(("selection_offset",axis))).char_limit(1024).interactive(ui.is_enabled()));
+                            let owned=ui.is_enabled() && (response.has_focus() || response.lost_focus() || ui.memory(|m|m.had_focus_last_frame(response.id)));
+                            enter|=owned && ui.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Enter));
+                            escape|=owned && ui.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape));
+                            if response.changed() {self.draft_generation=self.draft_generation.wrapping_add(1);}
+                        });
+                    }
+                });
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Reset translation offset").clicked() || escape {
+                        self.manipulation.delta=std::array::from_fn(|_|"0".into());
+                        self.draft_generation=self.draft_generation.wrapping_add(1);
+                    }
+                    if ui.add_enabled(!self.manipulation.ids.is_empty(),egui::Button::new("Apply translation offset")).clicked() || (enter && !self.manipulation.ids.is_empty()) {
+                        let result=self.guard().and_then(|()|self.manipulation.apply_delta(&mut self.session));
+                        match result {
+                            Ok(())=>{self.manipulation.delta=std::array::from_fn(|_|"0".into());self.sync_draft();self.error.clear();self.notice="Translation offset applied; one Undo restores the selection.".into();},
+                            Err(error)=>self.error=error,
+                        }
+                    }
+                });
+            });
+        });
     }
     fn asset_snapshot(&mut self) {
         self.content_search.key = None;
@@ -2239,6 +2230,140 @@ impl SceneEditor {
         self.content_selected = Some(id.into());
         self.content_scroll_to = true;
     }
+    fn inspector_contents(&mut self, ui: &mut egui::Ui) {
+        let title = if self.manipulation.ids.len() > 1 {
+            format!("{} objects", self.manipulation.ids.len())
+        } else {
+            self.selected
+                .as_ref()
+                .and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id))
+                .map(|object| object.display_name().to_owned())
+                .unwrap_or_else(|| "Inspector".into())
+        };
+        ui.horizontal_wrapped(|ui| {
+            ui.heading(title);
+            ui.menu_button("Actions", |ui| {
+                if ui
+                    .add_enabled(self.selected.is_some(), egui::Button::new("Rename object"))
+                    .clicked()
+                {
+                    match self.guard() {
+                        Ok(()) => self.rename_pending = true,
+                        Err(error) => self.error = error,
+                    };
+                    ui.close();
+                }
+                for (label, action) in [("Duplicate", "duplicate"), ("Delete", "delete")] {
+                    if ui.button(label).clicked() {
+                        self.object_action(action);
+                        ui.close();
+                    }
+                }
+                if ui.button("Copy objects").clicked() {
+                    self.clipboard_action(false);
+                    ui.close();
+                }
+                if ui.button("Paste objects").clicked() {
+                    self.clipboard_action(true);
+                    ui.close();
+                }
+            });
+        });
+        if self.selected.is_none() {
+            ui.label("Select an object to edit its properties.");
+            if self.manipulation.offset_pending() {
+                ui.add_enabled_ui(!self.behavior.pending(), |ui| self.manipulation_ui(ui));
+            }
+            if self.behavior.pending() {
+                let editable = self.behavior_editable();
+                if let Some(action) = self.behavior.inspector(
+                    ui,
+                    &self.session,
+                    None,
+                    self.assets.as_ref(),
+                    self.generation,
+                    editable,
+                ) {
+                    self.behavior_action(action);
+                }
+            }
+            return;
+        }
+        ui.separator();
+        ui.strong("Transform");
+        if self.draft != self.baseline_fields {
+            ui.add_enabled_ui(!self.behavior.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+                    ui.label("Recovered transform fields — repair or revert before other precision edits");
+                    let mut enter=false;
+                    let mut escape=false;
+                    if let Some(fields)=&mut self.draft {
+                        for (label, values) in [("Position", &mut fields.translation), (fields.rotation_unit.label(), &mut fields.rotation), ("Scale", &mut fields.scale)] {
+                            ui.label(label);
+                            ui.horizontal_wrapped(|ui| { for (axis,text) in ["X","Y","Z"].into_iter().zip(values) {
+                                ui.label(axis);
+                                let response=ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(1024).interactive(ui.is_enabled()));
+                                let owned=response.has_focus() || ui.memory(|m|m.had_focus_last_frame(response.id));
+                                enter|=owned && ui.input(|i|i.key_pressed(egui::Key::Enter));
+                                escape|=owned && ui.input(|i|i.key_pressed(egui::Key::Escape));
+                            }});
+                        }
+                    }
+                    if ui.button("Apply recovered transform fields").clicked() || enter {self.apply();}
+                    if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
+                });
+        }
+        ui.add_enabled_ui(self.draft == self.baseline_fields && !self.behavior.pending() && !self.manipulation.ids.is_empty(), |ui| {
+                match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
+                    Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
+                    Ok(false)=>{},Err(error)=>self.error=error,
+                }
+            });
+        ui.add_enabled_ui(!self.behavior.pending(), |ui| self.manipulation_ui(ui));
+        ui.separator();
+        if let Some(object) = self
+            .selected
+            .as_ref()
+            .filter(|_| self.manipulation.ids.len() > 1)
+            .and_then(|id| {
+                self.session
+                    .scene()
+                    .objects
+                    .iter()
+                    .find(|object| &object.id == id)
+            })
+        {
+            ui.label(format!("Active object: {}", object.display_name()));
+        }
+        ui.strong("Mesh");
+        self.mesh_reference_ui(ui);
+        let editable = self.behavior_editable();
+        if let Some(action) = self.behavior.inspector(
+            ui,
+            &self.session,
+            self.selected.as_deref(),
+            self.assets.as_ref(),
+            self.generation,
+            editable,
+        ) {
+            self.behavior_action(action);
+        }
+        ui.separator();
+        egui::CollapsingHeader::new("Details")
+            .id_salt("object_details")
+            .show(ui, |ui| {
+                if let Some(id) = &self.selected {
+                    ui.label(format!("Stable ID: {id}"));
+                }
+                if self.manipulation.ids.len() > 1 {
+                    ui.label("The last selected object is active.");
+                }
+                ui.label(format!(
+                    "Loaded scene format v{}; Save writes v{}.",
+                    self.session.loaded_format_version(),
+                    ruster_scene::FORMAT_VERSION
+                ));
+            });
+    }
     fn mesh_reference_ui(&mut self, ui: &mut egui::Ui) {
         let Some(id) = self.selected.clone() else {
             return;
@@ -2255,18 +2380,17 @@ impl SceneEditor {
         };
         let response = egui::Frame::group(ui.style())
             .show(ui, |ui| {
-                ui.label(format!(
-                    "Mesh: {}",
-                    mesh.as_deref().unwrap_or("Procedural cube")
-                ));
-                ui.small("Drop a project mesh here (active object only).");
+                ui.label(mesh.as_deref().unwrap_or("Procedural cube"));
                 if let Some(mesh) = &mesh {
                     if ui.button("Locate mesh in Content").clicked() {
                         self.locate_mesh(mesh);
                     }
                 }
             })
-            .response;
+            .response
+            .on_hover_text(
+                "Drop a project mesh from Content here to assign it to the active object.",
+            );
         response.context_menu(|ui| {
             if ui.button("Use procedural cube").clicked() {
                 match self.assign_mesh_to(&id, None) {
@@ -3061,49 +3185,15 @@ impl SceneEditor {
                     egui::Panel::right(("scene_inspector", self.workspace.layout_generation))
                 }
             };
-            let output=panel.default_size(self.workspace.prefs.inspector_width).resizable(true).size_range(240.0..=1000.0).show(ui,|ui| {
-            egui::ScrollArea::vertical().show(ui, |ui| {
-            ui.heading("Object");
-            if let Some(id) = &self.selected { ui.small(format!("Stable ID: {id}")); }
-            if let Some(object) = self.selected.as_ref().and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id)) { ui.label(object.display_name()); }
-            if ui.add_enabled(self.manipulation.ids.len() == 1, egui::Button::new("Rename object")).clicked() {
-                match self.guard() { Ok(()) => self.rename_pending = true, Err(error) => self.error = error }
-            }
-            let editable=self.behavior_editable();
-            if let Some(action)=self.behavior.inspector(ui,&self.session,self.selected.as_deref(),self.assets.as_ref(),self.generation,editable) {self.behavior_action(action);}
-            ui.add_enabled_ui(!self.behavior.pending(),|ui|self.manipulation_ui(ui));
-            ui.heading("Transform");
-            self.mesh_reference_ui(ui);
-            ui.label(format!("Loaded scene format v{}; Save writes v{}.",self.session.loaded_format_version(),ruster_scene::FORMAT_VERSION));
-            if self.draft != self.baseline_fields {
-                ui.add_enabled_ui(!self.behavior.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
-                    ui.label("Recovered transform fields — repair or revert before other precision edits");
-                    let mut enter=false;
-                    let mut escape=false;
-                    if let Some(fields)=&mut self.draft {
-                        for (label, values) in [("Position", &mut fields.translation), (fields.rotation_unit.label(), &mut fields.rotation), ("Scale", &mut fields.scale)] {
-                            ui.label(label);
-                            ui.horizontal_wrapped(|ui| { for (axis,text) in ["X","Y","Z"].into_iter().zip(values) {
-                                ui.label(axis);
-                                let response=ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(1024));
-                                let owned=response.has_focus() || ui.memory(|m|m.had_focus_last_frame(response.id));
-                                enter|=owned && ui.input(|i|i.key_pressed(egui::Key::Enter));
-                                escape|=owned && ui.input(|i|i.key_pressed(egui::Key::Escape));
-                            }});
-                        }
-                    }
-                    if ui.button("Apply recovered transform fields").clicked() || enter {self.apply();}
-                    if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
+            let output = panel
+                .default_size(self.workspace.prefs.inspector_width)
+                .resizable(true)
+                .size_range(240.0..=1000.0)
+                .show(ui, |ui| {
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        self.inspector_contents(ui);
+                    });
                 });
-            }
-            ui.add_enabled_ui(self.draft == self.baseline_fields && !self.behavior.pending() && !self.manipulation.ids.is_empty() && !self.manipulation.active(), |ui| {
-                match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
-                    Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
-                    Ok(false)=>{},Err(error)=>self.error=error,
-                }
-            });
-            });
-        });
             let width = output.response.rect.width().clamp(240.0, 1000.0);
             if (width - self.workspace.prefs.inspector_width).abs() > 0.5 {
                 self.workspace.prefs.inspector_width = width;
@@ -3144,6 +3234,7 @@ impl SceneEditor {
                 ui.horizontal(|ui| {if ui.button("Open a scene…").clicked(){self.dialog=Some(true);}
                 if ui.button("Workspace settings…").clicked(){self.workspace.settings_open=true;}});
             }
+            self.manipulation_tools_ui(ui);
             let blocked=self.guard().is_err() || self.manipulation.offset_pending();
             if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.reset_assets=Some((key,self.resolved.clone()));}
             if let Some(diagnostic)=&self.runtime.diagnostic {
@@ -3408,7 +3499,7 @@ fn run_session(session: Session) -> Result<(), String> {
         "Ruster Editor",
         options,
         Box::new(move |cc| {
-            crate::ui::configure(&cc.egui_ctx);
+            crate::editor_theme::configure(&cc.egui_ctx);
             if let Some(render) = cc.wgpu_render_state.as_ref() {
                 ruster_render::install(render);
                 eprintln!("Scene editor adapter: {:?}", render.adapter.get_info());
@@ -3440,6 +3531,82 @@ fn run_session(session: Session) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Folding advanced controls must never hide recovered/invalid input, and
+    // its keyboard actions must preserve invalid data until explicit cancellation.
+    #[test]
+    fn pending_offset_forces_advanced_section_open_and_owns_enter_escape() {
+        for scene in [Scene::demo(), Scene::empty("source-only")] {
+            let mut editor = SceneEditor::new(Session::new(scene).unwrap());
+            let ctx = egui::Context::default();
+            let id = egui::Id::unique(("selection_offset", "X"));
+            let mut time = 0.0;
+            let mut frame = |editor: &mut SceneEditor, events| {
+                time += 0.2;
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        time: Some(time),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(480.0, 320.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| editor.inspector_contents(ui),
+                );
+                output.textures_delta.clear();
+            };
+            frame(&mut editor, vec![]);
+            assert!(
+                ctx.read_response(id).is_none(),
+                "clean advanced section starts folded"
+            );
+            editor.manipulation.delta[0] = "-".into();
+            let snapshot = editor.recovery_snapshot().unwrap();
+            let mut restored = SceneEditor::new(snapshot.restore().unwrap());
+            restored
+                .restore_recovery_drafts(snapshot.drafts().unwrap())
+                .unwrap();
+            frame(&mut restored, vec![]);
+            frame(&mut restored, vec![]);
+            let field = ctx
+                .read_response(id)
+                .expect("recovered offset must force open its field");
+            assert!(field.rect.is_positive());
+            ctx.memory_mut(|memory| memory.request_focus(id));
+            let key = |key| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            let before = restored.session.snapshot_bytes().unwrap();
+            frame(&mut restored, vec![key(egui::Key::Enter)]);
+            assert_eq!(restored.manipulation.delta[0], "-");
+            if restored.selected.is_some() {
+                assert!(!restored.error.is_empty());
+            } else {
+                assert!(
+                    restored.error.is_empty(),
+                    "Apply is unavailable without a selection"
+                );
+                restored.manipulation.delta[0] = "2.5".into();
+                ctx.memory_mut(|memory| memory.request_focus(id));
+                frame(&mut restored, vec![]);
+                frame(&mut restored, vec![key(egui::Key::Enter)]);
+                assert_eq!(
+                    restored.manipulation.delta[0], "2.5",
+                    "Enter cannot clear a valid pending offset when Apply is disabled"
+                );
+            }
+            assert_eq!(restored.session.snapshot_bytes().unwrap(), before);
+            frame(&mut restored, vec![key(egui::Key::Escape)]);
+            assert!(!restored.manipulation.offset_pending());
+            assert_eq!(restored.session.snapshot_bytes().unwrap(), before);
+        }
+    }
     #[test]
     fn degree_fields_roundtrip_and_legacy_recovery_keep_original_units() {
         let mut scene = Scene::demo();
@@ -3697,6 +3864,89 @@ mod tests {
             2,
             "source Apply/Save is one edit after atomic attachment, not one per key"
         );
+        // A source can outlive all scene objects. Recover, hide its unfinished
+        // code, then reopen it through the actual empty-selection inspector.
+        let ids = recovered
+            .session
+            .scene()
+            .objects
+            .iter()
+            .map(|object| object.id.clone())
+            .collect::<Vec<_>>();
+        recovered
+            .session
+            .delete_many(recovered.session.scene().revision, &ids)
+            .unwrap();
+        recovered.manipulation.ids.clear();
+        recovered.selected = None;
+        recovered.sync_draft();
+        let source_only = recovered.recovery_snapshot().unwrap();
+        let mut orphan = SceneEditor::new(source_only.restore().unwrap());
+        orphan
+            .restore_recovery_drafts(source_only.drafts().unwrap())
+            .unwrap();
+        assert!(orphan.session.scene().objects.is_empty() && orphan.selected.is_none());
+        let exact = serde_json::to_value(orphan.behavior.snapshot()).unwrap();
+        let authored = orphan.session.snapshot_bytes().unwrap();
+        frame(&mut orphan, vec![]);
+        frame(
+            &mut orphan,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(!orphan.behavior.source_open && orphan.behavior.pending());
+        let inspector_ctx = egui::Context::default();
+        let inspector_frame = |orphan: &mut SceneEditor, events| {
+            let mut output = inspector_ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(480.0, 320.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| orphan.inspector_contents(ui),
+            );
+            output.textures_delta.clear();
+            output
+        };
+        let output = inspector_frame(&mut orphan, vec![]);
+        let button = output
+            .shapes
+            .iter()
+            .find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text)
+                    if text.galley.job.text == "Show unapplied source draft" =>
+                {
+                    Some(text.pos + text.galley.size() / 2.0)
+                }
+                _ => None,
+            })
+            .expect("empty inspector must expose the hidden unfinished source");
+        let pointer = |pressed| egui::Event::PointerButton {
+            pos: button,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        inspector_frame(
+            &mut orphan,
+            vec![egui::Event::PointerMoved(button), pointer(true)],
+        );
+        inspector_frame(&mut orphan, vec![pointer(false)]);
+        assert!(orphan.behavior.source_open && orphan.behavior.pending());
+        assert_eq!(
+            serde_json::to_value(orphan.behavior.snapshot()).unwrap(),
+            exact
+        );
+        assert_eq!(orphan.session.snapshot_bytes().unwrap(), authored);
     }
     // Recovery must preserve unapplied invalid text and asset provenance without
     // granting overwrite authority to the original project, even if it changed.

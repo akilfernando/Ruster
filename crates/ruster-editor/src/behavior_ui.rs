@@ -700,8 +700,7 @@ impl BehaviorUi {
         self.refresh(session);
         self.refresh_assets(assets);
         ui.separator();
-        ui.heading("Behavior");
-        ui.small("One attachment per object · sources/properties share scene Undo and Save.");
+        ui.strong("Behavior");
         let mut action = None;
         let mut property_changed = false;
         if self.source_dirty
@@ -714,10 +713,7 @@ impl BehaviorUi {
         if let Some(property) = &mut self.property {
             ui.add_enabled_ui(editable, |ui| {
                 ui.group(|ui| {
-                    ui.label(format!(
-                        "Property working copy: {} / {}",
-                        property.binding, property.name
-                    ));
+                    ui.strong(format!("Edit {}", property.name));
                     let response = value_ui(
                         ui,
                         &mut property.value,
@@ -761,7 +757,12 @@ impl BehaviorUi {
             self.changed();
         }
         let Some(object) = object else {
-            ui.label("Select one object to author its behavior.");
+            if !self.pending() {
+                ui.label("Select an object to add a behavior.");
+            }
+            if !self.error.is_empty() {
+                ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+            }
             return action;
         };
         let attached = session
@@ -784,34 +785,37 @@ impl BehaviorUi {
             }
         }
         if !editable {
-            ui.label("Resolve transform fields, gestures or modal dialogs before behavior edits.");
+            ui.label("Finish other edits to change this behavior.");
         }
         ui.add_enabled_ui(editable,|ui| {
             if let Some((id,binding))=attached {
-                ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
+                if let Some(source)=session.source(&binding.source_id) {ui.label(source.label.as_deref().unwrap_or(&binding.source_id));}
                 let mut enabled=binding.enabled;
-                if ui.checkbox(&mut enabled,"Attachment enabled").changed() {action=Some(Action::Enable(id.clone(),enabled));}
+                if ui.checkbox(&mut enabled,"Enabled").changed() {action=Some(Action::Enable(id.clone(),enabled));}
                 ui.horizontal_wrapped(|ui| {
                     if ui.button("Edit behavior source").clicked() {action=Some(Action::OpenSource(binding.source_id.clone()));}
-                    if ui.button("Detach behavior").clicked() {action=Some(Action::Detach(id.clone()));}
+                    ui.menu_button("Manage",|ui| {
+                        if ui.button("Detach behavior").clicked() {action=Some(Action::Detach(id.clone()));ui.close();}
+                        ui.menu_button("Other sources",|ui| {for (id,label) in &self.sources {if ui.button(label).clicked(){action=Some(Action::OpenSource(id.clone()));ui.close();}}});
+                    });
                 });
                 if let Some(source)=session.source(&binding.source_id) {
-                    ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));
-                    if source.language_id!=ruster_behavior::LANGUAGE_ID||source.host_api_version!=ruster_behavior::HOST_API_VERSION {ui.colored_label(egui::Color32::YELLOW,"Backend/API may be unsupported by this runtime. Authored data remains editable/saveable.");}
-                } else {ui.colored_label(egui::Color32::YELLOW,"Missing source: this orphan attachment is preserved. Detach or repair its source explicitly.");}
-                ui.label("Typed properties (retained independently of source declarations)");
+
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||source.host_api_version!=ruster_behavior::HOST_API_VERSION {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
+                } else {ui.colored_label(egui::Color32::YELLOW,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
+                ui.label("Properties");
                 for (name,summary) in &self.property_rows {
                     ui.push_id((id,name),|ui| {
                         ui.horizontal_wrapped(|ui| {
                             ui.label(name);
                             ui.label(summary);
                             if ui.add_enabled(!self.property_dirty,egui::Button::new("Edit value")).clicked() {action=Some(Action::EditProperty(id.clone(),name.clone()));}
-                            if ui.button("Remove value").clicked() {action=Some(Action::RemoveProperty(id.clone(),name.clone()));}
+                            ui.menu_button("⋯",|ui| {if ui.button("Remove value").clicked(){action=Some(Action::RemoveProperty(id.clone(),name.clone()));ui.close();}}).response.on_hover_text("Property actions");
                         });
                     });
                 }
-                ui.small(format!("{} / {} properties",binding.properties.len(),ruster_scene::MAX_PROPERTIES));
-                ui.label("New property name");text(ui,&mut self.new_property,128);
+                egui::CollapsingHeader::new("Add property").id_salt(("add_behavior_property",id)).show(ui,|ui| {
+                ui.label("Name");text(ui,&mut self.new_property,128);
                 egui::ComboBox::from_label("Property type").selected_text(["Number","Bool","Text","Vec3","Object reference","Asset reference"][self.new_type]).show_ui(ui,|ui| {
                     for (index,label) in ["Number","Bool","Text","Vec3","Object reference","Asset reference"].into_iter().enumerate() {ui.selectable_value(&mut self.new_type,index,label);}
                 });
@@ -819,17 +823,22 @@ impl BehaviorUi {
                     let value=match self.new_type {0=>PropertyValue::Number(0.0),1=>PropertyValue::Bool(false),2=>PropertyValue::Text(String::new()),3=>PropertyValue::Vec3([0.0;3]),4=>PropertyValue::ObjectRef(None),_=>PropertyValue::AssetRef(None)};
                     action=Some(Action::AddProperty(id.clone(),self.new_property.clone(),value));
                 }
+                });
+                egui::CollapsingHeader::new("Script details").id_salt(("behavior_details",id)).show(ui,|ui| {
+                    ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
+                    if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));}
+                    ui.label(format!("{} / {} properties",binding.properties.len(),ruster_scene::MAX_PROPERTIES));
+                });
             } else {
-                if ui.button("Add Lua follower behavior").clicked() {action=Some(Action::Create(object.into()));}
-                ui.small("Existing sources start without assumed properties; add the values their code needs.");
-                ui.menu_button("Attach existing source…",|ui| {
+                ui.menu_button("Add behavior…",|ui| {
+                    if ui.button("Lua follower").clicked() {action=Some(Action::Create(object.into()));ui.close();}
+                    ui.menu_button("Attach existing source…",|ui| {
                     for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::Attach{object:object.into(),source:id.clone()});ui.close();}}
-                    if self.sources.is_empty() {ui.label("No registered sources yet.");}
+                        if self.sources.is_empty() {ui.label("No sources in this scene.");}
+                    });
+                    ui.menu_button("Browse embedded sources…",|ui| {for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::OpenSource(id.clone()));ui.close();}}});
                 });
             }
-            ui.menu_button("Browse embedded sources…",|ui| {
-                for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::OpenSource(id.clone()));ui.close();}}
-            });
         });
         if !self.error.is_empty() {
             ui.colored_label(egui::Color32::LIGHT_RED, &self.error);

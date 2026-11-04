@@ -1,6 +1,6 @@
 # Milestone roadmap
 
-Updated 2026-11-04. This is the working delivery plan requested by the user. Milestone scope is an implementation plan, not a promise of dates or already delivered capabilities. Developer experience is the primary pillar; the product is an interactive simulation and visualization engine with games as one application.
+Updated 2026-11-05. This is the working delivery plan requested by the user. Milestone scope is an implementation plan, not a promise of dates or already delivered capabilities. Developer experience is the primary pillar; the product is an interactive simulation and visualization engine with games as one application.
 
 The user accepted the [post-M3 review](ROADMAP-REVIEW.md) on 2026-11-04. This canonical roadmap incorporates that revision; M0–M3 remain historical deliveries.
 
@@ -8,7 +8,7 @@ The user accepted the [post-M3 review](ROADMAP-REVIEW.md) on 2026-11-04. This ca
 
 Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Apply the user-confirmed [creator ethos](DIRECTION.md#project-ethos-serve-the-creator): explain what someone can create or change with the delivered systems, and where the workflow still limits them. This clarifies the existing user-outcome gates; it does not expand milestone scope. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
 
-M0 through M7 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M8 is in progress. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
+M0 through M8 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md), [M3 evidence](evidence/M3.md) and [M8 evaluation](ROADMAP-REVIEW.md#m8-completion-evaluation--2026-11-04). M9 is active and incomplete. Its revised human walkthrough exposed selection/live-feedback blockers; the [candidate gates](ALPHA-CANDIDATE.md) and [current handoff](STATUS.md) own remaining adoption evidence. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
 
 | Milestone | Demonstrable deliverable | Status |
 | --- | --- | --- |
@@ -20,8 +20,8 @@ M0 through M7 are complete within their documented local scope; see [M1/M2 evide
 | M5 Shared scene and 3D | Minimal scene and rendering shared by editor/runtime | Complete, bounded Linux procedural-scene scope |
 | M6 Content and iteration | Asset import, stable references and recoverable refresh | Complete, bounded OBJ/WGSL Linux scope |
 | M7 Standalone application kit | Code-first template and packaged interactive example | Complete, Linux development-kit scope |
-| M8 Independent reuse proof | A meaningfully different non-game application | In progress; runtime/project slices verified, authoring/tooling/reuse gates open |
-| M9 Public alpha candidate | Usable release on an explicitly tested support matrix | Planned |
+| M8 Independent reuse proof | A meaningfully different non-game application | Complete, recorded Linux development scope; human/adoption limits retained |
+| M9 Public alpha candidate | Usable release on an explicitly tested support matrix | Active; creator corrections and candidate/platform/resource/adoption gates open |
 
 ## M0 Engineering seed
 
@@ -189,7 +189,7 @@ Report reuse, editor baseline and behavior/tooling as separate open gates. This 
 
 **Boundaries:** no enterprise connector, CAD/BIM, certified simulation or digital-twin synchronization promise. Live external datasets are unnecessary for this proof.
 
-M8 completion,2026-11-04: independent application changes/exports/relocation, allocated generic editor authoring/recovery, actual Zed/LuaLS and native/SDK debugging passed within the recorded Linux development scope. See [completion evaluation](ROADMAP-REVIEW.md#m8-completion-evaluation--2026-11-04) and [current handoff](STATUS.md). The preceding implementation sequence is historical; no allocated M8 feature was silently moved to M9. Full human/platform/adoption evidence remains separate. The user deferred M9 and this run stops at M8.
+M8 completion,2026-11-04: independent application changes/exports/relocation, allocated generic editor authoring/recovery, actual Zed/LuaLS and native/SDK debugging passed within the recorded Linux development scope. See [completion evaluation](ROADMAP-REVIEW.md#m8-completion-evaluation--2026-11-04) and [current handoff](STATUS.md). The preceding implementation sequence and its open-gate language are historical; no allocated M8 feature was silently moved to M9. Full human/platform/adoption evidence remains separate. The initial M8-only stop was superseded by the user's2026-11-05 reactivation of through-M9 development; public publication remains separate.
 
 ## M9 Public alpha candidate
 
