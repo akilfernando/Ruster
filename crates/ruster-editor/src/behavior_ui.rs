@@ -1,0 +1,1957 @@
+//! Bounded embedded source/property working copies. Session owns authored data.
+use eframe::egui;
+use ruster_scene::{BehaviorBinding, BehaviorSource, PropertyValue, Session};
+use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
+use std::{collections::BTreeMap, ops::Range};
+
+fn fingerprint(value: &impl Serialize) -> String {
+    format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(value).expect("finite authored values"))
+    )
+}
+// Reject a complete oversized insertion, restoring a selection replaced by it.
+// Backups are allocated only for an actual deletion, never an idle source frame.
+struct ByteBuffer<'a> {
+    text: &'a mut String,
+    limit: usize,
+    rejected: &'a mut bool,
+    removed: Option<(egui::text::CharIndex, String)>,
+}
+impl egui::TextBuffer for ByteBuffer<'_> {
+    fn type_id(&self) -> std::any::TypeId {
+        std::any::TypeId::of::<ByteBuffer<'static>>()
+    }
+    fn is_mutable(&self) -> bool {
+        true
+    }
+    fn as_str(&self) -> &str {
+        self.text
+    }
+    fn insert_text(&mut self, text: &str, index: egui::text::CharIndex) -> usize {
+        if self.text.len().saturating_add(text.len()) > self.limit {
+            if let Some((at, removed)) = self.removed.take() {
+                egui::TextBuffer::insert_text(self.text, &removed, at);
+            }
+            *self.rejected = true;
+            return 0;
+        }
+        self.removed = None;
+        egui::TextBuffer::insert_text(self.text, text, index)
+    }
+    fn delete_char_range(&mut self, range: Range<egui::text::CharIndex>) {
+        self.removed = Some((
+            range.start,
+            egui::TextBuffer::char_range(self.text, range.clone()).to_string(),
+        ));
+        egui::TextBuffer::delete_char_range(self.text, range);
+    }
+}
+fn text(ui: &mut egui::Ui, value: &mut String, limit: usize) -> egui::Response {
+    let mut rejected = false;
+    let response = ui.add(
+        egui::TextEdit::singleline(&mut ByteBuffer {
+            text: value,
+            limit,
+            rejected: &mut rejected,
+            removed: None,
+        })
+        .interactive(ui.is_enabled()),
+    );
+    if rejected {
+        ui.colored_label(
+            egui::Color32::LIGHT_RED,
+            format!("Insertion rejected: maximum {limit} UTF-8 bytes; previous text preserved."),
+        );
+    }
+    response
+}
+fn scroll_line(
+    ui: &mut egui::Ui,
+    output: &mut egui::text_edit::TextEditOutput,
+    text: &str,
+    line: u32,
+) {
+    let index = text
+        .split_inclusive('\n')
+        .take(line.saturating_sub(1) as usize)
+        .map(|line| line.chars().count())
+        .sum::<usize>();
+    let cursor = egui::text::CCursor::new(egui::text::CharIndex(index));
+    output
+        .state
+        .cursor
+        .set_char_range(Some(egui::text::CCursorRange::one(cursor)));
+    output.state.clone().store(ui.ctx(), output.response.id);
+    ui.scroll_to_rect(
+        output
+            .galley
+            .pos_from_cursor(cursor)
+            .translate(output.galley_pos.to_vec2()),
+        Some(egui::Align::Center),
+    );
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(
+    tag = "type",
+    content = "value",
+    rename_all = "snake_case",
+    deny_unknown_fields
+)]
+pub(super) enum ValueDraft {
+    Number(String),
+    Bool(bool),
+    Text(String),
+    Vec3([String; 3]),
+    ObjectRef(Option<String>),
+    AssetRef(Option<String>),
+}
+impl From<&PropertyValue> for ValueDraft {
+    fn from(value: &PropertyValue) -> Self {
+        match value {
+            PropertyValue::Number(n) => Self::Number(n.to_string()),
+            PropertyValue::Bool(b) => Self::Bool(*b),
+            PropertyValue::Text(s) => Self::Text(s.clone()),
+            PropertyValue::Vec3(v) => Self::Vec3(v.map(|n| n.to_string())),
+            PropertyValue::ObjectRef(id) => Self::ObjectRef(id.clone()),
+            PropertyValue::AssetRef(id) => Self::AssetRef(id.clone()),
+        }
+    }
+}
+impl ValueDraft {
+    fn parse(&self) -> Result<PropertyValue, String> {
+        let number = |text: &str| {
+            text.trim()
+                .parse::<f64>()
+                .ok()
+                .filter(|n| n.is_finite())
+                .ok_or_else(|| {
+                    "Enter finite property numbers; unapplied text is preserved.".to_string()
+                })
+        };
+        let value = match self {
+            Self::Number(n) => PropertyValue::Number(number(n)?),
+            Self::Bool(b) => PropertyValue::Bool(*b),
+            Self::Text(s) => PropertyValue::Text(s.clone()),
+            Self::Vec3(v) => PropertyValue::Vec3([number(&v[0])?, number(&v[1])?, number(&v[2])?]),
+            Self::ObjectRef(id) => PropertyValue::ObjectRef(id.clone()),
+            Self::AssetRef(id) => PropertyValue::AssetRef(id.clone()),
+        };
+        value.validate().map_err(|error| error.to_string())?;
+        Ok(value)
+    }
+    fn validate_draft(&self, original: &PropertyValue) -> bool {
+        match (self, original) {
+            (Self::Number(s), PropertyValue::Number(_)) => s.len() <= 128,
+            (Self::Bool(_), PropertyValue::Bool(_)) => true,
+            (Self::Text(s), PropertyValue::Text(_)) => {
+                s.len() <= ruster_scene::MAX_PROPERTY_TEXT_BYTES
+            }
+            (Self::Vec3(v), PropertyValue::Vec3(_)) => v.iter().all(|s| s.len() <= 128),
+            (Self::ObjectRef(id), PropertyValue::ObjectRef(_))
+            | (Self::AssetRef(id), PropertyValue::AssetRef(_)) => id.as_ref().is_none_or(|id| {
+                !id.is_empty()
+                    && id.len() <= 128
+                    && id
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
+            }),
+            _ => false,
+        }
+    }
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SourceDraft {
+    id: String,
+    base_hash: String,
+    label: String,
+    language: String,
+    api: String,
+    text: String,
+}
+impl SourceDraft {
+    fn parsed(&self) -> Result<BehaviorSource, String> {
+        let source = BehaviorSource {
+            label: (!self.label.is_empty()).then(|| self.label.clone()),
+            language_id: self.language.clone(),
+            host_api_version: self.api.trim().parse().map_err(|_| {
+                "Host API must be a positive integer; source draft preserved.".to_string()
+            })?,
+            text: self.text.clone(),
+        };
+        source.validate().map_err(|error| error.to_string())?;
+        Ok(source)
+    }
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct PropertyDraft {
+    binding: String,
+    name: String,
+    base_hash: String,
+    value: ValueDraft,
+}
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct Drafts {
+    source: Option<SourceDraft>,
+    property: Option<PropertyDraft>,
+}
+impl Drafts {
+    pub fn pending(&self) -> bool {
+        self.source.is_some() || self.property.is_some()
+    }
+}
+pub(super) enum Action {
+    Create(String),
+    Attach { object: String, source: String },
+    Detach(String),
+    Enable(String, bool),
+    OpenSource(String),
+    EditProperty(String, String),
+    ApplySource,
+    RevertSource,
+    ApplyProperty,
+    RevertProperty,
+    RemoveProperty(String, String),
+    AddProperty(String, String, PropertyValue),
+    Save,
+}
+#[derive(Clone)]
+pub(super) struct ObjectDrag {
+    pub generation: u64,
+    pub revision: u64,
+    pub id: String,
+}
+#[derive(Default)]
+pub(super) struct BehaviorUi {
+    source: Option<SourceDraft>,
+    source_dirty: bool,
+    pub source_open: bool,
+    source_focus: bool,
+    source_footer_ids: [Option<egui::Id>; 3],
+    property_focus: bool,
+    property: Option<PropertyDraft>,
+    property_dirty: bool,
+    generation: u64,
+    cached_revision: Option<u64>,
+    sources: Vec<(String, String)>,
+    asset_key: Option<(std::path::PathBuf, u64)>,
+    assets: Vec<String>,
+    property_rows_key: Option<(u64, String)>,
+    property_rows: Vec<(String, String)>,
+    new_property: String,
+    new_type: usize,
+    pub error: String,
+    source_line: Option<u32>,
+    captured_view: Option<CapturedSource>,
+    #[cfg(test)]
+    source_footer: Option<egui::Rect>,
+}
+struct CapturedSource {
+    id: String,
+    hash: String,
+    text: String,
+    line: Option<u32>,
+    scroll: bool,
+}
+impl BehaviorUi {
+    pub fn navigate_diagnostic(
+        &mut self,
+        session: &Session,
+        diagnostic: &ruster_behavior::Diagnostic,
+        captured: Option<&ruster_scene::Authoring>,
+    ) -> Result<(), String> {
+        let id = diagnostic
+            .source_id
+            .as_deref()
+            .ok_or("Diagnostic has no source location.")?;
+        let hash = diagnostic
+            .source_hash
+            .as_deref()
+            .ok_or("Diagnostic has no captured source hash.")?;
+        let current = session
+            .source(id)
+            .filter(|source| ruster_behavior::source_hash(&source.text) == hash);
+        let pending_other = self.source_dirty
+            && self.source.as_ref().is_some_and(|source| {
+                source.id != id || ruster_behavior::source_hash(&source.text) != hash
+            });
+        if current.is_some() && !pending_other {
+            if !self.source_dirty {
+                self.load_source(session, id);
+            }
+            self.source_line = diagnostic.line;
+            self.source_open = true;
+            self.source_focus = true;
+        } else {
+            let source = captured
+                .and_then(|authoring| authoring.sources.get(id))
+                .filter(|source| ruster_behavior::source_hash(&source.text) == hash)
+                .ok_or(
+                    "Captured source version is unavailable; current code was not highlighted.",
+                )?;
+            self.captured_view = Some(CapturedSource {
+                id: id.into(),
+                hash: hash.into(),
+                text: source.text.clone(),
+                line: diagnostic.line,
+                scroll: true,
+            });
+        }
+        Ok(())
+    }
+    pub fn captured_window(&mut self, ctx: &egui::Context, editable: bool) {
+        let Some(source) = &mut self.captured_view else {
+            return;
+        };
+        let mut opened = true;
+        let mut close =
+            editable && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        let first = source.scroll;
+        egui::Window::new("Captured diagnostic source (read-only)")
+            .open(&mut opened)
+            .max_width((ctx.content_rect().width() - 32.0).max(240.0))
+            .show(ctx, |ui| {
+                ui.add(
+                    egui::Label::new(format!(
+                        "{} · hash {} · line {}",
+                        source.id,
+                        source.hash,
+                        source.line.unwrap_or(1)
+                    ))
+                    .truncate(),
+                )
+                .on_hover_text(&source.hash);
+                ui.label("Captured runtime version; your current working copy is preserved.");
+                egui::ScrollArea::vertical()
+                    .max_height((ctx.content_rect().height() - 190.0).max(48.0))
+                    .show(ui, |ui| {
+                        let mut body = source.text.as_str();
+                        let mut output = egui::TextEdit::multiline(&mut body)
+                            .code_editor()
+                            .interactive(false)
+                            .desired_width(f32::INFINITY)
+                            .show(ui);
+                        if source.scroll {
+                            scroll_line(ui, &mut output, &source.text, source.line.unwrap_or(1));
+                            source.scroll = false;
+                        }
+                    });
+                let button = ui.button("Close captured source");
+                if first {
+                    button.request_focus();
+                }
+                close |= button.clicked();
+            });
+        if !opened || close {
+            self.captured_view = None;
+        }
+    }
+    pub fn pending(&self) -> bool {
+        self.source_dirty || self.property_dirty
+    }
+    pub fn generation(&self) -> u64 {
+        self.generation
+    }
+    fn changed(&mut self) {
+        self.generation = self.generation.wrapping_add(1);
+    }
+    pub fn snapshot(&self) -> Drafts {
+        Drafts {
+            source: self.source_dirty.then(|| self.source.clone()).flatten(),
+            property: self.property_dirty.then(|| self.property.clone()).flatten(),
+        }
+    }
+    pub fn restore(&mut self, session: &Session, drafts: Drafts) -> Result<(), String> {
+        if let Some(source) = &drafts.source {
+            let original = session
+                .source(&source.id)
+                .ok_or("Recovered source draft refers to an absent source; record preserved.")?;
+            if source.base_hash != fingerprint(original)
+                || source.text.len() > ruster_scene::MAX_SOURCE_BYTES
+                || source.label.len() > 128
+                || source.language.len() > 128
+                || source.api.len() > 10
+            {
+                return Err("Recovered source draft has stale baseline or unsupported text bounds; record preserved.".into());
+            }
+        }
+        if let Some(property) = &drafts.property {
+            let original = session
+                .binding(&property.binding)
+                .ok_or("Recovered property draft refers to an absent binding; record preserved.")?;
+            if property.base_hash != fingerprint(original)
+                || !original
+                    .properties
+                    .get(&property.name)
+                    .is_some_and(|value| property.value.validate_draft(value))
+            {
+                return Err("Recovered property draft has stale baseline, type or unsupported bounds; record preserved.".into());
+            }
+        }
+        self.source = drafts.source;
+        self.source_dirty = self.source.is_some();
+        self.source_open = self.source_dirty;
+        self.source_focus = self.source_dirty;
+        self.property = drafts.property;
+        self.property_dirty = self.property.is_some();
+        self.property_focus = self.property_dirty;
+        self.changed();
+        Ok(())
+    }
+    fn refresh(&mut self, session: &Session) {
+        if self.cached_revision == Some(session.scene().revision) {
+            return;
+        }
+        self.cached_revision = Some(session.scene().revision);
+        self.sources = session
+            .authoring()
+            .sources
+            .iter()
+            .map(|(id, source)| {
+                (
+                    id.clone(),
+                    format!(
+                        "{} · {}",
+                        id,
+                        source.label.as_deref().unwrap_or(&source.language_id)
+                    ),
+                )
+            })
+            .collect();
+        if !self.source_dirty {
+            if let Some(draft) = &self.source {
+                let id = draft.id.clone();
+                if let Some(source) = session.source(&id) {
+                    if draft.base_hash != fingerprint(source) {
+                        self.load_source(session, &id);
+                    }
+                } else {
+                    self.source = None;
+                    self.source_open = false;
+                }
+            }
+        }
+        if !self.property_dirty
+            && self.property.as_ref().is_some_and(|property| {
+                session
+                    .binding(&property.binding)
+                    .map(fingerprint)
+                    .as_deref()
+                    != Some(property.base_hash.as_str())
+            })
+        {
+            self.property = None;
+        }
+    }
+    fn load_source(&mut self, session: &Session, id: &str) {
+        if let Some(source) = session.source(id) {
+            self.source = Some(SourceDraft {
+                id: id.into(),
+                base_hash: fingerprint(source),
+                label: source.label.clone().unwrap_or_default(),
+                language: source.language_id.clone(),
+                api: source.host_api_version.to_string(),
+                text: source.text.clone(),
+            });
+            self.source_dirty = false;
+        } else {
+            self.source = None;
+            self.source_dirty = false;
+        }
+    }
+    pub fn apply_source(&mut self, session: &mut Session) -> Result<(), String> {
+        if !self.source_dirty {
+            return Ok(());
+        }
+        let draft = self.source.as_ref().ok_or("Missing source working copy.")?;
+        if session.source(&draft.id).map(fingerprint).as_deref() != Some(draft.base_hash.as_str()) {
+            return Err("Embedded source changed; working copy preserved. Revert explicitly or recover its text before retrying.".into());
+        }
+        let source = draft.parsed()?;
+        let id = draft.id.clone();
+        session
+            .set_source(session.scene().revision, &id, Some(source))
+            .map_err(|error| error.to_string())?;
+        self.load_source(session, &id);
+        self.changed();
+        Ok(())
+    }
+    pub fn apply_property(&mut self, session: &mut Session) -> Result<(), String> {
+        if !self.property_dirty {
+            return Ok(());
+        }
+        let draft = self
+            .property
+            .as_ref()
+            .ok_or("Missing property working copy.")?;
+        let mut binding = session
+            .binding(&draft.binding)
+            .ok_or("Behavior attachment disappeared; property draft preserved.")?
+            .clone();
+        if fingerprint(&binding) != draft.base_hash {
+            return Err("Attachment changed; property working copy preserved. Revert explicitly before retrying.".into());
+        }
+        binding
+            .properties
+            .insert(draft.name.clone(), draft.value.parse()?);
+        session
+            .set_binding(session.scene().revision, &draft.binding, Some(binding))
+            .map_err(|error| error.to_string())?;
+        self.property = None;
+        self.property_dirty = false;
+        self.changed();
+        Ok(())
+    }
+    pub fn apply_all(&mut self, session: &mut Session) -> Result<(), String> {
+        // Parse both before admitting either; compilation is deliberately absent.
+        if self.source_dirty {
+            self.source.as_ref().unwrap().parsed()?;
+        }
+        if self.property_dirty {
+            self.property.as_ref().unwrap().value.parse()?;
+        }
+        self.apply_source(session)?;
+        self.apply_property(session)
+    }
+    pub fn execute(&mut self, action: Action, session: &mut Session) -> Result<(), String> {
+        match action {
+            Action::Create(object) => {
+                let source = session
+                    .allocate_source_ids(1)
+                    .map_err(|e| e.to_string())?
+                    .remove(0);
+                let binding = session
+                    .allocate_binding_ids(1)
+                    .map_err(|e| e.to_string())?
+                    .remove(0);
+                session
+                    .create_behavior(
+                        session.scene().revision,
+                        &source,
+                        BehaviorSource {
+                            label: Some("Follower".into()),
+                            language_id: ruster_behavior::LANGUAGE_ID.into(),
+                            host_api_version: ruster_behavior::HOST_API_VERSION,
+                            text: ruster_behavior::FOLLOWER_TEMPLATE.into(),
+                        },
+                        &binding,
+                        BehaviorBinding {
+                            object_id: object,
+                            source_id: source.clone(),
+                            enabled: true,
+                            properties: BTreeMap::from([
+                                ("speed".into(), PropertyValue::Number(2.0)),
+                                ("enabled".into(), PropertyValue::Bool(true)),
+                                ("target".into(), PropertyValue::ObjectRef(None)),
+                            ]),
+                        },
+                    )
+                    .map_err(|e| e.to_string())?;
+                self.load_source(session, &source);
+                self.source_open = true;
+                self.source_focus = true;
+            }
+            Action::Attach { object, source } => {
+                let id = session
+                    .allocate_binding_ids(1)
+                    .map_err(|e| e.to_string())?
+                    .remove(0);
+                session
+                    .set_binding(
+                        session.scene().revision,
+                        &id,
+                        Some(BehaviorBinding {
+                            object_id: object,
+                            source_id: source,
+                            enabled: true,
+                            properties: BTreeMap::new(),
+                        }),
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+            Action::Detach(id) => {
+                session
+                    .set_binding(session.scene().revision, &id, None)
+                    .map_err(|e| e.to_string())?;
+            }
+            Action::Enable(id, enabled) => {
+                let mut b = session.binding(&id).ok_or("Attachment missing")?.clone();
+                b.enabled = enabled;
+                session
+                    .set_binding(session.scene().revision, &id, Some(b))
+                    .map_err(|e| e.to_string())?;
+            }
+            Action::OpenSource(id) => {
+                if self.source_dirty && self.source.as_ref().is_some_and(|source| source.id != id) {
+                    return Err("Apply or Revert the existing source draft before opening another source; its text was preserved.".into());
+                }
+                if !self.source_dirty {
+                    self.load_source(session, &id);
+                }
+                if self.source.is_none() {
+                    return Err("Source is missing; attach a registered source or restore it through shared authoring tools.".into());
+                }
+                self.source_open = true;
+                self.source_focus = true;
+            }
+            Action::EditProperty(binding, name) => {
+                if self.property_dirty {
+                    return Err(
+                        "Apply or Revert the existing property draft first; text preserved.".into(),
+                    );
+                }
+                let original = session.binding(&binding).ok_or("Attachment missing")?;
+                let value = original.properties.get(&name).ok_or("Property missing")?;
+                self.property = Some(PropertyDraft {
+                    binding,
+                    name,
+                    base_hash: fingerprint(original),
+                    value: ValueDraft::from(value),
+                });
+                self.property_dirty = false;
+                self.property_focus = true;
+            }
+            Action::ApplySource => self.apply_source(session)?,
+            Action::ApplyProperty => {
+                if let Err(error) = self.apply_property(session) {
+                    self.property_focus = true;
+                    return Err(error);
+                }
+            }
+            Action::RevertSource => {
+                if let Some(source) = &self.source {
+                    let id = source.id.clone();
+                    self.load_source(session, &id);
+                }
+                self.source_dirty = false;
+            }
+            Action::RevertProperty => {
+                self.property = None;
+                self.property_dirty = false;
+            }
+            Action::RemoveProperty(id, name) => {
+                let mut binding = session.binding(&id).ok_or("Attachment missing")?.clone();
+                binding.properties.remove(&name);
+                session
+                    .set_binding(session.scene().revision, &id, Some(binding))
+                    .map_err(|e| e.to_string())?;
+            }
+            Action::AddProperty(id, name, value) => {
+                let mut binding = session.binding(&id).ok_or("Attachment missing")?.clone();
+                if binding.properties.contains_key(&name) {
+                    return Err("Property already exists; edit it explicitly.".into());
+                }
+                binding.properties.insert(name, value);
+                session
+                    .set_binding(session.scene().revision, &id, Some(binding))
+                    .map_err(|e| e.to_string())?;
+                self.new_property.clear();
+            }
+            Action::Save => self.apply_all(session)?,
+        }
+        self.changed();
+        self.error.clear();
+        Ok(())
+    }
+    pub fn inspector(
+        &mut self,
+        ui: &mut egui::Ui,
+        session: &Session,
+        object: Option<&str>,
+        assets: Option<&ruster_assets::AssetStore>,
+        generation: u64,
+        editable: bool,
+    ) -> Option<Action> {
+        self.refresh(session);
+        self.refresh_assets(assets);
+        ui.separator();
+        ui.heading("Behavior");
+        ui.small("One attachment per object · sources/properties share scene Undo and Save.");
+        let mut action = None;
+        let mut property_changed = false;
+        if self.source_dirty
+            && !self.source_open
+            && ui.button("Show unapplied source draft").clicked()
+        {
+            self.source_open = true;
+            self.source_focus = true;
+        }
+        if let Some(property) = &mut self.property {
+            ui.add_enabled_ui(editable, |ui| {
+                ui.group(|ui| {
+                    ui.label(format!(
+                        "Property working copy: {} / {}",
+                        property.binding, property.name
+                    ));
+                    let response = value_ui(
+                        ui,
+                        &mut property.value,
+                        session,
+                        &self.assets,
+                        generation,
+                        &mut self.property_focus,
+                    );
+                    property_changed = response.changed;
+                    if editable
+                        && response.focused
+                        && ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                        })
+                    {
+                        action = Some(Action::ApplyProperty);
+                    }
+                    if editable
+                        && response.focused
+                        && ui.input_mut(|input| {
+                            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                        })
+                    {
+                        action = Some(Action::RevertProperty);
+                    }
+                    if property_changed {
+                        self.property_dirty = true;
+                    }
+                    ui.horizontal_wrapped(|ui| {
+                        if ui.button("Apply property value").clicked() {
+                            action = Some(Action::ApplyProperty);
+                        }
+                        if ui.button("Revert property value").clicked() {
+                            action = Some(Action::RevertProperty);
+                        }
+                    });
+                });
+            });
+        }
+        if property_changed {
+            self.changed();
+        }
+        let Some(object) = object else {
+            ui.label("Select one object to author its behavior.");
+            return action;
+        };
+        let attached = session
+            .authoring()
+            .bindings
+            .iter()
+            .find(|(_, binding)| binding.object_id == object);
+        if let Some((id, binding)) = attached {
+            if !self
+                .property_rows_key
+                .as_ref()
+                .is_some_and(|(revision, old)| *revision == session.scene().revision && old == id)
+            {
+                self.property_rows = binding
+                    .properties
+                    .iter()
+                    .map(|(name, value)| (name.clone(), property_summary(value)))
+                    .collect();
+                self.property_rows_key = Some((session.scene().revision, id.clone()));
+            }
+        }
+        if !editable {
+            ui.label("Resolve transform fields, gestures or modal dialogs before behavior edits.");
+        }
+        ui.add_enabled_ui(editable,|ui| {
+            if let Some((id,binding))=attached {
+                ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
+                let mut enabled=binding.enabled;
+                if ui.checkbox(&mut enabled,"Attachment enabled").changed() {action=Some(Action::Enable(id.clone(),enabled));}
+                ui.horizontal_wrapped(|ui| {
+                    if ui.button("Edit behavior source").clicked() {action=Some(Action::OpenSource(binding.source_id.clone()));}
+                    if ui.button("Detach behavior").clicked() {action=Some(Action::Detach(id.clone()));}
+                });
+                if let Some(source)=session.source(&binding.source_id) {
+                    ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||source.host_api_version!=ruster_behavior::HOST_API_VERSION {ui.colored_label(egui::Color32::YELLOW,"Backend/API may be unsupported by this runtime. Authored data remains editable/saveable.");}
+                } else {ui.colored_label(egui::Color32::YELLOW,"Missing source: this orphan attachment is preserved. Detach or repair its source explicitly.");}
+                ui.label("Typed properties (retained independently of source declarations)");
+                for (name,summary) in &self.property_rows {
+                    ui.push_id((id,name),|ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(name);
+                            ui.label(summary);
+                            if ui.add_enabled(!self.property_dirty,egui::Button::new("Edit value")).clicked() {action=Some(Action::EditProperty(id.clone(),name.clone()));}
+                            if ui.button("Remove value").clicked() {action=Some(Action::RemoveProperty(id.clone(),name.clone()));}
+                        });
+                    });
+                }
+                ui.small(format!("{} / {} properties",binding.properties.len(),ruster_scene::MAX_PROPERTIES));
+                ui.label("New property name");text(ui,&mut self.new_property,128);
+                egui::ComboBox::from_label("Property type").selected_text(["Number","Bool","Text","Vec3","Object reference","Asset reference"][self.new_type]).show_ui(ui,|ui| {
+                    for (index,label) in ["Number","Bool","Text","Vec3","Object reference","Asset reference"].into_iter().enumerate() {ui.selectable_value(&mut self.new_type,index,label);}
+                });
+                if ui.button("Add typed property").clicked() {
+                    let value=match self.new_type {0=>PropertyValue::Number(0.0),1=>PropertyValue::Bool(false),2=>PropertyValue::Text(String::new()),3=>PropertyValue::Vec3([0.0;3]),4=>PropertyValue::ObjectRef(None),_=>PropertyValue::AssetRef(None)};
+                    action=Some(Action::AddProperty(id.clone(),self.new_property.clone(),value));
+                }
+            } else {
+                if ui.button("Add Lua follower behavior").clicked() {action=Some(Action::Create(object.into()));}
+                ui.small("Existing sources start without assumed properties; add the values their code needs.");
+                ui.menu_button("Attach existing source…",|ui| {
+                    for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::Attach{object:object.into(),source:id.clone()});ui.close();}}
+                    if self.sources.is_empty() {ui.label("No registered sources yet.");}
+                });
+            }
+            ui.menu_button("Browse embedded sources…",|ui| {
+                for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::OpenSource(id.clone()));ui.close();}}
+            });
+        });
+        if !self.error.is_empty() {
+            ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+        }
+        action
+    }
+    fn refresh_assets(&mut self, store: Option<&ruster_assets::AssetStore>) {
+        let changed = match (&self.asset_key, store) {
+            (Some((root, revision)), Some(store)) => {
+                root != store.root() || *revision != store.revision()
+            }
+            (None, None) => false,
+            _ => true,
+        };
+        if changed {
+            self.assets = store
+                .map(|store| store.inspect().into_iter().map(|asset| asset.id).collect())
+                .unwrap_or_default();
+            self.asset_key = store.map(|store| (store.root().to_path_buf(), store.revision()));
+        }
+    }
+    pub fn source_window(&mut self, ctx: &egui::Context, editable: bool) -> Option<Action> {
+        if !self.source_open {
+            return None;
+        }
+        let mut opened = true;
+        let mut action = None;
+        let mut changed = false;
+        let field_ids = [
+            "source-body",
+            "source-label",
+            "source-language",
+            "source-api",
+        ]
+        .map(egui::Id::unique);
+        let owns_keyboard = ctx.memory(|memory| {
+            field_ids
+                .iter()
+                .chain(self.source_footer_ids.iter().flatten())
+                .any(|id| memory.focused() == Some(*id))
+        });
+        let owned_last_frame = ctx.memory(|memory| {
+            field_ids
+                .iter()
+                .chain(self.source_footer_ids.iter().flatten())
+                .any(|id| memory.had_focus_last_frame(*id))
+        });
+        let save = editable
+            && owns_keyboard
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S));
+        let apply = editable
+            && owns_keyboard
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::Enter));
+        let hide = editable
+            && (owns_keyboard || owned_last_frame)
+            && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+        egui::Window::new("Behavior source").id(egui::Id::unique("behavior_source_window")).open(&mut opened)
+            .default_width(640.0).max_width((ctx.content_rect().width()-32.0).max(240.0)).resizable(true)
+            .show(ctx,|ui| {
+                ui.set_max_height((ctx.content_rect().height()-64.0).max(160.0));
+                let Some(source)=&mut self.source else {ui.label("No embedded source selected.");return;};
+                ui.add(egui::Label::new(format!("{} · base {}",source.id,&source.base_hash[..12])).truncate()).on_hover_text(&source.id);
+                if let Some(line)=self.source_line {ui.label(format!("Diagnostic line {line}"));}
+                ui.small("Apply stores unfinished code without compiling. Ctrl+Enter Apply · Ctrl+S Apply and Save · Escape hide/keep draft.");
+                egui::ScrollArea::vertical().id_salt("embedded_source_scroll").max_height((ctx.content_rect().height()-250.0).max(48.0)).show(ui,|ui| {
+                    ui.add_enabled_ui(editable,|ui| {
+                        ui.label("Display label");let mut rejected=false;
+                        changed|=ui.add(egui::TextEdit::singleline(&mut ByteBuffer{text:&mut source.label,limit:128,rejected:&mut rejected,removed:None}).id(field_ids[1]).interactive(ui.is_enabled())).changed();
+                        ui.label("Language backend ID (unknown IDs are preserved)");
+                        changed|=ui.add(egui::TextEdit::singleline(&mut ByteBuffer{text:&mut source.language,limit:128,rejected:&mut rejected,removed:None}).id(field_ids[2]).interactive(ui.is_enabled())).changed();
+                        ui.label("Host API version");
+                        changed|=ui.add(egui::TextEdit::singleline(&mut ByteBuffer{text:&mut source.api,limit:10,rejected:&mut rejected,removed:None}).id(field_ids[3]).interactive(ui.is_enabled())).changed();
+                        ui.label(format!("Source body · {} / {} UTF-8 bytes",source.text.len(),ruster_scene::MAX_SOURCE_BYTES));
+                        let mut output=egui::TextEdit::multiline(&mut ByteBuffer{text:&mut source.text,limit:ruster_scene::MAX_SOURCE_BYTES,rejected:&mut rejected,removed:None}).id(field_ids[0]).interactive(ui.is_enabled()).code_editor().desired_rows(14).desired_width(f32::INFINITY).show(ui);
+                        if self.source_focus {output.response.request_focus();output.response.scroll_to_me(Some(egui::Align::Min));self.source_focus=false;}
+                        if let Some(line)=self.source_line.take() {scroll_line(ui,&mut output,&source.text,line);}
+                        changed|=output.response.changed();
+                        if rejected {ui.colored_label(egui::Color32::LIGHT_RED,"Insertion rejected: field byte limit exceeded; previous text preserved.");}
+                    });
+                });
+                if !self.error.is_empty() {ui.add(egui::Label::new(egui::RichText::new(&self.error).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&self.error);}
+                ui.horizontal_wrapped(|ui| {
+                    let apply_button=ui.add_enabled(editable,egui::Button::new("Apply source data"));self.source_footer_ids[0]=Some(apply_button.id);
+                    if apply_button.clicked()||apply {action=Some(Action::ApplySource);}
+                    let revert=ui.add_enabled(editable,egui::Button::new("Revert source draft"));self.source_footer_ids[1]=Some(revert.id);
+                    if revert.clicked() {action=Some(Action::RevertSource);}
+                    let close=ui.button("Close source (keep draft)");
+                    self.source_footer_ids[2]=Some(close.id);
+                    #[cfg(test)] {self.source_footer=Some(close.rect);}
+                    if close.clicked()||hide {self.source_open=false;}
+                });
+            });
+        if changed {
+            self.source_dirty = true;
+            self.changed();
+        }
+        if !opened {
+            self.source_open = false;
+        }
+        if !self.source_open {
+            ctx.memory_mut(|memory| {
+                for id in field_ids
+                    .iter()
+                    .chain(self.source_footer_ids.iter().flatten())
+                {
+                    memory.surrender_focus(*id);
+                }
+            });
+        }
+        if save {
+            action = Some(Action::Save);
+        }
+        action
+    }
+}
+fn property_summary(value: &PropertyValue) -> String {
+    match value {
+        PropertyValue::Number(n) => format!("Number: {n}"),
+        PropertyValue::Bool(b) => format!("Bool: {b}"),
+        PropertyValue::Text(s) => format!("Text: {}", s.chars().take(48).collect::<String>()),
+        PropertyValue::Vec3(v) => format!("Vec3: {}, {}, {}", v[0], v[1], v[2]),
+        PropertyValue::ObjectRef(id) => format!("Object: {}", id.as_deref().unwrap_or("None")),
+        PropertyValue::AssetRef(id) => format!("Asset: {}", id.as_deref().unwrap_or("None")),
+    }
+}
+#[derive(Default)]
+struct ValueResponse {
+    changed: bool,
+    focused: bool,
+}
+impl ValueResponse {
+    fn field(&mut self, response: egui::Response, focus: &mut bool) {
+        if *focus && response.enabled() {
+            response.request_focus();
+            response.scroll_to_me(Some(egui::Align::Center));
+            *focus = false;
+        }
+        self.changed |= response.changed();
+        self.focused |= response.has_focus() || response.lost_focus();
+    }
+}
+fn value_ui(
+    ui: &mut egui::Ui,
+    value: &mut ValueDraft,
+    session: &Session,
+    assets: &[String],
+    generation: u64,
+    focus: &mut bool,
+) -> ValueResponse {
+    let mut result = ValueResponse::default();
+    match value {
+        ValueDraft::Number(value) => result.field(text(ui, value, 128), focus),
+        ValueDraft::Bool(value) => result.field(ui.checkbox(value, "Value"), focus),
+        ValueDraft::Text(value) => result.field(
+            text(ui, value, ruster_scene::MAX_PROPERTY_TEXT_BYTES),
+            focus,
+        ),
+        ValueDraft::Vec3(value) => {
+            for (axis, value) in ["X", "Y", "Z"].into_iter().zip(value) {
+                ui.label(axis);
+                result.field(text(ui, value, 128), focus);
+            }
+        }
+        ValueDraft::ObjectRef(value) => {
+            let response = egui::ComboBox::from_label("Object reference")
+                .selected_text(value.as_deref().unwrap_or("None"))
+                .show_ui(ui, |ui| {
+                    result.changed |= ui.selectable_value(value, None, "None").changed();
+                    for object in &session.scene().objects {
+                        result.changed |= ui
+                            .selectable_value(
+                                value,
+                                Some(object.id.clone()),
+                                format!("{} ({})", object.display_name(), object.id),
+                            )
+                            .changed();
+                    }
+                })
+                .response;
+            if ui.is_enabled() {
+                if let Some(payload) = response.dnd_release_payload::<ObjectDrag>() {
+                    if payload.generation == generation
+                        && payload.revision == session.scene().revision
+                        && session
+                            .scene()
+                            .objects
+                            .iter()
+                            .any(|object| object.id == payload.id)
+                    {
+                        *value = Some(payload.id.clone());
+                        result.changed = true;
+                    } else {
+                        ui.colored_label(
+                            egui::Color32::LIGHT_RED,
+                            "Stale/foreign object drag rejected; drag again from this scene.",
+                        );
+                    }
+                }
+            }
+            result.field(response, focus);
+            if value.as_ref().is_some_and(|id| {
+                !session
+                    .scene()
+                    .objects
+                    .iter()
+                    .any(|object| &object.id == id)
+            }) {
+                ui.colored_label(egui::Color32::YELLOW,"Unresolved object reference; preserved until you choose a replacement or None.");
+            }
+            ui.small("Choose an object or drop its hierarchy row here.");
+        }
+        ValueDraft::AssetRef(value) => {
+            let response = egui::ComboBox::from_label("Asset reference")
+                .selected_text(value.as_deref().unwrap_or("None"))
+                .show_ui(ui, |ui| {
+                    result.changed |= ui.selectable_value(value, None, "None").changed();
+                    for id in assets {
+                        result.changed |=
+                            ui.selectable_value(value, Some(id.clone()), id).changed();
+                    }
+                })
+                .response;
+            result.field(response, focus);
+            if value.as_ref().is_some_and(|id| !assets.contains(id)) {
+                ui.colored_label(egui::Color32::YELLOW,"Unresolved catalog reference; preserved without rebasing until explicitly changed.");
+            }
+        }
+    }
+    result
+}
+
+// Only immutable authored/reset snapshots and owned DTOs cross this boundary.
+use crate::behavior_worker::{
+    Command as VmCommand, Event as VmEvent, Frame, Operation, RequestErrorKind, RunKey, State,
+    Worker as VmWorker,
+};
+use std::sync::Arc;
+#[derive(Clone)]
+enum Request {
+    Reset {
+        key: RunKey,
+        scene: Arc<ruster_scene::Scene>,
+        authoring: Arc<ruster_scene::Authoring>,
+    },
+    Play(RunKey),
+    Pause(RunKey),
+    Step(RunKey),
+    Invalidate(RunKey),
+    Stop(RunKey),
+}
+impl Request {
+    fn command(&self) -> VmCommand {
+        match self {
+            Self::Reset {
+                key,
+                scene,
+                authoring,
+            } => VmCommand::Reset {
+                key: *key,
+                scene: scene.clone(),
+                authoring: authoring.clone(),
+            },
+            Self::Play(key) => VmCommand::Play { key: *key },
+            Self::Pause(key) => VmCommand::Pause { key: *key },
+            Self::Step(key) => VmCommand::Step { key: *key },
+            Self::Invalidate(key) => VmCommand::Invalidate { key: *key },
+            Self::Stop(key) => VmCommand::Stop { key: *key },
+        }
+    }
+}
+#[derive(Default)]
+pub(super) struct RuntimeUi {
+    worker: Option<VmWorker>,
+    pending: Option<Request>,
+    identity: Option<(u64, u64, Option<u64>, u64)>,
+    pub frame: Option<Frame>,
+    pub visible: bool,
+    pub stale: bool,
+    ready: bool,
+    playing: bool,
+    pub status: String,
+    pub diagnostic: Option<ruster_behavior::Diagnostic>,
+    pub captured: Option<Arc<ruster_scene::Authoring>>,
+    shutdown: bool,
+    reset_key: Option<RunKey>,
+    reset_ack: Option<RunKey>,
+    reset_frame: Option<Frame>,
+    pub reset_succeeded: Option<RunKey>,
+}
+impl RuntimeUi {
+    #[cfg(test)]
+    pub fn is_playing(&self) -> bool {
+        self.playing
+    }
+    pub fn observe(
+        &mut self,
+        generation: u64,
+        revision: u64,
+        asset_revision: Option<u64>,
+        shader_revision: u64,
+    ) {
+        let next = (generation, revision, asset_revision, shader_revision);
+        if self.identity == Some(next) {
+            return;
+        }
+        let previous = self.identity.replace(next);
+        self.clear_reset();
+        if let Some(worker) = &mut self.worker {
+            if self.shutdown {
+                return;
+            }
+            match worker.advance(generation, revision) {
+                Ok(key) => self.pending = Some(Request::Invalidate(key)),
+                Err(error) => self.status = error.to_string(),
+            }
+            self.stale = self.frame.is_some();
+            self.ready = false;
+            self.playing = false;
+            self.visible = false;
+            self.status =
+                "Authored scene/content changed; runtime cancelled. Reset to run the current data."
+                    .into();
+        }
+        if previous.is_some_and(|old| old.0 != generation) {
+            self.frame = None;
+            self.captured = None;
+            self.diagnostic = None;
+        }
+    }
+    fn ensure_worker(&mut self, ctx: &egui::Context) -> Result<(), String> {
+        if self.worker.is_none() {
+            let ctx = ctx.clone();
+            self.worker = Some(VmWorker::start(Some(Arc::new(move || {
+                ctx.request_repaint()
+            })))?);
+        }
+        Ok(())
+    }
+    pub fn reset(
+        &mut self,
+        ctx: &egui::Context,
+        session: &Session,
+        generation: u64,
+    ) -> Result<RunKey, String> {
+        self.ensure_worker(ctx)?;
+        let worker = self.worker.as_mut().unwrap();
+        let key = worker
+            .advance(generation, session.scene().revision)
+            .map_err(|e| e.to_string())?;
+        let authoring = Arc::new(session.authoring().clone());
+        self.captured = Some(authoring.clone());
+        self.pending = Some(Request::Reset {
+            key,
+            scene: Arc::new(session.scene().clone()),
+            authoring,
+        });
+        self.begin_reset(key);
+        self.diagnostic = None;
+        self.status = "Resetting behavior runtime…".into();
+        self.flush();
+        Ok(key)
+    }
+    fn clear_reset(&mut self) {
+        self.reset_key = None;
+        self.reset_ack = None;
+        self.reset_frame = None;
+        self.reset_succeeded = None;
+    }
+    fn begin_reset(&mut self, key: RunKey) {
+        self.clear_reset();
+        self.reset_key = Some(key);
+        self.ready = false;
+        self.stale = self.frame.is_some();
+        self.playing = false;
+    }
+    fn acknowledge_reset(&mut self, key: RunKey, tick: u64) {
+        if self.reset_key == Some(key) {
+            self.status =
+                format!("Reset accepted at tick {tick}; waiting for its matching viewport frame.");
+            self.reset_ack = Some(key);
+            self.complete_reset();
+        }
+    }
+    fn accept_frame(&mut self, frame: Frame) {
+        if let Some(key) = self.reset_key {
+            if frame.key == key {
+                self.reset_frame = Some(frame);
+                self.complete_reset();
+            }
+        } else if self.ready {
+            self.frame = Some(frame);
+        }
+    }
+    fn complete_reset(&mut self) {
+        if let Some(key) = self.reset_key {
+            if self.reset_ack == Some(key)
+                && self
+                    .reset_frame
+                    .as_ref()
+                    .is_some_and(|frame| frame.key == key)
+            {
+                self.frame = self.reset_frame.take();
+                self.reset_key = None;
+                self.reset_ack = None;
+                self.ready = true;
+                self.stale = false;
+                self.visible = true;
+                self.reset_succeeded = Some(key);
+                self.status = "Runtime reset successfully; authored data unchanged.".into();
+            }
+        }
+    }
+    fn flush(&mut self) {
+        let (Some(worker), Some(request)) = (&self.worker, &self.pending) else {
+            return;
+        };
+        match worker.try_request(request.command()) {
+            Ok(()) => self.pending = None,
+            Err(error) if error.kind == RequestErrorKind::Busy => {}
+            Err(error) => {
+                self.status = error.to_string();
+                self.pending = None;
+                self.ready = false;
+                self.playing = false;
+            }
+        }
+    }
+    pub fn poll(&mut self, ctx: &egui::Context) {
+        loop {
+            let event = self.worker.as_ref().map(VmWorker::poll_event);
+            match event {
+                Some(Ok(event)) => {
+                    if !self.worker.as_ref().unwrap().accepts(event.key()) {
+                        continue;
+                    }
+                    match event {
+                        VmEvent::Reset { key, run } => self.acknowledge_reset(key, run.tick),
+                        VmEvent::Step { run, .. } => {
+                            self.playing = false;
+                            self.status = format!(
+                                "Committed runtime tick {}; authored data unchanged.",
+                                run.tick
+                            )
+                        }
+                        VmEvent::State {
+                            state, last_good, ..
+                        } => match state {
+                            State::Playing => {
+                                self.playing = true;
+                                self.status = "Playing behavior runtime".into();
+                            }
+                            State::Paused => {
+                                self.playing = false;
+                                self.status = format!(
+                                    "Paused at committed tick {}",
+                                    last_good
+                                        .map(|run| run.tick.to_string())
+                                        .as_deref()
+                                        .unwrap_or("none")
+                                );
+                            }
+                            State::Invalidated => {
+                                self.ready = false;
+                                self.playing = false;
+                                self.stale = self.frame.is_some();
+                                self.status=format!("Runtime invalidated; last committed tick {} retained. Reset required.",last_good.map(|run|run.tick.to_string()).as_deref().unwrap_or("none"));
+                            }
+                            State::Stopped => {
+                                self.ready = false;
+                                self.playing = false;
+                                self.visible = false;
+                                self.stale = self.frame.is_some();
+                                self.status = format!(
+                                    "Stopped · viewing authored scene. Last committed tick {}",
+                                    last_good
+                                        .map(|run| run.tick.to_string())
+                                        .as_deref()
+                                        .unwrap_or("none")
+                                );
+                            }
+                        },
+                        VmEvent::Error {
+                            operation,
+                            diagnostic,
+                            last_good,
+                            ..
+                        } => {
+                            self.playing = false;
+                            if operation == Operation::Reset {
+                                self.clear_reset();
+                                self.ready = false;
+                                self.stale = self.frame.is_some();
+                            }
+                            self.status = format!(
+                                "{operation:?} failed; last committed runtime tick {} retained.",
+                                last_good
+                                    .map(|run| run.tick.to_string())
+                                    .as_deref()
+                                    .unwrap_or("none")
+                            );
+                            self.diagnostic = Some(diagnostic);
+                        }
+                        VmEvent::Rejected {
+                            operation,
+                            message,
+                            last_good,
+                            ..
+                        } => {
+                            self.playing = false;
+                            if last_good.is_none() {
+                                self.ready = false;
+                            }
+                            if operation == Operation::Reset {
+                                self.clear_reset();
+                                self.ready = false;
+                                self.stale = self.frame.is_some();
+                            }
+                            self.status = format!(
+                                "{operation:?} rejected: {message}. Last committed tick: {}",
+                                last_good
+                                    .map(|run| run.tick.to_string())
+                                    .as_deref()
+                                    .unwrap_or("none")
+                            );
+                        }
+                    }
+                }
+                Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
+                    if !self.shutdown {
+                        self.status =
+                            "Behavior worker disconnected; authored work remains available.".into();
+                        self.ready = false;
+                        self.playing = false;
+                    }
+                    break;
+                }
+                _ => break,
+            }
+        }
+        let frame = self.worker.as_ref().and_then(VmWorker::take_latest);
+        if let Some(frame) = frame {
+            if self
+                .worker
+                .as_ref()
+                .is_some_and(|worker| worker.accepts(frame.key))
+            {
+                self.accept_frame(frame);
+            }
+        }
+        self.flush();
+        if self.pending.is_some() || self.reset_ack.is_some() {
+            ctx.request_repaint_after(std::time::Duration::from_millis(16));
+        }
+    }
+    pub fn stop(&mut self, generation: u64, revision: u64) {
+        self.clear_reset();
+        if self.shutdown {
+            return;
+        }
+        if let Some(worker) = &mut self.worker {
+            match worker.stop_immediate(generation, revision) {
+                Ok(_) => self.pending = None,
+                Err(error) if error.kind == RequestErrorKind::Busy => {
+                    self.pending = Some(Request::Stop(error.key))
+                }
+                Err(error) => {
+                    self.pending = None;
+                    self.status = error.to_string();
+                }
+            }
+        }
+        self.visible = false;
+        self.ready = false;
+        self.playing = false;
+        self.stale = self.frame.is_some();
+        self.flush();
+    }
+    pub fn shutdown(&mut self) {
+        if self.shutdown {
+            return;
+        }
+        self.shutdown = true;
+        self.clear_reset();
+        self.pending = None;
+        self.ready = false;
+        self.playing = false;
+        if let Some(worker) = &mut self.worker {
+            if let Err(error) = worker.request_shutdown() {
+                self.status = error.to_string();
+            }
+        }
+    }
+    pub fn finished(&mut self) -> bool {
+        self.worker.as_mut().is_none_or(VmWorker::finished)
+    }
+    pub fn controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        session: &Session,
+        generation: u64,
+        blocked: bool,
+    ) -> Option<RunKey> {
+        let mut reset = None;
+        ui.horizontal_wrapped(|ui| {
+            if ui
+                .add_enabled(
+                    !blocked && !self.shutdown,
+                    egui::Button::new("Reset behavior runtime"),
+                )
+                .clicked()
+            {
+                match self.reset(ui.ctx(), session, generation) {
+                    Ok(key) => reset = Some(key),
+                    Err(error) => self.status = error,
+                }
+            }
+            let ready = self.ready && !blocked && self.pending.is_none() && !self.shutdown;
+            if ui
+                .add_enabled(
+                    ready,
+                    egui::Button::new(if self.playing { "Pause" } else { "Play" }),
+                )
+                .clicked()
+            {
+                let key = self.worker.as_ref().unwrap().current_key();
+                self.pending = Some(if self.playing {
+                    Request::Pause(key)
+                } else {
+                    Request::Play(key)
+                });
+            }
+            if ui
+                .add_enabled(ready && !self.playing, egui::Button::new("Step"))
+                .clicked()
+            {
+                self.pending = Some(Request::Step(self.worker.as_ref().unwrap().current_key()));
+            }
+            if ui
+                .add_enabled(
+                    self.worker.is_some() && !self.shutdown,
+                    egui::Button::new("Stop (authored view)"),
+                )
+                .clicked()
+            {
+                self.stop(generation, session.scene().revision);
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.add_enabled(
+                self.frame.is_some(),
+                egui::Checkbox::new(
+                    &mut self.visible,
+                    if self.stale {
+                        "View last runtime (stale; Reset required)"
+                    } else {
+                        "View runtime"
+                    },
+                ),
+            );
+            ui.label(format!(
+                "Runtime tick {}",
+                self.frame.as_ref().map(|frame| frame.tick).unwrap_or(0)
+            ));
+        });
+        if !self.status.is_empty() {
+            ui.label(&self.status);
+        }
+        self.flush();
+        reset
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn key(key: egui::Key, modifiers: egui::Modifiers) -> Vec<egui::Event> {
+        vec![
+            egui::Event::ModifiersChanged(modifiers),
+            egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers,
+            },
+        ]
+    }
+    fn source_frame(
+        ctx: &egui::Context,
+        editor: &mut BehaviorUi,
+        events: Vec<egui::Event>,
+    ) -> Option<Action> {
+        let mut action = None;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1100.0, 800.0),
+                )),
+                events,
+                ..Default::default()
+            },
+            |_| action = editor.source_window(ctx, true),
+        );
+        output.textures_delta.clear();
+        action
+    }
+    #[test]
+    fn embedded_source_focus_applies_unfinished_data_and_recovery_preserves_typed_drafts() {
+        let mut session = Session::new(ruster_scene::Scene::demo()).unwrap();
+        let mut editor = BehaviorUi::default();
+        editor
+            .execute(Action::Create("left".into()), &mut session)
+            .unwrap();
+        assert_eq!(session.undo_len(), 1);
+        let binding_id = session.authoring().bindings.keys().next().unwrap().clone();
+        let source_id = session.binding(&binding_id).unwrap().source_id.clone();
+        assert_eq!(
+            session.binding(&binding_id).unwrap().properties["speed"],
+            PropertyValue::Number(2.0)
+        );
+        let ctx = egui::Context::default();
+        source_frame(&ctx, &mut editor, vec![]);
+        source_frame(
+            &ctx,
+            &mut editor,
+            vec![egui::Event::Text("\nreturn { update = function(".into())],
+        );
+        assert!(editor.pending());
+        assert_eq!(session.scene().revision, 1);
+        let generation = editor.generation();
+        source_frame(&ctx, &mut editor, vec![]);
+        assert_eq!(
+            editor.generation(),
+            generation,
+            "idle source rendering must not manufacture draft changes"
+        );
+        source_frame(
+            &ctx,
+            &mut editor,
+            key(egui::Key::Escape, egui::Modifiers::NONE),
+        );
+        assert!(!editor.source_open);
+        assert!(
+            ctx.memory(|memory| memory.focused().is_none()),
+            "hidden source fields must release global shortcut ownership"
+        );
+        assert!(editor.pending());
+        editor
+            .execute(
+                Action::EditProperty(binding_id.clone(), "speed".into()),
+                &mut session,
+            )
+            .unwrap();
+        editor.property.as_mut().unwrap().value = ValueDraft::Number("-".into());
+        editor.property_dirty = true;
+        editor.changed();
+        let drafts =
+            serde_json::from_slice(&serde_json::to_vec(&editor.snapshot()).unwrap()).unwrap();
+        let mut recovered = BehaviorUi::default();
+        recovered.restore(&session, drafts).unwrap();
+        assert!(recovered.source_open);
+        assert_eq!(
+            recovered
+                .property
+                .as_ref()
+                .unwrap()
+                .value
+                .parse()
+                .unwrap_err(),
+            "Enter finite property numbers; unapplied text is preserved."
+        );
+        let unchanged = session.snapshot_bytes().unwrap();
+        assert!(recovered.apply_all(&mut session).is_err());
+        assert_eq!(
+            session.snapshot_bytes().unwrap(),
+            unchanged,
+            "preflight preserves all drafts when a numeric property is incomplete"
+        );
+        recovered
+            .execute(Action::RevertProperty, &mut session)
+            .unwrap();
+        let fresh = egui::Context::default();
+        source_frame(&fresh, &mut recovered, vec![]);
+        let action = source_frame(
+            &fresh,
+            &mut recovered,
+            key(egui::Key::Enter, egui::Modifiers::CTRL),
+        )
+        .unwrap();
+        assert!(matches!(action, Action::ApplySource));
+        recovered.execute(action, &mut session).unwrap();
+        assert_eq!(session.undo_len(), 2);
+        assert!(session
+            .source(&source_id)
+            .unwrap()
+            .text
+            .contains("return { update = function("));
+        assert!(
+            !recovered.pending(),
+            "invalid syntax is still valid authored source data"
+        );
+        source_frame(
+            &fresh,
+            &mut recovered,
+            vec![egui::Event::Text("\n-- retained save draft".into())],
+        );
+        assert!(matches!(
+            source_frame(
+                &fresh,
+                &mut recovered,
+                key(egui::Key::S, egui::Modifiers::CTRL)
+            ),
+            Some(Action::Save)
+        ));
+        let captured = session.authoring().clone();
+        let diagnostic = ruster_behavior::Diagnostic {
+            code: ruster_behavior::DiagnosticCode::Compile,
+            source_id: Some(source_id.clone().into_boxed_str()),
+            source_hash: Some(
+                ruster_behavior::source_hash(&session.source(&source_id).unwrap().text)
+                    .into_boxed_str(),
+            ),
+            binding_id: Some(binding_id.into_boxed_str()),
+            object_id: Some("left".into()),
+            phase: ruster_behavior::Phase::Compile,
+            message: "captured error".into(),
+            line: Some(2),
+        };
+        recovered
+            .navigate_diagnostic(&session, &diagnostic, Some(&captured))
+            .unwrap();
+        assert!(
+            recovered.captured_view.is_some(),
+            "a changed working copy must not receive an old diagnostic location"
+        );
+        assert!(recovered.pending());
+    }
+    #[test]
+    fn bounded_editor_preserves_replaced_selection_and_footer_at_two_times_scale() {
+        let mut value = "kept text".to_string();
+        let mut rejected = false;
+        let mut buffer = ByteBuffer {
+            text: &mut value,
+            limit: 16,
+            rejected: &mut rejected,
+            removed: None,
+        };
+        egui::TextBuffer::delete_char_range(
+            &mut buffer,
+            egui::text::CharIndex(0)..egui::text::CharIndex(4),
+        );
+        assert_eq!(
+            egui::TextBuffer::insert_text(
+                &mut buffer,
+                "oversized multibyte 🦀🦀🦀",
+                egui::text::CharIndex(0)
+            ),
+            0
+        );
+        assert_eq!(value, "kept text");
+        assert!(rejected);
+        let mut session = Session::new(ruster_scene::Scene::demo()).unwrap();
+        let mut editor = BehaviorUi::default();
+        editor
+            .execute(Action::Create("left".into()), &mut session)
+            .unwrap();
+        editor.error = "Long recoverable diagnostic ".repeat(60);
+        let ctx = egui::Context::default();
+        let physical = egui::vec2(960.0, 640.0);
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, physical)),
+                ..Default::default()
+            },
+            |_| {},
+        );
+        output.textures_delta.clear();
+        ctx.set_zoom_factor(2.0);
+        for _ in 0..4 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, physical / 2.0)),
+                    ..Default::default()
+                },
+                |_| {
+                    editor.source_window(&ctx, true);
+                },
+            );
+            output.textures_delta.clear();
+        }
+        let footer = editor.source_footer.unwrap();
+        assert!(
+            ctx.content_rect().contains_rect(footer),
+            "source footer {footer:?} must remain reachable at supported minimum2x viewport {:?}",
+            ctx.content_rect()
+        );
+    }
+    #[test]
+    fn runtime_arc_frames_are_separate_and_failed_reset_retains_explicit_stale_code() {
+        use std::sync::mpsc;
+        let mut session = Session::new(ruster_scene::Scene::demo()).unwrap();
+        let mut editor = BehaviorUi::default();
+        editor
+            .execute(Action::Create("left".into()), &mut session)
+            .unwrap();
+        let binding_id = session.authoring().bindings.keys().next().unwrap().clone();
+        let mut binding = session.binding(&binding_id).unwrap().clone();
+        binding.properties.insert(
+            "target".into(),
+            PropertyValue::ObjectRef(Some("right".into())),
+        );
+        session
+            .set_binding(session.scene().revision, &binding_id, Some(binding.clone()))
+            .unwrap();
+        let authored = session.snapshot_bytes().unwrap();
+        let ctx = egui::Context::default();
+        let (notify, pulses) = mpsc::sync_channel(1);
+        let mut runtime = RuntimeUi::default();
+        runtime.observe(10, session.scene().revision, None, 0);
+        runtime.worker = Some(
+            VmWorker::start(Some(Arc::new(move || {
+                let _ = notify.try_send(());
+            })))
+            .unwrap(),
+        );
+        let drive = |runtime: &mut RuntimeUi, predicate: fn(&RuntimeUi) -> bool| {
+            for _ in 0..32 {
+                runtime.poll(&ctx);
+                if predicate(runtime) {
+                    return;
+                }
+                pulses
+                    .recv_timeout(std::time::Duration::from_secs(5))
+                    .expect("VM UI notification deadline");
+            }
+            panic!("VM UI did not reach expected state");
+        };
+        runtime.reset(&ctx, &session, 10).unwrap();
+        drive(&mut runtime, |runtime| {
+            runtime.ready && runtime.frame.is_some()
+        });
+        runtime.pending = Some(Request::Step(
+            runtime.worker.as_ref().unwrap().current_key(),
+        ));
+        runtime.flush();
+        drive(&mut runtime, |runtime| {
+            runtime.frame.as_ref().is_some_and(|frame| frame.tick == 1)
+        });
+        let frame = runtime.frame.as_ref().unwrap().scene.clone();
+        assert!(
+            frame.objects[0].transform.translation[0]
+                > session.scene().objects[0].transform.translation[0]
+        );
+        assert_eq!(
+            session.snapshot_bytes().unwrap(),
+            authored,
+            "runtime transforms must never enter authored history/save"
+        );
+        let mut source = session.source(&binding.source_id).unwrap().clone();
+        source.text = "return {update=function(".into();
+        session
+            .set_source(session.scene().revision, &binding.source_id, Some(source))
+            .unwrap();
+        runtime.observe(10, session.scene().revision, None, 0);
+        assert!(runtime.stale);
+        assert!(!runtime.visible);
+        assert!(!runtime.ready);
+        runtime.reset(&ctx, &session, 10).unwrap();
+        drive(&mut runtime, |runtime| runtime.diagnostic.is_some());
+        assert!(runtime.stale);
+        assert!(!runtime.ready);
+        assert!(Arc::ptr_eq(&runtime.frame.as_ref().unwrap().scene, &frame));
+        let diagnostic = runtime.diagnostic.as_ref().unwrap();
+        assert_eq!(
+            diagnostic.source_id.as_deref(),
+            Some(binding.source_id.as_str())
+        );
+        assert_eq!(
+            diagnostic.source_hash.as_deref(),
+            Some(
+                ruster_behavior::source_hash(&session.source(&binding.source_id).unwrap().text)
+                    .as_str()
+            )
+        );
+        runtime.stop(10, session.scene().revision);
+        assert!(!runtime.visible);
+        runtime.shutdown();
+        assert!(runtime.shutdown);
+    }
+    #[test]
+    fn property_fields_own_enter_escape_and_respect_other_field_ownership() {
+        let mut session = Session::new(ruster_scene::Scene::demo()).unwrap();
+        let mut editor = BehaviorUi::default();
+        editor
+            .execute(Action::Create("left".into()), &mut session)
+            .unwrap();
+        let binding = session.authoring().bindings.keys().next().unwrap().clone();
+        let ctx = egui::Context::default();
+        let frame =
+            |editor: &mut BehaviorUi, session: &Session, editable, events: Vec<egui::Event>| {
+                let mut action = None;
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1000.0, 800.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| action = editor.inspector(ui, session, Some("left"), None, 5, editable),
+                );
+                output.textures_delta.clear();
+                action
+            };
+        editor
+            .execute(
+                Action::EditProperty(binding.clone(), "speed".into()),
+                &mut session,
+            )
+            .unwrap();
+        frame(&mut editor, &session, true, vec![]);
+        assert!(editor.property.is_some());
+        let generation = editor.generation();
+        let before = session.snapshot_bytes().unwrap();
+        frame(
+            &mut editor,
+            &session,
+            false,
+            vec![egui::Event::Text("-".into())],
+        );
+        assert!(
+            !editor.property_dirty,
+            "disabled property fields must not create compound transform/behavior drafts"
+        );
+        assert_eq!(editor.generation(), generation);
+        for (name, value, insertion, valid) in [
+            ("number", PropertyValue::Number(2.0), "-", false),
+            ("vector", PropertyValue::Vec3([0.0; 3]), "-", false),
+            ("text", PropertyValue::Text("start".into()), " edit", true),
+        ] {
+            editor
+                .execute(
+                    Action::AddProperty(binding.clone(), name.into(), value),
+                    &mut session,
+                )
+                .unwrap();
+            editor
+                .execute(
+                    Action::EditProperty(binding.clone(), name.into()),
+                    &mut session,
+                )
+                .unwrap();
+            frame(&mut editor, &session, true, vec![]);
+            frame(
+                &mut editor,
+                &session,
+                true,
+                vec![egui::Event::Text(insertion.into())],
+            );
+            assert!(editor.property_dirty);
+            let unchanged = session.snapshot_bytes().unwrap();
+            let action = frame(
+                &mut editor,
+                &session,
+                true,
+                key(egui::Key::Enter, egui::Modifiers::NONE),
+            )
+            .unwrap();
+            assert!(matches!(action, Action::ApplyProperty));
+            let result = editor.execute(action, &mut session);
+            assert_eq!(result.is_ok(), valid);
+            if !valid {
+                assert_eq!(session.snapshot_bytes().unwrap(), unchanged);
+                assert!(editor.property_dirty);
+                editor.property_focus = true;
+                frame(&mut editor, &session, true, vec![]);
+                let action = frame(
+                    &mut editor,
+                    &session,
+                    true,
+                    key(egui::Key::Escape, egui::Modifiers::NONE),
+                )
+                .unwrap();
+                assert!(matches!(action, Action::RevertProperty));
+                editor.execute(action, &mut session).unwrap();
+                assert!(!editor.pending());
+            }
+        }
+        assert_ne!(session.snapshot_bytes().unwrap(), before);
+    }
+    #[test]
+    fn reset_ack_waits_for_matching_frame_and_superseding_reset_discards_old_pair() {
+        let old = RunKey {
+            generation: 1,
+            reset_epoch: 1,
+            authored_revision: 1,
+        };
+        let first = RunKey {
+            reset_epoch: 2,
+            ..old
+        };
+        let second = RunKey {
+            reset_epoch: 3,
+            ..old
+        };
+        let old_scene = Arc::new(ruster_scene::Scene::empty("old-assets"));
+        let mut runtime = RuntimeUi {
+            frame: Some(Frame {
+                key: old,
+                tick: 7,
+                scene: old_scene.clone(),
+            }),
+            visible: true,
+            ready: true,
+            ..Default::default()
+        };
+        runtime.begin_reset(first);
+        runtime.acknowledge_reset(first, 0);
+        assert!(!runtime.ready);
+        assert!(runtime.stale);
+        assert!(runtime.reset_succeeded.is_none());
+        assert!(Arc::ptr_eq(
+            &runtime.frame.as_ref().unwrap().scene,
+            &old_scene
+        ));
+        runtime.begin_reset(second);
+        runtime.acknowledge_reset(first, 0);
+        runtime.accept_frame(Frame {
+            key: first,
+            tick: 0,
+            scene: Arc::new(ruster_scene::Scene::empty("obsolete-assets")),
+        });
+        assert!(runtime.reset_succeeded.is_none());
+        assert!(Arc::ptr_eq(
+            &runtime.frame.as_ref().unwrap().scene,
+            &old_scene
+        ));
+        runtime.acknowledge_reset(second, 0);
+        assert!(runtime.reset_succeeded.is_none());
+        runtime.accept_frame(Frame {
+            key: second,
+            tick: 0,
+            scene: Arc::new(ruster_scene::Scene::empty("new-assets")),
+        });
+        assert_eq!(runtime.reset_succeeded, Some(second));
+        assert_eq!(runtime.frame.as_ref().unwrap().key, second);
+        assert_eq!(runtime.frame.as_ref().unwrap().scene.id, "new-assets");
+        assert!(runtime.ready);
+        assert!(!runtime.stale);
+    }
+}

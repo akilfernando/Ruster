@@ -18,6 +18,10 @@ Acceptance: create two objects→attach follower→choose target/edit speed→Un
 
 ## Stage2: working copies and real editor tooling
 
+User-confirmed2026-11-04: use **Zed** as the preferred external editor; the user also authorized installation/setup if needed. Local `/usr/bin/zeditor --version` reports1.26.2 and its help confirms `file:line:column` plus `--new`. No installation was needed. A previously absent `~/.config/zed/settings.json` was created with only `auto_install_extensions.lua=true`; actual extension download/editor launch remain unverified. This explicit setup authorization is distinct from automatically changing creators' global settings as product behavior. Ruster's configured executable/argv integration remains in progress.
+
+[Official Zed CLI](https://zed.dev/docs/reference/cli), [Lua support](https://zed.dev/docs/languages/lua) and [extension auto-install](https://zed.dev/docs/reference/all-settings#auto-install-extensions), accessed2026-11-04, document file/line launch and project `.luarc.json`/LuaLS support. Verify local flags and actual language tooling rather than inferring acceptance from these documents.
+
 Embedded source remains authoritative. Generated filenames use stable IDs/hashes, never labels. Track exported embedded hash and last synchronized regular-file hash. Explicit Refresh or focus-return checks compare embedded/file/base: import file-only changes through history; rewrite only an unchanged expected working file; preserve both sides on conflict. Missing/invalid files remain repairable. No per-frame polling or silently overwritten work.
 
 Launch a configured executable with argument vectors and file/line placeholders, never a shell command. Generate project-local LuaLS configuration and type stubs; do not modify global editor settings automatically. Derive property declarations from actual bindings, including optional fields/type unions when a shared source has differing sets. Escape supported names; do not invent a source-schema parser or silently convert stored values. Verify actual completion/definition navigation and a two-sided conflict, not only generated-file existence.

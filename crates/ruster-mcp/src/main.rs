@@ -1,4 +1,5 @@
 //! Narrow MCP 2025-06-18 stdio profile. See the crate README for limits.
+mod behavior_tools;
 use serde_json::{json, Map, Value};
 use std::io::{self, BufRead, BufReader, Write};
 
@@ -83,6 +84,9 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if behavior_tools::supported(name) {
+        return behavior_tools::valid(name, arguments);
+    }
     let Some(args) = arguments.as_object() else {
         return false;
     };
@@ -350,6 +354,7 @@ fn tools() -> Value {
             "inputSchema":object_schema(Value::Object(properties),required),
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
+    tools.extend(behavior_tools::list());
     json!({"tools":tools})
 }
 
@@ -472,6 +477,7 @@ impl Server {
                         "shader_refresh",
                     ]
                     .contains(&name)
+                        && !behavior_tools::supported(name)
                 {
                     Err((-32602, "Unknown tool or tools/call parameters"))
                 } else if !valid_arguments(name, &arguments) {
@@ -630,7 +636,7 @@ mod tests {
             .unwrap()
     }
 
-    fn ready() -> Server {
+    pub(super) fn ready() -> Server {
         let mut server = Server::default();
         let response = request(
             &mut server,
@@ -730,7 +736,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 23);
+        assert_eq!(tools.len(), 33);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -760,7 +766,17 @@ mod tests {
                 "scene_transform",
                 "scene_undo",
                 "scene_redo",
-                "scene_replay"
+                "scene_replay",
+                "behavior_inspect",
+                "behavior_source",
+                "behavior_source_set",
+                "behavior_source_remove",
+                "behavior_create",
+                "behavior_binding",
+                "behavior_binding_set",
+                "behavior_binding_remove",
+                "behavior_property",
+                "behavior_property_set"
             ]
         );
         for tool in tools {

@@ -24,3 +24,4 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0018](0018-language-neutral-behavior-authoring.md) | Scene5 source/binding/property data and byte-pressure history |
 | [0019](0019-provisional-lua-backend.md) | Provisional isolated Lua backend, preserving language-neutral data |
 | [0020](0020-local-recovery-checkpoints.md) | Detached recovery checkpoints and measured serial-worker ownership |
+| [0021](0021-editor-behavior-runtime.md) | Embedded behavior editing, keyed owning VM worker and bounded data parity |

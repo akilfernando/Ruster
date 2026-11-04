@@ -157,7 +157,22 @@ fn structured_diagnostics_and_explicit_reset_preserve_authored_data() {
 // and cancellation must reject atomically and permit a clean explicitly retried run.
 #[test]
 fn budgets_cancellation_memory_recovery_and_cache_are_bounded() {
-    let mut engine = engine();
+    let before_setup = Arc::new(AtomicBool::new(true));
+    let mut engine = Engine::with_cancellation(
+        Limits {
+            fixed_dt: 0.25,
+            ..Limits::default()
+        },
+        before_setup.clone(),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&engine.cancellation(), &before_setup));
+    let (scene, authoring) = fixture(FOLLOWER_TEMPLATE);
+    assert_eq!(
+        engine.reset(&scene, &authoring).unwrap_err().code,
+        DiagnosticCode::Cancelled
+    );
+    before_setup.store(false, Ordering::Relaxed);
     for text in [
         "while true do end",
         "return {update=function(o) while true do end end}",

@@ -1,4 +1,5 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
+mod behavior_commands;
 use crate::workspace::{Action, Side, Workspace};
 use eframe::{
     egui,
@@ -29,6 +30,8 @@ struct RecoveryDrafts {
     fields: Option<Fields>,
     pending_name: Option<String>,
     manipulation: crate::manipulation::DraftSnapshot,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    behavior: Option<crate::behavior_ui::Drafts>,
 }
 impl From<&Transform> for Fields {
     fn from(t: &Transform) -> Self {
@@ -194,6 +197,9 @@ pub struct SceneEditor {
     session: Session,
     selected: Option<String>,
     manipulation: crate::manipulation::Manipulation,
+    behavior: crate::behavior_ui::BehaviorUi,
+    runtime: crate::behavior_ui::RuntimeUi,
+    reset_assets: Option<(crate::behavior_worker::RunKey, BTreeMap<String, Arc<Mesh>>)>,
     draft: Option<Fields>,
     baseline_fields: Option<Fields>,
     workspace: Workspace,
@@ -222,9 +228,6 @@ pub struct SceneEditor {
     content_search: ContentSearch,
     scale_applied: f32,
     preview: Preview,
-    show_preview: bool,
-    running: bool,
-    last_tick: Instant,
     generation: u64,
     error: String,
     notice: String,
@@ -304,6 +307,9 @@ impl SceneEditor {
             session,
             selected,
             manipulation,
+            behavior: crate::behavior_ui::BehaviorUi::default(),
+            runtime: crate::behavior_ui::RuntimeUi::default(),
+            reset_assets: None,
             baseline_fields: draft.clone(),
             workspace,
             recovery: crate::recovery_ui::RecoveryUi::disabled(),
@@ -336,9 +342,6 @@ impl SceneEditor {
             scale_applied: 0.0,
             draft,
             preview,
-            show_preview: false,
-            running: false,
-            last_tick: Instant::now(),
             generation: GENERATION.fetch_add(1, Ordering::Relaxed),
             error: asset_error,
             notice: "Ready. Right-drag to orbit; scroll to zoom.".into(),
@@ -368,20 +371,107 @@ impl SceneEditor {
         }
     }
     fn drafts(&self) -> bool {
-        self.manipulation.precision_pending() || self.draft != self.baseline_fields
+        self.manipulation.precision_pending()
+            || self.draft != self.baseline_fields
+            || self.behavior.pending()
     }
     fn pending_recovery_drafts(&self) -> bool {
         self.drafts() || self.rename_pending || self.manipulation.offset_pending()
     }
+    fn behavior_editable(&self) -> bool {
+        !self.manipulation.active()
+            && !self.manipulation.precision_pending()
+            && self.draft == self.baseline_fields
+            && !self.manipulation.offset_pending()
+            && self.dialog.is_none()
+            && !self.asset_dialog
+            && !self.new_scene_pending
+            && !self.rename_pending
+            && !self.close_pending
+            && !self.close_approved
+            && !self.workspace.settings_open
+            && !self.recovery.open
+            && self.recovery_transition.is_none()
+    }
+    fn behavior_action(&mut self, action: crate::behavior_ui::Action) {
+        use crate::behavior_ui::Action;
+        if !self.behavior_editable() {
+            self.error="Resolve transform fields, gestures and modal dialogs before behavior edits; drafts preserved.".into();
+            return;
+        }
+        if matches!(action, Action::Save) {
+            self.save();
+            self.observe_runtime();
+            return;
+        }
+        let own_draft_action = matches!(
+            action,
+            Action::ApplySource
+                | Action::RevertSource
+                | Action::ApplyProperty
+                | Action::RevertProperty
+                | Action::OpenSource(_)
+                | Action::EditProperty(_, _)
+        );
+        if !own_draft_action {
+            if let Err(error) = self.guard() {
+                self.behavior.error = error;
+                return;
+            }
+        }
+        match self.behavior.execute(action, &mut self.session) {
+            Ok(()) => {
+                self.sync_draft();
+                self.observe_runtime();
+                self.error.clear();
+                self.notice="Behavior data updated through shared history; Reset runtime to use authored changes.".into();
+            }
+            Err(error) => {
+                self.behavior.error = error.clone();
+                self.error = error;
+            }
+        }
+    }
+    fn observe_runtime(&mut self) {
+        self.runtime.observe(
+            self.generation,
+            self.session.scene().revision,
+            self.assets.as_ref().map(|store| store.revision()),
+            self.shader_revision,
+        );
+    }
+    fn poll_runtime(&mut self, ctx: &egui::Context) {
+        self.observe_runtime();
+        self.runtime.poll(ctx);
+        self.accept_runtime_resources();
+    }
+    fn accept_runtime_resources(&mut self) {
+        if let Some(key) = self.runtime.reset_succeeded.take() {
+            if self
+                .reset_assets
+                .as_ref()
+                .is_some_and(|(candidate, _)| *candidate == key)
+                && self
+                    .runtime
+                    .frame
+                    .as_ref()
+                    .is_some_and(|frame| frame.key == key)
+            {
+                let (_, assets) = self.reset_assets.take().unwrap();
+                self.preview_assets = assets;
+            }
+        }
+    }
     #[cfg(test)]
     fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
         let drafts = RecoveryDrafts {
-            version: 1,
+            version: 2,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
             pending_name: self.rename_pending.then(|| self.name_text.clone()),
             manipulation: self.manipulation.snapshot_drafts(),
+            behavior: Some(self.behavior.snapshot()),
         };
         let mut snapshot = crate::recovery::Snapshot::capture(
             &self.session,
@@ -394,10 +484,12 @@ impl SceneEditor {
         Ok(snapshot)
     }
     fn restore_recovery_drafts(&mut self, value: Value) -> Result<(), String> {
+        let behavior_field = value.get("behavior").is_some();
         let draft: RecoveryDrafts = serde_json::from_value(value)
             .map_err(|e| format!("Unsupported recovery drafts: {e}; checkpoint preserved."))?;
         let scene = self.session.scene();
-        if draft.version != 1
+        if !((draft.version == 1 && !behavior_field)
+            || (draft.version == 2 && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -426,6 +518,16 @@ impl SceneEditor {
         self.manipulation
             .restore_drafts(self.session.scene(), draft.manipulation)?;
         self.draft = draft.fields;
+        if let Some(behavior) = draft.behavior {
+            if behavior.pending()
+                && (self.manipulation.precision_pending()
+                    || self.draft != self.baseline_fields
+                    || self.manipulation.offset_pending())
+            {
+                return Err("Unsupported compound transform/behavior recovery drafts; original record preserved.".into());
+            }
+            self.behavior.restore(&self.session, behavior)?;
+        }
         if let Some(name) = draft.pending_name {
             self.name_text = name;
             self.rename_pending = true;
@@ -513,7 +615,8 @@ impl SceneEditor {
         self.recovery.observe(
             self.session.scene().revision,
             self.manipulation.draft_generation(),
-            self.draft_generation,
+            self.draft_generation
+                .wrapping_add(self.behavior.generation()),
             pending,
             now,
         );
@@ -526,12 +629,13 @@ impl SceneEditor {
             let asset_origin = self.asset_origin.clone();
             let recovered_origin = self.recovered_origin.clone();
             let drafts = RecoveryDrafts {
-                version: 1,
+                version: 2,
                 revision: session.scene().revision,
                 selection: self.manipulation.ids.clone(),
                 fields: self.draft.clone(),
                 pending_name: self.rename_pending.then(|| self.name_text.clone()),
                 manipulation: self.manipulation.snapshot_drafts(),
+                behavior: Some(self.behavior.snapshot()),
             };
             let capture = Box::new(move || {
                 let mut snapshot = crate::recovery::Snapshot::capture(
@@ -558,8 +662,9 @@ impl SceneEditor {
         shader: bool,
     ) {
         self.remember_camera();
+        self.runtime
+            .stop(self.generation, self.session.scene().revision);
         self.manipulation.cancel();
-        self.running = false;
         self.recovery.open = false;
         self.dialog = None;
         self.new_scene_pending = false;
@@ -600,6 +705,13 @@ impl SceneEditor {
                 if clipboard {
                     next.manipulation.clipboard_from(&mut self.manipulation);
                 }
+                next.runtime = std::mem::take(&mut self.runtime);
+                next.runtime.observe(
+                    next.generation,
+                    next.session.scene().revision,
+                    next.assets.as_ref().map(|store| store.revision()),
+                    next.shader_revision,
+                );
                 next.recovery = std::mem::replace(
                     &mut self.recovery,
                     crate::recovery_ui::RecoveryUi::disabled(),
@@ -628,6 +740,7 @@ impl SceneEditor {
                     match result {
                         Ok(()) => {
                             self.recovery.shutdown();
+                            self.runtime.shutdown();
                             self.close_shutdown = true;
                         }
                         Err(error) => self.close_cleanup_error = Some(error),
@@ -647,7 +760,7 @@ impl SceneEditor {
                     ui.label("The preserved checkpoint may reappear next launch. Close anyway, or keep this window open.");
                 });
                 ui.horizontal_wrapped(|ui| {
-                if ui.button("Close anyway").clicked() {self.close_cleanup_error=None;self.recovery.shutdown();self.close_shutdown=true;}
+                if ui.button("Close anyway").clicked() {self.close_cleanup_error=None;self.recovery.shutdown();self.runtime.shutdown();self.close_shutdown=true;}
                 let cancel=ui.button("Cancel closing");
                 if self.confirm_focused!=Some("cleanup-error") {cancel.request_focus();self.confirm_focused=Some("cleanup-error");}
                 if cancel.clicked() || ui.input_mut(|i|i.consume_key(egui::Modifiers::NONE,egui::Key::Escape)) {
@@ -771,6 +884,11 @@ impl SceneEditor {
             self.error = "Finish or cancel the transform gesture first.".into();
             return false;
         }
+        if let Err(error) = self.behavior.apply_all(&mut self.session) {
+            self.error = error;
+            return false;
+        }
+        self.observe_runtime();
         if self.manipulation.precision_pending() {
             match self.manipulation.apply_precision(&mut self.session) {
                 Ok(()) => {
@@ -1499,6 +1617,9 @@ impl SceneEditor {
         }
     }
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
+        if op.starts_with("behavior_") {
+            return self.behavior_command(token, op, args);
+        }
         if matches!(
             op,
             "asset_inspect"
@@ -1569,7 +1690,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -1875,8 +1996,21 @@ impl SceneEditor {
                 for index in &self.hierarchy_search.visible {
                     let row = &self.hierarchy_search.rows[*index];
                     let response = ui
-                        .selectable_label(self.manipulation.ids.contains(&row.id), &row.name)
+                        .add(
+                            egui::Button::selectable(
+                                self.manipulation.ids.contains(&row.id),
+                                &row.name,
+                            )
+                            .sense(egui::Sense::click_and_drag()),
+                        )
                         .on_hover_text(&row.tooltip);
+                    if response.drag_started() {
+                        response.dnd_set_drag_payload(crate::behavior_ui::ObjectDrag {
+                            generation: self.generation,
+                            revision: self.session.scene().revision,
+                            id: row.id.clone(),
+                        });
+                    }
                     if response.clicked() {
                         clicked = Some((
                             Some(row.id.clone()),
@@ -2362,6 +2496,8 @@ impl SceneEditor {
                     && self.session.redo_len() == 0))
     }
     fn request_close(&mut self) {
+        self.runtime
+            .stop(self.generation, self.session.scene().revision);
         if self.recovery_transition.is_some() {
             self.error =
                 "Recovery cleanup is still finishing; retry Close once it completes.".into();
@@ -2375,13 +2511,10 @@ impl SceneEditor {
         }
         if self.new_scene_pending {
             self.error = "Resolve or cancel New scene before closing.".into();
-            self.running = false;
         } else if self.rename_pending {
             self.error = "Apply or cancel the name edit before closing.".into();
-            self.running = false;
         } else if self.needs_recovery() {
             self.close_pending = true;
-            self.running = false;
         } else {
             self.close_approved = true;
         }
@@ -2389,7 +2522,6 @@ impl SceneEditor {
     fn request_new(&mut self) {
         if self.needs_recovery() {
             self.new_scene_pending = true;
-            self.running = false;
         } else {
             self.replace_with_empty();
         }
@@ -2498,6 +2630,7 @@ impl SceneEditor {
         let ctx = ui.ctx().clone();
         self.recovery.poll(&ctx);
         self.process_recovery_ack();
+        self.poll_runtime(&ctx);
         self.content_search
             .update(self.assets.as_ref(), &self.content_query);
         if self.scale_applied != self.workspace.prefs.scale {
@@ -2524,16 +2657,6 @@ impl SceneEditor {
             self.notice = "Transform cancelled; authored state unchanged.".into();
         }
         self.route_shortcuts(&ctx);
-        if self.running && self.last_tick.elapsed() >= Duration::from_millis(250) {
-            if let Err(e) = self.preview.step() {
-                self.error = e.to_string();
-                self.running = false;
-            }
-            self.last_tick = Instant::now();
-        }
-        if self.running {
-            ctx.request_repaint_after(Duration::from_millis(250));
-        }
         egui::Panel::top("scene_top").show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
                 ui.heading("Ruster Scene Editor");
@@ -2578,7 +2701,6 @@ impl SceneEditor {
                     if ui.button("Recovery checkpoints…").clicked() {
                         self.recovery.show_picker();
                         self.manipulation.cancel();
-                        self.running = false;
                         ui.close();
                     }
                     if ui.button("Reset camera").clicked() {
@@ -2739,24 +2861,18 @@ impl SceneEditor {
             if ui.add_enabled(self.manipulation.ids.len() == 1, egui::Button::new("Rename object")).clicked() {
                 match self.guard() { Ok(()) => self.rename_pending = true, Err(error) => self.error = error }
             }
-            self.manipulation_ui(ui);
+            let editable=self.behavior_editable();
+            if let Some(action)=self.behavior.inspector(ui,&self.session,self.selected.as_deref(),self.assets.as_ref(),self.generation,editable) {self.behavior_action(action);}
+            ui.add_enabled_ui(!self.behavior.pending(),|ui|self.manipulation_ui(ui));
             ui.heading("Transform");
             self.mesh_reference_ui(ui);
             ui.label(format!("Loaded scene format v{}; Save writes v{}.",self.session.loaded_format_version(),ruster_scene::FORMAT_VERSION));
-            ui.add_enabled_ui(!self.manipulation.ids.is_empty() && !self.manipulation.active(), |ui| {
+            ui.add_enabled_ui(!self.behavior.pending() && !self.manipulation.ids.is_empty() && !self.manipulation.active(), |ui| {
                 match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                     Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                     Ok(false)=>{},Err(error)=>self.error=error,
                 }
             });
-            ui.separator();ui.label(format!("Preview tick {}",self.preview.tick));
-            if self.preview.scene!=*self.session.scene(){ui.colored_label(egui::Color32::YELLOW,"Scene or imported content changed; Reset preview.");}
-            ui.horizontal(|ui| {
-                if ui.button(if self.running{"Pause preview"}else{"Run preview"}).clicked(){self.running = !self.running;}
-                if ui.button("Step preview").clicked(){if let Err(e)=self.preview.step(){self.error=e.to_string();}}
-            });
-            if ui.button("Reset preview").clicked(){self.running=false;self.preview.reset(self.session.scene());self.preview_assets=self.resolved.clone();}
-            ui.label("Static arrangement: ticks advance lifecycle only; no sample gameplay is implied.");
             });
         });
             let width = output.response.rect.width().clamp(240.0, 1000.0);
@@ -2768,6 +2884,12 @@ impl SceneEditor {
         self.process_queued_action();
         self.process_queued_selection();
         self.process_content_intents();
+        self.runtime.observe(
+            self.generation,
+            self.session.scene().revision,
+            self.assets.as_ref().map(|store| store.revision()),
+            self.shader_revision,
+        );
         if !self.asset_dialog && self.dialog.is_none() && !self.close_pending {
             egui::Panel::bottom("content_status").show(ui,|ui| {
                 ui.horizontal(|ui| {
@@ -2793,14 +2915,19 @@ impl SceneEditor {
                 ui.horizontal(|ui| {if ui.button("Open a scene…").clicked(){self.dialog=Some(true);}
                 if ui.button("Workspace settings…").clicked(){self.workspace.settings_open=true;}});
             }
-            ui.horizontal(|ui| {
-                ui.add_enabled(
-                    !self.manipulation.active(),
-                    egui::Checkbox::new(&mut self.show_preview, "Show preview snapshot"),
-                );
-                ui.label("Right-drag orbit · scroll zoom");
-            });
-            let transient = if !self.show_preview {
+            let blocked=self.guard().is_err() || self.manipulation.offset_pending();
+            if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.reset_assets=Some((key,self.resolved.clone()));}
+            if let Some(diagnostic)=&self.runtime.diagnostic {
+                egui::ScrollArea::vertical().id_salt("behavior_diagnostics").max_height(88.0).show(ui,|ui| {
+                    ui.colored_label(egui::Color32::LIGHT_RED,&diagnostic.message);
+                    ui.label(format!("source {} · hash {} · line {} · object {} · binding {}",diagnostic.source_id.as_deref().unwrap_or("—"),diagnostic.source_hash.as_deref().unwrap_or("—"),diagnostic.line.map(|line|line.to_string()).as_deref().unwrap_or("—"),diagnostic.object_id.as_deref().unwrap_or("—"),diagnostic.binding_id.as_deref().unwrap_or("—")));
+                });
+                if ui.button("Open diagnostic location").clicked() {
+                    if let Err(error)=self.behavior.navigate_diagnostic(&self.session,diagnostic,self.runtime.captured.as_deref()) {self.error=error;}
+                }
+            }
+            self.runtime.observe(self.generation,self.session.scene().revision,self.assets.as_ref().map(|store|store.revision()),self.shader_revision);
+            let transient = if !self.runtime.visible {
                 self.manipulation.transient_scene(self.session.scene())
             } else {
                 None
@@ -2811,20 +2938,20 @@ impl SceneEditor {
             self.navigation.movement_speed=self.workspace.prefs.movement_speed;
             let viewport = ruster_render::viewport_with_navigation(
                 ui,
-                if self.show_preview {
-                    &self.preview.scene
+                if self.runtime.visible {
+                    self.runtime.frame.as_ref().map(|frame|frame.scene.as_ref()).unwrap_or(self.session.scene())
                 } else {
                     transient.as_ref().unwrap_or(self.session.scene())
                 },
                 &selected,
-                if self.show_preview {
+                if self.runtime.visible {
                     &self.preview_assets
                 } else {
                     &self.resolved
                 },
                 &mut self.navigation,
             );
-            let may_draw = !self.show_preview
+            let may_draw = !self.runtime.visible
                 && !self.drafts()
                 && self.dialog.is_none()
                 && !self.asset_dialog
@@ -2937,6 +3064,11 @@ impl SceneEditor {
             });
         }
         self.content_ui(&ctx);
+        let editable = self.behavior_editable();
+        if let Some(action) = self.behavior.source_window(&ctx, editable) {
+            self.behavior_action(action);
+        }
+        self.behavior.captured_window(&ctx, editable);
         if self.close_pending && self.dialog.is_none() && !self.asset_dialog && !self.rename_pending
         {
             egui::Modal::new(egui::Id::unique("scene_close_dialog")).show(&ctx, |ui| {
@@ -2980,7 +3112,7 @@ impl SceneEditor {
         self.close_finalization_ui(&ctx);
         self.start_close_cleanup();
         if self.close_shutdown {
-            if self.recovery.shutdown_finished() {
+            if self.recovery.shutdown_finished() && self.runtime.finished() {
                 self.close_ready_to_exit = true;
                 self.remember_camera();
                 self.workspace.flush();
@@ -3065,6 +3197,134 @@ fn run_session(session: Session) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn runtime_content_snapshot_changes_only_for_matching_published_run() {
+        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let first = crate::behavior_worker::RunKey {
+            generation: editor.generation,
+            reset_epoch: 1,
+            authored_revision: 0,
+        };
+        let second = crate::behavior_worker::RunKey {
+            reset_epoch: 2,
+            ..first
+        };
+        let old = Arc::new(Mesh {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        });
+        let new = Arc::new(Mesh {
+            vertices: Vec::new(),
+            indices: Vec::new(),
+        });
+        editor.preview_assets = BTreeMap::from([("old-mesh".into(), old.clone())]);
+        editor.reset_assets = Some((second, BTreeMap::from([("new-mesh".into(), new.clone())])));
+        editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            key: first,
+            tick: 0,
+            scene: Arc::new(Scene::demo()),
+        });
+        editor.runtime.reset_succeeded = Some(first);
+        editor.accept_runtime_resources();
+        assert!(Arc::ptr_eq(&editor.preview_assets["old-mesh"], &old));
+        assert!(
+            editor.reset_assets.is_some(),
+            "superseded run must not consume newer resource snapshot"
+        );
+        editor.runtime.reset_succeeded = Some(second);
+        editor.accept_runtime_resources();
+        assert!(
+            Arc::ptr_eq(&editor.preview_assets["old-mesh"], &old),
+            "acknowledgement without matching display frame must not replace geometry resources"
+        );
+        editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            key: second,
+            tick: 0,
+            scene: Arc::new(Scene::demo()),
+        });
+        editor.runtime.reset_succeeded = Some(second);
+        editor.accept_runtime_resources();
+        assert!(Arc::ptr_eq(&editor.preview_assets["new-mesh"], &new));
+        assert!(editor.reset_assets.is_none());
+    }
+    #[test]
+    fn embedded_source_save_and_recovery_keep_unfinished_work_and_guard_agents() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("scene.json");
+        Session::new(Scene::demo()).unwrap().save(&path).unwrap();
+        let mut editor = SceneEditor::new(Session::open(&path).unwrap());
+        editor.behavior_action(crate::behavior_ui::Action::Create("left".into()));
+        assert_eq!(editor.session.undo_len(), 1);
+        let ctx = egui::Context::default();
+        let frame = |editor: &mut SceneEditor, events: Vec<egui::Event>| {
+            let mut action = None;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |_| action = editor.behavior.source_window(&ctx, true),
+            );
+            output.textures_delta.clear();
+            if let Some(action) = action {
+                editor.behavior_action(action);
+            }
+        };
+        frame(&mut editor, vec![]);
+        frame(
+            &mut editor,
+            vec![egui::Event::Text("\nreturn {update=function(".into())],
+        );
+        assert!(editor.behavior.pending());
+        let inspection = editor.command("test", "scene_inspect", json!({}))["result"].clone();
+        assert_eq!(inspection["drafts_pending"], true);
+        let rejected=editor.command("test","scene_create",json!({"expected_session_token":inspection["session_token"],"expected_revision":inspection["revision"],"object_id":"agent-object","name":"Must not overwrite drafts"}));
+        assert_eq!(rejected["error"]["code"], "drafts_pending");
+        let snapshot = editor.recovery_snapshot().unwrap();
+        let payload = snapshot.drafts().unwrap();
+        assert_eq!(payload["version"], 2);
+        let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
+        recovered.restore_recovery_drafts(payload).unwrap();
+        assert!(recovered.behavior.pending());
+        assert!(recovered.behavior.source_open);
+        assert!(!recovered.runtime.is_playing());
+        assert!(recovered.runtime.frame.is_none());
+        frame(
+            &mut editor,
+            vec![
+                egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                egui::Event::Key {
+                    key: egui::Key::S,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::CTRL,
+                },
+            ],
+        );
+        assert!(!editor.behavior.pending(), "{}", editor.error);
+        assert!(!editor.session.is_dirty());
+        let reopened = Session::open(path).unwrap();
+        assert_eq!(reopened.authoring(), editor.session.authoring());
+        assert!(reopened
+            .authoring()
+            .sources
+            .values()
+            .next()
+            .unwrap()
+            .text
+            .contains("return {update=function("));
+        assert_eq!(
+            reopened.undo_len(),
+            2,
+            "source Apply/Save is one edit after atomic attachment, not one per key"
+        );
+    }
     // Recovery must preserve unapplied invalid text and asset provenance without
     // granting overwrite authority to the original project, even if it changed.
     #[test]
@@ -3101,6 +3361,7 @@ mod tests {
             fields: e.draft.clone(),
             pending_name: Some("Unapplied name".into()),
             manipulation: e.manipulation.snapshot_drafts(),
+            behavior: None,
         })
         .unwrap();
         draft["manipulation"]["precision"][0] = "-".into();
@@ -3140,7 +3401,7 @@ mod tests {
             restored.session.scene().objects[0].transform.translation[0],
             -2.0
         );
-        assert!(!restored.running);
+        assert!(!restored.runtime.is_playing());
         assert!(!restored.manipulation.active());
         assert!(restored.save_scene(path.clone()).is_err());
         assert_eq!(
@@ -3196,6 +3457,7 @@ mod tests {
             fields: source.draft.clone(),
             pending_name: None,
             manipulation: source.manipulation.snapshot_drafts(),
+            behavior: None,
         })
         .unwrap();
         drafts["version"] = 99.into();

@@ -191,6 +191,11 @@ pub struct Engine {
 }
 impl Engine {
     pub fn new(limits: Limits) -> Result<Self, Diagnostic> {
+        Self::with_cancellation(limits, Arc::new(AtomicBool::new(false)))
+    }
+    /// Construct on the owning thread while sharing an already-published cancel token.
+    /// An initially set token remains set; construction never revives cancelled work.
+    pub fn with_cancellation(limits: Limits, cancel: Arc<AtomicBool>) -> Result<Self, Diagnostic> {
         limits.validate()?;
         let lua = Lua::new_with(StdLib::MATH, LuaOptions::default()).map_err(|e| {
             Diagnostic::plain(DiagnosticCode::Runtime, Phase::Setup, &e.to_string())
@@ -198,7 +203,6 @@ impl Engine {
         lua.set_memory_limit(limits.memory_bytes).map_err(|e| {
             Diagnostic::plain(DiagnosticCode::MemoryLimit, Phase::Setup, &e.to_string())
         })?;
-        let cancel = Arc::new(AtomicBool::new(false));
         let binding_count = Rc::new(Cell::new(0u64));
         let tick_count = Rc::new(Cell::new(0u64));
         let failure = Rc::new(Cell::new(None));
@@ -255,7 +259,7 @@ impl Engine {
         self.binding_count.set(0);
         self.tick_count.set(0);
         self.failure.set(None);
-        if self.cancel.load(Ordering::Relaxed) {
+        if self.cancel.load(Ordering::SeqCst) {
             return Err(Diagnostic::plain(
                 DiagnosticCode::Cancelled,
                 Phase::Setup,
@@ -265,7 +269,7 @@ impl Engine {
         Ok(())
     }
     fn check_cancelled(&self) -> Result<(), Diagnostic> {
-        if self.cancel.load(Ordering::Relaxed) {
+        if self.cancel.load(Ordering::SeqCst) {
             return Err(Diagnostic::plain(
                 DiagnosticCode::Cancelled,
                 Phase::Commit,
@@ -412,7 +416,7 @@ impl Engine {
             })?;
             let main = self.compile(&binding.source_id, source)?;
             self.binding_count.set(0);
-            if self.cancel.load(Ordering::Relaxed) {
+            if self.cancel.load(Ordering::SeqCst) {
                 return Err(Diagnostic::plain(
                     DiagnosticCode::Cancelled,
                     Phase::Module,

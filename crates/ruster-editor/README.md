@@ -151,10 +151,10 @@ objects. Camera/selection are session views, not persisted scene transforms.
 **Save scene** persists the current file with conflict checks. **Save scene as…**
 creates a new path. **Open scene…** warns before discarding unsaved data; failed
 loads preserve the current scene. Closing unsaved work offers Save/Discard/Cancel.
-**Run preview** and **Step preview** count explicit static-arrangement lifecycle
-ticks. They do not imply physics or gameplay. **Show preview snapshot** shows the
-captured runtime scene; authored edits do not enter it until **Reset preview**.
-The standalone renderer and headless `ruster-scene run` use the same Preview.
+The behavior runtime controls described below replace the editor's earlier
+static-arrangement tick toolbar. Standalone `ruster-scene run` and isolated
+`scene_replay` still provide their original static lifecycle replay; they do not
+execute behavior sources.
 
 For native MCP, start scene mode with `RUSTER_MCP_ENABLE=1`, then attach the
 adapter using the printed private socket as described above. Scene mode uses
@@ -199,7 +199,8 @@ remain unchanged. See the [asset guide](../ruster-assets/README.md) for exact
 bounds, supported OBJ directives, cache recipe, failure behavior and CLI commands.
 There is no background watcher, texture/MTL import or general polygon importer.
 
-Preview freezes both scene data and resolved geometry until **Reset preview**.
+The editor runtime freezes authored scene data and resolved geometry on a successful
+**Reset behavior runtime**.
 Refreshing authored content leaves that snapshot intact and marks it stale.
 Missing references keep their IDs and display a diagnostic placeholder. Save As
 to another asset root is blocked when current state or undo/redo can restore mesh
@@ -228,7 +229,7 @@ set, against a disposable scene whose first object is still a procedural cube.
 
 ### Generic scene construction
 
-In generic scene mode, **New scene** starts an empty authored scene. Unsaved work offers Save, Discard or Cancel; Save As must complete successfully before replacement. **Create cube** creates a procedural object and selects it. **Duplicate** creates a new stable identity, **Delete** removes the selected object, and **Undo authored edit** / **Redo authored edit** share the scene's bounded persisted history. Preview stays a separate snapshot until Reset preview.
+In generic scene mode, **New scene** starts an empty authored scene. Unsaved work offers Save, Discard or Cancel; Save As must complete successfully before replacement. **Create cube** creates a procedural object and selects it. **Duplicate** creates a new stable identity, **Delete** removes the selected object, and **Undo authored edit** / **Redo authored edit** share the scene's bounded persisted history. Runtime transforms remain separate from authored scene data.
 
 **Rename object** opens a focused display-name dialog: Enter or **Apply name** submits, Escape or **Cancel rename** cancels. Tab can move to buttons and Enter activates the focused choice. Names can change without changing stable IDs or references. Resolve pending transform fields before object operations; resolve the name dialog before changing selection or closing. The hierarchy shows display names and the inspector shows the immutable stable ID. Newly generated IDs avoid current objects and identities retained by undo/redo. The translation slice below adds multi-selection, a window-owned object clipboard and translation gizmos; the transform/pivot and mixed-precision continuation below extends that route.
 
@@ -354,6 +355,49 @@ beside that state file. Otherwise it uses `XDG_STATE_HOME/ruster/recovery` or
 `~/.local/state/ruster/recovery`. Unit constructors disable recovery unless a
 test explicitly supplies a temporary store. Recovery is local crash mitigation,
 not a substitute for deliberate project saves or universal power-loss safety.
+
+### Embedded behavior authoring and execution
+
+Select one object and use **Behavior → Add Lua follower behavior**. This creates
+one source and attachment in a single Undo step, with Number `speed = 2`, Bool
+`enabled = true` and an initially empty Object reference `target`. **Edit value**
+opens the chosen typed property working copy; Apply commits that value once and
+Revert discards its draft. Choose a target object from the dropdown or drag its
+hierarchy row onto the Object reference field. Asset references list this
+project's catalog identities. Missing references and properties no longer used
+by source code remain present until explicitly edited or removed.
+
+An object can attach an existing source, enable/disable its attachment, or detach
+it without deleting the shared source. Existing-source attachments start with
+an empty property map; add the typed values that source requires. **Browse
+embedded sources…** also reaches unbound sources. Unknown language/API metadata
+stays editable and saveable; unsupported execution reports a diagnostic.
+
+**Edit behavior source** opens the embedded working copy. Ctrl+Enter or **Apply
+source data** stores its text/metadata through shared history without compiling.
+Ctrl+S applies data and invokes normal project Save. Unfinished syntax therefore
+survives Save/reopen. Escape or **Close source (keep draft)** hides the pane while
+retaining unapplied text; **Revert source draft** is the explicit discard action.
+Source/property drafts participate in command guards, New/Close/Save and local
+crash recovery. Source text is bounded to16KiB UTF-8; oversized insertions are
+rejected with feedback rather than silently truncated. Property/core document
+limits remain visible and failures preserve working copies.
+
+**Reset behavior runtime** snapshots authored objects, source and properties on
+the VM worker. Reset succeeds atomically or retains the previous runtime as
+explicitly stale. **Step** commits one fixed tick, **Play/Pause** controls fixed
+ticks, and **Stop (authored view)** cancels execution and returns to authored
+objects. Authoring/content changes cancel the active run and require Reset.
+Runtime movement never becomes scene history or project-save data. A failed
+tick retains its last committed scene/tick. **View last runtime (stale; Reset
+required)** permits explicit inspection of the retained frame.
+
+Diagnostics show source ID/hash/line and object/attachment context. **Open
+diagnostic location** navigates matching current code, or opens the captured
+version read-only when the working source has changed. No Lua handles cross into
+the UI. Close cancellation and worker shutdown remain nonblocking. External IDE
+working copies, LuaLS and debugging are separate unfinished stages; this pane
+does not claim those capabilities.
 
 
 The asset dialog focuses its stable-ID field initially and Escape closes it without invoking import/refresh/rename; Tab reaches the separate explicit operation buttons. Camera navigation and viewport selection remain blocked while it owns input. Shortcut capture consumes both accepted and conflicting key attempts before controls render, so Enter/Space cannot immediately reactivate the capture button.

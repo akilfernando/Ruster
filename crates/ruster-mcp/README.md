@@ -1,6 +1,6 @@
 # Ruster native MCP adapter
 
-`ruster-mcp` is a Linux stdio MCP server attached to one explicitly enabled local editor. It preserves the logistics tools `inspect`, `edit`, `undo`, `redo` and `replay`, and adds `scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo` and `scene_replay` for generic scenes, plus object create/display-rename/duplicate/delete and the six bounded content tools below. The editor owns and serializes the actual session operations. Project content tools can import, refresh and rename registered OBJ sources through the confined asset store; they are not general filesystem access. No shell, scene save, project replacement or preview playback tools are exposed.
+`ruster-mcp` is a Linux stdio MCP server attached to one explicitly enabled local editor. It preserves the logistics tools `inspect`, `edit`, `undo`, `redo` and `replay`, and adds `scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo` and `scene_replay` for generic scenes, plus object create/display-rename/duplicate/delete and the six bounded content tools below. The editor owns and serializes the actual session operations. Project content tools can import, refresh and rename registered OBJ sources through the confined asset store; they are not general filesystem access. Ten bounded behavior data tools also share the authored session. No shell, scene save, project replacement or preview playback tools are exposed.
 
 Build from the repository root with `cargo build --locked -p ruster-mcp`. Configure a stdio MCP client to launch the absolute path to `target/debug/ruster-mcp` with `RUSTER_MCP_SOCKET` set to the absolute editor socket path. The editor must already be running with its bridge enabled; see the [editor quickstart](../ruster-editor/README.md) for attachment instructions. The adapter does not discover sockets or start an editor automatically.
 
@@ -32,7 +32,7 @@ RUSTER_MCP_SOCKET=/absolute/private-directory/editor.sock \
   uv run --with mcp==2.3.0 scripts/mcp_scene_demo.py
 ```
 
-Run against an enabled editor opened on a disposable scene with at least one object. The script discovers all twenty-three tools, compares isolated zero/ten-tick snapshots, edits the first object's X translation, checks stale/invalid/work-limit rejection and restores the transform using shared Undo. `RUSTER_MCP_DEMO_KEEP=1` retains the edit for a subsequent native Undo journey. No save is performed. The existing `scripts/mcp_demo.py` covers the legacy logistics workflow.
+Run against an enabled editor opened on a disposable scene with at least one object. The script discovers the tools, compares isolated zero/ten-tick snapshots, edits the first object's X translation, checks stale/invalid/work-limit rejection and restores the transform using shared Undo. `RUSTER_MCP_DEMO_KEEP=1` retains the edit for a subsequent native Undo journey. No save is performed. The existing `scripts/mcp_demo.py` covers the legacy logistics workflow.
 
 Object lifecycle tools share the inspected session/revision preconditions and human undo. `scene_create` takes a fresh `object_id` and display `name`, creating a procedural cube. `scene_rename` takes `object_id` and `name` without changing identity. `scene_duplicate` takes `object_id`, fresh `new_object_id` and `name`, preserving source transform/color/mesh. `scene_delete` takes `object_id`. Display names can repeat; stable IDs cannot collide with current or reversible history. Names/IDs are bounded to128 UTF-8 bytes at the adapter, with syntax/blank/control validation owned by the scene. Draft or recovery dialogs block mutations. Diffs preserve existing before/after transform and mesh fields, with null for an absent side, and add `before_object`/`after_object` snapshots for complete created/deleted/name data. Lifecycle diffs include added/deleted objects; edits remain unsaved and do not replace the project or reset playback.
 
@@ -61,7 +61,7 @@ RUSTER_MCP_SOCKET=/absolute/private-directory/editor.sock \
   uv run --with mcp==2.3.0 scripts/mcp_content_demo.py
 ```
 
-It discovers twenty-three tools, inspects the catalog, imports asset ID `pyramid` if absent, checks that the old scene's isolated replay still works, assigns the mesh, rejects a stale catalog revision and restores the assignment through shared Undo. The import remains persisted; the authored scene is not saved. `RUSTER_MCP_DEMO_KEEP=1` leaves the assignment for a native Undo journey. `RUSTER_MCP_CONTENT_SOURCE` and `RUSTER_MCP_CONTENT_ASSET_ID` override the source/ID. The script does not edit source or shader files, rename sources, reset preview or exercise shader recovery; those need a separate controlled native/content journey.
+It discovers the tools, inspects the catalog, imports asset ID `pyramid` if absent, checks that the old scene's isolated replay still works, assigns the mesh, rejects a stale catalog revision and restores the assignment through shared Undo. The import remains persisted; the authored scene is not saved. `RUSTER_MCP_DEMO_KEEP=1` leaves the assignment for a native Undo journey. `RUSTER_MCP_CONTENT_SOURCE` and `RUSTER_MCP_CONTENT_ASSET_ID` override the source/ID. The script does not edit source or shader files, rename sources, reset preview or exercise shader recovery; those need a separate controlled native/content journey.
 
 The local attachment capability is the socket's location inside a same-user private directory (0700), with a same-user socket (0600). The adapter rejects symlinked immediate directories/sockets and checks Linux ownership through `/proc/self`. This protects other users, not hostile processes already running as the same user or a privileged user. No remote listener or bearer secret is used. The session token prevents stale editor/session mutations; it is not an authentication secret.
 
@@ -82,3 +82,27 @@ Primary specifications consulted 2026-11-04: [stdio transport](https://modelcont
 `scene_transform_many` takes `transforms: [{object_id, transform}]`, `scene_duplicate_many` takes `objects: [{object_id, new_object_id}]`, and `scene_delete_many` takes `object_ids: [id]`. Arrays contain1–256 entries and reject unknown keys; normal session/revision/draft/recovery guards apply. Scene owner validates all targets before committing one revision and one Undo entry. Full-scene and retained-history bytes are preflighted so accepted changes remain saveable.
 
 Mutation `diff` is capped to16 changed objects, with `diff_count` and `diff_truncated`. If truncated, use paginated `scene_inspect` with the new revision before constructing another edit; the response is a bounded summary of a completed atomic group, not an incomplete mutation. Existing transform diff keys remain unchanged. No new file access or scene-save permission is added.
+
+## Embedded behavior data
+
+`behavior_inspect` requires `kind` (`sources`, `bindings` or `diagnostics`) and accepts optional decimal-string `offset`. It returns at most16 source/binding summaries or missing-reference diagnostics under `page`, plus `session_token` and scene `revision`. Summary `page.next_offset` is a JSON integer or null; convert it to a canonical decimal string for the next request. Restart paging when session/revision changes. Source text and property bodies are omitted.
+
+All other behavior tools require `expected_session_token` and `expected_revision`, including reads, so related observations refer to one authored revision. Mutations additionally honor human drafts, active gestures, recovery/close/modal guards and shared scene Undo. They remain unsaved and invalidate the runtime snapshot; they do not execute scripts or grant filesystem access. Unknown language IDs and unfinished code are valid authored data.
+
+| Tool | Additional arguments / result |
+| --- | --- |
+| `behavior_source` | `source_id`; returns label, language/API, `text_base64` and SHA256 of decoded UTF-8 bytes |
+| `behavior_source_set` | `source_id`, `label` (string/null), `language_id`, positive u32 `host_api_version`, `text_base64`; explicit source upsert |
+| `behavior_source_remove` | `source_id`; removes source, retaining repairable orphan bindings |
+| `behavior_create` | Source-set fields plus fresh `binding_id` and existing `object_id`; creates source and enabled attachment with empty properties atomically |
+| `behavior_binding` | `binding_id`, optional string `offset`; returns owner/source/enabled plus at most16 property names/types and string/null `next_offset` |
+| `behavior_binding_set` | `binding_id`, `object_id`, `source_id`, boolean `enabled`; upsert preserves existing properties |
+| `behavior_binding_remove` | `binding_id`; detach while retaining source |
+| `behavior_property` | `binding_id`, `name`; returns one typed value or null for absent property |
+| `behavior_property_set` | `binding_id`, `name`, `value`; null removes, otherwise tagged `{"type":...,"value":...}` |
+
+Property tags are `number`, `bool`, `text`, `vec3`, `object_ref` and `asset_ref`. Numbers/vectors must be finite, vectors have exactly3 components, text has at most1024 UTF-8 bytes, and reference values are a stable ID or null. A null reference inside a tagged property differs from a top-level null removing the property. Up to64 properties are retained per binding. Binding metadata changes preserve those values; no whole-map replacement or response is exposed.
+
+Source bodies use standard padded base64 because arbitrary valid UTF-8 control text can expand beyond the64KiB JSON bridge frame. Decoded text is at most16KiB, encoded length at most21848bytes; invalid base64/UTF-8 and oversize text fail before mutation. No chunk upload or additional file authority is introduced. The existing bridge/output frame guards remain enforced. A source read is authored data, not evidence that the runtime accepts its language/API or syntax.
+
+The official SDK smoke is `uv run --with mcp==2.3.0 scripts/mcp_behavior_demo.py`, with `RUSTER_MCP_SOCKET` set to an enabled disposable editor. It requires clean human drafts and an unattached object in the first scene page. It round-trips16KiB source/control text and one1024-byte property, checks stale/invalid rejection, and restores authored data through three shared Undo operations. It never saves or executes scripts. A failed/timeout assertion may leave unsaved work: inspect before retrying. Native run evidence is recorded with the behavior journey.

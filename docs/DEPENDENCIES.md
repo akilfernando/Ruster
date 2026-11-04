@@ -5,7 +5,7 @@ This inventory covers every external package in the locked workspace resolution,
 Cargo's declared SPDX license expression is metadata supplied by each package. Its presence is not an independent license review or certification.
 Project source licensing does not change the licenses of dependencies.
 
-External locked package versions: **435**. Packages with no discovered readable license text: **63**.
+External locked package versions: **436**. Packages with no discovered readable license text: **63**.
 
 | Package | Version | Cargo source | Declared license expression | Upstream repository |
 | --- | --- | --- | --- | --- |
@@ -46,6 +46,7 @@ External locked package versions: **435**. Packages with no discovered readable 
 | atspi-common | 0.13.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/odilia-app/atspi](https://github.com/odilia-app/atspi) |
 | atspi-proxies | 0.13.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/odilia-app/atspi](https://github.com/odilia-app/atspi) |
 | autocfg | 1.5.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/cuviper/autocfg](https://github.com/cuviper/autocfg) |
+| base64 | 0.22.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/marshallpierce/rust-base64](https://github.com/marshallpierce/rust-base64) |
 | bit-set | 0.10.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/contain-rs/bit-set](https://github.com/contain-rs/bit-set) |
 | bit-vec | 0.9.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/contain-rs/bit-vec](https://github.com/contain-rs/bit-vec) |
 | bitflags | 1.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/bitflags/bitflags](https://github.com/bitflags/bitflags) |
