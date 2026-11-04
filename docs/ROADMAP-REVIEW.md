@@ -78,3 +78,35 @@ Retain M5 scene/3D → M6 content → M7 standalone kit → M8 independent reuse
 Two suggested M5 checks arise directly from M4: evaluate editor-thread command wakeup/responsiveness under hidden/throttled rendering and actual scene-size work limits before broadening MCP; decide bounded history memory and inspection output from a declared scene workload rather than extrapolating 32 tiny configuration snapshots to full scenes. These are revisit triggers, not a mandate for an ECS, background job system or render graph.
 
 Keep existing adoption gates visible: external human usability before major UI expansion, representative performance/hardware budgets, Windows/another GPU feasibility before packaging, license before public collaboration/distribution, and CLI/editor/MCP/schema parity as facilities grow. No calendar schedule or percentage complete is supported by milestone counts.
+
+
+## Post-M6 creator-outcome review — 2026-11-04
+
+**Status:** user-confirmed ethos, recorded in [DIRECTION.md](DIRECTION.md#project-ethos-serve-the-creator); root assessment and recommendations below. The active root is Astra and performs the strategic review directly under the development skill. No milestone reorder, new subsystem commitment or M7 implementation is authorized by this review itself. M0–M6 completion remains bounded by the recorded prototype scopes, not a measure of overall engine completeness.
+
+### Current state against the creation journey
+
+| Creator need | Current implementation/evidence | Remaining gap |
+| --- | --- | --- |
+| Start and shape an idea | Checked-in scenes, public Scene/Object types, transform and mesh edits, native selection, persisted history | The generic scene editor edits existing objects; it has no general create/duplicate/delete object workflow. Starting from a sample is not yet a complete blank-project experience. |
+| Bring personal content and iterate safely | M6 triangle OBJ import, stable IDs, refresh/rename, last-good recovery, shared rendering, controlled WGSL refresh | Narrow geometry/shader route; no texture/material pipeline. Catalog persistence is independent of scene undo, and cross-root Save As is blocked with asset references, so project copying/ownership needs clear guidance. |
+| Express an application's behavior | Separate logistics simulation; neutral scene state; shared renderer; preview snapshot/reset | Scene Preview::step increments a counter. It does not run user application logic. The standalone viewer is not yet the reusable input/lifecycle/template kit promised by M7. |
+| Share a working result | Open source, setup docs, Linux CI, viewer without editor/MCP dependencies | No packaged application kit; runtime prerequisites, asset location and notices must survive execution outside the checkout. |
+| Build something different | Neutral scene types and game/non-game briefs | Two independently modified applications have not yet proved that the common surface accommodates different behavior/data needs. M8 remains necessary. |
+| Learn and recover without the authors | Documented quickstarts, diagnostics, reversible scene edits, real native/client verification | External human onboarding/usability remains unverified. Agent-run demonstrations and automated checks do not establish intuitive use. |
+
+Basis: inspected Cargo workspace/manifests, scene public types/session/Preview implementation, standalone renderer host, scene editor controls, README, M5 briefs, current status and recorded M6 evidence at source cdccdae / handoff 619fa79. Existing implementation tests are reused; no engine execution or new external research was needed for this documentation review. The upstream GPU correction and limited Linux hardware coverage remain material qualifications.
+
+### Roadmap assessment
+
+Retain **M7 standalone kit → M8 independent reuse → M9 alpha adoption**. This already moves from shared facilities to creating and distributing an application, then tests whether the facilities generalize and whether another person can use them. Reordering into more infrastructure work would need a demonstrated blocker. Strong recovery, ownership and parity foundations are valuable because creators can experiment without losing work; they are necessary but do not establish a complete creation experience by themselves.
+
+Recommendations for interpreting the existing gates, not newly accepted feature scope:
+
+- **M7:** make the demonstration about changing meaningful application behavior in the creator's code, seeing the result and packaging it. Record where the person must touch engine internals or learn incidental infrastructure. Let a concrete application requirement justify each shared input/lifecycle facility. Keep the existing independent modification requirement visible.
+- **M8:** use a different task and data model, with its own interaction needs. Show that a creator can adapt both applications through the documented kit without copying internals. A second visual skin over the same workflow would not answer the reuse question.
+- **M9 and ongoing UX work:** observe a human's first successful creation/change, error recovery and distribution attempt. Record confusion, workarounds and blocked intent as product evidence alongside timing/correctness. Seek the already-planned human walkthrough before major UI expansion.
+
+The object creation gap should be considered when choosing a visual authoring journey; it does not automatically require inserting a new editor milestone before the code-first M7. Likewise, textures, hierarchy, scripting, physics or audio should follow demonstrated creation needs rather than an engine feature checklist. The long-term aspiration supports diverse creations; each delivered release must state which workflows actually work.
+
+**Conclusion:** the sequence remains appropriate. The immediate product test is whether M7 turns today's scene/content facilities into a comprehensible path to an application of the creator's own. Human usability, distribution/platform feasibility and independent reuse remain open evidence gaps, not completed work.

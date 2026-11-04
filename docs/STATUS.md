@@ -6,6 +6,14 @@ Last updated: 2026-11-04.
 
 The user authorized continuing the next milestone after M5/public-source hosting. **M0–M6 are complete within their documented Linux prototype scopes.** Rust, Vulkan, openness, native MCP, manual/agent parity, developer experience, documentation continuity and proportionate verification remain confirmed priorities. M7 standalone application kit is next; no M7 implementation has started.
 
+## Product checkpoint — 2026-11-04
+
+The user explicitly reaffirmed that systems must serve end users and help them create what they want to create. This is now recorded as the [project ethos](DIRECTION.md#project-ethos-serve-the-creator), linked from AGENTS.md and the public README. It expresses long-term creative freedom without claiming universal current capability. No milestone scope/order change was requested or made.
+
+The [post-M6 review](ROADMAP-REVIEW.md#post-m6-creator-outcome-review--2026-11-04) retains M7 → M8 → M9. Current strengths are shared scene/content operations, recovery and ownership. Main gaps are application behavior/template/packaging, general object creation in the scene editor, independent reuse and human usability evidence. M7 remains the next creation-oriented proof; review recommendations do not silently add new features to its accepted scope.
+
+Documentation-only verification: `python3 scripts/check.py --base origin/main` and `git diff --check` passed; no engine behavior changed and no Rust/GPU rerun was needed. Existing M6 source evidence below remains applicable.
+
 ## Implemented state
 
 - M0–M5: logistics reference workflow, persisted authoring, legacy ash schematic, egui Vulkan editor, bounded native MCP, neutral scene/Preview and shared procedural3D. Legacy logistics-v1 and scene-v1 remain readable within their explicit boundaries; see HISTORY.md and milestone evidence.

@@ -6,7 +6,7 @@ The user accepted the [post-M3 review](ROADMAP-REVIEW.md) on 2026-11-04. This ca
 
 ## Delivery contract
 
-Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
+Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Apply the user-confirmed [creator ethos](DIRECTION.md#project-ethos-serve-the-creator): explain what someone can create or change with the delivered systems, and where the workflow still limits them. This clarifies the existing user-outcome gates; it does not expand milestone scope. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
 
 M0 through M6 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M7 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
 
@@ -133,7 +133,7 @@ M4 delivered scope: editor-owned Linux attachment, protocol2025-06-18, official 
 
 **Decision gate:** resolve the current ash-viewer/egui-wgpu-editor rendering split before duplicating substantial 3D infrastructure. No backend winner, general render graph, plugin ABI, advanced GI or full editor framework is predetermined.
 
-M5 delivered scope: neutral bounded scene/session/Preview, separate identified scene format, shared procedural cube/depth/camera renderer in standalone/editor, guarded transform authoring and scene CLI/MCP parity. Static preview ticks do not imply simulation behavior. Existing logistics-v1 workflows remain legacy/reference support. Native client/UI/lifecycle and declared release workload evidence passed; see [M5 evidence](evidence/M5.md) and [decision0006](decisions/0006-scene-and-shared-3d.md). Full kit, asset import and complete second application remain later milestones.
+M5 delivered scope: neutral bounded scene/session/Preview, separate identified scene format, shared procedural cube/depth/camera renderer in standalone/editor, guarded transform authoring and scene CLI/MCP parity. Static preview ticks do not imply simulation behavior. Existing logistics-v1 workflows remain legacy/reference support. Native client/UI and declared release workload evidence were recorded; the original release Vulkan validation acceptance was incorrect and is superseded by the M6 correction and patched rerun. See [M5 evidence](evidence/M5.md) and [decision0006](decisions/0006-scene-and-shared-3d.md). Full kit, asset import and complete second application remain later milestones.
 
 ## M6 Content and fast iteration
 

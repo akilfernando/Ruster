@@ -2,6 +2,8 @@
 
 An open-source Rust/Vulkan engine project for interactive simulation and visualization. Games are the first proving ground; the shared scene and tooling are designed to support other interactive applications too.
 
+Ruster's purpose is to help people turn their own ideas into working creations. Its systems and tools should serve that creative process, with understandable workflows, room to extend behavior and ownership of the result. See the [project ethos](docs/DIRECTION.md#project-ethos-serve-the-creator) and the current scope below.
+
 [![CI](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml/badge.svg)](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 

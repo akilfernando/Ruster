@@ -8,6 +8,16 @@ An open Rust/Vulkan engine for interactive simulation and visualization, where d
 
 User experience is the primary product pillar. Performance, reliability and openness support that experience. AI automation is an interface to the same coherent engine, not a separate required workflow.
 
+## Project ethos: serve the creator
+
+Confirmed by the user on 2026-11-04: having systems in place is useful only insofar as those systems serve end users and help them create what they want to create. Creative intent should guide the engine; the reference examples should not define the limits of what people can imagine building with it.
+
+For Ruster, this means helping creators turn their own ideas into working applications: understand the tools, bring their own content, express behavior, iterate with confidence, and share the result. The experience of people using those finished applications also matters. Technical foundations, performance, visual tools and optional agent assistance should support that complete journey.
+
+This is a long-term design principle, not a claim that the current prototype can build every kind of application or a request to add every subsystem now. Keep staged scope explicit. When choosing or reviewing work, identify the creator's intended result, the obstacle it removes, and the evidence that the workflow is usable. Internal infrastructure can be necessary; connect it to that result rather than treating its existence as the product outcome. Prefer understandable defaults and documented ways to extend behavior over assumptions that constrain every application to the sample's needs.
+
+The user did not request a roadmap change with this clarification. The existing M7–M9 sequence remains in force; the [post-M6 assessment](ROADMAP-REVIEW.md#post-m6-creator-outcome-review--2026-11-04) records current gaps and recommendations separately from accepted scope.
+
 ## Pillars and observable outcomes
 
 | Pillar | Design rule | Evidence to collect |
