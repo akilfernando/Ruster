@@ -97,6 +97,14 @@ pub trait Application: 'static {
     fn input(&mut self, _input: &InputFrame) -> Result<(), String> {
         Ok(())
     }
+    /// Return false to veto native close and present application-owned recovery UI.
+    fn request_close(&mut self) -> bool {
+        true
+    }
+    /// Consume a successful document replacement request through the host Reset lifecycle.
+    fn take_reset_request(&mut self) -> bool {
+        false
+    }
     fn selected(&self) -> Option<&str> {
         None
     }

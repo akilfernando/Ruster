@@ -23,5 +23,10 @@ ruster-scene = { path = "../../crates/ruster-scene" }
 ruster-script = { path = "../../crates/ruster-script" }
 ruster-assets = { path = "../../crates/ruster-assets" }
 
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+fs2 = "0.4"
+tempfile = "3"
+
 [lints]
 workspace = true

@@ -86,6 +86,31 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     let Some(args) = arguments.as_object() else {
         return false;
     };
+    if matches!(
+        name,
+        "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete"
+    ) {
+        let mut keys = vec!["expected_session_token", "expected_revision", "object_id"];
+        if name != "scene_delete" {
+            keys.push("name");
+        }
+        if name == "scene_duplicate" {
+            keys.push("new_object_id");
+        }
+        return exact_keys(args, &keys, &[])
+            && canonical_u64(&args["expected_revision"])
+            && keys.iter().filter(|k| **k != "expected_revision").all(|k| {
+                args[*k].as_str().is_some_and(|s| {
+                    !s.is_empty()
+                        && s.len()
+                            <= if *k == "expected_session_token" {
+                                256
+                            } else {
+                                128
+                            }
+                })
+            });
+    }
     if name == "asset_inspect" {
         return exact_keys(args, &[], &["offset"]) && args.get("offset").is_none_or(canonical_u64);
     }
@@ -205,6 +230,10 @@ fn tools() -> Value {
         ("scene_mesh", "Assign registered asset ID or null for procedural cube to one scene object; revisioned shared authored undo. Preview snapshot unchanged."),
         ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
+        ("scene_create", "Create one procedural cube with a new immutable object ID and display name. Revisioned, unsaved and shares human undo; preview unchanged."),
+        ("scene_rename", "Change an object's display name without changing its stable ID. Shares authored undo; preview unchanged."),
+        ("scene_duplicate", "Duplicate one object with a fresh stable ID and display name. Preserves its transform and mesh; shares authored undo."),
+        ("scene_delete", "Delete one object, retaining its data and position in bounded authored undo. Preview unchanged."),
         ("scene_transform", "Replace one object's authored translation, Euler rotation in radians and scale. Requires the inspected identity/revision and clean human drafts. Unsaved; shares human undo; leaves preview unchanged."),
         ("scene_undo", "Undo one authored scene change in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("scene_redo", "Redo one authored scene change in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
@@ -231,6 +260,18 @@ fn tools() -> Value {
             if name=="scene_mesh" {properties.insert("object_id".into(),json!({"type":"string","minLength":1,"maxLength":128}));required.push("object_id");}
         }
         if name=="shader_refresh" {properties.insert("expected_shader_revision".into(),decimal.clone());required.push("expected_shader_revision");}
+        if matches!(name, "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete") {
+            properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Immutable object identity, distinct from its display name."}));
+            required.push("object_id");
+            if name != "scene_delete" {
+                properties.insert("name".into(), json!({"type":"string","minLength":1,"maxLength":128}));
+                required.push("name");
+            }
+            if name == "scene_duplicate" {
+                properties.insert("new_object_id".into(), json!({"type":"string","minLength":1,"maxLength":128}));
+                required.push("new_object_id");
+            }
+        }
         if name == "scene_transform" {
             properties.insert("object_id".into(), json!({"type":"string", "description":"Exact stable object ID returned by scene_inspect."}));
             let vector = json!({"type":"array", "items":{"type":"number"}, "minItems":3, "maxItems":3});
@@ -349,6 +390,10 @@ impl Server {
                         "replay",
                         "scene_inspect",
                         "scene_transform",
+                        "scene_create",
+                        "scene_rename",
+                        "scene_duplicate",
+                        "scene_delete",
                         "scene_undo",
                         "scene_redo",
                         "scene_replay",
@@ -618,7 +663,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 16);
+        assert_eq!(tools.len(), 20);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -638,6 +683,10 @@ mod tests {
                 "scene_mesh",
                 "shader_refresh",
                 "scene_inspect",
+                "scene_create",
+                "scene_rename",
+                "scene_duplicate",
+                "scene_delete",
                 "scene_transform",
                 "scene_undo",
                 "scene_redo",
@@ -706,6 +755,28 @@ mod tests {
 
     #[test]
     fn scene_shapes_are_strict_and_semantic_validation_stays_with_owner() {
+        // Object operations have distinct, bounded shapes before forwarding to the owner.
+        for (name, mut args) in [
+            (
+                "scene_create",
+                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube","name":"Cube"}),
+            ),
+            (
+                "scene_duplicate",
+                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube","new_object_id":"copy","name":"Copy"}),
+            ),
+            (
+                "scene_delete",
+                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube"}),
+            ),
+        ] {
+            assert!(valid_arguments(name, &args));
+            args["extra"] = json!(true);
+            assert!(!valid_arguments(name, &args));
+            args.as_object_mut().unwrap().remove("extra");
+            args["object_id"] = json!("x".repeat(129));
+            assert!(!valid_arguments(name, &args));
+        }
         let mut server = ready();
         let arguments = json!({"expected_session_token":"scene-session","expected_revision":"7",
             "object_id":"left","transform":{"translation":[1,2.5,-3],"rotation":[0,0,0],"scale":[1,1,1]}});
@@ -730,6 +801,22 @@ mod tests {
         assert!(!valid_arguments("scene_transform", &invalid));
         for (name, args) in [
             ("scene_transform", arguments.clone()),
+            (
+                "scene_create",
+                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1","name":"Cube"}),
+            ),
+            (
+                "scene_rename",
+                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1","name":"My cube"}),
+            ),
+            (
+                "scene_duplicate",
+                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1","new_object_id":"cube-2","name":"Copy"}),
+            ),
+            (
+                "scene_delete",
+                json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1"}),
+            ),
             ("scene_inspect", json!({"offset":"16"})),
             (
                 "scene_undo",

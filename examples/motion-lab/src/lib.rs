@@ -1,4 +1,4 @@
-//! Session-only motion authoring over the same application runtime as Yard.
+//! Persisted motion authoring over the same application runtime as Yard.
 
 use std::{
     collections::BTreeMap,
@@ -8,6 +8,8 @@ use std::{
 use ruster_app::{egui, Application, Content, MeshMap, Step};
 use ruster_scene::Scene;
 use ruster_script::{Behavior, Properties};
+
+mod project;
 
 pub const DEFAULT_SOURCE: &str = include_str!("../resources/motion.rhai");
 pub const MAX_SOURCE_BYTES: u64 = 16 * 1024;
@@ -20,6 +22,14 @@ pub fn read_source(path: &Path) -> Result<String, String> {
 }
 
 pub struct MotionLab {
+    storage: Option<project::Storage>,
+    undo: Vec<project::Authored>,
+    redo: Vec<project::Authored>,
+    pending_edit: Option<project::Authored>,
+    project_path_draft: String,
+    confirm_close: bool,
+    allow_close: bool,
+    reset_requested: bool,
     authored: Scene,
     content: Content,
     selected: String,
@@ -35,10 +45,28 @@ pub struct MotionLab {
 
 impl MotionLab {
     pub fn new(source: String, source_path: Option<PathBuf>) -> Result<Self, String> {
+        let source_path = source_path
+            .map(|p| {
+                if p.is_absolute() {
+                    Ok(p)
+                } else {
+                    std::env::current_dir().map(|cwd| cwd.join(p))
+                }
+            })
+            .transpose()
+            .map_err(|e| e.to_string())?;
         let behavior = Behavior::compile(&source)?;
         let authored = Scene::demo();
         let content = Content::new(authored.clone(), MeshMap::new())?;
         Ok(Self {
+            storage: None,
+            undo: Vec::new(),
+            redo: Vec::new(),
+            pending_edit: None,
+            project_path_draft: String::new(),
+            confirm_close: false,
+            allow_close: false,
+            reset_requested: false,
             authored,
             content,
             selected: "left".into(),
@@ -57,13 +85,17 @@ impl MotionLab {
         &self.draft_source
     }
     pub fn set_draft_source(&mut self, source: String) {
+        self.begin_edit();
         self.draft_source = source;
+        self.finish_edit();
         self.draft_error = None;
     }
     pub fn draft_properties(&self, id: &str) -> Option<&Properties> {
         self.draft.get(id)
     }
     pub fn draft_properties_mut(&mut self, id: &str) -> Option<&mut Properties> {
+        self.finish_edit();
+        self.begin_edit();
         self.draft.get_mut(id)
     }
     pub fn active_properties(&self, id: &str) -> Option<&Properties> {
@@ -93,23 +125,34 @@ impl MotionLab {
             ));
         }
         let behavior = self.compile_draft()?;
+        self.finish_edit();
+        let before = self.snapshot();
         self.draft.insert(id.into(), behavior.defaults().clone());
+        self.remember(before);
         self.draft_error = None;
         Ok(())
     }
 
     pub fn detach(&mut self, id: &str) {
+        self.finish_edit();
+        let before = self.snapshot();
         self.draft.remove(id);
+        self.remember(before);
     }
 
     pub fn revert_drafts(&mut self) {
+        self.finish_edit();
+        let before = self.snapshot();
         self.draft_source.clone_from(&self.active_source);
         self.draft.clone_from(&self.active);
+        self.remember(before);
         self.draft_error = None;
     }
 
     /// Loading makes an explicit candidate; it never changes executing behavior.
     pub fn reload_from_disk(&mut self) -> Result<(), String> {
+        self.finish_edit();
+        let before = self.snapshot();
         let result = (|| {
             let path = self
                 .source_path
@@ -119,6 +162,7 @@ impl MotionLab {
             self.compile_draft()?;
             Ok(())
         })();
+        self.remember(before);
         self.draft_error = result.as_ref().err().cloned();
         result
     }
@@ -126,13 +170,17 @@ impl MotionLab {
     /// Explicitly replace draft property maps when a script's exposed schema changes.
     pub fn use_source_defaults(&mut self) -> Result<(), String> {
         let behavior = self.compile_draft()?;
+        self.finish_edit();
+        let before = self.snapshot();
         for properties in self.draft.values_mut() {
             *properties = behavior.defaults().clone();
         }
+        self.remember(before);
         Ok(())
     }
 
     fn commit_reset(&mut self) -> Result<(), String> {
+        self.finish_edit();
         let candidate = self.compile_draft()?;
         for (id, properties) in &self.draft {
             if properties.keys().ne(candidate.defaults().keys())
@@ -167,6 +215,18 @@ impl MotionLab {
 }
 
 impl Application for MotionLab {
+    fn request_close(&mut self) -> bool {
+        if self.allow_close || !self.is_dirty() {
+            true
+        } else {
+            self.confirm_close = true;
+            false
+        }
+    }
+    fn take_reset_request(&mut self) -> bool {
+        std::mem::take(&mut self.reset_requested)
+    }
+
     fn content(&self) -> &Content {
         &self.content
     }
@@ -209,7 +269,8 @@ impl Application for MotionLab {
         egui::ScrollArea::vertical().show(ui, |ui| {
             ui.heading("Motion Lab");
             ui.label("Select an object, Attach behavior, edit properties, then Reset and Run.");
-            ui.small("Draft source, attachments and values are session-only. Reset applies drafts and restores authored transforms.");
+            ui.small("Save stores authored source and attachments; Reset applies drafts. Play transforms are never saved.");
+            self.project_ui(ui);
             ui.separator();
             ui.strong("Hierarchy");
             for object in &self.authored.objects {
@@ -230,6 +291,7 @@ impl Application for MotionLab {
                 let result = self.attach(&selected);
                 self.show_action_result(result);
             }
+            self.begin_edit();
             if let Some(properties) = self.draft.get_mut(&selected) {
                 for (name, value) in properties {
                     ui.horizontal(|ui| {
@@ -256,6 +318,7 @@ impl Application for MotionLab {
                 let result = self.reload_from_disk();
                 self.show_action_result(result);
             }
+            self.begin_edit();
             if ui.add(egui::TextEdit::multiline(&mut self.draft_source).code_editor().desired_rows(12).desired_width(f32::INFINITY)).changed() {
                 self.draft_error = None;
             }
@@ -263,6 +326,7 @@ impl Application for MotionLab {
                 let result = self.use_source_defaults();
                 self.show_action_result(result);
             }
+            if !ui.ctx().egui_wants_keyboard_input() && !ui.ctx().input(|i| i.pointer.any_down()) { self.finish_edit(); }
             if let Some(error) = &self.draft_error {
                 ui.colored_label(ui.visuals().error_fg_color, error);
                 ui.label("Fix the draft, then Reset. The last applied runtime is preserved.");

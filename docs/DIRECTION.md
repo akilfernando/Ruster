@@ -22,6 +22,10 @@ The user did not request a roadmap change with this clarification. The existing 
 
 Confirmed by the user on 2026-11-04: creators who have spent their working lives in Unity or Unreal should feel at home immediately in Ruster. Everyday quality-of-life behavior is non-negotiable, including the small interactions people ordinarily take for granted. Treat it as part of delivering a workflow, not discretionary finishing work. The [editor experience baseline](EDITOR-EXPERIENCE.md) records the working breakdown, current gaps and required human acceptance evidence. Current prototype completion does not establish that this requirement is met.
 
+## Autonomous delivery authorization
+
+2026-11-04: the user authorized continued development through M9, adjusting short-term goals when they serve the creator outcome above, with an evaluation after each milestone. Lean, efficient and optimized code is an explicit priority. Measure meaningful runtime/memory/iteration costs, avoid speculative framework/dependency growth, and retain optimizations only with relevant correctness and before/after evidence. This authorization does not turn unverified human/platform gates into completed milestones or authorize claiming publication/readiness without evidence.
+
 ## Pillars and observable outcomes
 
 The user accepted two complementary authoring paths on 2026-11-04: Rust for native applications/extensions and an approachable scripting path for everyday behavior. The language is not user-selected. Scripting acceptance covers attaching behaviors, exposed inspector properties, IDE/project setup, source diagnostics, debugging and fast recoverable iteration; embedding an interpreter alone does not meet the requirement. [Decision0011](decisions/0011-behavior-scripting-experiment.md) bounds the initial Rhai experiment and the later language/tooling decision gate.

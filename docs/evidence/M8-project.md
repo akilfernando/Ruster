@@ -1,0 +1,19 @@
+# M8 Motion Lab authored projects — 2026-11-04
+
+This bounded application-level slice removes the need to recreate source, attachment and property edits after closing Motion Lab. [Decision0012](../decisions/0012-motion-lab-project.md) describes the separate version1 document; the [guide](../../examples/motion-lab/README.md) owns runnable commands and limits. Scene v1/v2, generic editor and MCP formats are unchanged. M8 and editor readiness remain open.
+
+## Implemented contract
+
+Projects embed authored scene, authoritative source snapshot, optional absolute external Reload provenance and per-object attachments/properties. Runtime transforms/time are excluded. Save validates a disposable candidate without changing the running behavior; invalid source/schema/first-update candidates cannot be saved in this slice. Open prepares the entire candidate before replacement. Dirty Open is refused unless explicitly discarded; failed Open preserves work even after discard was requested. Save As refuses occupied destinations, and Save compares the complete stored baseline under a cooperative sibling lock. Bounded regular-file reads, nonregular destination/lock guards and same-directory synced temporary replacement follow existing project conventions.
+
+A unified 32-edit session-local undo/redo restores source/attachment/property drafts. Numeric drags and source typing are grouped by interaction; Reset applies the restored drafts. Saved files contain current authored state, not undo history. The shared host provides a default-compatible close-veto hook and one-shot document-reset hook; Motion Lab uses these for unsaved close recovery and clearing host time/error after Open.
+
+## Verification
+
+- Focused package checks: strict Clippy passed; 4 integration cases passed, including the 2 existing runtime cases and 2 new project-boundary cases. The final API one-shot reset assertion passed separately after its addition. New coverage protects authored/runtime save separation, embedded-source independence, undo dirty baseline, corruption/foreign format/reference rejection, conflict and occupied-file preservation, and close veto. Existing scene migration tests are reused unchanged through the full gate.
+- Final code gate: `python3 scripts/check.py --base origin/main` selected full scope because shared host/build inputs changed. Passed 88 Rust tests, 20 tooling tests, formatting, strict Clippy and Markdown checks in 33.54s. One GPU probe remains excluded from the default lane. Cargo execution was serialized; the existing capacity test took 22.45s. No performance comparison is claimed.
+- Four actual binary CLI runs from a different working directory passed: fresh save with speed2, reopen/run yielding Y0.909297, occupied destination rejection preserving exact bytes, and truncated-project rejection (error exit2).
+- `python3 scripts/dependency_notices.py --check` passed with unchanged 417 external versions, 232 unique texts/662 associations and 62 recorded text gaps. New direct dependencies were already locked; no external version was added.
+- Initial implementation compilation caught a renamed egui API and malformed CLI text replacement; strict Clippy caught a collapsible conditional. All were corrected before final checks. Architecture review found premature history finalization on failed saves, CWD-relative provenance and insufficient nonregular-lock guards; these were corrected and the final review found no blocker.
+
+Native journey evidence is recorded separately in [M8-project-native.md](M8-project-native.md). Native scoped injection does not establish focused-window keyboard behavior or experienced-human familiarity. Persistent undo, unfinished-code saves, autosave/crash journals, external meshes, IDE integration, generic editor commands and Motion Lab distribution remain unfinished. Cooperative filesystem guards do not establish hostile-filesystem or universal power-loss isolation.

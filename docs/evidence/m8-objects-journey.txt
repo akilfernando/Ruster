@@ -1,0 +1,11 @@
+new empty passed
+create object-1
+rename passed
+duplicate object-2
+position and draft guard passed
+delete undo passed
+real MCP create/stale/invalid/undo passed
+save passed
+framebuffer [2532, 1370]
+reopen and stale session passed
+PASS

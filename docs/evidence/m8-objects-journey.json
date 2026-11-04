@@ -1,0 +1,666 @@
+{
+  "empty": {
+    "asset_revision": null,
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 0,
+    "objects": [],
+    "preview_fingerprint": "9f7e0db158e8010e",
+    "preview_stale": false,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "0",
+    "scene_id": "untitled",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "created": {
+    "asset_revision": null,
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 1,
+    "objects": [
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-1",
+        "name": "Cube",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "9f7e0db158e8010e",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "1",
+    "scene_id": "untitled",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "renamed": {
+    "asset_revision": null,
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 1,
+    "objects": [
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-1",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "9f7e0db158e8010e",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "2",
+    "scene_id": "untitled",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "moved": {
+    "asset_revision": null,
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-1",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-2",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.5,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "9f7e0db158e8010e",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "4",
+    "scene_id": "untitled",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "deleted": {
+    "asset_revision": null,
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 1,
+    "objects": [
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-1",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "9f7e0db158e8010e",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "5",
+    "scene_id": "untitled",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "restored": {
+    "asset_revision": null,
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": true,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-1",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-2",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.5,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "9f7e0db158e8010e",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "6",
+    "scene_id": "untitled",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "mcp_create": {
+    "ok": true,
+    "result": {
+      "changed": true,
+      "diff": [
+        {
+          "after": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "after_mesh": null,
+          "after_object": {
+            "color": [
+              0.6000000238418579,
+              0.6000000238418579,
+              0.6000000238418579,
+              1.0
+            ],
+            "id": "rpc-cube",
+            "name": "MCP cube",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          "before": null,
+          "before_mesh": null,
+          "before_object": null,
+          "object_id": "rpc-cube"
+        }
+      ],
+      "dirty": true,
+      "revision": "7",
+      "session_token": "[session]"
+    }
+  },
+  "mcp_stale": {
+    "error": {
+      "code": "stale_revision",
+      "message": "stale_revision",
+      "revision": "7",
+      "session_token": "[session]"
+    },
+    "ok": false
+  },
+  "mcp_invalid": {
+    "error": {
+      "code": "invalid_arguments",
+      "message": "invalid scene: display name requires 1..128 UTF-8 bytes without surrounding whitespace or control characters",
+      "revision": "7",
+      "session_token": "[session]"
+    },
+    "ok": false
+  },
+  "saved": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": false,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-1",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-2",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.5,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "9f7e0db158e8010e",
+    "preview_stale": true,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "8",
+    "scene_id": "untitled",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  },
+  "opened": {
+    "asset_revision": "0",
+    "capabilities": [
+      "scene_inspect",
+      "scene_transform",
+      "scene_create",
+      "scene_rename",
+      "scene_duplicate",
+      "scene_delete",
+      "scene_undo",
+      "scene_redo",
+      "scene_replay",
+      "asset_inspect",
+      "asset_import",
+      "asset_refresh",
+      "asset_rename",
+      "scene_mesh",
+      "shader_refresh"
+    ],
+    "dirty": false,
+    "drafts_pending": false,
+    "loaded_format_version": 3,
+    "next_offset": null,
+    "object_count": 2,
+    "objects": [
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-1",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ]
+        }
+      },
+      {
+        "color": [
+          0.6000000238418579,
+          0.6000000238418579,
+          0.6000000238418579,
+          1.0
+        ],
+        "id": "object-2",
+        "name": "Beacon",
+        "transform": {
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ],
+          "translation": [
+            2.5,
+            0.0,
+            0.0
+          ]
+        }
+      }
+    ],
+    "preview_fingerprint": "f61a63d0caeb2bfe",
+    "preview_stale": false,
+    "preview_tick": "0",
+    "recovery_pending": false,
+    "revision": "8",
+    "scene_id": "untitled",
+    "session_token": "[session]",
+    "shader_revision": "0",
+    "unresolved_assets": []
+  }
+}

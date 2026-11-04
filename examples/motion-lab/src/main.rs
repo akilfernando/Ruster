@@ -10,13 +10,15 @@ Usage: ruster-motion-lab [OPTIONS]
   --ticks N        Headless ticks, 0–10000 (default 10)
   --speed N        Override the attached left object's speed property
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
+  --project PATH   Open an authored Motion Lab project (instead of --script)
+  --save-project PATH Save authored state before running
   --frames N       Close native window after 1–10000 frames
   -h, --help       Show help
 
 Native mode starts paused with no attachments. Select an object, Attach behavior,
 edit numeric properties, then Reset and Run or Step. Source/properties are drafts
 until Reset; invalid candidates preserve the last applied runtime. Script files
-are read only; use Reload from disk after editing externally. No project save.
+are read only; use Reload from disk after editing externally. Projects embed source and attachments; external script files are never written.
 The default script is embedded, so the command works from any directory.";
 
 #[derive(Default)]
@@ -25,6 +27,8 @@ struct Options {
     ticks: Option<u64>,
     frames: Option<u64>,
     script: Option<PathBuf>,
+    project: Option<PathBuf>,
+    save_project: Option<PathBuf>,
     speed: Option<f64>,
 }
 
@@ -35,11 +39,13 @@ fn parse() -> Result<Option<Options>, String> {
         match arg.as_str() {
             "--help" | "-h" => return Ok(None),
             "--headless" => options.headless = true,
-            "--ticks" | "--frames" | "--script" | "--speed" => {
+            "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project" => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{arg} requires a value. See --help."))?;
                 match arg.as_str() {
+                    "--project" => options.project = Some(value.into()),
+                    "--save-project" => options.save_project = Some(value.into()),
                     "--script" => options.script = Some(value.into()),
                     "--speed" => {
                         let speed: f64 = value
@@ -79,6 +85,9 @@ fn parse() -> Result<Option<Options>, String> {
     {
         return Err("--ticks requires --headless; --frames requires native mode.".into());
     }
+    if options.project.is_some() && options.script.is_some() {
+        return Err("Use either --project or --script.".into());
+    }
     Ok(Some(options))
 }
 
@@ -87,9 +96,16 @@ fn execute(options: Options) -> Result<(), String> {
         Some(path) => read_source(path)?,
         None => DEFAULT_SOURCE.into(),
     };
-    let mut app = MotionLab::new(source, options.script)?;
+    let mut app = match &options.project {
+        Some(path) => MotionLab::open_project(path)?,
+        None => MotionLab::new(source, options.script)?,
+    };
     if options.headless || options.speed.is_some() {
-        app.attach("left")?;
+        if (options.project.is_none() || options.speed.is_some())
+            && app.draft_properties("left").is_none()
+        {
+            app.attach("left")?;
+        }
         if let Some(speed) = options.speed {
             let properties = app
                 .draft_properties_mut("left")
@@ -100,13 +116,16 @@ fn execute(options: Options) -> Result<(), String> {
         }
         app.reset()?;
     }
+    if let Some(path) = &options.save_project {
+        app.save_project(path)?;
+    }
     let tick_duration = Duration::from_millis(100);
     if options.headless {
         let mut runtime = Runtime::new(app, tick_duration)?;
         for _ in 0..options.ticks.unwrap_or(10) {
             runtime.step()?;
         }
-        println!("Motion Lab | tick={} dt=0.1 behavior=left", runtime.tick());
+        println!("Motion Lab | tick={} dt=0.1", runtime.tick());
         for object in &runtime.app().content().scene().objects {
             println!(
                 "{} position={:.6?} rotation={:.6?} scale={:.6?}",

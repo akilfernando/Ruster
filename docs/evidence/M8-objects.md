@@ -1,0 +1,19 @@
+# M8 generic scene construction — 2026-11-04
+
+This slice enables creating a scene instead of only modifying the fixed demo. [Decision0013](../decisions/0013-scene-object-lifecycle.md) records the identity/history boundary; the [scene guide](../../crates/ruster-scene/README.md) and [editor guide](../../crates/ruster-editor/README.md) contain executable commands and UI steps. M8 remains open.
+
+## Implemented result
+
+An empty scene can receive procedural objects, independent display names, duplicates and deletions. Transform editing, persisted undo/redo and safe save/reopen apply to these objects. IDs remain immutable and reserved while reversible history refers to them. The editor repairs selection after membership changes and ignores stale-preview picks of deleted authored IDs. New scene is explicit document replacement with recovery and a fresh session token; it is not an object undo entry or an agent replacement operation.
+
+The same Session owns CLI/editor/MCP mutations. Four bounded MCP object tools retain session/revision/draft/recovery guards; edits remain unsaved and leave preview unchanged. Identity-keyed diffs preserve existing transform/mesh fields and add full before/after object snapshots, including null for absent sides. Scene format3 has strict old-v1/v2 decoders and preserves their undo/redo, with upgrades only on save. Optional names preserve unnamed fingerprints. Lifecycle history stores one object/index rather than unrelated scene snapshots, and retained meshes block unsafe cross-root relocation.
+
+## Verification and efficiency limits
+
+- Core focused checks passed11unit/1CLI tests; existing CLI smoke covers construction and migration diagnostics. Two new tests protect mixed lifecycle persistence/history/reference restoration and strict v2 migration/malformed historical states.
+- Editor focused6tests passed, including actual egui Ctrl+S injection under modal states and shared lifecycle-command/guard/diff/selection behavior; strict package Clippy passed.
+- Final `python3 scripts/check.py --base origin/main` selected full scope for shared changes and passed92Rust/20tooling tests, formatting, strictClippy and documentation in46.17s (Rust phase42.01s including builds). One GPU probe remains excluded from the default lane. Cargo builds were serialized; an earlier focused editor run rebuilt HAL/dependencies. No unsupported cross-platform/hardware or performance conclusion follows.
+- Root extended the existing MCP transport/shape tests for four object operations and bounded unknown/oversized arguments rather than adding an overlapping protocol suite. No new external dependency/version is needed for this slice.
+- Review corrected modal shortcuts that could overwrite pending name text, duplication of maximum-length labels, competing New/Close recovery intent, unnecessary default-shader reset on New, historical mesh reference retention and lifecycle-unsafe zipped diffs. Additive response fields preserve existing transform consumers.
+
+[Native interaction and real-client evidence](M8-objects-native.md) passed the full construction journey with in-process reopen, exact guarded command checks, clean loaded Vulkan validation and workspace cleanup. Process restart for this construction-specific journey and physical focused keyboard remain unverified. `python3 scripts/dependency_notices.py --check` passed unchanged417external versions. Compact deltas and conditional shader reset reduce unnecessary retained data/work by construction, but no before/after runtime or memory speedup is claimed. Renderer workloads and human familiarity need their own evidence. Next: multi-object/manipulation authoring, with explicit gesture transactions, geometry conventions, representation limits and measured dependency/iteration costs before toolkit adoption.

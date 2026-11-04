@@ -28,6 +28,8 @@ Source `f17e45c` was pushed to personal public main. Hosted [run41793353477](htt
 
 ## Limits and next work
 
+Historical first-slice limits below are superseded for project save/reopen and session-local undo by [decision0012](../decisions/0012-motion-lab-project.md) and the current [Motion Lab guide](../../examples/motion-lab/README.md). IDE, generic-editor and durable-language gates remain open.
+
 Only functions execute; top-level script statements/declarations are ignored, with no persistent globals. Behaviors return validated numeric transform maps; there are no object/resource references or arbitrary engine calls. The copied-state interface avoids exposing mutable Rust/scene references. Rhai's resource/operation checks are an in-process defensive boundary, not process isolation or a hard time/memory guarantee.
 
 Attachments, property values and in-app source are session-only, with explicit UI/guide warnings. External script files persist in the user's own editor. There is no project save/undo, generic-editor component integration, MCP scripting command, auto reload, IDE setup, source navigation, breakpoint debugger or language-selection usability evidence. The current trial uses the app's fixed100ms first tick, then runtime failures can still occur later. Yard export/package tooling is unchanged; no Motion Lab binary distribution or second-application independent adoption is claimed.

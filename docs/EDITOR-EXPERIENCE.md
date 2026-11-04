@@ -56,3 +56,9 @@ Keep M7 standalone application kit, M8 independent reuse and M9 public alpha as 
 | M9 adoption and remaining corrections | Experienced Unity and Unreal creator walkthroughs, readable scaling/focus/accessibility review and fixes for supported journeys; verify recovery and distribution on the declared support matrix. No readiness claim while these baseline blockers remain. |
 
 M8 will need several runnable implementation slices; estimate each from its actual requirements rather than compressing it into a single example task. Shared changes preserve CLI/editor/MCP semantics where those operations are exposed. Avoid promising screen-reader compliance, crash recovery guarantees or a shortcut preset without corresponding implementation and evidence.
+
+
+The [post-M8 persistence reassessment](ROADMAP-REVIEW.md#post-m8-persistence-reassessment--2026-11-04) sequences the remaining allocation in the canonical roadmap. Generic object construction is next; a bounded first lifecycle slice does not complete multi-selection/gizmos or the rest of this baseline. Reuse, editor authoring and behavior/tooling are reported separately, with all currently allocated M8 gates retained.
+
+
+2026-11-04 construction update: generic create/display-name/duplicate/delete, new empty scene and persisted lifecycle undo now pass the [native construction journey](evidence/M8-objects-native.md). Earlier absence statements describe the M6 baseline. The remaining manipulation/content/workspace/tooling allocation is still open; this does not establish familiarity. The user reports mainly Unity experience for a later walkthrough; Unreal-user evidence remains separate.

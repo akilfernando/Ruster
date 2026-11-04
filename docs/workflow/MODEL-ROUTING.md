@@ -36,3 +36,7 @@ The user reports that the main model is currently Astra and asks whether Sol bet
 ## M4 session refresh — 2026-11-04
 
 Reopened all three official sources above and checked the active collaboration schema. Role assignments and supported effort/inheritance/slot limits remain unchanged. Used Astra at high effort for bounded M4 ownership review because session identity and draft/runtime conflicts are consequential; main implementation remains in the root. No cache inspection, API billing job or global model change. Actual subscription cost and active root model identity remain unmeasured.
+
+## M8 persistence session refresh — 2026-11-04
+
+Reopened the three official sources above at 07:43 UTC and inspected the active collaboration schema. Available role models, efforts, four-slot limit and explicit-override inheritance rules remain unchanged. Sol6.1 remains the recommended main developer; Astra high is assigned the bounded persistence/ownership review. Child workers reuse this snapshot. No global settings changed; actual subscription usage/cost remains unknown.

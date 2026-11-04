@@ -69,4 +69,26 @@ fn headless_workflow_and_failed_command_preserve_disk() {
         ruster_scene::Scene::load(&path).unwrap().objects[0].mesh,
         None
     );
+    let path = dir.path().join("owned.json");
+    let file = path.to_str().unwrap();
+    for args in [
+        vec!["new", file, "owned-scene"],
+        vec!["create", file, "0", "stable-a", "Owned object"],
+        vec!["duplicate", file, "1", "stable-a", "stable-b"],
+        vec!["rename", file, "2", "stable-a", "Different label"],
+        vec!["delete", file, "3", "stable-b"],
+        vec!["undo", file, "4"],
+    ] {
+        let output = cli(&args);
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    let session = ruster_scene::Session::open(&path).unwrap();
+    assert_eq!(session.scene().objects.len(), 2);
+    assert_eq!(session.scene().objects[0].id, "stable-a");
+    assert_eq!(session.scene().objects[0].display_name(), "Different label");
+    assert_eq!(session.scene().objects[1].display_name(), "Owned object");
 }

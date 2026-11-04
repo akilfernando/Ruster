@@ -4,7 +4,7 @@ use eframe::{
     egui_wgpu::{WgpuSetup, WgpuSetupCreateNew},
 };
 use ruster_assets::{AssetStore, Mesh};
-use ruster_scene::{Preview, Session, Transform};
+use ruster_scene::{Object, Preview, Scene, Session, Transform};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::Arc};
 use std::{
@@ -61,6 +61,9 @@ pub struct SceneEditor {
     error: String,
     notice: String,
     path_text: String,
+    name_text: String,
+    new_scene_pending: bool,
+    rename_pending: bool,
     dialog: Option<bool>,
     close_pending: bool,
     close_approved: bool,
@@ -100,6 +103,12 @@ impl SceneEditor {
             })
             .unwrap_or_default();
         let preview_assets = resolved.clone();
+        let name_text = session
+            .scene()
+            .objects
+            .first()
+            .map(|o| o.display_name().to_string())
+            .unwrap_or_default();
         Self {
             session,
             selected,
@@ -112,6 +121,9 @@ impl SceneEditor {
             error: asset_error,
             notice: "Ready. Right-drag to orbit; scroll to zoom.".into(),
             path_text: String::new(),
+            name_text,
+            new_scene_pending: false,
+            rename_pending: false,
             dialog: None,
             close_pending: false,
             close_approved: false,
@@ -133,7 +145,23 @@ impl SceneEditor {
             .map(|o| Some(Fields::from(&o.transform)).as_ref() != self.draft.as_ref())
             .unwrap_or(false)
     }
+    fn reconcile_selection(&mut self) {
+        if !self
+            .selected
+            .as_ref()
+            .is_some_and(|id| self.session.scene().objects.iter().any(|o| &o.id == id))
+        {
+            self.selected = self.session.scene().objects.first().map(|o| o.id.clone());
+        }
+    }
     fn sync_draft(&mut self) {
+        self.reconcile_selection();
+        self.name_text = self
+            .selected
+            .as_ref()
+            .and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id))
+            .map(|o| o.display_name().to_string())
+            .unwrap_or_default();
         self.draft = self
             .selected
             .as_ref()
@@ -145,6 +173,8 @@ impl SceneEditor {
             Err("drafts_pending".into())
         } else if self.dialog.is_some()
             || self.asset_dialog
+            || self.new_scene_pending
+            || self.rename_pending
             || self.close_pending
             || self.close_approved
         {
@@ -215,6 +245,80 @@ impl SceneEditor {
             }
             Err(e) => self.error = e.to_string(),
         }
+    }
+    fn next_object_id(&self) -> String {
+        // Probe only the bounded scene; IDs remain stable across display-name edits.
+        (1..=ruster_scene::MAX_OBJECTS + ruster_scene::HISTORY_LIMIT + 1)
+            .map(|n| format!("object-{n}"))
+            .find(|id| !self.session.contains_object_id(id))
+            .expect("bounded scene has a free generated ID")
+    }
+    fn object_action(&mut self, action: &str) {
+        if let Err(error) = self.guard() {
+            self.error = error;
+            return;
+        }
+        let revision = self.session.scene().revision;
+        let selected = self.selected.clone();
+        let new_id = self.next_object_id();
+        let result = match action {
+            "create" => self
+                .session
+                .create(revision, Object::cube(new_id.clone(), Some("Cube".into()))),
+            "duplicate" => selected
+                .as_deref()
+                .ok_or_else(|| "Select an object first.".to_string())
+                .and_then(|id| {
+                    let name = self
+                        .session
+                        .scene()
+                        .objects
+                        .iter()
+                        .find(|o| o.id == id)
+                        .map(|o| o.display_name().to_string())
+                        .unwrap_or_default();
+                    self.session
+                        .duplicate(revision, id, &new_id, Some(name))
+                        .map_err(|e| e.to_string())
+                })
+                .map_err(ruster_scene::SceneError::Invalid),
+            "delete" => selected
+                .as_deref()
+                .ok_or_else(|| ruster_scene::SceneError::Invalid("Select an object first.".into()))
+                .and_then(|id| self.session.delete(revision, id)),
+            "rename" => selected
+                .as_deref()
+                .ok_or_else(|| ruster_scene::SceneError::Invalid("Select an object first.".into()))
+                .and_then(|id| {
+                    self.session
+                        .rename(revision, id, Some(self.name_text.clone()))
+                }),
+            _ => unreachable!(),
+        };
+        match result {
+            Ok(_) => {
+                if matches!(action, "create" | "duplicate") {
+                    self.selected = Some(new_id);
+                }
+                self.sync_draft();
+                self.error.clear();
+                self.notice = format!("Authored {action}; preview unchanged until Reset.");
+            }
+            Err(error) => self.error = error.to_string(),
+        }
+    }
+    fn replace_with_empty(&mut self) {
+        let render = self.render.clone();
+        if let Some(render) = render.as_ref().filter(|_| self.shader_revision > 0) {
+            if let Err(error) =
+                ruster_render::refresh_shader(render, ruster_render::default_shader())
+            {
+                self.error = error;
+                return;
+            }
+        }
+        *self = Self::new(Session::new(Scene::empty("untitled")).expect("empty scene is valid"));
+        self.render = render;
     }
     fn asset_snapshot(&mut self) {
         let meshes = self
@@ -553,6 +657,20 @@ impl SceneEditor {
                 "object_id",
                 "transform",
             ],
+            "scene_create" | "scene_rename" => &[
+                "expected_session_token",
+                "expected_revision",
+                "object_id",
+                "name",
+            ],
+            "scene_duplicate" => &[
+                "expected_session_token",
+                "expected_revision",
+                "object_id",
+                "new_object_id",
+                "name",
+            ],
+            "scene_delete" => &["expected_session_token", "expected_revision", "object_id"],
             "scene_undo" | "scene_redo" => &["expected_session_token", "expected_revision"],
             "scene_replay" => &["expected_session_token", "expected_revision", "ticks"],
             _ => return Err(err("unsupported_operation")),
@@ -584,7 +702,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts(),"recovery_pending":self.dialog.is_some()||self.close_pending,"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.asset_dialog||self.new_scene_pending||self.rename_pending,"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -627,6 +745,44 @@ impl SceneEditor {
                     .map_err(|_| err("invalid_arguments"))?;
                 self.session.edit(revision, id, &transform)
             }
+            "scene_create" => {
+                let id = args["object_id"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let name = args["name"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                self.session
+                    .create(revision, Object::cube(id, Some(name.into())))
+            }
+            "scene_rename" => {
+                let id = args["object_id"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let name = args["name"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                self.session.rename(revision, id, Some(name.into()))
+            }
+            "scene_duplicate" => {
+                let id = args["object_id"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let new_id = args["new_object_id"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let name = args["name"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                self.session
+                    .duplicate(revision, id, new_id, Some(name.into()))
+            }
+            "scene_delete" => {
+                let id = args["object_id"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                self.session.delete(revision, id)
+            }
             "scene_undo" => self.session.undo(revision),
             "scene_redo" => self.session.redo(revision),
             _ => unreachable!(),
@@ -642,14 +798,30 @@ impl SceneEditor {
             };
             (code.into(), e.to_string())
         })?;
+        if matches!(op, "scene_create" | "scene_duplicate") {
+            self.selected = args[if op == "scene_create" {
+                "object_id"
+            } else {
+                "new_object_id"
+            }]
+            .as_str()
+            .map(str::to_string);
+        }
         self.sync_draft();
         let changed = before != *self.session.scene();
-        let diff: Vec<_> = before
-            .objects
-            .iter()
-            .zip(&self.session.scene().objects)
-            .filter(|(a, b)| a.transform != b.transform || a.mesh != b.mesh)
-            .map(|(a, b)| json!({"object_id":a.id,"before":a.transform,"after":b.transform,"before_mesh":a.mesh,"after_mesh":b.mesh}))
+        let mut ids: std::collections::BTreeSet<_> =
+            before.objects.iter().map(|o| o.id.as_str()).collect();
+        ids.extend(self.session.scene().objects.iter().map(|o| o.id.as_str()));
+        let diff: Vec<_> = ids
+            .into_iter()
+            .filter_map(|id| {
+                let old = before.objects.iter().find(|o| o.id == id);
+                let new = self.session.scene().objects.iter().find(|o| o.id == id);
+                (old != new).then(|| json!({"object_id":id,
+                    "before":old.map(|o| &o.transform),"after":new.map(|o| &o.transform),
+                    "before_mesh":old.and_then(|o| o.mesh.as_ref()),"after_mesh":new.and_then(|o| o.mesh.as_ref()),
+                    "before_object":old,"after_object":new}))
+            })
             .collect();
         self.notice = format!(
             "Agent {op}: revision {revision}; {} authored object(s) changed. Preview unchanged.",
@@ -693,18 +865,14 @@ impl SceneEditor {
             if ui.button("Close assets").clicked(){self.asset_dialog=false;}
         });
     }
-    fn ui(&mut self, ui: &mut egui::Ui) {
-        let ctx = ui.ctx().clone();
-        if ctx.input(|i| i.viewport().close_requested()) && !self.close_approved {
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-            if self.session.is_dirty() || self.drafts() {
-                self.close_pending = true;
-                self.running = false;
-            } else {
-                self.close_approved = true;
-            }
-        }
-        if !ctx.egui_wants_keyboard_input() && self.dialog.is_none() && !self.close_pending {
+    fn route_shortcuts(&mut self, ctx: &egui::Context) {
+        if !ctx.egui_wants_keyboard_input()
+            && self.dialog.is_none()
+            && !self.close_pending
+            && !self.rename_pending
+            && !self.new_scene_pending
+            && !self.asset_dialog
+        {
             if ctx.input_mut(|i| i.consume_key(egui::Modifiers::CTRL, egui::Key::S)) {
                 self.save();
             }
@@ -716,6 +884,25 @@ impl SceneEditor {
                 self.history(false);
             }
         }
+    }
+    fn ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        if ctx.input(|i| i.viewport().close_requested()) && !self.close_approved {
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+            if self.new_scene_pending {
+                self.error = "Resolve or cancel New scene before closing.".into();
+                self.running = false;
+            } else if self.rename_pending {
+                self.error = "Apply or cancel the name edit before closing.".into();
+                self.running = false;
+            } else if self.session.is_dirty() || self.drafts() {
+                self.close_pending = true;
+                self.running = false;
+            } else {
+                self.close_approved = true;
+            }
+        }
+        self.route_shortcuts(&ctx);
         if self.running && self.last_tick.elapsed() >= Duration::from_millis(250) {
             if let Err(e) = self.preview.step() {
                 self.error = e.to_string();
@@ -727,8 +914,16 @@ impl SceneEditor {
             ctx.request_repaint_after(Duration::from_millis(250));
         }
         egui::Panel::top("scene_top").show(ui, |ui| {
-            ui.horizontal(|ui| {
+            ui.horizontal_wrapped(|ui| {
                 ui.heading("Ruster Scene Editor");
+                if ui.button("New scene").clicked() {
+                    if self.session.is_dirty() || self.drafts() {
+                        self.new_scene_pending = true;
+                        self.running = false;
+                    } else {
+                        self.replace_with_empty();
+                    }
+                }
                 if ui.button("Assets…").clicked() {
                     self.asset_dialog = true;
                 }
@@ -762,10 +957,10 @@ impl SceneEditor {
                 if ui.button("Save scene as…").clicked() && self.apply() {
                     self.dialog = Some(false);
                 }
-                if ui.button("Undo transform").clicked() {
+                if ui.button("Undo authored edit").clicked() {
                     self.history(false)
                 }
-                if ui.button("Redo transform").clicked() {
+                if ui.button("Redo authored edit").clicked() {
                     self.history(true)
                 }
             });
@@ -790,22 +985,39 @@ impl SceneEditor {
             .default_size(180.)
             .show(ui, |ui| {
                 ui.heading("Objects");
+                if ui.button("Create cube").clicked() {
+                    self.object_action("create");
+                }
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(self.selected.is_some(), egui::Button::new("Duplicate"))
+                        .clicked()
+                    {
+                        self.object_action("duplicate");
+                    }
+                    if ui
+                        .add_enabled(self.selected.is_some(), egui::Button::new("Delete"))
+                        .clicked()
+                    {
+                        self.object_action("delete");
+                    }
+                });
                 let ids: Vec<_> = self
                     .session
                     .scene()
                     .objects
                     .iter()
-                    .map(|o| o.id.clone())
+                    .map(|o| (o.id.clone(), o.display_name().to_string()))
                     .collect();
                 egui::ScrollArea::vertical()
                     .id_salt("scene_object_scroll")
                     .show(ui, |ui| {
-                        for id in ids {
+                        for (id, name) in ids {
                             if ui
-                                .selectable_label(self.selected.as_ref() == Some(&id), &id)
+                                .selectable_label(self.selected.as_ref() == Some(&id), name)
                                 .clicked()
                             {
-                                if self.drafts() {
+                                if self.guard().is_err() {
                                     self.error =
                                         "Apply or revert transform before changing selection."
                                             .into();
@@ -818,9 +1030,15 @@ impl SceneEditor {
                     });
             });
         egui::Panel::right("scene_inspector").exact_size(290.).show(ui,|ui| {
+            ui.heading("Object");
+            if let Some(id) = &self.selected { ui.small(format!("Stable ID: {id}")); }
+            if let Some(object) = self.selected.as_ref().and_then(|id| self.session.scene().objects.iter().find(|o| &o.id == id)) { ui.label(object.display_name()); }
+            if ui.add_enabled(self.selected.is_some(), egui::Button::new("Rename object")).clicked() {
+                match self.guard() { Ok(()) => self.rename_pending = true, Err(error) => self.error = error }
+            }
             ui.heading("Transform");
             if let Some(object)=self.selected.as_ref().and_then(|id|self.session.scene().objects.iter().find(|o|&o.id==id)) {ui.label(format!("Mesh: {}",object.mesh.as_deref().unwrap_or("Procedural cube")));}
-            ui.label(format!("Loaded scene format v{}; Save writes v2.",self.session.loaded_format_version()));
+            ui.label(format!("Loaded scene format v{}; Save writes v{}.",self.session.loaded_format_version(),ruster_scene::FORMAT_VERSION));
             if let Some(t)=&mut self.draft {
                 for (label,values) in [("Position",&mut t.translation),("Rotation (radians)",&mut t.rotation),("Scale",&mut t.scale)] {
                     ui.label(label);
@@ -881,12 +1099,51 @@ impl SceneEditor {
                     &self.resolved
                 },
             ) {
-                if !self.drafts() {
+                if self.guard().is_ok() && self.session.scene().objects.iter().any(|o| o.id == id) {
                     self.selected = Some(id);
                     self.sync_draft();
                 }
             }
         });
+        if self.rename_pending {
+            egui::Modal::new(egui::Id::unique("rename_object_dialog")).show(&ctx, |ui| {
+                ui.heading("Rename object");
+                ui.label("Display name; the stable object ID stays unchanged.");
+                ui.text_edit_singleline(&mut self.name_text);
+                if ui.button("Apply name").clicked() {
+                    self.rename_pending = false;
+                    self.object_action("rename");
+                    if !self.error.is_empty() {
+                        self.rename_pending = true;
+                    }
+                }
+                if ui.button("Cancel rename").clicked() {
+                    self.rename_pending = false;
+                    self.sync_draft();
+                }
+                if !self.error.is_empty() {
+                    ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+                }
+            });
+        }
+        if self.new_scene_pending && self.dialog.is_none() {
+            egui::Modal::new(egui::Id::unique("new_scene_dialog")).show(&ctx, |ui| {
+                ui.heading("New scene — unsaved work");
+                ui.label("Save your current scene, discard it, or cancel.");
+                if ui.button("Save before new scene").clicked() {
+                    self.save();
+                    if !self.session.is_dirty() && !self.drafts() {
+                        self.replace_with_empty();
+                    }
+                }
+                if ui.button("Discard and create new scene").clicked() {
+                    self.replace_with_empty();
+                }
+                if ui.button("Cancel new scene").clicked() {
+                    self.new_scene_pending = false;
+                }
+            });
+        }
         if let Some(open) = self.dialog {
             egui::Modal::new(egui::Id::unique("scene_path_dialog")).show(&ctx,|ui| {
                 ui.heading(if open {"Open scene"}else{"Save scene as"});
@@ -908,7 +1165,7 @@ impl SceneEditor {
                             }
                         } else {
                             match self.save_scene(path) {
-                                Ok(())=>{self.dialog=None;if self.close_pending {self.close_approved=true;}self.notice="Scene saved.".into();},
+                                Ok(())=>{self.dialog=None;if self.close_pending {self.close_approved=true;}self.notice="Scene saved.".into();if self.new_scene_pending {self.replace_with_empty();}},
                                 Err(e)=>self.error=e.to_string()
                             }
                         }
@@ -918,7 +1175,8 @@ impl SceneEditor {
             });
         }
         self.content_ui(&ctx);
-        if self.close_pending && self.dialog.is_none() && !self.asset_dialog {
+        if self.close_pending && self.dialog.is_none() && !self.asset_dialog && !self.rename_pending
+        {
             egui::Modal::new(egui::Id::unique("scene_close_dialog")).show(&ctx, |ui| {
                 ui.label("Save, discard or cancel before closing.");
                 if ui.button("Save and close scene").clicked() {
@@ -1004,6 +1262,117 @@ pub fn run(path: PathBuf) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Unique UI boundary risk: an unfocused name field in a modal must not let
+    // Ctrl+S apply/sync another draft and destroy the pending text.
+    #[test]
+    fn modal_shortcuts_preserve_pending_name_and_recovery_intent() {
+        let ctx = egui::Context::default();
+        for modal in 0..4 {
+            let mut e = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+            e.name_text = "Unapplied name".into();
+            match modal {
+                0 => e.rename_pending = true,
+                1 => e.new_scene_pending = true,
+                2 => e.asset_dialog = true,
+                _ => e.dialog = Some(true),
+            }
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: vec![
+                        egui::Event::ModifiersChanged(egui::Modifiers::CTRL),
+                        egui::Event::Key {
+                            key: egui::Key::S,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::CTRL,
+                        },
+                    ],
+                    ..Default::default()
+                },
+                |_| e.route_shortcuts(&ctx),
+            );
+            output.textures_delta.clear();
+            assert_eq!(e.name_text, "Unapplied name");
+            assert_eq!(e.session.scene().revision, 0);
+            assert!(e.session.path().is_none());
+            assert_eq!(e.dialog, if modal == 3 { Some(true) } else { None });
+        }
+    }
+
+    // Unique integration risk: object membership changes need ID-based diffs,
+    // shared human/agent history and selection repair rather than zipped vectors.
+    #[test]
+    fn object_commands_share_history_guards_and_preserve_preview() {
+        let mut e = SceneEditor::new(Session::new(Scene::empty("created")).unwrap());
+        let initial = e.command("test", "scene_inspect", json!({}))["result"].clone();
+        let token = initial["session_token"].clone();
+        let args =
+            |revision: &str| json!({"expected_session_token":token,"expected_revision":revision});
+        let mut create = args("0");
+        create["object_id"] = "stable".into();
+        create["name"] = "My object".into();
+        e.rename_pending = true;
+        assert_eq!(
+            e.command("test", "scene_create", create.clone())["error"]["code"],
+            "recovery_pending"
+        );
+        e.rename_pending = false;
+        let result = e.command("test", "scene_create", create.clone());
+        assert_eq!(result["ok"], true);
+        assert!(result["result"]["diff"][0]["before"].is_null());
+        assert_eq!(result["result"]["diff"][0]["after_object"]["id"], "stable");
+        assert_eq!(e.selected.as_deref(), Some("stable"));
+        assert!(e.preview.scene.objects.is_empty());
+        assert_eq!(
+            e.command("test", "scene_create", create)["error"]["code"],
+            "stale_revision"
+        );
+        let mut rename = args("1");
+        rename["object_id"] = "stable".into();
+        rename["name"] = "Renamed".into();
+        e.draft.as_mut().unwrap().translation[0] = "-".into();
+        assert_eq!(
+            e.command("test", "scene_rename", rename.clone())["error"]["code"],
+            "drafts_pending"
+        );
+        e.sync_draft();
+        assert_eq!(e.command("test", "scene_rename", rename)["ok"], true);
+        assert_eq!(e.session.scene().objects[0].id, "stable");
+        assert_eq!(e.session.scene().objects[0].display_name(), "Renamed");
+        let mut duplicate = args("2");
+        duplicate["object_id"] = "stable".into();
+        duplicate["new_object_id"] = "copy".into();
+        duplicate["name"] = "Copy".into();
+        assert_eq!(e.command("test", "scene_duplicate", duplicate)["ok"], true);
+        assert_eq!(e.selected.as_deref(), Some("copy"));
+        let mut delete = args("3");
+        delete["object_id"] = "copy".into();
+        let result = e.command("test", "scene_delete", delete);
+        assert!(result["result"]["diff"][0]["after"].is_null());
+        assert_eq!(e.selected.as_deref(), Some("stable"));
+        e.history(false);
+        assert_eq!(e.session.scene().objects.len(), 2);
+        assert!(e.preview.scene.objects.is_empty());
+        e.history(true);
+        assert_eq!(e.session.scene().objects.len(), 1);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("created.json");
+        e.save_scene(path.clone()).unwrap();
+        assert_eq!(Session::open(path).unwrap().scene(), e.session.scene());
+        let old_token =
+            e.command("test", "scene_inspect", json!({}))["result"]["session_token"].clone();
+        e.replace_with_empty();
+        assert!(e.session.scene().objects.is_empty());
+        assert!(e.selected.is_none());
+        assert!(e.preview.scene.objects.is_empty());
+        assert_ne!(
+            e.command("test", "scene_inspect", json!({}))["result"]["session_token"],
+            old_token
+        );
+    }
+
     #[test]
     fn content_commands_preserve_preview_and_last_good_assets_across_refresh_failures() {
         let dir = tempfile::tempdir().unwrap();

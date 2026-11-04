@@ -2836,10 +2836,14 @@ dependencies = [
 name = "ruster-motion-lab"
 version = "0.1.0"
 dependencies = [
+ "fs2",
  "ruster-app",
  "ruster-assets",
  "ruster-scene",
  "ruster-script",
+ "serde",
+ "serde_json",
+ "tempfile",
 ]
 
 [[package]]

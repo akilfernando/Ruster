@@ -162,6 +162,11 @@ impl<A: Application> Host<A> {
 impl<A: Application> eframe::App for Host<A> {
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
+        if ctx.input(|i| i.viewport().close_requested()) && !self.runtime.app_mut().request_close()
+        {
+            self.runtime.set_running(false);
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
         self.ui_frames = self.ui_frames.saturating_add(1);
         let now = Instant::now();
         let elapsed = now.saturating_duration_since(self.last_frame);
@@ -223,6 +228,9 @@ impl<A: Application> eframe::App for Host<A> {
                 self.report(result);
             });
 
+        if self.runtime.app_mut().take_reset_request() {
+            self.reset();
+        }
         self.route_keyboard(&ctx);
 
         // Application UI/input may have edited scene data. Invalid state never reaches the GPU.

@@ -23,7 +23,7 @@ async def main():
             tools = await client.list_tools()
             assert {tool.name for tool in tools.tools} >= {
                 "inspect", "edit", "undo", "redo", "replay", "scene_inspect",
-                "scene_transform", "scene_undo", "scene_redo", "scene_replay",
+                "scene_transform", "scene_create", "scene_rename", "scene_duplicate", "scene_delete", "scene_undo", "scene_redo", "scene_replay",
             }
 
             async def call(name, arguments=None, error=None):

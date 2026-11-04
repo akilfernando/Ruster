@@ -20,7 +20,7 @@ M0 through M7 are complete within their documented local scope; see [M1/M2 evide
 | M5 Shared scene and 3D | Minimal scene and rendering shared by editor/runtime | Complete, bounded Linux procedural-scene scope |
 | M6 Content and iteration | Asset import, stable references and recoverable refresh | Complete, bounded OBJ/WGSL Linux scope |
 | M7 Standalone application kit | Code-first template and packaged interactive example | Complete, Linux development-kit scope |
-| M8 Independent reuse proof | A meaningfully different non-game application | In progress; scripting experiment first |
+| M8 Independent reuse proof | A meaningfully different non-game application | In progress; runtime/project slices verified, authoring/tooling/reuse gates open |
 | M9 Public alpha candidate | Usable release on an explicitly tested support matrix | Planned |
 
 ## M0 Engineering seed
@@ -173,7 +173,17 @@ M7 delivered scope: ruster-app shared host with application-owned behavior, read
 
 **Working implementation slices:** the [experience allocation](EDITOR-EXPERIENCE.md#implementation-allocation) assigns generic object/manipulation, content/workspace and recovery work alongside the second application before reuse acceptance. These are concrete follow-on requirements; the current prototype does not already provide a familiar editor.
 
-2026-11-04: the user accepted Rust plus approachable behavior scripting. Begin with a bounded non-game Motion Lab experiment over the same application kit, under [decision0011](decisions/0011-behavior-scripting-experiment.md). Test per-object behavior, exposed properties, source replacement and error recovery. Rhai is an agent-selected prototype dependency, not the settled product language. This slice does not complete M8: project persistence, generic editor/command integration, IDE/source navigation/debugging, the allocated everyday editor interactions and independent distribution/reuse evidence still need delivery. Preserve the final language/tooling gate rather than letting the prototype become a decision by inertia.
+2026-11-04: the user accepted Rust plus approachable behavior scripting. Motion Lab now verifies per-object behavior/source edits, atomic errors, separate project save/reopen and session-local undo, under [decision0011](decisions/0011-behavior-scripting-experiment.md) and [decision0012](decisions/0012-motion-lab-project.md). Rhai remains an agent-selected experiment. This does not complete generic editor integration, tooling selection, the everyday editor allocation or independent distribution/reuse.
+
+The [post-persistence reassessment](ROADMAP-REVIEW.md#post-m8-persistence-reassessment--2026-11-04) makes the working order explicit:
+
+1. **Next: generic scene construction.** New scene, create/name/duplicate/delete, position, shared guarded undo and save/reopen through the human/CLI/MCP command boundary. Preserve stable identities and supported history; distinguish naming from identity before choosing storage.
+2. **Everyday manipulation.** Multi-selection/copy-paste, gizmos, snapping/local-world/pivot and precision/cancel/focus behavior, guided by interaction research and early creator feedback.
+3. **Behavior/tooling gate and integration.** Trial real language/tooling workflows before hardening generic components; then support attached behavior on creator-authored objects, source navigation/debugging, guarded commands and saving/reopening unfinished code separately from last-good runtime.
+4. **Content/workspace/recovery.** Deliver the allocated finding/assignment/navigation, discoverable/remappable controls, readable persisted layouts/recent context and explicit save/recovery behavior.
+5. **Independent reuse closeout.** Independently modify both applications; export/package the non-game application outside the checkout with representative cost, resource and notice evidence.
+
+Report reuse, editor baseline and behavior/tooling as separate open gates. This order is an agent-selected implementation plan under authorized development, not a new user-selected language/control scheme. No allocated M8 gate is waived or moved to M9. Bounded tooling trials and human feedback should occur early enough to change dependent implementation. Keep M9 focused on adoption/release evidence and corrections rather than postponing ordinary editor creation until alpha hardening.
 
 **Exit criteria:** no copying engine internals into the second example; shared mechanisms remain domain-neutral; exposed coupling is corrected; representative performance and iteration costs are recorded. Two differently presented logistics demos alone do not establish broad reuse.
 
@@ -203,7 +213,7 @@ M7 delivered scope: ruster-app shared host with application-owned behavior, read
 
 Seek an external human walkthrough of the current editor before major UI expansion. Keep agent-assisted timing distinct from human usability evidence. Choose representative workloads and hardware tiers before performance claims; measure tail latency, memory, idle use and iteration/build cost. Establish Windows runtime feasibility and another GPU class where access permits before distribution decisions harden.
 
-Source licensing, public hosting and scoped Linux CI are delivered under decision0007. Maintain dependency notices and use TESTING.md as workflows evolve; binary distribution obligations still need review in M7. Keep CLI/editor/MCP semantics and schema compatibility aligned as facilities grow.
+Source licensing, public hosting and scoped Linux CI are delivered under decision0007. Maintain dependency notices and use TESTING.md as workflows evolve; new binary payloads still require their own distribution/notices review; M7 evidence covers its recorded Yard package. Keep CLI/editor/MCP semantics and schema compatibility aligned as facilities grow.
 
 After alpha, choose evidence-driven tracks such as richer rendering/animation, larger simulations, networking, extensibility or enterprise integrations. These are future directions, not simultaneous scope commitments or a claim of Unity/Unreal parity.
 
@@ -211,7 +221,7 @@ After alpha, choose evidence-driven tracks such as richer rendering/animation, l
 
 At each close record: artifact/launch command, demo steps, acceptance evidence, UX/performance observations, remaining limitations, architectural decisions and the next slice. Reference existing valid test results rather than rerunning everything to prepare the demonstration. If an exit criterion fails, fix it or explicitly revise scope and rationale; never silently mark it complete.
 
-Estimate only the next milestone after a short task breakdown. Do not assign calendar dates across the entire roadmap without capacity and measured velocity. Binary distribution prerequisites/notices, access to Windows/GPU testing and independent usability participants are explicit dependencies to arrange before they block the relevant gates. Source license selection is complete. At M7 planning, allocate the relevant EDITOR-EXPERIENCE.md gaps to concrete implementation slices before M9 acceptance; the accepted requirement currently has a baseline and gate, not a completed implementation schedule.
+Estimate only the next milestone after a short task breakdown. Do not assign calendar dates across the entire roadmap without capacity and measured velocity. Binary distribution prerequisites/notices, access to Windows/GPU testing and independent usability participants are explicit dependencies to arrange before they block the relevant gates. Source license selection is complete. The M8 order above and EDITOR-EXPERIENCE.md allocation own the remaining editor slices; they are implementation work with open acceptance evidence, not a completed familiarity baseline.
 
 ## Completed M1 slices
 

@@ -130,3 +130,39 @@ No fundamental conflict was found between the accepted direction and the M7–M9
 Current private/public repository state and notices were checked: public personal repository on main; generated inventory matches locked dependencies, including the HAL patch. The recorded61 packages without bundled readable license texts remain a distribution-review input, not newly resolved by this audit. Documentation links/whitespace and notice checks passed. Existing source/native evidence was reused; no fresh functional, human-usability or performance validation was claimed.
 
 Scope limit: this was an internal alignment audit, not a complete code correctness/security audit or a re-fetch of every external research link. Dated source claims remain research snapshots and must be rechecked when used for a new consequential choice. Historical proposals, milestone counts and failed evidence are retained as history with current pointers rather than rewritten as past success.
+
+## Post-M8 persistence reassessment — 2026-11-04
+
+**Status:** root plus independent Astra strategic review, requested by the user. Findings below update the agent's working implementation order; the accepted M7 → M8 → M9 milestone sequence and confirmed familiarity requirements remain intact. Any proposed gate relocation is explicitly unaccepted. This review changes documentation only, preserving the uncommitted M8 implementation and its valid evidence.
+
+### Assessment
+
+Retain the overall sequence, but stop treating M8 as a single second-example task. It now contains three distinct outcomes: independent application reuse, a usable generic authoring workflow, and scripting/tooling selection. The current title understates that work. Neither another scripting demo nor packaging Motion Lab alone can satisfy its allocated editor gates.
+
+M7 establishes a code-first application/export route. Motion Lab additionally proves the same host can run non-logistics behavior, atomic script updates and authored project persistence. These are real advances, but not yet independent creator reuse: the app starts from three demo objects, its project format rejects meshes, its authoring controls are separate from the generic editor, and Yard's export scripts do not export it. Generic Scene Session and editor still offer transform/mesh edits rather than ordinary object construction. MCP has no behavior or object-lifecycle commands. Human familiarity, fresh-machine/platform breadth and representative current performance remain evidence gaps.
+
+The largest product bottleneck is now **constructing one's own scene**, rather than another layer of interpreter infrastructure. Prioritize a generic object lifecycle vertical slice next. A full editor or engine-framework rewrite is not justified; extend the shared validated command/history boundary from concrete workflows. Do not merge the scene and experimental application formats merely to make their diagrams look unified.
+
+### Working order within M8
+
+| Order | Runnable creator result | Required evidence / boundary |
+| --- | --- | --- |
+| 1. Generic scene construction — next | Start a new scene, create/name/duplicate/delete objects, position them, undo/redo and save/reopen | Shared revision-aware commands used by human/CLI/MCP routes; preserve stable identity and supported old scene history. Selection/focus, dirty-close recovery and actionable errors are part of the slice. Define display naming versus identity before changing storage. No gizmo framework bundled into this first change. |
+| 2. Everyday manipulation | Select several objects, copy/paste and position/rotate/scale them through gizmos and precise fields, with snapping/local-world/pivot choices | Primary-source interaction research and targeted creator feedback inform controls; one coherent undo per gesture, cancel/focus behavior and actual native journey. Existing allocation stays mandatory. |
+| 3. Behavior authoring/tooling gate and integration | Attach behavior to creator-authored objects, edit externally, locate diagnostics, inspect/debug and recover | Run a bounded practical comparison before permanent language or generic component/schema commitment. Rhai remains provisional. Integrate supported operations with guarded commands and authored history; demonstrate behavior on newly created/duplicated/deleted objects. Save unfinished source independently of last-good runnable state, then reopen and repair it. |
+| 4. Content/workspace/recovery | Find and assign owned content, frame/navigate objects, arrange a readable workspace and resume work safely | Deliver the already allocated search/context/drag-drop, discoverable/remappable controls, persisted layout/recent context and save/recovery handling. Dense Motion Lab source wrapping is concrete feedback, not proof of a finished code editor. Select crash-recovery semantics explicitly; no universal power-loss promise. |
+| 5. Independent reuse and distribution closeout | Another developer changes both applications and runs/packages them outside the checkout | Give the non-game task a clear creator-owned input/output and different data/interaction needs; verify source edit/rebuild, relocated resources, notices and actual package prerequisites. Reuse shared facilities without copying engine internals. Record representative iteration/performance costs. |
+
+These are sequenced vertical slices, not simultaneous subsystem assignments or a commitment to one giant PR per row. A bounded tooling trial and early human feedback can occur before their dependent implementation. The language/tooling gate must precede hardening behavior integration; it should not become a broad research detour. Valid-code-only Save is a known restrictive contract, not evidence of corruption: close that specific recovery gap without building an unrelated recovery framework or displacing scene construction.
+
+### Gate clarity and risks
+
+Keep three independently reported gate states: **reuse proof**, **editor creation/familiarity baseline**, and **behavior/tooling workflow**. Today all remain open; runtime/persistence sub-slices are verified. Preserve all allocated M8 requirements until an explicit scope revision. A possible later restructuring would rename M8 or introduce a distinct pre-alpha editor gate, but moving those requirements to M9 merely to mark reuse complete is **not accepted by this review**.
+
+M9 should consume evidence and resolve adoption/release blockers, rather than hide the first implementation of routine editing. Seek experienced Unity and Unreal creator feedback during M8; final M9 walkthroughs remain required. Linux-only alpha scope versus the intended Windows target needs an explicit decision based on actual access/testing. Another GPU/fresh-machine route, performance budgets on declared workloads and binary prerequisites remain release dependencies; the existing GLIBC2.44 archive does not establish portable Linux support.
+
+No speculative ECS, render graph, textures/physics/audio, enterprise integration or full engine parity is added. No dates or overall completion percentage follow from milestone counts. Preserve the existing bounded scopes and distinguish an internal agent walkthrough from external human adoption.
+
+### Inspection and verification
+
+Reviewed current `docs/STATUS.md`, roadmap/direction/experience allocation, decisions0011/0012, M8 project/native evidence, scene public types/Session history, generic editor controls/dispatch, MCP scene capabilities and `scripts/new_app.py`. Independent Astra read-only review agreed that generic construction is the next bottleneck and that M8's independent gates must remain visible. Existing 88Rust/20tooling and native results are reused for unchanged implementation; no engine tests, new benchmark, external-user study or new toolkit/language research was run for this documentation review. Final Markdown links/whitespace are checked separately.

@@ -159,7 +159,7 @@ The standalone renderer and headless `ruster-scene run` use the same Preview.
 
 For native MCP, start scene mode with `RUSTER_MCP_ENABLE=1`, then attach the
 adapter using the printed private socket as described above. Scene mode uses
-`scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo`, `scene_replay`.
+`scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo`, `scene_replay`, plus the object-lifecycle commands described below.
 Inspection pages at most16 objects; all edits require the exact live session
 identity/revision and resolved human drafts/dialogs. From the repository root:
 
@@ -215,7 +215,7 @@ modes; it does not rewrite authored data or roll back runtime ticks. Open/restar
 uses the built-in pipeline until an explicit refresh (or standalone `--shader`).
 
 Scene-v1 files still load with their existing transform history. The inspector
-shows the loaded version and that Save writes v2. V1-labelled files containing
+shows the loaded version and that Save writes v3, preserving supported v1/v2 history on migration. V1-labelled files containing
 v2 mesh fields are rejected. Logistics-v1 scenarios remain a separate format.
 
 Native MCP adds `asset_inspect`, `asset_import`, `asset_refresh`, `asset_rename`,
@@ -225,3 +225,12 @@ explicit project root; responses contain metadata/status rather than mesh arrays
 or shader source. A reproducible official-SDK smoke is
 `uv run --with mcp==2.3.0 scripts/mcp_content_demo.py` with `RUSTER_MCP_SOCKET`
 set, against a disposable scene whose first object is still a procedural cube.
+
+
+### Generic scene construction
+
+In generic scene mode, **New scene** starts an empty authored scene. Unsaved work offers Save, Discard or Cancel; Save As must complete successfully before replacement. **Create cube** creates a procedural object and selects it. **Duplicate** creates a new stable identity, **Delete** removes the selected object, and **Undo authored edit** / **Redo authored edit** share the scene's bounded persisted history. Preview stays a separate snapshot until Reset preview.
+
+**Rename object** opens an explicit display-name Apply/Cancel dialog. Names can change without changing stable IDs or references. Resolve pending transform fields before object operations; resolve the name dialog before changing selection or closing. The hierarchy shows display names and the inspector shows the immutable stable ID. Newly generated IDs avoid current objects and identities retained by undo/redo. This slice uses single selection; multi-selection, copy/paste and gizmos remain unfinished.
+
+The live command surface additionally exposes `scene_create` (`object_id`, `name`), `scene_rename` (`object_id`, `name`), `scene_duplicate` (`object_id`, `new_object_id`, `name`) and `scene_delete` (`object_id`). All require exact inspected `expected_session_token` and decimal `expected_revision`, refuse pending human drafts/recovery, remain unsaved until human Save, and use the same Session operations/history as the buttons. Object diffs are keyed by stable ID. Existing `before`/`after` transform and `before_mesh`/`after_mesh` fields retain their semantics; additive `before_object`/`after_object` fields contain complete objects. Null represents creation/deletion. A replaced scene receives a fresh session token. New scene is a human-owned destructive recovery flow, not an MCP command.

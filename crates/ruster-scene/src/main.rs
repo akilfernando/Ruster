@@ -1,7 +1,7 @@
 use std::error::Error;
 use std::path::Path;
 
-use ruster_scene::{Preview, Scene, Session};
+use ruster_scene::{Object, Preview, Scene, Session, FORMAT_VERSION};
 
 fn main() {
     if let Err(error) = run() {
@@ -12,7 +12,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: ruster-scene demo FILE | inspect FILE | transform FILE EXPECTED_REV OBJECT X Y Z [RX RY RZ SX SY SZ] | mesh FILE EXPECTED_REV OBJECT ASSET_ID|none | undo FILE EXPECTED_REV | redo FILE EXPECTED_REV | run FILE TICKS (0..10000)";
+    let usage = "usage: ruster-scene demo FILE | new FILE SCENE_ID | create FILE REV ID [NAME] | rename FILE REV ID [NAME] | duplicate FILE REV SOURCE NEW_ID [NAME] | delete FILE REV ID | inspect FILE | transform FILE EXPECTED_REV OBJECT X Y Z [RX RY RZ SX SY SZ] | mesh FILE EXPECTED_REV OBJECT ASSET_ID|none | undo FILE EXPECTED_REV | redo FILE EXPECTED_REV | run FILE TICKS (0..10000)";
     let Some(command) = args.first() else {
         return Err(usage.into());
     };
@@ -22,13 +22,36 @@ fn run() -> Result<(), Box<dyn Error>> {
             session.save(&args[1])?;
             println!("created {} revision 0", args[1]);
         }
+        ("new" | "empty", 3) => {
+            let mut session = Session::new(Scene::empty(&args[2]))?;
+            session.save(&args[1])?;
+            println!("created empty {} revision 0", args[1]);
+        }
+        ("create" | "rename", 4 | 5) | ("duplicate", 5 | 6) | ("delete", 4) => {
+            let path = Path::new(&args[1]);
+            let mut session = Session::open(path)?;
+            let expected = args[2].parse()?;
+            let revision = match command.as_str() {
+                "create" => {
+                    session.create(expected, Object::cube(&args[3], args.get(4).cloned()))?
+                }
+                "rename" => session.rename(expected, &args[3], args.get(4).cloned())?,
+                "duplicate" => {
+                    session.duplicate(expected, &args[3], &args[4], args.get(5).cloned())?
+                }
+                "delete" => session.delete(expected, &args[3])?,
+                _ => unreachable!(),
+            };
+            session.save(path)?;
+            println!("revision {revision}");
+        }
         ("inspect", 2) => {
             let session = Session::open(&args[1])?;
             println!("{}", serde_json::to_string_pretty(session.scene())?);
             println!("undo={} redo={}", session.undo_len(), session.redo_len());
             println!("loaded_format_version={}", session.loaded_format_version());
-            if session.loaded_format_version() == 1 {
-                println!("v1 opened; next save upgrades to v2, preserving transform history");
+            if session.loaded_format_version() != FORMAT_VERSION {
+                println!("older scene opened; next save upgrades to v{FORMAT_VERSION}, preserving history");
             }
         }
         ("transform", 7 | 13) => {

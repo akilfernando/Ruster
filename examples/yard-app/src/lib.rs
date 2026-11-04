@@ -224,6 +224,7 @@ fn setting(ui: &mut egui::Ui, label: &str, value: &mut u64, range: std::ops::Ran
 
 fn block(id: &str, position: [f32; 3], scale: [f32; 3], color: [f32; 4]) -> Object {
     Object {
+        name: None,
         id: id.into(),
         transform: Transform {
             translation: position,
