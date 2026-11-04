@@ -1,0 +1,54 @@
+# M9 alpha-candidate acceptance
+
+Updated2026-11-05. **Working candidate, not accepted or published.** The user reactivated the through-M9 goal after the M8 checkpoint. The intended outcome is adoption by another developer without continual author assistance. A version label, local green gate or successful example alone does not prove that outcome.
+
+## Candidate identity and gate ownership
+
+The accepted functional baseline is local commit45a9a92 (M8); workspace package version is0.1.0 and packages remain `publish=false`. M9 working changes are not a frozen versioned candidate. Freeze a candidate commit and source version only after the current creator blockers are repaired; then generate source/artifact checksums from those exact bytes. No tag, hosted release, source upload or binary publication is implied here. Public publication remains a separate concrete action.
+
+This document owns the current candidate gate matrix. Existing architecture decisions, testing policy, distribution and security guides retain their contracts. Historical measurements and M8 reports remain scoped evidence, not candidate-wide certifications.
+
+| Gate | Current evidence | Remaining requirement |
+| --- | --- | --- |
+| Creator workflow | M8 injected/native journeys; first Unity user's prior feedback | Revised physical walkthrough currently fails viewport selection and live inspector feedback. Repair/retest before acceptance. Complete editing, recovery, package and MCP journey; retain coaching and failures. Experienced-Unreal evidence remains absent. |
+| Candidate/version/guidance | M8 committed source; current guides and app exports | Freeze version/commit, candidate release notes and complete source artifact/checksum; correct stale root quickstart claims. App-only exports do not constitute the complete editor/MCP source candidate. |
+| Linux runtime | M8 native validation and relocated app packages on the named workstation | Candidate-specific clean-environment build/run and prerequisite review. Existing GLIBC2.44 binaries are not broad Linux compatibility proof. |
+| Windows/runtime scope | No verified Windows runtime; code has Linux-only MCP and packaging boundaries | Test recorded core workflows on native Windows, or explicitly decide/document a narrower release scope as permitted by ROADMAP. No scope revision has been accepted; Wine/cross-compilation cannot establish native workflow acceptance. |
+| Performance/resources | Named M8 history/assets/AA/recovery/Lua workloads | Declare representative candidate CPU/GPU/tail/memory/iteration budgets from those baselines before measuring; collect release-profile results under matching named conditions. No candidate-wide budget pass yet. |
+| Persistence/recovery | Scene1–5 migration/history tests; native unfinished-code and recovery journeys | Audit the exact candidate formats below, preserve fixtures and failure atomicity; resolve new failures. Reuse unchanged final-state evidence instead of replaying every past journey. |
+| Distribution/notices | Both selected app exports/builds/packages/relocation pass; supplements carry missing license texts/provenance | Candidate-specific artifacts, clean prerequisites and target-specific dependency/notices review. Registry inventory gaps remain visible; source build is not binary redistribution clearance. |
+| CI/community/security/support | CONTRIBUTING/SECURITY/licenses; pinned risk-based Linux CI; private vulnerability reporting enabled | CI for the frozen candidate revision, accurate support/update expectations and known-limit release notes. No guaranteed maintenance response or stable ABI. |
+
+## Observed environment and proof boundaries
+
+Read-only checks on2026-11-05: CachyOS x86_64, glibc2.44, Rust target `x86_64-unknown-linux-gnu`; native human editor reports NVIDIA RTX4060 Laptop/Vulkan driver615.78.08. Only that Rust target is installed. Docker, Podman, QEMU and a MinGW compiler were not found; Wine is installed. This inventory does not prove another environment is impossible, nor does it substitute for Windows/GPU testing.
+
+Remote main is2b290274afd45ea00440079978ad049283a4086f, with successful [CI41794192529](https://github.com/akilfernando/Ruster/actions/runs/41794192529). The local M8 baseline is8commits ahead of that remote revision; the hosted run does not cover M8/M9 changes. GitHub's read-only private-vulnerability-reporting endpoint returned `enabled:true`; [SECURITY.md](../SECURITY.md) remains the reporting policy. No report or external message was sent.
+
+M9's revised Unity walkthrough uses a fresh disposable content project, independent workspace/recovery state, inspection disabled and explicit Vulkan/sync logs. The user controls its window. Their first findings are that repeated viewport clicks fail to select the intended object, and the inspector does not show transform changes during a gizmo drag. Source inspection identifies a competing cursor-centered interactive gizmo widget and static authored precision display as likely causes; executable reproduction/fixes are in progress. These observations supersede any inference that injected interaction alone established human familiarity.
+
+## Candidate compatibility inventory
+
+These are current owning-source contracts, not stable future-format promises. Unknown/corrupt versions must fail visibly and preserve original data; explicit Save is the migration boundary where documented.
+
+| Data/interface | Current reader/writer contract | Owning source/guide |
+| --- | --- | --- |
+| Generic scenes | Read identified scene versions1–5; explicit Save writes5 with supported history and embedded behavior. No silent conversion of another document format. | [Scene API](../crates/ruster-scene/README.md), `ruster-scene::FORMAT_VERSION`, Session migration fixtures |
+| Behavior source | Scene5 language-neutral source/binding/typed properties; provisional `lua54` hostAPI1 executes. Unknown/unfinished source remains authored data. One live binding per object is currently supported. | [Backend](../crates/ruster-behavior/README.md), [authoring](BEHAVIOR-AUTHORING.md) |
+| Recovery | Journal record1; editor drafts read1/2/3 under strict field/unit rules and write3. Legacy pending radian text is not reinterpreted as degrees. Restore becomes an unsaved copy without original-overwrite authority. | `recovery.rs`, `scene_editor.rs::restore_recovery_drafts`, [decision0020](decisions/0020-local-recovery-checkpoints.md) |
+| Workspace | `ruster-editor-preferences` version1 with bounded optional-field compatibility. Per-machine paths and shortcuts are not project interchange. | `workspace.rs::Preferences`, [editor](../crates/ruster-editor/README.md) |
+| Assets/cache | `ruster-assets` catalog1; binary derived mesh cache2 with validated legacy cache1 fallback/rebuild. Catalog persists independently of scene Undo. Triangle-only OBJ and controlled WGSL remain bounded. | [Assets](../crates/ruster-assets/README.md), [decision0016](decisions/0016-derived-mesh-cache-and-snapshots.md) |
+| External working copies | `ruster-behavior-files` manifest1; derived paths/hash bases and explicit observed conflicts, not project/executable authority. | [decision0023](decisions/0023-derived-behavior-working-copies.md) |
+| Legacy Motion | `ruster-motion-project`1 remains separate from Scene5; legacy Rhai Save requires runnable code. Generic Motion consumes Scene5 read-only. | [Motion](../examples/motion-lab/README.md), `project.rs` |
+| MCP | Bounded stdio profile2025-06-18;44discoverable tools; opt-in same-user Unix socket, identity/revision/run/stop guards. No Windows attachment claim. | [MCP](../crates/ruster-mcp/README.md) |
+| API/packages | Workspace0.1.0, no stable Rust ABI/API or crates.io publication commitment; exported/binary app manifests are development artifacts. | [Distribution](DISTRIBUTION.md), workspace Cargo manifest |
+
+## Acceptance order
+
+1. Fix the observed selection and live-transform defects, prove the prior failure where feasible, and repeat the affected real-egui/native/human journey without touching the user's open work.
+2. Finish the corrected first-run guide and a short adopter journey covering create/edit, unfinished source repair, save/reopen/recovery, standalone app modification/package and MCP connection. Keep guided repeat-user evidence distinct from independent first-run evidence.
+3. Freeze candidate version/commit and source/package checksums using existing exporters/packagers where applicable; no new installer framework is selected.
+4. Collect clean-environment/platform, performance/resource and human evidence against that exact candidate. Missing participants/hardware and failed commands remain open evidence, not passed gates.
+5. Reconcile candidate notes/support conditions and run the affected/full checks required by TESTING. Perform the requirement-by-requirement completion audit before M9 acceptance. Actual publication is separate.
+
+No engine feature expansion, generalized scheduler, storage rewrite or new scripting language is justified by this audit. The next implementation serves the directly observed creator workflow.

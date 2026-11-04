@@ -55,7 +55,7 @@ cargo run --locked --offline -p ruster-motion-lab -- --generic-demo
 
 The selected source export includes only Motion Lab, the common kit and its optional `ruster-script`/`ruster-behavior` backends, the reviewed mlua source/patch and required templates. Owned resources are exactly `motion.rhai` and `generic.scene.json`; arbitrary project files remain excluded. Lua is bundled at build time; a C compiler/linker is needed, but system Lua is not. The kit itself gains no mandatory interpreter. The new consumer reads Scene5 snapshots, leaving source/history authoring to the generic editor; it adds no competing source editor. Existing Rhai project1 files stay distinct and are not silently converted.
 
-Both selectors preserve previous locked registry versions. Use a fresh destination. `--app` is an explicit known-example selector, not an arbitrary filesystem/package upload. Source manifests identify the selected application; binary manifests and archive roots use the same identity. No M9 release work is authorized in this run.
+Both selectors preserve previous locked registry versions. Use a fresh destination. `--app` is an explicit known-example selector, not an arbitrary filesystem/package upload. Source manifests identify the selected application; binary manifests and archive roots use the same identity. The user reactivated M9 development on2026-11-05; public publication remains separate. Candidate acceptance is tracked in [ALPHA-CANDIDATE.md](ALPHA-CANDIDATE.md).
 
 ## Package the built application
 

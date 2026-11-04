@@ -9,7 +9,7 @@ Ruster's purpose is to help people turn their own ideas into working creations. 
 
 Familiarity for experienced Unity and Unreal creators, including everyday editor conveniences, is a core requirement. The [editor experience baseline](docs/EDITOR-EXPERIENCE.md) describes the target and the gaps still to close.
 
-**Early development:** milestones M0–M7 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines.
+**Early development:** milestones M0–M8 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan and editor evidence is Linux-only on the recorded development machine; Windows and other GPU classes remain unverified. Physical-focus and experienced-creator acceptance also remain open. The current [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the newly reported selection/live-inspector blockers and platform limits.
 
 ![Ruster scene editor with imported meshes, content browser and transform tools](docs/evidence/m8-content-recovery-drag.png)
 
@@ -18,14 +18,15 @@ Familiarity for experienced Unity and Unreal creators, including everyday editor
 - **Shared 3D viewport:** depth-tested cubes/imported meshes, simple colored materials, perspective/orthographic and axis/isometric views, orbit/pan/fly/frame navigation, picking and bounded hardware antialiasing through wgpu's Vulkan backend.
 - **Scene authoring:** create/name/duplicate/delete, multi-selection/internal copy-paste, move/rotate/scale tools, snapping/pivots/local axes, precise fields and bounded shared undo/redo. Atomic saves detect cooperating-writer conflicts.
 - **Human and agent workflows:** an offline native editor and CLI, plus an optional native MCP adapter that edits the displayed session with identity/revision checks and draft protection.
-- **Repeatable previews:** authored state stays separate from runtime snapshots. The scene preview is a static arrangement with explicit lifecycle ticks and Reset; it does not imply physics or gameplay simulation.
+- **Repeatable previews:** authored state stays separate from runtime snapshots. The scene lifecycle preview and provisional Lua behavior runtime support explicit Reset and fixed ticks; neither implies physics or gameplay simulation.
 - **Content iteration:** search objects/assets, use contextual actions and drag a registered mesh onto an object. Explicit OBJ/shader refresh retains last-good content; derived binary caches and shared snapshots avoid unchanged parsing/full payload copies. Catalog/originals are authored; cache is disposable.
-- **Recoverable workspace:** remappable shortcuts, remembered layout/scale/camera/recent files and bounded background checkpoints. Crash recovery retains unfinished authored data and invalid field/name drafts as an unsaved copy, preserving externally changed originals. Physical-focus/human familiarity acceptance remains separate.
-- **A standalone application kit:** application-owned behavior, shared input/lifecycle/rendering and read-only resources; an editable delivery challenge and source/binary packaging tools.
-- **Provisional scripting foundations:** language-neutral scene5 sources/bindings/properties, guarded CLI authoring, and a separate bounded Lua5.4 runtime/headless consumer. Generic editor behavior/tooling integration remains unfinished. The earlier Rhai Motion Lab experiment stays available; Rust remains the native application path and no permanent scripting language is selected.
+- **Recoverable workspace:** remappable shortcuts, remembered layout/scale/camera/recent files and bounded background checkpoints. Crash recovery retains unfinished behavior sources, typed-property drafts and invalid field/name drafts as an unsaved copy, preserving externally changed originals. Physical-focus and human-familiarity acceptance remain separate.
+- **Provisional scripting workflow:** language-neutral Scene5 sources, bindings and typed properties save with the scene and share bounded undo/redo and crash recovery. The generic editor includes a bounded provisional Lua 5.4 runtime, Zed/LuaLS working-copy support, and an owned debugger with breakpoints, locals, Next and Continue. Lua is not a permanent language choice; Rust remains the native application path.
+- **Independent application reuse:** the shared kit powers Yard and a non-game Motion Lab Scene5 consumer. Both can be exported, independently edited, rebuilt and packaged as Linux development artifacts. Motion Lab consumes scenes from the generic editor; it does not replace that editor's source/history workflow. The earlier Rhai Motion Lab project format remains a separate compatibility path.
+- **Native MCP workflows:** an optional local MCP adapter exposes 44 bounded scene, content, behavior, runtime and debugger tools against the displayed editor session, with revision checks and draft protection.
 - **A logistics reference application:** integer throughput simulation, saved scenarios, a schematic viewer and the original authoring workflow remain available separately.
 
-The current scene limit is 256 objects and one viewport. M6 adds bounded triangle-only OBJ mesh import, stable references, rebuildable caches and controlled asset/WGSL refresh. Textures/MTL, general mesh formats, physics/audio and a general ECS remain later work. M7 supplies the bounded application kit and Linux development packaging described below. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope.
+The current scene limit is 256 objects and one viewport. Scene format v5 carries language-neutral behavior data; M6 adds bounded triangle-only OBJ mesh import, stable references, rebuildable caches and controlled asset/WGSL refresh. Textures/MTL, general mesh formats, physics/audio and a general ECS remain later work. M7 supplies the bounded application kit and M8 adds the shared editor/runtime/recovery workflow and independent Motion Lab consumer. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope and remaining acceptance gates.
 
 ## Quickstart
 
@@ -66,23 +67,26 @@ This reports the scene identity, revision, three objects, ten preview ticks and 
 
 ### Build your own application
 
-M7's source template demonstrates application-owned behavior using the shared kit. Run the delivery challenge, or export it to a new editable workspace:
+The Yard and Motion Lab examples demonstrate application-owned behavior using the shared kit. Run the Yard delivery challenge, or export either example to a new editable workspace:
 
 ```sh
 cargo run --locked -p ruster-yard -- --resources examples/yard-app/resources
 python3 scripts/new_app.py /tmp/my-ruster-app
+python3 scripts/new_app.py --app motion-lab /tmp/my-motion-lab
 ```
 
-Use Run/Pause, Step and Reset. The default truck capacity misses the delivery target; capacity 3 completes it. Change the application rules in `examples/yard-app/src/lib.rs`, rebuild and package your result. Export requires the pinned dependencies in the local Cargo cache; see the [application guide](examples/yard-app/README.md), [kit API](crates/ruster-app/README.md) and [distribution workflow](docs/DISTRIBUTION.md). The Linux development package runs outside the checkout with resources beside its executable; editor/MCP services are not required.
+Use Run/Pause, Step and Reset. The default truck capacity misses the delivery target; capacity 3 completes it. Change the application rules in `examples/yard-app/src/lib.rs`, rebuild and package your result. Motion Lab is a non-game consumer of the shared Scene5 runtime. Exports require the pinned dependencies in the local Cargo cache; see the [application guide](examples/yard-app/README.md), [Motion Lab guide](examples/motion-lab/README.md), [kit API](crates/ruster-app/README.md) and [distribution workflow](docs/DISTRIBUTION.md). These are Linux development artifacts, not a supported release matrix; editor/MCP services are not runtime requirements.
 
 ### Try behavior scripting
 
+Open the generic Scene5 example in the editor, where behavior sources and their bindings/properties are authored with the scene:
+
 ```sh
-cargo run --locked -p ruster-motion-lab -- --script examples/motion-lab/resources/motion.rhai
-cargo run --locked -p ruster-motion-lab -- --headless --ticks 10 --speed 2
+cargo run --locked -p ruster-editor -- --scene examples/motion-lab/resources/generic.scene.json
+cargo run --locked -p ruster-motion-lab -- --scene examples/motion-lab/resources/generic.scene.json --headless --ticks 10
 ```
 
-Select an object, attach a behavior, edit its numeric properties, then Reset and Run. Edit the script in the app or in your own text editor and reload it. Invalid candidates keep the last applied behavior and scene. This is a bounded M8 experiment: attachments, property values and in-app source drafts are session-only; there is no project save, generic-editor integration or configured IDE/debugger yet. See the [Motion Lab guide](examples/motion-lab/README.md) and [language decision gate](docs/decisions/0011-behavior-scripting-experiment.md). The existing export/package tools still target Yard.
+Select an object to inspect its attached behavior. To add one, create/select an unattached object and choose **Add Lua follower behavior** in its Behavior inspector. Edit source or typed properties, then use **Reset behavior runtime** and **Play**. Save/reopen retains behavior data with the scene; source and property edits participate in shared undo and recovery. For external editing, export or open the working copy in Zed; the editor generates LuaLS configuration and host/property types. The in-editor debugger supports source breakpoints, bounded locals, Next and Continue. Lua remains provisional, and human physical-focus/familiarity acceptance is still open. The separate legacy Rhai `project1` workflow remains available and is not silently converted to Scene5. See the [editor behavior guide](crates/ruster-editor/README.md#embedded-behavior-authoring-and-execution), [Motion Lab guide](examples/motion-lab/README.md), [behavior backend](crates/ruster-behavior/README.md) and [language decision gate](docs/decisions/0011-behavior-scripting-experiment.md).
 
 ### Imported content example
 
@@ -91,7 +95,7 @@ cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
 cargo run --locked -p ruster-render -- --scene examples/content/scene.json --shader examples/content/scene.wgsl
 ```
 
-The project includes an original pyramid OBJ and stable-ID catalog. Use a disposable copy to try source edits, refresh and rename; see the [content workflow](crates/ruster-editor/README.md#mesh-content-and-shader-iteration-m6) and [asset API/CLI](crates/ruster-assets/README.md). Scene-v1 files retain their history on load; saving explicitly writes v2. Asset catalog operations persist independently of scene Undo/Discard.
+The project includes an original pyramid OBJ and stable-ID catalog. Use a disposable copy to try source edits, refresh and rename; see the [content workflow](crates/ruster-editor/README.md#mesh-content-and-shader-iteration-m6) and [asset API/CLI](crates/ruster-assets/README.md). Older supported scene files migrate on load; explicit Save writes current Scene5 data, including language-neutral behavior sources and bindings. Asset catalog operations persist independently of scene Undo/Discard.
 
 ### Optional MCP connection
 
@@ -104,7 +108,7 @@ RUSTER_MCP_ENABLE=1 cargo run --locked -p ruster-editor -- --scene examples/arra
 
 The editor prints a private socket path to stderr. Configure a stdio MCP client to launch the absolute path to `target/debug/ruster-mcp` with that path in `RUSTER_MCP_SOCKET`. Start with `scene_inspect`; changes require the exact inspected session token and revision. Unapplied human drafts block agent edits, and agent changes share the editor's undo history.
 
-The tested client is the official Python MCP SDK 2.3.0 with protocol revision 2025-06-18. The [MCP guide](crates/ruster-mcp/README.md) includes client configuration, bounded capabilities, the reproducible SDK demo and connection limitations. There are no shell, arbitrary file access or remote save tools.
+The current adapter exposes 44 bounded tools across scene/content authoring, behavior data, runtime and debugging. The tested client is the official Python MCP SDK 2.3.0 with protocol revision 2025-06-18. The [MCP guide](crates/ruster-mcp/README.md) includes client configuration, the reproducible SDK demo and connection limits. There are no shell, arbitrary file access or scene-save tools.
 
 ### Logistics reference
 
@@ -136,7 +140,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. [AGENTS.md](AGE
 | Create, modify and package an application | [Application kit](crates/ruster-app/README.md), [distribution](docs/DISTRIBUTION.md), [M7 evidence](docs/evidence/M7.md) |
 | Product direction | [Direction](docs/DIRECTION.md) |
 | Architecture and tradeoffs | [Decisions](docs/decisions/README.md) |
-| Scene/editor/MCP delivery evidence | [M5 evidence](docs/evidence/M5.md), [M6 content evidence](docs/evidence/M6.md) |
+| Scene/editor/MCP delivery evidence | [M5 evidence](docs/evidence/M5.md), [M6 content evidence](docs/evidence/M6.md), [M8 debugger](docs/evidence/M8-debugger-native.md), [M8 Motion Lab](docs/evidence/M8-motion-native.md), [M8 independent reuse](docs/evidence/M8-independent-reuse.md) |
 | Performance methods and bounded measurements | [Performance](docs/PERFORMANCE.md) |
 | Dependency licenses and notices | [Dependency inventory](docs/DEPENDENCIES.md) |
 | Reporting a vulnerability | [Security policy](SECURITY.md) |
