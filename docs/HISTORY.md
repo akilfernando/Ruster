@@ -29,3 +29,5 @@
 - Reviewed the whole roadmap after M3 at the user’s request. Documented a proposed M4–M9 sequence separating reusable scene/3D foundations, assets, distribution and independent reuse, with earlier human/platform checks. Current roadmap retained pending discussion; corrected stale DIRECTION.md delivery status. No implementation performed.
 
 - User accepted the revised roadmap and continuation; canonical ROADMAP.md now defines M4–M9. Clarified Sol as the recommended main developer while Astra handles selected difficult work; the skill can select child models but does not switch the running parent. Next M4 slice is the live-session/command contract. No engine code changed in this handoff.
+
+- Prepared session handoff before user restarts with Sol. Made the user’s preference for deep-reasoning involvement in whole-roadmap/long-horizon reviews explicit in the development skill; ignored persistent generated lock files without deleting them. Verified no active workers/builds/test processes; engine code unchanged.

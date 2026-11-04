@@ -1,3 +1,6 @@
 /target/
 __pycache__/
 *.pyc
+
+# Persistent sibling files for cooperating scenario writers; do not delete while in use.
+.*.ruster-lock

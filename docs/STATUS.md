@@ -43,3 +43,9 @@ Rust 1.99.1 uses standard user directories. Validation layers and screenshot too
 The user works on workspace 1. Test windows must launch silently on workspace 2 without stealing focus or using global input/clipboard automation. A local Hyprland rule persists this routing. Temporary forced-background rendering used for native editor verification must be removed after tests; see AGENTS.md and TESTING.md.
 
 Read [HISTORY.md](HISTORY.md) and [delegation log](workflow/DELEGATION-LOG.md) for chronology. Inspect actual code/git state before relying on this snapshot.
+
+## Session-close handoff — 2026-11-04
+
+The user is restarting with Sol as the main agent. The revised roadmap is accepted; M4 has not started implementation. Begin with the live-session/command contract described above, using Astra for consequential design/review and Sol for implementation/integration. Whole-roadmap and long-horizon strategy reviews explicitly involve the deep-reasoning role under the updated development skill; ordinary status recaps do not require delegation. Refresh the model snapshot once in the new root session.
+
+M3 is committed as `9b8924e`; roadmap adoption is `6b3f74d`. No background worker, build or test application remained at handoff. The temporary background-rendering rule was removed; persistent workspace-2 routing remains. Generated sibling lock files are ignored by Git and deliberately retained for the locking protocol. No global model setting was changed. This closeout changes documentation/skill instructions and ignore rules only; existing implementation verification remains applicable.
