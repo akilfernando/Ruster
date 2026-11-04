@@ -12,7 +12,7 @@ fn main() {
 
 fn run() -> Result<(), Box<dyn Error>> {
     let args: Vec<String> = std::env::args().skip(1).collect();
-    let usage = "usage: ruster-scene demo FILE | inspect FILE | transform FILE EXPECTED_REV OBJECT X Y Z [RX RY RZ SX SY SZ] | undo FILE EXPECTED_REV | redo FILE EXPECTED_REV | run FILE TICKS (0..10000)";
+    let usage = "usage: ruster-scene demo FILE | inspect FILE | transform FILE EXPECTED_REV OBJECT X Y Z [RX RY RZ SX SY SZ] | mesh FILE EXPECTED_REV OBJECT ASSET_ID|none | undo FILE EXPECTED_REV | redo FILE EXPECTED_REV | run FILE TICKS (0..10000)";
     let Some(command) = args.first() else {
         return Err(usage.into());
     };
@@ -26,6 +26,10 @@ fn run() -> Result<(), Box<dyn Error>> {
             let session = Session::open(&args[1])?;
             println!("{}", serde_json::to_string_pretty(session.scene())?);
             println!("undo={} redo={}", session.undo_len(), session.redo_len());
+            println!("loaded_format_version={}", session.loaded_format_version());
+            if session.loaded_format_version() == 1 {
+                println!("v1 opened; next save upgrades to v2, preserving transform history");
+            }
         }
         ("transform", 7 | 13) => {
             let path = Path::new(&args[1]);
@@ -44,6 +48,18 @@ fn run() -> Result<(), Box<dyn Error>> {
                 transform.scale = [args[10].parse()?, args[11].parse()?, args[12].parse()?];
             }
             let revision = session.edit(expected, &args[3], &transform)?;
+            session.save(path)?;
+            println!("revision {revision}");
+        }
+        ("mesh", 5) => {
+            let path = Path::new(&args[1]);
+            let mut session = Session::open(path)?;
+            let mesh = if args[4] == "none" {
+                None
+            } else {
+                Some(args[4].clone())
+            };
+            let revision = session.set_mesh(args[2].parse()?, &args[3], mesh)?;
             session.save(path)?;
             println!("revision {revision}");
         }

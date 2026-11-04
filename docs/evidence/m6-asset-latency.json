@@ -1,0 +1,30 @@
+{
+  "profile": "release",
+  "source_bytes": 22264,
+  "positions": 546,
+  "triangles": 1000,
+  "scope": "process startup + file I/O + parse/serialize/hash/catalog; interactive workstation, no comparative claim",
+  "trials": [
+    {
+      "trial": 1,
+      "import_ms": 5.683358001988381,
+      "open_cache_ms": 3.8612970092799515,
+      "refresh_ms": 7.710033998591825,
+      "rebuild_ms": 4.125453997403383
+    },
+    {
+      "trial": 2,
+      "import_ms": 5.443700007162988,
+      "open_cache_ms": 6.1200390045996755,
+      "refresh_ms": 6.1559019959531724,
+      "rebuild_ms": 6.052404991351068
+    },
+    {
+      "trial": 3,
+      "import_ms": 7.895040005678311,
+      "open_cache_ms": 10.24152900208719,
+      "refresh_ms": 16.393120982684195,
+      "rebuild_ms": 8.278674999019131
+    }
+  ]
+}

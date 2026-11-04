@@ -8,7 +8,7 @@ The user accepted the [post-M3 review](ROADMAP-REVIEW.md) on 2026-11-04. This ca
 
 Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
 
-M0 through M5 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M6 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
+M0 through M6 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M7 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
 
 | Milestone | Demonstrable deliverable | Status |
 | --- | --- | --- |
@@ -18,7 +18,7 @@ M0 through M5 are complete within their documented local scope; see [M1/M2 evide
 | M3 First authoring experience | Minimal editor for a complete create/edit/run/save workflow | Complete, Linux scenario scope |
 | M4 Native agent workflow | MCP client performs the same workflow with reviewable results | Complete, Linux editor-owned proof |
 | M5 Shared scene and 3D | Minimal scene and rendering shared by editor/runtime | Complete, bounded Linux procedural-scene scope |
-| M6 Content and iteration | Asset import, stable references and recoverable refresh | Planned |
+| M6 Content and iteration | Asset import, stable references and recoverable refresh | Complete, bounded OBJ/WGSL Linux scope |
 | M7 Standalone application kit | Code-first template and packaged interactive example | Planned |
 | M8 Independent reuse proof | A meaningfully different non-game application | Planned |
 | M9 Public alpha candidate | Usable release on an explicitly tested support matrix | Planned |
@@ -146,6 +146,8 @@ M5 delivered scope: neutral bounded scene/session/Preview, separate identified s
 **Exit criteria:** clean-checkout derived-data reproduction; supported rename preserves identity; actionable missing/broken-reference errors; declared format/version handling; measured import/edit feedback. Expose the supported operations coherently through code, editor and MCP.
 
 **Boundaries:** one useful route, not universal CAD/BIM import, arbitrary Rust hot reload or an asset marketplace. Original sources remain owned and caches disposable.
+
+M6 delivered scope: bounded triangle-only OBJ import, stable-ID catalog with its own immediate persistence, versioned rebuildable cache, strict scene-v1 migration/v2 mesh history, real shared geometry and controlled WGSL refresh retaining last-good results. Native/real-client, cache reproduction, rename and raw GPU lifecycle evidence passed; see [M6 evidence](evidence/M6.md). The real upstream SPIR-V defect and prior M5 acceptance mistake were corrected via decision0009. Textures/MTL, general import formats and automated watchers are outside this delivered route.
 
 ## M7 Standalone application kit
 

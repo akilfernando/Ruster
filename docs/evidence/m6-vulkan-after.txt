@@ -1,0 +1,3 @@
+Ruster shared 3D: adapter=NVIDIA GeForce RTX 4060 Laptop GPU backend=Vulkan timestamps=true
+Ruster shader: Explicit scene shader loaded
+Ruster shared 3D summary: scene=procedural-demo fingerprint=21b8871e9039669d revision=3 tick=10 frames=92 objects=3 warmup=10 samples_cpu=82 cpu_prepare_us_p50=Some(153.165) cpu_prepare_us_p95=Some(210.064) samples_gpu=40 gpu_scene_us_p50=Some(40.96) gpu_scene_us_p95=Some(132.096) timestamps_enabled=true mesh_bytes=1224 mesh_uploads=2 mesh_upload_bytes=1224 scene_draw_calls=2 instance_capacity_bytes=512 color_depth_bytes=25099616

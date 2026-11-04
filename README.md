@@ -5,7 +5,7 @@ An open-source Rust/Vulkan engine project for interactive simulation and visuali
 [![CI](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml/badge.svg)](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
-**Early development:** milestones M0–M5 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines.
+**Early development:** milestones M0–M6 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines.
 
 ![Ruster scene editor with procedural 3D objects and transform inspector](docs/evidence/m5-scene-editor.png)
 
@@ -15,9 +15,10 @@ An open-source Rust/Vulkan engine project for interactive simulation and visuali
 - **Scene authoring:** stable object IDs, position/rotation/scale editing, validation, bounded undo/redo, atomic saves and cooperating-writer conflict detection.
 - **Human and agent workflows:** an offline native editor and CLI, plus an optional native MCP adapter that edits the displayed session with identity/revision checks and draft protection.
 - **Repeatable previews:** authored state stays separate from runtime snapshots. The scene preview is a static arrangement with explicit lifecycle ticks and Reset; it does not imply physics or gameplay simulation.
+- **Content iteration:** import a triangle-only OBJ, assign its stable asset ID, refresh after source edits and recover from invalid input while retaining the last good geometry/pipeline. The catalog and originals are authored; the cache is disposable.
 - **A logistics reference application:** integer throughput simulation, saved scenarios, a schematic viewer and the original authoring workflow remain available separately.
 
-The current scene limit is 256 procedural cube objects and one viewport. Asset import, arbitrary meshes, physics/audio, a general ECS and the standalone application kit are later work. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope.
+The current scene limit is 256 objects and one viewport. M6 adds bounded triangle-only OBJ mesh import, stable references, rebuildable caches and controlled asset/WGSL refresh. Textures/MTL, general mesh formats, physics/audio, a general ECS and the standalone application kit remain later work. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope.
 
 ## Quickstart
 
@@ -26,6 +27,8 @@ The current scene limit is 256 procedural cube objects and one viewport. Asset i
 - Git and [Rust via rustup](https://rust-lang.org/tools/install/). The repository pins the tested Rust 1.99.1 toolchain, including rustfmt and Clippy.
 - Python 3.10 or newer for the verification runner.
 - For graphical tools: a Linux Wayland/X11 desktop and a working Vulkan driver. A display is not required for the headless CLI or ordinary tests.
+
+A documented [upstream SPIR-V compatibility patch](third_party/wgpu-hal/RUSTER-PATCH.md) is included with full source and licenses; newer GPU feature requirements must revisit this temporary boundary.
 
 Native Vulkan runtime verification currently covers CachyOS with an NVIDIA RTX 4060 Laptop GPU. Windows runtime and other GPU classes are not yet verified. Development-library package names vary by distribution; the [Linux CI workflow](.github/workflows/ci.yml) shows the Ubuntu build prerequisites.
 
@@ -50,6 +53,15 @@ cargo run --locked -p ruster-scene -- run examples/arrangement.scene.json 10
 ```
 
 This reports the scene identity, revision, three objects, ten preview ticks and a deterministic snapshot fingerprint. See the [editor guide](crates/ruster-editor/README.md), [scene API and CLI](crates/ruster-scene/README.md) and [renderer guide](crates/ruster-render/README.md) for editing, persistence guarantees and diagnostics.
+
+### Imported content example
+
+```sh
+cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
+cargo run --locked -p ruster-render -- --scene examples/content/scene.json --shader examples/content/scene.wgsl
+```
+
+The project includes an original pyramid OBJ and stable-ID catalog. Use a disposable copy to try source edits, refresh and rename; see the [content workflow](crates/ruster-editor/README.md#mesh-content-and-shader-iteration-m6) and [asset API/CLI](crates/ruster-assets/README.md). Scene-v1 files retain their history on load; saving explicitly writes v2. Asset catalog operations persist independently of scene Undo/Discard.
 
 ### Optional MCP connection
 
@@ -93,7 +105,7 @@ Read [CONTRIBUTING.md](CONTRIBUTING.md) before opening a change. [AGENTS.md](AGE
 | Delivery sequence and acceptance gates | [Roadmap](docs/ROADMAP.md) |
 | Product direction | [Direction](docs/DIRECTION.md) |
 | Architecture and tradeoffs | [Decisions](docs/decisions/README.md) |
-| Scene/editor/MCP delivery evidence | [M5 evidence](docs/evidence/M5.md) |
+| Scene/editor/MCP delivery evidence | [M5 evidence](docs/evidence/M5.md), [M6 content evidence](docs/evidence/M6.md) |
 | Performance methods and bounded measurements | [Performance](docs/PERFORMANCE.md) |
 | Dependency licenses and notices | [Dependency inventory](docs/DEPENDENCIES.md) |
 | Reporting a vulnerability | [Security policy](SECURITY.md) |

@@ -1,0 +1,11 @@
+{
+  "format": "ruster-assets",
+  "version": 1,
+  "revision": 1,
+  "assets": {
+    "pyramid": {
+      "source": "meshes/pyramid.obj",
+      "hash": "23e61ceab1a577aedfae2d8ef0d404103f0cedd51686fb13701e93fd4425bb72"
+    }
+  }
+}

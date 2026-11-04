@@ -86,55 +86,101 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     let Some(args) = arguments.as_object() else {
         return false;
     };
-    if name == "inspect" {
-        return args.is_empty();
-    }
-    if name == "scene_inspect" {
+    if name == "asset_inspect" {
         return exact_keys(args, &[], &["offset"]) && args.get("offset").is_none_or(canonical_u64);
     }
-    let extra = match name {
-        "edit" => "config",
-        "replay" | "scene_replay" => "ticks",
-        "scene_transform" => "object_id",
-        "undo" | "redo" | "scene_undo" | "scene_redo" => "",
-        _ => return false,
-    };
-    let mut keys = vec!["expected_session_token", "expected_revision"];
-    if !extra.is_empty() {
-        keys.push(extra);
-    }
-    if name == "scene_transform" {
-        keys.push("transform");
-    }
-    if !exact_keys(args, &keys, &[])
-        || !args["expected_session_token"]
-            .as_str()
-            .is_some_and(|s| !s.is_empty() && s.len() <= 256)
-        || !canonical_u64(&args["expected_revision"])
-    {
-        return false;
-    }
-    match name {
-        "edit" => args["config"].as_object().is_some_and(|config| {
-            exact_keys(
-                config,
-                &["initial_stock", "production_per_tick", "transfer_per_tick"],
-                &[],
-            ) && config.values().all(canonical_u64)
-        }),
-        "replay" | "scene_replay" => canonical_u64(&args["ticks"]),
-        "scene_transform" => {
-            args["object_id"].is_string()
-                && args["transform"].as_object().is_some_and(|transform| {
-                    exact_keys(transform, &["translation", "rotation", "scale"], &[])
-                        && transform.values().all(|value| {
-                            value.as_array().is_some_and(|values| {
-                                values.len() == 3 && values.iter().all(Value::is_number)
-                            })
-                        })
-                })
+    if matches!(
+        name,
+        "asset_import" | "asset_refresh" | "asset_rename" | "scene_mesh" | "shader_refresh"
+    ) {
+        let revision = if name == "shader_refresh" {
+            "expected_shader_revision"
+        } else {
+            "expected_asset_revision"
+        };
+        let mut keys = vec!["expected_session_token", "expected_revision", revision];
+        match name {
+            "asset_import" | "asset_rename" => keys.extend(["asset_id", "source"]),
+            "asset_refresh" => keys.push("asset_id"),
+            "scene_mesh" => keys.extend(["object_id", "asset_id"]),
+            _ => {}
         }
-        _ => true,
+        let bounded_string = |value: &Value, limit| {
+            value
+                .as_str()
+                .is_some_and(|s| !s.is_empty() && s.len() <= limit)
+        };
+        if !exact_keys(args, &keys, &[])
+            || !bounded_string(&args["expected_session_token"], 256)
+            || !canonical_u64(&args["expected_revision"])
+            || !canonical_u64(&args[revision])
+        {
+            return false;
+        }
+        match name {
+            "shader_refresh" => true,
+            "scene_mesh" => {
+                bounded_string(&args["object_id"], 128)
+                    && (args["asset_id"].is_null() || bounded_string(&args["asset_id"], 128))
+            }
+            _ => {
+                bounded_string(&args["asset_id"], 128)
+                    && (!matches!(name, "asset_import" | "asset_rename")
+                        || bounded_string(&args["source"], 256))
+            }
+        }
+    } else {
+        if name == "inspect" {
+            return args.is_empty();
+        }
+        if name == "scene_inspect" {
+            return exact_keys(args, &[], &["offset"])
+                && args.get("offset").is_none_or(canonical_u64);
+        }
+        let extra = match name {
+            "edit" => "config",
+            "replay" | "scene_replay" => "ticks",
+            "scene_transform" => "object_id",
+            "undo" | "redo" | "scene_undo" | "scene_redo" => "",
+            _ => return false,
+        };
+        let mut keys = vec!["expected_session_token", "expected_revision"];
+        if !extra.is_empty() {
+            keys.push(extra);
+        }
+        if name == "scene_transform" {
+            keys.push("transform");
+        }
+        if !exact_keys(args, &keys, &[])
+            || !args["expected_session_token"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty() && s.len() <= 256)
+            || !canonical_u64(&args["expected_revision"])
+        {
+            return false;
+        }
+        match name {
+            "edit" => args["config"].as_object().is_some_and(|config| {
+                exact_keys(
+                    config,
+                    &["initial_stock", "production_per_tick", "transfer_per_tick"],
+                    &[],
+                ) && config.values().all(canonical_u64)
+            }),
+            "replay" | "scene_replay" => canonical_u64(&args["ticks"]),
+            "scene_transform" => {
+                args["object_id"].is_string()
+                    && args["transform"].as_object().is_some_and(|transform| {
+                        exact_keys(transform, &["translation", "rotation", "scale"], &[])
+                            && transform.values().all(|value| {
+                                value.as_array().is_some_and(|values| {
+                                    values.len() == 3 && values.iter().all(Value::is_number)
+                                })
+                            })
+                    })
+            }
+            _ => true,
+        }
     }
 }
 
@@ -152,15 +198,21 @@ fn tools() -> Value {
         ("undo", "Undo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("redo", "Redo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("replay", "Replay the inspected authored snapshot in isolation for at most 10000 ticks; return one aggregate state. Does not alter editor playback."),
+        ("asset_inspect", "Inspect one page of up to 16 registered project OBJ assets and catalog revision; bounded metadata only."),
+        ("asset_import", "Import one bounded project-relative OBJ mesh into the immediately persisted catalog. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
+        ("asset_refresh", "Reimport one registered asset, retaining last good mesh on failure. Catalog persists independently of scene history."),
+        ("asset_rename", "Rename one registered OBJ source within the project without overwrite, preserving stable asset ID; catalog update is independent of scene undo."),
+        ("scene_mesh", "Assign registered asset ID or null for procedural cube to one scene object; revisioned shared authored undo. Preview snapshot unchanged."),
+        ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
         ("scene_transform", "Replace one object's authored translation, Euler rotation in radians and scale. Requires the inspected identity/revision and clean human drafts. Unsaved; shares human undo; leaves preview unchanged."),
-        ("scene_undo", "Undo one authored scene transform in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
-        ("scene_redo", "Redo one authored scene transform in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
+        ("scene_undo", "Undo one authored scene change in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
+        ("scene_redo", "Redo one authored scene change in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("scene_replay", "Replay the inspected static scene snapshot in isolation for at most 10000 lifecycle ticks; return its fingerprint and object count. No gameplay or editor playback changes."),
     ] {
         let mut properties = Map::new();
         let mut required = Vec::new();
-        if name != "inspect" && name != "scene_inspect" {
+        if name != "inspect" && name != "scene_inspect" && name != "asset_inspect" {
             properties.insert("expected_session_token".into(), json!({"type":"string","minLength":1,"maxLength":256}));
             properties.insert("expected_revision".into(), decimal.clone());
             required.extend(["expected_session_token", "expected_revision"]);
@@ -169,9 +221,16 @@ fn tools() -> Value {
             properties.insert("config".into(), object_schema(json!({"initial_stock":decimal, "production_per_tick":decimal, "transfer_per_tick":decimal}), vec!["initial_stock", "production_per_tick", "transfer_per_tick"]));
             required.push("config");
         }
-        if name == "scene_inspect" {
+        if name == "scene_inspect" || name == "asset_inspect" {
             properties.insert("offset".into(), decimal.clone());
         }
+        if matches!(name,"asset_import"|"asset_refresh"|"asset_rename"|"scene_mesh") {
+            properties.insert("expected_asset_revision".into(),decimal.clone());required.push("expected_asset_revision");
+            properties.insert("asset_id".into(),if name=="scene_mesh" {json!({"type":["string","null"],"minLength":1,"maxLength":128})}else{json!({"type":"string","minLength":1,"maxLength":128})});required.push("asset_id");
+            if matches!(name,"asset_import"|"asset_rename") {properties.insert("source".into(),json!({"type":"string","minLength":1,"maxLength":256,"description":"Relative project path; no traversal, absolute paths or escaping symlinks."}));required.push("source");}
+            if name=="scene_mesh" {properties.insert("object_id".into(),json!({"type":"string","minLength":1,"maxLength":128}));required.push("object_id");}
+        }
+        if name=="shader_refresh" {properties.insert("expected_shader_revision".into(),decimal.clone());required.push("expected_shader_revision");}
         if name == "scene_transform" {
             properties.insert("object_id".into(), json!({"type":"string", "description":"Exact stable object ID returned by scene_inspect."}));
             let vector = json!({"type":"array", "items":{"type":"number"}, "minItems":3, "maxItems":3});
@@ -184,7 +243,7 @@ fn tools() -> Value {
         }
         tools.push(json!({"name":name,"description":description,
             "inputSchema":object_schema(Value::Object(properties),required),
-            "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay"), "openWorldHint":false}}));
+            "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
     json!({"tools":tools})
 }
@@ -254,7 +313,7 @@ impl Server {
                     Ok(
                         json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},
                         "serverInfo":{"name":"ruster-mcp","version":env!("CARGO_PKG_VERSION")},
-                        "instructions":"Local live editor attachment. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision. No retries. Cancellation cannot roll back dispatched commands; after disconnect/timeout inspect before deciding whether to retry. Edits remain unsaved until a human saves."}),
+                        "instructions":"Local live editor attachment. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision. No retries. Cancellation cannot roll back dispatched commands; after disconnect/timeout inspect before deciding whether to retry. Scene/config edits remain unsaved until a human saves; asset catalog changes persist immediately."}),
                     )
                 }
             }
@@ -293,6 +352,12 @@ impl Server {
                         "scene_undo",
                         "scene_redo",
                         "scene_replay",
+                        "asset_inspect",
+                        "asset_import",
+                        "asset_refresh",
+                        "asset_rename",
+                        "scene_mesh",
+                        "shader_refresh",
                     ]
                     .contains(&name)
                 {
@@ -553,7 +618,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 10);
+        assert_eq!(tools.len(), 16);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -566,6 +631,12 @@ mod tests {
                 "undo",
                 "redo",
                 "replay",
+                "asset_inspect",
+                "asset_import",
+                "asset_refresh",
+                "asset_rename",
+                "scene_mesh",
+                "shader_refresh",
                 "scene_inspect",
                 "scene_transform",
                 "scene_undo",
@@ -687,6 +758,117 @@ mod tests {
         let mut args = arguments;
         args["transform"]["scale"] = json!([0, 1e100, -1]);
         assert!(valid_arguments("scene_transform", &args));
+    }
+
+    // Unique risk: content commands must preserve independent catalog/shader
+    // revisions, nullable assignment and path shapes at the transport boundary.
+    #[test]
+    fn content_shapes_and_independent_revisions_are_forwarded_without_semantic_rewrites() {
+        let mut server = ready();
+        let common = json!({"expected_session_token":"scene-session","expected_revision":"7"});
+        let mut import = common.clone();
+        import["expected_asset_revision"] = json!("18446744073709551615");
+        import["asset_id"] = json!("pyramid");
+        import["source"] = json!("meshes/pyramid.obj");
+        let mut refresh = import.clone();
+        refresh.as_object_mut().unwrap().remove("source");
+        let mut mesh = refresh.clone();
+        mesh["object_id"] = json!("left");
+        mesh["asset_id"] = Value::Null;
+        let mut shader = common;
+        shader["expected_shader_revision"] = json!("9");
+        for (name, args) in [
+            ("asset_inspect", json!({"offset":"16"})),
+            ("asset_import", import.clone()),
+            ("asset_rename", import.clone()),
+            ("asset_refresh", refresh.clone()),
+            ("scene_mesh", mesh.clone()),
+            ("shader_refresh", shader.clone()),
+        ] {
+            assert!(valid_arguments(name, &args), "{name}: {args}");
+            let response = server.handle(
+                json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":name,"arguments":args}}).to_string().as_bytes(),
+                |forwarded_name, forwarded_args| {
+                    assert_eq!(forwarded_name, name);
+                    assert_eq!(forwarded_args, &args);
+                    domain_error("asset_error", "The editor validates content semantics")
+                },
+            ).unwrap();
+            assert_eq!(
+                response["result"]["structuredContent"]["error"]["code"],
+                "asset_error"
+            );
+        }
+        for (name, valid, revision) in [
+            ("asset_import", &import, "expected_asset_revision"),
+            ("shader_refresh", &shader, "expected_shader_revision"),
+        ] {
+            for value in [
+                json!(1),
+                Value::Null,
+                json!("01"),
+                json!("18446744073709551616"),
+            ] {
+                let mut invalid = valid.clone();
+                invalid[revision] = value;
+                assert!(!valid_arguments(name, &invalid));
+            }
+            let mut missing = valid.clone();
+            missing.as_object_mut().unwrap().remove(revision);
+            assert!(!valid_arguments(name, &missing));
+            let mut extra = valid.clone();
+            extra[if revision == "expected_asset_revision" {
+                "expected_shader_revision"
+            } else {
+                "expected_asset_revision"
+            }] = json!("0");
+            assert!(!valid_arguments(name, &extra));
+        }
+        for value in [Value::Null, json!(4), json!(""), json!("x".repeat(257))] {
+            let mut invalid = import.clone();
+            invalid["source"] = value;
+            assert!(!valid_arguments("asset_import", &invalid));
+            assert!(!valid_arguments("asset_rename", &invalid));
+        }
+        for value in [json!(4), json!(""), json!("x".repeat(129))] {
+            let mut invalid = mesh.clone();
+            invalid["asset_id"] = value;
+            assert!(!valid_arguments("scene_mesh", &invalid));
+        }
+        let mut invalid = refresh;
+        invalid["asset_id"] = Value::Null;
+        assert!(!valid_arguments("asset_refresh", &invalid));
+        assert!(!valid_arguments("asset_inspect", &json!({"offset":16})));
+        // Confinement is checked against the owning project/filesystem by the
+        // editor, not guessed or normalized by the transport adapter.
+        import["source"] = json!("../escape.obj");
+        assert!(valid_arguments("asset_import", &import));
+        let response = server.handle(
+            json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"asset_import","arguments":import}}).to_string().as_bytes(),
+            |_, args| { assert_eq!(args, &import); domain_error("asset_error", "Project path escapes root") },
+        ).unwrap();
+        assert_eq!(
+            response["result"]["structuredContent"]["error"]["code"],
+            "asset_error"
+        );
+        let schemas = tools();
+        let listed = schemas["tools"].as_array().unwrap();
+        let schema =
+            |name| &listed.iter().find(|tool| tool["name"] == name).unwrap()["inputSchema"];
+        assert_eq!(
+            schema("scene_mesh")["properties"]["asset_id"]["type"],
+            json!(["string", "null"])
+        );
+        assert_eq!(
+            schema("scene_mesh")["properties"]["asset_id"]["minLength"],
+            1
+        );
+        assert!(schema("shader_refresh")["properties"]
+            .get("expected_asset_revision")
+            .is_none());
+        assert!(schema("asset_import")["properties"]
+            .get("expected_shader_revision")
+            .is_none());
     }
 
     #[test]

@@ -1,4 +1,4 @@
-//! Application-neutral authored cubes; no logistics, player or runtime state.
+//! Application-neutral authored objects; no logistics, player or runtime state.
 //!
 //! Public values permit code-first construction. Call `validate` at ingestion;
 //! [`Session`] validates transactional edits and owns bounded persisted history.
@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 1;
+pub const FORMAT_VERSION: u32 = 2;
 pub const MAX_OBJECTS: usize = 256;
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub const HISTORY_LIMIT: usize = 32;
@@ -62,8 +62,12 @@ impl Transform {
 pub struct Object {
     pub id: String,
     pub transform: Transform,
-    /// Linear RGBA channels in 0..=1. Every object uses the procedural unit cube.
+    /// Linear RGBA channels in 0..=1.
     pub color: [f32; 4],
+    /// Stable asset ID; None selects the procedural unit cube.
+    /// Asset existence is checked by the asset/editor boundary, not this crate.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mesh: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -92,6 +96,7 @@ impl Scene {
                     ..Transform::default()
                 },
                 color,
+                mesh: None,
             })
             .collect(),
         }
@@ -114,6 +119,9 @@ impl Scene {
                 )));
             }
             object.transform.validate()?;
+            if let Some(mesh) = &object.mesh {
+                validate_id(mesh)?;
+            }
             if !object
                 .color
                 .iter()
@@ -185,7 +193,7 @@ impl fmt::Display for SceneError {
             Self::Format(error) => write!(f, "invalid scene JSON: {error}"),
             Self::UnsupportedVersion(version) => write!(
                 f,
-                "unsupported scene version {version}; supported version is {FORMAT_VERSION}"
+                "unsupported scene version {version}; supported versions are 1 and {FORMAT_VERSION}"
             ),
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
             Self::StaleRevision { expected, actual } => write!(
@@ -195,8 +203,8 @@ impl fmt::Display for SceneError {
             Self::TickOverflow => write!(f, "preview tick exhausted; no step applied"),
             Self::RevisionOverflow => write!(f, "scene revision exhausted; no change applied"),
             Self::ObjectNotFound(id) => write!(f, "object {id} does not exist"),
-            Self::NoUndo => write!(f, "no authored transform to undo"),
-            Self::NoRedo => write!(f, "no authored transform to redo"),
+            Self::NoUndo => write!(f, "no authored change to undo"),
+            Self::NoRedo => write!(f, "no authored change to redo"),
             Self::Conflict => write!(
                 f,
                 "scene changed on disk or destination exists; reopen or save to a new path"
@@ -229,11 +237,125 @@ impl From<serde_json::Error> for SceneError {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+enum Change {
+    Transform {
+        id: String,
+        before: Transform,
+        after: Transform,
+    },
+    Mesh {
+        id: String,
+        before: Option<String>,
+        after: Option<String>,
+    },
+}
+
+impl Change {
+    fn apply(&self, scene: &mut Scene, undo: bool) -> Result<(), SceneError> {
+        let id = match self {
+            Self::Transform { id, .. } | Self::Mesh { id, .. } => id,
+        };
+        let object = scene
+            .objects
+            .iter_mut()
+            .find(|o| &o.id == id)
+            .ok_or_else(|| SceneError::ObjectNotFound(id.clone()))?;
+        let inconsistent = || SceneError::Invalid("inconsistent authored history".into());
+        match self {
+            Self::Transform { before, after, .. } => {
+                before.validate()?;
+                after.validate()?;
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &object.transform != expected {
+                    return Err(inconsistent());
+                }
+                object.transform = replacement.clone();
+            }
+            Self::Mesh { before, after, .. } => {
+                for mesh in [before, after].into_iter().flatten() {
+                    validate_id(mesh)?;
+                }
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &object.mesh != expected {
+                    return Err(inconsistent());
+                }
+                object.mesh = replacement.clone();
+            }
+        }
+        Ok(())
+    }
+}
+
+// Decode v1 through its exact schema: even `mesh: null` must be rejected.
+// Its untagged transform history is migrated without losing undo or redo.
+#[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
-struct Change {
+struct LegacyObject {
+    id: String,
+    transform: Transform,
+    color: [f32; 4],
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyScene {
+    id: String,
+    revision: u64,
+    objects: Vec<LegacyObject>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyChange {
     id: String,
     before: Transform,
     after: Transform,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyDocument {
+    format: String,
+    format_version: u32,
+    scene: LegacyScene,
+    undo: Vec<LegacyChange>,
+    redo: Vec<LegacyChange>,
+}
+impl From<LegacyDocument> for Document {
+    fn from(old: LegacyDocument) -> Self {
+        let migrate = |change: LegacyChange| Change::Transform {
+            id: change.id,
+            before: change.before,
+            after: change.after,
+        };
+        Self {
+            format: old.format,
+            format_version: old.format_version,
+            scene: Scene {
+                id: old.scene.id,
+                revision: old.scene.revision,
+                objects: old
+                    .scene
+                    .objects
+                    .into_iter()
+                    .map(|o| Object {
+                        id: o.id,
+                        transform: o.transform,
+                        color: o.color,
+                        mesh: None,
+                    })
+                    .collect(),
+            },
+            undo: old.undo.into_iter().map(migrate).collect(),
+            redo: old.redo.into_iter().map(migrate).collect(),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -265,22 +387,7 @@ impl Document {
         for (history, undo) in [(&self.undo, true), (&self.redo, false)] {
             let mut scene = self.scene.clone();
             for change in history.iter().rev() {
-                change.before.validate()?;
-                change.after.validate()?;
-                let object = scene
-                    .objects
-                    .iter_mut()
-                    .find(|o| o.id == change.id)
-                    .ok_or_else(|| SceneError::ObjectNotFound(change.id.clone()))?;
-                let (expected, replacement) = if undo {
-                    (&change.after, &change.before)
-                } else {
-                    (&change.before, &change.after)
-                };
-                if change.before == change.after || &object.transform != expected {
-                    return Err(SceneError::Invalid("inconsistent transform history".into()));
-                }
-                object.transform = replacement.clone();
+                change.apply(&mut scene, undo)?;
             }
         }
         Ok(())
@@ -301,16 +408,19 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
-        if version != u64::from(FORMAT_VERSION) {
-            return Err(SceneError::UnsupportedVersion(version));
-        }
-        let document: Self = serde_json::from_value(value)?;
+        let document: Self = match version {
+            1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
+            2 => serde_json::from_value(value)?,
+            _ => return Err(SceneError::UnsupportedVersion(version)),
+        };
         document.validate()?;
         Ok(document)
     }
     fn write(&self, path: &Path, create_new: bool) -> Result<(), SceneError> {
         self.validate()?;
-        let mut bytes = serde_json::to_vec_pretty(self)?;
+        let mut upgraded = self.clone();
+        upgraded.format_version = FORMAT_VERSION;
+        let mut bytes = serde_json::to_vec_pretty(&upgraded)?;
         bytes.push(b'\n');
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(SceneError::Invalid("serialized file exceeds 1 MiB".into()));
@@ -340,12 +450,13 @@ impl Document {
     }
 }
 
-/// Authored state with bounded transform deltas. Runtime state belongs elsewhere.
+/// Authored state with bounded transform and mesh deltas. Runtime state belongs elsewhere.
 #[derive(Clone, Debug)]
 pub struct Session {
     document: Document,
     path: Option<PathBuf>,
     saved: Option<Document>,
+    loaded_format_version: u32,
 }
 impl Session {
     pub fn new(scene: Scene) -> Result<Self, SceneError> {
@@ -354,12 +465,14 @@ impl Session {
             document: Document::new(scene),
             path: None,
             saved: None,
+            loaded_format_version: FORMAT_VERSION,
         })
     }
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SceneError> {
         let lock = SceneLock::acquire(path.as_ref())?;
         let document = Document::load(&lock.path)?;
         Ok(Self {
+            loaded_format_version: document.format_version,
             saved: Some(document.clone()),
             document,
             path: Some(lock.path.clone()),
@@ -371,6 +484,10 @@ impl Session {
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
+    /// Source format opened, or the current format after a successful save.
+    pub fn loaded_format_version(&self) -> u32 {
+        self.loaded_format_version
+    }
     pub fn is_dirty(&self) -> bool {
         self.saved.as_ref() != Some(&self.document)
     }
@@ -379,6 +496,11 @@ impl Session {
     }
     pub fn redo_len(&self) -> usize {
         self.document.redo.len()
+    }
+    /// True when current state or reversible history can resolve an asset ID.
+    /// Hosts use this to avoid relocating a scene away from its catalog.
+    pub fn has_asset_references(&self) -> bool {
+        self.scene().objects.iter().any(|o|o.mesh.is_some()) || self.document.undo.iter().chain(&self.document.redo).any(|change| matches!(change,Change::Mesh{before,after,..} if before.is_some()||after.is_some()))
     }
     fn check_revision(&self, expected: u64) -> Result<(), SceneError> {
         let actual = self.scene().revision;
@@ -411,12 +533,54 @@ impl Session {
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
-        let change = Change {
+        let change = Change::Transform {
             id: id.into(),
             before: object.transform.clone(),
             after: transform.clone(),
         };
         object.transform = transform.clone();
+        self.document.scene.revision = next;
+        self.document.redo.clear();
+        if self.document.undo.len() == HISTORY_LIMIT {
+            self.document.undo.remove(0);
+        }
+        self.document.undo.push(change);
+        Ok(next)
+    }
+    /// Assign a syntactically valid stable asset ID, or None for a cube.
+    /// Registry lookup belongs to the caller; failed/no-op commands preserve history.
+    pub fn set_mesh(
+        &mut self,
+        expected_revision: u64,
+        object_id: &str,
+        mesh: Option<String>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        if let Some(id) = &mesh {
+            validate_id(id)?;
+        }
+        let object = self
+            .document
+            .scene
+            .objects
+            .iter_mut()
+            .find(|o| o.id == object_id)
+            .ok_or_else(|| SceneError::ObjectNotFound(object_id.into()))?;
+        if object.mesh == mesh {
+            return Ok(self.document.scene.revision);
+        }
+        let next = self
+            .document
+            .scene
+            .revision
+            .checked_add(1)
+            .ok_or(SceneError::RevisionOverflow)?;
+        let change = Change::Mesh {
+            id: object_id.into(),
+            before: object.mesh.clone(),
+            after: mesh.clone(),
+        };
+        object.mesh = mesh;
         self.document.scene.revision = next;
         self.document.redo.clear();
         if self.document.undo.len() == HISTORY_LIMIT {
@@ -444,18 +608,7 @@ impl Session {
             .revision
             .checked_add(1)
             .ok_or(SceneError::RevisionOverflow)?;
-        let object = self
-            .document
-            .scene
-            .objects
-            .iter_mut()
-            .find(|o| o.id == change.id)
-            .ok_or_else(|| SceneError::ObjectNotFound(change.id.clone()))?;
-        object.transform = if undo {
-            change.before.clone()
-        } else {
-            change.after.clone()
-        };
+        change.apply(&mut self.document.scene, undo)?;
         if undo {
             self.document.undo.pop();
             self.document.redo.push(change);
@@ -475,6 +628,8 @@ impl Session {
             return Err(SceneError::Conflict);
         }
         self.document.write(&lock.path, !existing)?;
+        self.document.format_version = FORMAT_VERSION;
+        self.loaded_format_version = FORMAT_VERSION;
         self.saved = Some(self.document.clone());
         self.path = Some(lock.path.clone());
         Ok(())
@@ -642,6 +797,145 @@ mod tests {
         assert_eq!(session.document, before);
     }
 
+    // Unique risk: legacy undo AND redo survive an explicit v1-to-v2 save,
+    // including an unchanged save; absent mesh fields preserve old fingerprints.
+    #[test]
+    fn legacy_v1_history_migrates_without_dropping_or_rewriting_on_open() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.json");
+        let bytes = include_bytes!("../tests/fixtures/legacy-v1.scene.json");
+        std::fs::write(&path, bytes).unwrap();
+        let mut session = Session::open(&path).unwrap();
+        assert_eq!(session.loaded_format_version(), 1);
+        assert!(!session.is_dirty());
+        assert_eq!((session.undo_len(), session.redo_len()), (1, 1));
+        assert!(session.scene().objects[0].mesh.is_none());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        let legacy: serde_json::Value = serde_json::from_slice(bytes).unwrap();
+        let serialized: serde_json::Value =
+            serde_json::from_slice(&serde_json::to_vec(session.scene()).unwrap()).unwrap();
+        assert_eq!(serialized, legacy["scene"]);
+        let fingerprint = session.scene().fingerprint();
+        // Fixed from the v1 struct's canonical field order, before mesh existed.
+        assert_eq!(fingerprint, "65601f5c06cf65d9");
+        let occupied = dir.path().join("occupied.json");
+        std::fs::write(&occupied, b"external work").unwrap();
+        assert!(matches!(session.save(&occupied), Err(SceneError::Conflict)));
+        assert_eq!(session.loaded_format_version(), 1);
+        assert!(!session.is_dirty());
+        assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        session.save(&path).unwrap();
+        assert_eq!(session.loaded_format_version(), 2);
+        assert!(!session.is_dirty());
+        let stored: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        assert_eq!(stored["format_version"], 2);
+        assert_eq!(stored["undo"][0]["kind"], "transform");
+        assert_eq!(stored["redo"][0]["kind"], "transform");
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.scene().fingerprint(), fingerprint);
+        reopened.redo(3).unwrap();
+        assert_eq!(reopened.scene().objects[0].transform.translation[0], 2.0);
+        reopened.undo(4).unwrap();
+        reopened.undo(5).unwrap();
+        assert_eq!(reopened.scene().objects[0].transform.translation[0], 0.0);
+        reopened.redo(6).unwrap();
+        assert_eq!(reopened.scene().objects[0].transform.translation[0], 1.0);
+    }
+
+    // Unique risk: a mislabeled v1 document must never silently discard v2 mesh
+    // assignments or accept v2 tagged history, including explicit mesh null.
+    #[test]
+    fn legacy_v1_rejects_mesh_fields_and_v2_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("legacy.json");
+        let legacy: serde_json::Value =
+            serde_json::from_slice(include_bytes!("../tests/fixtures/legacy-v1.scene.json"))
+                .unwrap();
+        for mesh in [serde_json::Value::Null, "owned-mesh".into()] {
+            let mut value = legacy.clone();
+            value["scene"]["objects"][0]["mesh"] = mesh;
+            let bytes = serde_json::to_vec(&value).unwrap();
+            std::fs::write(&path, &bytes).unwrap();
+            assert!(matches!(Session::open(&path), Err(SceneError::Format(_))));
+            assert_eq!(std::fs::read(&path).unwrap(), bytes);
+        }
+        let mut value = legacy;
+        value["undo"][0]["kind"] = "transform".into();
+        std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(Session::open(&path).is_err());
+    }
+
+    // Unique risk: mesh and transform edits share one chronological persisted
+    // history while invalid/stale/no-op assignments preserve redo and dirty state.
+    #[test]
+    fn mesh_assignments_share_history_and_failed_commands_are_atomic() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("mesh.json");
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let mesh = Some("owned_mesh.01".into());
+        session.set_mesh(0, "left", mesh.clone()).unwrap();
+        let mut transform = session.scene().objects[0].transform.clone();
+        transform.translation[1] = 5.0;
+        session.edit(1, "left", &transform).unwrap();
+        session.undo(2).unwrap();
+        session.save(&path).unwrap();
+        let before = session.document.clone();
+        assert_eq!(session.set_mesh(3, "left", mesh.clone()).unwrap(), 3);
+        assert!(matches!(
+            session.set_mesh(2, "left", mesh.clone()),
+            Err(SceneError::StaleRevision { .. })
+        ));
+        assert!(matches!(
+            session.set_mesh(3, "absent", None),
+            Err(SceneError::ObjectNotFound(_))
+        ));
+        for invalid in [
+            "",
+            "../source.obj",
+            "mesh/name",
+            "mesh name",
+            &"x".repeat(129),
+        ] {
+            assert!(session.set_mesh(3, "left", Some(invalid.into())).is_err());
+        }
+        assert_eq!(session.document, before);
+        assert!(!session.is_dirty());
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.redo(3).unwrap(), 4);
+        assert_eq!(reopened.scene().objects[0].transform, transform);
+        reopened.undo(4).unwrap();
+        reopened.undo(5).unwrap();
+        assert_eq!(reopened.scene().objects[0].mesh, None);
+        reopened.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        reopened.redo(6).unwrap();
+        assert_eq!(reopened.scene().objects[0].mesh, mesh);
+        reopened.set_mesh(7, "left", None).unwrap();
+        assert_eq!(reopened.redo_len(), 0);
+        reopened.undo(8).unwrap();
+        assert_eq!(reopened.scene().objects[0].mesh, mesh);
+        reopened.document.scene.revision = u64::MAX;
+        let before = reopened.document.clone();
+        assert!(matches!(
+            reopened.set_mesh(u64::MAX, "left", None),
+            Err(SceneError::RevisionOverflow)
+        ));
+        assert_eq!(reopened.document, before);
+        // Bounded history applies equally to mesh changes.
+        let mut bounded = Session::new(Scene::demo()).unwrap();
+        for i in 0..40 {
+            bounded
+                .set_mesh(i, "left", Some(format!("mesh-{i}")))
+                .unwrap();
+        }
+        assert_eq!(bounded.undo_len(), HISTORY_LIMIT);
+        bounded.document.validate().unwrap();
+        // Persisted mesh chains must match the current field, just like transforms.
+        bounded.document.scene.objects[0].mesh = None;
+        assert!(bounded.document.validate().is_err());
+    }
+
     // Unique risk: public code-first values bypass constructor validation.
     #[test]
     fn public_value_validation_rejects_representative_limits() {
@@ -649,6 +943,9 @@ mod tests {
         let mut cases = Vec::new();
         let mut scene = demo.clone();
         scene.id = "x".repeat(129);
+        cases.push(scene);
+        let mut scene = demo.clone();
+        scene.objects[0].mesh = Some("mesh/source.obj".into());
         cases.push(scene);
         let mut scene = demo.clone();
         scene.objects[1].id = "left".into();
@@ -692,10 +989,17 @@ mod tests {
             br#"{"format_version":1,"id":"logistics","config":{}}"#.to_vec(),
         ];
         let mut value = good.clone();
-        value["format_version"] = 2.into();
+        value["format_version"] = 3.into();
         cases.push(serde_json::to_vec(&value).unwrap());
         let mut value = good.clone();
         value["unexpected"] = true.into();
+        cases.push(serde_json::to_vec(&value).unwrap());
+        let mut value = good.clone();
+        value["undo"] =
+            serde_json::json!([{"kind":"mesh","id":"left","before":null,"after":"owned-mesh"}]);
+        cases.push(serde_json::to_vec(&value).unwrap());
+        let mut value = good.clone();
+        value["undo"] = serde_json::json!([{"kind":"unrecognized","id":"left"}]);
         cases.push(serde_json::to_vec(&value).unwrap());
         let mut value = good;
         value["undo"] = serde_json::json!([{"id":"left","before":Transform::default(),"after":Transform::default()}]);
@@ -708,7 +1012,7 @@ mod tests {
         }
         let mut session = Session::new(Scene::demo()).unwrap();
         session.document.undo = vec![
-            Change {
+            Change::Transform {
                 id: "left".into(),
                 before: Transform::default(),
                 after: Transform::default()

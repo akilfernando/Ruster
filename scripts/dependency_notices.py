@@ -34,10 +34,20 @@ def cargo_metadata() -> dict:
 
 
 def external_packages(metadata: dict) -> list[dict]:
-    return sorted(
-        (p for p in metadata["packages"] if p.get("source")),
-        key=lambda p: (p["name"].casefold(), p["name"], p["version"], p["source"]),
-    )
+    members = set(metadata["workspace_members"])
+    packages = []
+    for original in metadata["packages"]:
+        if original["id"] in members:
+            continue
+        package = dict(original)
+        if not package.get("source"):
+            try:
+                relative = Path(package["manifest_path"]).resolve().parent.relative_to(ROOT.resolve())
+            except ValueError as exc:
+                raise RuntimeError(f"external path dependency {package['name']} must be inside the repository to publish its source/notices") from exc
+            package["source"] = "vendored:" + relative.as_posix()
+        packages.append(package)
+    return sorted(packages, key=lambda p: (p["name"].casefold(), p["name"], p["version"], p["source"]))
 
 
 def license_named(path: Path) -> bool:

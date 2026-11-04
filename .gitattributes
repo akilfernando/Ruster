@@ -1,2 +1,4 @@
 # Preserve upstream license payloads verbatim, including their original line endings.
 THIRD_PARTY_NOTICES.txt -text -whitespace
+# One unmodified upstream source file uses CRLF; keep its bytes and other whitespace checks.
+third_party/wgpu-hal/src/vulkan/descriptor.rs -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

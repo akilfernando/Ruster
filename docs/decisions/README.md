@@ -11,3 +11,5 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0005](0005-live-mcp.md) | Local editor-owned native MCP proof |
 | [0006](0006-scene-and-shared-3d.md) | Bounded neutral scenes and shared procedural 3D |
 | [0007](0007-open-source-publication.md) | Public source hosting, dual license and contributor workflow |
+| [0008](0008-content-import-and-refresh.md) | OBJ assets, stable catalog, cache and controlled shader refresh |
+| [0009](0009-spirv-validation-compatibility.md) | Bounded SPIR-V compatibility patch and corrected validation evidence |

@@ -1,0 +1,42 @@
+[
+  {
+    "shader": "composite-13",
+    "exit_code": 0,
+    "diagnostic": ""
+  },
+  {
+    "shader": "composite-16",
+    "exit_code": 1,
+    "diagnostic": "error: line 77: [VUID-StandaloneSpirv-None-10684] Invalid explicit layout decorations on type '8[%_struct_8]', the Function storage class has an explicit layout from the Offset decoration\n  %30 = OpVariable %_ptr_Function__struct_8 Function %32\n\n"
+  },
+  {
+    "shader": "egui-13",
+    "exit_code": 0,
+    "diagnostic": ""
+  },
+  {
+    "shader": "egui-16",
+    "exit_code": 1,
+    "diagnostic": "error: line 410: [VUID-StandaloneSpirv-None-10684] Invalid explicit layout decorations on type '6[%_struct_6]', the Function storage class has an explicit layout from the Offset decoration\n  %310 = OpVariable %_ptr_Function__struct_6 Function %312\n\n"
+  },
+  {
+    "shader": "project-13",
+    "exit_code": 0,
+    "diagnostic": ""
+  },
+  {
+    "shader": "project-16",
+    "exit_code": 1,
+    "diagnostic": "error: line 98: [VUID-StandaloneSpirv-None-10684] Invalid explicit layout decorations on type '9[%_struct_9]', the Function storage class has an explicit layout from the Offset decoration\n  %50 = OpVariable %_ptr_Function__struct_9 Function %52\n\n"
+  },
+  {
+    "shader": "scene-13",
+    "exit_code": 0,
+    "diagnostic": ""
+  },
+  {
+    "shader": "scene-16",
+    "exit_code": 1,
+    "diagnostic": "error: line 99: [VUID-StandaloneSpirv-None-10684] Invalid explicit layout decorations on type '9[%_struct_9]', the Function storage class has an explicit layout from the Offset decoration\n  %50 = OpVariable %_ptr_Function__struct_9 Function %52\n\n"
+  }
+]

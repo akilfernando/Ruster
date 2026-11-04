@@ -21,7 +21,7 @@ async def main():
         async with ClientSession(read, write) as client:
             info = await client.initialize()
             tools = await client.list_tools()
-            assert {tool.name for tool in tools.tools} == {
+            assert {tool.name for tool in tools.tools} >= {
                 "inspect", "edit", "undo", "redo", "replay", "scene_inspect",
                 "scene_transform", "scene_undo", "scene_redo", "scene_replay",
             }
@@ -60,7 +60,7 @@ async def main():
             arguments = {**expected, "object_id": first["id"], "transform": proposed}
             edited = await call("scene_transform", arguments)
             assert edited["changed"] and edited["diff"] == [{
-                "object_id": first["id"], "before": first["transform"], "after": proposed,
+                "object_id": first["id"], "before": first["transform"], "after": proposed, "before_mesh":first.get("mesh"), "after_mesh":first.get("mesh"),
             }], edited
             current = await call("scene_inspect")
             assert current["objects"][0]["transform"] == proposed, current
@@ -84,7 +84,7 @@ async def main():
             if os.environ.get("RUSTER_MCP_DEMO_KEEP") != "1":
                 undone = await call("scene_undo", expected)
                 assert undone["diff"] == [{
-                    "object_id": first["id"], "before": proposed, "after": first["transform"],
+                    "object_id": first["id"], "before": proposed, "after": first["transform"], "before_mesh":first.get("mesh"), "after_mesh":first.get("mesh"),
                 }], undone
                 restored = await call("scene_inspect")
                 assert restored["objects"] == before["objects"], restored

@@ -1,0 +1,18 @@
+[package]
+name = "ruster-assets"
+description = "Bounded owned OBJ mesh import and rebuildable derived cache"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fs2 = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+tempfile = "3"
+
+[lints]
+workspace = true

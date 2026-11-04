@@ -1,6 +1,7 @@
 [workspace]
-members = ["crates/ruster-core", "crates/ruster-cli", "crates/ruster-viewer", "crates/ruster-editor", "crates/ruster-mcp", "crates/ruster-scene", "crates/ruster-render"]
+members = ["crates/ruster-core", "crates/ruster-cli", "crates/ruster-viewer", "crates/ruster-editor", "crates/ruster-mcp", "crates/ruster-scene", "crates/ruster-render", "crates/ruster-assets"]
 resolver = "2"
+exclude = ["third_party/wgpu-hal"]
 
 [workspace.package]
 version = "0.1.0"
@@ -11,3 +12,7 @@ repository = "https://github.com/akilfernando/Ruster"
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
+
+# Bounded upstream SPIR-V layout workaround; see third_party/wgpu-hal/RUSTER-PATCH.md.
+[patch.crates-io]
+wgpu-hal = { path = "third_party/wgpu-hal" }

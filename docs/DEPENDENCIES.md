@@ -5,7 +5,7 @@ This inventory covers every external package in the locked workspace resolution,
 Cargo's declared SPDX license expression is metadata supplied by each package. Its presence is not an independent license review or certification.
 Project source licensing does not change the licenses of dependencies.
 
-External locked package versions: **398**. Packages with no discovered readable license text: **61**.
+External locked package versions: **406**. Packages with no discovered readable license text: **61**.
 
 | Package | Version | Cargo source | Declared license expression | Upstream repository |
 | --- | --- | --- | --- | --- |
@@ -51,6 +51,7 @@ External locked package versions: **398**. Packages with no discovered readable 
 | bitflags | 1.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/bitflags/bitflags](https://github.com/bitflags/bitflags) |
 | bitflags | 2.13.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/bitflags/bitflags](https://github.com/bitflags/bitflags) |
 | block | 0.1.6 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [http://github.com/SSheldon/rust-block](http://github.com/SSheldon/rust-block) |
+| block-buffer | 0.10.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | block2 | 0.5.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | block2 | 0.6.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | blocking | 1.7.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/blocking](https://github.com/smol-rs/blocking) |
@@ -78,10 +79,13 @@ External locked package versions: **398**. Packages with no discovered readable 
 | core-foundation-sys | 0.8.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
 | core-graphics | 0.23.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
 | core-graphics-types | 0.1.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
+| cpufeatures | 0.2.17 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | crc32fast | 1.5.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/srijs/rust-crc32fast](https://github.com/srijs/rust-crc32fast) |
 | crossbeam-utils | 0.8.23 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/crossbeam-rs/crossbeam](https://github.com/crossbeam-rs/crossbeam) |
 | crunchy | 0.2.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/eira-fransham/crunchy](https://github.com/eira-fransham/crunchy) |
+| crypto-common | 0.1.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |
 | cursor-icon | 1.2.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0 OR Zlib` | [https://github.com/rust-windowing/cursor-icon](https://github.com/rust-windowing/cursor-icon) |
+| digest | 0.10.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |
 | dispatch | 0.2.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [http://github.com/SSheldon/rust-dispatch](http://github.com/SSheldon/rust-dispatch) |
 | dispatch2 | 0.3.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | dlib | 0.5.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/elinorbgr/dlib](https://github.com/elinorbgr/dlib) |
@@ -127,6 +131,7 @@ External locked package versions: **398**. Packages with no discovered readable 
 | futures-macro | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | futures-task | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | futures-util | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
+| generic-array | 0.14.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/fizyk20/generic-array.git](https://github.com/fizyk20/generic-array.git) |
 | gethostname | 1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://codeberg.org/swsnr/gethostname.rs.git](https://codeberg.org/swsnr/gethostname.rs.git) |
 | getrandom | 0.3.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-random/getrandom](https://github.com/rust-random/getrandom) |
 | getrandom | 0.4.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-random/getrandom](https://github.com/rust-random/getrandom) |
@@ -239,6 +244,7 @@ External locked package versions: **398**. Packages with no discovered readable 
 | plain | 0.2.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/randomites/plain](https://github.com/randomites/plain) |
 | png | 0.18.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/image-rs/image-png](https://github.com/image-rs/image-png) |
 | polling | 3.11.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/polling](https://github.com/smol-rs/polling) |
+| pollster | 0.4.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0/MIT` | [https://github.com/zesterer/pollster](https://github.com/zesterer/pollster) |
 | pollster | 1.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0/MIT` | [https://github.com/zesterer/pollster](https://github.com/zesterer/pollster) |
 | polycool | 0.4.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/linebender/kurbo](https://github.com/linebender/kurbo) |
 | portable-atomic | 1.15.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/taiki-e/portable-atomic](https://github.com/taiki-e/portable-atomic) |
@@ -279,6 +285,7 @@ External locked package versions: **398**. Packages with no discovered readable 
 | serde_derive | 1.0.229 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/serde-rs/serde](https://github.com/serde-rs/serde) |
 | serde_json | 1.0.154 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/serde-rs/json](https://github.com/serde-rs/json) |
 | serde_repr | 0.1.21 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/serde-repr](https://github.com/dtolnay/serde-repr) |
+| sha2 | 0.10.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/hashes](https://github.com/RustCrypto/hashes) |
 | shlex | 2.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/comex/rust-shlex](https://github.com/comex/rust-shlex) |
 | signal-hook-registry | 1.4.8 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/vorner/signal-hook](https://github.com/vorner/signal-hook) |
 | simd-adler32 | 0.3.10 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mcountryman/simd-adler32](https://github.com/mcountryman/simd-adler32) |
@@ -316,6 +323,7 @@ External locked package versions: **398**. Packages with no discovered readable 
 | tree_magic_mini | 3.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mbrubeck/tree_magic/](https://github.com/mbrubeck/tree_magic/) |
 | ttf-parser | 0.25.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/harfbuzz/ttf-parser](https://github.com/harfbuzz/ttf-parser) |
 | type-map | 0.5.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/kardeiz/type-map](https://github.com/kardeiz/type-map) |
+| typenum | 1.20.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/paholg/typenum](https://github.com/paholg/typenum) |
 | uds_windows | 1.2.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/haraldh/rust_uds_windows](https://github.com/haraldh/rust_uds_windows) |
 | unicode-general-category | 1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://github.com/yeslogic/unicode-general-category](https://github.com/yeslogic/unicode-general-category) |
 | unicode-ident | 1.0.27 | `registry+https://github.com/rust-lang/crates.io-index` | `(MIT OR Apache-2.0) AND Unicode-3.0` | [https://github.com/dtolnay/unicode-ident](https://github.com/dtolnay/unicode-ident) |
@@ -350,7 +358,7 @@ External locked package versions: **398**. Packages with no discovered readable 
 | wgpu | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
 | wgpu-core | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
 | wgpu-core-deps-windows-linux-android | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
-| wgpu-hal | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
+| wgpu-hal | 30.0.1 | `vendored:third_party/wgpu-hal` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
 | wgpu-naga-bridge | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
 | wgpu-types | 30.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/gfx-rs/wgpu](https://github.com/gfx-rs/wgpu) |
 | winapi | 0.3.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/retep998/winapi-rs](https://github.com/retep998/winapi-rs) |

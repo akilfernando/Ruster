@@ -1,0 +1,98 @@
+{
+  "format": "ruster-scene",
+  "format_version": 2,
+  "scene": {
+    "id": "procedural-demo",
+    "revision": 1,
+    "objects": [
+      {
+        "id": "left",
+        "transform": {
+          "translation": [
+            -2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "color": [
+          0.12,
+          0.58,
+          0.85,
+          1.0
+        ],
+        "mesh": "pyramid"
+      },
+      {
+        "id": "center",
+        "transform": {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "color": [
+          0.9,
+          0.4,
+          0.16,
+          1.0
+        ]
+      },
+      {
+        "id": "right",
+        "transform": {
+          "translation": [
+            2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "color": [
+          0.3,
+          0.75,
+          0.45,
+          1.0
+        ]
+      }
+    ]
+  },
+  "undo": [
+    {
+      "kind": "mesh",
+      "id": "left",
+      "before": null,
+      "after": "pyramid"
+    }
+  ],
+  "redo": []
+}

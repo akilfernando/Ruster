@@ -161,3 +161,56 @@ Use a disposable scene. This official-SDK demo checks inspection/replay,
 transform diff, stale/invalid rejection and shared undo. It does not save. See
 the [scene API](../ruster-scene/README.md), [renderer guide](../ruster-render/README.md)
 and [M5 evidence](../../docs/evidence/M5.md) for exact scope and tested conditions.
+
+## Mesh content and shader iteration (M6)
+
+```sh
+cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
+cargo run --locked -p ruster-render -- --scene examples/content/scene.json --shader examples/content/scene.wgsl
+```
+
+The checked-in project includes an original pyramid OBJ, an authored stable-ID
+catalog and a v2 scene. Work on a disposable project copy when trying refresh
+or rename. The derived `.ruster-cache/` directory is ignored and rebuildable;
+keep `.ruster-assets.json`, scene files and original sources under version control.
+
+**Assets…** imports one project-relative triangle-only OBJ under a stable asset
+ID. Choose **Assign mesh…** to use it on the selected object; choosing
+**Procedural cube** clears the reference. Mesh assignment shares transform
+Undo/Redo. Import/Refresh/Rename save the catalog immediately and have their own
+revision; scene Undo/Discard does not delete or rename source files. The asset
+window states this boundary before actions.
+
+Edit the source in your preferred tool, then **Refresh mesh asset**. Broken or
+missing sources show diagnostics and retain the accepted mesh when available.
+Repair and refresh again to recover. **Rename mesh source** moves the source
+without overwriting the destination and preserves the asset ID. Scene references
+remain unchanged. See the [asset guide](../ruster-assets/README.md) for exact
+bounds, supported OBJ directives, cache recipe, failure behavior and CLI commands.
+There is no background watcher, texture/MTL import or general polygon importer.
+
+Preview freezes both scene data and resolved geometry until **Reset preview**.
+Refreshing authored content leaves that snapshot intact and marks it stale.
+Missing references keep their IDs and display a diagnostic placeholder. Save As
+to another asset root is blocked when current state or undo/redo can restore mesh
+references; dependency export/relocation belongs to later packaging work.
+
+**Create shader source** creates `scene.wgsl` beside the scene without overwriting
+an existing file. Edit it, then **Refresh scene shader** to validate a candidate
+with the fixed renderer contract. Invalid syntax/bindings retain the last good
+pipeline; repair and refresh to recover. Shader refresh is trusted local GPU
+code, not a hostile-code sandbox. It affects the visual pipeline in both viewport
+modes; it does not rewrite authored data or roll back runtime ticks. Open/restart
+uses the built-in pipeline until an explicit refresh (or standalone `--shader`).
+
+Scene-v1 files still load with their existing transform history. The inspector
+shows the loaded version and that Save writes v2. V1-labelled files containing
+v2 mesh fields are rejected. Logistics-v1 scenarios remain a separate format.
+
+Native MCP adds `asset_inspect`, `asset_import`, `asset_refresh`, `asset_rename`,
+`scene_mesh` and `shader_refresh`. Use the exact session/scene revision and the
+separate catalog/shader revision returned by inspection. Paths stay inside the
+explicit project root; responses contain metadata/status rather than mesh arrays
+or shader source. A reproducible official-SDK smoke is
+`uv run --with mcp==2.3.0 scripts/mcp_content_demo.py` with `RUSTER_MCP_SOCKET`
+set, against a disposable scene whose first object is still a procedural cube.

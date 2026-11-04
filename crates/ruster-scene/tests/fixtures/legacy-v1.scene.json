@@ -1,0 +1,23 @@
+{
+  "format": "ruster-scene",
+  "format_version": 1,
+  "scene": {
+    "id": "legacy-history",
+    "revision": 3,
+    "objects": [{
+      "id": "cube",
+      "transform": { "translation": [1.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] },
+      "color": [0.2, 0.4, 0.6, 1.0]
+    }]
+  },
+  "undo": [{
+    "id": "cube",
+    "before": { "translation": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] },
+    "after": { "translation": [1.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] }
+  }],
+  "redo": [{
+    "id": "cube",
+    "before": { "translation": [1.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] },
+    "after": { "translation": [2.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0] }
+  }]
+}

@@ -37,7 +37,7 @@ The reference game must exercise the engine, not become a second large product. 
 
 ## Delivery sequence
 
-The canonical phase definitions, deliverables, scope limits and acceptance gates are in [ROADMAP.md](ROADMAP.md). M0–M3 now provide the local seed, saved-scenario workflow, first Vulkan schematic view and visual authoring. M4 now provides the bounded native editor-owned MCP proof; M5 now supplies bounded neutral scenes and shared procedural3D; M6 content/iteration is next. The accepted post-M3 revision separates shared scene/3D foundations, content iteration, standalone application kit, independent reuse proof and public alpha (M5–M9).
+The canonical phase definitions, deliverables, scope limits and acceptance gates are in [ROADMAP.md](ROADMAP.md). M0–M3 now provide the local seed, saved-scenario workflow, first Vulkan schematic view and visual authoring. M4 now provides the bounded native editor-owned MCP proof; M5 now supplies bounded neutral scenes and shared procedural3D; M6 now supplies the bounded OBJ/cache/WGSL iteration route; M7 standalone application kit is next. The accepted post-M3 revision separates shared scene/3D foundations, content iteration, standalone application kit, independent reuse proof and public alpha (M5–M9).
 
 A dependency-free prototype is a temporary scope choice, not a ban on libraries. Authoring undo restores authored changes; simulation reset/replay is distinct from runtime rollback.
 

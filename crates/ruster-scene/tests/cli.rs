@@ -34,6 +34,7 @@ fn headless_workflow_and_failed_command_preserve_disk() {
         ],
         vec!["undo", file, "1"],
         vec!["redo", file, "2"],
+        vec!["mesh", file, "3", "left", "owned_mesh"],
     ] {
         let output = cli(&args);
         assert!(
@@ -44,6 +45,7 @@ fn headless_workflow_and_failed_command_preserve_disk() {
     }
     let scene = ruster_scene::Scene::load(&path).unwrap();
     let object = &scene.objects[0];
+    assert_eq!(object.mesh.as_deref(), Some("owned_mesh"));
     assert_eq!(object.transform.rotation, [0.1, 0.2, 0.3]);
     assert_eq!(object.transform.scale, [1., 2., 3.]);
     let before = std::fs::read(&path).unwrap();
@@ -51,11 +53,20 @@ fn headless_workflow_and_failed_command_preserve_disk() {
     assert!(!stale.status.success());
     assert!(String::from_utf8_lossy(&stale.stderr).contains("stale revision"));
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(!cli(&["mesh", file, "4", "left", "../mesh.obj"])
+        .status
+        .success());
+    assert_eq!(std::fs::read(&path).unwrap(), before);
     let output = cli(&["run", file, "3"]);
     assert!(output.status.success());
     let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(value["tick"], 3);
-    assert_eq!(value["revision"], 3);
+    assert_eq!(value["revision"], 4);
     assert!(!cli(&["run", file, "10001"]).status.success());
     assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert!(cli(&["mesh", file, "4", "left", "none"]).status.success());
+    assert_eq!(
+        ruster_scene::Scene::load(&path).unwrap().objects[0].mesh,
+        None
+    );
 }
