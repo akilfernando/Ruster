@@ -1,0 +1,20 @@
+Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation true
+Vulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0
+Vulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0
+Vulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0
+Vulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0
+Vulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0
+Smoke: resize 720x480 requested
+Smoke: reset after 20 rendered frames
+Smoke: resize 1100x720 and camera pan/zoom
+Smoke: minimize requested (compositor support varies)
+Smoke: restore requested
+smoke replay_equal=true frames=90 tick=70 stock=70 delivered=140 produced=210
+Timing gpu_commands: samples=89 mean_ms=0.0479 p95_ms=0.0486
+Timing cpu_redraw_including_acquire: samples=90 mean_ms=10.1289 p95_ms=20.1746
+Timing cpu_geometry_rebuild: samples=90 mean_ms=0.0480 p95_ms=0.0794
+Geometry: rebuilds=90 retained_capacity_bytes=131072
+Timing frame_interval_including_lifecycle: samples=89 mean_ms=28.7231 p95_ms=38.8689
+Viewer lifecycle: 90 frames in 2.811s
+Viewer state: playing=false tick=70 stock=70 delivered=140 produced=210
+Validation enabled=true errors=0 warnings=0

@@ -17,6 +17,9 @@ use winit::{
     window::{Window, WindowId},
 };
 
+const TICK_INTERVAL: Duration = Duration::from_millis(250);
+const SMOKE_INTERVAL: Duration = Duration::from_millis(16);
+
 const HELP: &str = "Ruster Vulkan logistics viewer\n\
 Usage: ruster-viewer [--scenario PATH] [--validation] [--smoke FRAMES]\n\
 SPACE play/pause (4 ticks/sec); N step and pause; R reset and pause.\n\
@@ -74,6 +77,8 @@ struct App {
     config: Config,
     simulation: Simulation,
     camera: Camera,
+    geometry: scene::GeometryCache,
+    occluded: bool,
     playing: bool,
     last_tick: Instant,
     started: Instant,
@@ -96,6 +101,8 @@ impl App {
             config,
             simulation: Simulation::new(config).map_err(|e| e.to_string())?,
             camera: Camera::default(),
+            geometry: scene::GeometryCache::default(),
+            occluded: false,
             playing: false,
             last_tick: Instant::now(),
             started: Instant::now(),
@@ -132,11 +139,17 @@ impl App {
 
     fn title(&self) -> String {
         let state = self.simulation.state();
-        format!("Ruster | {} | tick {} | stock {} | delivered {} | Space play/pause · N step · R reset · Home camera", if self.playing { "PLAY" } else { "PAUSED" }, state.tick, state.stock, state.delivered)
+        format!(
+            "Ruster | {} | tick {} | stock {} | delivered {} | Space play/pause · N step · R reset · Home camera",
+            if self.playing { "PLAY" } else { "PAUSED" },
+            state.tick,
+            state.stock,
+            state.delivered
+        )
     }
 
     fn redraw(&mut self, event_loop: &ActiveEventLoop) -> Result<(), Box<dyn std::error::Error>> {
-        if self.restore_at.is_some() {
+        if self.restore_at.is_some() || self.occluded {
             return Ok(());
         }
         let size = self.window.as_ref().unwrap().inner_size();
@@ -150,15 +163,14 @@ impl App {
                 eprintln!("Smoke: reset after 20 rendered frames");
             }
             self.step()?;
-        } else if self.playing && self.last_tick.elapsed() >= Duration::from_millis(250) {
-            // No catch-up loop: an explicit tick sequence is the contract, not wall-clock determinism.
-            self.step()?;
-            self.last_tick = Instant::now();
         }
-        let geometry = scene::scene(self.simulation.state(), self.config, self.playing);
+        let geometry = self
+            .geometry
+            .get(self.simulation.state(), self.config, self.playing);
         let renderer = self.renderer.as_mut().unwrap();
-        if !renderer.draw(&geometry, self.camera)? {
+        if !renderer.draw(geometry, self.camera)? {
             renderer.resize(size)?;
+            self.window.as_ref().unwrap().request_redraw();
         }
         let now = Instant::now();
         if self.cpu_times.len() < 600 {
@@ -222,11 +234,22 @@ impl App {
             timing("gpu_commands", &renderer.gpu_milliseconds);
         }
         timing("cpu_redraw_including_acquire", &self.cpu_times);
+        timing("cpu_geometry_rebuild", &self.geometry.rebuild_milliseconds);
+        eprintln!(
+            "Geometry: rebuilds={} retained_capacity_bytes={}",
+            self.geometry.rebuilds,
+            self.geometry.capacity_bytes()
+        );
         timing("frame_interval_including_lifecycle", &self.frame_times);
         eprintln!(
             "Viewer lifecycle: {} frames in {:.3}s",
             self.frames,
             self.started.elapsed().as_secs_f64()
+        );
+        let state = self.simulation.state();
+        eprintln!(
+            "Viewer state: playing={} tick={} stock={} delivered={} produced={}",
+            self.playing, state.tick, state.stock, state.delivered, state.produced
         );
         // Destruct before reading counts: teardown is part of validation evidence.
         self.renderer.take();
@@ -277,6 +300,7 @@ impl ApplicationHandler for App {
         match vulkan::Renderer::new(&window, self.validation) {
             Ok(renderer) => {
                 self.renderer = Some(renderer);
+                window.request_redraw();
                 self.window = Some(window);
             }
             Err(error) => self.fail(event_loop, error),
@@ -289,12 +313,19 @@ impl ApplicationHandler for App {
         }
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                if !occluded {
+                    self.window.as_ref().unwrap().request_redraw();
+                }
+            }
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     if let Err(error) = renderer.resize(size) {
                         self.fail(event_loop, error);
                     }
                 }
+                self.window.as_ref().unwrap().request_redraw();
             }
             WindowEvent::RedrawRequested => {
                 if let Err(error) = self.redraw(event_loop) {
@@ -323,8 +354,9 @@ impl ApplicationHandler for App {
                         KeyCode::ArrowRight => self.camera.x += 40.0 / self.camera.zoom,
                         KeyCode::ArrowUp => self.camera.y -= 40.0 / self.camera.zoom,
                         KeyCode::ArrowDown => self.camera.y += 40.0 / self.camera.zoom,
-                        _ => {}
+                        _ => return,
                     }
+                    self.window.as_ref().unwrap().request_redraw();
                 }
             }
             WindowEvent::MouseWheel { delta, .. } => {
@@ -333,35 +365,61 @@ impl ApplicationHandler for App {
                     MouseScrollDelta::PixelDelta(position) => position.y as f32 / 100.0,
                 };
                 self.camera.zoom = (self.camera.zoom * 1.15_f32.powf(amount)).clamp(0.25, 4.0);
+                self.window.as_ref().unwrap().request_redraw();
             }
             _ => {}
         }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        if self.smoke.is_some() && self.started.elapsed() > Duration::from_secs(30) {
+        let now = Instant::now();
+        let timeout = self.started + Duration::from_secs(30);
+        if self.smoke.is_some() && now >= timeout {
             self.fail(
                 event_loop,
                 "Smoke exceeded 30 seconds; check compositor restore/device availability",
             );
             return;
         }
-        if let Some(at) = self.restore_at {
-            if Instant::now() >= at {
-                self.restore_at = None;
-                if let Some(window) = self.window.as_ref() {
-                    window.set_minimized(false);
-                    window.focus_window();
-                }
-                eprintln!("Smoke: restore/focus requested");
+        if self.restore_at.is_some_and(|at| now >= at) {
+            self.restore_at = None;
+            if let Some(window) = self.window.as_ref() {
+                window.set_minimized(false);
+                window.request_redraw();
+            }
+            eprintln!("Smoke: restore requested");
+        }
+        // Ticking is independent of presentation: a zero-sized/occluded surface can
+        // sleep between ticks instead of repeatedly waking on an overdue redraw.
+        if self.smoke.is_none() && self.playing && now >= self.last_tick + TICK_INTERVAL {
+            // No catch-up loop: explicit tick sequence, not wall-clock determinism.
+            if let Err(error) = self.step() {
+                self.fail(event_loop, error);
+                return;
+            }
+            self.last_tick = now;
+            if let Some(window) = self.window.as_ref() {
+                window.request_redraw();
             }
         }
-        if let Some(window) = self.window.as_ref() {
-            window.request_redraw();
+        let mut wake = self.restore_at;
+        if self.smoke.is_some() {
+            // Smoke remains frame-scripted and bounded even if no surface can draw.
+            wake = Some(wake.unwrap_or(timeout).min(timeout));
+            if self.restore_at.is_none() && !self.occluded {
+                let next = self.last_frame.map_or(now, |at| at + SMOKE_INTERVAL);
+                if now >= next {
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
+                }
+                // Use a future wake even when a zero-size surface cannot present.
+                wake = Some(wake.unwrap().min(next.max(now + SMOKE_INTERVAL)));
+            }
+        } else if self.playing {
+            wake = Some(self.last_tick + TICK_INTERVAL);
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(
-            Instant::now() + Duration::from_millis(16),
-        ));
+        event_loop.set_control_flow(wake.map_or(ControlFlow::Wait, ControlFlow::WaitUntil));
     }
 
     fn exiting(&mut self, _event_loop: &ActiveEventLoop) {

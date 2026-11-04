@@ -145,6 +145,31 @@ fn simultaneous_cli_edits_cannot_silently_overwrite_a_revision() {
     let path = dir.path().join("project.json");
     let path = path.to_str().unwrap();
     assert!(project(&["create", path]).status.success());
+    // Frontends and CLI must honor exactly the same lock, including aliases.
+    let lock = ruster_core::ProjectLock::acquire(dir.path().join("./project.json")).unwrap();
+    let mut blocked = Command::new(env!("CARGO_BIN_EXE_ruster-cli"))
+        .args(["edit", path, "--revision", "0", "--transfer", "4"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+    loop {
+        if blocked.try_wait().unwrap().is_some() {
+            break;
+        }
+        if std::time::Instant::now() >= deadline {
+            blocked.kill().unwrap();
+            blocked.wait().unwrap();
+            panic!("CLI blocked instead of reporting a busy project");
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+    let blocked = blocked.wait_with_output().unwrap();
+    assert!(!blocked.status.success());
+    assert!(String::from_utf8(blocked.stderr).unwrap().contains("busy"));
+    assert_eq!(ruster_core::Scenario::load(path).unwrap().revision(), 0);
+    drop(lock);
     let mut first = Command::new(env!("CARGO_BIN_EXE_ruster-cli"))
         .args(["edit", path, "--revision", "0", "--transfer", "4"])
         .stdout(std::process::Stdio::null())

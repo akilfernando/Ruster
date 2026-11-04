@@ -1,0 +1,18 @@
+[package]
+name = "ruster-editor"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+
+[features]
+# Developer-controlled native UI inspection; no listener unless explicitly enabled.
+inspection = ["eframe/inspection"]
+
+[dependencies]
+ruster-core = { path = "../ruster-core" }
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "wgpu_no_default_features", "wayland", "x11", "accesskit", "clipboard"] }
+wgpu = { version = "30.0", default-features = false, features = ["std", "vulkan", "wgsl"] }
+log = "0.4"
+
+[lints]
+workspace = true

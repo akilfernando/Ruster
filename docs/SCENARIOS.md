@@ -31,7 +31,7 @@ The initial ten-tick run produces 30, retains 10 and delivers 20. Changing capac
 - Runtime ticks, delivered counters, camera and renderer state are not saved in authored data.
 - Production precedes transfer each tick. Checked integer overflow rejects the entire failed tick; earlier successful ticks remain valid.
 
-The CLI holds a sibling advisory lock during authored mutations and checks the expected revision after acquiring it. Lock files can remain on disk; the operating-system lock, not file presence, determines ownership. Cooperating CLI processes serialize writes. Arbitrary external editors do not participate in that guarantee.
+The CLI holds a sibling advisory lock during authored mutations and checks the expected revision after acquiring it. Lock files can remain on disk; the operating-system lock, not file presence, determines ownership. CLI and editor share this lock. Contention returns a clear busy error immediately instead of blocking the interface; retry when the other writer finishes. Arbitrary external editors do not participate in that guarantee.
 
 Writes use a temporary sibling file, sync its contents and replace atomically. Failure before replacement preserves the previous destination. This is not a cross-platform power-loss guarantee or distributed transaction. Core callers using save directly must manage their own concurrency.
 
@@ -39,4 +39,6 @@ Writes use a temporary sibling file, sync its contents and replace atomically. F
 
 ## Programmatic use
 
-`Scenario::load(path)` yields validated authored data. `config()` returns a copy for `Simulation::new`, and `simulation()` starts a new runtime. `edit(expected_revision, config)`, `undo(expected_revision)` and `redo(expected_revision)` are the common authoring operations. These narrow operations will underpin the later editor/MCP; neither interface is implemented by M1.
+`Scenario::load(path)` yields validated authored data. `config()` returns a copy for `Simulation::new`, and `simulation()` starts a new runtime. `edit(expected_revision, config)`, `undo(expected_revision)` and `redo(expected_revision)` are the common authoring operations. The CLI and editor use these same authored operations; MCP is planned for M4.
+
+`ProjectSession` adds an optional file association and the full saved authored baseline. New and duplicated sessions are dirty until saved. `save()` compares the current disk scenario to that baseline while holding `ProjectLock`, rejecting conflicting edits (including valid same-revision manual changes). `save_as()` creates a new file and changes the association only after success. Failed saves preserve in-memory work. Undo may restore identical configuration while remaining dirty because revision/history changed. Runtime simulation and draft UI text stay outside this session. Direct `Scenario::save` callers still manage locking themselves.

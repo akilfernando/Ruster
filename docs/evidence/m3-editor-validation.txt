@@ -1,0 +1,56 @@
+2026-11-04: debug inspection editor; NVIDIA RTX 4060 Laptop / Vulkan.
+VK_INSTANCE_LAYERS=VK_LAYER_KHRONOS_validation
+VK_VALIDATION_VALIDATE_SYNC=1
+VK_LAYER_PATH and LD_LIBRARY_PATH point to local validation installation.
+VK_LOADER_DEBUG=layer. Excerpt begins after repeated manifest discovery.
+Loader env-layer notices below are expected, not validation defects.
+
+WARN wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x55fc9bedbec0, name: ?)
+[Vulkan Loader] WARNING | LAYER: env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: GENERAL [Loader Message (0x0)]
+	env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+WARN wgpu_hal::vulkan::instance: 	objects: (type: INSTANCE, hndl: 0x55fc9bedbec0, name: ?)
+[Vulkan Loader] WARNING | LAYER: env var 'VK_INSTANCE_LAYERS' defined and adding layers "VK_LAYER_KHRONOS_validation"
+[Vulkan Loader] DEBUG | LAYER:  Loading layer library libVkLayer_khronos_validation.so
+[Vulkan Loader] INFO | LAYER:   Insert instance layer "VK_LAYER_KHRONOS_validation" (/home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so)
+[Vulkan Loader] DEBUG | LAYER:  Loading layer library libVkLayer_MESA_device_select.so
+[Vulkan Loader] INFO | LAYER:   Insert instance layer "VK_LAYER_MESA_device_select" (/usr/lib/libVkLayer_MESA_device_select.so)
+[Vulkan Loader] LAYER:          vkCreateInstance layer callstack setup to:
+[Vulkan Loader] LAYER:             <Application>
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] LAYER:             <Loader>
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] LAYER:             VK_LAYER_MESA_device_select
+[Vulkan Loader] LAYER:                     Type: Implicit
+[Vulkan Loader] LAYER:                     Enabled By: Implicit Layer
+[Vulkan Loader] LAYER:                         Disable Env Var:  NODEVICE_SELECT
+[Vulkan Loader] LAYER:                     Manifest: /usr/share/vulkan/implicit_layer.d/VkLayer_MESA_device_select.json
+[Vulkan Loader] LAYER:                     Library:  /usr/lib/libVkLayer_MESA_device_select.so
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] LAYER:             VK_LAYER_KHRONOS_validation
+[Vulkan Loader] LAYER:                     Type: Explicit
+[Vulkan Loader] LAYER:                     Enabled By: Environment Variable VK_INSTANCE_LAYERS
+[Vulkan Loader] LAYER:                     Manifest: /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+[Vulkan Loader] LAYER:                     Library:  /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] LAYER:             <Drivers>
+[Vulkan Loader] INFO | LAYER:   Inserted device layer "VK_LAYER_KHRONOS_validation" (/home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so)
+[Vulkan Loader] INFO | LAYER:   Failed to find vkGetDeviceProcAddr in layer "/usr/lib/libVkLayer_MESA_device_select.so"
+[Vulkan Loader] DRIVER:         vkCreateDevice layer callstack setup to:
+[Vulkan Loader] DRIVER:            <Application>
+[Vulkan Loader] DRIVER:              ||
+[Vulkan Loader] DRIVER:            <Loader>
+[Vulkan Loader] DRIVER:              ||
+[Vulkan Loader] LAYER:             VK_LAYER_KHRONOS_validation
+[Vulkan Loader] LAYER:                     Type: Explicit
+[Vulkan Loader] LAYER:                     Enabled By: Environment Variable VK_INSTANCE_LAYERS
+[Vulkan Loader] LAYER:                     Manifest: /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/share/vulkan/explicit_layer.d/VkLayer_khronos_validation.json
+[Vulkan Loader] LAYER:                     Library:  /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so
+[Vulkan Loader] LAYER:               ||
+[Vulkan Loader] DRIVER:            <Device>
+[Vulkan Loader] DRIVER:                Using "NVIDIA GeForce RTX 4060 Laptop GPU" with driver: "/usr/lib/libGLX_nvidia.so.615.78.08"
+Ruster Editor renderer: NVIDIA GeForce RTX 4060 Laptop GPU · Vulkan
+[Vulkan Loader] DEBUG | LAYER:  Unloading layer library /usr/lib/libVkLayer_MESA_device_select.so
+[Vulkan Loader] DEBUG | LAYER:  Unloading layer library /home/akilf/.local/share/ruster-tools/vulkan-validation/usr/lib/libVkLayer_khronos_validation.so

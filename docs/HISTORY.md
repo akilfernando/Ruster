@@ -20,3 +20,8 @@
 - User requested milestone-based phased development with visible deliverables. Added canonical ROADMAP.md (M0–M7), demo/exit criteria, scope limits, dependency gates and immediate M1 slices; linked current status and direction rather than maintaining competing phase lists. This planning change does not implement new engine capabilities.
 
 - User authorized autonomous completion through M2. Implemented M1 versioned scenario persistence/commands and M2 Vulkan schematic viewer; completed headless journey, concurrency/save boundaries, GPU validation/interactive lifecycle and Windows compile assessment. See evidence/M1-M2.md. M3 remains next.
+
+- User emphasized ongoing learning from industry engines and willingness to redesign foundations. Added PERFORMANCE.md with sourced Unity/Unreal lessons, adoption tradeoffs, a measured improvement process and a bounded pre-editor investigation. No runtime changes or claimed speedups in this documentation pass.
+
+- User authorized the next milestone. Delivered M3 native Vulkan editor and shared conflict-safe project sessions. Completed independent native authoring/recovery/keyboard/save workflows, fixed unsupported glyphs and stale validation feedback, exposed backend diagnostics, and recorded M3 evidence. The viewer performance pass reduced CPU use in matched isolated-workspace samples through event-driven redraw and retained geometry. M4 native MCP remains next.
+- User requested workspace 2 for test windows to avoid disrupting workspace 1. Added a narrow persistent local Hyprland routing rule and project testing instructions; isolated app-scoped UI inspection replaced global desktop input.

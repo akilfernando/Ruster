@@ -1,0 +1,408 @@
+{
+  "binary_sha256": "b4a61325ad19c1faea95d293df276e2cd5064c3ef5b2115a6244170cb578fc6e",
+  "command": [
+    "/home/akilf/Projects/Ruster/target/release/ruster-viewer"
+  ],
+  "recorded_utc": "2026-11-04T04:10:46Z",
+  "validation": false,
+  "warmup_seconds": 1,
+  "sample_seconds": 3,
+  "repeats": 3,
+  "required_workspace": 2,
+  "initial_active_workspace": 1,
+  "proc_clock_ticks": 100,
+  "platform": [
+    "Linux",
+    "Zeph",
+    "7.3.1-1-cachyos",
+    "#1 SMP PREEMPT_DYNAMIC Sat, 31 Oct 2026 15:33:05 +0000",
+    "x86_64"
+  ],
+  "hyprland_version": "Hyprland 0.57.0 built from branch v0.57.0 at commit 0aa6745f705f2c4b0a5004eb019ef76e5bbdb426 clean (VERSION: bump to 0.57.0).\nDate: Wed Oct 28 10:37:05 2026\nTag: v0.57.0, commits: 7978\n\nLibraries:\nHyprgraphics: built against 0.6.0, system has 0.6.0\nHyprutils: built against 0.14.3, system has 0.14.3\nHyprcursor: built against 0.1.13, system has 0.1.13\nHyprlang: built against 0.6.8, system has 0.6.8\nAquamarine: built against 0.16.0, system has 0.16.0\n\nVersion ABI string: 0aa6745f705f2c4b0a5004eb019ef76e5bbdb426_aq_0.16_hu_0.14_hg_0.6_hc_0.1_hlg_0.6\nno flags were set\n\n",
+  "monitors": [
+    {
+      "id": 2,
+      "name": "DP-3",
+      "description": "HKC OVERSEAS LIMITED S2721PM 0000000000001",
+      "make": "HKC OVERSEAS LIMITED",
+      "model": "S2721PM",
+      "serial": "0000000000001",
+      "width": 2560,
+      "height": 1440,
+      "physicalWidth": 600,
+      "physicalHeight": 330,
+      "refreshRate": 199.99899,
+      "x": 0,
+      "y": 0,
+      "activeWorkspace": {
+        "address": "1",
+        "id": 1,
+        "type": "normal",
+        "name": "1"
+      },
+      "specialWorkspace": {
+        "address": "",
+        "type": "",
+        "name": ""
+      },
+      "reserved": [
+        0,
+        42,
+        0,
+        0
+      ],
+      "scale": 1,
+      "transform": 0,
+      "focused": true,
+      "dpmsStatus": true,
+      "vrr": false,
+      "solitary": "0",
+      "solitaryBlockedBy": [
+        "WINDOWED",
+        "CANDIDATE"
+      ],
+      "activelyTearing": false,
+      "tearingBlockedBy": [
+        "NOT_TORN",
+        "USER",
+        "CANDIDATE"
+      ],
+      "directScanoutTo": "0",
+      "directScanoutBlockedBy": [
+        "USER",
+        "SW",
+        "CANDIDATE"
+      ],
+      "disabled": false,
+      "currentFormat": "XBGR2101010",
+      "mirrorOf": "none",
+      "availableModes": [
+        "2560x1440@60.00Hz",
+        "2560x1440@200.00Hz",
+        "2560x1440@180.00Hz",
+        "2560x1440@144.00Hz",
+        "2560x1440@120.00Hz",
+        "1920x1080@119.88Hz",
+        "1920x1080@59.94Hz",
+        "1920x1080@50.00Hz",
+        "1680x1050@59.95Hz",
+        "1280x1024@75.03Hz",
+        "1440x900@59.89Hz",
+        "1280x720@59.94Hz",
+        "1280x720@50.00Hz",
+        "1024x768@75.03Hz",
+        "1024x768@60.00Hz",
+        "800x600@75.00Hz",
+        "800x600@60.32Hz",
+        "720x576@50.00Hz",
+        "720x480@59.94Hz",
+        "640x480@75.00Hz",
+        "640x480@59.94Hz",
+        "640x480@59.93Hz"
+      ],
+      "colorManagementPreset": "hdr",
+      "sdrBrightness": 5,
+      "sdrSaturation": 1,
+      "sdrMinLuminance": 0.2,
+      "sdrMaxLuminance": 80,
+      "hardwareCursorsInUse": false,
+      "hardwareDetails": {
+        "backend": "drm",
+        "hdr": true,
+        "chroma": true,
+        "bt2020": true,
+        "vrrCapable": true
+      }
+    }
+  ],
+  "results": [
+    {
+      "mode": "idle",
+      "repeat": 1,
+      "wall_seconds": 3.0033917159889825,
+      "cpu_seconds": 0.020000000000000018,
+      "cpu_percent_one_core": 0.6659138031688366,
+      "input_events": 0,
+      "final_title": "Ruster | PAUSED | tick 0 | stock 0 | delivered 0 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=4 mean_ms=0.0575 p95_ms=0.0883\nTiming cpu_redraw_including_acquire: samples=5 mean_ms=3.8952 p95_ms=12.8752\nTiming cpu_geometry_rebuild: samples=1 mean_ms=0.0976 p95_ms=0.0976\nGeometry: rebuilds=1 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=4 mean_ms=1026.6263 p95_ms=4053.8339\nViewer lifecycle: 5 frames in 4.404s\nViewer state: playing=false tick=0 stock=0 delivered=0 produced=0\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "idle",
+      "repeat": 2,
+      "wall_seconds": 3.003379114990821,
+      "cpu_seconds": 0.020000000000000018,
+      "cpu_percent_one_core": 0.6659165970813892,
+      "input_events": 0,
+      "final_title": "Ruster | PAUSED | tick 0 | stock 0 | delivered 0 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=4 mean_ms=0.0517 p95_ms=0.0672\nTiming cpu_redraw_including_acquire: samples=5 mean_ms=2.7134 p95_ms=6.9155\nTiming cpu_geometry_rebuild: samples=1 mean_ms=0.0708 p95_ms=0.0708\nGeometry: rebuilds=1 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=4 mean_ms=1036.6052 p95_ms=4057.5658\nViewer lifecycle: 5 frames in 4.395s\nViewer state: playing=false tick=0 stock=0 delivered=0 produced=0\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "idle",
+      "repeat": 3,
+      "wall_seconds": 3.0036735299800057,
+      "cpu_seconds": 0.0,
+      "cpu_percent_one_core": 0.0,
+      "input_events": 0,
+      "final_title": "Ruster | PAUSED | tick 0 | stock 0 | delivered 0 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=4 mean_ms=0.0564 p95_ms=0.0780\nTiming cpu_redraw_including_acquire: samples=5 mean_ms=4.2508 p95_ms=11.2399\nTiming cpu_geometry_rebuild: samples=1 mean_ms=0.0750 p95_ms=0.0750\nGeometry: rebuilds=1 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=4 mean_ms=1043.5511 p95_ms=4049.8598\nViewer lifecycle: 5 frames in 4.428s\nViewer state: playing=false tick=0 stock=0 delivered=0 produced=0\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "play",
+      "repeat": 1,
+      "wall_seconds": 3.003530977992341,
+      "cpu_seconds": 0.050000000000000044,
+      "cpu_percent_one_core": 1.6647073183650563,
+      "input_events": 0,
+      "final_title": "Ruster | PLAY | tick 12 | stock 12 | delivered 24 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=17 mean_ms=0.0535 p95_ms=0.0833\nTiming cpu_redraw_including_acquire: samples=18 mean_ms=2.4906 p95_ms=8.2859\nTiming cpu_geometry_rebuild: samples=14 mean_ms=0.0581 p95_ms=0.0968\nGeometry: rebuilds=14 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=17 mean_ms=242.7418 p95_ms=1052.7576\nViewer lifecycle: 18 frames in 4.436s\nViewer state: playing=true tick=12 stock=12 delivered=24 produced=36\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "play",
+      "repeat": 2,
+      "wall_seconds": 3.0035550500033423,
+      "cpu_seconds": 0.06,
+      "cpu_percent_one_core": 1.99763277186923,
+      "input_events": 0,
+      "final_title": "Ruster | PLAY | tick 12 | stock 12 | delivered 24 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=17 mean_ms=0.0501 p95_ms=0.0683\nTiming cpu_redraw_including_acquire: samples=18 mean_ms=2.2535 p95_ms=7.3086\nTiming cpu_geometry_rebuild: samples=14 mean_ms=0.0565 p95_ms=0.0969\nGeometry: rebuilds=14 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=17 mean_ms=242.3685 p95_ms=1031.4471\nViewer lifecycle: 18 frames in 4.396s\nViewer state: playing=true tick=12 stock=12 delivered=24 produced=36\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "play",
+      "repeat": 3,
+      "wall_seconds": 3.004810494981939,
+      "cpu_seconds": 0.040000000000000036,
+      "cpu_percent_one_core": 1.3311987583509977,
+      "input_events": 0,
+      "final_title": "Ruster | PLAY | tick 12 | stock 12 | delivered 24 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=17 mean_ms=0.0552 p95_ms=0.0905\nTiming cpu_redraw_including_acquire: samples=18 mean_ms=2.1592 p95_ms=6.5045\nTiming cpu_geometry_rebuild: samples=14 mean_ms=0.0538 p95_ms=0.0897\nGeometry: rebuilds=14 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=17 mean_ms=241.7694 p95_ms=1029.3971\nViewer lifecycle: 18 frames in 4.357s\nViewer state: playing=true tick=12 stock=12 delivered=24 produced=36\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "step",
+      "repeat": 1,
+      "wall_seconds": 3.140430416999152,
+      "cpu_seconds": 0.03999999999999998,
+      "cpu_percent_one_core": 1.2737107558085017,
+      "input_events": 12,
+      "final_title": "Ruster | PAUSED | tick 12 | stock 12 | delivered 24 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=16 mean_ms=0.0512 p95_ms=0.0770\nTiming cpu_redraw_including_acquire: samples=17 mean_ms=2.4064 p95_ms=10.0882\nTiming cpu_geometry_rebuild: samples=13 mean_ms=0.0535 p95_ms=0.1069\nGeometry: rebuilds=13 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=16 mean_ms=266.6055 p95_ms=1050.1054\nViewer lifecycle: 17 frames in 4.611s\nViewer state: playing=false tick=12 stock=12 delivered=24 produced=36\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "step",
+      "repeat": 2,
+      "wall_seconds": 3.1251000170013867,
+      "cpu_seconds": 0.05000000000000002,
+      "cpu_percent_one_core": 1.5999487929341953,
+      "input_events": 12,
+      "final_title": "Ruster | PAUSED | tick 12 | stock 12 | delivered 24 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=16 mean_ms=0.0557 p95_ms=0.0782\nTiming cpu_redraw_including_acquire: samples=17 mean_ms=2.3714 p95_ms=5.2036\nTiming cpu_geometry_rebuild: samples=13 mean_ms=0.0491 p95_ms=0.0710\nGeometry: rebuilds=13 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=16 mean_ms=265.8395 p95_ms=1028.1102\nViewer lifecycle: 17 frames in 4.436s\nViewer state: playing=false tick=12 stock=12 delivered=24 produced=36\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "step",
+      "repeat": 3,
+      "wall_seconds": 3.135475620016223,
+      "cpu_seconds": 0.04999999999999999,
+      "cpu_percent_one_core": 1.594654402056594,
+      "input_events": 12,
+      "final_title": "Ruster | PAUSED | tick 12 | stock 12 | delivered 24 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=16 mean_ms=0.0516 p95_ms=0.0761\nTiming cpu_redraw_including_acquire: samples=17 mean_ms=2.2717 p95_ms=6.3170\nTiming cpu_geometry_rebuild: samples=13 mean_ms=0.0538 p95_ms=0.0714\nGeometry: rebuilds=13 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=16 mean_ms=263.7769 p95_ms=1025.9016\nViewer lifecycle: 17 frames in 4.466s\nViewer state: playing=false tick=12 stock=12 delivered=24 produced=36\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "pan",
+      "repeat": 1,
+      "wall_seconds": 3.0479155859793536,
+      "cpu_seconds": 0.09000000000000002,
+      "cpu_percent_one_core": 2.9528376840227124,
+      "input_events": 27,
+      "final_title": "Ruster | PAUSED | tick 0 | stock 0 | delivered 0 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=31 mean_ms=0.0505 p95_ms=0.0781\nTiming cpu_redraw_including_acquire: samples=32 mean_ms=2.2106 p95_ms=3.2641\nTiming cpu_geometry_rebuild: samples=1 mean_ms=0.0675 p95_ms=0.0675\nGeometry: rebuilds=1 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=31 mean_ms=134.8414 p95_ms=123.0061\nViewer lifecycle: 32 frames in 4.438s\nViewer state: playing=false tick=0 stock=0 delivered=0 produced=0\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "pan",
+      "repeat": 2,
+      "wall_seconds": 3.0359619460068643,
+      "cpu_seconds": 0.09999999999999998,
+      "cpu_percent_one_core": 3.2938489275706444,
+      "input_events": 27,
+      "final_title": "Ruster | PAUSED | tick 0 | stock 0 | delivered 0 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=31 mean_ms=0.0529 p95_ms=0.0676\nTiming cpu_redraw_including_acquire: samples=32 mean_ms=2.4458 p95_ms=4.0221\nTiming cpu_geometry_rebuild: samples=1 mean_ms=0.0681 p95_ms=0.0681\nGeometry: rebuilds=1 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=31 mean_ms=134.6438 p95_ms=122.4611\nViewer lifecycle: 32 frames in 4.455s\nViewer state: playing=false tick=0 stock=0 delivered=0 produced=0\nValidation enabled=false errors=0 warnings=0\n"
+    },
+    {
+      "mode": "pan",
+      "repeat": 3,
+      "wall_seconds": 3.0399868589884136,
+      "cpu_seconds": 0.09000000000000002,
+      "cpu_percent_one_core": 2.9605391133153924,
+      "input_events": 27,
+      "final_title": "Ruster | PAUSED | tick 0 | stock 0 | delivered 0 | Space play/pause \u00b7 N step \u00b7 R reset \u00b7 Home camera",
+      "window_size": [
+        1100,
+        720
+      ],
+      "workspace": {
+        "address": "2",
+        "id": 2,
+        "type": "normal",
+        "name": "2"
+      },
+      "visible": true,
+      "active_workspace_before_launch": 1,
+      "active_workspace_at_end": 1,
+      "exit_code": 0,
+      "log": "Vulkan device: NVIDIA GeForce RTX 4060 Laptop GPU; api 1.4.351; driver 2580775424; graphics/present queue 0; timestamp bits 64; validation false\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 2532x1370 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 794x689 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nVulkan surface: 1100x720 B8G8R8A8_SRGB, 3 images, FIFO; queue 0\nTiming gpu_commands: samples=31 mean_ms=0.0503 p95_ms=0.0648\nTiming cpu_redraw_including_acquire: samples=32 mean_ms=2.2920 p95_ms=2.9454\nTiming cpu_geometry_rebuild: samples=1 mean_ms=0.1392 p95_ms=0.1392\nGeometry: rebuilds=1 retained_capacity_bytes=131072\nTiming frame_interval_including_lifecycle: samples=31 mean_ms=134.6454 p95_ms=119.9495\nViewer lifecycle: 32 frames in 4.583s\nViewer state: playing=false tick=0 stock=0 delivered=0 produced=0\nValidation enabled=false errors=0 warnings=0\n"
+    }
+  ]
+}

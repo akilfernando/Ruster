@@ -6,14 +6,14 @@ Updated 2026-11-04. This is the working delivery plan requested by the user. Mil
 
 Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
 
-M0, M1 and M2 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md). M3 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
+M0 through M3 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M4 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
 
 | Milestone | Demonstrable deliverable | Status |
 | --- | --- | --- |
 | M0 Engineering seed | Headless logistics experiment and lean verification command | Complete, narrow local scope |
 | M1 Reproducible project | Saved scenario that can be inspected, edited, undone and replayed | Complete |
 | M2 First Vulkan view | Interactive window showing the same simulation | Complete, Linux schematic scope |
-| M3 First authoring experience | Minimal editor for a complete create/edit/run/save workflow | Planned |
+| M3 First authoring experience | Minimal editor for a complete create/edit/run/save workflow | Complete, Linux scenario scope |
 | M4 Native agent workflow | MCP client performs the same workflow with reviewable results | Planned |
 | M5 Reusable application kit | Imported content and a standalone packaged application | Planned |
 | M6 Two application proofs | Small game and non-game visualizer using shared engine facilities | Planned |
@@ -86,6 +86,8 @@ M0, M1 and M2 are complete within their documented local scope; see [M1/M2 evide
 - Closing with unsaved changes offers an explicit recovery choice.
 - A developer other than the implementing agent completes the core journey using the quickstart; record blockers and fix critical ones before declaring completion.
 - Establish a small measured UX baseline: first success, edit-to-feedback and error-recovery time. Do not treat an automated screenshot as usability validation.
+
+**Delivery scope:** one authored scenario is the creatable/duplicable object; source, transport and destination are selectable views, not arbitrary ECS entities. An independent agent completed the native quickstart journey. Timings are instrumented automation baselines; external human usability testing remains a later validation need. See [M3 evidence](evidence/M3.md).
 
 **Boundaries:** one complete workflow; no general docking system, theme marketplace, visual scripting or custom widget framework. Evaluate existing UI libraries against the actual workflow.
 

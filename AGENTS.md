@@ -6,6 +6,8 @@ For changes and verification, apply `skills/ruster-testing/SKILL.md` and the sin
 
 Read `docs/STATUS.md` before project work, then the relevant design and research documents linked there. Inspect actual code, configuration, and git state before making claims about implementation. Documentation is context, not proof of current behavior.
 
+For performance-sensitive architecture and optimization, follow `docs/PERFORMANCE.md`: learn from primary engine sources, record tradeoffs, measure before/after, and revise foundations when evidence warrants it. Do not claim competitive superiority from language choice or toy benchmarks.
+
 The user requires proper documentation throughout the work so future Codex sessions do not infer decisions or rely on stale data.
 
 For each meaningful change, update the relevant documentation in the same work session:
@@ -19,3 +21,7 @@ For each meaningful change, update the relevant documentation in the same work s
 - Finish substantial work with a concise handoff in `docs/STATUS.md`. Keep current state concise; historical milestones belong in `docs/HISTORY.md`.
 
 The user has authorized engine development as of 2026-11-04. Follow `docs/DIRECTION.md` and decision records for the current working scope. Rust, Vulkan, openness, native MCP, documentation continuity and developer experience are requirements. Distinguish agent-selected defaults from explicit user decisions.
+
+## Local desktop testing
+
+The user works on workspace 1. Open Ruster test windows on Hyprland workspace 2 silently, without switching the active workspace or stealing focus. A local `ruster-development-workspace` window rule in `~/.config/hypr/hyprland.lua` routes initial Ruster viewer/editor titles there. Verify routing before UI automation; target the exact test window and never send global input to the user's active window. Do not change the user's clipboard for unattended tests. Hidden-workspace rendering may be throttled: label performance evidence accordingly and compare matching conditions. Visual interaction that cannot run in isolation must wait for a suitable opportunity rather than interrupt the user.

@@ -1,10 +1,8 @@
-use fs2::FileExt;
 use std::ffi::OsString;
-use std::fs::{File, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use ruster_core::{Config, Scenario, Simulation};
+use ruster_core::{Config, ProjectLock, Scenario, Simulation};
 
 const HELP: &str = "Ruster logistics demo
 
@@ -28,6 +26,7 @@ Usage: ruster-cli [--ticks N] [--production N] [--transfer N]
 Each tick produces stock, then transfers up to the transport capacity.
 The simulation advances explicitly without waiting for real time.
 Edits/undo/redo save atomically and require the revision from inspect.
+Concurrent writers fail promptly as busy; retry when the other writer finishes.
 Save copies a project to a new file. Create/save refuse existing destinations.
 Run/replay start fresh; reset prints initial runtime without changing authored data.";
 
@@ -225,36 +224,6 @@ fn run(command: Command) -> Result<(), Box<dyn std::error::Error>> {
     Ok(())
 }
 
-// All cooperating CLI writers use a stable sibling lock, because the scenario
-// inode itself is replaced at save. Resolve parents and reject file symlinks so
-// aliases do not accidentally use different locks for the same destination.
-fn lock_project(path: &Path) -> Result<(PathBuf, File), Box<dyn std::error::Error>> {
-    let parent = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .unwrap_or_else(|| Path::new("."));
-    let parent = parent.canonicalize()?;
-    let name = path.file_name().ok_or("scenario path needs a file name")?;
-    let target = parent.join(name);
-    if target
-        .symlink_metadata()
-        .is_ok_and(|m| m.file_type().is_symlink())
-    {
-        return Err("scenario destination must not be a symlink".into());
-    }
-    let mut lock_name = OsString::from(".");
-    lock_name.push(name);
-    lock_name.push(".ruster-lock");
-    let lock = OpenOptions::new()
-        .create(true)
-        .truncate(false)
-        .read(true)
-        .write(true)
-        .open(parent.join(lock_name))?;
-    lock.lock_exclusive()?;
-    Ok((target, lock))
-}
-
 fn inspect(scenario: &Scenario) {
     let config = scenario.config();
     println!(
@@ -286,7 +255,8 @@ fn run_project(
             .unwrap_or(fallback)
     };
     if action == "create" {
-        let (path, _lock) = lock_project(path)?;
+        let lock = ProjectLock::acquire(path)?;
+        let path = lock.path();
         let scenario = Scenario::new(
             options
                 .get("--id")
@@ -303,8 +273,9 @@ fn run_project(
         return Ok(());
     }
     if matches!(action, "edit" | "undo" | "redo") {
-        let (path, _lock) = lock_project(path)?;
-        let mut scenario = Scenario::load(&path)?;
+        let lock = ProjectLock::acquire(path)?;
+        let path = lock.path();
+        let mut scenario = Scenario::load(path)?;
         let revision = value("--revision", 0);
         match action {
             "edit" => {
@@ -334,8 +305,8 @@ fn run_project(
     match action {
         "inspect" => inspect(&scenario),
         "save" => {
-            let (output, _lock) = lock_project(output.ok_or("missing output path")?)?;
-            scenario.save_new(output)?;
+            let lock = ProjectLock::acquire(output.ok_or("missing output path")?)?;
+            scenario.save_new(lock.path())?;
             inspect(&scenario);
         }
         "run" | "replay" | "reset" => {

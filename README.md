@@ -2,7 +2,7 @@
 
 An open Rust/Vulkan engine for interactive simulation and visualization, with developer experience as its primary pillar. Games are the first proving ground.
 
-M1 and M2 deliver a versioned scenario workflow and an actual Vulkan schematic viewer. This is an early engineering foundation, not a production 3D engine. Editor, MCP and mesh/material pipelines are later milestones.
+The project includes a versioned scenario workflow, a Vulkan schematic viewer and the first native authoring editor (M3). This is an early engineering foundation, not a production 3D engine. MCP and mesh/material pipelines are later milestones.
 
 ## Start here
 
@@ -11,9 +11,12 @@ Install Rust using the [official instructions](https://rust-lang.org/tools/insta
 ```sh
 cargo run -p ruster-cli -- run examples/logistics.scenario.json --ticks 10
 cargo run -p ruster-viewer -- --scenario examples/logistics.scenario.json
+cargo run -p ruster-editor -- --scenario examples/logistics.scenario.json
 ```
 
 The CLI produces 30 items, leaves 10 in stock and delivers 20. The viewer starts paused: Space plays/pauses, N steps, R resets, arrows pan, wheel zooms, Home resets camera, Escape closes. It requires a desktop session and a Vulkan-capable driver. Linux/NVIDIA runtime is tested; Windows compilation was checked but runtime support is not claimed.
+
+Start the visual authoring journey with the [editor quickstart](crates/ruster-editor/README.md). It covers editing, invalid-input recovery, runtime observation, undo and conflict-safe saves.
 
 See [scenario commands and persistence guarantees](docs/SCENARIOS.md), [viewer and validation](docs/VIEWER.md), and [milestone evidence](docs/evidence/M1-M2.md).
 

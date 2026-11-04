@@ -54,7 +54,7 @@ The runner uses Cargo's normal incremental cache and `--locked` for builds/tests
 | UI/UX | Exercise the changed user journey, error/recovery and keyboard interaction; use targeted visual inspection, not screenshots of every widget |
 | Tooling/test selection | Temporary-repository tests for classification, dependency closure, base resolution and failure propagation; runner changes conservatively trigger full scope |
 
-Most of these subsystems do not exist yet. Add executable checks alongside the feature they protect; do not prebuild speculative infrastructure. Unavailable required hardware/tools must be recorded as an unresolved validation gap and resolved before claiming that support/release criterion.
+Several later subsystems do not exist yet. Add executable checks alongside the feature they protect; do not prebuild speculative infrastructure. Unavailable required hardware/tools must be recorded as an unresolved validation gap and resolved before claiming that support/release criterion.
 
 ## Feedback budgets and suite growth
 
@@ -73,3 +73,9 @@ Review slow or redundant cases when they impair feedback, when replacing an impl
 ## Evidence template
 
 Scope/base and why; commands; pass/fail/counts; wall time and cold/warm context where measured; supplemental checks; exclusions/limitations. A short task or PR paragraph is sufficient. Never copy secrets or enormous test logs into documentation.
+
+## Native editor checks
+
+The editor quickstart in `crates/ruster-editor/README.md` is the manual journey. Its optional `inspection` feature supports app-scoped widget/input/framebuffer checks without global desktop input. Keep it default-off and loopback-only. Test on disposable scenario copies. Record platform/window context and distinguish model tests, native interaction, framebuffer inspection and external human usability studies.
+
+On the current workstation, follow AGENTS.md’s workspace-2 isolation rule. Hidden Wayland windows may stop painting, so an inspection timeout is an environment observation rather than evidence that a UI action succeeded. A temporary, editor-scoped Hyprland `render_unfocused=true` rule can permit background verification; remove it after testing and record the altered rendering condition. Do not compare those measurements with normal occluded idle behavior or switch the user’s workspace for convenience.

@@ -24,6 +24,37 @@ impl Default for Camera {
     }
 }
 
+/// Schematic geometry depends on authoritative content; camera projection happens in Vulkan.
+/// Keep the allocation across rebuilds and retain geometry for camera/exposure-only redraws.
+#[derive(Default)]
+pub struct GeometryCache {
+    key: Option<(State, Config, bool)>,
+    rectangles: Vec<Rect>,
+    pub rebuilds: u64,
+    pub rebuild_milliseconds: Vec<f64>,
+}
+
+impl GeometryCache {
+    pub fn get(&mut self, state: State, config: Config, playing: bool) -> &[Rect] {
+        let key = (state, config, playing);
+        if self.key != Some(key) {
+            let begin = std::time::Instant::now();
+            scene(&mut self.rectangles, state, config, playing);
+            self.key = Some(key);
+            self.rebuilds += 1;
+            if self.rebuild_milliseconds.len() < 600 {
+                self.rebuild_milliseconds
+                    .push(begin.elapsed().as_secs_f64() * 1000.0);
+            }
+        }
+        &self.rectangles
+    }
+
+    pub fn capacity_bytes(&self) -> usize {
+        self.rectangles.capacity() * std::mem::size_of::<Rect>()
+    }
+}
+
 const INK: [f32; 4] = [0.80, 0.88, 0.96, 1.0];
 const MUTED: [f32; 4] = [0.37, 0.51, 0.65, 1.0];
 const BLUE: [f32; 4] = [0.17, 0.57, 0.91, 1.0];
@@ -55,11 +86,11 @@ fn text(out: &mut Vec<Rect>, x: f32, y: f32, size: f32, text: &str, color: [f32;
     }
 }
 
-pub fn scene(state: State, config: Config, playing: bool) -> Vec<Rect> {
-    let mut out = Vec::with_capacity(3000);
-    text(&mut out, -445.0, -265.0, 4.0, "RUSTER / LOGISTICS", INK);
+fn scene(out: &mut Vec<Rect>, state: State, config: Config, playing: bool) {
+    out.clear();
+    text(out, -445.0, -265.0, 4.0, "RUSTER / LOGISTICS", INK);
     text(
-        &mut out,
+        out,
         -445.0,
         -218.0,
         2.0,
@@ -71,42 +102,38 @@ pub fn scene(state: State, config: Config, playing: bool) -> Vec<Rect> {
         (-95.0, "TRANSPORT", AMBER),
         (220.0, "DESTINATION", GREEN),
     ] {
-        rect(
-            &mut out,
-            [x, -105.0, 220.0, 230.0],
-            [0.055, 0.09, 0.14, 1.0],
-        );
-        rect(&mut out, [x, -105.0, 220.0, 5.0], color);
-        text(&mut out, x + 15.0, -80.0, 2.0, label, color);
+        rect(out, [x, -105.0, 220.0, 230.0], [0.055, 0.09, 0.14, 1.0]);
+        rect(out, [x, -105.0, 220.0, 5.0], color);
+        text(out, x + 15.0, -80.0, 2.0, label, color);
     }
-    rect(&mut out, [-220.0, 0.0, 125.0, 5.0], MUTED);
-    rect(&mut out, [125.0, 0.0, 95.0, 5.0], MUTED);
+    rect(out, [-220.0, 0.0, 125.0, 5.0], MUTED);
+    rect(out, [125.0, 0.0, 95.0, 5.0], MUTED);
     // A bounded moving marker communicates the discrete transport phase, not extra simulation state.
     let packet = (state.tick % 5) as f32;
-    rect(&mut out, [-205.0 + packet * 18.0, -7.0, 14.0, 19.0], AMBER);
-    text(&mut out, -425.0, -25.0, 2.0, "STOCK", MUTED);
-    text(&mut out, -425.0, 0.0, 2.0, &state.stock.to_string(), INK);
-    text(&mut out, -80.0, -25.0, 2.0, "PER TICK", MUTED);
+    rect(out, [-205.0 + packet * 18.0, -7.0, 14.0, 19.0], AMBER);
+    text(out, -425.0, -25.0, 2.0, "STOCK", MUTED);
+    text(out, -425.0, 0.0, 2.0, &state.stock.to_string(), INK);
+    text(out, -80.0, -25.0, 2.0, "PER TICK", MUTED);
     text(
-        &mut out,
+        out,
         -80.0,
         0.0,
         2.0,
         &config.transfer_per_tick.to_string(),
         INK,
     );
-    text(&mut out, 235.0, -25.0, 2.0, "DELIVERED", MUTED);
-    text(&mut out, 235.0, 0.0, 2.0, &state.delivered.to_string(), INK);
+    text(out, 235.0, -25.0, 2.0, "DELIVERED", MUTED);
+    text(out, 235.0, 0.0, 2.0, &state.delivered.to_string(), INK);
     // Logarithmic bars stay legible across the full u64 range. Exact counters remain visible.
     for (x, value, color) in [(-425.0, state.stock, BLUE), (235.0, state.delivered, GREEN)] {
-        rect(&mut out, [x, 73.0, 190.0, 22.0], [0.10, 0.16, 0.23, 1.0]);
+        rect(out, [x, 73.0, 190.0, 22.0], [0.10, 0.16, 0.23, 1.0]);
         let width = ((value as f64 + 1.0).log2() / 12.0).min(1.0) as f32 * 190.0;
         if width > 0.0 {
-            rect(&mut out, [x, 73.0, width, 22.0], color);
+            rect(out, [x, 73.0, width, 22.0], color);
         }
     }
     text(
-        &mut out,
+        out,
         -440.0,
         155.0,
         2.0,
@@ -117,7 +144,7 @@ pub fn scene(state: State, config: Config, playing: bool) -> Vec<Rect> {
         INK,
     );
     text(
-        &mut out,
+        out,
         -440.0,
         190.0,
         2.0,
@@ -125,7 +152,7 @@ pub fn scene(state: State, config: Config, playing: bool) -> Vec<Rect> {
         if playing { GREEN } else { AMBER },
     );
     text(
-        &mut out,
+        out,
         -440.0,
         235.0,
         1.5,
@@ -133,14 +160,13 @@ pub fn scene(state: State, config: Config, playing: bool) -> Vec<Rect> {
         MUTED,
     );
     text(
-        &mut out,
+        out,
         -440.0,
         258.0,
         1.5,
         "ARROWS PAN  WHEEL ZOOM  ESC QUIT",
         MUTED,
     );
-    out
 }
 
 // Original compact 5x7 bitmap glyphs; no font asset or external font license dependency.
@@ -185,5 +211,31 @@ fn glyph(c: char) -> [u8; 7] {
         '/' => [1, 1, 2, 4, 8, 16, 16],
         '-' => [0, 0, 0, 31, 0, 0, 0],
         _ => [0; 7],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn retained_geometry_invalidates_for_each_content_dependency() {
+        let config = Config::default();
+        let state = State::default();
+        let mut cache = GeometryCache::default();
+        let initial = cache.get(state, config, false).len();
+        let allocation = cache.rectangles.as_ptr();
+        // Exposure and camera movement use the same content key.
+        assert_eq!(cache.get(state, config, false).len(), initial);
+        assert_eq!(cache.rebuilds, 1);
+        assert_eq!(cache.rectangles.as_ptr(), allocation);
+        cache.get(state, config, true);
+        let mut changed = state;
+        changed.delivered = 42;
+        cache.get(changed, config, true);
+        let mut changed_config = config;
+        changed_config.transfer_per_tick += 1;
+        cache.get(changed, changed_config, true);
+        assert_eq!(cache.rebuilds, 4);
     }
 }

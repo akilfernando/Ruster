@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 
 mod scenario;
 pub use scenario::{Scenario, ScenarioError, HISTORY_LIMIT, SCENARIO_VERSION};
+mod session;
+pub use session::{ProjectLock, ProjectSession, SessionError};
 
 /// Fixed rates and starting inventory, in whole items.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
