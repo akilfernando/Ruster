@@ -25,3 +25,7 @@
 
 - User authorized the next milestone. Delivered M3 native Vulkan editor and shared conflict-safe project sessions. Completed independent native authoring/recovery/keyboard/save workflows, fixed unsupported glyphs and stale validation feedback, exposed backend diagnostics, and recorded M3 evidence. The viewer performance pass reduced CPU use in matched isolated-workspace samples through event-driven redraw and retained geometry. M4 native MCP remains next.
 - User requested workspace 2 for test windows to avoid disrupting workspace 1. Added a narrow persistent local Hyprland routing rule and project testing instructions; isolated app-scoped UI inspection replaced global desktop input.
+
+- Reviewed the whole roadmap after M3 at the user’s request. Documented a proposed M4–M9 sequence separating reusable scene/3D foundations, assets, distribution and independent reuse, with earlier human/platform checks. Current roadmap retained pending discussion; corrected stale DIRECTION.md delivery status. No implementation performed.
+
+- User accepted the revised roadmap and continuation; canonical ROADMAP.md now defines M4–M9. Clarified Sol as the recommended main developer while Astra handles selected difficult work; the skill can select child models but does not switch the running parent. Next M4 slice is the live-session/command contract. No engine code changed in this handoff.

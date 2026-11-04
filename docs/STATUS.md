@@ -4,7 +4,7 @@ Last updated: 2026-11-04.
 
 ## Requirements and authorization
 
-Rust, Vulkan, intended open source, native MCP, human/AI workflows, application-neutral simulation/visualization, developer experience, current documentation and proportionate verification are confirmed priorities. The user authorized M3 after M0–M2. **M3 is complete within its local Linux authoring scope.** M4 is the next planned milestone; it has not been implemented.
+Rust, Vulkan, intended open source, native MCP, human/AI workflows, application-neutral simulation/visualization, developer experience, current documentation and proportionate verification are confirmed priorities. The user authorized M3 after M0–M2. **M3 is complete within its local Linux authoring scope.** The revised roadmap is accepted; M4 is the next development scope and has not been implemented.
 
 ## Implemented and demonstrated
 
@@ -22,9 +22,13 @@ Final integrated local gate: 13 tooling tests, 26 Rust tests, formatting, strict
 
 The ash viewer's 90-frame synchronization-validation smoke passed exact headless replay with zero warnings/errors. The editor ran on NVIDIA/Vulkan with Khronos synchronization validation, resize and shutdown; no validation defect was reported. Expected loader notices about enabling the layer are retained in evidence. Windows GNU compilation was assessed, but no Windows runtime or linked package is verified. Actual minimize state remains unverified on this compositor.
 
+## Roadmap review
+
+The user accepted the post-M3 revision and continuation. [ROADMAP.md](ROADMAP.md) now records M4–M9: bounded MCP proof, shared scene/3D, content, standalone kit, independent reuse and alpha. The [review](ROADMAP-REVIEW.md) preserves the rationale. M4 is the active next development scope; later phases remain sequential.
+
 ## Next milestone
 
-M4: native MCP adapter over the same authored operations, with bounded discovery/inspection/edit/run results, stale-state protection, a tested real client and an interleaved human/agent conflict demonstration. Keep the human-only workflow complete. Choose and document transport/version/capability boundaries before implementation; do not confuse optional egui test inspection with MCP.
+M4: native MCP adapter over the same authored operations, with bounded discovery/inspection/edit/run results, stale-state protection, a tested real client and an interleaved human/agent conflict demonstration. Keep the human-only workflow complete. First produce the live-session/command contract: editor versus headless ownership, expected revisions, unapplied drafts, runtime ownership and how agent edits appear in the UI. Then choose transport/version/capability boundaries and implement the narrow client-backed proof. Do not confuse optional egui test inspection with MCP.
 
 ## Limits and unresolved choices
 

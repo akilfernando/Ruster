@@ -2,11 +2,13 @@
 
 Updated 2026-11-04. This is the working delivery plan requested by the user. Milestone scope is an implementation plan, not a promise of dates or already delivered capabilities. Developer experience is the primary pillar; the product is an interactive simulation and visualization engine with games as one application.
 
+The user accepted the [post-M3 review](ROADMAP-REVIEW.md) on 2026-11-04. This canonical roadmap incorporates that revision; M0–M3 remain historical deliveries.
+
 ## Delivery contract
 
 Every milestone ends with something runnable or directly inspectable, a short repeatable demonstration, relevant verification, updated documentation, and explicit limitations. Completing code alone does not complete a milestone. Use [TESTING.md](TESTING.md) to select evidence; do not add an expanding universal suite for each phase.
 
-M0 through M3 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M4 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
+M0 through M3 are complete within their documented local scope; see [M1/M2 evidence](evidence/M1-M2.md) and [M3 evidence](evidence/M3.md). M4 is next. Later milestones may be split or revised when earlier evidence changes assumptions. The critical path is M1 → M2 → M3 → M4 → M5 → M6 → M7 → M8 → M9. Small risk investigations can run alongside the active milestone; they must not turn into unbounded parallel feature work. Collect UX/performance evidence from the first milestone onward, not only during final hardening.
 
 | Milestone | Demonstrable deliverable | Status |
 | --- | --- | --- |
@@ -15,9 +17,11 @@ M0 through M3 are complete within their documented local scope; see [M1/M2 evide
 | M2 First Vulkan view | Interactive window showing the same simulation | Complete, Linux schematic scope |
 | M3 First authoring experience | Minimal editor for a complete create/edit/run/save workflow | Complete, Linux scenario scope |
 | M4 Native agent workflow | MCP client performs the same workflow with reviewable results | Planned |
-| M5 Reusable application kit | Imported content and a standalone packaged application | Planned |
-| M6 Two application proofs | Small game and non-game visualizer using shared engine facilities | Planned |
-| M7 Public alpha candidate | Usable, documented release on an explicitly tested support matrix | Planned |
+| M5 Shared scene and 3D | Minimal scene and rendering shared by editor/runtime | Planned |
+| M6 Content and iteration | Asset import, stable references and recoverable refresh | Planned |
+| M7 Standalone application kit | Code-first template and packaged interactive example | Planned |
+| M8 Independent reuse proof | A meaningfully different non-game application | Planned |
+| M9 Public alpha candidate | Usable release on an explicitly tested support matrix | Planned |
 
 ## M0 Engineering seed
 
@@ -109,51 +113,61 @@ M0 through M3 are complete within their documented local scope; see [M1/M2 evide
 
 **Boundaries:** a small capability set; no arbitrary shell execution tool, hosted AI account, embedded chatbot, multi-user collaboration or generic autonomous planner.
 
-**Decision gate:** document transport, client compatibility, capability/permission boundary and protocol-version policy. A noninteractive adapter spike can happen during M1, but broad protocol tooling waits until operations work.
+**Decision gate:** document transport, client compatibility, capability/permission boundary and protocol-version policy. First decide live-session ownership: editor session, headless session, or both; expected revisions, unapplied drafts, runtime ownership, cancellation/work limits and visibility of agent edits must be explicit. File locking alone does not provide live parity. Keep the first capability surface narrow and versioned; extend it alongside later scene/content operations.
 
-## M5 Reusable application kit
+## M5 Shared scene and first 3D viewport
 
-**User outcome:** use owned content and distribute an application independent of the editor.
+**User outcome:** author objects in a reusable scene and see the same scene in the editor and standalone runtime.
 
-**Deliverable:** one documented minimal 3D asset/material path, stable asset references, reproducible derived data, a project template and standalone development package. Import diagnostics must identify the source and recovery action. Package locally before any public release.
+**Deliverable:** stable object identities, transforms, camera and minimal procedural mesh/material rendering, with sample-specific logistics behavior extracted from shared facilities.
 
-**Demo:** import an asset, change its source, rebuild derived data, run the project, package it and launch the package without the editor or MCP.
+**Runnable slices:**
 
-**Exit criteria:**
+1. Define briefs for the game and a meaningfully different non-game example. Extract the minimal scene/application boundary and demonstrate headless scene edit/save/reopen. Choose storage/ECS from actual access patterns; a custom general ECS is not presumed.
+2. Render a small procedural 3D scene without asset import. Decide Vulkan device baseline, resource lifetime and renderer ownership; measure CPU preparation, GPU time and memory against a declared workload.
+3. Integrate the same scene/rendering boundary into the editor: select/edit transforms, save/reopen, run/reset and compare standalone behavior. Extend CLI/MCP parity for actual scene operations.
 
-- A clean checkout rebuilds derived content; missing/broken references produce useful errors.
-- A source rename preserves identity through the supported workflow; unsupported external edits are diagnosed.
-- Packaged execution runs outside the development checkout, has no dependency on developer-local paths or caches, and documents its runtime prerequisites.
-- Asset license/provenance and third-party notices are recorded; secrets/editor-only services are excluded.
-- A code-first user can modify the template without using the editor.
+**Exit criteria:** the slices work together; invalid/stale edits preserve the scene; rendering lifecycle passes relevant validation; the two applications' briefs fit without game/player concepts in shared APIs. Record compatibility treatment for existing v1 scenarios before changing stored data.
 
-**Boundaries:** one useful import route; no universal CAD/BIM pipeline, asset marketplace, arbitrary plugin ABI or production installer suite.
+**Decision gate:** resolve the current ash-viewer/egui-wgpu-editor rendering split before duplicating substantial 3D infrastructure. No backend winner, general render graph, plugin ABI, advanced GI or full editor framework is predetermined.
 
-**Decision gate:** choose the project release license before external distribution, audit introduced dependency/asset terms and record the packaging contract. Do not imply open-source redistribution rights before that choice.
+## M6 Content and fast iteration
 
-## M6 Two application proofs
+**User outcome:** bring owned content into the project and see source changes quickly with recoverable failures.
 
-**User outcome:** see that shared engine facilities support both games and non-game interaction.
+**Deliverable:** one documented asset import route, stable references, rebuildable derived caches and controlled asset/shader refresh.
 
-**Deliverables:**
+**Demo:** import content, change the source, reimport, inspect the result, save/reopen; introduce invalid content and recover without destroying the last valid project.
 
-1. A tiny logistics game with one clear objective, input, feedback and restart loop.
-2. A throughput visualization application showing scenario controls, comparisons and inspection without player/win-state requirements.
+**Exit criteria:** clean-checkout derived-data reproduction; supported rename preserves identity; actionable missing/broken-reference errors; declared format/version handling; measured import/edit feedback. Expose the supported operations coherently through code, editor and MCP.
 
-Both use the same project, renderer, command and packaging mechanisms. A deterministic local dataset is enough for the visualizer; live enterprise data integration is outside scope.
+**Boundaries:** one useful route, not universal CAD/BIM import, arbitrary Rust hot reload or an asset marketplace. Original sources remain owned and caches disposable.
 
-**Demo:** open both projects, change a meaningful behavior, inspect the result and launch their standalone builds.
+## M7 Standalone application kit
 
-**Exit criteria:**
+**User outcome:** develop through code and distribute an application independent of editor/agent tooling.
 
-- Application-specific rules live outside reusable engine modules; the non-game example does not need dummy game modes or player objects.
-- An independent developer can make one documented change in each example and rebuild it.
-- Add only the minimum UI/audio/input capabilities demanded by the samples; physics or animation are separate decisions if not needed.
-- Preserve example correctness while profiling representative scenarios; fix observed bottlenecks with before/after evidence.
+**Deliverable:** a documented Rust template and one tiny interactive application/game using shared scene, rendering, input and lifecycle facilities, with a standalone development package.
 
-**Boundaries:** two small reference applications, not commercial games or certified industrial simulations. No claim of digital-twin synchronization, physical accuracy, enterprise deployment or CAD compatibility.
+**Demo:** modify application behavior through code, build/package, then launch outside the checkout without editor or MCP services.
 
-## M7 Public alpha candidate
+**Exit criteria:** no developer-local paths or secrets; explicit runtime prerequisites; clean-checkout build; source/asset provenance and dependency notices; an independent developer can change and rebuild the example.
+
+**Decision gate:** select the release license before external source sharing/contributions or distribution. Test Windows runtime feasibility before packaging assumptions harden, or explicitly narrow the support target. Add audio/physics/UI capabilities only where the chosen small application requires them.
+
+## M8 Independent reuse proof
+
+**User outcome:** demonstrate that the kit supports applications with genuinely different behavior and data needs.
+
+**Deliverable:** a small non-game application using the same kit as M7. Define its requirements in M5 so they guide extraction, then implement it here. A simple object/product configurator is a candidate; exact sample selection remains open.
+
+**Demo:** inspect and change application data without player, score or win-state concepts, then package/run it independently. An independent developer modifies both examples.
+
+**Exit criteria:** no copying engine internals into the second example; shared mechanisms remain domain-neutral; exposed coupling is corrected; representative performance and iteration costs are recorded. Two differently presented logistics demos alone do not establish broad reuse.
+
+**Boundaries:** no enterprise connector, CAD/BIM, certified simulation or digital-twin synchronization promise. Live external datasets are unnecessary for this proof.
+
+## M9 Public alpha candidate
 
 **User outcome:** another developer can adopt the engine without continual assistance from its authors.
 
@@ -169,6 +183,14 @@ Both use the same project, renderer, command and packaging mechanisms. A determi
 - CI uses the risk-based fast gate; expensive platform/GPU/performance validation is scoped to affected changes and release evidence, not blindly attached to every PR.
 
 **Boundaries:** alpha does not mean stable ABI, universal hardware support, feature parity with mature engines, or production enterprise guarantees.
+
+## Continuous adoption and engineering gates
+
+Seek an external human walkthrough of the current editor before major UI expansion. Keep agent-assisted timing distinct from human usability evidence. Choose representative workloads and hardware tiers before performance claims; measure tail latency, memory, idle use and iteration/build cost. Establish Windows runtime feasibility and another GPU class where access permits before distribution decisions harden.
+
+Select the license before public collaboration/distribution. Introduce scoped CI when a remote PR workflow begins, using TESTING.md rather than accumulating every subsystem check into every PR. Keep CLI/editor/MCP semantics and schema compatibility aligned as facilities grow.
+
+After alpha, choose evidence-driven tracks such as richer rendering/animation, larger simulations, networking, extensibility or enterprise integrations. These are future directions, not simultaneous scope commitments or a claim of Unity/Unreal parity.
 
 ## Milestone review and scheduling
 

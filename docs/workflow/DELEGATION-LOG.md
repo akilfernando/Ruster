@@ -40,3 +40,7 @@ Record meaningful completed work, not every tool call. Unknown metrics remain un
 
 - Terra’s actual UI journey exposed missing decorative glyphs and stale error feedback when correcting a field to its authored value. Root removed unsupported decorations and added missing backend warning/error logging; Sol separated inspector validation from persistence errors and extended the existing regression. Terra reproduced and confirmed the recovery fix. App-scoped inspection with a temporary forced-background rule preserved the user’s active workspace; the rule was removed afterward. Human usability and Windows runtime remain unverified.
 - Sol’s viewer investigation recorded matched release before/after samples and retained event-driven redraw plus geometry caching; synchronization-validation smoke passed. No actual allocation-count or power measurement was claimed. Measurements and initial contaminated/guard-failed batches are preserved with their exclusions.
+
+## 2026-11-04 post-M3 roadmap review
+
+- `gpt-6-astra`, high, read-only: reviewed actual core/session and rendering boundaries against future milestone gates. Identified missing reusable foundations, overloaded M5, live MCP session ownership, weak differentiation between reuse proofs and late adoption/platform evidence. Root synthesized the proposed revision without changing accepted future scope. No builds, UI activity or nested delegation; cost metrics unknown.

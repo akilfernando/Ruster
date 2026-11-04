@@ -37,7 +37,7 @@ The reference game must exercise the engine, not become a second large product. 
 
 ## Delivery sequence
 
-The canonical phase definitions, deliverables, scope limits and acceptance gates are in [ROADMAP.md](ROADMAP.md). M0–M2 now provide the local seed, saved-scenario workflow and first Vulkan schematic view. M3 visual authoring is next, followed by MCP parity, packaging, two reference applications and an alpha candidate.
+The canonical phase definitions, deliverables, scope limits and acceptance gates are in [ROADMAP.md](ROADMAP.md). M0–M3 now provide the local seed, saved-scenario workflow, first Vulkan schematic view and visual authoring. M4 MCP parity is next in the current plan. The accepted post-M3 revision separates shared scene/3D foundations, content iteration, standalone application kit, independent reuse proof and public alpha (M5–M9).
 
 A dependency-free prototype is a temporary scope choice, not a ban on libraries. Authoring undo restores authored changes; simulation reset/replay is distinct from runtime rollback.
 
