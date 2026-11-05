@@ -33,7 +33,7 @@ This is an explicit V1 dependency replan. Implement in reviewable stages, reasse
 
 ## CPU payload ownership at the paint boundary — 2026-11-05 extension
 
-Root/Astra's actual ownership review finds that returning old stores/maps is not sufficient to prove off-UI final CPU-payload release. GPU mesh/texture caches currently retain strong source Arcs solely for identity; egui paint callbacks also retain draw inputs. No measured UI stall is claimed. The selected correction is small: weak GPU identity stamps plus one host-held retirement bundle gated to a later root frame, not a general collector or extra renderer thread. Implementation and proof remain pending at selection.
+Root/Astra's actual ownership review finds that returning old stores/maps is not sufficient to prove off-UI final CPU-payload release. GPU mesh/texture caches currently retain strong source Arcs solely for identity; egui paint callbacks also retain draw inputs. No measured UI stall is claimed. The selected correction is small: weak GPU identity stamps plus one host-held retirement bundle gated to a later root frame, not a general collector or extra renderer thread. Weak GPU stamps subsequently pass the recorded ownership/Vulkan proof; the host frame barrier remains in progress.
 
 Change GPU-cache source identities to Weak and compare weak identities without upgrading them. Keep SceneCallback draw inputs strong until preparation. Uploaded buffers/textures own their copied data; the CPU source is not required until GPU completion. Weak keeps allocation identity from being reused while allowing the Vec-backed value to be released. Preserve all upload/budget/fallback semantics and test replacement under the same asset ID.
 

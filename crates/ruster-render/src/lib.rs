@@ -5,7 +5,7 @@ mod material_probe;
 use material_gpu::{BindingKey, MaterialGpu};
 use std::collections::BTreeMap;
 use std::ops::Range;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Instant;
 
 use bytemuck::{Pod, Zeroable};
@@ -1180,7 +1180,7 @@ fn scene_pipeline(
 }
 
 struct GpuMesh {
-    source: Option<Arc<ruster_assets::Mesh>>,
+    source: Option<Weak<ruster_assets::Mesh>>,
     vertices: wgpu::Buffer,
     indices: wgpu::Buffer,
     count: u32,
@@ -1189,7 +1189,7 @@ struct GpuMesh {
 impl GpuMesh {
     fn new(
         device: &wgpu::Device,
-        source: Option<Arc<ruster_assets::Mesh>>,
+        source: Option<Weak<ruster_assets::Mesh>>,
         vertices: &[Vertex],
         indices: &[u32],
     ) -> Self {
@@ -1209,6 +1209,64 @@ impl GpuMesh {
             bytes: std::mem::size_of_val(vertices) as u64 + std::mem::size_of_val(indices) as u64,
         }
     }
+}
+
+/// Retain only allocation identity after copying source bytes into GPU-owned
+/// buffers. DrawGroup keeps the strong input alive throughout preparation.
+fn prepare_mesh(
+    device: &wgpu::Device,
+    meshes: &mut BTreeMap<String, GpuMesh>,
+    id: &str,
+    mesh: &Arc<ruster_assets::Mesh>,
+) -> Option<u64> {
+    let identity = Arc::downgrade(mesh);
+    if meshes
+        .get(id)
+        .and_then(|gpu| gpu.source.as_ref())
+        .is_some_and(|old| Weak::ptr_eq(old, &identity))
+    {
+        return None;
+    }
+    // Defense at the public renderer boundary; registered AssetStore meshes already satisfy these limits.
+    if meshes.len() >= MAX_MESHES && !meshes.contains_key(id) {
+        return None;
+    }
+    if ruster_assets::validate_mesh(mesh).is_err() {
+        eprintln!("Ruster mesh {id} invalid or over renderer limits; cube fallback");
+        meshes.remove(id);
+        return None;
+    }
+    let candidate_bytes =
+        (mesh.vertices.len() * size_of::<Vertex>() + mesh.indices.len() * size_of::<u32>()) as u64;
+    let retained_bytes = meshes
+        .iter()
+        .filter(|(key, _)| key.as_str() != id)
+        .map(|(_, gpu)| gpu.bytes)
+        .sum::<u64>();
+    if candidate_bytes + retained_bytes > ruster_assets::MAX_RESOLVED_BYTES as u64 {
+        eprintln!("Ruster mesh {id} exceeds total 48 MiB mesh payload limit; cube fallback");
+        meshes.remove(id);
+        return None;
+    }
+    let vertices = mesh
+        .vertices
+        .iter()
+        .enumerate()
+        .map(|(index, vertex)| Vertex {
+            position: vertex.position,
+            normal: vertex.normal,
+            uv: mesh
+                .texcoords
+                .as_ref()
+                .and_then(|uvs| uvs.get(index))
+                .copied()
+                .unwrap_or([0.0; 2]),
+        })
+        .collect::<Vec<_>>();
+    let gpu = GpuMesh::new(device, Some(identity), &vertices, &mesh.indices);
+    let bytes = gpu.bytes;
+    meshes.insert(id.into(), gpu);
+    Some(bytes)
 }
 struct DrawGroup {
     key: Option<String>,
@@ -1273,57 +1331,10 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 );
             }
             if let (Some(id), Some(mesh)) = (&group.key, &group.mesh) {
-                if r.meshes
-                    .get(id)
-                    .and_then(|gpu| gpu.source.as_ref())
-                    .is_some_and(|old| Arc::ptr_eq(old, mesh))
-                {
-                    continue;
+                if let Some(bytes) = prepare_mesh(device, &mut r.meshes, id, mesh) {
+                    mesh_uploads += 1;
+                    mesh_upload_bytes += bytes;
                 }
-                // Defense at the public renderer boundary; registered AssetStore meshes already satisfy these limits.
-                if r.meshes.len() >= MAX_MESHES && !r.meshes.contains_key(id) {
-                    continue;
-                }
-                if ruster_assets::validate_mesh(mesh).is_err() {
-                    eprintln!("Ruster mesh {id} invalid or over renderer limits; cube fallback");
-                    r.meshes.remove(id);
-                    continue;
-                }
-                let candidate_bytes = (mesh.vertices.len() * size_of::<Vertex>()
-                    + mesh.indices.len() * size_of::<u32>())
-                    as u64;
-                let retained_bytes = r
-                    .meshes
-                    .iter()
-                    .filter(|(key, _)| *key != id)
-                    .map(|(_, gpu)| gpu.bytes)
-                    .sum::<u64>();
-                if candidate_bytes + retained_bytes > ruster_assets::MAX_RESOLVED_BYTES as u64 {
-                    eprintln!(
-                        "Ruster mesh {id} exceeds total 48 MiB mesh payload limit; cube fallback"
-                    );
-                    r.meshes.remove(id);
-                    continue;
-                }
-                let vertices = mesh
-                    .vertices
-                    .iter()
-                    .enumerate()
-                    .map(|(index, v)| Vertex {
-                        position: v.position,
-                        normal: v.normal,
-                        uv: mesh
-                            .texcoords
-                            .as_ref()
-                            .and_then(|uvs| uvs.get(index))
-                            .copied()
-                            .unwrap_or([0.0; 2]),
-                    })
-                    .collect::<Vec<_>>();
-                let gpu = GpuMesh::new(device, Some(mesh.clone()), &vertices, &mesh.indices);
-                mesh_uploads += 1;
-                mesh_upload_bytes += gpu.bytes;
-                r.meshes.insert(id.clone(), gpu);
             }
         }
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
@@ -1791,6 +1802,7 @@ mod tests {
         };
         let (device, queue) =
             pollster::block_on(adapter.request_device(&descriptor)).expect("Vulkan device");
+        eprintln!("GPU probe adapter: {:?}", adapter.get_info());
         for samples in [1, 2, 4] {
             if supported_samples(&adapter, &device, samples) != samples {
                 eprintln!("GPU probe: {samples}x unsupported; skipped");

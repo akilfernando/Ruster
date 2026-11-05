@@ -1,6 +1,6 @@
-//! Retained immutable texture payloads and the four bounded material sampler variants.
+//! Retained GPU textures, weak CPU identities and four bounded material sampler variants.
 use std::collections::{BTreeMap, BTreeSet};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct BindingKey {
@@ -12,7 +12,7 @@ pub(super) struct BindingKey {
 }
 
 struct GpuTexture {
-    source: Option<Arc<ruster_assets::Texture>>,
+    source: Option<Weak<ruster_assets::Texture>>,
     _texture: wgpu::Texture,
     view: wgpu::TextureView,
     bytes: u64,
@@ -22,7 +22,7 @@ impl GpuTexture {
     fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        source: Arc<ruster_assets::Texture>,
+        source: &Arc<ruster_assets::Texture>,
     ) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
             label: Some("retained base-color texture"),
@@ -63,7 +63,7 @@ impl GpuTexture {
             view: texture.create_view(&Default::default()),
             _texture: texture,
             bytes: source.payload_bytes() as u64,
-            source: Some(source),
+            source: Some(Arc::downgrade(source)),
         }
     }
 
@@ -77,7 +77,7 @@ impl GpuTexture {
                 rgba: rgba.to_vec(),
             }],
         });
-        let mut gpu = Self::new(device, queue, source);
+        let mut gpu = Self::new(device, queue, &source);
         gpu.source = None;
         gpu
     }
@@ -221,7 +221,7 @@ impl MaterialGpu {
                     .textures
                     .get(id)
                     .and_then(|gpu| gpu.source.as_ref())
-                    .is_some_and(|old| Arc::ptr_eq(old, source))
+                    .is_some_and(|old| Weak::ptr_eq(old, &Arc::downgrade(source)))
                 {
                     let retained = self
                         .textures
@@ -246,7 +246,7 @@ impl MaterialGpu {
                         continue;
                     }
                     self.invalid.remove(id);
-                    let gpu = GpuTexture::new(device, queue, source.clone());
+                    let gpu = GpuTexture::new(device, queue, source);
                     uploads.count += 1;
                     uploads.bytes += gpu.bytes;
                     self.textures.insert(id.clone(), gpu);
