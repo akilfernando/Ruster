@@ -498,8 +498,33 @@ impl AssetStore {
             .get(id)
             .cloned()
             .ok_or_else(|| error(format!("unknown asset ID {id:?}")))?;
-        let (hash, payload) = match self.read_source(&record.source, record.kind) {
-            Ok(result) => result,
+        let bytes = match read_source_bytes(&self.root, &record.source, record.kind) {
+            Ok(bytes) => bytes,
+            Err(e) => {
+                let info = self.info(id, self.failure_status(&record.source), Some(e.to_string()));
+                self.infos.insert(id.into(), info);
+                return Err(e);
+            }
+        };
+        let hash = digest(&bytes);
+        if record.kind == AssetKind::Texture && record.hash.as_ref() == Some(&hash) {
+            if let Some(texture) = self.textures.get(id) {
+                // Accepted identical bytes cannot change deterministic decode/mips.
+                // Borrow the immutable payload: do not decode or clone pixels just
+                // to repair its disposable cache and clear a previous diagnostic.
+                if let Err(e) = self.write_texture_cache(&hash, texture) {
+                    self.mark_failure(id, &e);
+                    return Err(e);
+                }
+                let info = self.info(id, AssetStatus::Ready, None);
+                self.infos.insert(id.into(), info.clone());
+                return Ok(info);
+            }
+        }
+        // Meshes still parse on Refresh, including legacy-cache UV recovery.
+        // A texture without an accepted snapshot must decode even if hashes match.
+        let payload = match parse_source(&record.source, record.kind, &bytes) {
+            Ok(payload) => payload,
             Err(e) => {
                 let info = self.info(id, self.failure_status(&record.source), Some(e.to_string()));
                 self.infos.insert(id.into(), info);
@@ -702,15 +727,16 @@ impl AssetStore {
     fn write_payload_cache(&self, hash: &str, payload: &Payload) -> Result<(), AssetError> {
         match payload {
             Payload::Mesh(mesh) => self.write_cache(hash, mesh),
-            Payload::Texture(texture) => {
-                let directory = self.kind_cache_directory("textures", true)?;
-                atomic_write(
-                    &directory,
-                    &directory.join(format!("v1-{hash}.bin")),
-                    &texture::encode_cache(hash, texture)?,
-                )
-            }
+            Payload::Texture(texture) => self.write_texture_cache(hash, texture),
         }
+    }
+    fn write_texture_cache(&self, hash: &str, texture: &Texture) -> Result<(), AssetError> {
+        let directory = self.kind_cache_directory("textures", true)?;
+        atomic_write(
+            &directory,
+            &directory.join(format!("v1-{hash}.bin")),
+            &texture::encode_cache(hash, texture)?,
+        )
     }
     fn read_texture_cache(&self, hash: &str) -> Result<Texture, AssetError> {
         let directory = self.kind_cache_directory("textures", false)?;
@@ -1537,6 +1563,43 @@ mod tests {
             AssetStore::open(root.path()).unwrap().texture("color"),
             Some(old.as_ref())
         );
+        // Repairing unchanged accepted bytes clears the prior failure, rebuilds
+        // a missing cache and retains both Arc identity and catalog authority.
+        fs::write(root.path().join("color.png"), &first).unwrap();
+        let cache_directory = root.path().join(".ruster-cache/textures");
+        fs::remove_dir_all(&cache_directory).unwrap();
+        let repaired = store.refresh("color").unwrap();
+        assert_eq!(repaired.status, AssetStatus::Ready);
+        assert!(repaired.diagnostic.is_none());
+        assert!(Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
+        assert_eq!(store.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), baseline);
+        let cache = cache_directory.join(format!("v1-{}.bin", digest(&first)));
+        let cache_bytes = fs::read(&cache).unwrap();
+        // Failed unchanged-content cache publication cannot report success or
+        // change accepted state; a later same-content repair recovers status.
+        fs::remove_file(&cache).unwrap();
+        fs::create_dir(&cache).unwrap();
+        assert!(store.refresh_at(revision - 1, "color").is_err());
+        assert!(store.refresh("color").is_err());
+        assert_eq!(store.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), baseline);
+        assert!(Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
+        assert_eq!(
+            store
+                .inspect()
+                .into_iter()
+                .find(|i| i.id == "color")
+                .unwrap()
+                .status,
+            AssetStatus::Invalid
+        );
+        fs::remove_dir(&cache).unwrap();
+        assert_eq!(store.refresh("color").unwrap().status, AssetStatus::Ready);
+        assert_eq!(fs::read(&cache).unwrap(), cache_bytes);
+        assert!(Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
+        assert_eq!(store.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), baseline);
         let same = texture::tests::png(
             1,
             1,
@@ -1571,6 +1634,20 @@ mod tests {
             AssetStore::open(root.path()).unwrap().texture("color"),
             store.texture("color")
         );
+        // Matching catalog hash is insufficient when both source and last-good
+        // cache were lost: restoring bytes must decode and repopulate a snapshot.
+        fs::remove_dir_all(root.path().join(".ruster-cache/textures")).unwrap();
+        fs::remove_file(root.path().join("color.png")).unwrap();
+        let mut unavailable = AssetStore::open(root.path()).unwrap();
+        assert!(unavailable.texture("color").is_none());
+        fs::write(root.path().join("color.png"), &changed).unwrap();
+        let final_revision = unavailable.revision();
+        assert_eq!(
+            unavailable.refresh("color").unwrap().status,
+            AssetStatus::Ready
+        );
+        assert_eq!(unavailable.revision(), final_revision);
+        assert_eq!(unavailable.texture("color"), store.texture("color"));
     }
 
     // File close alone does not end an advisory lock with duplicated/inherited

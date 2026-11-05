@@ -1,8 +1,11 @@
 //! Transient translation gestures and the window-owned object clipboard.
 //! Authored transactions stay in Session; no pointer frame enters undo history.
 use eframe::egui;
-use ruster_scene::{Object, Scene, Session, Transform};
-use std::path::{Path, PathBuf};
+use ruster_scene::{Object, OpaqueMaterial, Scene, Session, Transform};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    path::{Path, PathBuf},
+};
 use transform_gizmo_egui::{
     math::{DMat3, DMat4, DQuat, DVec3, Transform as GizmoTransform},
     prelude::*,
@@ -225,11 +228,49 @@ impl Gesture {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, serde::Serialize)]
 struct Clipboard {
     version: u32,
     source_root: Option<PathBuf>,
+    document_generation: u64,
     objects: Vec<Object>,
+    materials: BTreeMap<String, OpaqueMaterial>,
+}
+
+impl Clipboard {
+    fn validate(&self) -> Result<(), String> {
+        if self.version != 2
+            || self.objects.is_empty()
+            || self.objects.len() > ruster_scene::MAX_OBJECTS
+            || self.materials.len() > ruster_scene::MAX_MATERIALS
+        {
+            return Err(
+                "Unsupported or oversized object clipboard; copy the selection again.".into(),
+            );
+        }
+        if serde_json::to_vec(self).map_err(|e| e.to_string())?.len() > 256 * 1024 {
+            return Err("Copied objects/materials exceed the 256 KiB clipboard bound.".into());
+        }
+        let referenced: BTreeSet<_> = self
+            .objects
+            .iter()
+            .filter_map(|o| o.material.as_ref())
+            .collect();
+        if referenced != self.materials.keys().collect() {
+            return Err(
+                "Clipboard material definitions do not match its object references; copy again."
+                    .into(),
+            );
+        }
+        Scene {
+            id: "clipboard".into(),
+            revision: 0,
+            objects: self.objects.clone(),
+            materials: self.materials.clone(),
+        }
+        .validate()
+        .map_err(|e| e.to_string())
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -622,34 +663,43 @@ impl Manipulation {
     pub fn selected(&self) -> Option<String> {
         self.ids.last().cloned()
     }
-    pub fn copy(&mut self, session: &Session, root: Option<&Path>) -> Result<(), String> {
+    pub fn copy(
+        &mut self,
+        session: &Session,
+        root: Option<&Path>,
+        document_generation: u64,
+    ) -> Result<(), String> {
         let objects: Vec<_> = self
             .ids
             .iter()
-            .filter_map(|id| {
+            .map(|id| {
                 session
                     .scene()
                     .objects
                     .iter()
                     .find(|o| &o.id == id)
                     .cloned()
+                    .ok_or_else(|| "Selected object disappeared; Copy was not changed.".to_string())
             })
-            .collect();
+            .collect::<Result<_, _>>()?;
         if objects.is_empty() {
             return Err("Select objects before Copy.".into());
         }
-        let clipboard = Clipboard {
-            version: 1,
-            source_root: root.map(Path::to_path_buf),
-            objects,
-        };
-        if serde_json::to_vec(&serde_json::json!({"version":clipboard.version,"source_root":clipboard.source_root,"objects":clipboard.objects}))
-            .map_err(|e| e.to_string())?
-            .len()
-            > 256 * 1024
-        {
-            return Err("Copied objects exceed the 256 KiB clipboard bound.".into());
+        let mut materials = BTreeMap::new();
+        for id in objects.iter().filter_map(|object| object.material.as_ref()) {
+            let value = session.scene().materials.get(id).ok_or_else(|| {
+                format!("Object references missing material {id}; repair it before Copy.")
+            })?;
+            materials.insert(id.clone(), value.clone());
         }
+        let clipboard = Clipboard {
+            version: 2,
+            source_root: root.map(Path::to_path_buf),
+            document_generation,
+            objects,
+            materials,
+        };
+        clipboard.validate()?;
         self.clipboard = Some(clipboard);
         Ok(())
     }
@@ -658,28 +708,64 @@ impl Manipulation {
             .allocate_object_ids(count)
             .map_err(|e| e.to_string())
     }
-    pub fn paste(&mut self, session: &mut Session, root: Option<&Path>) -> Result<(), String> {
+    pub fn paste(
+        &mut self,
+        session: &mut Session,
+        root: Option<&Path>,
+        document_generation: u64,
+    ) -> Result<(), String> {
         let clipboard = self
             .clipboard
             .as_ref()
             .ok_or("Copy objects in this editor window before Paste.")?;
-        if clipboard.version != 1 || clipboard.objects.len() > ruster_scene::MAX_OBJECTS {
-            return Err("Unsupported or oversized object clipboard.".into());
-        }
-        if clipboard.objects.iter().any(|o| o.mesh.is_some())
+        clipboard.validate()?;
+        let fresh_materials: Vec<_> = clipboard
+            .materials
+            .keys()
+            .filter(|id| {
+                clipboard.document_generation != document_generation
+                    || !session.scene().materials.contains_key(*id)
+            })
+            .collect();
+        let fresh_ids = session
+            .allocate_material_ids(fresh_materials.len())
+            .map_err(|e| e.to_string())?;
+        let remap: BTreeMap<_, _> = fresh_materials
+            .into_iter()
+            .cloned()
+            .zip(fresh_ids)
+            .collect();
+        let imported: BTreeMap<_, _> = remap
+            .iter()
+            .map(|(old, new)| (new.clone(), clipboard.materials[old].clone()))
+            .collect();
+        // Same-document pastes share live definitions, including edits made since
+        // Copy. Other incarnations import snapshots even beside the same catalog.
+        let external_textures = clipboard.materials.iter().any(|(id, stored)| {
+            let effective = if remap.contains_key(id) {
+                stored
+            } else {
+                &session.scene().materials[id]
+            };
+            effective.base_color_texture.is_some()
+        });
+        if (clipboard.objects.iter().any(|o| o.mesh.is_some()) || external_textures)
             && (clipboard.source_root.is_none()
                 || root.is_none()
                 || clipboard.source_root.as_deref() != root)
         {
-            return Err("Mesh references belong to another project catalog; paste beside the source project or remove those references first.".into());
+            return Err("Mesh/texture references belong to another or unknown project catalog; paste beside the source project or remove those references first.".into());
         }
         let ids = Self::fresh_ids(session, clipboard.objects.len())?;
         let mut objects = clipboard.objects.clone();
         for (object, id) in objects.iter_mut().zip(&ids) {
             object.id.clone_from(id);
+            if let Some(replacement) = object.material.as_ref().and_then(|old| remap.get(old)) {
+                object.material = Some(replacement.clone());
+            }
         }
         session
-            .create_many(session.scene().revision, objects)
+            .create_many_with_materials(session.scene().revision, objects, imported)
             .map_err(|e| e.to_string())?;
         self.ids = ids;
         Ok(())
@@ -1150,9 +1236,9 @@ mod tests {
         m.select(Some("left".into()), false);
         m.select(Some("right".into()), true);
         assert_eq!(m.ids, ["left", "right"]);
-        m.copy(&session, None).unwrap();
+        m.copy(&session, None, 1).unwrap();
         let before = session.scene().clone();
-        m.paste(&mut session, None).unwrap();
+        m.paste(&mut session, None, 1).unwrap();
         assert_eq!(session.scene().objects.len(), 5);
         assert!(m
             .ids
@@ -1188,7 +1274,7 @@ mod tests {
         session.undo(revision).unwrap();
         session.undo(revision + 1).unwrap();
         assert_eq!(session.scene().objects, before.objects);
-        m.paste(&mut session, None).unwrap();
+        m.paste(&mut session, None, 1).unwrap();
         assert!(
             m.ids.iter().all(|id| !copies.contains(id)),
             "redo identities remain reserved"
@@ -1196,15 +1282,137 @@ mod tests {
         session
             .set_mesh(session.scene().revision, &m.ids[0], Some("owned".into()))
             .unwrap();
-        m.copy(&session, Some(Path::new("/first"))).unwrap();
+        m.copy(&session, Some(Path::new("/first")), 1).unwrap();
         let before = session.scene().clone();
-        assert!(m.paste(&mut session, Some(Path::new("/second"))).is_err());
+        assert!(m
+            .paste(&mut session, Some(Path::new("/second")), 1)
+            .is_err());
         assert_eq!(session.scene(), &before);
-        m.copy(&session, None).unwrap();
+        m.copy(&session, None, 1).unwrap();
         assert!(
-            m.paste(&mut session, None).is_err(),
+            m.paste(&mut session, None, 1).is_err(),
             "unknown mesh origins cannot bind silently"
         );
+        // Material identities are scoped to a document incarnation, even when
+        // both documents use the same catalog root and the same material ID.
+        let mut source_scene = Scene::demo();
+        source_scene.objects.truncate(2);
+        for object in &mut source_scene.objects {
+            object.material = Some("paint".into());
+        }
+        let copied = OpaqueMaterial {
+            tint: [0.2, 0.4, 0.8],
+            ..Default::default()
+        };
+        source_scene
+            .materials
+            .insert("paint".into(), copied.clone());
+        let mut source = Session::new(source_scene).unwrap();
+        let mut clipboard = Manipulation {
+            ids: vec!["left".into(), "center".into()],
+            ..Default::default()
+        };
+        let root = Some(Path::new("/shared"));
+        clipboard.copy(&source, root, 10).unwrap();
+        let edited = OpaqueMaterial {
+            tint: [0.8, 0.4, 0.2],
+            ..Default::default()
+        };
+        source.set_material(0, "paint", edited.clone()).unwrap();
+        clipboard.paste(&mut source, root, 10).unwrap();
+        assert_eq!(source.scene().materials.len(), 1);
+        assert_eq!(source.scene().materials["paint"], edited);
+        assert!(clipboard.ids.iter().all(|id| source
+            .scene()
+            .objects
+            .iter()
+            .any(|o| &o.id == id && o.material.as_deref() == Some("paint"))));
+        let mut destination_scene = Scene::empty("another-document");
+        destination_scene
+            .materials
+            .insert("paint".into(), OpaqueMaterial::default());
+        let mut destination = Session::new(destination_scene).unwrap();
+        clipboard.paste(&mut destination, root, 11).unwrap();
+        let imported = destination.scene().objects[0].material.clone().unwrap();
+        assert_ne!(imported, "paint");
+        assert_eq!(
+            destination.scene().objects[1].material.as_deref(),
+            Some(imported.as_str())
+        );
+        assert_eq!(destination.scene().materials[&imported], copied);
+        assert_eq!(
+            destination.scene().materials["paint"],
+            OpaqueMaterial::default()
+        );
+        assert_eq!(destination.undo_len(), 1);
+        destination.undo(1).unwrap();
+        assert!(destination.scene().objects.is_empty());
+        assert!(!destination.scene().materials.contains_key(&imported));
+        destination.redo(2).unwrap();
+        assert_eq!(destination.scene().materials[&imported], copied);
+        // Removing the original same-document definition never silently binds
+        // the stored snapshot to another historical identity on the next paste.
+        let owners: Vec<_> = source
+            .scene()
+            .objects
+            .iter()
+            .map(|o| o.id.clone())
+            .collect();
+        for id in owners {
+            source
+                .assign_material(source.scene().revision, &id, None)
+                .unwrap();
+        }
+        source
+            .remove_material(source.scene().revision, "paint")
+            .unwrap();
+        clipboard.paste(&mut source, root, 10).unwrap();
+        let restored_id = source
+            .scene()
+            .objects
+            .iter()
+            .find(|o| o.id == clipboard.ids[0])
+            .unwrap()
+            .material
+            .clone()
+            .unwrap();
+        assert_ne!(restored_id, "paint");
+        assert_eq!(source.scene().materials[&restored_id], copied);
+        let mut full_scene = Scene::empty("full");
+        full_scene.objects = (0..ruster_scene::MAX_OBJECTS)
+            .map(|n| Object::cube(format!("full-{n}"), None))
+            .collect();
+        let mut full = Session::new(full_scene).unwrap();
+        let before = full.snapshot_bytes().unwrap();
+        let selection = clipboard.ids.clone();
+        let stored = serde_json::to_vec(clipboard.clipboard.as_ref().unwrap()).unwrap();
+        assert!(clipboard.paste(&mut full, root, 20).is_err());
+        assert_eq!(full.snapshot_bytes().unwrap(), before);
+        assert_eq!(clipboard.ids, selection);
+        assert_eq!(
+            serde_json::to_vec(clipboard.clipboard.as_ref().unwrap()).unwrap(),
+            stored
+        );
+        clipboard.clipboard.as_mut().unwrap().version = 1;
+        assert!(clipboard.paste(&mut full, root, 20).is_err());
+        clipboard.clipboard.as_mut().unwrap().version = 2;
+        // Texture references require catalog-root confinement even without meshes.
+        source
+            .set_material(
+                source.scene().revision,
+                &restored_id,
+                OpaqueMaterial {
+                    base_color_texture: Some("missing-but-authored-texture".into()),
+                    ..copied
+                },
+            )
+            .unwrap();
+        clipboard.copy(&source, root, 10).unwrap();
+        assert!(clipboard
+            .paste(&mut destination, Some(Path::new("/other")), 11)
+            .is_err());
+        clipboard.copy(&source, None, 10).unwrap();
+        assert!(clipboard.paste(&mut destination, None, 11).is_err());
     }
 
     // Unique UI boundary: the real toolkit's result stream previews only until

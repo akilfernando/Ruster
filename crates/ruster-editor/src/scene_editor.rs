@@ -3,6 +3,10 @@ mod behavior_commands;
 mod capture_commands;
 mod color_commands;
 mod export_commands;
+mod material_commands;
+mod material_ui;
+#[cfg(all(test, feature = "inspection"))]
+mod material_visual_probe;
 mod persistence_commands;
 mod runtime_commands;
 mod view_commands;
@@ -11,7 +15,8 @@ use eframe::{
     egui,
     egui_wgpu::{WgpuSetup, WgpuSetupCreateNew},
 };
-use ruster_assets::{AssetStore, Mesh};
+use ruster_assets::{AssetStore, Mesh, Texture};
+type TextureMap = BTreeMap<String, Arc<Texture>>;
 use ruster_scene::{Object, Preview, Scene, Session, Transform};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::Arc};
@@ -42,6 +47,8 @@ struct RecoveryDrafts {
     behavior: Option<crate::behavior_ui::Drafts>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     color: Option<color_commands::ColorDraft>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    material: Option<material_ui::MaterialDraft>,
 }
 impl From<&Transform> for Fields {
     fn from(t: &Transform) -> Self {
@@ -98,7 +105,7 @@ fn sidebar_budget(width: f32, hierarchy: Option<f32>, inspector: Option<f32>) ->
     )
 }
 #[derive(Clone)]
-struct AssetDrag {
+pub(super) struct AssetDrag {
     catalog_root: PathBuf,
     catalog_revision: u64,
     generation: u64,
@@ -189,7 +196,12 @@ impl ContentSearch {
                                 ruster_assets::AssetStatus::Missing => "Missing",
                                 ruster_assets::AssetStatus::Invalid => "Invalid",
                             };
-                            let label = format!("{} · {status} · {}", info.id, info.source);
+                            let kind = match info.kind {
+                                ruster_assets::AssetKind::Mesh => "Mesh",
+                                ruster_assets::AssetKind::Texture => "Texture",
+                            };
+                            let label =
+                                format!("{} · {kind} · {status} · {}", info.id, info.source);
                             ContentRow {
                                 search: label.to_lowercase(),
                                 info,
@@ -251,9 +263,14 @@ pub struct SceneEditor {
     external: crate::behavior_external::External,
     external_focused: bool,
     queued_external: Option<(String, crate::behavior_external::Intent)>,
-    reset_assets: Option<(crate::behavior_worker::RunKey, BTreeMap<String, Arc<Mesh>>)>,
+    reset_assets: Option<(
+        crate::behavior_worker::RunKey,
+        BTreeMap<String, Arc<Mesh>>,
+        TextureMap,
+    )>,
     draft: Option<Fields>,
     color_draft: Option<color_commands::ColorDraft>,
+    material_draft: Option<material_ui::MaterialDraft>,
     baseline_fields: Option<Fields>,
     workspace: Workspace,
     recovery: crate::recovery_ui::RecoveryUi,
@@ -299,7 +316,9 @@ pub struct SceneEditor {
     close_approved: bool,
     assets: Option<AssetStore>,
     resolved: BTreeMap<String, Arc<Mesh>>,
+    resolved_textures: TextureMap,
     preview_assets: BTreeMap<String, Arc<Mesh>>,
+    preview_textures: TextureMap,
     asset_dialog: bool,
     asset_focused: bool,
     asset_source_focus: bool,
@@ -348,6 +367,11 @@ impl SceneEditor {
             .map(|s| s.mesh_snapshots())
             .unwrap_or_default();
         let preview_assets = resolved.clone();
+        let resolved_textures = assets
+            .as_ref()
+            .map(|store| store.texture_snapshots())
+            .unwrap_or_default();
+        let preview_textures = resolved_textures.clone();
         let mut manipulation = crate::manipulation::Manipulation::default();
         manipulation.select_only(selected.clone());
         manipulation.reset_precision(session.scene());
@@ -384,6 +408,7 @@ impl SceneEditor {
             queued_external: None,
             reset_assets: None,
             color_draft: None,
+            material_draft: None,
             baseline_fields: draft.clone(),
             workspace,
             recovery: crate::recovery_ui::RecoveryUi::disabled(),
@@ -435,6 +460,8 @@ impl SceneEditor {
             assets,
             resolved,
             preview_assets,
+            resolved_textures,
+            preview_textures,
             asset_dialog: false,
             asset_focused: false,
             asset_source_focus: false,
@@ -449,6 +476,7 @@ impl SceneEditor {
     }
     fn drafts(&self) -> bool {
         self.color_draft.is_some()
+            || self.material_draft.is_some()
             || self.manipulation.precision_pending()
             || self.draft != self.baseline_fields
             || self.behavior.pending()
@@ -457,7 +485,7 @@ impl SceneEditor {
         self.drafts() || self.rename_pending || self.manipulation.offset_pending()
     }
     fn behavior_editable(&self) -> bool {
-        self.color_draft.is_none()
+        (self.color_draft.is_none() && self.material_draft.is_none())
             && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && self.draft == self.baseline_fields
@@ -610,22 +638,23 @@ impl SceneEditor {
             if self
                 .reset_assets
                 .as_ref()
-                .is_some_and(|(candidate, _)| *candidate == key)
+                .is_some_and(|(candidate, _, _)| *candidate == key)
                 && self
                     .runtime
                     .frame
                     .as_ref()
                     .is_some_and(|frame| frame.key == key)
             {
-                let (_, assets) = self.reset_assets.take().unwrap();
+                let (_, assets, textures) = self.reset_assets.take().unwrap();
                 self.preview_assets = assets;
+                self.preview_textures = textures;
             }
         }
     }
     #[cfg(test)]
     fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
         let drafts = RecoveryDrafts {
-            version: 3,
+            version: 4,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -633,6 +662,7 @@ impl SceneEditor {
             manipulation: self.manipulation.snapshot_drafts(),
             behavior: Some(self.behavior.snapshot()),
             color: self.color_draft.clone(),
+            material: self.material_draft.clone(),
         };
         let mut snapshot = crate::recovery::Snapshot::capture(
             &self.session,
@@ -646,6 +676,7 @@ impl SceneEditor {
     }
     fn restore_recovery_drafts(&mut self, value: Value) -> Result<(), String> {
         let behavior_field = value.get("behavior").is_some();
+        let material_field = value.get("material").is_some();
         let version = value.get("version").and_then(Value::as_u64);
         let manipulation_unit = value.pointer("/manipulation/rotation_unit").is_some();
         let fields_unit = value
@@ -653,8 +684,9 @@ impl SceneEditor {
             .filter(|v| !v.is_null())
             .map(|v| v.get("rotation_unit").is_some());
         if !match version {
-            Some(1 | 2) => !manipulation_unit && fields_unit != Some(true),
-            Some(3) => manipulation_unit && fields_unit != Some(false),
+            Some(1 | 2) => !material_field && !manipulation_unit && fields_unit != Some(true),
+            Some(3) => !material_field && manipulation_unit && fields_unit != Some(false),
+            Some(4) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -666,7 +698,8 @@ impl SceneEditor {
             .map_err(|e| format!("Unsupported recovery drafts: {e}; checkpoint preserved."))?;
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((draft.version == 2 || draft.version == 3) && draft.behavior.is_some()))
+            || ((draft.version == 2 || draft.version == 3 || draft.version == 4)
+                && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -709,10 +742,34 @@ impl SceneEditor {
                 );
             }
         }
-        // Validate color's exclusive draft ownership before touching selection or
+        if let Some(material) = &draft.material {
+            if !material.validate_snapshot(scene, draft.selection.last().map(String::as_str))
+                || draft.color.is_some()
+                || draft.fields.as_ref().is_some_and(|fields| {
+                    draft
+                        .selection
+                        .last()
+                        .and_then(|id| scene.objects.iter().find(|object| &object.id == id))
+                        .is_none_or(|object| {
+                            *fields != Fields::with_unit(&object.transform, fields.rotation_unit)
+                        })
+                })
+                || draft.pending_name.is_some()
+                || draft
+                    .behavior
+                    .as_ref()
+                    .is_some_and(|behavior| behavior.pending())
+            {
+                return Err(
+                    "Unsupported compound or stale material recovery draft; checkpoint preserved."
+                        .into(),
+                );
+            }
+        }
+        // Validate visual drafts' exclusive ownership before touching selection or
         // adopting any recovered state. Precision masks and offsets are private
         // to Manipulation, so use its real restoration validator for preflight.
-        let manipulation = if draft.color.is_some() {
+        let manipulation = if draft.color.is_some() || draft.material.is_some() {
             let mut checked = crate::manipulation::Manipulation::default();
             checked.ids = draft.selection.clone();
             checked.restore_drafts(scene, draft.manipulation)?;
@@ -726,12 +783,14 @@ impl SceneEditor {
             draft.manipulation
         };
         let color = draft.color;
+        let material = draft.material;
         self.manipulation.ids = draft.selection;
         self.selected = self.manipulation.selected();
         self.sync_draft();
         self.manipulation
             .restore_drafts(self.session.scene(), manipulation)?;
         self.color_draft = color;
+        self.material_draft = material;
         if let (Some(fields), Some(id)) = (&draft.fields, &self.selected) {
             let transform = &self
                 .session
@@ -808,6 +867,7 @@ impl SceneEditor {
         };
         next.asset_snapshot();
         next.preview_assets = next.resolved.clone();
+        next.preview_textures = next.resolved_textures.clone();
         let render = self.render.clone();
         if let Some(render) = render.as_ref().filter(|_| self.shader_revision > 0) {
             ruster_render::refresh_shader(render, ruster_render::default_shader())?;
@@ -864,7 +924,7 @@ impl SceneEditor {
             let asset_origin = self.asset_origin.clone();
             let recovered_origin = self.recovered_origin.clone();
             let drafts = RecoveryDrafts {
-                version: 3,
+                version: 4,
                 revision: session.scene().revision,
                 selection: self.manipulation.ids.clone(),
                 fields: self.draft.clone(),
@@ -872,6 +932,7 @@ impl SceneEditor {
                 manipulation: self.manipulation.snapshot_drafts(),
                 behavior: Some(self.behavior.snapshot()),
                 color: self.color_draft.clone(),
+                material: self.material_draft.clone(),
             };
             let capture = Box::new(move || {
                 let mut snapshot = crate::recovery::Snapshot::capture(
@@ -1154,6 +1215,9 @@ impl SceneEditor {
         }
     }
     fn apply(&mut self) -> bool {
+        if self.material_draft.is_some() {
+            return self.apply_material_draft();
+        }
         if self.color_draft.is_some() {
             return self.apply_color_draft();
         }
@@ -1364,9 +1428,11 @@ impl SceneEditor {
         }
         let root = self.asset_origin.clone();
         let result = if paste {
-            self.manipulation.paste(&mut self.session, root.as_deref())
+            self.manipulation
+                .paste(&mut self.session, root.as_deref(), self.generation)
         } else {
-            self.manipulation.copy(&self.session, root.as_deref())
+            self.manipulation
+                .copy(&self.session, root.as_deref(), self.generation)
         };
         match result {
             Ok(()) => {
@@ -1499,7 +1565,7 @@ impl SceneEditor {
         }
         egui::CollapsingHeader::new("Adjust selection").id_salt("selection_adjustments").open(pending.then_some(true)).show(ui,|ui| {
             ui.label("World translation offset");
-            ui.add_enabled_ui(self.color_draft.is_none() && !self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
+            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none()) && !self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
                 let mut enter=false;
                 let mut escape=false;
                 let group_width=crate::manipulation::component_group_width(ui);
@@ -1538,6 +1604,11 @@ impl SceneEditor {
             .as_ref()
             .map(|store| store.mesh_snapshots())
             .unwrap_or_default();
+        self.resolved_textures = self
+            .assets
+            .as_ref()
+            .map(|store| store.texture_snapshots())
+            .unwrap_or_default();
     }
     fn document_label(&self) -> String {
         self.session
@@ -1572,7 +1643,7 @@ impl SceneEditor {
             .map_err(|e| e.to_string())?;
         let old_root = self.asset_origin.clone();
         if self.session.has_asset_references() && old_root.as_ref() != Some(&parent) {
-            return Err("Save As across asset roots is unavailable while scene or undo/redo history references meshes; save beside the existing project.".into());
+            return Err("Save As across asset roots is unavailable while scene or undo/redo history references project assets; save beside the existing project.".into());
         }
         let destination_store = if old_root.as_ref() != Some(&parent) {
             Some(AssetStore::open(&parent).map_err(|e| e.to_string())?)
@@ -1658,6 +1729,7 @@ impl SceneEditor {
                 ));
             }
         }
+        self.validate_mesh_material_compatibility(id, &mesh)?;
         let revision = self
             .session
             .set_mesh(self.session.scene().revision, id, mesh)
@@ -1665,13 +1737,47 @@ impl SceneEditor {
         self.notice=format!("Mesh assigned to {id} only, revision{revision}; Undo restores the assignment, preview unchanged until Reset.");
         Ok(revision)
     }
+    /// Changing geometry must not introduce missing UVs beneath an assigned
+    /// textured material. No-op assignments leave existing repairable data alone.
+    pub(super) fn validate_mesh_material_compatibility(
+        &self,
+        object_id: &str,
+        mesh: &Option<String>,
+    ) -> Result<(), String> {
+        let object = self
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == object_id)
+            .ok_or_else(|| format!("Object {object_id} does not exist"))?;
+        if object.mesh == *mesh {
+            return Ok(());
+        }
+        let textured = object
+            .material
+            .as_ref()
+            .and_then(|id| self.session.scene().materials.get(id))
+            .is_some_and(|material| material.base_color_texture.is_some());
+        if textured
+            && !mesh
+                .as_ref()
+                .and_then(|id| self.resolved.get(id))
+                .is_some_and(|mesh| mesh.has_complete_uvs())
+        {
+            return Err("A textured material requires complete mesh UVs; assign a UV-mapped mesh or clear the material first.".into());
+        }
+        Ok(())
+    }
     fn asset_payload(&self, id: &str) -> Result<AssetDrag, String> {
         let store = self
             .assets
             .as_ref()
             .ok_or("Open a saved scene with a valid content catalog first.")?;
-        if !self.resolved.contains_key(id) {
-            return Err(format!("Asset {id} has no valid mesh to assign."));
+        if !self.resolved.contains_key(id) && !self.resolved_textures.contains_key(id) {
+            return Err(format!(
+                "Asset {id} has no accepted mesh or texture content."
+            ));
         }
         Ok(AssetDrag {
             catalog_root: store.root().to_path_buf(),
@@ -1684,6 +1790,12 @@ impl SceneEditor {
     fn accept_asset_drop(&mut self, target: &str, payload: &AssetDrag) -> Result<u64, String> {
         self.guard()
             .map_err(|e| format!("{e}: finish drafts or dialogs before dropping content."))?;
+        self.check_asset_drag(payload)?;
+        self.assign_mesh_to(target, Some(payload.asset_id.clone()))
+    }
+    /// Check frozen scene/catalog provenance independently of draft ownership;
+    /// material drop targets may intentionally update a pending human draft.
+    pub(super) fn check_asset_drag(&self, payload: &AssetDrag) -> Result<(), String> {
         if payload.generation != self.generation {
             return Err(
                 "The content drag belongs to an older/different scene session; drag it again."
@@ -1708,7 +1820,7 @@ impl SceneEditor {
                 "The catalog changed during the content drag; inspect it and drag again.".into(),
             );
         }
-        self.assign_mesh_to(target, Some(payload.asset_id.clone()))
+        Ok(())
     }
     fn process_content_intents(&mut self) {
         if let Some(id) = self.queued_refresh.take() {
@@ -1727,7 +1839,16 @@ impl SceneEditor {
                 .scene()
                 .objects
                 .iter()
-                .filter(|o| o.mesh.as_deref() == Some(asset.as_str()))
+                .filter(|object| {
+                    object.mesh.as_deref() == Some(asset.as_str())
+                        || object
+                            .material
+                            .as_ref()
+                            .and_then(|id| self.session.scene().materials.get(id))
+                            .is_some_and(|material| {
+                                material.base_color_texture.as_deref() == Some(asset.as_str())
+                            })
+                })
                 .map(|o| o.id.clone())
                 .collect();
             self.selected = self.manipulation.selected();
@@ -1945,7 +2066,7 @@ impl SceneEditor {
             );
         }
         let expected_asset = number("expected_asset_revision")?;
-        let store = self.assets.as_mut().ok_or_else(|| {
+        let store = self.assets.as_ref().ok_or_else(|| {
             err(
                 "assets_unavailable",
                 "Open a project with a valid catalog".into(),
@@ -1993,6 +2114,8 @@ impl SceneEditor {
                 .ok_or_else(|| err("object_not_found", id.into()))?
                 .mesh
                 .clone();
+            self.validate_mesh_material_compatibility(id, &mesh)
+                .map_err(|message| err("material_unavailable", message))?;
             let revision = self
                 .session
                 .set_mesh(self.session.scene().revision, id, mesh.clone())
@@ -2006,6 +2129,12 @@ impl SceneEditor {
         let id = args["asset_id"]
             .as_str()
             .ok_or_else(|| err("invalid_arguments", "asset_id required".into()))?;
+        let store = self.assets.as_mut().ok_or_else(|| {
+            err(
+                "assets_unavailable",
+                "Open a project with a valid catalog".into(),
+            )
+        })?;
         let result = match op {
             "asset_import" => store.import_at(
                 expected_asset,
@@ -2071,6 +2200,17 @@ impl SceneEditor {
         }
         if matches!(op, "scene_persistence_inspect" | "scene_save") {
             return self.persistence_command(token, op, args);
+        }
+        if [
+            "material_inspect",
+            "scene_material_set",
+            "scene_material_assign",
+            "scene_material_copy",
+            "scene_material_remove",
+        ]
+        .contains(&op)
+        {
+            return self.material_command(token, op, args);
         }
         if op == "scene_color" {
             return self.color_command(token, args);
@@ -2157,7 +2297,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_color","viewport_inspect","viewport_camera","scene_select","viewport_capture_start","viewport_capture_inspect","creation_export_inspect","creation_export_start","creation_export_cancel","scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved || self.preview_textures!=self.resolved_textures,"capabilities":["material_inspect","scene_material_set","scene_material_assign","scene_material_copy","scene_material_remove","scene_color","viewport_inspect","viewport_camera","scene_select","viewport_capture_start","viewport_capture_inspect","creation_export_inspect","creation_export_start","creation_export_cancel","scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -2502,7 +2642,19 @@ impl SceneEditor {
                             }
                         }
                     });
-                    if response.dnd_hover_payload::<AssetDrag>().is_some() {
+                    if response
+                        .dnd_hover_payload::<AssetDrag>()
+                        .is_some_and(|payload| {
+                            self.resolved.contains_key(&payload.asset_id)
+                                && self.check_asset_drag(&payload).is_ok()
+                                && self
+                                    .validate_mesh_material_compatibility(
+                                        &row.id,
+                                        &Some(payload.asset_id.clone()),
+                                    )
+                                    .is_ok()
+                        })
+                    {
                         ui.painter().rect_stroke(
                             response.rect,
                             3.0,
@@ -2574,7 +2726,12 @@ impl SceneEditor {
         if self.selected.is_none() {
             ui.label("Select an object to edit its properties.");
             if self.manipulation.offset_pending() {
-                ui.add_enabled_ui(!self.behavior.pending(), |ui| self.manipulation_ui(ui));
+                ui.add_enabled_ui(
+                    self.color_draft.is_none()
+                        && self.material_draft.is_none()
+                        && !self.behavior.pending(),
+                    |ui| self.manipulation_ui(ui),
+                );
             }
             if self.behavior.pending() {
                 let editable = self.behavior_editable();
@@ -2594,7 +2751,7 @@ impl SceneEditor {
         ui.separator();
         ui.strong("Transform");
         if self.draft != self.baseline_fields {
-            ui.add_enabled_ui(self.color_draft.is_none() && !self.behavior.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none()) && !self.behavior.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
                     ui.label("Recovered transform fields — repair or revert before other precision edits");
                     let mut enter=false;
                     let mut escape=false;
@@ -2614,13 +2771,16 @@ impl SceneEditor {
                     if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
                 });
         }
-        ui.add_enabled_ui(self.color_draft.is_none() && self.draft == self.baseline_fields && !self.behavior.pending() && !self.manipulation.ids.is_empty(), |ui| {
+        ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.manipulation.ids.is_empty(), |ui| {
                 match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                     Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                     Ok(false)=>{},Err(error)=>self.error=error,
                 }
             });
-        ui.add_enabled_ui(!self.behavior.pending(), |ui| self.manipulation_ui(ui));
+        ui.add_enabled_ui(
+            self.color_draft.is_none() && self.material_draft.is_none() && !self.behavior.pending(),
+            |ui| self.manipulation_ui(ui),
+        );
         ui.separator();
         if let Some(object) = self
             .selected
@@ -2638,6 +2798,7 @@ impl SceneEditor {
         }
         ui.strong("Mesh");
         self.mesh_reference_ui(ui);
+        self.material_inspector_ui(ui);
         self.color_inspector_ui(ui);
         let editable = self.behavior_editable();
         if let Some(action) = self.behavior.inspector(
@@ -2709,7 +2870,16 @@ impl SceneEditor {
                 }
             }
         });
-        if response.dnd_hover_payload::<AssetDrag>().is_some() {
+        if response
+            .dnd_hover_payload::<AssetDrag>()
+            .is_some_and(|payload| {
+                self.resolved.contains_key(&payload.asset_id)
+                    && self.check_asset_drag(&payload).is_ok()
+                    && self
+                        .validate_mesh_material_compatibility(&id, &Some(payload.asset_id.clone()))
+                        .is_ok()
+            })
+        {
             ui.painter().rect_stroke(
                 response.rect,
                 3.0,
@@ -2797,12 +2967,13 @@ impl SceneEditor {
             return;
         }
         ui.small(format!(
-            "{} / {} assets · drag a mesh onto an object or its inspector reference",
+            "{} / {} assets · drag meshes onto objects; use textures in the Material inspector",
             self.content_search.visible.len(),
             self.content_search.rows.len()
         ));
         let mut selected = None;
         let mut assign = None;
+        let mut use_texture = None;
         let mut refresh = None;
         let mut edit = None;
         let mut refs = None;
@@ -2811,7 +2982,12 @@ impl SceneEditor {
             .show(ui, |ui| {
                 for index in &self.content_search.visible {
                     let row = &self.content_search.rows[*index];
-                    let available = self.resolved.contains_key(&row.info.id);
+                    let available = match row.info.kind {
+                        ruster_assets::AssetKind::Mesh => self.resolved.contains_key(&row.info.id),
+                        ruster_assets::AssetKind::Texture => {
+                            self.resolved_textures.contains_key(&row.info.id)
+                        }
+                    };
                     let response = ui.add(
                         egui::Button::selectable(
                             self.content_selected.as_ref() == Some(&row.info.id),
@@ -2838,14 +3014,26 @@ impl SceneEditor {
                         }
                     }
                     response.context_menu(|ui| {
-                        if ui
-                            .add_enabled(
-                                available && self.selected.is_some(),
-                                egui::Button::new("Assign to active object"),
-                            )
-                            .clicked()
+                        if row.info.kind == ruster_assets::AssetKind::Mesh
+                            && ui
+                                .add_enabled(
+                                    available && self.selected.is_some(),
+                                    egui::Button::new("Assign to active object"),
+                                )
+                                .clicked()
                         {
                             assign = Some(row.info.id.clone());
+                            ui.close();
+                        }
+                        if row.info.kind == ruster_assets::AssetKind::Texture
+                            && ui
+                                .add_enabled(
+                                    available && self.selected.is_some(),
+                                    egui::Button::new("Use in active material"),
+                                )
+                                .clicked()
+                        {
+                            use_texture = Some(row.info.id.clone());
                             ui.close();
                         }
                         if ui.button("Refresh source").clicked() {
@@ -2878,6 +3066,11 @@ impl SceneEditor {
                 }
             }
         }
+        if let Some(id) = use_texture {
+            if let Err(error) = self.stage_material_texture(&id) {
+                self.error = error;
+            }
+        }
         if let Some(id) = refresh {
             self.queued_refresh = Some(id);
         }
@@ -2904,11 +3097,11 @@ impl SceneEditor {
                 if let Some(error) = &row.info.diagnostic {
                     ui.colored_label(egui::Color32::YELLOW, error);
                 }
-                if self.resolved.contains_key(id)
+                if (self.resolved.contains_key(id) || self.resolved_textures.contains_key(id))
                     && row.info.status != ruster_assets::AssetStatus::Ready
                 {
                     ui.small(
-                        "Last-good mesh remains available; fix and explicitly refresh the source.",
+                        "Last-good content remains available; fix and explicitly refresh the source.",
                     );
                 }
                 ui.small(
@@ -2973,7 +3166,7 @@ impl SceneEditor {
             .update(self.assets.as_ref(), &self.content_query);
         egui::Modal::new(egui::Id::unique("asset_dialog")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 520.0));
-            ui.heading(if self.asset_rename_intent { "Rename mesh source" } else { "Project mesh assets" });
+            ui.heading(if self.asset_rename_intent { "Rename asset source" } else { "Project assets" });
             egui::ScrollArea::vertical().id_salt("asset_tools_body").max_height((ctx.content_rect().height() - 110.0).max(80.0)).show(ui, |ui| {
             ui.label("Imports and source renames save the asset catalog immediately. Scene Undo reverses assignments only.");
             ui.label("Stable asset ID");
@@ -2986,7 +3179,7 @@ impl SceneEditor {
                 }
             }
             let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
-            ui.label("Project-relative OBJ source / rename destination");
+            ui.label(if self.asset_rename_intent { "Project-relative rename destination (same extension)" } else { "Project-relative OBJ mesh or PNG texture source" });
             let source = ui.text_edit_singleline(&mut self.asset_source);
             if !self.asset_focused && self.asset_source_focus {
                 source.request_focus(); source.scroll_to_me(Some(egui::Align::Center)); self.asset_focused = true;
@@ -2997,10 +3190,10 @@ impl SceneEditor {
             }
             ui.horizontal_wrapped(|ui| {
                 if !self.asset_rename_intent {
-                    if ui.button("Import mesh asset").clicked() { operation = Some("import"); }
-                    if ui.button("Refresh mesh asset").clicked() { operation = Some("refresh"); }
+                    if ui.button("Import asset").clicked() { operation = Some("import"); }
+                    if ui.button("Refresh asset").clicked() { operation = Some("refresh"); }
                 }
-                if ui.button("Rename mesh source").clicked() { operation = Some("rename"); }
+                if ui.button("Rename asset source").clicked() { operation = Some("rename"); }
             });
             if let Some(op) = operation {
                 if self.drafts() || self.manipulation.active() {
@@ -3733,7 +3926,7 @@ impl SceneEditor {
             }
             self.manipulation_tools_ui(ui);
             let blocked=self.guard().is_err() || self.manipulation.offset_pending();
-            if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.reset_assets=Some((key,self.resolved.clone()));}
+            if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.reset_assets=Some((key,self.resolved.clone(),self.resolved_textures.clone()));}
             if let Some(diagnostic)=&self.runtime.diagnostic {
                 ui.horizontal(|ui| {
                     if ui.button("Open location").clicked() {if let Err(error)=self.behavior.navigate_diagnostic(&self.session,diagnostic,self.runtime.captured.as_deref()){self.error=error;}}
@@ -3750,7 +3943,7 @@ impl SceneEditor {
             self.navigation.enabled=!self.export_dialog && !self.close_approved && !self.manipulation.active() && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none() && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending;
             self.navigation.keyboard_enabled=self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
             self.navigation.movement_speed=self.workspace.prefs.movement_speed;
-            let viewport = ruster_render::viewport_with_navigation(
+            let viewport = ruster_render::viewport_with_materials(
                 ui,
                 if self.runtime.visible {
                     self.runtime.frame.as_ref().map(|frame|frame.scene.as_ref()).unwrap_or(self.session.scene())
@@ -3763,6 +3956,7 @@ impl SceneEditor {
                 } else {
                     &self.resolved
                 },
+                if self.runtime.visible { &self.preview_textures } else { &self.resolved_textures },
                 &mut self.navigation,
             );
             self.captures.rect = Some(viewport.rect);
@@ -4135,7 +4329,7 @@ mod tests {
                     assert_eq!(summary_count,1,"identical multiline error/shader messages must share one concise footer summary");
                     full_problem_count.set(output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==editor.error)).count());
                 }
-                asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("triangle · Ready") && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
+                asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("triangle · Mesh · Ready") && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
                 viewport.expect("production viewport callback must remain present")
             };
             let normal_size = egui::vec2(1280.0, 800.0);
@@ -4532,8 +4726,26 @@ mod tests {
             vertices: Vec::new(),
             indices: Vec::new(),
         });
+        let texture = |rgb| {
+            Arc::new(Texture {
+                width: 1,
+                height: 1,
+                mips: vec![ruster_assets::TextureMip {
+                    width: 1,
+                    height: 1,
+                    rgba: vec![rgb, 0, 0, 255],
+                }],
+            })
+        };
+        let old_texture = texture(16);
+        let new_texture = texture(192);
         editor.preview_assets = BTreeMap::from([("old-mesh".into(), old.clone())]);
-        editor.reset_assets = Some((second, BTreeMap::from([("new-mesh".into(), new.clone())])));
+        editor.preview_textures = BTreeMap::from([("texture".into(), old_texture.clone())]);
+        editor.reset_assets = Some((
+            second,
+            BTreeMap::from([("new-mesh".into(), new.clone())]),
+            BTreeMap::from([("texture".into(), new_texture.clone())]),
+        ));
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
             key: first,
             tick: 0,
@@ -4542,6 +4754,10 @@ mod tests {
         editor.runtime.reset_succeeded = Some(first);
         editor.accept_runtime_resources();
         assert!(Arc::ptr_eq(&editor.preview_assets["old-mesh"], &old));
+        assert!(Arc::ptr_eq(
+            &editor.preview_textures["texture"],
+            &old_texture
+        ));
         assert!(
             editor.reset_assets.is_some(),
             "superseded run must not consume newer resource snapshot"
@@ -4552,6 +4768,10 @@ mod tests {
             Arc::ptr_eq(&editor.preview_assets["old-mesh"], &old),
             "acknowledgement without matching display frame must not replace geometry resources"
         );
+        assert!(Arc::ptr_eq(
+            &editor.preview_textures["texture"],
+            &old_texture
+        ));
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
             key: second,
             tick: 0,
@@ -4560,6 +4780,10 @@ mod tests {
         editor.runtime.reset_succeeded = Some(second);
         editor.accept_runtime_resources();
         assert!(Arc::ptr_eq(&editor.preview_assets["new-mesh"], &new));
+        assert!(Arc::ptr_eq(
+            &editor.preview_textures["texture"],
+            &new_texture
+        ));
         assert!(editor.reset_assets.is_none());
     }
     #[test]
@@ -4602,7 +4826,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 3);
+        assert_eq!(payload["version"], 4);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -4772,6 +4996,7 @@ mod tests {
             manipulation: e.manipulation.snapshot_drafts(),
             behavior: None,
             color: None,
+            material: None,
         })
         .unwrap();
         draft["manipulation"]
@@ -4925,6 +5150,7 @@ mod tests {
             manipulation: source.manipulation.snapshot_drafts(),
             behavior: None,
             color: None,
+            material: None,
         })
         .unwrap();
         drafts["version"] = 99.into();
@@ -5101,12 +5327,39 @@ mod tests {
             "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
         )
         .unwrap();
+        std::fs::write(
+            dir.path().join("mapped.obj"),
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n",
+        )
+        .unwrap();
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[255, 128, 0])
+                .unwrap();
+        }
+        std::fs::write(dir.path().join("texture.png"), png).unwrap();
         Session::new(Scene::demo()).unwrap().save(&path).unwrap();
         let mut e = SceneEditor::new(Session::open(&path).unwrap());
         e.assets
             .as_mut()
             .unwrap()
             .import("triangle", "triangle.obj")
+            .unwrap();
+        e.assets
+            .as_mut()
+            .unwrap()
+            .import("mapped", "mapped.obj")
+            .unwrap();
+        e.assets
+            .as_mut()
+            .unwrap()
+            .import("texture", "texture.png")
             .unwrap();
         e.asset_snapshot();
         let payload = e.asset_payload("triangle").unwrap();
@@ -5185,6 +5438,46 @@ mod tests {
         e.sync_draft();
         e.history(false);
         assert!(e.session.scene().objects.iter().all(|o| o.mesh.is_none()));
+        // A typed texture drag is valid content but must never assign geometry.
+        let texture = e.asset_payload("texture").unwrap();
+        assert!(e.check_asset_drag(&texture).is_ok());
+        assert!(e.accept_asset_drop("left", &texture).is_err());
+        let revision = e.session.scene().revision;
+        e.session
+            .set_mesh(revision, "left", Some("mapped".into()))
+            .unwrap();
+        e.session
+            .set_material(
+                revision + 1,
+                "surface",
+                ruster_scene::OpaqueMaterial {
+                    base_color_texture: Some("texture".into()),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        e.session
+            .assign_material(revision + 2, "left", Some("surface".into()))
+            .unwrap();
+        e.sync_draft();
+        let before = e.session.snapshot_bytes().unwrap();
+        for mesh in [None, Some("triangle".into())] {
+            assert!(e.assign_mesh_to("left", mesh).unwrap_err().contains("UV"));
+        }
+        assert!(e.assign_mesh_to("left", Some("mapped".into())).is_ok());
+        let inspected = e.command("test", "scene_inspect", json!({}));
+        let rejected = e.command(
+            "test",
+            "scene_mesh",
+            json!({
+                "expected_session_token":inspected["result"]["session_token"],
+                "expected_revision":inspected["result"]["revision"],
+                "expected_asset_revision":inspected["result"]["asset_revision"],
+                "object_id":"left", "asset_id":"triangle"
+            }),
+        );
+        assert_eq!(rejected["error"]["code"], "material_unavailable");
+        assert_eq!(e.session.snapshot_bytes().unwrap(), before);
     }
     // Unique UI boundary risk: an unfocused name field in a modal must not let
     // Ctrl+S apply/sync another draft and destroy the pending text.

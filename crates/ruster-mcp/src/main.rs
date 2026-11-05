@@ -3,6 +3,7 @@ mod behavior_tools;
 mod capture_tools;
 mod color_tools;
 mod export_tools;
+mod material_tools;
 mod persistence_tools;
 mod runtime_tools;
 mod view_tools;
@@ -104,6 +105,9 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if material_tools::supported(name) {
+        return material_tools::valid(name, arguments);
+    }
     if color_tools::supported(name) {
         return color_tools::valid(name, arguments);
     }
@@ -319,11 +323,11 @@ fn tools() -> Value {
         ("undo", "Undo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("redo", "Redo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("replay", "Replay the inspected authored snapshot in isolation for at most 10000 ticks; return one aggregate state. Does not alter editor playback."),
-        ("asset_inspect", "Inspect one page of up to 16 registered project OBJ assets and catalog revision; bounded metadata only."),
-        ("asset_import", "Import one bounded project-relative OBJ mesh into the immediately persisted catalog. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
-        ("asset_refresh", "Reimport one registered asset, retaining last good mesh on failure. Catalog persists independently of scene history."),
-        ("asset_rename", "Rename one registered OBJ source within the project without overwrite, preserving stable asset ID; catalog update is independent of scene undo."),
-        ("scene_mesh", "Assign registered asset ID or null for procedural cube to one scene object; revisioned shared authored undo. Preview snapshot unchanged."),
+        ("asset_inspect", "Inspect one page of up to 16 registered project OBJ meshes and PNG textures with typed status and catalog revision; bounded metadata only."),
+        ("asset_import", "Import one bounded project-relative OBJ mesh or supported PNG base-color texture into the immediately persisted typed catalog. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
+        ("asset_refresh", "Reimport one registered mesh or texture, retaining last-good accepted content on failure. Catalog persists independently of scene history."),
+        ("asset_rename", "Rename one registered OBJ or PNG source within the project without overwrite or changing its extension/kind, preserving stable asset ID; catalog update is independent of scene undo."),
+        ("scene_mesh", "Assign a registered mesh ID or null for procedural cube to one scene object; revisioned shared authored undo. A changed mesh beneath a textured material requires complete UVs; clear the material first to repair. Preview snapshot unchanged."),
         ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
         ("scene_create", "Create one procedural cube with a new immutable object ID and display name. Revisioned, unsaved and shares human undo; preview unchanged."),
@@ -400,6 +404,7 @@ fn tools() -> Value {
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
     tools.extend(color_tools::list());
+    tools.extend(material_tools::list());
     tools.extend(view_tools::list());
     tools.extend(capture_tools::list());
     tools.extend(export_tools::list());
@@ -529,6 +534,7 @@ impl Server {
                     ]
                     .contains(&name)
                         && !color_tools::supported(name)
+                        && !material_tools::supported(name)
                         && !view_tools::supported(name)
                         && !capture_tools::supported(name)
                         && !export_tools::supported(name)
@@ -811,7 +817,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 55);
+        assert_eq!(tools.len(), 60);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -843,6 +849,11 @@ mod tests {
                 "scene_redo",
                 "scene_replay",
                 "scene_color",
+                "material_inspect",
+                "scene_material_set",
+                "scene_material_assign",
+                "scene_material_copy",
+                "scene_material_remove",
                 "viewport_inspect",
                 "viewport_camera",
                 "scene_select",

@@ -1843,14 +1843,40 @@ impl Session {
         expected_revision: u64,
         objects: Vec<Object>,
     ) -> Result<u64, SceneError> {
+        self.create_many_with_materials(expected_revision, objects, BTreeMap::new())
+    }
+    /// Append copied objects and fresh scene-owned materials as one transaction.
+    /// Material identities cannot collide with current or reversible state.
+    pub fn create_many_with_materials(
+        &mut self,
+        expected_revision: u64,
+        objects: Vec<Object>,
+        materials: BTreeMap<String, OpaqueMaterial>,
+    ) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
-        if objects.is_empty() {
+        if objects.is_empty() && materials.is_empty() {
             return Ok(self.scene().revision);
         }
         if objects.len() > MAX_OBJECTS || self.scene().objects.len() + objects.len() > MAX_OBJECTS {
             return Err(SceneError::Invalid(
                 "object group exceeds 256 objects".into(),
             ));
+        }
+        if materials.len() > MAX_MATERIALS
+            || self.scene().materials.len() + materials.len() > MAX_MATERIALS
+        {
+            return Err(SceneError::Invalid(
+                "material group exceeds 64 materials".into(),
+            ));
+        }
+        for (id, value) in &materials {
+            validate_id(id)?;
+            value.validate()?;
+            if self.contains_material_id(id) {
+                return Err(SceneError::Invalid(
+                    "new material ID collides with current or reversible state".into(),
+                ));
+            }
         }
         let mut ids = HashSet::new();
         for object in &objects {
@@ -1862,7 +1888,7 @@ impl Session {
             }
         }
         let start = self.scene().objects.len();
-        let created = objects
+        let created: Vec<_> = objects
             .into_iter()
             .enumerate()
             .map(|(i, object)| IndexedObject {
@@ -1870,9 +1896,25 @@ impl Session {
                 index: start + i,
             })
             .collect();
-        self.commit_change(SceneDelta::Objects {
-            created,
-            deleted: Vec::new(),
+        let scene = if created.is_empty() {
+            Vec::new()
+        } else {
+            vec![SceneDelta::Objects {
+                created,
+                deleted: Vec::new(),
+            }]
+        };
+        self.commit_change(Change {
+            scene,
+            materials: materials
+                .into_iter()
+                .map(|(id, value)| ValueDelta {
+                    id,
+                    before: None,
+                    after: Some(value),
+                })
+                .collect(),
+            ..Change::default()
         })
     }
     /// Delete a selection atomically, retaining its original scene order for undo.
@@ -3554,6 +3596,45 @@ mod tests {
         reopened.set_material(10, "left", material).unwrap();
         assert_eq!(preview.scene.materials["left"], edited);
         assert_eq!(Scene::load(&path).unwrap().materials["left"], edited);
+        let before = reopened.document.clone();
+        let mut objects = vec![Object::cube("bulk-1", None), Object::cube("bulk-2", None)];
+        for object in &mut objects {
+            object.material = Some("bulk-material".into());
+        }
+        assert!(reopened
+            .create_many_with_materials(10, objects.clone(), BTreeMap::new())
+            .is_err());
+        assert!(reopened
+            .create_many_with_materials(11, objects.clone(), BTreeMap::new())
+            .is_err());
+        assert!(reopened
+            .create_many_with_materials(
+                11,
+                objects.clone(),
+                BTreeMap::from([("material-1".into(), OpaqueMaterial::default())])
+            )
+            .is_err());
+        assert_eq!(reopened.document, before);
+        assert_eq!(
+            reopened
+                .create_many_with_materials(11, Vec::new(), BTreeMap::new())
+                .unwrap(),
+            11
+        );
+        reopened
+            .create_many_with_materials(
+                11,
+                objects,
+                BTreeMap::from([("bulk-material".into(), OpaqueMaterial::default())]),
+            )
+            .unwrap();
+        assert_eq!(reopened.undo_len(), before.undo.len() + 1);
+        reopened.undo(12).unwrap();
+        assert_eq!(reopened.scene().objects, before.scene.objects);
+        assert_eq!(reopened.scene().materials, before.scene.materials);
+        reopened.redo(13).unwrap();
+        let restored = Session::from_snapshot_bytes(&reopened.snapshot_bytes().unwrap()).unwrap();
+        assert_eq!(restored.document, reopened.document);
     }
 
     // Unique risk: old structs using the live Scene/Change types accidentally

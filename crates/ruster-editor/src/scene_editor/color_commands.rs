@@ -56,7 +56,8 @@ impl SceneEditor {
     }
 
     fn color_editable_for_save(&self, saving: bool) -> bool {
-        !self.manipulation.active()
+        self.material_draft.is_none()
+            && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && !self.manipulation.offset_pending()
             && self.draft == self.baseline_fields
@@ -132,8 +133,12 @@ impl SceneEditor {
             .unwrap_or_else(|| ColorDraft::new(object, self.session.scene().revision));
         let editable = self.color_editable();
         ui.separator();
-        ui.strong("Color")
-            .on_hover_text("Active object tint. RGB channels range from 0 to 1.");
+        ui.strong(if object.material.is_some() {
+            "Object tint"
+        } else {
+            "Color"
+        })
+        .on_hover_text("Active object tint. RGB channels range from 0 to 1.");
         let mut changed = false;
         let mut enter = false;
         let mut submitting_field = None;

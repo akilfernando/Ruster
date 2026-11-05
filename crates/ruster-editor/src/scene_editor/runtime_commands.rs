@@ -122,7 +122,8 @@ impl SceneEditor {
             })?;
         if op == "behavior_runtime_reset" {
             if let Some(key) = self.runtime.current_run() {
-                self.reset_assets = Some((key, self.resolved.clone()));
+                self.reset_assets =
+                    Some((key, self.resolved.clone(), self.resolved_textures.clone()));
             }
         }
         let object = value.as_object_mut().ok_or_else(|| fail("runtime_error"))?;

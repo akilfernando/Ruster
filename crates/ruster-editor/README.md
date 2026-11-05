@@ -184,7 +184,7 @@ catalog and a v2 scene. Work on a disposable project copy when trying refresh
 or rename. The derived `.ruster-cache/` directory is ignored and rebuildable;
 keep `.ruster-assets.json`, scene files and original sources under version control.
 
-**Assets…** imports one project-relative triangle-only OBJ under a stable asset
+**Assets…** imports one project-relative triangle-only OBJ or opaque base-color PNG under a stable asset
 ID. Choose **Assign mesh…** to use it on the selected object; choosing
 **Procedural cube** clears the reference. Mesh assignment shares transform
 Undo/Redo. Import/Refresh/Rename save the catalog immediately and have their own
@@ -197,9 +197,13 @@ Repair and refresh again to recover. **Rename mesh source** moves the source
 without overwriting the destination and preserves the asset ID. Scene references
 remain unchanged. See the [asset guide](../ruster-assets/README.md) for exact
 bounds, supported OBJ directives, cache recipe, failure behavior and CLI commands.
-There is no background watcher, texture/MTL import or general polygon importer.
+There is no background watcher, MTL import or general polygon importer.
 
-The editor runtime freezes authored scene data and resolved geometry on a successful
+The inspector **Material** section creates shared opaque materials, assigns existing materials or makes a unique copy. Name, linear RGB tint, base-color texture, filtering and wrapping are an unapplied draft until **Apply** or Enter commits; Escape cancels. Assignment selection is an immediate undoable change. Shared edits affect every listed user; **Make unique** separates the active object. **Manage materials** deletes unused definitions. Object tint multiplies material tint and texture color.
+
+Use an accepted PNG from Content via **Use in active material**, drag it onto the material section, or choose it in the texture control. A textured assignment requires a mesh with complete UVs; the procedural cube has none. Missing content remains visible with a diagnostic. Material drafts participate in recovery and block conflicting edits. Window-local object copy/paste preserves sharing within the pasted group and remaps material IDs when crossing documents; it never copies source files or uses the system clipboard. Native focus/keyboard and full V1 workflow acceptance remain in progress; see the [checkpoint](../../docs/evidence/V1-foundation.md).
+
+The editor runtime freezes authored scene data, resolved geometry and textures on a successful
 **Reset**.
 Refreshing authored content leaves that snapshot intact and marks it stale.
 Missing references keep their IDs and display a diagnostic placeholder. Save As

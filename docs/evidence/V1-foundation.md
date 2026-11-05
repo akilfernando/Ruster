@@ -34,6 +34,52 @@ Exact reports: `.studio/offscreen-shared-report.json`, `offscreen-identities.jso
 
 At checkpoint revalidation, configuration bytes match baseline, no owned V1 rule/window remains and the protected Tideglass PID881634 remains on workspace2. Next review: first runnable creator workflow or after the next90active implementation minutes, whichever comes first. Continue shared editor/MCP integration; required native access remains unresolved.
 
+## Creator integration and measured responsiveness checkpoint — 2026-11-05
+
+The next implementation stage adds the five bounded material tools, shared native material form and guard rules, typed Content import/drop actions, texture-aware preview snapshots, material clipboard remapping and production recovery. This is implemented source with focused verification, **not completion of either native creator journey**. Recovery draft envelope4 writes material intent, original baseline and raw unfinished numeric/name text; envelopes1–3 remain readable but cannot relabel new material fields. Window clipboard2 carries exact referenced definitions, remaps across documents and preserves group sharing without source-file/system-clipboard authority. New assignments and mesh replacements validate complete UVs; unrelated edits may retain a broken existing reference for repair.
+
+Focused results: five editor material cases pass, including shared/unique keyboard form behavior, MCP stale/asset guards, typed export staging and the production recovery checkpoint. Existing scene material/history and editor clipboard transaction cases pass; preview snapshot, drag provenance and asset-dialog keyboard cases pass. Strict editor/MCP Clippy passes. The initial recovery fixture failed because the recovery scanner correctly hides a live journal; dropping its owner does not join the asynchronous worker. The corrected fixture explicitly disconnects/joins the real journal before scanning and adoption. These results precede the next integrated change gate; the foundation208/24 full gate above is not presented as final integration evidence.
+
+The opt-in inspection-feature `material_inspector_offscreen` case renders the production inspector at320logical pixels and1×/2× scale using actual Khronos+sync validation. Captures `material-inspector-1x.png` and `material-inspector-2x.png` in the private evidence directory show readable controls and long-label wrapping. The editable Name field horizontally clips long text, while its full label is available above. The final run passes in1.93s; the log retains the initial probe-only Wake import and texture-delta lifecycle failures. Static images do not establish native keyboard/focus, dropdown behavior, pending-draft presentation or human aesthetic approval.
+
+Release asset baseline uses deterministic compressible RGB/checker images, one warmup plus three samples, warm filesystem cache on the i9-13900H powersave governor. Existing applications were preserved, approximately16% aggregate host CPU activity; this is not an isolated machine or worst encoded-input workload. Median milliseconds:
+
+| Operation |128²|1024²|2048²|1535×1023|
+| --- | ---: | ---: | ---: | ---: |
+| Decode and full mips |1.97|59.26|174.84|92.65|
+| Import and cache/catalog writes |5.96|60.40|218.77|101.63|
+| Accepted-cache open |0.37|9.35|31.54|15.31|
+| Same-content refresh |4.54|67.88|222.41|101.11|
+| Changed-source open, last good retained |2.03|55.94|225.18|112.83|
+| Corrupt-cache rebuild open |4.56|76.42|274.21|110.46|
+
+Invalid-CRC2048² refresh takes0.059ms. Correctness/source/catalog/cache/Arc assertions pass. Rust-process cumulative VmHWM reaches84,220kB; individual operation peak memory and whole-editor budgets remain unproven. Evidence is `.studio/asset-costs/`, client `Tools/asset_costs.rs`, source SHA256`84134b0a06a758a3f2305d9defd757ec9b1ff80247f32922c7791b80b1cb3450`, baseline executable SHA256`9a1030daa5e9509ddfb82d0a8f7f9385e94aa94153f48cbc2aa9e256e370a66d`.
+
+This changes the next action: synchronous large-image work can visibly stall the editor. Investigate hash-matched accepted-texture reuse without losing cache repair, then review worker/publication ownership before moving operations. The MCP bridge currently serializes timeout/command execution under one pending-request lock; moving a mutation to a thread without an explicit commit/deadline contract is unsafe. No new async contract or final responsiveness acceptance is implied. At10:12UTC the normal desktop remains locked; no native retry or lock bypass was performed.
+
 ## Remaining acceptance
 
-Editor/MCP material authoring/observation, drafts/keyboard/focus, recovery, clipboard/remapping, frozen texture preview snapshots, both UI/MCP export paths, old/current shader/material UX, actual full-scene visual review, representative release costs/budgets and the final requirement audit remain open. Encoded-source closure can be substantially larger than decoded retained pixels; inspect peak export/import pressure, including candidate/old snapshot overlap, before claiming lean memory acceptance. No UI, architecture expansion or rendering feature beyond V1 is silently added. Preserve PumpBench's separate keyboard obligation, Tideglass review and human fixtures; no public publication.
+Full direct-editor/MCP material authoring and observation journeys, native keyboard/focus, integrated recovery/clipboard/preview acceptance, both UI/MCP export paths, old/current shader/material UX, full-scene visual review, release render/export/resource budgets and the final requirement audit remain open. Component evidence above does not close these integrated gates. Encoded-source closure can be substantially larger than decoded retained pixels; inspect peak export/import pressure, including candidate/old snapshot overlap, before claiming lean memory acceptance. No UI, architecture expansion or rendering feature beyond V1 is silently added. Preserve PumpBench's separate keyboard obligation, Tideglass review and human fixtures; no public publication.
+
+## Unchanged-texture Refresh optimization — 2026-11-05
+
+Retain a narrow fast path: after the existing confined bounded read and exact accepted-hash match, reuse the accepted texture Arc and serialize its borrowed pixels to repair the disposable cache. Skip decode/mip regeneration and replacement/equality of a duplicate payload. The catalog lock/baseline/revision guard, Ready/error diagnostic transitions and cache-publication failure semantics remain. Missing accepted snapshots still decode normally; mesh Refresh still reparses for legacy UV recovery. The existing texture case covers removed-cache repair, write-failure rollback, stale rejection and same-hash recovery without a snapshot. All19owning asset checks and strict lint pass.
+
+Matched release comparison uses the identical client source/inputs, original external dependency rlibs and opt-level3/remap settings, interleaved before/after by case, one warmup/three measurements each. Earlier candidate-link dependency-identity and omitted-remap attempts were caught, retained and excluded; this is not an uncontrolled Cargo-profile comparison. Median milliseconds:
+
+| Size | Before | After |
+| --- | ---: | ---: |
+|128²|4.634|2.676|
+|1024²|58.297|19.554|
+|2048²|227.668|49.157|
+|1535×1023|112.326|19.975|
+
+2048² min/median/max changes222.630/227.668/227.993→45.222/49.157/59.534ms. All decoded/mip/cache/source identities match. The19.749scomparison includes setup/assertions and unrelated measured operations; it is not Refresh latency. Warm filesystem/powersave/non-isolated host limitations remain. Evidence: `.studio/asset-costs/refresh-optimization/comparison.json`, matched build commands/identities and raw case logs. Cache encoding/checksum/atomic-write work remains proportional to mip bytes; no focused UI, allocation-peak or final responsiveness pass follows. First import and changed-source open are unchanged in this checkpoint. [0030](../decisions/0030-bounded-asset-preparation-and-publication.md) explicitly replans the remaining responsiveness dependency without weakening V1 acceptance.
+
+## Integrated creator-source gate — 2026-11-05
+
+Base`4e3b27d` (HEAD plus the current tracked/untracked integration), runner plan selects10affected packages and reverse dependents: app/assets/behavior/editor/MCP/Motion/render/scene/script/Yard. Final combined evidence passes189Rust checks, with one existing opt-in GPU ignore; strict lint and formatting pass. Unchanged foundation Python24/core evidence is reused, not claimed rerun. The existing explicit Vulkan/inspector evidence remains supplemental and scope-limited; no native journey is inferred.
+
+The initial runner stops on unformatted manual-probe code; a shell PATH miss prevents that first formatting attempt, then absolute-path ordinary editor fmt succeeds. The next gate exposes two obsolete fixture expectations: typed Content label now includes Mesh, and recovery envelope is4 rather than3. Both expectations are corrected without weakening full-row visibility or recovery assertions; all89editor tests then pass. The following package reveals the adapter's old55-tool enumeration; root updates both the exact five added names and count60. Final MCP formatting/strict lint and all12adapter cases pass. All not-yet-reached dependent tests and doctests then pass, reusing final-valid earlier package results rather than repeating them.
+
+Logs: `.studio/creator-integration-gate-{1,2,3,4}.log` retain the failures; `creator-integration-remainder.log` and its JSON record complete the final scope. Gate3 takes111.17s including recompilation; gate4 takes19.22s; corrected MCP/remainder/doc commands take0.329/0.874/46.549/11.872s. These are build/test feedback observations, not runtime performance or a warm-under30s gate claim. Final Markdown/link/whitespace checks are required after the documentation handoff.
