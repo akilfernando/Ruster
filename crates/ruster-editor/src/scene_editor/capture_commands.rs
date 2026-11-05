@@ -70,6 +70,24 @@ pub(super) struct Captures {
     pub rect: Option<egui::Rect>,
 }
 impl SceneEditor {
+    /// Hidden logic can retire an expired request, but cannot certify a new
+    /// viewport rectangle/layer stack or manufacture a rendered frame.
+    pub(super) fn expire_capture(&mut self, ctx: &egui::Context) {
+        let Some(pending) = &self.captures.pending else {
+            return;
+        };
+        let remaining = Duration::from_secs(5).saturating_sub(pending.started.elapsed());
+        if remaining.is_zero() {
+            let pending = self.captures.pending.take().unwrap();
+            self.captures.completed = Some((
+                pending.id,
+                pending.pin.clone(),
+                json!({"capture_id":pending.id.to_string(),"status":"failed","reason":"capture_expired"}),
+            ));
+        } else {
+            ctx.request_repaint_after(remaining);
+        }
+    }
     fn capture_pin(&mut self) -> Pin {
         self.observe_view();
         Pin {

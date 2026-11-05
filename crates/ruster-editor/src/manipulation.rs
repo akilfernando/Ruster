@@ -1,7 +1,7 @@
-//! Transient translation gestures and the window-owned object clipboard.
+//! Transient translation gestures and the window-owned geometry/light clipboard.
 //! Authored transactions stay in Session; no pointer frame enters undo history.
 use eframe::egui;
-use ruster_scene::{Object, OpaqueMaterial, Scene, Session, Transform};
+use ruster_scene::{Ambient, Light, Lighting, Object, OpaqueMaterial, Scene, Session, Transform};
 use std::{
     collections::{BTreeMap, BTreeSet},
     path::{Path, PathBuf},
@@ -258,21 +258,32 @@ struct Clipboard {
     document_generation: u64,
     objects: Vec<Object>,
     materials: BTreeMap<String, OpaqueMaterial>,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    lights: BTreeMap<String, Light>,
+    /// Version3 preserves interleaved geometry/light order and its active target.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    target_order: Vec<String>,
 }
 
 impl Clipboard {
     fn validate(&self) -> Result<(), String> {
-        if self.version != 2
-            || self.objects.is_empty()
-            || self.objects.len() > ruster_scene::MAX_OBJECTS
+        let count = self.objects.len() + self.lights.len();
+        if !matches!(self.version, 2 | 3)
+            || count == 0
+            || count > ruster_scene::MAX_OBJECTS
             || self.materials.len() > ruster_scene::MAX_MATERIALS
+            || (self.version == 2 && (!self.lights.is_empty() || !self.target_order.is_empty()))
+            || (self.version == 3 && self.lights.is_empty())
         {
             return Err(
-                "Unsupported or oversized object clipboard; copy the selection again.".into(),
+                "Unsupported or oversized geometry/light clipboard; copy the selection again."
+                    .into(),
             );
         }
         if serde_json::to_vec(self).map_err(|e| e.to_string())?.len() > 256 * 1024 {
-            return Err("Copied objects/materials exceed the 256 KiB clipboard bound.".into());
+            return Err(
+                "Copied geometry/lights/materials exceed the 256 KiB clipboard bound.".into(),
+            );
         }
         let referenced: BTreeSet<_> = self
             .objects
@@ -286,14 +297,46 @@ impl Clipboard {
             );
         }
         Scene {
-            lighting: Default::default(),
+            // Ambient is never copied. This temporary scene validates the whole
+            // incoming membership, shared IDs and disabled-inclusive light caps.
+            lighting: if self.lights.is_empty() {
+                Lighting::Legacy
+            } else {
+                Lighting::Authored {
+                    ambient: Ambient::default(),
+                    lights: self.lights.clone(),
+                }
+            },
             id: "clipboard".into(),
             revision: 0,
             objects: self.objects.clone(),
             materials: self.materials.clone(),
         }
         .validate()
-        .map_err(|e| e.to_string())
+        .map_err(|e| e.to_string())?;
+        if self.version == 3 {
+            let targets: BTreeSet<_> = self
+                .objects
+                .iter()
+                .map(|object| object.id.as_str())
+                .chain(self.lights.keys().map(String::as_str))
+                .collect();
+            let order: BTreeSet<_> = self.target_order.iter().map(String::as_str).collect();
+            if self.target_order.len() != count || targets != order {
+                return Err("Clipboard target order contains missing, repeated or unknown identities; copy again.".into());
+            }
+        }
+        Ok(())
+    }
+    fn target_ids(&self) -> Vec<&str> {
+        if self.version == 2 {
+            self.objects
+                .iter()
+                .map(|object| object.id.as_str())
+                .collect()
+        } else {
+            self.target_order.iter().map(String::as_str).collect()
+        }
     }
 }
 
@@ -400,6 +443,7 @@ pub(super) struct Manipulation {
     gizmo: Gizmo,
     gesture: Option<Gesture>,
     clipboard: Option<Clipboard>,
+    last_paste_created_lights: Vec<String>,
     suppress_pointer: bool,
     draft_generation: u64,
 }
@@ -424,6 +468,7 @@ impl Default for Manipulation {
             gizmo: Gizmo::default(),
             gesture: None,
             clipboard: None,
+            last_paste_created_lights: Vec::new(),
             suppress_pointer: false,
             draft_generation: 0,
         }
@@ -702,28 +747,24 @@ impl Manipulation {
         document_generation: u64,
     ) -> Result<(), String> {
         selected_transforms(session.scene(), &self.ids)?;
-        if self
-            .ids
-            .iter()
-            .any(|id| session.scene().lighting.light(id).is_some())
-        {
-            return Err("Light Copy is not available yet; select only geometry before Copy. The previous clipboard was preserved.".into());
+        let mut objects = Vec::new();
+        let mut lights = BTreeMap::new();
+        for id in &self.ids {
+            if let Some(object) = session
+                .scene()
+                .objects
+                .iter()
+                .find(|object| &object.id == id)
+            {
+                objects.push(object.clone());
+            } else if let Some(light) = session.scene().lighting.light(id) {
+                lights.insert(id.clone(), light.clone());
+            } else {
+                return Err("Selected target disappeared; Copy was not changed.".into());
+            }
         }
-        let objects: Vec<_> = self
-            .ids
-            .iter()
-            .map(|id| {
-                session
-                    .scene()
-                    .objects
-                    .iter()
-                    .find(|o| &o.id == id)
-                    .cloned()
-                    .ok_or_else(|| "Selected object disappeared; Copy was not changed.".to_string())
-            })
-            .collect::<Result<_, _>>()?;
-        if objects.is_empty() {
-            return Err("Select objects before Copy.".into());
+        if objects.is_empty() && lights.is_empty() {
+            return Err("Select geometry or lights before Copy.".into());
         }
         let mut materials = BTreeMap::new();
         for id in objects.iter().filter_map(|object| object.material.as_ref()) {
@@ -733,11 +774,17 @@ impl Manipulation {
             materials.insert(id.clone(), value.clone());
         }
         let clipboard = Clipboard {
-            version: 2,
+            version: if lights.is_empty() { 2 } else { 3 },
             source_root: root.map(Path::to_path_buf),
             document_generation,
             objects,
             materials,
+            target_order: if lights.is_empty() {
+                Vec::new()
+            } else {
+                self.ids.clone()
+            },
+            lights,
         };
         clipboard.validate()?;
         self.clipboard = Some(clipboard);
@@ -748,6 +795,12 @@ impl Manipulation {
             .allocate_object_ids(count)
             .map_err(|e| e.to_string())
     }
+    /// Receipt from the last successful Paste, including any explicit Sun created
+    /// by Legacy promotion. Read only in the caller's successful Paste branch;
+    /// a failed operation preserves this receipt along with the entire model.
+    pub fn paste_created_lights(&self) -> &[String] {
+        &self.last_paste_created_lights
+    }
     pub fn paste(
         &mut self,
         session: &mut Session,
@@ -757,7 +810,7 @@ impl Manipulation {
         let clipboard = self
             .clipboard
             .as_ref()
-            .ok_or("Copy objects in this editor window before Paste.")?;
+            .ok_or("Copy geometry or lights in this editor window before Paste.")?;
         clipboard.validate()?;
         let fresh_materials: Vec<_> = clipboard
             .materials
@@ -796,17 +849,32 @@ impl Manipulation {
         {
             return Err("Mesh/texture references belong to another or unknown project catalog; paste beside the source project or remove those references first.".into());
         }
-        let ids = Self::fresh_ids(session, clipboard.objects.len())?;
+        let source_ids = clipboard.target_ids();
+        // One allocation reserves all incoming target IDs together, including
+        // reversible history across both kinds. ID prefixes have no kind meaning.
+        let ids = Self::fresh_ids(session, source_ids.len())?;
+        let target_remap: BTreeMap<_, _> = source_ids.into_iter().zip(ids.iter()).collect();
         let mut objects = clipboard.objects.clone();
-        for (object, id) in objects.iter_mut().zip(&ids) {
-            object.id.clone_from(id);
+        for object in &mut objects {
+            object.id = (*target_remap[object.id.as_str()]).clone();
             if let Some(replacement) = object.material.as_ref().and_then(|old| remap.get(old)) {
                 object.material = Some(replacement.clone());
             }
         }
-        session
-            .create_many_with_materials(session.scene().revision, objects, imported)
+        let lights = clipboard
+            .lights
+            .iter()
+            .map(|(id, light)| ((*target_remap[id.as_str()]).clone(), light.clone()))
+            .collect();
+        let receipt = session
+            .create_many_with_materials_and_lights(
+                session.scene().revision,
+                objects,
+                imported,
+                lights,
+            )
             .map_err(|e| e.to_string())?;
+        self.last_paste_created_lights = receipt.created_ids;
         self.ids = ids;
         Ok(())
     }
@@ -1440,18 +1508,7 @@ mod tests {
             assert!(Gesture::begin(&session, &m.ids).is_err());
             assert_eq!(session.scene(), &before);
         }
-        m.ids = vec!["left".into()];
-        m.copy(&session, None, 1).unwrap();
-        let clipboard = serde_json::to_value(m.clipboard.as_ref().unwrap()).unwrap();
         m.ids = ids.clone();
-        assert!(m
-            .copy(&session, None, 1)
-            .unwrap_err()
-            .contains("Light Copy"));
-        assert_eq!(
-            serde_json::to_value(m.clipboard.as_ref().unwrap()).unwrap(),
-            clipboard
-        );
         m.ids.push("deleted".into());
         m.reconcile(session.scene());
         assert_eq!(m.ids, ids);
@@ -1652,6 +1709,168 @@ mod tests {
             .is_err());
         clipboard.copy(&source, None, 10).unwrap();
         assert!(clipboard.paste(&mut destination, None, 11).is_err());
+
+        // Light/mixed clipboard ownership: preserve interleaved selection and
+        // active target, but never copy ambient or manufacture runtime geometry.
+        let mut scene = Scene::demo();
+        scene.objects.truncate(1);
+        let mut point = Light::point(Some("Copied point".into()));
+        point.enabled = false;
+        point.color = [0.2, 0.4, 0.8];
+        scene.lighting = Lighting::Authored {
+            ambient: Ambient {
+                color: [0.3, 0.4, 0.5],
+                intensity: 0.07,
+            },
+            lights: BTreeMap::from([
+                (
+                    "source-sun".into(),
+                    Light::directional(Some("Copied sun".into())),
+                ),
+                ("source-point".into(), point.clone()),
+            ]),
+        };
+        let source = Session::new(scene).unwrap();
+        let mut mixed = Manipulation {
+            ids: vec!["source-point".into(), "left".into(), "source-sun".into()],
+            ..Default::default()
+        };
+        mixed.copy(&source, Some(Path::new("/source")), 1).unwrap();
+        assert_eq!(mixed.clipboard.as_ref().unwrap().version, 3);
+        let stored = serde_json::to_value(mixed.clipboard.as_ref().unwrap()).unwrap();
+        let source_bytes = source.snapshot_bytes().unwrap();
+        let oversized_root = PathBuf::from("x".repeat(256 * 1024));
+        assert!(mixed.copy(&source, Some(&oversized_root), 1).is_err());
+        assert_eq!(
+            serde_json::to_value(mixed.clipboard.as_ref().unwrap()).unwrap(),
+            stored
+        );
+        for invalid in [
+            vec!["source-point".into(), "source-point".into()],
+            vec!["left".into(), "missing".into()],
+        ] {
+            mixed.ids = invalid.clone();
+            assert!(mixed.copy(&source, None, 1).is_err());
+            assert_eq!(mixed.ids, invalid);
+            assert_eq!(
+                serde_json::to_value(mixed.clipboard.as_ref().unwrap()).unwrap(),
+                stored
+            );
+            assert_eq!(source.snapshot_bytes().unwrap(), source_bytes);
+        }
+        let mut destination = Session::new(Scene::empty("mixed-target")).unwrap();
+        mixed
+            .paste(&mut destination, Some(Path::new("/other")), 2)
+            .unwrap();
+        assert_eq!(destination.scene().objects.len(), 1);
+        assert_eq!(destination.scene().lighting.light_count(), 2);
+        assert_eq!(mixed.ids.len(), 3);
+        assert_eq!(
+            destination.scene().lighting.light(&mixed.ids[0]),
+            Some(&point)
+        );
+        assert_eq!(destination.scene().objects[0].id, mixed.ids[1]);
+        assert!(destination.scene().lighting.light(&mixed.ids[2]).is_some());
+        assert_eq!(mixed.selected(), Some(mixed.ids[2].clone()));
+        assert_eq!(
+            mixed.paste_created_lights().len(),
+            2,
+            "incoming Sun avoids a second promoted Sun"
+        );
+        let Lighting::Authored { ambient, .. } = &destination.scene().lighting else {
+            unreachable!()
+        };
+        assert_eq!(
+            ambient,
+            &Ambient::default(),
+            "source ambient is never copied"
+        );
+        assert_eq!(destination.undo_len(), 1);
+        let first_ids = mixed.ids.clone();
+        destination.undo(1).unwrap();
+        assert!(destination.scene().lighting.is_legacy());
+        mixed.paste(&mut destination, None, 2).unwrap();
+        assert!(
+            mixed.ids.iter().all(|id| !first_ids.contains(id)),
+            "all mixed redo identities stay reserved"
+        );
+        let mut existing_sun = Session::new(Scene::authored_empty("existing-sun")).unwrap();
+        let before = existing_sun.snapshot_bytes().unwrap();
+        let selection = mixed.ids.clone();
+        assert!(mixed.paste(&mut existing_sun, None, 2).is_err());
+        assert_eq!(existing_sun.snapshot_bytes().unwrap(), before);
+        assert_eq!(
+            mixed.ids, selection,
+            "Sun capacity rejects the whole mixed group"
+        );
+
+        // A point-only paste promotes Legacy explicitly; selection contains the
+        // incoming point while the receipt exposes the additional counted Sun.
+        mixed.ids = vec!["source-point".into()];
+        mixed.copy(&source, None, 1).unwrap();
+        let mut legacy = Session::new(Scene::empty("point-only")).unwrap();
+        mixed.paste(&mut legacy, None, 3).unwrap();
+        assert!(legacy.scene().objects.is_empty());
+        assert_eq!(mixed.ids.len(), 1);
+        assert_eq!(mixed.paste_created_lights().len(), 2);
+        assert_eq!(legacy.scene().lighting.light_count(), 2);
+        assert!(mixed.paste_created_lights().iter().all(|id| legacy
+            .scene()
+            .lighting
+            .light(id)
+            .is_some()));
+        let mut full_lights = Scene::authored_empty("full-lights");
+        let Lighting::Authored { lights, .. } = &mut full_lights.lighting else {
+            unreachable!()
+        };
+        for index in 0..ruster_scene::MAX_POINT_LIGHTS {
+            let mut disabled = Light::point(None);
+            disabled.enabled = false;
+            lights.insert(format!("disabled-{index}"), disabled);
+        }
+        let mut nearly_full = Scene::empty("promotion-overflow");
+        nearly_full.objects = (0..ruster_scene::MAX_OBJECTS - 1)
+            .map(|index| Object::cube(format!("geometry-{index}"), None))
+            .collect();
+        let previous_receipt = mixed.paste_created_lights().to_vec();
+        let previous_selection = mixed.ids.clone();
+        let stored = serde_json::to_value(mixed.clipboard.as_ref().unwrap()).unwrap();
+        for scene in [full_lights, nearly_full] {
+            let mut full = Session::new(scene).unwrap();
+            let before = full.snapshot_bytes().unwrap();
+            assert!(mixed.paste(&mut full, None, 4).is_err());
+            assert_eq!(full.snapshot_bytes().unwrap(), before);
+            assert_eq!(mixed.ids, previous_selection);
+            assert_eq!(mixed.paste_created_lights(), previous_receipt.as_slice());
+            assert_eq!(
+                serde_json::to_value(mixed.clipboard.as_ref().unwrap()).unwrap(),
+                stored
+            );
+        }
+        // A corrupt selection order or cross-kind ID must not apply a valid
+        // subset, even if fresh destination IDs would hide that source defect.
+        mixed.clipboard.as_mut().unwrap().target_order[0] = "missing".into();
+        let before = legacy.snapshot_bytes().unwrap();
+        assert!(mixed.paste(&mut legacy, None, 3).is_err());
+        assert_eq!(legacy.snapshot_bytes().unwrap(), before);
+        assert_eq!(mixed.ids, previous_selection);
+        mixed.ids = vec!["left".into(), "source-point".into()];
+        mixed.copy(&source, None, 1).unwrap();
+        let clipboard = mixed.clipboard.as_mut().unwrap();
+        clipboard.objects[0].id = "source-point".into();
+        assert!(mixed.paste(&mut legacy, None, 3).is_err());
+        assert_eq!(legacy.snapshot_bytes().unwrap(), before);
+        // Geometry-only payloads keep their prior version2 shape and never
+        // promote a Legacy destination merely because their source had lights.
+        mixed.ids = vec!["left".into()];
+        mixed.copy(&source, None, 1).unwrap();
+        let geometry = serde_json::to_value(mixed.clipboard.as_ref().unwrap()).unwrap();
+        assert_eq!(geometry["version"], 2);
+        assert!(geometry.get("lights").is_none() && geometry.get("target_order").is_none());
+        let mut geometry_only = Session::new(Scene::empty("geometry-only")).unwrap();
+        mixed.paste(&mut geometry_only, None, 5).unwrap();
+        assert!(geometry_only.scene().lighting.is_legacy());
+        assert!(mixed.paste_created_lights().is_empty());
     }
 
     // Unique UI boundary: the real toolkit's result stream previews only until

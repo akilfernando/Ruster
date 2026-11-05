@@ -5,6 +5,44 @@ use serde_json::{json, Value};
 use std::sync::OnceLock;
 use std::time::Instant;
 
+// eframe calls App::logic inside run_ui and inside run_logic. Only real
+// egui pass hooks can distinguish them; cumulative frame/input state is stale
+// during hidden logic. This marker is inspection-only and owns no resources.
+pub(super) fn install_pass_marker(ctx: &egui::Context) {
+    let installed = egui::Id::unique("ruster_asset_timing_hooks");
+    if ctx.data_mut(|data| data.get_temp::<bool>(installed).unwrap_or(false)) {
+        return;
+    }
+    ctx.data_mut(|data| data.insert_temp(installed, true));
+    ctx.on_begin_pass(
+        "ruster asset timing pass",
+        std::sync::Arc::new(|ui| {
+            if ui.ctx().viewport_id() == egui::ViewportId::ROOT {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(egui::Id::unique("ruster_asset_timing_pass"), true)
+                });
+            }
+        }),
+    );
+    ctx.on_end_pass(
+        "ruster asset timing pass",
+        std::sync::Arc::new(|ui| {
+            if ui.ctx().viewport_id() == egui::ViewportId::ROOT {
+                ui.ctx().data_mut(|data| {
+                    data.insert_temp(egui::Id::unique("ruster_asset_timing_pass"), false)
+                });
+            }
+        }),
+    );
+}
+pub(super) fn in_real_pass(ctx: &egui::Context) -> bool {
+    ctx.viewport_id() == egui::ViewportId::ROOT
+        && ctx.data_mut(|data| {
+            data.get_temp::<bool>(egui::Id::unique("ruster_asset_timing_pass"))
+                .unwrap_or(false)
+        })
+}
+
 const LIMIT: usize = 512;
 fn epoch() -> &'static Instant {
     static EPOCH: OnceLock<Instant> = OnceLock::new();
@@ -48,6 +86,7 @@ struct Run {
     focus_lost: bool,
     overflow: bool,
     overlap: bool,
+    nonvisual: bool,
 }
 
 #[derive(Default)]
@@ -59,6 +98,14 @@ pub(super) struct Probe {
 }
 
 impl Probe {
+    pub fn hidden_logic(&mut self) {
+        // No stale idle-frame anchor and no invented trailing frame. Raw
+        // operation spans remain useful, but this cannot qualify a paint cohort.
+        self.latest = None;
+        if let Some(run) = &mut self.run {
+            run.nonvisual = true;
+        }
+    }
     /// The caller must invoke this at Host entry, not after editor work.
     pub fn frame(&mut self, ctx: &egui::Context) {
         if !enabled()
@@ -87,6 +134,7 @@ impl Probe {
         }
         let previous = self.latest.replace(point);
         let run = self.run.as_mut()?;
+        run.focus_lost |= !point.focused;
         if let Some(previous) =
             previous.filter(|last| run.start.is_some_and(|start| last.frame >= start.frame))
         {
@@ -151,6 +199,7 @@ impl Probe {
             focus_lost: self.latest.is_some_and(|point| !point.focused),
             overflow: false,
             overlap: false,
+            nonvisual: self.latest.is_none(),
         });
         true
     }
@@ -199,7 +248,8 @@ impl Probe {
         json!({"operation":run.operation,"outcome":run.terminal.map(|(_,outcome)|outcome),
             "operation_filter":operation_filter(),
             "reason":reason,"trailing_frame":trailing,"overflow":run.overflow,"overlap":run.overlap,
-            "complete":trailing && run.start.is_some() && run.gap_count>0 && !run.overflow && !run.overlap,
+            "complete":trailing && run.start.is_some() && run.gap_count>0 && !run.overflow && !run.overlap && !run.nonvisual,
+            "nonvisual":run.nonvisual,
             "focus_lost":run.focus_lost,"gap_count":run.gap_count,
             "maximum_gap_ms":run.maximum_gap_ms,"gaps":run.gaps,"spans":run.spans,
             "scope":"inspection feature; foreground elapsed and Host frame-start gaps; not presentation latency"})
@@ -237,10 +287,19 @@ mod tests {
         assert_eq!(result["complete"], true);
         assert_eq!(result["focus_lost"], false);
         probe.begin_record("asset_refresh");
+        probe.hidden_logic();
         assert!(probe.frame_record(point(5, 5093., false)).is_none());
         let result = probe.summary(false, "test_shutdown");
         assert_eq!(result["complete"], false);
         assert_eq!(result["focus_lost"], true);
+        assert_eq!(result["nonvisual"], true);
+        probe.hidden_logic();
+        probe.begin_record("asset_refresh");
+        assert!(probe.run.as_ref().unwrap().start.is_none());
+        let hidden = probe.summary(false, "hidden_start");
+        assert_eq!(hidden["nonvisual"], true);
+        assert_eq!(hidden["complete"], false);
+        probe.frame_record(point(5, 5093., true));
         probe.begin_record("asset_refresh");
         for frame in 6..=(LIMIT as u64 + 6) {
             probe.frame_record(point(frame, 5100. + frame as f64, true));

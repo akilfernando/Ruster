@@ -358,6 +358,13 @@ impl SceneEditor {
     fn lighting_form(&mut self, ui: &mut egui::Ui, mut draft: LightingDraft, own: bool) {
         let editable = self.lighting_editable(false) && (self.lighting_draft.is_none() || own);
         let ambient = draft.is_ambient();
+        let committed_color = match &draft {
+            LightingDraft::Light { baseline, .. } => baseline.color,
+            LightingDraft::Ambient { baseline, .. } => match baseline {
+                Lighting::Legacy => Ambient::default().color,
+                Lighting::Authored { ambient, .. } => ambient.color,
+            },
+        };
         let prefix = if ambient { "ambient" } else { "light" };
         let mut changed = false;
         let mut enter = false;
@@ -377,7 +384,7 @@ impl SceneEditor {
             // numeric text for keyboard entry and invalid-draft recovery.
             ui.horizontal(|ui| {
                 ui.label("Color");
-                let mut picked = rgb(color).unwrap_or([1.0; 3]);
+                let mut picked = rgb(color).unwrap_or(committed_color);
                 let response = ui.color_edit_button_rgb(&mut picked);
                 if response.changed() {
                     *color = picked.map(|value| value.to_string());

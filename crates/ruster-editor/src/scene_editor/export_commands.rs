@@ -360,7 +360,9 @@ impl SceneEditor {
         self.shader_notice = "Built-in scene shader".into();
         Ok(())
     }
-    pub(super) fn export_frame(&mut self, ctx: &egui::Context) {
+    /// Guarded owner-thread completion/publication, independent of painting.
+    /// The host must defer this until fresh human input/close has priority.
+    pub(super) fn export_maintenance(&mut self) {
         // Draft intent need not advance authored revision. It still invalidates
         // publication, as do dialogs/gestures/project changes.
         if self.guard().is_err() || self.manipulation.offset_pending() {
@@ -390,6 +392,9 @@ impl SceneEditor {
                 }
             }
         }
+    }
+    pub(super) fn export_frame(&mut self, ctx: &egui::Context) {
+        self.export_maintenance();
         if self.export_dialog {
             egui::Modal::new(egui::Id::unique("creator_export_dialog")).show(ctx, |ui| {
                 ui.set_max_width((ctx.content_rect().width() - 64.0).clamp(200.0, 560.0));

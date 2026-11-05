@@ -217,10 +217,14 @@ impl Worker {
                     run(&receiver, &sender, &worker_shutdown, &repaint);
                 }));
                 drop(sender);
-                // Normally disconnected by shutdown. After panic, incoming payloads
-                // are retired here rather than accepted as executable work.
+                repaint(); // Wake owner-side failure adoption even without a paint.
+                           // Normally disconnected by shutdown. After panic, incoming payloads
+                           // are retired here rather than accepted as executable work.
                 while let Ok(command) = receiver.recv() {
                     drop(command);
+                    // A Full cleanup handoff has no Retired event after failure.
+                    // Notify the owner when this bounded channel has space again.
+                    repaint();
                 }
                 let events = worker_shutdown
                     .state
@@ -967,7 +971,19 @@ mod tests {
         .unwrap();
         let mut fixture = AssetStore::open(directory.path()).unwrap();
         fixture.import("triangle", "triangle.obj").unwrap();
-        let (mut worker, barrier) = Worker::panic_after_event_for_test().unwrap();
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let worker_barrier = barrier.clone();
+        let notifications = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let observed = notifications.clone();
+        let (wake, wakes) = mpsc::channel();
+        let mut worker = Worker::spawn(Arc::new(move || {
+            if observed.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 {
+                worker_barrier.wait();
+                panic!("intentional worker fault after event transfer");
+            }
+            wake.send(()).unwrap();
+        }))
+        .unwrap();
         worker.try_open(1, directory.path().to_path_buf()).unwrap();
         let store = match next(&mut worker) {
             Event::Opened {
@@ -982,6 +998,13 @@ mod tests {
             textures: store.texture_snapshots(),
         };
         let weak = Arc::downgrade(&maps.meshes["triangle"]);
+        // The worker is still blocked after publishing Opened: the sole
+        // command slot is occupied and a second cleanup remains owner-held.
+        worker.try_retire(2, RetiredAssets::default()).unwrap();
+        assert!(matches!(
+            *worker.try_retire(3, RetiredAssets::default()).unwrap_err(),
+            TrySendError::Full(_)
+        ));
         barrier.wait();
         assert!(matches!(
             worker
@@ -997,10 +1020,35 @@ mod tests {
             maps: [maps, AssetMaps::default(), AssetMaps::default()],
             ..Default::default()
         };
-        assert!(
-            worker.try_retire(2, retired).is_ok(),
-            "terminal drainer must accept cleanup after event disconnection"
-        );
+        let mut pending = retired;
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            match worker.try_retire(3, pending) {
+                Ok(()) => break,
+                Err(returned) => match *returned {
+                    TrySendError::Full(retired) => {
+                        pending = retired;
+                        wakes
+                            .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                            .expect("cleanup dequeue must wake a Full retry");
+                    }
+                    TrySendError::Disconnected(_) => panic!("terminal drainer rejected cleanup"),
+                },
+            }
+        }
+        // Hidden owner progress cannot rely on paint polling after a failed
+        // worker: every cleanup dequeue must wake a Full-channel retry.
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while (weak.strong_count() != 0
+            || notifications.load(std::sync::atomic::Ordering::SeqCst) < 4)
+            && Instant::now() < deadline
+        {
+            wakes
+                .recv_timeout(deadline.saturating_duration_since(Instant::now()))
+                .expect("terminal cleanup must notify the owner");
+        }
+        assert_eq!(weak.strong_count(), 0);
+        assert!(notifications.load(std::sync::atomic::Ordering::SeqCst) >= 4);
         worker.try_shutdown().unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);
         while !worker.is_finished() && Instant::now() < deadline {

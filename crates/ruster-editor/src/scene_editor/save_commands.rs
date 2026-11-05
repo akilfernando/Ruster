@@ -151,7 +151,8 @@ impl SceneEditor {
             "dirty":self.session.is_dirty(), "receipt":self.save_receipt})
     }
     // The returned bundle includes the old Session, so its final owned source /
-    // history buffers are released on the worker after the paint boundary.
+    // history buffers are released on the worker independently of paint. Callback
+    // resource roles in the same returned bundle retain their real paint fence.
     pub(super) fn adopt_saved(
         &mut self,
         saved: Saved,
@@ -269,7 +270,7 @@ impl SceneEditor {
         self.save_receipt = Some(
             json!({"committed":true,"persistence_token":self.persistence_token(),
             "revision":self.session.scene().revision.to_string(),"path":persistence_commands::bounded(&path.display().to_string()),
-            "document_sha256":document_hash,"document_bytes":document_bytes,"warning":self.save_warning,"followup_pending":true}),
+            "document_sha256":document_hash,"document_bytes":document_bytes,"warning":self.save_warning,"followup_pending":true,"paint_cleanup_pending":false}),
         );
         self.notice = self
             .save_warning
@@ -327,7 +328,7 @@ impl SceneEditor {
         }
     }
     pub(super) fn finish_save_continuation(&mut self) {
-        if self.asset_busy() {
+        if self.asset_busy() || self.asset_paint_cleanup_pending() {
             return;
         }
         let Some(after) = self.save_continuation.take() else {

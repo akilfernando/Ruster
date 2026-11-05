@@ -9,10 +9,12 @@ mod color_commands;
 mod export_commands;
 mod lighting_commands;
 mod lighting_ui;
+mod lighting_viewport;
 mod material_commands;
 mod material_ui;
 #[cfg(all(test, feature = "inspection"))]
 mod material_visual_probe;
+mod nonvisual;
 mod persistence_commands;
 mod runtime_commands;
 mod save_commands;
@@ -461,7 +463,8 @@ impl SceneEditor {
         let ctx = self.export_context.clone().unwrap_or_default();
         self.export_context = Some(ctx.clone());
         let deadline = Instant::now() + Duration::from_secs(3);
-        while self.asset_busy() && Instant::now() < deadline {
+        while (self.asset_busy() || self.asset_paint_cleanup_pending()) && Instant::now() < deadline
+        {
             ctx.run_ui(egui::RawInput::default(), |ui| {
                 self.asset_begin_root_frame(&ctx);
                 self.asset_frame(&ctx, false);
@@ -476,7 +479,7 @@ impl SceneEditor {
             std::thread::yield_now();
         }
         assert!(
-            !self.asset_busy(),
+            !self.asset_busy() && !self.asset_paint_cleanup_pending(),
             "asset test driver timed out: {}",
             self.asset_observation()
         );
@@ -1088,6 +1091,9 @@ impl SceneEditor {
                 Err(error) => self.recovery.set_warning(error),
             }
         }
+        self.recovery_maintenance(ctx);
+    }
+    fn recovery_maintenance(&mut self, ctx: &egui::Context) {
         let now = Instant::now();
         let pending = self.needs_recovery() || self.pending_recovery_drafts();
         self.recovery.observe(
@@ -1310,7 +1316,7 @@ impl SceneEditor {
         }
     }
     fn start_close_cleanup(&mut self) {
-        if self.asset_busy() {
+        if self.asset_busy() || self.asset_paint_cleanup_pending() {
             return;
         }
         if self.close_shutdown {
@@ -1642,11 +1648,27 @@ impl SceneEditor {
                 self.sync_draft();
                 self.error.clear();
                 self.notice = if paste {
-                    "Pasted objects; one Undo restores the scene."
+                    "Pasted selection; one Undo restores the scene."
                 } else {
-                    "Copied objects inside this editor window."
+                    "Copied selection inside this editor window."
                 }
                 .into();
+                if paste && !self.manipulation.paste_created_lights().is_empty() {
+                    self.notice.push_str(&format!(
+                        " Created lights: {}.",
+                        self.manipulation
+                            .paste_created_lights()
+                            .iter()
+                            .filter_map(|id| self
+                                .session
+                                .scene()
+                                .lighting
+                                .light(id)
+                                .map(|light| light.display_name(id)))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
             }
             Err(error) => self.error = error,
         }
@@ -2795,8 +2817,8 @@ impl SceneEditor {
                             ("Rename object", ContextAction::Rename),
                             ("Duplicate", ContextAction::Duplicate),
                             ("Delete", ContextAction::Delete),
-                            ("Copy objects", ContextAction::Copy),
-                            ("Paste objects", ContextAction::Paste),
+                            ("Copy", ContextAction::Copy),
+                            ("Paste", ContextAction::Paste),
                             ("Frame selected", ContextAction::Frame),
                         ] {
                             if ui.button(label).clicked() {
@@ -2881,11 +2903,11 @@ impl SceneEditor {
                         ui.close();
                     }
                 }
-                if ui.button("Copy objects").clicked() {
+                if ui.button("Copy").clicked() {
                     self.clipboard_action(false);
                     ui.close();
                 }
-                if ui.button("Paste objects").clicked() {
+                if ui.button("Paste").clicked() {
                     self.clipboard_action(true);
                     ui.close();
                 }
@@ -4157,6 +4179,7 @@ impl SceneEditor {
                 });
             }
             self.runtime.observe(self.generation,self.session.scene().revision,self.assets.as_ref().map(|store|store.revision()),self.shader_revision);
+            self.asset_mark_callback_owners();
             let transient = if !self.runtime.visible {
                 self.manipulation.transient_scene(self.session.scene())
             } else {
@@ -4166,12 +4189,35 @@ impl SceneEditor {
             self.navigation.enabled=!self.export_dialog && !self.close_approved && !self.manipulation.active() && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none() && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending;
             self.navigation.keyboard_enabled=self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
             self.navigation.movement_speed=self.workspace.prefs.movement_speed;
+            let authored_view = transient.as_ref().unwrap_or(self.session.scene());
+            if self.navigation.frame_selected
+                && self.manipulation.ids.iter().any(|id| authored_view.lighting.light(id).is_some())
+            {
+                // The shared runtime renderer frames geometry. Editor light
+                // anchors participate only in the authored view, never its runtime.
+                self.navigation.frame_selected = false;
+                if !self.runtime.visible && self.navigation.enabled {
+                    if let Some(camera) = self.navigation.camera.and_then(|camera| {
+                        lighting_viewport::frame_selection(
+                            authored_view,
+                            &self.manipulation.ids,
+                            &self.resolved,
+                            camera,
+                            ui.available_width() / ui.available_height().max(1.0),
+                        )
+                    }) {
+                        self.navigation.camera = Some(camera);
+                    }
+                } else if self.runtime.visible {
+                    self.notice = "Switch to the authored view to frame selected lights.".into();
+                }
+            }
             let viewport = ruster_render::viewport_with_materials(
                 ui,
                 if self.runtime.visible {
                     self.runtime.frame.as_ref().map(|frame|frame.scene.as_ref()).unwrap_or(self.session.scene())
                 } else {
-                    transient.as_ref().unwrap_or(self.session.scene())
+                    authored_view
                 },
                 &selected,
                 if self.runtime.visible {
@@ -4192,6 +4238,20 @@ impl SceneEditor {
                 && !self.close_approved
                 && !self.new_scene_pending
                 && !self.rename_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none();
+            let can_pick = self.navigation.enabled && !self.manipulation.active();
+            // Passive xray icons precede transform handles in paint order;
+            // handles retain first refusal on a click, then icons, then surfaces.
+            let light_pick = if !self.runtime.visible {
+                lighting_viewport::paint_and_pick(
+                    ui,
+                    &viewport,
+                    authored_view,
+                    &self.manipulation.ids,
+                    can_pick,
+                )
+            } else {
+                None
+            };
             let overlay_owns = if may_draw {
                 let before = self.session.scene().revision;
                 let result = self.manipulation.draw(ui, &viewport, &mut self.session);
@@ -4209,10 +4269,10 @@ impl SceneEditor {
             } else {
                 false
             };
-            if viewport.response.clicked() && !overlay_owns && !self.manipulation.active() && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none() && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending {
-                let id = viewport
-                    .picked
-                    .filter(|id| self.session.scene().objects.iter().any(|o| &o.id == id));
+            if viewport.response.clicked() && !overlay_owns && can_pick {
+                let id = light_pick
+                    .or(viewport.picked)
+                    .filter(|id| lighting_viewport::selectable_target(self.session.scene(), id, !self.runtime.visible));
                 let additive =
                     ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 self.queued_selection=Some((id,additive));
@@ -4377,31 +4437,33 @@ impl SceneEditor {
 }
 struct Host {
     editor: SceneEditor,
+    input: nonvisual::InputGate,
     #[cfg(unix)]
     bridge: Option<crate::bridge::Bridge>,
 }
 impl eframe::App for Host {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        #[cfg(feature = "inspection")]
+        asset_timing::install_pass_marker(ctx);
+        self.input.observe(raw, ctx);
+    }
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        #[cfg(feature = "inspection")]
+        if asset_timing::in_real_pass(ctx) {
+            self.editor.asset_ops.timing_frame(ctx);
+        } else {
+            self.editor.asset_ops.probe.hidden_logic();
+        }
+        self.logic_tick(ctx);
+    }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         #[cfg(feature = "inspection")]
         self.editor.asset_ops.timing_frame(ui.ctx());
         self.editor.ui(ui);
         self.editor.poll_capture(ui.ctx());
-        #[cfg(unix)]
-        if let Some(bridge) = &mut self.bridge {
-            if bridge.dispatch_request(|nonce, op, args, lease| {
-                if op == "scene_save" {
-                    self.editor
-                        .dispatch_save_request(ui.ctx(), nonce, &args, lease);
-                } else if asset_commands::supported(op) {
-                    self.editor
-                        .dispatch_asset_request(ui.ctx(), nonce, op, args, lease);
-                } else {
-                    lease.run_immediate(|| self.editor.command(nonce, op, args));
-                }
-            }) {
-                ui.ctx().request_repaint();
-            }
-        }
+        // Widgets, dialogs and cancellation own this frame's input first.
+        self.input.human_pending = false;
+        self.service_bridge(ui.ctx());
         #[cfg(feature = "inspection")]
         self.editor.finish_asset_timing(ui.ctx());
     }
@@ -4447,6 +4509,7 @@ fn run_session(session: Session) -> Result<(), String> {
                 None
             };
             Ok(Box::new(Host {
+                input: Default::default(),
                 editor: {
                     let mut editor = SceneEditor::new(session);
                     editor.save_grant = save_grant;

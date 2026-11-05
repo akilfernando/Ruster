@@ -187,7 +187,17 @@ pub(super) struct Controller {
     save_request: Option<Box<crate::asset_save::Request>>,
     request: Option<AssetRequest>,
     retired: Option<RetiredAssets>,
+    // Never exposed to a paint callback. One bounded bundle, drained by the
+    // same worker before another operation may be admitted.
+    immediate: Option<RetiredAssets>,
+    // The existing single candidate result may arrive before a retirement ack.
+    // Hold that same owner while draining the ack, never admit another candidate.
+    held_completion: Option<Event>,
     retiring: bool,
+    retiring_paint: bool,
+    // Store, authored, preview, reset roles. Only a real UI pass marks them.
+    exposed: [bool; 4],
+    fence_ready: bool,
     // Root frame which last queued callback-visible resources. Layout passes
     // within that frame do not establish a paint boundary.
     retired_frame: Option<u64>,
@@ -288,10 +298,35 @@ impl Controller {
             || self.save_request.is_some()
             || self.request.is_some()
             || self.retired.is_some()
+            || self.immediate.is_some()
+            || self.held_completion.is_some()
             || self.retiring
     }
     pub fn busy(&self) -> bool {
-        self.pending() || self.restart_after_retirement
+        self.active.is_some()
+            || self.opening.is_some()
+            || self.saving.is_some()
+            || self.save_request.is_some()
+            || self.request.is_some()
+            || self.immediate.is_some()
+            || self.held_completion.is_some()
+            || self.retiring
+            || self.paint_conflict()
+            || self.restart_after_retirement
+            || self.close_after
+    }
+
+    fn paint_conflict(&self) -> bool {
+        self.retired.as_ref().is_some_and(|retired| {
+            (self.exposed[0] && retired.store.is_some())
+                || retired.maps.iter().enumerate().any(|(i, maps)| {
+                    self.exposed[i + 1] && (!maps.meshes.is_empty() || !maps.textures.is_empty())
+                })
+        })
+    }
+
+    fn paint_cleanup_pending(&self) -> bool {
+        self.retired.is_some() || self.retiring_paint
     }
     pub(super) fn fresh_root_adopted(&mut self) {
         // Only explicit document replacement grants a fresh failure incarnation.
@@ -387,13 +422,11 @@ impl Controller {
         Ok(())
     }
     pub(super) fn retire_unsent_save(&mut self, request: Box<crate::asset_save::Request>) {
-        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+        let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
         assert!(retired.save_request.is_none());
         retired.save_request = Some(request);
-        self.retired_frame = self.root_frame;
     }
     pub(super) fn merge_save_retirement(&mut self, returned: RetiredAssets) {
-        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
         let RetiredAssets {
             store,
             request,
@@ -403,39 +436,44 @@ impl Controller {
             saved,
             session,
         } = returned;
-        if let Some(store) = store {
-            assert!(retired.store.is_none());
-            retired.store = Some(store);
-        }
-        if let Some(request) = request {
-            assert!(retired.request.is_none());
-            retired.request = Some(request);
-        }
-        if let Some(completion) = completion {
-            assert!(retired.completion.is_none());
-            retired.completion = Some(completion);
-        }
-        if let Some(request) = save_request {
-            assert!(retired.save_request.is_none());
-            retired.save_request = Some(request);
-        }
-        if let Some(saved) = saved {
-            assert!(retired.saved.is_none());
-            retired.saved = Some(saved);
-        }
-        if let Some(session) = session {
-            assert!(retired.session.is_none());
-            retired.session = Some(session);
+        if store.is_some() {
+            self.queue_store(store);
         }
         for (slot, maps) in maps.into_iter().enumerate() {
             if !maps.meshes.is_empty() || !maps.textures.is_empty() {
-                assert!(
-                    retired.maps[slot].meshes.is_empty() && retired.maps[slot].textures.is_empty()
-                );
-                retired.maps[slot] = maps;
+                self.queue_maps(slot, maps);
             }
         }
-        self.retired_frame = self.root_frame;
+        if request.is_some()
+            || completion.is_some()
+            || save_request.is_some()
+            || saved.is_some()
+            || session.is_some()
+        {
+            let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
+            // These candidates/Sessions never supplied a paint callback. All
+            // final destructors still run on the existing serial worker.
+            if let Some(value) = request {
+                assert!(retired.request.is_none());
+                retired.request = Some(value);
+            }
+            if let Some(value) = completion {
+                assert!(retired.completion.is_none());
+                retired.completion = Some(value);
+            }
+            if let Some(value) = save_request {
+                assert!(retired.save_request.is_none());
+                retired.save_request = Some(value);
+            }
+            if let Some(value) = saved {
+                assert!(retired.saved.is_none());
+                retired.saved = Some(value);
+            }
+            if let Some(value) = session {
+                assert!(retired.session.is_none());
+                retired.session = Some(value);
+            }
+        }
     }
     fn reject_save(&mut self, editor: &mut SceneEditor, failure: Error) {
         #[cfg(feature = "inspection")]
@@ -561,25 +599,40 @@ impl Controller {
         if let Some(request) = self.request.take() {
             // A matching Reset may already own the preview retirement role
             // while this request is still Submitting. Preserve that bundle.
-            let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+            let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
             assert!(retired.request.is_none());
             retired.request = Some(Box::new(request));
-            self.retired_frame = self.root_frame;
             self.active = None;
         }
     }
     fn terminal(&mut self, editor: &mut SceneEditor) {
+        // A received payload is a known worker outcome, even if its adoption
+        // waits for a retirement slot. Keep its original authority until it is
+        // adopted; disconnect must not turn a known commit into an unknown one.
+        let held_save = matches!(&self.held_completion, Some(Event::Saved { job, .. })
+            if self.saving.as_ref().is_some_and(|save| save.job == *job));
+        let held_asset = matches!(&self.held_completion, Some(Event::Complete { job, .. })
+            if self.active.as_ref().is_some_and(|active| active.job == *job));
+        let held_open = matches!(&self.held_completion, Some(Event::Opened { job, .. })
+            if self.opening.as_ref().is_some_and(|open| open.job == *job));
         #[cfg(feature = "inspection")]
         {
-            if let Some(job) = self.opening.as_ref().map(|open| open.job) {
+            if let Some(job) = self
+                .opening
+                .as_ref()
+                .filter(|_| !held_open)
+                .map(|open| open.job)
+            {
                 self.timing_result(TimingKind::Open, job, "failure");
             }
-            if let Some((job, authorized)) = self.active.as_ref().map(|active| {
-                (
-                    active.job,
-                    matches!(active.phase, Phase::CommitQueued | Phase::Publishing),
-                )
-            }) {
+            if let Some((job, authorized)) =
+                self.active.as_ref().filter(|_| !held_asset).map(|active| {
+                    (
+                        active.job,
+                        matches!(active.phase, Phase::CommitQueued | Phase::Publishing),
+                    )
+                })
+            {
                 self.timing_result(
                     TimingKind::Asset,
                     job,
@@ -589,7 +642,7 @@ impl Controller {
             if let Some(job) = self
                 .saving
                 .as_ref()
-                .filter(|save| save.followup.is_none())
+                .filter(|save| save.followup.is_none() && !held_save)
                 .map(|save| {
                     (
                         save.job,
@@ -605,7 +658,9 @@ impl Controller {
             }
         }
         self.disconnected = true;
-        self.opening = None;
+        if !held_open {
+            self.opening = None;
+        }
         editor.pending_asset_open = None;
         let handled_save = self.saving.is_some();
         if self
@@ -615,7 +670,7 @@ impl Controller {
         {
             editor.append_save_warning("content worker stopped after the scene committed; reopen the scene before further content work");
             self.status = "Scene saved; finishing cleanup after content worker failure…".into();
-        } else if let Some(mut save) = self.saving.take() {
+        } else if let Some(mut save) = (!held_save).then(|| self.saving.take()).flatten() {
             let message = if matches!(
                 save.phase,
                 Phase::CommitQueued | Phase::Publishing | Phase::FollowingUp
@@ -637,7 +692,7 @@ impl Controller {
             self.status="Asset retirement worker disconnected; resources are retained until cleanup handoff completes.".into();
             editor.error = self.status.clone();
         }
-        if let Some(mut active) = self.active.take() {
+        if let Some(mut active) = (!held_asset).then(|| self.active.take()).flatten() {
             let message = if matches!(active.phase, Phase::CommitQueued | Phase::Publishing) {
                 "Asset worker disconnected after authorization. Publication status may be unknown; inspect/reopen before retrying."
             } else {
@@ -650,30 +705,47 @@ impl Controller {
             }
         }
         if let Some(request) = self.request.take() {
-            let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+            let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
             debug_assert!(retired.request.is_none());
             retired.request = Some(Box::new(request));
         }
         self.retiring = false;
+        self.retiring_paint = false;
     }
     fn poll(&mut self, editor: &mut SceneEditor) {
         // One event per frame bounds foreground work. Payload events remain
         // owned until they have been adopted or handed back for retirement.
         // A queued bundle may coexist with an earlier in-flight retirement.
         // Keep consuming that acknowledgement so backpressure cannot deadlock.
-        if self.retired.is_some() && !self.retiring {
+        let can_adopt = self.immediate.is_none() && !self.paint_conflict();
+        let held = can_adopt.then(|| self.held_completion.take()).flatten();
+        let event = if let Some(event) = held {
+            event
+        } else {
+            match self.worker.as_mut().map(Worker::poll) {
+                Some(Ok(event)) => event,
+                Some(Err(TryRecvError::Disconnected)) => {
+                    if !self.shutting_down && !self.disconnected {
+                        self.terminal(editor);
+                    }
+                    return;
+                }
+                _ => return,
+            }
+        };
+        if !can_adopt
+            && matches!(
+                event,
+                Event::Saved { .. } | Event::Complete { .. } | Event::Opened { .. }
+            )
+        {
+            assert!(
+                self.held_completion.is_none(),
+                "one candidate result at a time"
+            );
+            self.held_completion = Some(event);
             return;
         }
-        let event = match self.worker.as_mut().map(Worker::poll) {
-            Some(Ok(event)) => event,
-            Some(Err(TryRecvError::Disconnected)) => {
-                if !self.shutting_down && !self.disconnected {
-                    self.terminal(editor);
-                }
-                return;
-            }
-            _ => return,
-        };
         #[cfg(feature = "inspection")]
         let observation = match &event {
             Event::Complete { job, .. } => {
@@ -765,6 +837,9 @@ impl Controller {
                                 &mut self.probe,
                             );
                             self.merge_save_retirement(returned);
+                            if self.disconnected {
+                                editor.append_save_warning("content worker stopped after the scene committed; reopen the scene before further content work");
+                            }
                             save.phase = Phase::FollowingUp;
                             save.followup = Some(SaveFollowup {
                                 recovery_request: request,
@@ -804,17 +879,19 @@ impl Controller {
                     self.active = None;
                 }
             }
-            Event::Retired { .. } => self.retiring = false,
+            Event::Retired { .. } => {
+                self.retiring = false;
+                self.retiring_paint = false;
+            }
             Event::Complete { job, completion } => {
                 let active = self.active.take();
                 let matched = active
                     .as_ref()
                     .is_some_and(|a| a.job == job && a.phase == Phase::Publishing);
                 if !matched {
-                    let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+                    let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
                     assert!(retired.completion.is_none());
                     retired.completion = Some(completion);
-                    self.retired_frame = self.root_frame;
                     if let Some(active) = active {
                         self.active = Some(active);
                     }
@@ -834,24 +911,16 @@ impl Controller {
                             meshes: std::mem::replace(&mut editor.resolved, meshes),
                             textures: std::mem::replace(&mut editor.resolved_textures, textures),
                         };
-                        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
-                        assert!(retired.store.is_none());
-                        assert!(
-                            retired.maps[0].meshes.is_empty()
-                                && retired.maps[0].textures.is_empty()
-                        );
-                        retired.store = Some(adoption.retired);
-                        retired.maps[0] = old;
-                        self.retired_frame = self.root_frame;
+                        self.queue_store(Some(adoption.retired));
+                        self.queue_maps(0, old);
                         editor.content_search.key = None;
                         editor.asset_outcome(&active.op, adoption.result)
                     }
                     Err(completion) => {
                         let published = completion.catalog_published();
-                        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+                        let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
                         assert!(retired.completion.is_none());
                         retired.completion = Some(completion);
-                        self.retired_frame = self.root_frame;
                         Err(error("asset_error",format!("Asset publication could not be adopted (catalog_published={published}); inspect/reopen before retrying.")))
                     }
                 };
@@ -947,10 +1016,9 @@ impl Controller {
                         }
                     }
                     Ok(store) => {
-                        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+                        let retired = self.immediate.get_or_insert_with(RetiredAssets::default);
                         assert!(retired.store.is_none());
                         retired.store = Some(*store);
-                        self.retired_frame = self.root_frame;
                         self.status = "Finishing content loading…".into();
                         if opening.as_ref().is_some_and(|open| !open.cancelled) {
                             editor.error = "Content load no longer matches this document; retained content was preserved. Retry explicitly.".into();
@@ -972,33 +1040,34 @@ impl Controller {
             }
         }
     }
+    fn retirement_role(&mut self, role: usize) -> &mut RetiredAssets {
+        if std::mem::take(&mut self.exposed[role]) {
+            self.retired_frame = self.root_frame;
+            self.fence_ready = false;
+            self.retired.get_or_insert_with(RetiredAssets::default)
+        } else {
+            self.immediate.get_or_insert_with(RetiredAssets::default)
+        }
+    }
     fn queue_maps(&mut self, slot: usize, maps: AssetMaps) {
         if maps.meshes.is_empty() && maps.textures.is_empty() {
+            self.exposed[slot + 1] = false;
             return;
         }
-        // Before the first UI pass there cannot be any old paint callbacks.
-        // Synchronous construction/model clients need no invented root frame.
-        if self.root_frame.is_none() {
-            return;
-        }
-        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
-        // Reset admission and root replacement wait for retirement. Thus each
-        // role has at most one superseded snapshot in this bounded bundle.
+        let retired = self.retirement_role(slot + 1);
         assert!(retired.maps[slot].meshes.is_empty());
         assert!(retired.maps[slot].textures.is_empty());
         retired.maps[slot] = maps;
-        self.retired_frame = self.root_frame;
         self.status = "Finishing content update…".into();
     }
     pub(super) fn queue_store(&mut self, store: Option<AssetStore>) {
-        if self.root_frame.is_none() || store.is_none() {
+        let Some(store) = store else {
+            self.exposed[0] = false;
             return;
-        }
-        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+        };
+        let retired = self.retirement_role(0);
         assert!(retired.store.is_none());
-        retired.store = store;
-        self.retired_frame = self.root_frame;
-        self.status = "Finishing content update…".into();
+        retired.store = Some(store);
     }
     fn begin_root_frame(&mut self, editor: &mut SceneEditor, ctx: &egui::Context) {
         if ctx.viewport_id() != egui::ViewportId::ROOT {
@@ -1010,51 +1079,63 @@ impl Controller {
             && self.retired.is_some()
             && self.retired_frame.is_none_or(|queued| queued < frame)
         {
-            if self.worker.is_none() {
-                if let Err((_, message)) = self.ensure_worker(ctx) {
-                    editor.error = message;
-                }
-            }
-            // A disconnected worker may still accept cleanup-only payloads;
-            // preserve that terminal handoff before requesting shutdown.
-            self.retire(editor);
+            // This witness is established only by a real later UI frame.
+            // Backpressure retries may use it without inventing another paint.
+            self.fence_ready = true;
         }
+        if self.worker.is_none() && (self.immediate.is_some() || self.retired.is_some()) {
+            if let Err((_, message)) = self.ensure_worker(ctx) {
+                editor.error = message;
+            }
+        }
+        self.retire(editor);
         if self.retired.is_some() {
             ctx.request_repaint();
         }
     }
     fn retire(&mut self, editor: &mut SceneEditor) {
         #[cfg(feature = "inspection")]
-        let started = self.retired.as_ref().and_then(|_| self.probe.span_start());
+        let started = (self.immediate.is_some() || self.retired.is_some())
+            .then(|| self.probe.span_start())
+            .flatten();
         self.retire_inner(editor);
         #[cfg(feature = "inspection")]
-        {
-            self.probe.record("retire_submit", started);
-            if self.disconnected && self.retired.is_none() && !self.retiring {
-                self.probe.record("retire_handoff", started);
-            }
-        }
+        self.probe.record("retire_submit", started);
     }
     fn retire_inner(&mut self, editor: &mut SceneEditor) {
-        let Some(retired) = self.retired.take() else {
+        if self.retiring {
+            return;
+        }
+        let paint = self.retired.is_some() && self.fence_ready || self.immediate.is_none();
+        if paint && !self.fence_ready && self.root_frame.is_some() {
+            return;
+        }
+        let slot = if paint {
+            &mut self.retired
+        } else {
+            &mut self.immediate
+        };
+        let Some(retired) = slot.take() else {
             return;
         };
         let Some(worker) = self.worker.as_mut() else {
-            self.retired = Some(retired);
+            *slot = Some(retired);
             return;
         };
         self.status = "Finishing content update…".into();
         match worker.try_retire(self.next, retired) {
             Ok(()) => {
                 self.retiring = !self.disconnected;
-                self.retired_frame = None;
+                self.retiring_paint = paint && self.retiring;
+                if paint {
+                    self.retired_frame = None;
+                    self.fence_ready = false;
+                }
             }
             Err(returned) => match *returned {
-                TrySendError::Full(retired) => self.retired = Some(retired),
+                TrySendError::Full(retired) => *slot = Some(retired),
                 TrySendError::Disconnected(retired) => {
-                    // Retain the full payload while switching to terminal
-                    // cleanup; ordinary backpressure cannot hide a dead worker.
-                    self.retired = Some(retired);
+                    *slot = Some(retired);
                     self.terminal(editor);
                 }
             },
@@ -1077,7 +1158,7 @@ impl Controller {
         false
     }
     fn finish_saved_followup(&mut self, editor: &mut SceneEditor) {
-        if self.retired.is_some() || self.retiring {
+        if self.immediate.is_some() || self.retiring {
             return;
         }
         if !self.saving.as_ref().is_some_and(|save| {
@@ -1102,6 +1183,9 @@ impl Controller {
             save.continuation = save_commands::Continuation::SaveOnly;
         }
         editor.finalize_saved_followup(save.continuation, followup.result.unwrap());
+        if let Some(receipt) = &mut editor.save_receipt {
+            receipt["paint_cleanup_pending"] = json!(self.paint_cleanup_pending());
+        }
         if editor.save_warning.is_some() {
             if matches!(
                 editor.queued_action,
@@ -1128,11 +1212,14 @@ impl Controller {
         }
     }
     fn frame(&mut self, editor: &mut SceneEditor, ctx: &egui::Context, authorize: bool) {
-        // The native host calls begin_root_frame before poll/new callbacks.
-        // Non-UI model clients have no callback ownership to fence.
-        if self.root_frame.is_none() {
-            self.retire(editor);
+        // Immediate owners never supplied a callback. A ready paint fence was
+        // witnessed by begin_root_frame, never by this nonvisual service.
+        if self.worker.is_none() && (self.immediate.is_some() || self.retired.is_some()) {
+            if let Err((_, message)) = self.ensure_worker(ctx) {
+                editor.error = message;
+            }
         }
+        self.retire(editor);
         self.poll(editor);
         if self.retired.is_some() && self.retired_frame.is_none() {
             self.retired_frame = self.root_frame;
@@ -1440,9 +1527,6 @@ impl Controller {
             }
             self.probe.record("publish_enqueue", asset_publish);
         }
-        if self.busy() {
-            ctx.request_repaint_after(Duration::from_millis(16));
-        }
     }
     fn shutdown(&mut self) {
         if !self.pending() && !self.shutting_down {
@@ -1454,7 +1538,8 @@ impl Controller {
         }
     }
     fn finished(&self) -> bool {
-        !self.busy()
+        !self.pending()
+            && !self.restart_after_retirement
             && self
                 .worker
                 .as_ref()
@@ -1466,6 +1551,7 @@ impl SceneEditor {
     #[cfg(feature = "inspection")]
     pub(super) fn finish_asset_timing(&mut self, ctx: &egui::Context) {
         let ready = !self.asset_busy()
+            && !self.asset_paint_cleanup_pending()
             && self.save_continuation.is_none()
             && self.recovery_transition.is_none()
             && !self.asset_ops.close_after
@@ -1485,6 +1571,11 @@ impl SceneEditor {
         let mut controller = std::mem::take(&mut self.asset_ops);
         controller.begin_root_frame(self, ctx);
         self.asset_ops = controller;
+    }
+    pub(super) fn asset_mark_callback_owners(&mut self) {
+        // Adoption can replace roles after begin_root_frame, but before the
+        // viewport builds callbacks. Mark those actual new owners as exposed.
+        self.asset_ops.exposed = [true; 4];
     }
     pub(super) fn retire_asset_maps(&mut self, slot: usize, maps: AssetMaps) {
         self.asset_ops.queue_maps(slot, maps);
@@ -1515,10 +1606,11 @@ impl SceneEditor {
         self.pending_asset_open.is_some() || self.asset_ops.busy()
     }
     pub(super) fn asset_observation(&self) -> Value {
-        json!({ "loading": self.asset_loading(), "busy": self.asset_busy(), "phase":
+        json!({ "loading": self.asset_loading(), "busy": self.asset_busy(), "paint_cleanup_pending":self.asset_paint_cleanup_pending(), "phase":
             if self.pending_asset_open.is_some() { "queued" }
             else if let Some(open) = &self.asset_ops.opening { if open.cancelled { "cancelling" } else { "opening" } }
-            else if self.asset_ops.retired.is_some() || self.asset_ops.retiring { "retiring" }
+            else if self.asset_ops.immediate.is_some() || self.asset_ops.retiring { "retiring" }
+            else if self.asset_ops.retired.is_some() { "paint_cleanup_pending" }
             else if self.asset_ops.publishing() { "publishing" }
             else if self.asset_ops.active.is_some() || self.asset_ops.saving.is_some() { "preparing" }
             else if self.asset_ops.disconnected { "failed" } else { "idle" }
@@ -1829,16 +1921,21 @@ impl SceneEditor {
         {
             self.revoke_save_continuation();
         }
-        let mut controller = std::mem::take(&mut self.asset_ops);
-        controller.frame(self, ctx, authorize);
-        if controller.retired.is_some() && controller.retired_frame.is_none() {
-            controller.retired_frame = controller.root_frame;
-        }
-        if controller.busy() || self.pending_asset_open.is_some() {
+        self.asset_nonvisual_frame(ctx, authorize);
+        if self.asset_busy() || self.asset_paint_cleanup_pending() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
+    }
+    // No input reads, paints, synthetic root frames, or unconditional polling.
+    // Worker completion and queued bridge work wake the owner through eframe.
+    pub(super) fn asset_nonvisual_frame(&mut self, ctx: &egui::Context, authorize: bool) {
+        let mut controller = std::mem::take(&mut self.asset_ops);
+        controller.frame(self, ctx, authorize);
+        if let Some(receipt) = &mut self.save_receipt {
+            receipt["paint_cleanup_pending"] = json!(controller.paint_cleanup_pending());
+        }
         let close =
-            controller.close_after && !controller.busy() && self.pending_asset_open.is_none();
+            controller.close_after && !controller.pending() && self.pending_asset_open.is_none();
         if close {
             controller.close_after = false;
         }
@@ -1846,6 +1943,9 @@ impl SceneEditor {
         if close {
             self.request_close();
         }
+    }
+    pub(super) fn asset_paint_cleanup_pending(&self) -> bool {
+        self.asset_ops.paint_cleanup_pending()
     }
     pub(super) fn start_human_asset(
         &mut self,
@@ -2039,7 +2139,7 @@ impl SceneEditor {
     pub(super) fn asset_close_guard(&mut self) -> bool {
         self.save_continuation = None;
         self.pending_asset_open = None;
-        if self.asset_ops.busy() {
+        if self.asset_ops.pending() {
             self.asset_ops.close_after = true;
             self.asset_ops.cancel();
             self.asset_dialog = false;
@@ -2056,7 +2156,7 @@ impl SceneEditor {
         if self.asset_ops.opening.is_some() {
             self.asset_ops.cancel();
         }
-        if !self.asset_ops.close_resources_taken && !self.asset_ops.busy() {
+        if !self.asset_ops.close_resources_taken && !self.asset_ops.pending() {
             self.retire_root_assets();
             self.asset_ops.close_resources_taken = true;
         }
@@ -2145,33 +2245,37 @@ mod tests {
         let mut session = Session::new(Scene::demo()).unwrap();
         session.save(directory.path().join("scene.json")).unwrap();
         let mut host = Host {
+            input: Default::default(),
             editor: SceneEditor::with_workspace(session, Workspace::detached()),
             bridge: None,
         };
         let ctx = egui::Context::default();
         let mut frame = eframe::Frame::_new_kittest();
         let root_frame = |host: &mut Host, frame: &mut eframe::Frame| {
-            ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1280., 800.),
-                    )),
-                    ..Default::default()
-                },
-                |ui| {
-                    eframe::App::ui(host, ui, frame);
-                },
-            )
+            let mut raw = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1280., 800.),
+                )),
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(host, &ctx, &mut raw);
+            ctx.run_ui(raw, |ui| {
+                assert!(asset_timing::in_real_pass(&ctx));
+                eframe::App::logic(host, ui.ctx(), frame);
+                eframe::App::ui(host, ui, frame);
+            })
             .drop_without_applying_deltas();
         };
         let deadline = Instant::now() + Duration::from_secs(5);
-        while host.editor.asset_busy() && Instant::now() < deadline {
+        while (host.editor.asset_busy() || host.editor.asset_paint_cleanup_pending())
+            && Instant::now() < deadline
+        {
             root_frame(&mut host, &mut frame);
             std::thread::yield_now();
         }
         assert!(
-            !host.editor.asset_busy(),
+            !host.editor.asset_busy() && !host.editor.asset_paint_cleanup_pending(),
             "startup did not finish: {}",
             host.editor.error
         );
@@ -2179,24 +2283,19 @@ mod tests {
             host.editor.asset_ops.probe.last_summary().is_none(),
             "predeclared cohort must exclude startup open"
         );
-        let token = format!("timing:scene:{}", host.editor.generation);
+        let token = format!("test:scene:{}", host.editor.generation);
         let args = json!({"expected_session_token":token,"expected_revision":host.editor.session.scene().revision.to_string(),"expected_asset_revision":host.editor.assets.as_ref().unwrap().revision().to_string(),"asset_id":"triangle","source":"triangle.obj"});
-        let (lease, mut observe) =
-            crate::bridge::preparing_test_lease(Instant::now() + Duration::from_secs(3));
-        let mut pending = Some((args, lease));
-        ctx.run_ui(egui::RawInput::default(), |ui| {
-            eframe::App::ui(&mut host, ui, &mut frame);
-            // Same Host dispatch point: after editor actions, before next
-            // UI-end authorization. The lease and controller are production.
-            if let Some((args, lease)) = pending.take() {
-                host.editor
-                    .dispatch_asset_request(&ctx, "timing", "asset_import", args, lease);
-            }
-        })
-        .drop_without_applying_deltas();
+        let (bridge, mut observe) = crate::bridge::queued_test_bridge(
+            json!({"operation":"asset_import","arguments":args}),
+            Instant::now() + Duration::from_secs(3),
+        );
+        host.bridge = Some(bridge);
+        root_frame(&mut host, &mut frame);
         assert!(host.editor.asset_ops.probe.last_summary().is_none());
         let deadline = Instant::now() + Duration::from_secs(5);
-        while host.editor.asset_busy() && Instant::now() < deadline {
+        while (host.editor.asset_busy() || host.editor.asset_paint_cleanup_pending())
+            && Instant::now() < deadline
+        {
             root_frame(&mut host, &mut frame);
             assert!(
                 host.editor.asset_ops.probe.last_summary().is_none(),
@@ -2205,7 +2304,7 @@ mod tests {
             std::thread::yield_now();
         }
         assert!(
-            !host.editor.asset_busy(),
+            !host.editor.asset_busy() && !host.editor.asset_paint_cleanup_pending(),
             "mutation did not finish: {}",
             host.editor.error
         );
@@ -2220,6 +2319,7 @@ mod tests {
             json!(["asset_import", "asset_refresh"])
         );
         assert_eq!(summary["complete"], true);
+        assert_eq!(summary["nonvisual"], false);
         assert_eq!(summary["overlap"], false);
         assert!(summary["gap_count"].as_u64().unwrap() > 0);
         let spans = summary["spans"].as_array().unwrap();
@@ -2262,6 +2362,13 @@ mod tests {
                 <= named("retire_submit")[0]["start_ms"].as_f64().unwrap()
         );
         assert!(!host.editor.asset_ops.probe.active());
+        assert!(!asset_timing::in_real_pass(&ctx));
+        let frames = ctx.cumulative_frame_nr();
+        let mut raw = egui::RawInput::default();
+        eframe::App::raw_input_hook(&mut host, &ctx, &mut raw);
+        let _ = ctx.run_logic(&raw, |ctx| eframe::App::logic(&mut host, ctx, &mut frame));
+        assert_eq!(ctx.cumulative_frame_nr(), frames);
+        assert!(!asset_timing::in_real_pass(&ctx));
         host.editor.test_finish_asset_work();
     }
     #[track_caller]
@@ -2301,10 +2408,10 @@ mod tests {
         }
         assert!(
             done(editor),
-            "controller phase timeout: active={:?}, retired={}, retiring={}, disconnected={}, shutdown={}, finished={}, status={}",
+            "controller phase timeout: active={:?}, retired={}, immediate={}, retiring={}, disconnected={}, shutdown={}, close_resources={}, finished={}, status={}",
             editor.asset_ops.active.as_ref().map(|active| active.phase),
-            editor.asset_ops.retired.is_some(), editor.asset_ops.retiring,
-            editor.asset_ops.disconnected, editor.asset_ops.shutting_down,
+            editor.asset_ops.retired.is_some(), editor.asset_ops.immediate.is_some(), editor.asset_ops.retiring,
+            editor.asset_ops.disconnected, editor.asset_ops.shutting_down, editor.asset_ops.close_resources_taken,
             editor.asset_ops.worker.as_ref().is_some_and(Worker::is_finished), editor.asset_ops.status
         );
     }
@@ -2633,15 +2740,19 @@ mod tests {
                     }
                     release_recovery.take().unwrap().send(()).unwrap();
                 }
-                if let Some(retired) = &editor.asset_ops.retired {
+                if let Some(retired) = &editor.asset_ops.immediate {
                     if case == "save_stale_after_commit" {
                         assert!(retired.saved.is_some());
                     } else {
                         assert!(retired.session.is_some());
                     }
                 } else {
-                    assert_eq!(case, "save_committed_disconnect");
-                    assert!(editor.asset_ops.disconnected);
+                    assert!(
+                        editor.asset_ops.retiring
+                            || editor.asset_ops.disconnected
+                            || editor.asset_ops.saving.is_none(),
+                        "session disposal must be queued, in flight or acknowledged"
+                    );
                 }
 
                 editor.finish_save_continuation();
@@ -2657,7 +2768,7 @@ mod tests {
                 .saving
                 .as_ref()
                 .is_some_and(|save| save.followup.is_some()));
-            assert!(editor.asset_ops.retired.is_some() || editor.asset_ops.retiring);
+            assert!(editor.asset_ops.immediate.is_some() || editor.asset_ops.retiring);
             escape_save_continuation(editor, ctx);
             assert!(editor.save_continuation.is_none());
             assert!(editor
@@ -2666,7 +2777,9 @@ mod tests {
                 .as_ref()
                 .is_none_or(|save| save.continuation == Continuation::SaveOnly));
         }
-        until(editor, ctx, |e| !e.asset_busy());
+        until(editor, ctx, |e| {
+            !e.asset_busy() && !e.asset_paint_cleanup_pending()
+        });
         let committed = !matches!(
             case,
             "save_expired"
@@ -2782,6 +2895,7 @@ mod tests {
             }
             _ => (),
         }
+        until(editor, ctx, |e| !e.asset_ops.pending());
         editor.asset_shutdown();
         until(editor, ctx, SceneEditor::asset_finished);
     }
@@ -2938,14 +3052,16 @@ mod tests {
             );
             let store = editor
                 .asset_ops
-                .retired
+                .immediate
                 .as_ref()
                 .unwrap()
                 .store
                 .as_ref()
                 .unwrap();
             let weak = Arc::downgrade(&store.mesh_snapshots()["triangle"]);
-            until(editor, ctx, |e| !e.asset_busy());
+            until(editor, ctx, |e| {
+                !e.asset_busy() && !e.asset_paint_cleanup_pending()
+            });
             assert!(weak.upgrade().is_none());
             if case == "open_close" {
                 assert!(editor.close_approved);
@@ -2964,7 +3080,9 @@ mod tests {
                 "invalid draft retained across Retry".into();
             editor.retry_asset_open().unwrap();
             assert!(editor.retry_asset_open().is_err());
-            until(editor, ctx, |e| !e.asset_busy());
+            until(editor, ctx, |e| {
+                !e.asset_busy() && !e.asset_paint_cleanup_pending()
+            });
             assert!(editor.assets.is_some());
             assert_eq!(
                 editor.draft.as_ref().unwrap().translation[0],
@@ -2997,8 +3115,260 @@ mod tests {
         if !matches!(case, "open_stale" | "open_recovered_stale") {
             assert_eq!(editor.generation, generation);
         }
+        until(editor, ctx, |e| !e.asset_ops.pending());
         editor.asset_shutdown();
         until(editor, ctx, SceneEditor::asset_finished);
+    }
+    // One live callback generation may remain parked while arbitrarily many
+    // never-painted roots complete through the same bounded candidate/cleanup
+    // slots. Reappearance is a real egui UI pass, not a synthetic frame count.
+    #[test]
+    fn hidden_saves_keep_only_painted_owners_and_preserve_held_commit_on_disconnect() {
+        fn tick(host: &mut Host, ctx: &egui::Context) {
+            let raw = egui::RawInput::default();
+            host.input.observe(&raw, ctx);
+            let _ = ctx.run_logic(&raw, |ctx| host.logic_tick(ctx));
+            if host.editor.asset_ops.close_resources_taken {
+                host.editor.asset_shutdown();
+            }
+        }
+        #[track_caller]
+        fn wait(host: &mut Host, ctx: &egui::Context, done: impl Fn(&Host) -> bool) {
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !done(host) && Instant::now() < deadline {
+                tick(host, ctx);
+                std::thread::yield_now();
+            }
+            assert!(
+                done(host),
+                "hidden owner stalled: {} {:?}",
+                host.editor.error,
+                host.editor.asset_observation()
+            );
+        }
+        fn save(
+            host: &mut Host,
+            root: &std::path::Path,
+            filename: Option<&str>,
+        ) -> impl FnMut() -> Option<Value> {
+            host.editor.save_grant = Some(persistence_commands::SaveGrant::new(root).unwrap());
+            let mut args = json!({"expected_session_token":format!("test:scene:{}",host.editor.generation),
+                "expected_revision":host.editor.session.scene().revision.to_string(),
+                "expected_persistence_token":host.editor.persistence_token()});
+            if let Some(filename) = filename {
+                args["filename"] = json!(filename);
+            }
+            let (bridge, observe) = crate::bridge::queued_test_bridge(
+                json!({"operation":"scene_save","arguments":args}),
+                Instant::now() + Duration::from_secs(10),
+            );
+            host.bridge = Some(bridge);
+            observe
+        }
+        for disconnect in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let roots: Vec<_> = ["a", "b", "c", "d"]
+                .into_iter()
+                .map(|name| {
+                    let root = directory.path().join(name);
+                    std::fs::create_dir(&root).unwrap();
+                    std::fs::write(
+                        root.join("triangle.obj"),
+                        b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+                    )
+                    .unwrap();
+                    let mut store = AssetStore::open(&root).unwrap();
+                    store.import("triangle", "triangle.obj").unwrap();
+                    root
+                })
+                .collect();
+            let mut session = Session::new(Scene::authored_empty("hidden-roots")).unwrap();
+            session.save(roots[0].join("scene.json")).unwrap();
+            let mut host = Host {
+                editor: SceneEditor::with_workspace(session, Workspace::detached()),
+                input: Default::default(),
+                bridge: None,
+            };
+            let ctx = egui::Context::default();
+            let mut original = None;
+            ctx.run_ui(egui::RawInput::default(), |ui| {
+                host.editor.asset_begin_root_frame(&ctx);
+                // Adoption happens AFTER frame entry, BEFORE this callback.
+                // Entry-only exposure tracking would miss these exact owners.
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while host.editor.asset_busy() && Instant::now() < deadline {
+                    host.editor.asset_nonvisual_frame(&ctx, true);
+                    std::thread::yield_now();
+                }
+                assert!(!host.editor.asset_busy());
+                host.editor.preview_assets.clear();
+                let mesh = host.editor.resolved["triangle"].clone();
+                original = Some(Arc::downgrade(&mesh));
+                host.editor.asset_mark_callback_owners();
+                ui.painter().add(egui::PaintCallback {
+                    rect: ui.max_rect(),
+                    callback: mesh,
+                });
+            })
+            .drop_without_applying_deltas();
+            let original = original.unwrap();
+            let real_frames = ctx.cumulative_frame_nr();
+            for (root, filename) in [(1, Some("scene.json")), (1, None), (2, Some("scene.json"))] {
+                let old = Arc::downgrade(&host.editor.resolved["triangle"]);
+                let mut observe = save(&mut host, &roots[root], filename);
+                tick(&mut host, &ctx);
+                wait(&mut host, &ctx, |host| !host.editor.asset_busy());
+                let reply = observe().unwrap();
+                assert_eq!(reply["ok"], true, "{reply}");
+                assert_eq!(
+                    host.editor.session.path(),
+                    Some(roots[root].join("scene.json").as_path())
+                );
+                assert_eq!(
+                    host.editor.save_receipt.as_ref().unwrap()["committed"],
+                    true
+                );
+                assert_eq!(
+                    host.editor.save_receipt.as_ref().unwrap()["followup_pending"],
+                    false
+                );
+                assert_eq!(
+                    host.editor.save_receipt.as_ref().unwrap()["paint_cleanup_pending"],
+                    true
+                );
+                assert_eq!(ctx.cumulative_frame_nr(), real_frames);
+                assert!(original.upgrade().is_some());
+                assert!(host.editor.asset_ops.immediate.is_none());
+                assert!(host.editor.asset_ops.held_completion.is_none());
+                if root == 2 {
+                    assert!(
+                        old.upgrade().is_none(),
+                        "never-painted prior root must retire without paint"
+                    );
+                }
+            }
+            // Reappearance releases the original fence and constructs a real
+            // callback using the newly adopted current root (not the old root
+            // that was present at the earlier frame entry).
+            let current = Arc::downgrade(&host.editor.resolved["triangle"]);
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                host.editor.asset_begin_root_frame(&ctx);
+                host.editor.asset_mark_callback_owners();
+                ui.painter().add(egui::PaintCallback {
+                    rect: ui.max_rect(),
+                    callback: current.upgrade().unwrap(),
+                });
+            });
+            wait(&mut host, &ctx, |host| !host.editor.asset_busy());
+            assert!(original.upgrade().is_none());
+            let fault = if disconnect {
+                host.editor
+                    .asset_ops
+                    .worker
+                    .as_mut()
+                    .unwrap()
+                    .try_shutdown()
+                    .unwrap();
+                wait(&mut host, &ctx, |host| {
+                    host.editor.asset_ops.worker.as_ref().unwrap().is_finished()
+                });
+                let (worker, barrier) = Worker::panic_after_n_events_for_test(2).unwrap();
+                host.editor.asset_ops.worker = Some(worker);
+                host.editor.asset_ops.disconnected = false;
+                Some(barrier)
+            } else {
+                None
+            };
+            host.editor.save_grant = Some(persistence_commands::SaveGrant::new(&roots[3]).unwrap());
+            let args = json!({"expected_session_token":format!("test:scene:{}",host.editor.generation),
+                "expected_revision":host.editor.session.scene().revision.to_string(),
+                "expected_persistence_token":host.editor.persistence_token(),"filename":"scene.json"});
+            let (lease, mut observe) =
+                crate::bridge::preparing_test_lease(Instant::now() + Duration::from_secs(10));
+            host.editor
+                .dispatch_save_request(&ctx, "test", &args, lease);
+            host.editor.asset_nonvisual_frame(&ctx, true);
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !host
+                .editor
+                .asset_ops
+                .saving
+                .as_ref()
+                .is_some_and(|save| save.phase == Phase::Prepared)
+                && Instant::now() < deadline
+            {
+                host.editor.asset_nonvisual_frame(&ctx, false);
+                std::thread::yield_now();
+            }
+            assert!(host
+                .editor
+                .asset_ops
+                .saving
+                .as_ref()
+                .is_some_and(|save| save.phase == Phase::Prepared));
+            host.editor.asset_nonvisual_frame(&ctx, true);
+            assert!(host.editor.asset_publishing());
+            // A non-callback owner awaiting handoff occupies the fixed immediate
+            // role. Poll may receive the one candidate while that role is full;
+            // it must retain it and continue consuming disconnect/ack signals.
+            host.editor.asset_ops.immediate = Some(RetiredAssets {
+                session: Some(Box::new(host.editor.session.clone())),
+                ..Default::default()
+            });
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while host.editor.asset_ops.held_completion.is_none() && Instant::now() < deadline {
+                let mut controller = std::mem::take(&mut host.editor.asset_ops);
+                controller.poll(&mut host.editor);
+                host.editor.asset_ops = controller;
+                std::thread::yield_now();
+            }
+            assert!(host.editor.asset_ops.held_completion.is_some());
+            assert!(observe().is_none());
+            assert!(host.editor.asset_busy());
+            assert!(
+                host.editor.asset_ops.request.is_none()
+                    && host.editor.asset_ops.save_request.is_none()
+            );
+            if let Some(barrier) = fault {
+                barrier.wait();
+                let deadline = Instant::now() + Duration::from_secs(3);
+                while !host.editor.asset_ops.disconnected && Instant::now() < deadline {
+                    let mut controller = std::mem::take(&mut host.editor.asset_ops);
+                    controller.poll(&mut host.editor);
+                    host.editor.asset_ops = controller;
+                    std::thread::yield_now();
+                }
+                assert!(host.editor.asset_ops.disconnected);
+                assert!(host.editor.asset_ops.held_completion.is_some());
+                assert!(
+                    host.editor.asset_ops.saving.is_some(),
+                    "delivered commit retains publication authority after disconnect"
+                );
+            }
+            wait(&mut host, &ctx, |host| {
+                host.editor.asset_ops.saving.is_none()
+            });
+            let reply = observe().unwrap();
+            assert_eq!(reply["ok"], true, "{reply}");
+            assert_eq!(reply["result"]["receipt"]["committed"], true);
+            assert!(original.upgrade().is_none());
+            assert!(
+                current.upgrade().is_some(),
+                "actual callback owner must still have a fenced successor owner"
+            );
+            assert!(host.editor.asset_paint_cleanup_pending());
+            output.drop_without_applying_deltas();
+            ctx.run_ui(egui::RawInput::default(), |_| {
+                host.editor.asset_begin_root_frame(&ctx)
+            })
+            .drop_without_applying_deltas();
+            wait(&mut host, &ctx, |host| !host.editor.asset_ops.pending());
+            // The failed worker promises handoff rather than a retirement ack;
+            // final shutdown joins its bounded drainer before testing last drop.
+            host.editor.asset_shutdown();
+            wait(&mut host, &ctx, |host| host.editor.asset_finished());
+            assert!(current.upgrade().is_none());
+        }
     }
     // Real egui multipass output owns a discarded callback until AFTER pass1
     // app code. Only a later root-frame pass0 can hand its last map owner off.
@@ -3054,6 +3424,7 @@ mod tests {
                 editor.asset_begin_root_frame(&ctx);
                 editor.asset_frame(&ctx, false);
                 if ctx.current_pass_index() == 0 {
+                    editor.asset_mark_callback_owners();
                     ui.painter().add(egui::PaintCallback {
                         rect: ui.max_rect(),
                         callback: weak.upgrade().unwrap(),
@@ -3123,7 +3494,7 @@ mod tests {
                                     .as_ref()
                                     .unwrap()
                                     .session
-                                    .is_some());
+                                    .is_none());
                             }
                             "preview" => {
                                 editor.accept_runtime_resources();
@@ -3148,7 +3519,7 @@ mod tests {
                     assert!(editor.asset_ops.retired.is_some());
                     assert!(!editor.asset_ops.retiring);
                     if case == "save" {
-                        assert!(editor.asset_ops.retired.as_ref().unwrap().session.is_some());
+                        assert!(editor.asset_ops.retired.as_ref().unwrap().session.is_none());
                     }
                     // Fixed map roles plus the old pass0 callback, which
                     // FullOutput::append has not yet replaced during app.ui.
@@ -3162,7 +3533,7 @@ mod tests {
             assert_eq!(weak.strong_count(), owners);
             assert!(!editor.asset_finished());
             let deadline = Instant::now() + Duration::from_secs(3);
-            while editor.asset_ops.busy() && Instant::now() < deadline {
+            while editor.asset_ops.pending() && Instant::now() < deadline {
                 let output = ctx.run_ui(egui::RawInput::default(), |_ui| {
                     assert_eq!(ctx.current_pass_index(), 0);
                     assert!(ctx.cumulative_frame_nr() > 0);
@@ -3194,6 +3565,7 @@ mod tests {
             } else {
                 assert!(weak.upgrade().is_none());
             }
+            until(&mut editor, &ctx, |e| !e.asset_ops.pending());
             editor.asset_shutdown();
             until(&mut editor, &ctx, SceneEditor::asset_finished);
             assert!(weak.upgrade().is_none());
@@ -3306,7 +3678,7 @@ mod tests {
                     editor.asset_begin_root_frame(&ctx)
                 })
                 .drop_without_applying_deltas();
-                until(&mut editor, &ctx, |e| e.asset_ops.retired.is_some());
+                until(&mut editor, &ctx, |e| e.asset_ops.immediate.is_some());
                 barrier.wait();
                 until(&mut editor, &ctx, |e| {
                     e.asset_ops.disconnected && !e.asset_ops.pending()
@@ -3323,6 +3695,7 @@ mod tests {
                     editor.asset_begin_root_frame(&ctx);
                     editor.asset_frame(&ctx, false);
                     if ctx.current_pass_index() == 0 {
+                        editor.asset_mark_callback_owners();
                         ui.painter().add(egui::PaintCallback {
                             rect: ui.max_rect(),
                             callback: editor.resolved["triangle"].clone(),
@@ -3376,7 +3749,7 @@ mod tests {
                             .is_some_and(|a| a.phase == Phase::Prepared)
                     });
                     editor.asset_frame(&ctx, true);
-                    until(&mut editor, &ctx, |e| !e.asset_ops.busy());
+                    until(&mut editor, &ctx, |e| !e.asset_ops.pending());
                     assert!(editor.assets.as_ref().unwrap().mesh("triangle").is_some());
                     editor.asset_shutdown();
                     until(&mut editor, &ctx, SceneEditor::asset_finished);
@@ -3461,6 +3834,7 @@ mod tests {
                     editor.asset_begin_root_frame(&ctx);
                     if ctx.current_pass_index() == 0 {
                         assert!(editor.asset_ops.request.is_some());
+                        editor.asset_mark_callback_owners();
                         ui.painter().add(egui::PaintCallback {
                             rect: ui.max_rect(),
                             callback: editor.preview_assets["old"].clone(),
@@ -3481,13 +3855,16 @@ mod tests {
                         editor.asset_frame(&ctx, false);
                     }
                     let retired = editor.asset_ops.retired.as_ref().unwrap();
-                    assert!(retired.request.is_some());
+                    assert!(
+                        retired.request.is_none(),
+                        "unsubmitted request is not paint-owned"
+                    );
                     assert!(retired.maps[1].meshes.contains_key("old"));
                     assert_eq!(editor.asset_ops.retired_frame, Some(0));
                     assert!(weak.upgrade().is_some());
                 })
                 .drop_without_applying_deltas();
-                until(&mut editor, &ctx, |e| !e.asset_ops.busy());
+                until(&mut editor, &ctx, |e| !e.asset_ops.pending());
                 assert!(weak.upgrade().is_none());
                 assert!(editor.assets.as_ref().unwrap().mesh("triangle").is_none());
                 assert!(!directory.path().join(".ruster-assets.json").exists());
@@ -3628,7 +4005,7 @@ mod tests {
                     }
                 }
             }
-            until(&mut editor, &ctx, |e| !e.asset_ops.busy());
+            until(&mut editor, &ctx, |e| !e.asset_ops.pending());
             let accepted = matches!(
                 case,
                 "human" | "agent" | "close_publishing" | "reset_preparing" | "reset_retiring"
@@ -3679,6 +4056,7 @@ mod tests {
                     }
                 }
             }
+            until(&mut editor, &ctx, |e| !e.asset_ops.pending());
             editor.asset_shutdown();
             until(&mut editor, &ctx, SceneEditor::asset_finished);
         }

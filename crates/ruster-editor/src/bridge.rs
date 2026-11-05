@@ -345,6 +345,24 @@ impl Drop for Bridge {
 }
 
 #[cfg(test)]
+pub(crate) fn queued_test_bridge(
+    request: Value,
+    deadline: Instant,
+) -> (Bridge, impl FnMut() -> Option<Value>) {
+    let (sender, receiver) = mpsc::sync_channel(1);
+    let (pending, state, _) = new_pending(request, deadline);
+    assert!(sender.try_send(pending).is_ok());
+    (
+        Bridge {
+            receiver,
+            directory: tempfile::tempdir().unwrap(),
+            nonce: "test".into(),
+        },
+        move || state.take_reply_or_expire(),
+    )
+}
+
+#[cfg(test)]
 pub(crate) fn preparing_test_lease(
     deadline: Instant,
 ) -> (RequestLease, impl FnMut() -> Option<Value>) {
