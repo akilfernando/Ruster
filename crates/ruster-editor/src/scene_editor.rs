@@ -717,17 +717,17 @@ impl SceneEditor {
             self.external.status = error;
         }
     }
-    fn external_frame(&mut self, ctx: &egui::Context) {
-        self.external.set_closing(
-            self.close_pending
-                || self.close_approved
-                || self.close_shutdown
-                || matches!(
-                    self.recovery_transition,
-                    Some(RecoveryTransition::Close { .. })
-                ),
-        );
-        let blocked = self.guard().is_err() || self.manipulation.offset_pending();
+    fn close_in_progress(&self) -> bool {
+        self.close_pending
+            || self.close_approved
+            || self.close_shutdown
+            || matches!(
+                self.recovery_transition,
+                Some(RecoveryTransition::Close { .. })
+            )
+    }
+    fn external_maintenance(&mut self, ctx: &egui::Context, blocked: bool) {
+        self.external.set_closing(self.close_in_progress());
         if let Some(import) = self.external.poll(
             ctx,
             &self.session,
@@ -755,6 +755,10 @@ impl SceneEditor {
                 }
             }
         }
+    }
+    fn external_frame(&mut self, ctx: &egui::Context) {
+        let blocked = self.guard().is_err() || self.manipulation.offset_pending();
+        self.external_maintenance(ctx, blocked);
         if let Some((source, intent)) =
             self.external
                 .ui(ctx, !blocked, self.session.scene().revision)
@@ -1338,6 +1342,40 @@ impl SceneEditor {
                 cancelled: false,
             });
             self.process_recovery_ack();
+        }
+    }
+    // Shared by real UI completion and hidden owner logic. No dialog decision,
+    // new command admission, synthetic paint, or fence advancement occurs here.
+    fn close_maintenance(&mut self, ctx: &egui::Context, allow_advance: bool) {
+        if !self.close_in_progress() || self.close_ready_to_exit {
+            return;
+        }
+        self.creation_export.cancel();
+        self.export_maintenance();
+        // Drain existing working-copy jobs, including an already queued Save
+        // promotion. Closing blocks source import and external editor launch.
+        self.external_maintenance(ctx, true);
+        if !allow_advance {
+            return;
+        }
+        self.start_close_cleanup();
+        if self.close_shutdown {
+            self.asset_shutdown();
+            if self.recovery.shutdown_finished()
+                && self.runtime.finished()
+                && self.external.finished()
+                && self.creation_export.finished()
+                && self.asset_finished()
+            {
+                self.close_ready_to_exit = true;
+                self.remember_camera();
+                self.workspace.flush();
+                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+            } else {
+                // Existing close-only retry: terminal notifications can arrive
+                // just before their worker thread reports that it has exited.
+                ctx.request_repaint_after(Duration::from_millis(16));
+            }
         }
     }
     #[cfg(test)]
@@ -4416,23 +4454,7 @@ impl SceneEditor {
         // Final authorization follows every human dialog/cancel/close action.
         self.asset_frame(&ctx, true);
         self.finish_save_continuation();
-        self.start_close_cleanup();
-        if self.close_shutdown {
-            self.asset_shutdown();
-            if self.recovery.shutdown_finished()
-                && self.runtime.finished()
-                && self.external.finished()
-                && self.creation_export.finished()
-                && self.asset_finished()
-            {
-                self.close_ready_to_exit = true;
-                self.remember_camera();
-                self.workspace.flush();
-                ctx.send_viewport_cmd(egui::ViewportCommand::Close);
-            } else {
-                ctx.request_repaint_after(Duration::from_millis(16));
-            }
-        }
+        self.close_maintenance(&ctx, true);
     }
 }
 struct Host {

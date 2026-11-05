@@ -1,6 +1,6 @@
 # 0032: nonvisual editor progress and bounded retirement
 
-Status: accepted implementation design2026-11-06 by root after Astra assessment; implementation and verification pending. Agent-selected dependency of the user-approved [V2a goal](../plans/V2A-AUTHORED-LIGHTING.md), preserving first-class direct/MCP parity. Refines [0030](0030-bounded-asset-preparation-and-publication.md); does not remove callback lifetime fences or change lighting scope.
+Status: accepted implementation design2026-11-06 by root after Astra assessment; source implemented and verified, integrated native qualification in progress. Agent-selected dependency of the user-approved [V2a goal](../plans/V2A-AUTHORED-LIGHTING.md), preserving first-class direct/MCP parity. Refines [0030](0030-bounded-asset-preparation-and-publication.md); does not remove callback lifetime fences or change lighting scope.
 
 ## Context and evidence
 
@@ -35,3 +35,8 @@ A committed Save completes only after required nonvisual retirement/recovery ack
 The controller becomes more explicit about exposure and cleanup phases. The additional fixed bundle increases bounded retained memory; final resource evidence must account for it. No lower memory, latency, CPU or completed capability claim follows from this decision.
 
 Verify adversarial worker completion/UI reappearance ordering, role overflow/backpressure and disconnection without foreground final-payload drops; retain expiry/nonexecution and fresh human priority. Run affected default/inspection editor checks and strict lint. Then use actual native hidden inspection, repeated edits/same-root saves, content/root-changing SaveAs and later UI reappearance without forced focus as the model-progress proof. Pending-human guards, expired-request nonexecution and truthful capture waiting remain required. Reuse unchanged Scene/renderer/runtime evidence only where these edits do not alter its inputs.
+
+
+## Native checkpoint and close maintenance extension
+
+The first pinned hidden native proof completes49SDK calls and three textured edit/save cycles while original painted owners remain fenced. Its normal Close waits until actual UI exposure, which is intentional under this design. Merely permitting unfocused rendering does not guarantee a Wayland callback; do not force or fabricate a paint witness. A separate owning red case exposes no-fence clean-close starvation caused by UI-only cleanup initiation/finalization. Shared owner-thread close maintenance repairs that case, including cancelled export/existing blocked working-copy completion, recovery and all finished predicates. The existing close-only16ms unfinished-worker retry moves with that code unchanged; no new timer or continuous paint loop is selected. Fresh human cancellation defers advancement. Actual fenced hidden Close still requires a genuine later UI pass, and the first native orphan's exit status remains unknown. [Evidence](../evidence/V2A-foundation.md#actual-hidden-sdk-checkpoint-and-clean-close-follow-up--2026-11-06) separates these results from final acceptance.

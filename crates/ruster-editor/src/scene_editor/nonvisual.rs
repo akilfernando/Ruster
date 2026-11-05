@@ -86,12 +86,48 @@ mod tests {
             .unwrap()
             .events
             .push(egui::ViewportEvent::Close);
+        raw.events.push(egui::Event::Key {
+            key: egui::Key::Escape,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        });
         host.input.observe(&raw, &ctx);
         let output = ctx.run_logic(&raw, |ctx| host.logic_tick(ctx));
         assert!(output.viewport_commands[&egui::ViewportId::ROOT]
             .contains(&egui::ViewportCommand::CancelClose));
+        assert!(
+            !host.editor.close_shutdown && !host.editor.close_ready_to_exit,
+            "fresh human cancellation must reach UI before cleanup advances"
+        );
+        // The synthetic input owner releases its event; no paint is introduced.
+        raw.events.clear();
         assert!(closed().is_none());
         assert_eq!(host.editor.session.scene().revision, 0);
+        // A clean blank document has no callback fence. Its ordinary Close
+        // must finish via owner logic without any UI pass or hidden paint.
+        let mut sent_close = output.viewport_commands[&egui::ViewportId::ROOT]
+            .contains(&egui::ViewportCommand::Close);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !host.editor.close_ready_to_exit && Instant::now() < deadline {
+            host.input.observe(&raw, &ctx);
+            let output = ctx.run_logic(&raw, |ctx| host.logic_tick(ctx));
+            sent_close |= output
+                .viewport_commands
+                .get(&egui::ViewportId::ROOT)
+                .is_some_and(|commands| commands.contains(&egui::ViewportCommand::Close));
+            std::thread::yield_now();
+        }
+        assert!(
+            host.editor.close_ready_to_exit && sent_close,
+            "clean hidden Close must complete without paint"
+        );
+        assert_eq!(ctx.cumulative_frame_nr(), 0);
+        assert!(
+            closed().is_none(),
+            "Close must retain priority over queued edits"
+        );
     }
 }
 
@@ -134,6 +170,8 @@ impl Host {
             self.editor.asset_nonvisual_frame(ctx, true);
             self.editor.finish_save_continuation();
         }
+        self.editor
+            .close_maintenance(ctx, !self.input.human_pending);
         if !self.editor.close_approved {
             self.editor.recovery_maintenance(ctx);
         }
