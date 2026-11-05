@@ -184,6 +184,18 @@ impl AssetStore {
         self.identity == *identity
     }
 
+    /// Worker-only: check the exact accepted catalog baseline and retain its
+    /// advisory lock through an external publication action. The callback must
+    /// not reenter asset mutation/open for this root. This coordinates cooperating
+    /// catalog writers, not noncooperating filesystem edits or a scene transaction.
+    pub fn with_current_catalog<T>(
+        &self,
+        action: impl FnOnce() -> Result<T, AssetError>,
+    ) -> Result<T, AssetError> {
+        let _lock = self.guard(self.revision())?;
+        action()
+    }
+
     /// Capture bounded metadata and Arc handles only: no reads, locks, hashes,
     /// cache work or pixel equality. Hosts allow at most one outstanding request.
     pub fn request_at(
@@ -783,6 +795,7 @@ mod tests {
             DiagnosticEpoch,
             RenameSourceChanged,
             RenameDestinationAppeared,
+            CatalogLease,
         }
         for case in [
             Case::Success,
@@ -795,6 +808,7 @@ mod tests {
             Case::DiagnosticEpoch,
             Case::RenameSourceChanged,
             Case::RenameDestinationAppeared,
+            Case::CatalogLease,
         ] {
             let owner = tempfile::tempdir().unwrap();
             let project = owner.path().join("project");
@@ -820,6 +834,43 @@ mod tests {
             let identity = store.state_identity();
             let revision = store.revision();
             let catalog = fs::read(project.join(REGISTRY)).unwrap();
+            if matches!(case, Case::CatalogLease) {
+                let mut writer = AssetStore::open(&project).unwrap();
+                let value = store
+                    .with_current_catalog(|| {
+                        // Another cooperating worker cannot publish while the
+                        // checked external action owns the catalog reservation.
+                        let failure = std::thread::spawn(move || writer.refresh("color"))
+                            .join()
+                            .unwrap()
+                            .unwrap_err();
+                        assert!(failure.to_string().contains("Busy"));
+                        Ok(42)
+                    })
+                    .unwrap();
+                assert_eq!(value, 42);
+                let failure = store
+                    .with_current_catalog::<()>(|| Err(error("external action failed")))
+                    .unwrap_err();
+                assert_eq!(failure.to_string(), "external action failed");
+                drop(lock(&project).unwrap()); // callback error released the lock
+                let mut external = catalog.clone();
+                external.push(b'\n');
+                fs::write(project.join(REGISTRY), &external).unwrap();
+                let mut called = false;
+                let failure = store
+                    .with_current_catalog(|| {
+                        called = true;
+                        Ok(())
+                    })
+                    .unwrap_err();
+                assert!(!called);
+                assert!(failure.to_string().contains("reopen"));
+                assert_eq!(fs::read(project.join(REGISTRY)).unwrap(), external);
+                assert!(store.matches_identity(&identity));
+                assert_eq!(store.revision(), revision);
+                continue;
+            }
             let staged_bytes: &[u8] =
                 if matches!(case, Case::RepairedFailure | Case::DiagnosticEpoch) {
                     b"corrupt PNG"
@@ -858,6 +909,7 @@ mod tests {
             let mut held = None;
             match case {
                 Case::Success => (),
+                Case::CatalogLease => unreachable!("catalog lease case handled above"),
                 Case::SourceChanged => fs::write(project.join("color.png"), &first).unwrap(),
                 Case::SourceMissing => fs::remove_file(project.join("color.png")).unwrap(),
                 Case::RepairedFailure => fs::write(project.join("color.png"), &first).unwrap(),
