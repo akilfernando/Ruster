@@ -251,10 +251,10 @@ impl SceneEditor {
         #[cfg(feature = "inspection")]
         let workspace_started = probe.span_start();
         if let Some(path) = self.session.path() {
-            self.workspace.remember(path);
+            self.workspace.remember_saved(path, self.navigation.camera);
+        } else {
+            self.workspace.flush();
         }
-        self.remember_camera();
-        self.workspace.flush();
         #[cfg(feature = "inspection")]
         probe.record("save_workspace_update", workspace_started);
         if self.workspace.state_path().is_some() && !self.workspace.error.is_empty() {

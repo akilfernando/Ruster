@@ -2379,6 +2379,7 @@ mod tests {
                 | "save_revoke"
                 | "save_revoke_after"
                 | "save_warning_close"
+                | "save_workspace_warning_close"
                 | "save_terminal_prepared"
                 | "save_terminal_publishing"
                 | "save_recovery_error_new"
@@ -2393,13 +2394,22 @@ mod tests {
             | "save_human_offset_revoke"
             | "save_human_offset_cancel"
             | "save_warning_close"
+            | "save_workspace_warning_close"
             | "save_recovery_error_close" => Continuation::ThenClose,
             _ => Continuation::SaveOnly,
         };
-        let destination = if case == "save_warning_close" {
+        let destination = if matches!(case, "save_warning_close" | "save_workspace_warning_close") {
             let other = root.join("destination");
             std::fs::create_dir(&other).unwrap();
-            editor.save_shader_reset_failure = Some("injected committed warning".into());
+            if case == "save_warning_close" {
+                editor.save_shader_reset_failure = Some("injected committed warning".into());
+            } else {
+                let preferences = root.join("workspace.json");
+                let mut workspace = Workspace::at_for_test(preferences.clone());
+                workspace.persist().unwrap();
+                std::fs::write(&preferences, b"{external").unwrap();
+                editor.workspace = workspace;
+            }
             other.join("saved.json")
         } else if case == "save_symlink_root" {
             root.join("normalized.json")
@@ -2685,7 +2695,7 @@ mod tests {
                 assert_eq!(reply.as_ref().unwrap()["ok"], adopted, "{reply:?}");
             }
         }
-        if adopted && case != "save_warning_close" {
+        if adopted && !matches!(case, "save_warning_close" | "save_workspace_warning_close") {
             assert_eq!(editor.generation, generation);
             assert!(editor.assets.as_ref().unwrap().matches_identity(&identity));
             assert!(Arc::ptr_eq(&editor.resolved["triangle"], &accepted));
@@ -2711,6 +2721,23 @@ mod tests {
                     .unwrap()
                     .contains("injected committed warning"));
                 assert!(editor.notice.contains("Stayed in this scene"));
+            }
+            "save_workspace_warning_close" => {
+                assert!(!editor.close_approved);
+                assert!(editor.save_continuation.is_none());
+                let receipt = editor.save_receipt.as_ref().unwrap();
+                assert_eq!(receipt["committed"], true);
+                assert_eq!(receipt["followup_pending"], false);
+                assert!(receipt["warning"]
+                    .as_str()
+                    .unwrap()
+                    .contains("workspace settings"));
+                assert!(editor.notice.contains("Stayed in this scene"));
+                assert_eq!(
+                    std::fs::read(root.join("workspace.json")).unwrap(),
+                    b"{external"
+                );
+                assert!(editor.workspace.prefs.recent.contains(&destination));
             }
             "save_human_offset" | "save_human_offset_cancel" | "save_human_offset_revoke" => {
                 assert!(editor.manipulation.offset_pending());
@@ -3225,6 +3252,7 @@ mod tests {
             "save_recovery_error_close",
             "save_committed_disconnect",
             "save_warning_close",
+            "save_workspace_warning_close",
             "save_stale_after_commit",
             "save_symlink_root",
         ] {

@@ -496,6 +496,10 @@ impl Workspace {
     pub fn detached() -> Self {
         Self::at(None)
     }
+    #[cfg(test)]
+    pub fn at_for_test(path: PathBuf) -> Self {
+        Self::at(Some(path))
+    }
     pub fn load() -> Self {
         let path = std::env::var_os("RUSTER_EDITOR_STATE")
             .map(PathBuf::from)
@@ -705,6 +709,19 @@ impl Workspace {
         self.dirty = true;
     }
     pub fn remember(&mut self, path: &Path) {
+        if self.stage_recent(path) {
+            self.flush();
+        }
+    }
+    /// Save adoption publishes recent-file and camera preferences together.
+    pub fn remember_saved(&mut self, path: &Path, camera: Option<ruster_render::CameraState>) {
+        self.stage_recent(path);
+        if let Some(camera) = camera {
+            self.remember_camera(path, camera);
+        }
+        self.flush();
+    }
+    fn stage_recent(&mut self, path: &Path) -> bool {
         if let Ok(path) = path.canonicalize() {
             self.prefs.recent.retain(|p| p != &path);
             self.prefs.recent.insert(0, path);
@@ -713,7 +730,9 @@ impl Workspace {
                 .cameras
                 .retain(|(old, _)| self.prefs.recent.contains(old));
             self.dirty = true;
-            self.flush();
+            true
+        } else {
+            false
         }
     }
     pub fn changed(&mut self) {
@@ -1055,6 +1074,13 @@ mod tests {
             Workspace::at(Some(path.clone())).camera_for(&recent),
             Some(camera)
         );
+        let batched = dir.path().join("scene-batched.json");
+        std::fs::write(&batched, "example").unwrap();
+        w.remember_saved(&batched, Some(camera));
+        let reopened = Workspace::at(Some(path.clone()));
+        assert_eq!(reopened.prefs.recent[0], batched);
+        assert_eq!(reopened.camera_for(&batched), Some(camera));
+        assert_eq!(reopened.camera_for(&recent), Some(camera));
         let mut invalid_camera = w.prefs.json();
         invalid_camera["cameras"][0]["distance"] = (-1).into();
         assert!(Preferences::parse(&serde_json::to_vec(&invalid_camera).unwrap()).is_err());
@@ -1067,6 +1093,15 @@ mod tests {
         assert!(Preferences::parse(&serde_json::to_vec(&oversized).unwrap()).is_err());
         let original = std::fs::read(&path).unwrap();
         std::fs::write(&path, b"{broken").unwrap();
+        let pending_camera = ruster_render::CameraState {
+            distance: 9.0,
+            ..camera
+        };
+        w.remember_saved(&batched, Some(pending_camera));
+        assert!(!w.error.is_empty());
+        assert!(w.dirty);
+        assert_eq!(w.camera_for(&batched), Some(pending_camera));
+        assert_eq!(std::fs::read(&path).unwrap(), b"{broken");
         w.prefs.scale = 1.5;
         assert!(w.persist().is_err());
         assert_eq!(std::fs::read(&path).unwrap(), b"{broken");
