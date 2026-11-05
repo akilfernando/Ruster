@@ -120,7 +120,12 @@ impl SceneEditor {
         let accepted = self.creation_export.start(&ctx, request)?;
         self.notice =
             "Exporting application… You can keep editing; changed work cancels this export.".into();
-        self.export_status_open = true;
+        // MCP already receives the operation/receipt through inspection. Do not
+        // open an unsolicited window over its subsequent viewport captures.
+        // Existing human-opened status windows remain under human ownership.
+        if !mcp_scope {
+            self.export_status_open = true;
+        }
         Ok(accepted)
     }
     pub(super) fn export_command(&mut self, token: &str, op: &str, args: &Value) -> Result<Value> {

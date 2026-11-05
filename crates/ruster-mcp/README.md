@@ -182,3 +182,6 @@ A successful human or MCP SaveAs into a different asset root changes the scene s
 
 
 Background servicing scope (V2a/0032): the repaired generic editor launched without arguments or with `--scene` uses owner-thread nonvisual servicing; exact-bin hidden verification remains pending in [STATUS](../../docs/STATUS.md). The retained logistics `--scenario` frontend still services its legacy bridge through UI. Rendered captures require actual painting and may expire while hidden; model/save completion must not be inferred from screenshot availability.
+
+
+Export presentation: MCP export start/inspect supplies structured progress and receipts without automatically opening the editor's export-status window. Manual export retains its visible status window. A status window explicitly opened by a human remains human-owned; capture may truthfully report viewport_occluded until that overlap is resolved. The first native iteration exposed/fixed the unsolicited popup; final workflow verification is tracked in STATUS.
