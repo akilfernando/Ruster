@@ -16,7 +16,11 @@ pub const MAX_TRIANGLES: usize = 32_768;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 pub const MAX_ASSETS: usize = 64;
 pub const MAX_RESOLVED_BYTES: usize = 48 * 1024 * 1024;
+mod mutations;
 mod texture;
+pub use mutations::{
+    AssetAdoption, AssetCompletion, AssetMutation, AssetRequest, AssetStateIdentity, PreparedAsset,
+};
 pub use texture::{
     decode_png, validate_texture, Texture, TextureMip, MAX_TEXTURE_BYTES, MAX_TEXTURE_EDGE,
     MAX_TEXTURE_RESOLVED_BYTES, MAX_TEXTURE_SOURCE_BYTES,
@@ -221,12 +225,13 @@ enum Payload {
 /// expected revision and complete on-disk catalog baseline under an advisory lock.
 #[derive(Debug)]
 pub struct AssetStore {
+    identity: AssetStateIdentity,
     root: PathBuf,
     registry: Registry,
     baseline: Option<Vec<u8>>,
     meshes: BTreeMap<String, Arc<Mesh>>,
     textures: BTreeMap<String, Arc<Texture>>,
-    infos: BTreeMap<String, AssetInfo>,
+    infos: BTreeMap<String, Arc<AssetInfo>>,
 }
 
 /// Read-only export authority for the selected, accepted asset sources. Capture
@@ -317,6 +322,7 @@ impl AssetStore {
         };
         validate_registry(&registry)?;
         let mut store = Self {
+            identity: AssetStateIdentity::new(),
             root,
             registry,
             baseline,
@@ -391,7 +397,7 @@ impl AssetStore {
                     info.diagnostic = Some(e.to_string());
                 }
             }
-            store.infos.insert(id, info);
+            store.infos.insert(id, Arc::new(info));
         }
         Ok(store)
     }
@@ -466,183 +472,10 @@ impl AssetStore {
         })
     }
     pub fn inspect(&self) -> Vec<AssetInfo> {
-        self.infos.values().cloned().collect()
-    }
-    pub fn import(&mut self, id: &str, source: &str) -> Result<AssetInfo, AssetError> {
-        self.import_at(self.revision(), id, source)
-    }
-    pub fn import_at(
-        &mut self,
-        expected: u64,
-        id: &str,
-        source: &str,
-    ) -> Result<AssetInfo, AssetError> {
-        let _lock = self.guard(expected)?;
-        validate_id(id)?;
-        validate_relative(source)?;
-        if self.registry.assets.contains_key(id) {
-            return Err(error(format!("asset ID {id:?} already exists")));
-        }
-        if self
-            .registry
-            .assets
+        self.infos
             .values()
-            .any(|record| record.source == source)
-        {
-            return Err(error(format!(
-                "source {source:?} is already registered; use its existing asset ID"
-            )));
-        }
-        if self.registry.assets.len() >= MAX_ASSETS {
-            return Err(error("asset catalog limit (64) reached"));
-        }
-        let kind = AssetKind::from_source(source)?;
-        let (hash, payload) = self.read_source(source, kind)?;
-        self.check_payload_budget(id, &payload)?;
-        self.write_payload_cache(&hash, &payload)?;
-        let mut next = self.registry.clone();
-        next.assets.insert(
-            id.into(),
-            Record {
-                kind,
-                source: source.into(),
-                hash: Some(hash),
-            },
-        );
-        self.commit(next)?;
-        self.install_payload(id, payload);
-        let info = self.info(id, AssetStatus::Ready, None);
-        self.infos.insert(id.into(), info.clone());
-        Ok(info)
-    }
-    pub fn refresh(&mut self, id: &str) -> Result<AssetInfo, AssetError> {
-        self.refresh_at(self.revision(), id)
-    }
-    pub fn refresh_at(&mut self, expected: u64, id: &str) -> Result<AssetInfo, AssetError> {
-        let _lock = self.guard(expected)?;
-        let record = self
-            .registry
-            .assets
-            .get(id)
-            .cloned()
-            .ok_or_else(|| error(format!("unknown asset ID {id:?}")))?;
-        let bytes = match read_source_bytes(&self.root, &record.source, record.kind) {
-            Ok(bytes) => bytes,
-            Err(e) => {
-                let info = self.info(id, self.failure_status(&record.source), Some(e.to_string()));
-                self.infos.insert(id.into(), info);
-                return Err(e);
-            }
-        };
-        let hash = digest(&bytes);
-        if record.kind == AssetKind::Texture && record.hash.as_ref() == Some(&hash) {
-            if let Some(texture) = self.textures.get(id) {
-                // Accepted identical bytes cannot change deterministic decode/mips.
-                // Borrow the immutable payload: do not decode or clone pixels just
-                // to repair its disposable cache and clear a previous diagnostic.
-                if let Err(e) = self.write_texture_cache(&hash, texture) {
-                    self.mark_failure(id, &e);
-                    return Err(e);
-                }
-                let info = self.info(id, AssetStatus::Ready, None);
-                self.infos.insert(id.into(), info.clone());
-                return Ok(info);
-            }
-        }
-        // Meshes still parse on Refresh, including legacy-cache UV recovery.
-        // A texture without an accepted snapshot must decode even if hashes match.
-        let payload = match parse_source(&record.source, record.kind, &bytes) {
-            Ok(payload) => payload,
-            Err(e) => {
-                let info = self.info(id, self.failure_status(&record.source), Some(e.to_string()));
-                self.infos.insert(id.into(), info);
-                return Err(e);
-            }
-        };
-        if let Err(e) = self.check_payload_budget(id, &payload) {
-            self.mark_failure(id, &e);
-            return Err(e);
-        }
-        // Publish cache before catalog. An orphan cache after a catalog write
-        // failure is disposable; accepted payload/hash/revision stay unchanged.
-        if let Err(e) = self.write_payload_cache(&hash, &payload) {
-            self.mark_failure(id, &e);
-            return Err(e);
-        }
-        if record.hash.as_ref() != Some(&hash) {
-            let mut next = self.registry.clone();
-            next.assets.get_mut(id).expect("checked asset").hash = Some(hash.clone());
-            if let Err(e) = self.commit(next) {
-                self.mark_failure(id, &e);
-                return Err(e);
-            }
-        }
-        // Source-only edits (for example comments) still advance the accepted
-        // hash/revision, but need not replace identical renderer geometry. Only
-        // the changed asset needs comparison; unchanged assets need no copies.
-        self.install_payload(id, payload);
-        let info = self.info(id, AssetStatus::Ready, None);
-        self.infos.insert(id.into(), info.clone());
-        Ok(info)
-    }
-    pub fn rename(&mut self, id: &str, source: &str) -> Result<AssetInfo, AssetError> {
-        self.rename_at(self.revision(), id, source)
-    }
-    pub fn rename_at(
-        &mut self,
-        expected: u64,
-        id: &str,
-        source: &str,
-    ) -> Result<AssetInfo, AssetError> {
-        let _lock = self.guard(expected)?;
-        let record = self
-            .registry
-            .assets
-            .get(id)
-            .cloned()
-            .ok_or_else(|| error(format!("unknown asset ID {id:?}")))?;
-        validate_relative(source)?;
-        if AssetKind::from_source(source)? != record.kind {
-            return Err(error("rename cannot change an asset's kind"));
-        }
-        let old = confined(&self.root, &record.source, false)?;
-        let new = confined(&self.root, source, true)?;
-        if old == new {
-            return Ok(self.infos[id].clone());
-        }
-        if fs::symlink_metadata(&new).is_ok() {
-            return Err(error(
-                "rename destination already exists; refusing to overwrite",
-            ));
-        }
-        if self
-            .registry
-            .assets
-            .iter()
-            .any(|(other, record)| other != id && record.source == source)
-        {
-            return Err(error("rename destination is registered to another asset"));
-        }
-        if !old.is_file() {
-            return Err(error("rename source must be an existing regular file"));
-        }
-        fs::rename(&old, &new)?;
-        let mut next = self.registry.clone();
-        next.assets.get_mut(id).expect("checked asset").source = source.into();
-        if let Err(e) = self.commit(next) {
-            if let Err(rollback) = fs::rename(&new, &old) {
-                return Err(error(format!(
-                    "catalog save failed ({e}); source rename rollback also failed ({rollback}); recover {} to {} manually",
-                    new.display(),
-                    old.display()
-                )));
-            }
-            return Err(e);
-        }
-        let mut info = self.infos[id].clone();
-        info.source = source.into();
-        self.infos.insert(id.into(), info.clone());
-        Ok(info)
+            .map(|info| info.as_ref().clone())
+            .collect()
     }
     fn info(&self, id: &str, status: AssetStatus, diagnostic: Option<String>) -> AssetInfo {
         let record = &self.registry.assets[id];
@@ -654,12 +487,6 @@ impl AssetStore {
             status,
             diagnostic,
         }
-    }
-    fn mark_failure(&mut self, id: &str, e: &AssetError) {
-        self.infos.insert(
-            id.into(),
-            self.info(id, AssetStatus::Invalid, Some(e.to_string())),
-        );
     }
     fn failure_status(&self, source: &str) -> AssetStatus {
         if self.root.join(source).exists() {
@@ -682,21 +509,6 @@ impl AssetStore {
             ));
         }
         Ok(lock)
-    }
-    fn commit(&mut self, mut next: Registry) -> Result<(), AssetError> {
-        next.version = 2;
-        next.revision = next
-            .revision
-            .checked_add(1)
-            .ok_or_else(|| error("asset catalog revision exhausted"))?;
-        let bytes = serde_json::to_vec_pretty(&next)?;
-        if bytes.len() > MAX_REGISTRY_BYTES {
-            return Err(error("asset catalog exceeds byte limit"));
-        }
-        atomic_write(&self.root, &self.root.join(REGISTRY), &bytes)?;
-        self.registry = next;
-        self.baseline = Some(bytes);
-        Ok(())
     }
     fn check_payload_budget(&self, id: &str, replacement: &Payload) -> Result<(), AssetError> {
         match replacement {
@@ -746,11 +558,6 @@ impl AssetStore {
                 }
             }
         }
-    }
-    fn read_source(&self, source: &str, kind: AssetKind) -> Result<(String, Payload), AssetError> {
-        let bytes = read_source_bytes(&self.root, source, kind)?;
-        let payload = parse_source(source, kind, &bytes)?;
-        Ok((digest(&bytes), payload))
     }
     fn write_payload_cache(&self, hash: &str, payload: &Payload) -> Result<(), AssetError> {
         match payload {
@@ -1796,6 +1603,31 @@ mod tests {
         );
         assert_eq!(unresolved.revision(), unresolved_revision + 1);
         assert_eq!(unresolved.texture("color"), Some(old.as_ref()));
+        // Rename changes location only, so an oversized/corrupt source remains
+        // renameable without silently accepting or decoding its changed bytes.
+        let accepted = unresolved.texture_snapshots()["color"].clone();
+        let accepted_hash = unresolved
+            .inspect()
+            .into_iter()
+            .find(|i| i.id == "color")
+            .unwrap()
+            .hash;
+        fs::write(
+            root.path().join("color.png"),
+            vec![0; MAX_TEXTURE_SOURCE_BYTES + 1],
+        )
+        .unwrap();
+        let renamed = unresolved.rename("color", "moved.png").unwrap();
+        assert_eq!(renamed.hash, accepted_hash);
+        assert!(Arc::ptr_eq(
+            &accepted,
+            &unresolved.texture_snapshots()["color"]
+        ));
+        assert!(!root.path().join("color.png").exists());
+        assert_eq!(
+            fs::metadata(root.path().join("moved.png")).unwrap().len(),
+            (MAX_TEXTURE_SOURCE_BYTES + 1) as u64
+        );
     }
 
     // File close alone does not end an advisory lock with duplicated/inherited

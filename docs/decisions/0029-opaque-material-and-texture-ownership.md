@@ -4,7 +4,7 @@ Date:2026-11-05. Status: **selected V1 design at the early checkpoint; implement
 
 ## Context and alternatives
 
-Scene5 owns flat objects, object colors and reversible visual edits. The separate asset catalog owns mesh sources and explicit refresh; OBJ currently discards validated UV indices. Preview/behavior/runtime clone `Scene`; runtime resources and accepted-source exports are mesh-only. We need reusable materials and real textures across all of those paths, without a project database, ECS or new renderer backend.
+At selection, Scene5 owned flat objects, object colors and reversible visual edits. The separate asset catalog owned mesh sources and explicit refresh; OBJ discarded validated UV indices. Preview/behavior/runtime clone `Scene`; runtime resources and accepted-source exports are mesh-only. We need reusable materials and real textures across all of those paths, without a project database, ECS or new renderer backend.
 
 Choose a bounded `Scene.materials` map and optional `Object.material` stable ID. A separate file/catalog material would place ordinary edits outside scene Undo and introduce a cross-file transaction problem. Putting materials in behavior `Authoring` would require a parallel visual snapshot at every plain Scene consumer. Cross-scene material libraries remain future scope, not an implicit promise of this scene-owned design.
 

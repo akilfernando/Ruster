@@ -1,6 +1,6 @@
 # 0030 Bounded asset preparation and publication
 
-Date:2026-11-05. Status: **selected implementation direction; deferred bridge primitive implemented with focused verification, asset/controller/open-path integration incomplete.** Agent-selected root/Astra response to the measured V1 dependency; the user authorized adjusting short-term work for quality and efficiency. Extends [0029](0029-opaque-material-and-texture-ownership.md), without changing its formats or adding a product capability. [V1](../plans/V1-TEXTURED-MATERIALS.md) retains all acceptance gates.
+Date:2026-11-05. Status: **selected implementation direction; deferred bridge and staged asset transaction primitives implemented with focused verification; editor controller/open-path integration incomplete.** Agent-selected root/Astra response to the measured V1 dependency; the user authorized adjusting short-term work for quality and efficiency. Extends [0029](0029-opaque-material-and-texture-ownership.md), without changing its formats or adding a product capability. [V1](../plans/V1-TEXTURED-MATERIALS.md) retains all acceptance gates.
 
 ## Context and alternatives
 
