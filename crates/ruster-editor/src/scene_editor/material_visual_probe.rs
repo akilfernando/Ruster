@@ -89,7 +89,7 @@ fn material_inspector_offscreen() {
         captured.lock().unwrap().push(e.to_string());
     }));
     for scale in [1u32, 2] {
-        let width = 320 * scale;
+        let width = 256 * scale;
         let height = 800 * scale;
         let context = egui::Context::default();
         crate::editor_theme::configure(&context);
@@ -129,7 +129,7 @@ fn material_inspector_offscreen() {
                 egui::RawInput {
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
-                        egui::vec2(320., 800.),
+                        egui::vec2(256., 800.),
                     )),
                     time: Some(frame as f64 / 60.),
                     ..Default::default()
@@ -202,7 +202,7 @@ fn material_inspector_offscreen() {
             rx.recv().unwrap().unwrap();
             let pixels = read.slice(..).get_mapped_range().unwrap();
             if frame == 1 {
-                let path = out.join(format!("material-inspector-{scale}x.png"));
+                let path = out.join(format!("material-inspector-256-{scale}x.png"));
                 let mut png = png::Encoder::new(
                     std::io::BufWriter::new(std::fs::File::create(&path).unwrap()),
                     width,

@@ -488,7 +488,7 @@ impl SceneEditor {
             );
             changed |= name.changed();
             let mut fields = vec![name];
-            ui.horizontal_wrapped(|ui| {
+            ui.horizontal(|ui| {
                 ui.label("Tint").on_hover_text(
                     "Linear material tint, multiplied by the texture and Object tint.",
                 );
@@ -502,6 +502,10 @@ impl SceneEditor {
                     changed = true;
                 }
                 fields.push(swatch);
+            });
+            // Keep all three labelled channels together at the inspector's
+            // minimum width; wrapping a label away from its field is ambiguous.
+            ui.horizontal(|ui| {
                 for (index, label) in ["R", "G", "B"].into_iter().enumerate() {
                     ui.label(label);
                     let response = ui.add(
@@ -520,8 +524,7 @@ impl SceneEditor {
                 .as_ref()
                 .map(|store| {
                     store
-                        .inspect()
-                        .into_iter()
+                        .infos()
                         .filter(|info| info.kind == ruster_assets::AssetKind::Texture)
                         .collect::<Vec<_>>()
                 })
@@ -617,7 +620,7 @@ impl SceneEditor {
             }
             let filter = draft.filter;
             let address = draft.address;
-            ui.horizontal_wrapped(|ui| {
+            ui.horizontal(|ui| {
                 ui.label("Filter");
                 let filter_response = egui::ComboBox::from_id_salt("material_filter")
                     .selected_text(match draft.filter {
@@ -629,6 +632,8 @@ impl SceneEditor {
                         ui.selectable_value(&mut draft.filter, TextureFilter::Nearest, "Nearest");
                     });
                 fields.push(filter_response.response);
+            });
+            ui.horizontal(|ui| {
                 ui.label("Wrap");
                 let wrap_response = egui::ComboBox::from_id_salt("material_wrap")
                     .selected_text(match draft.address {

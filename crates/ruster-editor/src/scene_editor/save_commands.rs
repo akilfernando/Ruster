@@ -327,6 +327,13 @@ impl SceneEditor {
         }
     }
     pub(super) fn save_with_continuation(&mut self, kind: Continuation) {
+        #[cfg(feature = "inspection")]
+        let observed = self.asset_ops.timing_begin("scene_save");
+        self.save_with_continuation_inner(kind);
+        #[cfg(feature = "inspection")]
+        self.asset_ops.timing_admitted(observed);
+    }
+    fn save_with_continuation_inner(&mut self, kind: Continuation) {
         if let Err(error) = self.asset_root_guard() {
             self.error = error;
             return;
@@ -342,6 +349,13 @@ impl SceneEditor {
         }
     }
     pub(super) fn start_human_save(&mut self, path: PathBuf, kind: Continuation) {
+        #[cfg(feature = "inspection")]
+        let observed = self.asset_ops.timing_begin("scene_save");
+        self.start_human_save_inner(path, kind);
+        #[cfg(feature = "inspection")]
+        self.asset_ops.timing_admitted(observed);
+    }
+    fn start_human_save_inner(&mut self, path: PathBuf, kind: Continuation) {
         if self.asset_busy() {
             self.error = "Content or Save work is already in progress.".into();
             return;

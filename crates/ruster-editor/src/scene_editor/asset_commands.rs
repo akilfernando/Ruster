@@ -159,8 +159,27 @@ struct Opening {
     recovery_shader: bool,
     cancelled: bool,
 }
+#[cfg(feature = "inspection")]
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum TimingKind {
+    Asset,
+    Save,
+    Open,
+}
+#[cfg(feature = "inspection")]
+struct TimedOperation {
+    kind: TimingKind,
+    job: Option<u64>,
+    outcome: Option<&'static str>,
+    admitting: bool,
+    enqueue_attempted: bool,
+}
 #[derive(Default)]
 pub(super) struct Controller {
+    #[cfg(feature = "inspection")]
+    pub(super) probe: super::asset_timing::Probe,
+    #[cfg(feature = "inspection")]
+    timed: Option<TimedOperation>,
     worker: Option<Worker>,
     active: Option<Active>,
     opening: Option<Opening>,
@@ -182,6 +201,86 @@ pub(super) struct Controller {
     close_after: bool,
 }
 impl Controller {
+    #[cfg(feature = "inspection")]
+    pub(super) fn timing_frame(&mut self, ctx: &egui::Context) {
+        self.probe.frame(ctx);
+        if !self.probe.active() {
+            self.timed = None;
+        }
+    }
+    #[cfg(feature = "inspection")]
+    pub(super) fn timing_begin(&mut self, operation: &str) -> Option<Instant> {
+        // Human Save invokes its path handler synchronously; only the outer
+        // admission owns the span. Separate overlapping calls reach Probe.begin.
+        if self.timed.as_ref().is_some_and(|timed| timed.admitting) {
+            return None;
+        }
+        let started = self.probe.begin(operation);
+        if started.is_some() {
+            let kind = match operation {
+                "scene_save" => TimingKind::Save,
+                "asset_open" => TimingKind::Open,
+                _ => TimingKind::Asset,
+            };
+            self.timed = Some(TimedOperation {
+                kind,
+                job: None,
+                outcome: None,
+                admitting: true,
+                enqueue_attempted: false,
+            });
+        }
+        started
+    }
+    #[cfg(feature = "inspection")]
+    pub(super) fn timing_admitted(&mut self, started: Option<Instant>) {
+        if started.is_none() {
+            return;
+        }
+        self.probe.record("admission", started);
+        if let Some(timed) = &mut self.timed {
+            timed.admitting = false;
+            if timed.job.is_none() {
+                timed.outcome = Some("not_submitted");
+            }
+        }
+    }
+    #[cfg(feature = "inspection")]
+    fn timing_bind(&mut self, kind: TimingKind, job: u64) {
+        if let Some(timed) = &mut self.timed {
+            if timed.admitting && timed.kind == kind && timed.job.is_none() {
+                timed.job = Some(job);
+            }
+        }
+    }
+    #[cfg(feature = "inspection")]
+    fn timing_span(&self, kind: TimingKind, job: u64) -> Option<Instant> {
+        self.timed
+            .as_ref()
+            .filter(|timed| timed.kind == kind && timed.job == Some(job))
+            .and_then(|_| self.probe.span_start())
+    }
+    #[cfg(feature = "inspection")]
+    fn timing_result(&mut self, kind: TimingKind, job: u64, outcome: &'static str) {
+        if let Some(timed) = &mut self.timed {
+            if timed.kind == kind && timed.job == Some(job) && timed.outcome.is_none() {
+                timed.outcome = Some(outcome);
+            }
+        }
+    }
+    #[cfg(feature = "inspection")]
+    fn timing_enqueue(&mut self, kind: TimingKind, job: u64) -> (&'static str, Option<Instant>) {
+        let started = self.timing_span(kind, job);
+        let mut label = "enqueue";
+        if started.is_some() {
+            let timed = self.timed.as_mut().unwrap();
+            if timed.enqueue_attempted {
+                label = "enqueue_retry";
+            }
+            timed.enqueue_attempted = true;
+        }
+        (label, started)
+    }
     fn pending(&self) -> bool {
         self.active.is_some()
             || self.opening.is_some()
@@ -272,6 +371,8 @@ impl Controller {
             ));
         };
         self.next = job;
+        #[cfg(feature = "inspection")]
+        self.timing_bind(TimingKind::Save, job);
         self.saving = Some(Saving {
             job,
             phase: Phase::Submitting,
@@ -337,6 +438,20 @@ impl Controller {
         self.retired_frame = self.root_frame;
     }
     fn reject_save(&mut self, editor: &mut SceneEditor, failure: Error) {
+        #[cfg(feature = "inspection")]
+        if let Some(job) = self.saving.as_ref().map(|record| record.job) {
+            self.timing_result(
+                TimingKind::Save,
+                job,
+                if failure.0.ends_with("cancelled") {
+                    "cancelled"
+                } else if failure.0.ends_with("expired") {
+                    "expired"
+                } else {
+                    "failure"
+                },
+            );
+        }
         if let Some(save) = &mut self.saving {
             if let Some(reply) = save.reply.take() {
                 reply.finish(editor, Err(failure.clone()));
@@ -381,6 +496,8 @@ impl Controller {
             ));
         };
         self.next = job;
+        #[cfg(feature = "inspection")]
+        self.timing_bind(TimingKind::Asset, job);
         self.active = Some(Active {
             job,
             op: op.into(),
@@ -419,6 +536,20 @@ impl Controller {
         }
     }
     fn reject(&mut self, editor: &mut SceneEditor, failure: Error) {
+        #[cfg(feature = "inspection")]
+        if let Some(job) = self.active.as_ref().map(|record| record.job) {
+            self.timing_result(
+                TimingKind::Asset,
+                job,
+                if failure.0.ends_with("cancelled") {
+                    "cancelled"
+                } else if failure.0.ends_with("expired") {
+                    "expired"
+                } else {
+                    "failure"
+                },
+            );
+        }
         if let Some(active) = &mut self.active {
             if let Some(reply) = active.reply.take() {
                 reply.finish(editor, Err(failure.clone()));
@@ -438,6 +569,41 @@ impl Controller {
         }
     }
     fn terminal(&mut self, editor: &mut SceneEditor) {
+        #[cfg(feature = "inspection")]
+        {
+            if let Some(job) = self.opening.as_ref().map(|open| open.job) {
+                self.timing_result(TimingKind::Open, job, "failure");
+            }
+            if let Some((job, authorized)) = self.active.as_ref().map(|active| {
+                (
+                    active.job,
+                    matches!(active.phase, Phase::CommitQueued | Phase::Publishing),
+                )
+            }) {
+                self.timing_result(
+                    TimingKind::Asset,
+                    job,
+                    if authorized { "unknown" } else { "failure" },
+                );
+            }
+            if let Some(job) = self
+                .saving
+                .as_ref()
+                .filter(|save| save.followup.is_none())
+                .map(|save| {
+                    (
+                        save.job,
+                        matches!(save.phase, Phase::CommitQueued | Phase::Publishing),
+                    )
+                })
+            {
+                self.timing_result(
+                    TimingKind::Save,
+                    job.0,
+                    if job.1 { "unknown" } else { "failure" },
+                );
+            }
+        }
         self.disconnected = true;
         self.opening = None;
         editor.pending_asset_open = None;
@@ -508,6 +674,27 @@ impl Controller {
             }
             _ => return,
         };
+        #[cfg(feature = "inspection")]
+        let observation = match &event {
+            Event::Complete { job, .. } => {
+                Some(("adoption", self.timing_span(TimingKind::Asset, *job)))
+            }
+            Event::Saved { job, .. } => {
+                Some(("save_adoption", self.timing_span(TimingKind::Save, *job)))
+            }
+            Event::Opened { job, .. } => {
+                Some(("open_adoption", self.timing_span(TimingKind::Open, *job)))
+            }
+            Event::Retired { .. } => Some(("retire_ack", self.probe.span_start())),
+            _ => None,
+        };
+        self.handle_event(editor, event);
+        #[cfg(feature = "inspection")]
+        if let Some((label, started)) = observation {
+            self.probe.record(label, started);
+        }
+    }
+    fn handle_event(&mut self, editor: &mut SceneEditor, event: Event) {
         match event {
             Event::SavePrepared { job, result } => {
                 if self.saving.as_ref().is_some_and(|save| save.job == job) {
@@ -524,6 +711,8 @@ impl Controller {
                             if let Some(reply) = save.reply.take() {
                                 reply.finish(editor, Err((failure.code().into(), failure.message)));
                             }
+                            #[cfg(feature = "inspection")]
+                            self.timing_result(TimingKind::Save, job, "failure");
                             self.status = "Save could not be prepared.".into();
                         }
                     }
@@ -546,6 +735,8 @@ impl Controller {
                     let mut save = self.saving.take().unwrap();
                     match result {
                         Err(failure) => {
+                            #[cfg(feature = "inspection")]
+                            self.timing_result(TimingKind::Save, job, "failure");
                             if let Some(reply) = save.reply.take() {
                                 reply.finish(editor, Err((failure.code().into(), failure.message)));
                             }
@@ -556,6 +747,8 @@ impl Controller {
                                     != Some(saved.root.as_path())
                                     && saved.destination_store.is_none()) =>
                         {
+                            #[cfg(feature = "inspection")]
+                            self.timing_result(TimingKind::Save, job, "unknown");
                             self.merge_save_retirement(RetiredAssets {
                                 saved: Some(saved),
                                 ..Default::default()
@@ -657,6 +850,16 @@ impl Controller {
                         Err(error("asset_error",format!("Asset publication could not be adopted (catalog_published={published}); inspect/reopen before retrying.")))
                     }
                 };
+                #[cfg(feature = "inspection")]
+                self.timing_result(
+                    TimingKind::Asset,
+                    job,
+                    if outcome.is_ok() {
+                        "success"
+                    } else {
+                        "failure"
+                    },
+                );
                 if let Some(reply) = active.reply.take() {
                     reply.finish(editor, outcome);
                 }
@@ -684,6 +887,22 @@ impl Controller {
                             _ => false,
                         }
                 });
+                #[cfg(feature = "inspection")]
+                self.timing_result(
+                    TimingKind::Open,
+                    job,
+                    if matches
+                        && result
+                            .as_ref()
+                            .is_ok_and(|store| canonical_root.as_deref() == Some(store.root()))
+                    {
+                        "success"
+                    } else if opening.as_ref().is_some_and(|open| open.cancelled) {
+                        "cancelled"
+                    } else {
+                        "failure"
+                    },
+                );
                 match result {
                     Ok(store) if matches && canonical_root.as_deref() == Some(store.root()) => {
                         let meshes = store.mesh_snapshots();
@@ -800,6 +1019,18 @@ impl Controller {
         }
     }
     fn retire(&mut self, editor: &mut SceneEditor) {
+        #[cfg(feature = "inspection")]
+        let started = self.retired.as_ref().and_then(|_| self.probe.span_start());
+        self.retire_inner(editor);
+        #[cfg(feature = "inspection")]
+        {
+            self.probe.record("retire_submit", started);
+            if self.disconnected && self.retired.is_none() && !self.retiring {
+                self.probe.record("retire_handoff", started);
+            }
+        }
+    }
+    fn retire_inner(&mut self, editor: &mut SceneEditor) {
         let Some(retired) = self.retired.take() else {
             return;
         };
@@ -827,10 +1058,14 @@ impl Controller {
     pub(super) fn save_recovery_ack(&mut self, request: u64, result: &Result<(), String>) -> bool {
         if let Some(followup) = self.saving.as_mut().and_then(|save| save.followup.as_mut()) {
             if followup.recovery_request == Some(request) {
+                #[cfg(feature = "inspection")]
+                let started = self.probe.span_start();
                 followup.result = Some(match result {
                     Ok(()) => Ok(()),
                     Err(message) => Err(persistence_commands::bounded(message)),
                 });
+                #[cfg(feature = "inspection")]
+                self.probe.record("recovery_ack", started);
                 return true;
             }
         }
@@ -847,6 +1082,8 @@ impl Controller {
         }) {
             return;
         }
+        #[cfg(feature = "inspection")]
+        let started = self.probe.span_start();
         let mut save = self.saving.take().unwrap();
         let followup = save.followup.take().unwrap();
         if (followup.generation, followup.sequence, followup.revision)
@@ -879,6 +1116,11 @@ impl Controller {
             reply.finish(editor, Ok(editor.saved_result()));
         }
         self.status = "Scene saved.".into();
+        #[cfg(feature = "inspection")]
+        {
+            self.timing_result(TimingKind::Save, save.job, "success");
+            self.probe.record("save_followup", started);
+        }
     }
     fn frame(&mut self, editor: &mut SceneEditor, ctx: &egui::Context, authorize: bool) {
         // The native host calls begin_root_frame before poll/new callbacks.
@@ -915,6 +1157,17 @@ impl Controller {
         if !authorize {
             return;
         }
+        #[cfg(feature = "inspection")]
+        let save_authorize = self
+            .saving
+            .as_ref()
+            .filter(|save| {
+                matches!(
+                    save.phase,
+                    Phase::Submitting | Phase::Preparing | Phase::Prepared
+                )
+            })
+            .and_then(|save| self.timing_span(TimingKind::Save, save.job));
         if let Some(save) = &self.saving {
             if !matches!(
                 save.phase,
@@ -969,6 +1222,21 @@ impl Controller {
                 );
             }
         }
+        #[cfg(feature = "inspection")]
+        self.probe.record("authorize", save_authorize);
+        #[cfg(feature = "inspection")]
+        let save_enqueue = self
+            .saving
+            .as_ref()
+            .filter(|save| save.phase == Phase::Submitting && self.save_request.is_some())
+            .map(|save| save.job)
+            .map(|job| self.timing_enqueue(TimingKind::Save, job));
+        #[cfg(feature = "inspection")]
+        let save_publish = self
+            .saving
+            .as_ref()
+            .filter(|save| save.phase == Phase::CommitQueued)
+            .and_then(|save| self.timing_span(TimingKind::Save, save.job));
         if let Some(save) = &mut self.saving {
             if let Some(worker) = &mut self.worker {
                 match save.phase {
@@ -993,19 +1261,46 @@ impl Controller {
                 }
             }
         }
+        #[cfg(feature = "inspection")]
+        {
+            if let Some((label, started)) = save_enqueue {
+                self.probe.record(label, started);
+            }
+            self.probe.record("publish_enqueue", save_publish);
+        }
         if !self.busy() && editor.pending_asset_open.is_some() {
+            #[cfg(feature = "inspection")]
+            let open_admission = if self.timed.as_ref().is_some_and(|timed| {
+                timed.kind == TimingKind::Open
+                    && timed.job == self.next.checked_add(1)
+                    && timed.outcome.is_none()
+            }) {
+                None
+            } else {
+                self.timing_begin("asset_open")
+            };
             if let Err((code, message)) = self.ensure_worker(ctx) {
                 if code != "asset_busy" {
                     editor.pending_asset_open = None;
                 }
                 editor.error = message;
+                #[cfg(feature = "inspection")]
+                self.timing_admitted(open_admission);
                 return;
             }
             let intent = editor.pending_asset_open.take().unwrap();
             let Some(job) = self.next.checked_add(1) else {
                 editor.error = "Content job identity exhausted.".into();
+                #[cfg(feature = "inspection")]
+                self.timing_admitted(open_admission);
                 return;
             };
+            #[cfg(feature = "inspection")]
+            self.timing_bind(TimingKind::Open, job);
+            #[cfg(feature = "inspection")]
+            self.timing_admitted(open_admission);
+            #[cfg(feature = "inspection")]
+            let (open_label, open_enqueue) = self.timing_enqueue(TimingKind::Open, job);
             match self
                 .worker
                 .as_mut()
@@ -1032,7 +1327,20 @@ impl Controller {
                     self.terminal(editor);
                 }
             }
+            #[cfg(feature = "inspection")]
+            self.probe.record(open_label, open_enqueue);
         }
+        #[cfg(feature = "inspection")]
+        let asset_authorize = self
+            .active
+            .as_ref()
+            .filter(|active| {
+                matches!(
+                    active.phase,
+                    Phase::Submitting | Phase::Preparing | Phase::Prepared
+                )
+            })
+            .and_then(|active| self.timing_span(TimingKind::Asset, active.job));
         if let Some(active) = &self.active {
             if !matches!(
                 active.phase,
@@ -1068,6 +1376,21 @@ impl Controller {
                 );
             }
         }
+        #[cfg(feature = "inspection")]
+        self.probe.record("authorize", asset_authorize);
+        #[cfg(feature = "inspection")]
+        let asset_enqueue = self
+            .active
+            .as_ref()
+            .filter(|active| active.phase == Phase::Submitting && self.request.is_some())
+            .map(|active| active.job)
+            .map(|job| self.timing_enqueue(TimingKind::Asset, job));
+        #[cfg(feature = "inspection")]
+        let asset_publish = self
+            .active
+            .as_ref()
+            .filter(|active| active.phase == Phase::CommitQueued)
+            .and_then(|active| self.timing_span(TimingKind::Asset, active.job));
         let Some(active) = self.active.as_mut() else {
             return;
         };
@@ -1105,6 +1428,13 @@ impl Controller {
                 active.phase = Phase::Publishing;
             }
         }
+        #[cfg(feature = "inspection")]
+        {
+            if let Some((label, started)) = asset_enqueue {
+                self.probe.record(label, started);
+            }
+            self.probe.record("publish_enqueue", asset_publish);
+        }
         if self.busy() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
@@ -1128,6 +1458,24 @@ impl Controller {
 }
 
 impl SceneEditor {
+    #[cfg(feature = "inspection")]
+    pub(super) fn finish_asset_timing(&mut self, ctx: &egui::Context) {
+        let ready = !self.asset_busy()
+            && self.save_continuation.is_none()
+            && self.recovery_transition.is_none()
+            && !self.asset_ops.close_after
+            && (!self.close_approved || self.close_ready_to_exit);
+        if ready {
+            if let Some(outcome) = self
+                .asset_ops
+                .timed
+                .as_ref()
+                .and_then(|timed| timed.outcome)
+            {
+                self.asset_ops.probe.finish(ctx, outcome);
+            }
+        }
+    }
     pub(super) fn asset_begin_root_frame(&mut self, ctx: &egui::Context) {
         let mut controller = std::mem::take(&mut self.asset_ops);
         controller.begin_root_frame(self, ctx);
@@ -1201,6 +1549,17 @@ impl SceneEditor {
     pub(super) fn cancel_asset_work(&mut self) {
         self.save_continuation = None;
         if self.pending_asset_open.take().is_some() {
+            #[cfg(feature = "inspection")]
+            if let Some(job) = self
+                .asset_ops
+                .timed
+                .as_ref()
+                .filter(|timed| timed.kind == TimingKind::Open)
+                .and_then(|timed| timed.job)
+            {
+                self.asset_ops
+                    .timing_result(TimingKind::Open, job, "cancelled");
+            }
             self.asset_ops.status = "Content loading cancelled; Retry when ready.".into();
             self.notice = self.asset_ops.status.clone();
         }
@@ -1491,6 +1850,20 @@ impl SceneEditor {
         source: &str,
         own_dialog: bool,
     ) {
+        #[cfg(feature = "inspection")]
+        let observed = self.asset_ops.timing_begin(op);
+        self.start_human_asset_inner(ctx, op, id, source, own_dialog);
+        #[cfg(feature = "inspection")]
+        self.asset_ops.timing_admitted(observed);
+    }
+    fn start_human_asset_inner(
+        &mut self,
+        ctx: &egui::Context,
+        op: &str,
+        id: &str,
+        source: &str,
+        own_dialog: bool,
+    ) {
         let token = format!("human:scene:{}", self.generation);
         let mut args = json!({"expected_session_token":token,"expected_revision":self.session.scene().revision.to_string(),"expected_asset_revision":self.assets.as_ref().map_or(0,AssetStore::revision).to_string(),"asset_id":id});
         if op != "asset_refresh" {
@@ -1526,6 +1899,20 @@ impl SceneEditor {
     }
     #[cfg(unix)]
     pub(super) fn dispatch_save_request(
+        &mut self,
+        ctx: &egui::Context,
+        nonce: &str,
+        args: &Value,
+        lease: crate::bridge::RequestLease,
+    ) {
+        #[cfg(feature = "inspection")]
+        let observed = self.asset_ops.timing_begin("scene_save");
+        self.dispatch_save_request_inner(ctx, nonce, args, lease);
+        #[cfg(feature = "inspection")]
+        self.asset_ops.timing_admitted(observed);
+    }
+    #[cfg(unix)]
+    fn dispatch_save_request_inner(
         &mut self,
         ctx: &egui::Context,
         nonce: &str,
@@ -1578,6 +1965,21 @@ impl SceneEditor {
     }
     #[cfg(unix)]
     pub(super) fn dispatch_asset_request(
+        &mut self,
+        ctx: &egui::Context,
+        nonce: &str,
+        op: &str,
+        args: Value,
+        lease: crate::bridge::RequestLease,
+    ) {
+        #[cfg(feature = "inspection")]
+        let observed = self.asset_ops.timing_begin(op);
+        self.dispatch_asset_request_inner(ctx, nonce, op, args, lease);
+        #[cfg(feature = "inspection")]
+        self.asset_ops.timing_admitted(observed);
+    }
+    #[cfg(unix)]
+    fn dispatch_asset_request_inner(
         &mut self,
         ctx: &egui::Context,
         nonce: &str,
@@ -1699,6 +2101,164 @@ impl SceneEditor {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    // Real Host ROOT frames, affine bridge lease and production worker prove
+    // observer placement; this is neither a native-window nor focus test.
+    #[cfg(feature = "inspection")]
+    #[test]
+    fn timing_hooks_follow_real_host_worker_reply_and_retirement() {
+        const CHILD: &str = "RUSTER_TIMING_HOOK_TEST_CHILD";
+        if std::env::var_os(CHILD).is_none() {
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args([
+                    "--exact",
+                    &format!(
+                        "{}::timing_hooks_follow_real_host_worker_reply_and_retirement",
+                        module_path!().split_once("::").unwrap().1
+                    ),
+                    "--nocapture",
+                ])
+                .env(CHILD, "1")
+                .env("RUSTER_ASSET_TIMING", "1")
+                .env("RUSTER_ASSET_TIMING_OPS", "asset_import,asset_refresh")
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success()
+                    && String::from_utf8_lossy(&result.stdout).contains("running 1 test"),
+                "isolated timing smoke failed:\n{}\n{}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            return;
+        }
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("triangle.obj"),
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        let mut session = Session::new(Scene::demo()).unwrap();
+        session.save(directory.path().join("scene.json")).unwrap();
+        let mut host = Host {
+            editor: SceneEditor::with_workspace(session, Workspace::detached()),
+            bridge: None,
+        };
+        let ctx = egui::Context::default();
+        let mut frame = eframe::Frame::_new_kittest();
+        let root_frame = |host: &mut Host, frame: &mut eframe::Frame| {
+            ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280., 800.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    eframe::App::ui(host, ui, frame);
+                },
+            )
+            .drop_without_applying_deltas();
+        };
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while host.editor.asset_busy() && Instant::now() < deadline {
+            root_frame(&mut host, &mut frame);
+            std::thread::yield_now();
+        }
+        assert!(
+            !host.editor.asset_busy(),
+            "startup did not finish: {}",
+            host.editor.error
+        );
+        assert!(
+            host.editor.asset_ops.probe.last_summary().is_none(),
+            "predeclared cohort must exclude startup open"
+        );
+        let token = format!("timing:scene:{}", host.editor.generation);
+        let args = json!({"expected_session_token":token,"expected_revision":host.editor.session.scene().revision.to_string(),"expected_asset_revision":host.editor.assets.as_ref().unwrap().revision().to_string(),"asset_id":"triangle","source":"triangle.obj"});
+        let (lease, mut observe) =
+            crate::bridge::preparing_test_lease(Instant::now() + Duration::from_secs(3));
+        let mut pending = Some((args, lease));
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            eframe::App::ui(&mut host, ui, &mut frame);
+            // Same Host dispatch point: after editor actions, before next
+            // UI-end authorization. The lease and controller are production.
+            if let Some((args, lease)) = pending.take() {
+                host.editor
+                    .dispatch_asset_request(&ctx, "timing", "asset_import", args, lease);
+            }
+        })
+        .drop_without_applying_deltas();
+        assert!(host.editor.asset_ops.probe.last_summary().is_none());
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while host.editor.asset_busy() && Instant::now() < deadline {
+            root_frame(&mut host, &mut frame);
+            assert!(
+                host.editor.asset_ops.probe.last_summary().is_none(),
+                "summary preceded final reply/retirement and trailing frame"
+            );
+            std::thread::yield_now();
+        }
+        assert!(
+            !host.editor.asset_busy(),
+            "mutation did not finish: {}",
+            host.editor.error
+        );
+        assert_eq!(observe().unwrap()["ok"], true);
+        assert!(host.editor.asset_ops.probe.active());
+        root_frame(&mut host, &mut frame);
+        let summary = host.editor.asset_ops.probe.last_summary().unwrap();
+        assert_eq!(summary["operation"], "asset_import");
+        assert_eq!(summary["outcome"], "success");
+        assert_eq!(
+            summary["operation_filter"],
+            json!(["asset_import", "asset_refresh"])
+        );
+        assert_eq!(summary["complete"], true);
+        assert_eq!(summary["overlap"], false);
+        assert!(summary["gap_count"].as_u64().unwrap() > 0);
+        let spans = summary["spans"].as_array().unwrap();
+        let named = |name| {
+            spans
+                .iter()
+                .filter(|span| span["name"] == name)
+                .collect::<Vec<_>>()
+        };
+        for name in ["admission", "enqueue", "adoption"] {
+            assert_eq!(named(name).len(), 1, "{name}");
+        }
+        for name in [
+            "authorize",
+            "publish_enqueue",
+            "retire_submit",
+            "retire_ack",
+        ] {
+            assert!(!named(name).is_empty(), "{name}");
+        }
+        let gaps = summary["gaps"].as_array().unwrap();
+        let start = gaps.first().unwrap()["start_ms"].as_f64().unwrap();
+        let end = gaps.last().unwrap()["end_ms"].as_f64().unwrap();
+        for span in spans {
+            let a = span["start_ms"].as_f64().unwrap();
+            let b = span["end_ms"].as_f64().unwrap();
+            let elapsed = span["elapsed_ms"].as_f64().unwrap();
+            assert!(
+                a >= start && b <= end && a <= b,
+                "span outside Host interval: {span}"
+            );
+            assert!((b - a - elapsed).abs() < 1e-6);
+        }
+        assert!(
+            named("admission")[0]["end_ms"].as_f64().unwrap()
+                <= named("enqueue")[0]["start_ms"].as_f64().unwrap()
+        );
+        assert!(
+            named("adoption")[0]["end_ms"].as_f64().unwrap()
+                <= named("retire_submit")[0]["start_ms"].as_f64().unwrap()
+        );
+        assert!(!host.editor.asset_ops.probe.active());
+        host.editor.test_finish_asset_work();
+    }
     #[track_caller]
     fn until(editor: &mut SceneEditor, ctx: &egui::Context, done: impl Fn(&SceneEditor) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(3);

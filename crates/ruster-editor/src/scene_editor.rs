@@ -1,6 +1,8 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
 mod asset_commands;
 mod asset_inspection;
+#[cfg(feature = "inspection")]
+mod asset_timing;
 mod behavior_commands;
 mod capture_commands;
 mod color_commands;
@@ -2873,8 +2875,12 @@ impl SceneEditor {
         }
     }
     fn refresh_content_asset(&mut self, id: &str) {
+        #[cfg(feature = "inspection")]
+        let observed = self.asset_ops.timing_begin("asset_refresh");
         let ctx = self.export_context.clone().unwrap_or_default();
         self.start_human_asset(&ctx, "asset_refresh", id, "", false);
+        #[cfg(feature = "inspection")]
+        self.asset_ops.timing_admitted(observed);
     }
     fn browser_contents(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
@@ -3172,8 +3178,12 @@ impl SceneEditor {
                 if ui.button("Rename asset source").clicked() { operation = Some("rename"); }
             });});
             if let Some(op) = operation {
+                #[cfg(feature = "inspection")]
+                let observed = self.asset_ops.timing_begin(match op {"import"=>"asset_import","refresh"=>"asset_refresh",_=>"asset_rename"});
                 let id=self.asset_id.clone();let source=self.asset_source.clone();
                 self.start_human_asset(ctx,match op {"import"=>"asset_import","refresh"=>"asset_refresh",_=>"asset_rename"},&id,&source,true);
+                #[cfg(feature = "inspection")]
+                self.asset_ops.timing_admitted(observed);
             }
             if let Some(store) = &self.assets {
                 ui.label(format!("Catalog revision {}", store.revision()));
@@ -4052,6 +4062,8 @@ impl SceneEditor {
                 }
                 ui.horizontal(|ui| {
                     if ui.button(if open {"Open and discard current"}else{"Save to new path"}).clicked()||submit {
+                        #[cfg(feature = "inspection")]
+                        let observed = if open { None } else { self.asset_ops.timing_begin("scene_save") };
                         let path=PathBuf::from(self.path_text.trim());
                         if open {
                             if self.asset_loading(){self.cancel_asset_work();}
@@ -4067,6 +4079,8 @@ impl SceneEditor {
                         } else {
                             self.start_human_save(path, self.save_dialog_continuation);
                         }
+                        #[cfg(feature = "inspection")]
+                        self.asset_ops.timing_admitted(observed);
                     }
                     if ui.button("Cancel scene dialog").clicked()||cancel {self.dialog=None;self.path_focused=false;}
                 });
@@ -4158,6 +4172,8 @@ struct Host {
 }
 impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        #[cfg(feature = "inspection")]
+        self.editor.asset_ops.timing_frame(ui.ctx());
         self.editor.ui(ui);
         self.editor.poll_capture(ui.ctx());
         #[cfg(unix)]
@@ -4176,6 +4192,8 @@ impl eframe::App for Host {
                 ui.ctx().request_repaint();
             }
         }
+        #[cfg(feature = "inspection")]
+        self.editor.finish_asset_timing(ui.ctx());
     }
 }
 pub fn run_empty() -> Result<(), String> {
