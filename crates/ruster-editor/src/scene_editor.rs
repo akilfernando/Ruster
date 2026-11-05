@@ -1,8 +1,11 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
 mod behavior_commands;
+mod capture_commands;
+mod color_commands;
 mod export_commands;
 mod persistence_commands;
 mod runtime_commands;
+mod view_commands;
 use crate::workspace::{Action, Side, Workspace};
 use eframe::{
     egui,
@@ -37,6 +40,8 @@ struct RecoveryDrafts {
     manipulation: crate::manipulation::DraftSnapshot,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     behavior: Option<crate::behavior_ui::Drafts>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    color: Option<color_commands::ColorDraft>,
 }
 impl From<&Transform> for Fields {
     fn from(t: &Transform) -> Self {
@@ -233,6 +238,7 @@ pub struct SceneEditor {
     export_context: Option<egui::Context>,
     export_dialog: bool,
     export_title: String,
+    export_use_current_view: bool,
     export_destination: String,
     export_runtime_kit: String,
     export_focused: bool,
@@ -247,6 +253,7 @@ pub struct SceneEditor {
     queued_external: Option<(String, crate::behavior_external::Intent)>,
     reset_assets: Option<(crate::behavior_worker::RunKey, BTreeMap<String, Arc<Mesh>>)>,
     draft: Option<Fields>,
+    color_draft: Option<color_commands::ColorDraft>,
     baseline_fields: Option<Fields>,
     workspace: Workspace,
     recovery: crate::recovery_ui::RecoveryUi,
@@ -258,6 +265,8 @@ pub struct SceneEditor {
     asset_origin: Option<PathBuf>,
     recovered_origin: Option<PathBuf>,
     navigation: ruster_render::NavigationOptions,
+    view_state: view_commands::ViewState,
+    captures: capture_commands::Captures,
     queued_selection: Option<(Option<String>, bool)>,
     queued_action: Option<Action>,
     queued_context: Option<(Option<String>, ContextAction)>,
@@ -359,6 +368,7 @@ impl SceneEditor {
             creation_export: crate::creation_export::Controller::disabled(),
             export_context: None,
             export_dialog: false,
+            export_use_current_view: false,
             export_title: String::new(),
             export_destination: String::new(),
             export_runtime_kit: String::new(),
@@ -373,6 +383,7 @@ impl SceneEditor {
             external_focused: false,
             queued_external: None,
             reset_assets: None,
+            color_draft: None,
             baseline_fields: draft.clone(),
             workspace,
             recovery: crate::recovery_ui::RecoveryUi::disabled(),
@@ -383,6 +394,8 @@ impl SceneEditor {
             draft_generation: 0,
             asset_origin,
             recovered_origin: None,
+            view_state: Default::default(),
+            captures: Default::default(),
             navigation: ruster_render::NavigationOptions {
                 camera,
                 reset: camera.is_none(),
@@ -435,7 +448,8 @@ impl SceneEditor {
         }
     }
     fn drafts(&self) -> bool {
-        self.manipulation.precision_pending()
+        self.color_draft.is_some()
+            || self.manipulation.precision_pending()
             || self.draft != self.baseline_fields
             || self.behavior.pending()
     }
@@ -443,7 +457,8 @@ impl SceneEditor {
         self.drafts() || self.rename_pending || self.manipulation.offset_pending()
     }
     fn behavior_editable(&self) -> bool {
-        !self.manipulation.active()
+        self.color_draft.is_none()
+            && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && self.draft == self.baseline_fields
             && !self.manipulation.offset_pending()
@@ -617,6 +632,7 @@ impl SceneEditor {
             pending_name: self.rename_pending.then(|| self.name_text.clone()),
             manipulation: self.manipulation.snapshot_drafts(),
             behavior: Some(self.behavior.snapshot()),
+            color: self.color_draft.clone(),
         };
         let mut snapshot = crate::recovery::Snapshot::capture(
             &self.session,
@@ -673,11 +689,49 @@ impl SceneEditor {
         {
             return Err("Recovery drafts have unsupported version, selection, revision or text bounds; checkpoint preserved.".into());
         }
+        if let Some(color) = &draft.color {
+            if !color.validate_snapshot(scene, draft.selection.last().map(String::as_str))
+                || draft.fields.as_ref().is_some_and(|fields| {
+                    draft
+                        .selection
+                        .last()
+                        .and_then(|id| scene.objects.iter().find(|o| &o.id == id))
+                        .is_none_or(|o| {
+                            *fields != Fields::with_unit(&o.transform, fields.rotation_unit)
+                        })
+                })
+                || draft.pending_name.is_some()
+                || draft.behavior.as_ref().is_some_and(|b| b.pending())
+            {
+                return Err(
+                    "Unsupported compound or stale color recovery draft; checkpoint preserved."
+                        .into(),
+                );
+            }
+        }
+        // Validate color's exclusive draft ownership before touching selection or
+        // adopting any recovered state. Precision masks and offsets are private
+        // to Manipulation, so use its real restoration validator for preflight.
+        let manipulation = if draft.color.is_some() {
+            let mut checked = crate::manipulation::Manipulation::default();
+            checked.ids = draft.selection.clone();
+            checked.restore_drafts(scene, draft.manipulation)?;
+            if checked.precision_pending() || checked.offset_pending() {
+                return Err(
+                    "Unsupported compound color recovery draft; checkpoint preserved.".into(),
+                );
+            }
+            checked.snapshot_drafts()
+        } else {
+            draft.manipulation
+        };
+        let color = draft.color;
         self.manipulation.ids = draft.selection;
         self.selected = self.manipulation.selected();
         self.sync_draft();
         self.manipulation
-            .restore_drafts(self.session.scene(), draft.manipulation)?;
+            .restore_drafts(self.session.scene(), manipulation)?;
+        self.color_draft = color;
         if let (Some(fields), Some(id)) = (&draft.fields, &self.selected) {
             let transform = &self
                 .session
@@ -817,6 +871,7 @@ impl SceneEditor {
                 pending_name: self.rename_pending.then(|| self.name_text.clone()),
                 manipulation: self.manipulation.snapshot_drafts(),
                 behavior: Some(self.behavior.snapshot()),
+                color: self.color_draft.clone(),
             };
             let capture = Box::new(move || {
                 let mut snapshot = crate::recovery::Snapshot::capture(
@@ -1099,6 +1154,9 @@ impl SceneEditor {
         }
     }
     fn apply(&mut self) -> bool {
+        if self.color_draft.is_some() {
+            return self.apply_color_draft();
+        }
         if self.manipulation.active() {
             self.error = "Finish or cancel the transform gesture first.".into();
             return false;
@@ -1441,7 +1499,7 @@ impl SceneEditor {
         }
         egui::CollapsingHeader::new("Adjust selection").id_salt("selection_adjustments").open(pending.then_some(true)).show(ui,|ui| {
             ui.label("World translation offset");
-            ui.add_enabled_ui(!self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
+            ui.add_enabled_ui(self.color_draft.is_none() && !self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
                 let mut enter=false;
                 let mut escape=false;
                 let group_width=crate::manipulation::component_group_width(ui);
@@ -1480,6 +1538,13 @@ impl SceneEditor {
             .as_ref()
             .map(|store| store.mesh_snapshots())
             .unwrap_or_default();
+    }
+    fn document_label(&self) -> String {
+        self.session
+            .path()
+            .and_then(|path| path.file_stem())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_else(|| self.session.scene().id.clone())
     }
     fn remember_camera(&mut self) {
         if let (Some(path), Some(camera)) = (self.session.path(), self.navigation.camera) {
@@ -2007,6 +2072,15 @@ impl SceneEditor {
         if matches!(op, "scene_persistence_inspect" | "scene_save") {
             return self.persistence_command(token, op, args);
         }
+        if op == "scene_color" {
+            return self.color_command(token, args);
+        }
+        if view_commands::supported(op) {
+            return self.view_command(token, op, args);
+        }
+        if matches!(op, "viewport_capture_start" | "viewport_capture_inspect") {
+            return self.capture_command(token, op, args);
+        }
         if runtime_commands::supported(op) {
             return self.runtime_command(token, op, args);
         }
@@ -2083,7 +2157,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["creation_export_inspect","creation_export_start","creation_export_cancel","scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_color","viewport_inspect","viewport_camera","scene_select","viewport_capture_start","viewport_capture_inspect","creation_export_inspect","creation_export_start","creation_export_cancel","scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -2520,7 +2594,7 @@ impl SceneEditor {
         ui.separator();
         ui.strong("Transform");
         if self.draft != self.baseline_fields {
-            ui.add_enabled_ui(!self.behavior.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+            ui.add_enabled_ui(self.color_draft.is_none() && !self.behavior.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
                     ui.label("Recovered transform fields — repair or revert before other precision edits");
                     let mut enter=false;
                     let mut escape=false;
@@ -2540,7 +2614,7 @@ impl SceneEditor {
                     if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
                 });
         }
-        ui.add_enabled_ui(self.draft == self.baseline_fields && !self.behavior.pending() && !self.manipulation.ids.is_empty(), |ui| {
+        ui.add_enabled_ui(self.color_draft.is_none() && self.draft == self.baseline_fields && !self.behavior.pending() && !self.manipulation.ids.is_empty(), |ui| {
                 match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                     Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                     Ok(false)=>{},Err(error)=>self.error=error,
@@ -2564,6 +2638,7 @@ impl SceneEditor {
         }
         ui.strong("Mesh");
         self.mesh_reference_ui(ui);
+        self.color_inspector_ui(ui);
         let editable = self.behavior_editable();
         if let Some(action) = self.behavior.inspector(
             ui,
@@ -3441,7 +3516,7 @@ impl SceneEditor {
                 "{}{}{}",
                 if dirty { "* " } else { "" },
                 mode,
-                self.session.scene().id
+                self.document_label()
             );
             let width = (ui.available_width() - 64.0).clamp(48.0, 240.0);
             ui.add_sized(
@@ -3449,8 +3524,11 @@ impl SceneEditor {
                 egui::Label::new(&title).truncate(),
             )
             .on_hover_text(format!(
-                "{} · {}",
-                self.session.scene().id,
+                "{}\n{}",
+                self.session
+                    .path()
+                    .map(|path| path.display().to_string())
+                    .unwrap_or_else(|| "Unsaved scene".into()),
                 if dirty { "Unsaved changes" } else { "Saved" }
             ));
             if ui
@@ -3687,6 +3765,8 @@ impl SceneEditor {
                 },
                 &mut self.navigation,
             );
+            self.captures.rect = Some(viewport.rect);
+            self.view_state.input_active = ui.input(|input| input.pointer.any_down());
             let may_draw = !self.runtime.visible
                 && !self.drafts()
                 && self.dialog.is_none()
@@ -3722,6 +3802,7 @@ impl SceneEditor {
             }
         });
         self.process_queued_selection();
+        self.observe_view();
         self.workspace.settings_ui(&ctx);
         if ctx.input(|i| i.pointer.any_released()) {
             self.remember_camera();
@@ -3883,6 +3964,7 @@ struct Host {
 impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.editor.ui(ui);
+        self.editor.poll_capture(ui.ctx());
         #[cfg(unix)]
         if let Some(bridge) = &mut self.bridge {
             if bridge.dispatch_command(|nonce, op, args| self.editor.command(nonce, op, args)) {
@@ -4687,6 +4769,7 @@ mod tests {
             pending_name: Some("Unapplied name".into()),
             manipulation: e.manipulation.snapshot_drafts(),
             behavior: None,
+            color: None,
         })
         .unwrap();
         draft["manipulation"]
@@ -4839,6 +4922,7 @@ mod tests {
             pending_name: None,
             manipulation: source.manipulation.snapshot_drafts(),
             behavior: None,
+            color: None,
         })
         .unwrap();
         drafts["version"] = 99.into();

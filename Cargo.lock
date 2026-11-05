@@ -2987,6 +2987,7 @@ dependencies = [
  "base64",
  "eframe",
  "log",
+ "png",
  "ruster-assets",
  "ruster-behavior",
  "ruster-core",

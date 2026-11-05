@@ -58,6 +58,7 @@ impl SceneEditor {
         title: String,
         destination: PathBuf,
         mcp_scope: bool,
+        initial_camera: Option<ruster_render::CameraState>,
     ) -> std::result::Result<Value, String> {
         self.export_ready(false)?;
         if title.trim().is_empty()
@@ -81,7 +82,7 @@ impl SceneEditor {
             Some(store) => Some(store.export_snapshot(&ids).map_err(|e| e.to_string())?),
             None if ids.is_empty() => None,
             None => {
-                return Err("Repair the content catalog before exporting imported models.".into())
+                return Err("Repair the content catalog before exporting imported models.".into());
             }
         };
         let ctx = self
@@ -103,6 +104,7 @@ impl SceneEditor {
             destination,
             runtime_kit,
             mcp_scope,
+            initial_camera,
         };
         let accepted = self.creation_export.start(&ctx, request)?;
         self.notice =
@@ -127,14 +129,14 @@ impl SceneEditor {
                     "title",
                     "filename",
                 ],
-                &[],
+                &["initial_camera"],
             ),
             "creation_export_cancel" => (&["expected_session_token", "operation_id"], &[]),
             _ => {
                 return Err(fail(
                     "unsupported_operation",
                     "Unknown creation export operation",
-                ))
+                ));
             }
         };
         if required.iter().any(|key| !map.contains_key(*key))
@@ -286,7 +288,9 @@ impl SceneEditor {
             .creation_export
             .mcp_destination(filename)
             .map_err(|e| fail("export_permission", e))?;
-        self.start_creation_export(title, destination, true)
+        let initial_camera = crate::creation_export::parse_initial_camera(&args["initial_camera"])
+            .map_err(|e| fail("invalid_arguments", e))?;
+        self.start_creation_export(title, destination, true, initial_camera)
             .map_err(|e| fail("export_blocked", e))
     }
     pub(super) fn open_export_dialog(&mut self) {
@@ -322,6 +326,7 @@ impl SceneEditor {
             .map(|p| p.display().to_string())
             .unwrap_or_default();
         self.export_dialog = true;
+        self.export_use_current_view = false;
         self.export_focused = false;
         self.export_error.clear();
     }
@@ -401,6 +406,8 @@ impl SceneEditor {
                     egui::TextEdit::singleline(&mut self.export_destination)
                         .desired_width(ui.available_width()),
                 );
+                ui.checkbox(&mut self.export_use_current_view, "Use current view")
+                    .on_hover_text("Start the exported application with this camera and projection. Requires a current Linux export template.");
                 let blocked = self.export_ready(true).err();
                 if let Some(reason) = &blocked {
                     ui.label(reason);
@@ -461,7 +468,10 @@ impl SceneEditor {
                                 .join(destination)
                         };
                         self.export_dialog = false;
-                        self.start_creation_export(self.export_title.clone(), destination, false)
+                        let initial_camera = if self.export_use_current_view {
+                            Some(self.navigation.camera.filter(|camera| camera.is_valid()).ok_or("The current viewport camera is not ready; close this dialog and frame the view first.")?)
+                        } else { None };
+                        self.start_creation_export(self.export_title.clone(), destination, false, initial_camera)
                             .map(|_| ())
                     });
                     if let Err(error) = result {
@@ -636,7 +646,7 @@ mod tests {
         editor.open_export_dialog();
         editor.export_runtime_kit = dir.path().display().to_string();
         frame(&mut editor, &ctx, None, egui::Modifiers::NONE);
-        for _ in 0..4 {
+        for _ in 0..5 {
             frame(
                 &mut editor,
                 &ctx,

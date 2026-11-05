@@ -97,16 +97,20 @@ impl Object {
         if let Some(mesh) = &self.mesh {
             validate_id(mesh)?;
         }
-        if !self
-            .color
-            .iter()
-            .all(|x| x.is_finite() && (0.0..=1.0).contains(x))
-        {
-            return Err(SceneError::Invalid(
-                "color channels must be finite in 0..=1".into(),
-            ));
-        }
+        validate_color(&self.color)
+    }
+}
+
+fn validate_color(color: &[f32; 4]) -> Result<(), SceneError> {
+    if color
+        .iter()
+        .all(|x| x.is_finite() && (0.0..=1.0).contains(x))
+    {
         Ok(())
+    } else {
+        Err(SceneError::Invalid(
+            "color channels must be finite in 0..=1".into(),
+        ))
     }
 }
 
@@ -347,6 +351,11 @@ enum SceneDelta {
         before: Option<String>,
         after: Option<String>,
     },
+    Color {
+        id: String,
+        before: [f32; 4],
+        after: [f32; 4],
+    },
 }
 
 impl SceneDelta {
@@ -366,6 +375,7 @@ impl SceneDelta {
             Self::Create { object, .. } | Self::Delete { object, .. } => object.id == id,
             Self::Name { id: old, .. }
             | Self::Transform { id: old, .. }
+            | Self::Color { id: old, .. }
             | Self::Mesh { id: old, .. } => old == id,
             Self::Transforms { changes } => changes.iter().any(|e| e.id == id),
             Self::Objects { created, deleted } => {
@@ -481,6 +491,25 @@ impl SceneDelta {
                     return Err(inconsistent());
                 }
                 object.transform = replacement.clone();
+            }
+            Self::Color { id, before, after } => {
+                validate_id(id)?;
+                validate_color(before)?;
+                validate_color(after)?;
+                let object = scene
+                    .objects
+                    .iter_mut()
+                    .find(|o| &o.id == id)
+                    .ok_or_else(inconsistent)?;
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &object.color != expected {
+                    return Err(inconsistent());
+                }
+                object.color = *replacement;
             }
             Self::Mesh { id, before, after } => {
                 validate_id(id)?;
@@ -872,6 +901,18 @@ impl Document {
             5 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
+        if version < 5
+            && document
+                .undo
+                .iter()
+                .chain(&document.redo)
+                .flat_map(|c| &c.scene)
+                .any(|d| matches!(d, SceneDelta::Color { .. }))
+        {
+            return Err(SceneError::Invalid(
+                "color history requires scene v5".into(),
+            ));
+        }
         if version == 3
             && document.undo.iter().chain(&document.redo).any(|c| {
                 c.scene.iter().any(|d| {
@@ -1050,7 +1091,7 @@ fn allocate_ids(
         .collect())
 }
 
-/// Authored state with bounded object, name, transform and mesh deltas. Runtime state belongs elsewhere.
+/// Authored state with bounded object, name, transform, color and mesh deltas. Runtime state belongs elsewhere.
 #[derive(Clone, Debug)]
 pub struct Session {
     document: Document,
@@ -1426,6 +1467,7 @@ impl Session {
                     }
                     SceneDelta::Name { id, .. }
                     | SceneDelta::Transform { id, .. }
+                    | SceneDelta::Color { id, .. }
                     | SceneDelta::Mesh { id, .. } => {
                         used.insert(id);
                     }
@@ -1775,6 +1817,32 @@ impl Session {
             id: id.into(),
             before: object.transform.clone(),
             after: transform.clone(),
+        })
+    }
+
+    /// Replace one object's authored RGBA channels with one shared Undo entry.
+    /// Invalid, stale and unchanged requests preserve history and save state.
+    pub fn set_color(
+        &mut self,
+        expected_revision: u64,
+        object_id: &str,
+        color: [f32; 4],
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_color(&color)?;
+        let object = self
+            .scene()
+            .objects
+            .iter()
+            .find(|o| o.id == object_id)
+            .ok_or_else(|| SceneError::ObjectNotFound(object_id.into()))?;
+        if object.color == color {
+            return Ok(self.scene().revision);
+        }
+        self.commit_change(SceneDelta::Color {
+            id: object_id.into(),
+            before: object.color,
+            after: color,
         })
     }
 
@@ -3017,6 +3085,55 @@ mod tests {
         value["undo"][0]["kind"] = "transform".into();
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
         assert!(Session::open(&path).is_err());
+    }
+
+    // Unique risk: color deltas must retain reversible persisted history without
+    // admitting future deltas under legacy format labels or mutating on rejection.
+    #[test]
+    fn color_authoring_roundtrips_and_rejects_atomically() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("color.json");
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let original = session.scene().objects[0].color;
+        let color = [0.0, 0.25, 1.0, 0.75];
+        session.set_color(0, "left", color).unwrap();
+        assert_eq!(session.undo_len(), 1);
+        session.undo(1).unwrap();
+        session.save(&path).unwrap();
+        let before = session.document.clone();
+        assert_eq!(session.set_color(2, "left", original).unwrap(), 2);
+        assert!(matches!(
+            session.set_color(1, "left", color),
+            Err(SceneError::StaleRevision { .. })
+        ));
+        assert!(matches!(
+            session.set_color(2, "absent", color),
+            Err(SceneError::ObjectNotFound(_))
+        ));
+        for channel in [f32::NAN, f32::INFINITY, -0.01, 1.01] {
+            assert!(session
+                .set_color(2, "left", [channel, 0.0, 0.0, 1.0])
+                .is_err());
+        }
+        assert_eq!(session.document, before);
+        assert!(!session.is_dirty());
+        let mut reopened = Session::open(&path).unwrap();
+        reopened.redo(2).unwrap();
+        assert_eq!(reopened.scene().objects[0].color, color);
+        reopened.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        reopened.undo(3).unwrap();
+        assert_eq!(reopened.scene().objects[0].color, original);
+        reopened.redo(4).unwrap();
+        assert_eq!(reopened.scene().objects[0].color, color);
+        let mut value = serde_json::to_value(&reopened.document).unwrap();
+        value["undo"][0]["scene"][0]["before"][0] = serde_json::json!(2.0);
+        assert!(Session::from_snapshot_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
+        for version in [3, 4] {
+            let mut value = legacy_value(&reopened.document);
+            value["format_version"] = serde_json::json!(version);
+            assert!(Session::from_snapshot_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
+        }
     }
 
     // Unique risk: mesh and transform edits share one chronological persisted

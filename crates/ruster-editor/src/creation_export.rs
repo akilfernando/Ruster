@@ -58,6 +58,43 @@ pub(crate) struct Request {
     pub destination: PathBuf,
     pub runtime_kit: PathBuf,
     pub mcp_scope: bool,
+    /// Explicit frozen launch intent, independent of subsequent editor navigation.
+    pub initial_camera: Option<ruster_render::CameraState>,
+}
+
+pub(crate) fn camera_value(camera: ruster_render::CameraState) -> Value {
+    json!({"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,
+        "distance":camera.distance,"orthographic":camera.orthographic})
+}
+
+pub(crate) fn parse_initial_camera(
+    value: &Value,
+) -> Result<Option<ruster_render::CameraState>, String> {
+    if value.is_null() {
+        return Ok(None);
+    }
+    #[derive(serde::Deserialize)]
+    #[serde(deny_unknown_fields)]
+    struct Camera {
+        target: [f32; 3],
+        yaw: f32,
+        pitch: f32,
+        distance: f32,
+        orthographic: bool,
+    }
+    let parsed: Camera = serde_json::from_value(value.clone())
+        .map_err(|_| "initial_camera must contain exact camera fields".to_string())?;
+    let camera = ruster_render::CameraState {
+        target: parsed.target,
+        yaw: parsed.yaw,
+        pitch: parsed.pitch,
+        distance: parsed.distance,
+        orthographic: parsed.orthographic,
+    };
+    camera
+        .is_valid()
+        .then_some(Some(camera))
+        .ok_or_else(|| "Invalid initial_camera bounds".into())
 }
 
 struct Prepared {
@@ -168,6 +205,12 @@ impl Controller {
         context: &egui::Context,
         request: Request,
     ) -> Result<Value, String> {
+        if request
+            .initial_camera
+            .is_some_and(|camera| !camera.is_valid())
+        {
+            return Err("Invalid initial_camera bounds".into());
+        }
         if self.busy() {
             return Err(
                 "an export is still running; inspect or cancel it before starting another".into(),
@@ -224,6 +267,7 @@ impl Controller {
         let cancel = Arc::new(AtomicBool::new(false));
         let worker_cancel = cancel.clone();
         let identity = request.identity.clone();
+        let initial_camera = request.initial_camera.map(camera_value);
         let (sender, receiver) = mpsc::sync_channel(1);
         let context = context.clone();
         thread::Builder::new()
@@ -235,7 +279,10 @@ impl Controller {
                 context.request_repaint();
             })
             .map_err(|e| format!("cannot start export worker: {e}"))?;
-        let status = json!({"operation_id": operation.to_string(), "state": "running", "identity": identity.wire_value()});
+        let mut status = json!({"operation_id": operation.to_string(), "state": "running", "identity": identity.wire_value()});
+        if let Some(camera) = initial_camera {
+            status["initial_camera"] = camera;
+        }
         self.status = Some(status.clone());
         self.job = Some(Job {
             operation,
@@ -267,6 +314,13 @@ impl Controller {
         };
         let job = self.job.take().expect("job exists until completion");
         let mut status = json!({"operation_id": job.operation.to_string(), "identity": job.identity.wire_value()});
+        if let Some(camera) = self
+            .status
+            .as_ref()
+            .and_then(|status| status.get("initial_camera"))
+        {
+            status["initial_camera"] = camera.clone();
+        }
         if job.cancel.load(Ordering::Acquire) || current != &job.identity {
             status["state"] = json!("cancelled");
         } else {
@@ -416,7 +470,7 @@ fn checked_kit_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
 
 // Verify fixed Python code before Python can import it. The configured kit is
 // explicitly trusted executable code, not a sandbox or a source upload service.
-fn verify_helpers(kit: &Path) -> Result<(String, String), String> {
+fn verify_helpers(kit: &Path, initial_camera: bool) -> Result<(String, String), String> {
     let raw = read_regular(&kit.join("runtime.json"), MAX_DOCUMENT)?;
     let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
     if manifest["schema"] != 1
@@ -425,6 +479,11 @@ fn verify_helpers(kit: &Path) -> Result<(String, String), String> {
         || manifest["helper"] != "scripts/package_creation.py"
     {
         return Err("unsupported runtime kit manifest".into());
+    }
+    if initial_camera && manifest["profile"]["capabilities"] != json!(["initial_camera"]) {
+        return Err(
+            "runtime kit does not support initial_camera; prepare a current runtime kit".into(),
+        );
     }
     let files = manifest["files"]
         .as_array()
@@ -513,7 +572,8 @@ fn prepare(
         .transpose()?
         .unwrap_or_default();
     cancelled(cancel)?;
-    let (kit_hash, runtime_hash) = verify_helpers(&request.runtime_kit)?;
+    let (kit_hash, runtime_hash) =
+        verify_helpers(&request.runtime_kit, request.initial_camera.is_some())?;
     let temporary = tempfile::Builder::new()
         .prefix(".ruster-export-")
         .tempdir_in(directory.validate()?)
@@ -531,8 +591,12 @@ fn prepare(
         meshes.insert(id, json!({"path": path, "sha256": digest(&source)}));
     }
     let scene_hash = digest(&request.scene_bytes);
-    let content_manifest = json!({"schema":1, "title":request.title, "tick_millis":100,
+    let mut content_manifest = json!({"schema":1, "title":request.title, "tick_millis":100,
         "scene_sha256":scene_hash, "meshes":meshes});
+    let initial_camera = request.initial_camera.map(camera_value);
+    if let Some(camera) = &initial_camera {
+        content_manifest["initial_camera"] = camera.clone();
+    }
     fs::write(
         content.join("content.json"),
         serde_json::to_vec(&content_manifest).map_err(|e| e.to_string())?,
@@ -602,6 +666,7 @@ fn prepare(
         &kit_hash,
         &runtime_hash,
         &request.title,
+        initial_camera.as_ref(),
     )?;
     cancelled(cancel)?;
     Ok(Prepared {
@@ -686,7 +751,9 @@ fn stop_owned_group(child: &mut Child, cancel_path: &Path, reason: &str) -> Stri
     thread::sleep(Duration::from_millis(250));
     let kill = signal_owned_group(child, "-KILL");
     let waited = child.wait();
-    format!("{reason}; cancellation={cancellation:?}, owned-group TERM={term:?}, KILL={kill:?}, helper wait={waited:?}")
+    format!(
+        "{reason}; cancellation={cancellation:?}, owned-group TERM={term:?}, KILL={kill:?}, helper wait={waited:?}"
+    )
 }
 
 fn wait_for_helper(
@@ -747,7 +814,7 @@ fn wait_for_helper(
                     child,
                     cancel_path,
                     &format!("cannot observe packaging helper: {error}"),
-                ))
+                ));
             }
         }
         thread::sleep(Duration::from_millis(50));
@@ -784,12 +851,26 @@ fn validate_receipt(
     kit_hash: &str,
     runtime_hash: &str,
     title: &str,
+    initial_camera: Option<&Value>,
 ) -> Result<(), String> {
+    // JSON's f64 parse can drift one ULP from an exactly promoted f32 during
+    // helper IPC. Compare validated renderer camera values, not intermediate
+    // JSON numbers; omitted/null retain the legacy no-framing meaning.
+    let expected_camera = initial_camera
+        .map(parse_initial_camera)
+        .transpose()?
+        .flatten();
+    let receipt_camera = receipt
+        .get("initial_camera")
+        .map(parse_initial_camera)
+        .transpose()?
+        .flatten();
     if receipt["archive"].as_str().map(Path::new) != Some(archive)
         || receipt["scene_sha256"] != scene_hash
         || receipt["runtime_kit_sha256"] != kit_hash
         || receipt["runtime_binary_sha256"] != runtime_hash
         || receipt["title"] != title
+        || receipt_camera != expected_camera
     {
         return Err("packaging receipt does not match the captured creation/runtime kit".into());
     }
@@ -838,6 +919,69 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Real helper IPC must retain renderer f32 identity despite an intermediate
+    // f64 JSON roundtrip; different, invalid and unrequested framing still fail.
+    #[test]
+    fn framing_receipt_roundtrip_uses_validated_camera_identity() {
+        let root = tempfile::tempdir().unwrap();
+        let archive = root.path().join("bundle.tar.gz");
+        fs::write(&archive, b"archive fixture").unwrap();
+        let (size, hash) = hash_archive(&archive).unwrap();
+        let camera = camera_value(ruster_render::CameraState {
+            target: [0.0, 1.0225, 0.0],
+            yaw: 0.65,
+            pitch: 0.45,
+            distance: 21.631699,
+            orthographic: false,
+        });
+        let before_wire = json!({
+            "archive":archive,"archive_bytes":size,"archive_sha256":hash,
+            "scene_sha256":"scene","runtime_kit_sha256":"kit",
+            "runtime_binary_sha256":"runtime","title":"Fit framing",
+            "manifest_sha256":"a".repeat(64),"file_count":7,
+            "initial_camera":camera,
+        });
+        let wire = serde_json::to_vec(&before_wire).unwrap();
+        let mut receipt: Value = serde_json::from_slice(&wire).unwrap();
+        // This real Fit camera previously failed raw JSON equality after IPC.
+        // Protect the camera contract even if a future JSON parser fixes that drift.
+        assert_eq!(
+            parse_initial_camera(&receipt["initial_camera"]).unwrap(),
+            parse_initial_camera(&camera).unwrap()
+        );
+        let validate = |receipt: &Value, camera: Option<&Value>| {
+            validate_receipt(
+                receipt,
+                &archive,
+                "scene",
+                "kit",
+                "runtime",
+                "Fit framing",
+                camera,
+            )
+        };
+        validate(&receipt, Some(&camera)).unwrap();
+        assert!(validate(&receipt, None).is_err(), "unrequested camera");
+        let valid_camera = receipt["initial_camera"].clone();
+        receipt["initial_camera"]["distance"] = json!(22.0);
+        assert!(validate(&receipt, Some(&camera)).is_err(), "changed camera");
+        receipt["initial_camera"] = valid_camera.clone();
+        receipt["initial_camera"]["extra"] = json!(true);
+        assert!(
+            validate(&receipt, Some(&camera)).is_err(),
+            "extra camera field"
+        );
+        receipt["initial_camera"] = valid_camera;
+        receipt["initial_camera"]["distance"] = json!(0);
+        assert!(validate(&receipt, Some(&camera)).is_err(), "invalid camera");
+        receipt.as_object_mut().unwrap().remove("initial_camera");
+        assert!(validate(&receipt, Some(&camera)).is_err(), "missing camera");
+        validate(&receipt, None).unwrap();
+        receipt["initial_camera"] = Value::Null;
+        assert!(validate(&receipt, Some(&camera)).is_err(), "null camera");
+        validate(&receipt, None).unwrap();
+    }
 
     fn identity() -> Identity {
         Identity {

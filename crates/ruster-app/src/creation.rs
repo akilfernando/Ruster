@@ -9,6 +9,33 @@ pub const FORMAT: &str = "ruster-application";
 pub const VERSION: u32 = 1;
 pub const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
+/// Explicit launch framing. Navigation remains interactive after initialization.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InitialCamera {
+    pub target: [f32; 3],
+    pub yaw: f32,
+    pub pitch: f32,
+    pub distance: f32,
+    pub orthographic: bool,
+}
+
+impl InitialCamera {
+    pub fn camera_state(self) -> Result<ruster_render::CameraState, String> {
+        let state = ruster_render::CameraState {
+            target: self.target,
+            yaw: self.yaw,
+            pitch: self.pitch,
+            distance: self.distance,
+            orthographic: self.orthographic,
+        };
+        state
+            .is_valid()
+            .then_some(state)
+            .ok_or_else(|| "Invalid application initial_camera".into())
+    }
+}
+
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreationManifest {
@@ -19,6 +46,8 @@ pub struct CreationManifest {
     #[serde(deserialize_with = "unique_meshes")]
     pub meshes: BTreeMap<String, String>,
     pub tick_millis: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub initial_camera: Option<InitialCamera>,
 }
 
 fn unique_meshes<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error>
@@ -79,6 +108,9 @@ impl CreationManifest {
         }
         if !(1..=1000).contains(&self.tick_millis) {
             return Err("Application tick_millis must be 1–1000".into());
+        }
+        if let Some(camera) = self.initial_camera {
+            camera.camera_state()?;
         }
         resource_path(&self.scene)?;
         if self.meshes.len() > ruster_assets::MAX_ASSETS {
@@ -147,6 +179,7 @@ mod tests {
             scene: "scene.json".into(),
             meshes: [("marker".into(), "marker.obj".into())].into(),
             tick_millis: 100,
+            initial_camera: None,
         };
         std::fs::write(
             directory.path().join(DESCRIPTOR_NAME),
@@ -156,6 +189,27 @@ mod tests {
         let root = ResourceRoot::new(directory.path()).unwrap();
         let loaded = CreationManifest::load(&root).unwrap();
         assert_eq!(loaded.title, manifest.title);
+        assert!(loaded.initial_camera.is_none());
+        assert!(serde_json::to_value(&manifest)
+            .unwrap()
+            .get("initial_camera")
+            .is_none());
+        let mut framed = manifest.clone();
+        framed.initial_camera = Some(InitialCamera {
+            target: [1.0, 2.0, 3.0],
+            yaw: 0.25,
+            pitch: -0.5,
+            distance: 8.0,
+            orthographic: true,
+        });
+        let roundtrip: CreationManifest =
+            serde_json::from_slice(&serde_json::to_vec(&framed).unwrap()).unwrap();
+        roundtrip.validate().unwrap();
+        assert_eq!(roundtrip.initial_camera, framed.initial_camera);
+        for distance in [0.0, f32::INFINITY, 1.1e7] {
+            framed.initial_camera.as_mut().unwrap().distance = distance;
+            assert!(framed.validate().is_err());
+        }
         let input = loaded.load_session(&root).unwrap();
         assert!(
             input.path().is_none(),

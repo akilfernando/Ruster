@@ -13,6 +13,7 @@ pub struct HostOptions {
     pub tick_duration: Duration,
     pub max_frames: Option<u64>,
     pub start_running: bool,
+    pub initial_camera: Option<ruster_render::CameraState>,
 }
 
 impl Default for HostOptions {
@@ -23,6 +24,7 @@ impl Default for HostOptions {
             tick_duration: Duration::from_millis(100),
             max_frames: None,
             start_running: false,
+            initial_camera: None,
         }
     }
 }
@@ -49,6 +51,12 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
     }
     if options.max_frames.is_some_and(|n| n == 0 || n > 10_000) {
         return Err("max_frames must be 1..=10000".into());
+    }
+    if options
+        .initial_camera
+        .is_some_and(|camera| !camera.is_valid())
+    {
+        return Err("invalid application initial camera".into());
     }
     let mut runtime = Runtime::new(app, options.tick_duration)?;
     runtime.set_running(options.start_running);
@@ -77,6 +85,7 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         let render = cc.wgpu_render_state.as_ref().ok_or("Vulkan renderer unavailable")?;
         let metrics = ruster_render::install(render);
         Ok(Box::new(Host {
+            navigation: ruster_render::NavigationOptions { camera: options.initial_camera, ..Default::default() },
             runtime, metrics, options, last_frame: Instant::now(), error: None,
             ui_frames: 0, exit_error: host_error,
         }))
@@ -98,6 +107,7 @@ struct Host<A: Application> {
     error: Option<String>,
     ui_frames: u64,
     exit_error: Arc<Mutex<Option<String>>>,
+    navigation: ruster_render::NavigationOptions,
 }
 
 impl<A: Application> Host<A> {
@@ -241,12 +251,15 @@ impl<A: Application> eframe::App for Host<A> {
             if can_render {
                 let app = self.runtime.app();
                 let content = app.content();
-                let picked = ruster_render::viewport_with_assets(
+                let selected = app.selected();
+                let picked = ruster_render::viewport_with_navigation(
                     ui,
                     content.scene(),
-                    app.selected(),
+                    selected.as_slice(),
                     content.meshes(),
-                );
+                    &mut self.navigation,
+                )
+                .picked;
                 if let Some(id) = picked {
                     self.runtime.app_mut().select(&id);
                 }
@@ -283,9 +296,18 @@ impl<A: Application> Drop for Host<A> {
             .exit_error
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = self.error.clone();
-        eprintln!("Ruster application summary: tick={} completed={} ui_frames={} frames={} objects={} mesh_uploads={} mesh_upload_bytes={} draw_calls={} unresolved_error={}",
-            self.runtime.tick(), self.runtime.app().completed(), self.ui_frames, metrics.frames, metrics.objects,
-            metrics.mesh_uploads, metrics.mesh_upload_bytes, metrics.draw_calls, self.error.is_some());
+        eprintln!(
+            "Ruster application summary: tick={} completed={} ui_frames={} frames={} objects={} mesh_uploads={} mesh_upload_bytes={} draw_calls={} unresolved_error={}",
+            self.runtime.tick(),
+            self.runtime.app().completed(),
+            self.ui_frames,
+            metrics.frames,
+            metrics.objects,
+            metrics.mesh_uploads,
+            metrics.mesh_upload_bytes,
+            metrics.draw_calls,
+            self.error.is_some()
+        );
     }
 }
 
@@ -351,6 +373,7 @@ mod tests {
         };
         let options = HostOptions::default();
         let mut host = Host {
+            navigation: ruster_render::NavigationOptions::default(),
             runtime: Runtime::new(app, options.tick_duration).unwrap(),
             options,
             last_frame: Instant::now(),

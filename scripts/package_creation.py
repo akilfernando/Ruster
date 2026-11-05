@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import platform
@@ -32,6 +33,7 @@ MAX_MESHES = 64
 PROFILE = {"format": "ruster-runtime", "version": 1,
            "descriptor_format": "ruster-application", "descriptor_version": 1,
            "os": "linux", "arch": "x86_64"}
+CAMERA_PROFILE = {**PROFILE, "capabilities": ["initial_camera"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -143,8 +145,37 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if profile != PROFILE or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items()):
+    if (profile not in (PROFILE, CAMERA_PROFILE)
+            or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected Linux x86_64 protocol version 1")
+
+
+def initial_camera(value: object) -> dict | None:
+    if value is None:
+        return None
+    exact_fields(value, {"target", "yaw", "pitch", "distance", "orthographic"}, "initial camera")
+    def number(value):
+        if type(value) not in (int, float):
+            raise ValueError("initial camera values must be finite numbers")
+        try:
+            rounded = struct.unpack("f", struct.pack("f", value))[0]
+        except (OverflowError, struct.error) as exc:
+            raise ValueError("initial camera values exceed f32") from exc
+        if not math.isfinite(rounded):
+            raise ValueError("initial camera values must be finite")
+        return rounded
+    target = value["target"]
+    if type(target) is not list or len(target) != 3:
+        raise ValueError("initial camera target requires exactly three numbers")
+    camera = {"target": [number(n) for n in target],
+              "yaw": number(value["yaw"]), "pitch": number(value["pitch"]),
+              "distance": number(value["distance"]), "orthographic": value["orthographic"]}
+    if (any(abs(n) > 1e7 for n in camera["target"])
+            or abs(camera["pitch"]) > number(math.pi / 2)
+            or not number(0.01) <= camera["distance"] <= 1e7
+            or type(camera["orthographic"]) is not bool):
+        raise ValueError("invalid initial camera bounds or projection")
+    return camera
 
 
 def run_runtime(binary: Path, arguments: list[str], cancel_file: Path | None = None) -> dict:
@@ -290,7 +321,10 @@ def load_kit(root: Path, cancel_file: Path | None = None) -> tuple[dict, dict[st
 def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, dict, dict[str, bytes]]:
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
-    exact_fields(content, {"schema", "title", "tick_millis", "scene_sha256", "meshes"}, "content")
+    fields = {"schema", "title", "tick_millis", "scene_sha256", "meshes"}
+    exact_fields(content, fields | ({"initial_camera"} if "initial_camera" in content else set()), "content")
+    if "initial_camera" in content:
+        content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
     if (type(content["schema"]) is not int or content["schema"] != 1
             or not isinstance(title, str) or not title or title != title.strip()
@@ -342,10 +376,15 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             cancel_file: Path | None = None) -> dict:
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
     content, scene_data, document, meshes = source_content(content_root, cancel_file)
+    camera = content.get("initial_camera")
+    if camera is not None and kit["profile"] != CAMERA_PROFILE:
+        raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
     descriptor = {"format": "ruster-application", "version": 1, "title": content["title"],
                   "scene": "resources/scene.json", "tick_millis": content["tick_millis"],
                   "meshes": {identity: "resources/" + record["path"]
                              for identity, record in content["meshes"].items()}}
+    if camera is not None:
+        descriptor["initial_camera"] = camera
     with tempfile.TemporaryDirectory(prefix="ruster-creation-") as temporary:
         stage = Path(temporary)
         package_app.put(stage, "application", payload["runtime"], executable=True)
@@ -368,6 +407,8 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                 or result.get("tick") != "0" or result.get("fixed_dt") != content["tick_millis"] / 1000
                 or result.get("authored_scene") != typed_scene(document)):
             raise ValueError("runtime preflight did not retain creation identity, tick or authored scene")
+        if camera is not None and result.get("initial_camera") != camera:
+            raise ValueError("runtime preflight did not retain explicit initial camera")
         cancelled(cancel_file)
         manifest = {"schema": 1, "kind": "ruster-creation-package", "application": "application",
                     "target": package_app.TARGET, "title": content["title"],
@@ -381,6 +422,8 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
         receipt.update(manifest_sha256=sha256(manifest_data), scene_sha256=sha256(scene_data),
                        runtime_kit_sha256=kit_hash, runtime_binary_sha256=sha256(payload["runtime"]),
                        file_count=len(manifest["files"]) + 1, title=content["title"])
+        if camera is not None:
+            receipt["initial_camera"] = camera
         return receipt
 
 

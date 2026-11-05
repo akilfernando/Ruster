@@ -90,6 +90,7 @@ class CreationDistributionTests(unittest.TestCase):
                                         and ".." not in Path(m.name).parts for m in members))
                     archive.extractall(base / "application-relocated", filter="data")
                 application = base / "application-relocated/application"
+                self.assertNotIn("initial_camera", json.loads((application / "app.json").read_bytes()))
                 self.assertEqual((application / "resources/scene.json").read_bytes(), scene_bytes)
                 self.assertEqual((application / "resources/meshes/0000.obj").read_bytes(), mesh)
                 for name in ("THIRD_PARTY_NOTICES.txt", "SUPPLEMENTAL_NOTICES.txt"):
@@ -112,6 +113,46 @@ class CreationDistributionTests(unittest.TestCase):
                     with self.assertRaises((ValueError, OSError)):
                         package_creation.package(kit, content_root, failed)
                     self.assertFalse(failed.exists())
+                # Explicit framing is frozen launch intent; legacy kits cannot
+                # silently drop it, and the capable runtime must echo it at preflight.
+                camera = {"target": [0.1, 2.3, -0.7], "yaw": 0.4, "pitch": 0.3,
+                          "distance": 7.1, "orthographic": True}
+                normalized_camera = package_creation.initial_camera(camera)
+                self.assertNotEqual(normalized_camera, camera)
+                framed = {**content, "initial_camera": camera}
+                (content_root / "content.json").write_bytes(package_creation.encoded(framed))
+                with self.assertRaisesRegex(ValueError, "does not support initial_camera"):
+                    package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                capable = json.loads(runtime_json)
+                capable["profile"] = package_creation.CAMERA_PROFILE
+                (kit / "runtime.json").write_bytes(package_creation.encoded(capable))
+                # The actual Rust headless path serializes through Value, which
+                # promotes f32 to its exact f64 value before JSON encoding.
+                runtime_camera = {"target": [0.10000000149011612, 2.299999952316284, -0.699999988079071],
+                                  "yaw": 0.4000000059604645, "pitch": 0.30000001192092896,
+                                  "distance": 7.099999904632568, "orthographic": True}
+                self.assertEqual(runtime_camera, normalized_camera)
+                framed_response = {**response, "initial_camera": runtime_camera}
+                framed_output = base / "framed.tar.gz"
+                with patch.object(package_creation, "run_runtime", return_value=framed_response):
+                    framed_receipt = package_creation.package(kit, content_root, framed_output)
+                self.assertEqual(framed_receipt["initial_camera"], normalized_camera)
+                with tarfile.open(framed_output) as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["initial_camera"], normalized_camera)
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), scene_bytes)
+                with self.assertRaisesRegex(ValueError, "explicit initial camera"):
+                    package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                for field, value in [("distance", 0), ("pitch", 2), ("yaw", 1e100),
+                                     ("orthographic", 1), ("target", [True, 0, 0])]:
+                    invalid_camera = {**camera, field: value}
+                    (content_root / "content.json").write_bytes(package_creation.encoded(
+                        {**content, "initial_camera": invalid_camera}))
+                    rejected()
+                (kit / "runtime.json").write_bytes(runtime_json)
+                (content_root / "content.json").write_bytes(package_creation.encoded(content))
                 # Exact bounded kit inventory and hashed bytes, including nested duplicate JSON keys.
                 for mutation in ("tamper", "extra", "duplicate-record", "traversal", "oversize", "duplicate-key"):
                     with self.subTest(mutation=mutation):

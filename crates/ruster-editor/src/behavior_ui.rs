@@ -1142,7 +1142,6 @@ pub(super) struct RuntimeUi {
     pub reset_succeeded: Option<RunKey>,
 }
 impl RuntimeUi {
-    #[cfg(test)]
     pub fn is_playing(&self) -> bool {
         self.playing
     }

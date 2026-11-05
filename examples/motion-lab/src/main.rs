@@ -232,6 +232,7 @@ fn execute(options: Options) -> Result<(), String> {
                 tick_duration,
                 max_frames: options.frames,
                 start_running: false,
+                initial_camera: None,
             },
         )
     }
@@ -317,20 +318,23 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             runtime.step()?;
         }
         let app = runtime.app();
+        let mut output = serde_json::json!({
+            "mode": "creation",
+            "title": manifest.title,
+            "scene_id": app.session().scene().id,
+            "authored_revision": app.session().scene().revision.to_string(),
+            "tick": runtime.tick().to_string(),
+            "fixed_dt": tick_duration.as_secs_f64(),
+            "runtime_speed_override": null,
+            "authored_scene": app.session().scene(),
+            "runtime_scene": app.content().scene(),
+        });
+        if let Some(camera) = manifest.initial_camera {
+            output["initial_camera"] = serde_json::to_value(camera).map_err(|e| e.to_string())?;
+        }
         println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "mode": "creation",
-                "title": manifest.title,
-                "scene_id": app.session().scene().id,
-                "authored_revision": app.session().scene().revision.to_string(),
-                "tick": runtime.tick().to_string(),
-                "fixed_dt": tick_duration.as_secs_f64(),
-                "runtime_speed_override": null,
-                "authored_scene": app.session().scene(),
-                "runtime_scene": app.content().scene(),
-            }))
-            .map_err(|e| e.to_string())?
+            serde_json::to_string_pretty(&output).map_err(|e| e.to_string())?
         );
         Ok(())
     } else {
@@ -345,6 +349,10 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
                 tick_duration,
                 max_frames: options.frames,
                 start_running: true,
+                initial_camera: manifest
+                    .initial_camera
+                    .map(|camera| camera.camera_state())
+                    .transpose()?,
             },
         )
     }
@@ -397,6 +405,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
                 tick_duration: generic::FIXED_DT,
                 max_frames: options.frames,
                 start_running: false,
+                initial_camera: None,
             },
         )
     }
@@ -411,6 +420,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
+                "capabilities":["initial_camera"],
             })
         );
         return;

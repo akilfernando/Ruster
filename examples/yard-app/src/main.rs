@@ -141,6 +141,7 @@ fn execute(options: Options) -> Result<(), String> {
                 tick_duration,
                 max_frames: options.frames,
                 start_running: false,
+                initial_camera: None,
             },
         )
     }

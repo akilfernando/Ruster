@@ -483,3 +483,9 @@ See the [adapter's save workflow](../ruster-mcp/README.md#explicit-scene-save-au
 ## Export your creation
 
 **File → Export application…** (Ctrl+Shift+E, remappable) packages a clean saved Scene5, current accepted OBJ meshes and Lua behavior using a prepared Linux runtime template. Enter submits text fields, Tab traverses, Enter on Cancel or Escape cancels. Packaging runs off the UI thread with status/cancellation and fresh-file publication. See the [creator workflow](../../docs/CREATOR-WORKFLOW.md) for template preparation, scope, standalone execution and matching guarded MCP operations. Native MCP and direct-dialog verification pass within the recorded engineering scope; human acceptance remains separate.
+
+## Color and native MCP viewport workflow
+
+The Inspector's **Color** fields edit the active object's tint through shared scene history. Enter applies, Escape cancels and Tab traverses fields/actions. Invalid Enter preserves both text and focus for repair. Alpha is retained in the document; the current viewport uses opaque surfaces. Color drafts participate in guarded saving and recovery, so another agent cannot overwrite unfinished human color text.
+
+Native MCP now supports actual viewport thumbnails, guarded camera/selection changes and the same authored color operation. See the [native MCP guide](../ruster-mcp/README.md#viewport-observation-navigation-and-color). Saved headings follow the document filename without changing stable scene identity. **Use current view** in Export explicitly freezes initial application framing; it does not turn every working camera movement into scene data. See the [creator export guide](../../docs/CREATOR-WORKFLOW.md).

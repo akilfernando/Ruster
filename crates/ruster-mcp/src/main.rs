@@ -1,8 +1,11 @@
 //! Narrow MCP 2025-06-18 stdio profile. See the crate README for limits.
 mod behavior_tools;
+mod capture_tools;
+mod color_tools;
 mod export_tools;
 mod persistence_tools;
 mod runtime_tools;
+mod view_tools;
 use serde_json::{json, Map, Value};
 use std::io::{self, BufRead, BufReader, Write};
 
@@ -28,8 +31,22 @@ fn rpc_error(id: Value, code: i64, message: &str) -> Value {
 }
 
 fn tool_result(result: Value) -> Value {
-    json!({"content":[{"type":"text","text":result.to_string()}],
-        "structuredContent":result, "isError":result["ok"] != true})
+    let mut result = result;
+    let mut content = Vec::new();
+    // The bounded native viewport endpoint is the only image producer. Keep the
+    // bytes out of the text/structured duplicate while preserving useful pins.
+    if result["ok"] == true && result["result"]["status"] == "ready" {
+        if let Some(data) = result["result"]
+            .as_object_mut()
+            .and_then(|v| v.remove("image_base64"))
+        {
+            if let Some(data) = data.as_str().filter(|s| s.len() <= 54_000) {
+                content.push(json!({"type":"image","data":data,"mimeType":"image/png"}));
+            }
+        }
+    }
+    content.push(json!({"type":"text","text":result.to_string()}));
+    json!({"content":content,"structuredContent":result,"isError":result["ok"]!=true})
 }
 
 fn domain_error(code: &str, message: &str) -> Value {
@@ -87,6 +104,15 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if color_tools::supported(name) {
+        return color_tools::valid(name, arguments);
+    }
+    if view_tools::supported(name) {
+        return view_tools::valid(name, arguments);
+    }
+    if capture_tools::supported(name) {
+        return capture_tools::valid(name, arguments);
+    }
     if export_tools::supported(name) {
         return export_tools::valid(name, arguments);
     }
@@ -373,6 +399,9 @@ fn tools() -> Value {
             "inputSchema":object_schema(Value::Object(properties),required),
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
+    tools.extend(color_tools::list());
+    tools.extend(view_tools::list());
+    tools.extend(capture_tools::list());
     tools.extend(export_tools::list());
     tools.extend(persistence_tools::list());
     tools.extend(behavior_tools::list());
@@ -499,6 +528,9 @@ impl Server {
                         "shader_refresh",
                     ]
                     .contains(&name)
+                        && !color_tools::supported(name)
+                        && !view_tools::supported(name)
+                        && !capture_tools::supported(name)
                         && !export_tools::supported(name)
                         && !persistence_tools::supported(name)
                         && !behavior_tools::supported(name)
@@ -757,11 +789,29 @@ mod tests {
     }
 
     #[test]
+    fn viewport_image_uses_mcp_image_content_without_text_duplication() {
+        let result = tool_result(
+            json!({"ok":true,"result":{"status":"ready","capture_id":"2","revision":"9","image_base64":"cG5n"}}),
+        );
+        assert_eq!(result["content"][0]["type"], "image");
+        assert_eq!(result["content"][0]["mimeType"], "image/png");
+        assert_eq!(result["content"][0]["data"], "cG5n");
+        assert!(result["structuredContent"]["result"]
+            .get("image_base64")
+            .is_none());
+        assert_eq!(result["structuredContent"]["result"]["revision"], "9");
+        let pending =
+            tool_result(json!({"ok":true,"result":{"status":"pending","capture_id":"2"}}));
+        assert_eq!(pending["content"].as_array().unwrap().len(), 1);
+        assert_eq!(pending["content"][0]["type"], "text");
+    }
+
+    #[test]
     fn schemas_and_validation_prevent_unknown_or_rounded_arguments() {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 49);
+        assert_eq!(tools.len(), 55);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -792,6 +842,12 @@ mod tests {
                 "scene_undo",
                 "scene_redo",
                 "scene_replay",
+                "scene_color",
+                "viewport_inspect",
+                "viewport_camera",
+                "scene_select",
+                "viewport_capture_start",
+                "viewport_capture_inspect",
                 "creation_export_inspect",
                 "creation_export_start",
                 "creation_export_cancel",

@@ -17,6 +17,16 @@ Build from the repository root with `cargo build --locked -p ruster-mcp`. Config
 
 Client configuration formats vary; this example shows the executable and environment, not a universal installer. Use `inspect` for a legacy logistics session or `scene_inspect` for a generic scene session first. Tools from the other application mode return `unsupported_operation`. Every mutation and replay requires its exact `expected_session_token` and `expected_revision`. Content mutations additionally require the independent catalog or shader revision described below. All u64 configuration values, revisions and tick counts are canonical decimal strings to preserve precision in JavaScript clients. Scene/configuration edits remain unsaved until an explicit save. Generic-scene MCP saving requires the additional directory grant below; legacy configuration saving remains human-only. Asset catalog changes persist immediately and are independent of scene Undo. Drafts and modal/recovery actions can block mutation; follow the returned recovery instruction rather than discarding human state.
 
+## Viewport observation, navigation and color
+
+Generic-scene sessions also expose `viewport_inspect`, `viewport_camera`, `scene_select`, `viewport_capture_start`, `viewport_capture_inspect` and `scene_color`. Use `tools/list` for the exact schemas; the current adapter lists55tools.
+
+`viewport_inspect` returns the actual camera, selection and independent `view_revision`. Camera/selection changes require its exact session token, authored revision and view revision. A human's newer navigation rejects an old request. Finish drafts/dialogs/gestures first. These transient controls preserve scene Undo and runtime transforms. `scene_color` is a shared authored RGBA operation with scene revision/Undo; channels are finite0–1. The direct Inspector has matching Apply/Enter and Cancel/Escape behavior. Alpha is stored; the renderer remains opaque.
+
+Pause playback and finish navigation before `viewport_capture_start`, passing the inspected session, authored revision and view revision. Poll the returned `capture_id` with `viewport_capture_inspect`. Ready responses contain an MCP `image` block with a PNG thumbnail plus camera, revision, view, runtime and content identities. Pending/expired/stale responses do not contain a fresh image. Capture IDs do not alias after scene replacement. Only one readback/encoder may remain outstanding; no continuous capture runs while idle. The thumbnail is at most512pixels on its longest side and40,000PNG bytes. Native windows above8,388,608physical pixels cannot be captured.
+
+The screenshot is restricted to this editor's viewport. Floating source/debug windows, menus, tooltips and other non-background egui areas conservatively block observation; close them and inspect again. Other applications and the system clipboard are never captured. Hidden windows may fail to paint before the deadline. See [decision0028](../../docs/decisions/0028-viewport-observation-and-launch-framing.md) for design and verification limits.
+
 ## Explicit scene-save authority
 
 To enable saving for a disposable project, choose an existing directory and start the editor with an explicit grant:
