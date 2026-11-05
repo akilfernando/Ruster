@@ -17,6 +17,7 @@ Persistent project: `/home/akilf/Projects/Ruster-Creations/tideglass` (separate 
 - `Meshes/`, `Scripts/`: original source assets and readable mirrors of embedded scripts. Embedded scene source remains authoritative; mirrors are not automatically live-linked.
 - `open-editor.sh`: opens the editable project with creator-eval-1 and restricted project/export MCP grants.
 - `run.sh`, `Build/application/`: actual independently runnable creation.
+- `Exports/Tideglass-project.zip`: source-only editable project/Gallery/tools archive, excluding private session state, caches and native binaries; exact checksum in `Exports/project-receipt.json`.
 - `Exports/Tideglass-linux-x86_64.tar.gz`:10,462,806bytes, SHA256 `2ab7fff6c1fb70cd30a6f921cf0af6ff69c642208509b553cce0f2f273c09c5a`;14files. Exact receipt and runtime/template/manifest identities in `Exports/receipt.json`.
 - `Gallery/Tideglass.png`, `Gallery/Rest-pose.png`: unaltered native editor captures.
 - `Tools/studio.py`, `.studio/`: local MCP session script and private exact call traces/reports/captures. `Tools/make_meshes.py` records model construction; `Tools/verify.py` verifies the exported application's intended motion.
@@ -43,6 +44,6 @@ Two harness issues are retained: an initial Python helper argument-name collisio
 
 ## Findings for later product work
 
-MCP can author this whole creation and deliver it without engine changes. It does not currently expose camera/selection/color edits. Camera presentation needed observation-only UI controls, and the chosen editor framing is not included in the standalone descriptor, so runtime starts with conservative default framing. A new scene's heading remains `untitled` after saving to a named file. These are concrete creator-exercise observations for later prioritization, not silently implemented features or new accepted architecture.
+MCP can author this whole creation and deliver it without engine changes. It does not currently expose rendered-viewport observations or camera/selection/color edits. Camera presentation needed observation-only UI controls, and the chosen editor framing is not included in the standalone descriptor, so runtime starts with conservative default framing. A new scene's heading remains `untitled` after saving to a named file. These are concrete creator-exercise observations for later prioritization, not silently implemented features or new accepted architecture.
 
 The32-entry Undo history retains recent edits; it cannot represent this entire multi-step construction. Saved state and full private MCP traces preserve continuity. The work intentionally uses monochrome geometry and existing lifecycle controls; it does not claim new input, shading, audio, physics or general project-framework support. M9 human/platform/resource gates remain as recorded in the candidate matrix.
