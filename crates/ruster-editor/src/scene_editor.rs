@@ -1527,6 +1527,11 @@ impl SceneEditor {
         self.save_sequence = sequence;
         self.save_warning = None;
         if old_root.as_ref() != Some(&parent) {
+            // Catalog and shader revisions belong to their project root. A
+            // different root can have identical counters, so retire the old
+            // command/worker incarnation only after the disk save commits.
+            self.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
+            self.creation_export.cancel();
             self.assets = destination_store;
             self.asset_snapshot();
             match reset(self.render.as_ref()) {
@@ -1545,6 +1550,8 @@ impl SceneEditor {
                     self.save_warning = Some(warning);
                 }
             }
+            self.reset_assets = None;
+            self.observe_runtime();
         }
         self.asset_origin = Some(parent);
         self.recovered_origin = None;
@@ -1967,9 +1974,16 @@ impl SceneEditor {
     }
     pub fn command(&mut self, nonce: &str, op: &str, args: Value) -> Value {
         let token = format!("{nonce}:scene:{}", self.generation);
-        match self.execute(&token, op, &args) {
+        let outcome = self.execute(&token, op, &args);
+        // A committed cross-root Save As changes the content incarnation.
+        // Replies must describe the resulting state, not the admitted request.
+        let token = format!("{nonce}:scene:{}", self.generation);
+        match outcome {
             Ok(mut value) => {
                 if let Some(result) = value.as_object_mut() {
+                    if result.contains_key("session_token") {
+                        result.insert("session_token".into(), json!(token));
+                    }
                     result.insert(
                         "history_evictions".into(),
                         self.session.history_evictions().into(),

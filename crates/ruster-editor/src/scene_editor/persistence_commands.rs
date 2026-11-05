@@ -274,6 +274,11 @@ mod tests {
             inspect(&mut editor)["persistence_token"],
             before["persistence_token"]
         );
+        assert_eq!(
+            inspect(&mut editor)["session_token"],
+            before["session_token"],
+            "same-root saves retain the content incarnation"
+        );
         rejected(
             editor.command("test", "scene_save", stale),
             "stale_persistence",
@@ -383,15 +388,75 @@ mod tests {
 
         let elsewhere = tempfile::tempdir().unwrap();
         let old = arguments(&mut recovered, None);
+        let old_content = recovered.command("test", "asset_inspect", json!({}))["result"].clone();
+        assert_eq!(old_content["asset_revision"], "0");
+        assert!(!recovered.session.has_asset_references());
+        std::fs::write(elsewhere.path().join("occupied.json"), b"existing creation").unwrap();
+        assert!(recovered
+            .save_scene(elsewhere.path().join("occupied.json"))
+            .is_err());
+        assert_eq!(
+            inspect(&mut recovered)["session_token"],
+            old_content["session_token"]
+        );
+        std::fs::write(
+            elsewhere.path().join("triangle.obj"),
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        let document_before = recovered.session.snapshot_bytes().unwrap();
         recovered
             .save_scene(elsewhere.path().join("elsewhere.json"))
             .unwrap();
+        assert_eq!(recovered.session.snapshot_bytes().unwrap(), document_before);
+        assert_eq!(recovered.assets.as_ref().unwrap().revision(), 0);
+        // Both roots have catalog revision zero, so revision checks alone must
+        // not authorize an old request against the new project's source files.
+        rejected(
+            recovered.command(
+                "test",
+                "asset_import",
+                json!({
+                    "expected_session_token": old_content["session_token"],
+                    "expected_revision": old_content["revision"],
+                    "expected_asset_revision": old_content["asset_revision"],
+                    "asset_id": "triangle", "source": "triangle.obj",
+                }),
+            ),
+            "stale_session",
+        );
+        rejected(
+            recovered.command(
+                "test",
+                "shader_refresh",
+                json!({
+                    "expected_session_token": old_content["session_token"],
+                    "expected_revision": old_content["revision"],
+                    "expected_shader_revision": old_content["shader_revision"],
+                }),
+            ),
+            "stale_session",
+        );
+        assert_eq!(recovered.assets.as_ref().unwrap().revision(), 0);
         rejected(
             recovered.command("test", "scene_save", old),
-            "stale_persistence",
+            "stale_session",
         );
         assert_eq!(inspect(&mut recovered)["can_save"], false);
         rejected(save(&mut recovered, None), "save_permission_required");
+        let prior_token = inspect(&mut recovered)["session_token"].clone();
+        let returned = save(&mut recovered, Some("Returned.json"));
+        assert_eq!(returned["ok"], true, "{returned}");
+        let returned_state = inspect(&mut recovered);
+        assert_ne!(returned_state["session_token"], prior_token);
+        assert_eq!(
+            returned["result"]["session_token"],
+            returned_state["session_token"]
+        );
+        assert_eq!(
+            returned["result"]["persistence_token"],
+            returned_state["persistence_token"]
+        );
         // Human replacement keeps the process grant, but starts a new scene
         // incarnation with no save association or committed receipt.
         let old = arguments(&mut recovered, None);

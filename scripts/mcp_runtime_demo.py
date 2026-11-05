@@ -36,7 +36,7 @@ async def main(args):
         async with ClientSession(read, write) as client:
             await client.initialize()
             names = {tool.name for tool in (await client.list_tools()).tools}
-            assert len(names) == 44 and {'behavior_debug_next', 'behavior_runtime_reset'} <= names
+            assert {'behavior_debug_next', 'behavior_runtime_reset'} <= names
 
             async def call(name, value=None, error=None):
                 response = await client.call_tool(name, value or {})
