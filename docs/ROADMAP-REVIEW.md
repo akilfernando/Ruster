@@ -190,3 +190,32 @@ The maintenance liabilities are real: substantial editor/controller state and tw
 Physical focused keyboard/mouse/gizmo input, full revised Unity and experienced-Unreal walkthroughs, accessibility breadth, fresh-machine onboarding, another GPU class and native Windows remain unverified. No Unreal tester is available. Lua remains provisional; focused Zed GUI completion and external Zed DAP are separate undelivered claims. Linux binary prerequisites and readable-notice limitations remain explicit in distribution guidance. These limits do not waive allocated M8 features; they constrain the delivered prototype and the future M9 adoption/release gate.
 
 After this checkpoint, make no further engine changes in this run. A separately authorized M9 should start with creator walkthroughs and explicit platform/support decisions, fix observed workflow friction, then validate representative latency/memory/iteration budgets and release guidance. Keep the end state focused on enabling creators' own applications, rather than expanding an engine feature checklist.
+
+
+## Creator-goal reassessment — 2026-11-05
+
+**Status: proposed scheduling revision, awaiting user agreement.** The user requested Astra's assessment of progress and a revised goal that permits useful autonomous work. Root reconciled an independent Astra high read-only review with actual source and git state at `be5a482`. No milestone acceptance criteria, release authorization or implemented capability changed in this review.
+
+### Progress and the current obstacle
+
+M8's bounded authoring/reuse foundation is substantial: construction, manipulation, imported content, Lua behavior and debugging, recoverable authoring, shared runtime and standalone examples. The user's physical confirmation of reliable picking and live Transform feedback is stronger evidence for those two everyday interactions than the earlier injected checks. Source-archive rehearsal exposed and repaired two real adoption defects: Gitless verification and export dependence on an ignored development lockfile. The corrected evaluation source and relocated example packages now have scoped passing evidence.
+
+Recent effort nevertheless over-indexed on qualification logistics: hidden-window protocols, repeated harness repair and extensive evidence curation cannot establish missing human familiarity. The desktop lock is an external dependency; the hidden SaveAs observation is unresolved, not a demonstrated product defect. Reuse valid evidence and stop repeating unavailable checks.
+
+Actual owning tools reveal a product-facing handoff gap. `scripts/new_app.py` exports Yard or Motion; `scripts/package_app.py` selects fixed sample resources. Motion can read a creator's Scene5 content with explicit asset mappings, but defaults to the legacy mode without arguments. The mechanisms exist, while taking one's own authored creation to standalone delivery remains fragmented and sample-oriented. This assessment does not establish that a project manager or new runtime framework is needed.
+
+### Recommended finite working goal
+
+Deliver a bounded Linux creator workflow in which someone authors their own small Scene5/Lua creation, previews and repairs it, saves and recovers their work, and runs the same creation as a relocated standalone application using existing shared mechanisms. Resolve demonstrated usability and delivery defects, preserve keyboard behavior and compatibility, and verify affected correctness and performance proportionately. Prepare an immutable evaluation snapshot with concise guidance and explicit outstanding acceptance dependencies. Continue useful engineering independently of unavailable participants or machines; resume permitted focused desktop checks after normal unlock. Stop at this workflow's engineering handoff or when remaining work needs external access or a user decision. M9 acceptance retains its human, platform and resource requirements; public push/tag/release remain separate.
+
+### Recommended sequence and stop conditions
+
+1. After normal unlock, finish the preserved recovery → GUI repair → SaveAs → normal close → reopen journey, with observed menu state and process lifetime. Combine the relevant focused keyboard/idle checks into that bounded session. Stop on success or a reproducible defect; no further focus probes while locked.
+2. Independently of that access dependency, follow one distinctly named creator-owned scene with an imported OBJ, Lua behavior and editable property through edit → preview → repair → save → package → relocated run. Inspect the concrete journey first, then fix only demonstrated friction using existing Scene5, resource resolution, consumer and packaging code. A narrow selected-input option or launch configuration is a candidate, not an accepted architecture. Success means the same authored scene/behavior/asset run outside the checkout without engine-source edits or undocumented sample surgery.
+3. Freeze the resulting engineering evaluation snapshot, with changed-source checks, affected cost evidence and one short guide. Preserve external first-run, Unity/Unreal familiarity, another-machine, focused/resource and exact hosted-CI gaps in the [single candidate matrix](ALPHA-CANDIDATE.md). Engineering readiness is a separate state from externally validated alpha; neither automatically completes M9.
+
+No new engine subsystem, project/publishing framework, replacement language or speculative optimization is selected. No M10 expansion is authorized by this proposal. Evaluate each slice by the creator obstacle removed, keep implementation and documentation concise, and reassess after a failed focused repair rather than repeating automation. Historical source/native measurements remain reusable within their exact scope.
+
+Alternative: retain finish-M9-first scheduling, accepting that missing people/access block completion. Broad feature expansion is a worse fit before adoption is understood. The recommended bounded workflow extension serves the accepted ethos while making those dependencies explicit; root recommends it to the user without silently adopting it as a new acceptance contract.
+
+Verification: actual `new_app.py`, `package_app.py`, Motion/editor/distribution guides and git state inspected; no builds, native input, benchmarks or external writes. Existing implementation evidence reused. This is a strategic assessment, not a new independent usability or performance pass.
