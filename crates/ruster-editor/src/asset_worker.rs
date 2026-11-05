@@ -157,6 +157,18 @@ impl Worker {
         Self::spawn(Arc::new(move || ctx.request_repaint()))
     }
 
+    // Reuse the real post-event panic/drainer path for host ownership tests.
+    #[cfg(test)]
+    pub fn panic_after_event_for_test() -> std::io::Result<(Self, Arc<std::sync::Barrier>)> {
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let worker_barrier = barrier.clone();
+        let worker = Self::spawn(Arc::new(move || {
+            worker_barrier.wait();
+            panic!("intentional worker fault after event transfer");
+        }))?;
+        Ok((worker, barrier))
+    }
+
     fn spawn(repaint: Repaint) -> std::io::Result<Self> {
         let (commands, receiver) = mpsc::sync_channel(1);
         let (sender, events) = mpsc::sync_channel(1);
@@ -615,8 +627,10 @@ mod tests {
         let repaints = Arc::new(AtomicUsize::new(0));
         let worker_repaints = repaints.clone();
         let mut worker = Worker::spawn(Arc::new(move || {
-            worker_repaints.fetch_add(1, Ordering::SeqCst);
             let barrier = worker_pause.lock().unwrap().take();
+            // Publish callback generation only after it has captured its pause.
+            // Receiving the event alone does not establish callback progress.
+            worker_repaints.fetch_add(1, Ordering::SeqCst);
             if let Some(barrier) = barrier {
                 // Freeze the worker after its Prepared event, so UI-side
                 // cancellation/enqueue must return without worker progress.
@@ -710,6 +724,16 @@ mod tests {
         };
         assert_eq!(opened.revision(), 1);
         assert!(opened.mesh("triangle").is_some());
+        let await_callback = |generation| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while repaints.load(Ordering::SeqCst) < generation && Instant::now() < deadline {
+                thread::yield_now();
+            }
+            assert!(repaints.load(Ordering::SeqCst) >= generation);
+        };
+        // Seven events precede this point, ending with Opened5. Ensure its
+        // callback captured None before installing Retire6's pause barrier.
+        await_callback(7);
         let capacity_barrier = Arc::new(Barrier::new(2));
         *pause.lock().unwrap() = Some(capacity_barrier.clone());
         worker
@@ -735,6 +759,9 @@ mod tests {
             } => store,
             other => panic!("capacity notification lost: {other:?}"),
         };
+        // Retired6/Opened7 are generations8/9. Opened7 must not steal the
+        // barrier intended for Retire8 before that command is dequeued.
+        await_callback(9);
         let shutdown_barrier = Arc::new(Barrier::new(2));
         *pause.lock().unwrap() = Some(shutdown_barrier.clone());
         worker
@@ -787,13 +814,7 @@ mod tests {
         .unwrap();
         let mut fixture = AssetStore::open(directory.path()).unwrap();
         fixture.import("triangle", "triangle.obj").unwrap();
-        let barrier = Arc::new(Barrier::new(2));
-        let worker_barrier = barrier.clone();
-        let mut worker = Worker::spawn(Arc::new(move || {
-            worker_barrier.wait();
-            panic!("intentional worker fault after event transfer");
-        }))
-        .unwrap();
+        let (mut worker, barrier) = Worker::panic_after_event_for_test().unwrap();
         worker.try_open(1, directory.path().to_path_buf()).unwrap();
         let store = match next(&mut worker) {
             Event::Opened {

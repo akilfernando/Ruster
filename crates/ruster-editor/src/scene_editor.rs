@@ -1,5 +1,6 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
 mod asset_commands;
+mod asset_inspection;
 mod behavior_commands;
 mod capture_commands;
 mod color_commands;
@@ -652,6 +653,10 @@ impl SceneEditor {
         self.accept_runtime_resources();
     }
     fn accept_runtime_resources(&mut self) {
+        // RuntimeUi has already installed the matching visible frame. Publish
+        // its maps in this same foreground turn even during unrelated content
+        // work. Reset admission prevents a second reset while the preview
+        // retirement role is occupied; the authored/pending roles are separate.
         if let Some(key) = self.runtime.reset_succeeded.take() {
             if self
                 .reset_assets
@@ -664,8 +669,9 @@ impl SceneEditor {
                     .is_some_and(|frame| frame.key == key)
             {
                 let (_, assets, textures) = self.reset_assets.take().unwrap();
-                self.preview_assets = assets;
-                self.preview_textures = textures;
+                let meshes = std::mem::replace(&mut self.preview_assets, assets);
+                let textures = std::mem::replace(&mut self.preview_textures, textures);
+                self.retire_asset_maps(1, crate::asset_worker::AssetMaps { meshes, textures });
             }
         }
     }
@@ -998,6 +1004,13 @@ impl SceneEditor {
         self.process_recovery_ack();
     }
     fn process_recovery_ack(&mut self) {
+        if matches!(
+            self.recovery_transition,
+            Some(RecoveryTransition::Replace { .. })
+        ) && self.asset_ops.busy()
+        {
+            return;
+        }
         let Some((id, result)) = self.recovery.take_ack() else {
             return;
         };
@@ -1048,6 +1061,9 @@ impl SceneEditor {
                 if let Err(error) = result {
                     next.recovery.set_warning(format!("Previous recovery cleanup failed: {error}. Preserved entry remains in Recovery."));
                 }
+                self.retire_root_assets();
+                next.asset_ops = std::mem::take(&mut self.asset_ops);
+                next.asset_ops.fresh_root_adopted();
                 *self = *next;
                 if shader
                     && self
@@ -1140,7 +1156,7 @@ impl SceneEditor {
         if self.asset_ops.busy() {
             return;
         }
-        if self.close_approved {
+        if self.close_shutdown {
             self.asset_shutdown();
         }
         if self.close_approved {
@@ -1640,16 +1656,19 @@ impl SceneEditor {
     }
     fn asset_snapshot(&mut self) {
         self.content_search.key = None;
-        self.resolved = self
+        let meshes = self
             .assets
             .as_ref()
             .map(|store| store.mesh_snapshots())
             .unwrap_or_default();
-        self.resolved_textures = self
+        let textures = self
             .assets
             .as_ref()
             .map(|store| store.texture_snapshots())
             .unwrap_or_default();
+        let meshes = std::mem::replace(&mut self.resolved, meshes);
+        let textures = std::mem::replace(&mut self.resolved_textures, textures);
+        self.retire_asset_maps(0, crate::asset_worker::AssetMaps { meshes, textures });
     }
     fn document_label(&self) -> String {
         self.session
@@ -1710,7 +1729,8 @@ impl SceneEditor {
             // command/worker incarnation only after the disk save commits.
             self.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
             self.creation_export.cancel();
-            self.assets = destination_store;
+            let old = std::mem::replace(&mut self.assets, destination_store);
+            self.asset_ops.queue_store(old);
             self.asset_snapshot();
             match reset(self.render.as_ref()) {
                 Ok(()) => {
@@ -1728,7 +1748,7 @@ impl SceneEditor {
                     self.save_warning = Some(warning);
                 }
             }
-            self.reset_assets = None;
+            self.retire_reset_assets();
             self.observe_runtime();
         }
         self.asset_origin = Some(parent);
@@ -2058,7 +2078,6 @@ impl SceneEditor {
                 .assets
                 .as_ref()
                 .ok_or_else(|| err("assets_unavailable", self.error.clone()))?;
-            let all = store.inspect();
             let offset = if args.get("offset").is_some() {
                 number("offset")?
             } else {
@@ -2066,13 +2085,23 @@ impl SceneEditor {
             };
             let offset = usize::try_from(offset)
                 .map_err(|_| err("invalid_arguments", "offset exceeds range".into()))?;
-            if offset > all.len() {
-                return Err(err("invalid_arguments", "offset exceeds count".into()));
-            }
-            let records: Vec<_> = all.iter().skip(offset).take(16).collect();
-            return Ok(
-                json!({"session_token":token,"revision":self.session.scene().revision.to_string(),"asset_revision":store.revision().to_string(),"assets":records,"asset_count":all.len(),"next_offset":if offset+16<all.len(){Some((offset+16).to_string())}else{None},"shader_revision":self.shader_revision.to_string(),"shader_status":self.shader_notice,"shader_source":"scene.wgsl"}),
+            let mut page = asset_inspection::page(store, offset)
+                .map_err(|message| err("invalid_arguments", message.into()))?;
+            let observation = page
+                .as_object_mut()
+                .expect("asset inspection page is an object");
+            observation.insert("session_token".into(), json!(token));
+            observation.insert(
+                "revision".into(),
+                json!(self.session.scene().revision.to_string()),
             );
+            observation.insert(
+                "shader_revision".into(),
+                json!(self.shader_revision.to_string()),
+            );
+            observation.insert("shader_status".into(), json!(self.shader_notice));
+            observation.insert("shader_source".into(), json!("scene.wgsl"));
+            return Ok(page);
         }
         if args["expected_session_token"].as_str() != Some(token) {
             return Err(err(
@@ -3823,6 +3852,7 @@ impl SceneEditor {
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.export_context = Some(ctx.clone());
+        self.asset_begin_root_frame(&ctx);
         self.asset_frame(&ctx, false);
         let focused = ctx.input(|input| input.focused);
         if focused && !self.external_focused {
@@ -3943,8 +3973,8 @@ impl SceneEditor {
                 if ui.button("Workspace settings…").clicked(){self.workspace.settings_open=true;}});
             }
             self.manipulation_tools_ui(ui);
-            let blocked=self.guard().is_err() || self.manipulation.offset_pending();
-            if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.reset_assets=Some((key,self.resolved.clone(),self.resolved_textures.clone()));}
+            let blocked=self.guard().is_err() || self.manipulation.offset_pending() || self.asset_ops.busy();
+            if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.capture_reset_assets(key);}
             if let Some(diagnostic)=&self.runtime.diagnostic {
                 ui.horizontal(|ui| {
                     if ui.button("Open location").clicked() {if let Err(error)=self.behavior.navigate_diagnostic(&self.session,diagnostic,self.runtime.captured.as_deref()){self.error=error;}}
@@ -4156,6 +4186,7 @@ impl SceneEditor {
         self.asset_frame(&ctx, true);
         self.start_close_cleanup();
         if self.close_shutdown {
+            self.asset_shutdown();
             if self.recovery.shutdown_finished()
                 && self.runtime.finished()
                 && self.external.finished()

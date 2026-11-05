@@ -471,11 +471,14 @@ impl AssetStore {
             sources,
         })
     }
+    /// Borrow metadata in stable asset-ID order without cloning diagnostics.
+    /// Callers can page and bound individual fields before creating owned output.
+    pub fn infos(&self) -> impl ExactSizeIterator<Item = &AssetInfo> {
+        self.infos.values().map(Arc::as_ref)
+    }
+    /// Owned compatibility snapshot; use infos() for bounded borrowed inspection.
     pub fn inspect(&self) -> Vec<AssetInfo> {
-        self.infos
-            .values()
-            .map(|info| info.as_ref().clone())
-            .collect()
+        self.infos().cloned().collect()
     }
     fn info(&self, id: &str, status: AssetStatus, diagnostic: Option<String>) -> AssetInfo {
         let record = &self.registry.assets[id];

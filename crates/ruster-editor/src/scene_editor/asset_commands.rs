@@ -39,7 +39,7 @@ struct Stamp {
     drafts: (u64, u64, u64),
     owned_form: Option<(String, String, bool)>,
 }
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
     Submitting,
     Preparing,
@@ -132,6 +132,12 @@ pub(super) struct Controller {
     request: Option<AssetRequest>,
     retired: Option<RetiredAssets>,
     retiring: bool,
+    // Root frame which last queued callback-visible resources. Layout passes
+    // within that frame do not establish a paint boundary.
+    retired_frame: Option<u64>,
+    root_frame: Option<u64>,
+    close_resources_taken: bool,
+    restart_after_retirement: bool,
     next: u64,
     disconnected: bool,
     shutting_down: bool,
@@ -139,8 +145,16 @@ pub(super) struct Controller {
     close_after: bool,
 }
 impl Controller {
-    pub fn busy(&self) -> bool {
+    fn pending(&self) -> bool {
         self.active.is_some() || self.request.is_some() || self.retired.is_some() || self.retiring
+    }
+    pub fn busy(&self) -> bool {
+        self.pending() || self.restart_after_retirement
+    }
+    pub(super) fn fresh_root_adopted(&mut self) {
+        // Only explicit document replacement grants a fresh failure incarnation.
+        // Old callback/store ownership remains fenced until its cleanup finishes.
+        self.restart_after_retirement = self.disconnected;
     }
     fn cancellable(&self) -> bool {
         self.active.as_ref().is_some_and(|a| {
@@ -238,11 +252,12 @@ impl Controller {
         }
         self.status = failure.1;
         if let Some(request) = self.request.take() {
-            debug_assert!(self.retired.is_none());
-            self.retired = Some(RetiredAssets {
-                request: Some(Box::new(request)),
-                ..Default::default()
-            });
+            // A matching Reset may already own the preview retirement role
+            // while this request is still Submitting. Preserve that bundle.
+            let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+            assert!(retired.request.is_none());
+            retired.request = Some(Box::new(request));
+            self.retired_frame = self.root_frame;
             self.active = None;
         }
     }
@@ -274,13 +289,15 @@ impl Controller {
     fn poll(&mut self, editor: &mut SceneEditor) {
         // One event per frame bounds foreground work. Payload events remain
         // owned until they have been adopted or handed back for retirement.
-        if self.retired.is_some() {
+        // A queued bundle may coexist with an earlier in-flight retirement.
+        // Keep consuming that acknowledgement so backpressure cannot deadlock.
+        if self.retired.is_some() && !self.retiring {
             return;
         }
         let event = match self.worker.as_mut().map(Worker::poll) {
             Some(Ok(event)) => event,
             Some(Err(TryRecvError::Disconnected)) => {
-                if !self.shutting_down {
+                if !self.shutting_down && !self.disconnected {
                     self.terminal(editor);
                 }
                 return;
@@ -313,10 +330,10 @@ impl Controller {
                     .as_ref()
                     .is_some_and(|a| a.job == job && a.phase == Phase::Publishing);
                 if !matched {
-                    self.retired = Some(RetiredAssets {
-                        completion: Some(completion),
-                        ..Default::default()
-                    });
+                    let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+                    assert!(retired.completion.is_none());
+                    retired.completion = Some(completion);
+                    self.retired_frame = self.root_frame;
                     if let Some(active) = active {
                         self.active = Some(active);
                     }
@@ -336,20 +353,24 @@ impl Controller {
                             meshes: std::mem::replace(&mut editor.resolved, meshes),
                             textures: std::mem::replace(&mut editor.resolved_textures, textures),
                         };
-                        self.retired = Some(RetiredAssets {
-                            store: Some(adoption.retired),
-                            maps: [old, Default::default(), Default::default()],
-                            ..Default::default()
-                        });
+                        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+                        assert!(retired.store.is_none());
+                        assert!(
+                            retired.maps[0].meshes.is_empty()
+                                && retired.maps[0].textures.is_empty()
+                        );
+                        retired.store = Some(adoption.retired);
+                        retired.maps[0] = old;
+                        self.retired_frame = self.root_frame;
                         editor.content_search.key = None;
                         editor.asset_outcome(&active.op, adoption.result)
                     }
                     Err(completion) => {
                         let published = completion.catalog_published();
-                        self.retired = Some(RetiredAssets {
-                            completion: Some(completion),
-                            ..Default::default()
-                        });
+                        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+                        assert!(retired.completion.is_none());
+                        retired.completion = Some(completion);
+                        self.retired_frame = self.root_frame;
                         Err(error("asset_error",format!("Asset publication could not be adopted (catalog_published={published}); inspect/reopen before retrying.")))
                     }
                 };
@@ -369,6 +390,57 @@ impl Controller {
             }
         }
     }
+    fn queue_maps(&mut self, slot: usize, maps: AssetMaps) {
+        if maps.meshes.is_empty() && maps.textures.is_empty() {
+            return;
+        }
+        // Before the first UI pass there cannot be any old paint callbacks.
+        // Synchronous construction/model clients need no invented root frame.
+        if self.root_frame.is_none() {
+            return;
+        }
+        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+        // Reset admission and root replacement wait for retirement. Thus each
+        // role has at most one superseded snapshot in this bounded bundle.
+        assert!(retired.maps[slot].meshes.is_empty());
+        assert!(retired.maps[slot].textures.is_empty());
+        retired.maps[slot] = maps;
+        self.retired_frame = self.root_frame;
+        self.status = "Finishing content update…".into();
+    }
+    pub(super) fn queue_store(&mut self, store: Option<AssetStore>) {
+        if self.root_frame.is_none() || store.is_none() {
+            return;
+        }
+        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+        assert!(retired.store.is_none());
+        retired.store = store;
+        self.retired_frame = self.root_frame;
+        self.status = "Finishing content update…".into();
+    }
+    fn begin_root_frame(&mut self, editor: &mut SceneEditor, ctx: &egui::Context) {
+        if ctx.viewport_id() != egui::ViewportId::ROOT {
+            return;
+        }
+        let frame = ctx.cumulative_frame_nr_for(egui::ViewportId::ROOT);
+        self.root_frame = Some(frame);
+        if ctx.current_pass_index() == 0
+            && self.retired.is_some()
+            && self.retired_frame.is_none_or(|queued| queued < frame)
+        {
+            if self.worker.is_none() {
+                if let Err((_, message)) = self.ensure_worker(ctx) {
+                    editor.error = message;
+                }
+            }
+            // A disconnected worker may still accept cleanup-only payloads;
+            // preserve that terminal handoff before requesting shutdown.
+            self.retire(editor);
+        }
+        if self.retired.is_some() {
+            ctx.request_repaint();
+        }
+    }
     fn retire(&mut self, editor: &mut SceneEditor) {
         let Some(retired) = self.retired.take() else {
             return;
@@ -381,6 +453,7 @@ impl Controller {
         match worker.try_retire(self.next, retired) {
             Ok(()) => {
                 self.retiring = !self.disconnected;
+                self.retired_frame = None;
             }
             Err(returned) => match *returned {
                 TrySendError::Full(retired) => self.retired = Some(retired),
@@ -394,17 +467,33 @@ impl Controller {
         }
     }
     fn frame(&mut self, editor: &mut SceneEditor, ctx: &egui::Context, authorize: bool) {
+        // The native host calls begin_root_frame before poll/new callbacks.
+        // Non-UI model clients have no callback ownership to fence.
+        if self.root_frame.is_none() {
+            self.retire(editor);
+        }
         self.poll(editor);
-        self.retire(editor);
+        if self.retired.is_some() && self.retired_frame.is_none() {
+            self.retired_frame = self.root_frame;
+        }
         if self.disconnected {
-            if self.retired.is_none() && !self.shutting_down {
-                if let Some(worker) = self.worker.as_mut() {
-                    let _ = worker.try_shutdown();
-                    self.shutting_down = true;
-                }
+            // Keep the failed worker's cleanup drainer alive while this live
+            // root still owns payloads. Close or a genuinely adopted fresh root
+            // hands those payloads off before requesting terminal shutdown.
+            if self.restart_after_retirement || self.close_resources_taken {
+                self.shutdown();
             }
-            if self.worker.as_ref().is_some_and(Worker::is_finished) {
-                self.status = "Asset worker stopped; reopen the scene before retrying.".into();
+            if self.restart_after_retirement
+                && !self.pending()
+                && self.shutting_down
+                && self.worker.as_ref().is_some_and(Worker::is_finished)
+            {
+                self.worker = None;
+                self.disconnected = false;
+                self.shutting_down = false;
+                self.restart_after_retirement = false;
+                self.close_resources_taken = false;
+                self.status.clear();
             }
             return;
         }
@@ -488,7 +577,7 @@ impl Controller {
         }
     }
     fn shutdown(&mut self) {
-        if !self.busy() && !self.shutting_down {
+        if !self.pending() && !self.shutting_down {
             if let Some(worker) = &mut self.worker {
                 if worker.try_shutdown().is_ok() {
                     self.shutting_down = true;
@@ -497,13 +586,42 @@ impl Controller {
         }
     }
     fn finished(&self) -> bool {
-        self.worker
-            .as_ref()
-            .is_none_or(|worker| self.shutting_down && worker.is_finished())
+        !self.busy()
+            && self
+                .worker
+                .as_ref()
+                .is_none_or(|worker| self.shutting_down && worker.is_finished())
     }
 }
 
 impl SceneEditor {
+    pub(super) fn asset_begin_root_frame(&mut self, ctx: &egui::Context) {
+        let mut controller = std::mem::take(&mut self.asset_ops);
+        controller.begin_root_frame(self, ctx);
+        self.asset_ops = controller;
+    }
+    pub(super) fn retire_asset_maps(&mut self, slot: usize, maps: AssetMaps) {
+        self.asset_ops.queue_maps(slot, maps);
+    }
+    pub(super) fn retire_reset_assets(&mut self) {
+        if let Some((_, meshes, textures)) = self.reset_assets.take() {
+            self.retire_asset_maps(2, AssetMaps { meshes, textures });
+        }
+    }
+    pub(super) fn capture_reset_assets(&mut self, key: crate::behavior_worker::RunKey) {
+        self.retire_reset_assets();
+        self.reset_assets = Some((key, self.resolved.clone(), self.resolved_textures.clone()));
+    }
+    pub(super) fn retire_root_assets(&mut self) {
+        let meshes = std::mem::take(&mut self.resolved);
+        let textures = std::mem::take(&mut self.resolved_textures);
+        self.retire_asset_maps(0, AssetMaps { meshes, textures });
+        let meshes = std::mem::take(&mut self.preview_assets);
+        let textures = std::mem::take(&mut self.preview_textures);
+        self.retire_asset_maps(1, AssetMaps { meshes, textures });
+        self.retire_reset_assets();
+        self.asset_ops.queue_store(self.assets.take());
+    }
     pub(super) fn asset_publishing(&self) -> bool {
         self.asset_ops.publishing()
     }
@@ -712,6 +830,9 @@ impl SceneEditor {
         }
         let mut controller = std::mem::take(&mut self.asset_ops);
         controller.frame(self, ctx, authorize);
+        if controller.retired.is_some() && controller.retired_frame.is_none() {
+            controller.retired_frame = controller.root_frame;
+        }
         if controller.busy() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
@@ -832,10 +953,14 @@ impl SceneEditor {
         }
     }
     pub(super) fn asset_shutdown(&mut self) {
+        if !self.asset_ops.close_resources_taken && !self.asset_ops.busy() {
+            self.retire_root_assets();
+            self.asset_ops.close_resources_taken = true;
+        }
         self.asset_ops.shutdown();
     }
     pub(super) fn asset_finished(&self) -> bool {
-        self.asset_ops.finished()
+        !self.asset_ops.busy() && self.asset_ops.finished()
     }
     pub(super) fn asset_root_guard(&mut self) -> Result<(), String> {
         if self.asset_ops.busy() {
@@ -861,16 +986,158 @@ impl SceneEditor {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+    #[track_caller]
     fn until(editor: &mut SceneEditor, ctx: &egui::Context, done: impl Fn(&SceneEditor) -> bool) {
         let deadline = Instant::now() + Duration::from_secs(3);
         while !done(editor) && Instant::now() < deadline {
-            editor.asset_frame(ctx, false);
+            if editor.asset_ops.root_frame.is_some() {
+                ctx.run_ui(egui::RawInput::default(), |_ui| {
+                    editor.asset_begin_root_frame(ctx);
+                    editor.asset_frame(ctx, false);
+                })
+                .drop_without_applying_deltas();
+            } else {
+                editor.asset_frame(ctx, false);
+            }
+            // Match UI-end transport retries after a decision is already made.
+            // Prepared stays untouched until the case explicitly authorizes it.
+            if editor.asset_ops.active.as_ref().is_some_and(|active| {
+                matches!(active.phase, Phase::CommitQueued | Phase::Cancelling)
+            }) {
+                editor.asset_frame(ctx, true);
+            }
+            if editor.asset_ops.close_resources_taken {
+                editor.asset_shutdown();
+            }
             std::thread::yield_now();
         }
         assert!(
             done(editor),
-            "controller did not reach the expected bounded phase"
+            "controller phase timeout: active={:?}, retired={}, retiring={}, disconnected={}, shutdown={}, finished={}, status={}",
+            editor.asset_ops.active.as_ref().map(|active| active.phase),
+            editor.asset_ops.retired.is_some(), editor.asset_ops.retiring,
+            editor.asset_ops.disconnected, editor.asset_ops.shutting_down,
+            editor.asset_ops.worker.as_ref().is_some_and(Worker::is_finished), editor.asset_ops.status
         );
+    }
+    // Real egui multipass output owns a discarded callback until AFTER pass1
+    // app code. Only a later root-frame pass0 can hand its last map owner off.
+    #[test]
+    fn discarded_pass_resources_wait_for_later_root_frame_and_worker_ack() {
+        for case in ["replace", "close", "preview", "pending_reset"] {
+            let ctx = egui::Context::default();
+            let mut editor = SceneEditor::with_workspace(
+                Session::new(Scene::empty("retirement")).unwrap(),
+                Workspace::detached(),
+            );
+            let mesh = Arc::new(Mesh {
+                vertices: Vec::new(),
+                indices: Vec::new(),
+                texcoords: None,
+            });
+            let weak = Arc::downgrade(&mesh);
+            editor.resolved.insert("old".into(), mesh);
+            editor.preview_assets = editor.resolved.clone();
+            editor.reset_assets = Some((
+                crate::behavior_worker::RunKey {
+                    generation: editor.generation,
+                    authored_revision: 0,
+                    reset_epoch: 1,
+                },
+                editor.resolved.clone(),
+                BTreeMap::new(),
+            ));
+            let generation = editor.generation;
+            let key = editor.reset_assets.as_ref().unwrap().0;
+            let owners = if matches!(case, "replace" | "close") {
+                3
+            } else {
+                1
+            };
+            if case == "preview" {
+                editor.resolved.clear();
+                editor.reset_assets = Some((key, BTreeMap::new(), BTreeMap::new()));
+                editor.runtime.frame = Some(crate::behavior_worker::Frame {
+                    key,
+                    tick: 0,
+                    scene: Arc::new(Scene::empty("reset")),
+                });
+                editor.runtime.reset_succeeded = Some(key);
+            } else if case == "pending_reset" {
+                editor.resolved.clear();
+                editor.preview_assets.clear();
+            }
+            let mut passes = 0;
+            let output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                editor.asset_begin_root_frame(&ctx);
+                editor.asset_frame(&ctx, false);
+                if ctx.current_pass_index() == 0 {
+                    ui.painter().add(egui::PaintCallback {
+                        rect: ui.max_rect(),
+                        callback: weak.upgrade().unwrap(),
+                    });
+                    if case == "close" {
+                        editor.request_close();
+                        editor.start_close_cleanup();
+                        assert!(editor.close_shutdown);
+                        editor.asset_shutdown();
+                    } else {
+                        match case {
+                            "replace" => {
+                                editor.replace_with_empty();
+                                assert_ne!(editor.generation, generation);
+                            }
+                            "preview" => {
+                                editor.accept_runtime_resources();
+                                assert!(editor.preview_assets.is_empty());
+                            }
+                            "pending_reset" => {
+                                editor.capture_reset_assets(key);
+                                assert!(editor.reset_assets.as_ref().unwrap().1.is_empty());
+                            }
+                            _ => unreachable!(),
+                        }
+                        // Replacement carries the same controller and pending
+                        // bundle. Close must wait rather than shutting it down.
+                        editor.request_close();
+                        assert!(!editor.close_approved);
+                    }
+                    assert!(editor.asset_ops.retired.is_some());
+                    assert_eq!(editor.asset_ops.retired_frame, Some(0));
+                    ctx.request_discard("exercise discarded callback ownership");
+                } else {
+                    assert_eq!(ctx.cumulative_frame_nr(), 0);
+                    assert!(editor.asset_ops.retired.is_some());
+                    assert!(!editor.asset_ops.retiring);
+                    // Fixed map roles plus the old pass0 callback, which
+                    // FullOutput::append has not yet replaced during app.ui.
+                    assert_eq!(weak.strong_count(), owners + 1);
+                    assert!(!editor.asset_finished());
+                }
+                passes += 1;
+            });
+            assert_eq!(passes, 2);
+            output.drop_without_applying_deltas();
+            assert_eq!(weak.strong_count(), owners);
+            assert!(!editor.asset_finished());
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while editor.asset_ops.busy() && Instant::now() < deadline {
+                let output = ctx.run_ui(egui::RawInput::default(), |_ui| {
+                    assert_eq!(ctx.current_pass_index(), 0);
+                    assert!(ctx.cumulative_frame_nr() > 0);
+                    editor.asset_begin_root_frame(&ctx);
+                    editor.asset_frame(&ctx, false);
+                });
+                output.drop_without_applying_deltas();
+                std::thread::yield_now();
+            }
+            assert!(!editor.asset_ops.busy());
+            // No foreground owner remained after callback disposal. The sole
+            // bundle moved through Worker::Retire and its acknowledgement.
+            assert!(weak.upgrade().is_none());
+            editor.asset_shutdown();
+            until(&mut editor, &ctx, SceneEditor::asset_finished);
+        }
     }
     // Actual worker preparation/publication/adoption and the real affine bridge
     // lease. This is controller ordering evidence, not native input/focus evidence.
@@ -888,6 +1155,11 @@ mod tests {
             "close_prepared",
             "close_publishing",
             "retire_disconnected",
+            "reset_preparing",
+            "reset_retiring",
+            "reset_submitting_cancel",
+            "terminal_close",
+            "terminal_reopen",
         ] {
             let directory = tempfile::tempdir().unwrap();
             std::fs::write(
@@ -901,11 +1173,102 @@ mod tests {
             .unwrap();
             let mut session = Session::new(Scene::demo()).unwrap();
             session.save(directory.path().join("scene.json")).unwrap();
+            if matches!(case, "terminal_close" | "terminal_reopen") {
+                let mut store = AssetStore::open(directory.path()).unwrap();
+                store.import("triangle", "triangle.obj").unwrap();
+            }
             let mut editor = SceneEditor::with_workspace(session, Workspace::detached());
             let ctx = egui::Context::default();
             let generation = editor.generation;
             let preview = editor.preview.scene.fingerprint();
             let scene_revision = editor.session.scene().revision;
+            if matches!(case, "terminal_close" | "terminal_reopen") {
+                let weak = Arc::downgrade(&editor.resolved["triangle"]);
+                let (worker, barrier) = Worker::panic_after_event_for_test().unwrap();
+                editor.asset_ops.worker = Some(worker);
+                editor
+                    .asset_ops
+                    .worker
+                    .as_mut()
+                    .unwrap()
+                    .try_open(91, directory.path().to_path_buf())
+                    .unwrap();
+                ctx.run_ui(egui::RawInput::default(), |_ui| {
+                    editor.asset_begin_root_frame(&ctx)
+                })
+                .drop_without_applying_deltas();
+                until(&mut editor, &ctx, |e| e.asset_ops.retired.is_some());
+                barrier.wait();
+                until(&mut editor, &ctx, |e| {
+                    e.asset_ops.disconnected && !e.asset_ops.pending()
+                });
+                assert!(
+                    !editor.asset_ops.shutting_down,
+                    "live-root payloads still need the failed worker's cleanup drainer"
+                );
+                assert!(!editor.asset_ops.worker.as_ref().unwrap().is_finished());
+                assert!(weak.upgrade().is_some());
+                ctx.run_ui(egui::RawInput::default(), |ui| {
+                    editor.asset_begin_root_frame(&ctx);
+                    editor.asset_frame(&ctx, false);
+                    if ctx.current_pass_index() == 0 {
+                        ui.painter().add(egui::PaintCallback {
+                            rect: ui.max_rect(),
+                            callback: editor.resolved["triangle"].clone(),
+                        });
+                        if case == "terminal_close" {
+                            editor.request_close();
+                            editor.start_close_cleanup();
+                            assert!(editor.close_shutdown);
+                            editor.asset_shutdown();
+                        } else {
+                            let next = SceneEditor::with_workspace(
+                                Session::open(directory.path().join("scene.json")).unwrap(),
+                                Workspace::detached(),
+                            );
+                            editor.begin_replacement(next, None, false, false);
+                            assert_ne!(editor.generation, generation);
+                            assert!(editor.asset_ops.restart_after_retirement);
+                        }
+                        ctx.request_discard("failed-worker root handoff");
+                    }
+                    assert!(editor.asset_ops.disconnected);
+                    assert!(editor.asset_ops.retired.is_some());
+                    assert!(!editor.asset_finished());
+                    assert!(weak.upgrade().is_some());
+                })
+                .drop_without_applying_deltas();
+                if case == "terminal_close" {
+                    until(&mut editor, &ctx, SceneEditor::asset_finished);
+                } else {
+                    until(&mut editor, &ctx, |e| {
+                        !e.asset_ops.busy() && !e.asset_ops.disconnected
+                    });
+                    assert!(editor.asset_ops.worker.is_none());
+                    assert!(
+                        editor.error.is_empty(),
+                        "fresh root must not retain the failed incarnation's diagnostic"
+                    );
+                    editor.start_human_asset(&ctx, "asset_refresh", "triangle", "", false);
+                    editor.asset_frame(&ctx, true);
+                    until(&mut editor, &ctx, |e| {
+                        e.asset_ops
+                            .active
+                            .as_ref()
+                            .is_some_and(|a| a.phase == Phase::Prepared)
+                    });
+                    editor.asset_frame(&ctx, true);
+                    until(&mut editor, &ctx, |e| !e.asset_ops.busy());
+                    assert!(editor.assets.as_ref().unwrap().mesh("triangle").is_some());
+                    editor.asset_shutdown();
+                    until(&mut editor, &ctx, SceneEditor::asset_finished);
+                }
+                assert!(
+                    weak.upgrade().is_none(),
+                    "old-root ownership must retire on the failed drainer"
+                );
+                continue;
+            }
             if case == "retire_disconnected" {
                 let mut controller = Controller::default();
                 controller.ensure_worker(&ctx).unwrap();
@@ -926,6 +1289,12 @@ mod tests {
                     request: Some(Box::new(request)),
                     ..Default::default()
                 });
+                let worker = controller.worker.take();
+                assert!(
+                    !controller.finished(),
+                    "an unsent bundle cannot be finished without a worker"
+                );
+                controller.worker = worker;
                 controller.frame(&mut editor, &ctx, false);
                 assert!(controller.disconnected);
                 assert!(controller.retired.as_ref().unwrap().request.is_some());
@@ -957,6 +1326,57 @@ mod tests {
                 assert_eq!(editor.asset_id, "triangle");
                 assert_eq!(editor.asset_source, "triangle.obj");
             }
+            if case == "reset_submitting_cancel" {
+                let mesh = Arc::new(Mesh {
+                    vertices: Vec::new(),
+                    indices: Vec::new(),
+                    texcoords: None,
+                });
+                let weak = Arc::downgrade(&mesh);
+                editor.preview_assets = BTreeMap::from([("old".into(), mesh)]);
+                let key = crate::behavior_worker::RunKey {
+                    generation,
+                    reset_epoch: 1,
+                    authored_revision: scene_revision,
+                };
+                ctx.run_ui(egui::RawInput::default(), |ui| {
+                    editor.asset_begin_root_frame(&ctx);
+                    if ctx.current_pass_index() == 0 {
+                        assert!(editor.asset_ops.request.is_some());
+                        ui.painter().add(egui::PaintCallback {
+                            rect: ui.max_rect(),
+                            callback: editor.preview_assets["old"].clone(),
+                        });
+                        editor.reset_assets = Some((key, BTreeMap::new(), BTreeMap::new()));
+                        editor.runtime.frame = Some(crate::behavior_worker::Frame {
+                            key,
+                            tick: 0,
+                            scene: Arc::new(Scene::empty("reset")),
+                        });
+                        editor.runtime.visible = true;
+                        editor.runtime.reset_succeeded = Some(key);
+                        editor.accept_runtime_resources();
+                        editor.asset_ops.cancel();
+                        editor.asset_frame(&ctx, true);
+                        ctx.request_discard("Submitting rejection retains preview ownership");
+                    } else {
+                        editor.asset_frame(&ctx, false);
+                    }
+                    let retired = editor.asset_ops.retired.as_ref().unwrap();
+                    assert!(retired.request.is_some());
+                    assert!(retired.maps[1].meshes.contains_key("old"));
+                    assert_eq!(editor.asset_ops.retired_frame, Some(0));
+                    assert!(weak.upgrade().is_some());
+                })
+                .drop_without_applying_deltas();
+                until(&mut editor, &ctx, |e| !e.asset_ops.busy());
+                assert!(weak.upgrade().is_none());
+                assert!(editor.assets.as_ref().unwrap().mesh("triangle").is_none());
+                assert!(!directory.path().join(".ruster-assets.json").exists());
+                editor.asset_shutdown();
+                until(&mut editor, &ctx, SceneEditor::asset_finished);
+                continue;
+            }
             editor.asset_frame(&ctx, true);
             if case != "expired" {
                 until(&mut editor, &ctx, |e| {
@@ -972,6 +1392,77 @@ mod tests {
                 assert!(editor.assets.as_ref().unwrap().mesh("triangle").is_none());
                 if let Some(reply) = &mut reply {
                     assert!(reply().is_none());
+                }
+                if matches!(case, "reset_preparing" | "reset_retiring") {
+                    let mesh = Arc::new(Mesh {
+                        vertices: Vec::new(),
+                        indices: Vec::new(),
+                        texcoords: None,
+                    });
+                    let texture = |red| {
+                        Arc::new(Texture {
+                            width: 1,
+                            height: 1,
+                            mips: vec![ruster_assets::TextureMip {
+                                width: 1,
+                                height: 1,
+                                rgba: vec![red, 0, 0, 255],
+                            }],
+                        })
+                    };
+                    let old_texture = texture(16);
+                    let new_texture = texture(192);
+                    let key = crate::behavior_worker::RunKey {
+                        generation,
+                        reset_epoch: 1,
+                        authored_revision: scene_revision,
+                    };
+                    ctx.run_ui(egui::RawInput::default(), |_ui| {
+                        editor.asset_begin_root_frame(&ctx);
+                        if case == "reset_retiring" {
+                            editor.retire_asset_maps(
+                                0,
+                                AssetMaps {
+                                    meshes: BTreeMap::from([("retired".into(), mesh.clone())]),
+                                    textures: BTreeMap::new(),
+                                },
+                            );
+                        }
+                    })
+                    .drop_without_applying_deltas();
+                    ctx.run_ui(egui::RawInput::default(), |_ui| {
+                        editor.asset_begin_root_frame(&ctx);
+                        assert!(editor.asset_ops.active.is_some());
+                        if case == "reset_retiring" {
+                            assert!(editor.asset_ops.retiring);
+                        }
+                        editor.preview_assets = BTreeMap::from([("old".into(), mesh.clone())]);
+                        editor.preview_textures =
+                            BTreeMap::from([("image".into(), old_texture.clone())]);
+                        editor.reset_assets = Some((
+                            key,
+                            BTreeMap::from([("new".into(), mesh.clone())]),
+                            BTreeMap::from([("image".into(), new_texture.clone())]),
+                        ));
+                        // RuntimeUi::complete_reset publishes these together before
+                        // SceneEditor polls the matching resource snapshot.
+                        editor.runtime.frame = Some(crate::behavior_worker::Frame {
+                            key,
+                            tick: 0,
+                            scene: Arc::new(Scene::empty("new runtime")),
+                        });
+                        editor.runtime.visible = true;
+                        editor.runtime.reset_succeeded = Some(key);
+                        editor.accept_runtime_resources();
+                        assert!(
+                            editor.preview_assets.contains_key("new"),
+                            "new runtime frame must publish its matching maps during {case}"
+                        );
+                        assert!(!editor.preview_assets.contains_key("old"));
+                        assert!(Arc::ptr_eq(&editor.preview_textures["image"], &new_texture));
+                        assert!(editor.reset_assets.is_none());
+                    })
+                    .drop_without_applying_deltas();
                 }
                 match case {
                     "draft" => {
@@ -998,7 +1489,12 @@ mod tests {
                 editor.asset_frame(&ctx, true);
                 if matches!(
                     case,
-                    "human" | "agent" | "failed_import" | "close_publishing"
+                    "human"
+                        | "agent"
+                        | "failed_import"
+                        | "close_publishing"
+                        | "reset_preparing"
+                        | "reset_retiring"
                 ) {
                     assert!(editor.asset_publishing());
                     assert_eq!(editor.guard().unwrap_err(), "asset_busy");
@@ -1015,7 +1511,10 @@ mod tests {
                 }
             }
             until(&mut editor, &ctx, |e| !e.asset_ops.busy());
-            let accepted = matches!(case, "human" | "agent" | "close_publishing");
+            let accepted = matches!(
+                case,
+                "human" | "agent" | "close_publishing" | "reset_preparing" | "reset_retiring"
+            );
             assert_eq!(
                 editor.assets.as_ref().unwrap().mesh("triangle").is_some(),
                 accepted,
@@ -1033,7 +1532,11 @@ mod tests {
             );
             assert_eq!(editor.session.scene().revision, scene_revision);
             assert_eq!(editor.preview.scene.fingerprint(), preview);
-            assert!(editor.preview_assets.is_empty());
+            if matches!(case, "reset_preparing" | "reset_retiring") {
+                assert!(editor.preview_assets.contains_key("new"));
+            } else {
+                assert!(editor.preview_assets.is_empty());
+            }
             if matches!(case, "close_prepared" | "close_publishing") {
                 assert!(editor.close_approved);
             }

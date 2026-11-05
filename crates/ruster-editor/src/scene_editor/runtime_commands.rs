@@ -99,8 +99,23 @@ impl SceneEditor {
                 return Err(fail("stale_revision"));
             }
             if op != "behavior_debug_inspect" && op != "behavior_runtime_stop" {
-                self.guard()
-                    .map_err(|message| ("drafts_pending".into(), message))?;
+                if op == "behavior_runtime_reset" && self.asset_ops.busy() {
+                    return Err((
+                        "asset_busy".into(),
+                        "Content work is finishing; wait before Reset.".into(),
+                    ));
+                }
+                self.guard().map_err(|message| {
+                    (
+                        if message == "asset_busy" {
+                            "asset_busy"
+                        } else {
+                            "drafts_pending"
+                        }
+                        .into(),
+                        message,
+                    )
+                })?;
                 if self.manipulation.offset_pending() {
                     return Err(fail("drafts_pending"));
                 }
@@ -122,8 +137,7 @@ impl SceneEditor {
             })?;
         if op == "behavior_runtime_reset" {
             if let Some(key) = self.runtime.current_run() {
-                self.reset_assets =
-                    Some((key, self.resolved.clone(), self.resolved_textures.clone()));
+                self.capture_reset_assets(key);
             }
         }
         let object = value.as_object_mut().ok_or_else(|| fail("runtime_error"))?;
