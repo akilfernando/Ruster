@@ -225,7 +225,7 @@ Seek an external human walkthrough of the current editor before major UI expansi
 
 Source licensing, public hosting and scoped Linux CI are delivered under decision0007. Maintain dependency notices and use TESTING.md as workflows evolve; new binary payloads still require their own distribution/notices review; M7 evidence covers its recorded Yard package. Keep CLI/editor/MCP semantics and schema compatibility aligned as facilities grow.
 
-After alpha, choose evidence-driven tracks such as richer rendering/animation, larger simulations, networking, extensibility or enterprise integrations. These are future directions, not simultaneous scope commitments or a claim of Unity/Unreal parity.
+Lighting, shaders and textures are now explicitly confirmed core product requirements; see [visual authoring scope](DIRECTION.md#visual-authoring-is-core-product-scope). Their missing authoring workflows must receive an explicit implementation and acceptance allocation, rather than being hidden under a generic post-alpha rendering track. Exact slices and any resulting release-scope revision remain unselected; historical milestone acceptance does not prove this baseline. Advanced rendering beyond that baseline, animation, larger simulations, networking, extensibility and enterprise integrations remain evidence-driven future tracks, not simultaneous scope commitments.
 
 ## Milestone review and scheduling
 
