@@ -41,6 +41,8 @@ A documented [upstream SPIR-V compatibility patch](third_party/wgpu-hal/RUSTER-P
 
 Native Vulkan smoke currently covers CachyOS with NVIDIA RTX4060 Laptop and Intel Iris Xe graphics. This is a named-workstation check, not a broad support matrix. The [first alpha target](docs/decisions/0025-first-alpha-platform-scope.md) is Linux x86_64. Separate [Ubuntu userspace evidence](docs/evidence/M9-ubuntu-userspace.md) covers source checks and Intel startup/resize/shutdown, sharing the same host kernel/devices; another-machine and complete Ubuntu workflow acceptance remain open. Windows remains an intended future target. Development-library package names vary by distribution; the [Linux CI workflow](.github/workflows/ci.yml) shows the Ubuntu build prerequisites.
 
+For a supplied evaluation source archive, extract it and enter its root directory; skip the clone step below. Its paired `SOURCE-MANIFEST.json` identifies the exact candidate revision. The clone command follows the published branch, which can lag a local evaluation candidate.
+
 ```sh
 git clone https://github.com/akilfernando/Ruster.git
 cd Ruster
