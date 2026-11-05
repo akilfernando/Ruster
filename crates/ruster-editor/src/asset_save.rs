@@ -1,14 +1,61 @@
 //! Worker-only Save As preparation/publication. UI adoption owns all continuations.
 use std::path::{Path, PathBuf};
 
-use ruster_assets::{AssetError, AssetStore};
+use ruster_assets::AssetStore;
 use ruster_scene::Session;
 use sha2::{Digest, Sha256};
 
 use crate::directory_grant::DirectoryGrant;
 
-/// Captured caller state. original_asset_root is the already canonical accepted
-/// root, including a recovery origin; do not infer it from the cloned association.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum SaveFailureKind {
+    PermissionRequired,
+    InvalidDestination,
+    DestinationExists,
+    AssetRootMismatch,
+    SaveError,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SaveFailure {
+    pub kind: SaveFailureKind,
+    pub message: String,
+}
+
+impl SaveFailure {
+    fn new(kind: SaveFailureKind, message: impl AsRef<str>) -> Self {
+        Self {
+            kind,
+            message: message.as_ref().chars().take(4096).collect(),
+        }
+    }
+
+    pub fn code(&self) -> &'static str {
+        match self.kind {
+            SaveFailureKind::PermissionRequired => "save_permission_required",
+            SaveFailureKind::InvalidDestination => "invalid_destination",
+            SaveFailureKind::DestinationExists => "destination_exists",
+            SaveFailureKind::AssetRootMismatch => "asset_root_mismatch",
+            SaveFailureKind::SaveError => "save_error",
+        }
+    }
+}
+
+impl std::fmt::Display for SaveFailure {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.message)
+    }
+}
+
+impl std::error::Error for SaveFailure {}
+
+fn save_error(error: impl std::fmt::Display) -> SaveFailure {
+    SaveFailure::new(SaveFailureKind::SaveError, error.to_string())
+}
+
+/// Captured caller state. Compare original_asset_root exactly as supplied; do not
+/// infer it from the cloned association or normalize retained recovery provenance.
+/// Selecting the accepted root and pinning the original provenance belong to the host.
 #[derive(Debug)]
 pub(super) struct Request {
     pub session: Session,
@@ -49,12 +96,26 @@ pub(super) struct Saved {
 fn validate_destination(
     directory: &DirectoryGrant,
     grant: Option<&DirectoryGrant>,
-) -> Result<(), String> {
-    let root = directory.validate()?;
+) -> Result<(), SaveFailure> {
+    // Validate explicit authority first so a replaced granted directory retains
+    // its permission failure instead of becoming a generic destination error.
     if let Some(grant) = grant {
-        if grant.validate()? != root {
-            return Err("Scene destination is outside the granted save directory".into());
+        let granted = grant
+            .validate()
+            .map_err(|message| SaveFailure::new(SaveFailureKind::PermissionRequired, message))?;
+        let root = directory
+            .validate()
+            .map_err(|message| SaveFailure::new(SaveFailureKind::InvalidDestination, message))?;
+        if granted != root {
+            return Err(SaveFailure::new(
+                SaveFailureKind::PermissionRequired,
+                "Scene destination is outside the granted save directory",
+            ));
         }
+    } else {
+        directory
+            .validate()
+            .map_err(|message| SaveFailure::new(SaveFailureKind::InvalidDestination, message))?;
     }
     Ok(())
 }
@@ -65,37 +126,53 @@ fn save_session(
     directory: &DirectoryGrant,
     grant: Option<&DirectoryGrant>,
     fresh_destination: bool,
-) -> Result<(), AssetError> {
+) -> Result<(), SaveFailure> {
     // Recheck after acquiring any destination catalog lock. The grant is a
     // cooperating-filesystem identity check, not hostile ancestor-race isolation.
-    validate_destination(directory, grant).map_err(AssetError)?;
-    validate_fresh_destination(session, path, fresh_destination).map_err(AssetError)?;
-    session
-        .save(path)
-        .map_err(|failure| AssetError(failure.to_string()))
+    validate_destination(directory, grant)?;
+    validate_fresh_destination(session, path, fresh_destination)?;
+    session.save(path).map_err(|failure| {
+        // For a distinct fresh destination Session's final noclobber conflict
+        // means another file won after our last absence check.
+        if fresh_destination && matches!(failure, ruster_scene::SceneError::Conflict) {
+            SaveFailure::new(SaveFailureKind::DestinationExists, failure.to_string())
+        } else {
+            save_error(failure)
+        }
+    })
 }
 
 fn validate_fresh_destination(
     session: &Session,
     path: &Path,
     fresh_destination: bool,
-) -> Result<(), String> {
-    if !fresh_destination {
-        return Ok(());
-    }
+) -> Result<(), SaveFailure> {
     match path.symlink_metadata() {
-        Ok(_) => return Err("Save As requires a fresh destination that does not exist".into()),
+        Ok(metadata) if !metadata.is_file() => {
+            return Err(SaveFailure::new(
+                SaveFailureKind::InvalidDestination,
+                "Scene destination must be a regular file, never a symlink or directory",
+            ))
+        }
+        Ok(_) if fresh_destination => {
+            return Err(SaveFailure::new(
+                SaveFailureKind::DestinationExists,
+                "Save As requires a fresh destination that does not exist",
+            ))
+        }
+        Ok(_) => (),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => (),
-        Err(error) => return Err(error.to_string()),
+        Err(error) => return Err(save_error(error)),
     }
     // Reject this identity even when temporarily absent. Otherwise a recreated
     // matching baseline between this check and Session's lock could regain its
     // associated-file overwrite authority. Distinct paths retain Session's
     // atomic persist_noclobber protection as the final publication boundary.
-    if session.path() == Some(path) {
-        return Err(
-            "Fresh Save As requires a different destination from the current association".into(),
-        );
+    if fresh_destination && session.path() == Some(path) {
+        return Err(SaveFailure::new(
+            SaveFailureKind::DestinationExists,
+            "Fresh Save As requires a different destination from the current association",
+        ));
     }
     Ok(())
 }
@@ -103,34 +180,39 @@ fn validate_fresh_destination(
 impl Request {
     /// Worker-only: canonicalization, snapshot encoding/hashing and optional
     /// destination catalog open. This does not publish the scene document.
-    pub fn prepare(self) -> Result<Prepared, String> {
+    pub fn prepare(self) -> Result<Prepared, SaveFailure> {
+        if let Some(grant) = &self.grant {
+            grant.validate().map_err(|message| {
+                SaveFailure::new(SaveFailureKind::PermissionRequired, message)
+            })?;
+        }
         let parent = self
             .destination
             .parent()
             .filter(|parent| !parent.as_os_str().is_empty())
             .unwrap_or_else(|| Path::new("."));
-        let directory = DirectoryGrant::new(parent)?;
-        let name = self
-            .destination
-            .file_name()
-            .ok_or("Scene destination requires a file name")?;
+        let directory = DirectoryGrant::new(parent)
+            .map_err(|message| SaveFailure::new(SaveFailureKind::InvalidDestination, message))?;
+        let name = self.destination.file_name().ok_or_else(|| {
+            SaveFailure::new(
+                SaveFailureKind::InvalidDestination,
+                "Scene destination requires a file name",
+            )
+        })?;
         let path = directory.root().join(name);
         validate_destination(&directory, self.grant.as_ref())?;
         validate_fresh_destination(&self.session, &path, self.fresh_destination)?;
         let different_root = self.original_asset_root.as_deref() != Some(directory.root());
         if different_root && self.session.has_asset_references() {
-            return Err("Save As across asset roots is unavailable while scene or undo/redo history references project assets; save beside the existing project.".into());
+            return Err(SaveFailure::new(SaveFailureKind::AssetRootMismatch, "Save As across asset roots is unavailable while scene or undo/redo history references project assets; save beside the existing project."));
         }
         // snapshot_bytes and Session::save use the same canonical encoding,
         // including current-format migration, history, behavior and final newline.
-        let bytes = self
-            .session
-            .snapshot_bytes()
-            .map_err(|failure| failure.to_string())?;
+        let bytes = self.session.snapshot_bytes().map_err(save_error)?;
         let document_hash = format!("{:x}", Sha256::digest(&bytes));
         let document_bytes = bytes.len();
         let destination_store = if different_root {
-            Some(AssetStore::open(directory.root()).map_err(|failure| failure.to_string())?)
+            Some(AssetStore::open(directory.root()).map_err(save_error)?)
         } else {
             // Reopening here would add synchronous work and replace independent
             // accepted/last-good catalog state during an ordinary same-root save.
@@ -152,7 +234,7 @@ impl Request {
 impl Prepared {
     /// Worker-only, after the caller's final identity/draft/lease authorization.
     /// Publication preserves Session's existing baseline/fresh-file semantics.
-    pub fn publish(self) -> Result<Saved, String> {
+    pub fn publish(self) -> Result<Saved, SaveFailure> {
         let Self {
             mut session,
             path,
@@ -165,16 +247,18 @@ impl Prepared {
         } = self;
         validate_destination(&directory, grant.as_ref())?;
         match &destination_store {
-            Some(store) => store.with_current_catalog(|| {
-                // Never reenter asset mutation/open while this guard is held.
-                save_session(
-                    &mut session,
-                    &path,
-                    &directory,
-                    grant.as_ref(),
-                    fresh_destination,
-                )
-            }),
+            Some(store) => store
+                .with_current_catalog(|| {
+                    // Never reenter asset mutation/open while this guard is held.
+                    Ok(save_session(
+                        &mut session,
+                        &path,
+                        &directory,
+                        grant.as_ref(),
+                        fresh_destination,
+                    ))
+                })
+                .map_err(save_error)?,
             None => save_session(
                 &mut session,
                 &path,
@@ -182,8 +266,7 @@ impl Prepared {
                 grant.as_ref(),
                 fresh_destination,
             ),
-        }
-        .map_err(|failure| failure.to_string())?;
+        }?;
         // Nothing fallible remains after Session::save reports its disk commit.
         Ok(Saved {
             session,
@@ -225,19 +308,47 @@ mod tests {
             grant,
             fresh_destination: true,
         };
-        assert!(request(source.clone(), None).prepare().is_err());
+        assert_eq!(
+            request(source.clone(), None).prepare().unwrap_err().code(),
+            "destination_exists"
+        );
         assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
         std::fs::remove_file(&source).unwrap();
-        assert!(request(source.clone(), None).prepare().is_err());
+        assert_eq!(
+            request(source.clone(), None).prepare().unwrap_err().code(),
+            "destination_exists"
+        );
         std::fs::write(&source, &source_bytes).unwrap();
         let denied = destination.join("outside-grant.json");
-        assert!(request(
-            denied.clone(),
-            Some(DirectoryGrant::new(&original).unwrap())
-        )
-        .prepare()
-        .is_err());
+        assert_eq!(
+            request(
+                denied.clone(),
+                Some(DirectoryGrant::new(&original).unwrap())
+            )
+            .prepare()
+            .unwrap_err()
+            .code(),
+            "save_permission_required"
+        );
         assert!(!denied.exists());
+        let directory_target = destination.join("directory.json");
+        std::fs::create_dir(&directory_target).unwrap();
+        assert_eq!(
+            request(directory_target, None)
+                .prepare()
+                .unwrap_err()
+                .code(),
+            "invalid_destination"
+        );
+        #[cfg(unix)]
+        {
+            let alias = destination.join("alias.json");
+            std::os::unix::fs::symlink(&source, &alias).unwrap();
+            assert_eq!(
+                request(alias, None).prepare().unwrap_err().code(),
+                "invalid_destination"
+            );
+        }
         let path = destination.join("copy.json");
         let prepared = request(
             path.clone(),
@@ -272,7 +383,7 @@ mod tests {
         let raced = destination.join("raced.json");
         let prepared = request(raced.clone(), None).prepare().unwrap();
         std::fs::write(&raced, b"external file").unwrap();
-        assert!(prepared.publish().is_err());
+        assert_eq!(prepared.publish().unwrap_err().code(), "destination_exists");
         assert_eq!(std::fs::read(&raced).unwrap(), b"external file");
         assert_eq!(caller.snapshot_bytes().unwrap(), caller_bytes);
         assert_eq!(std::fs::read(&source).unwrap(), source_bytes);
@@ -297,7 +408,7 @@ mod tests {
         let catalog_race = destination.join("catalog-race.json");
         let prepared = request(catalog_race.clone(), None).prepare().unwrap();
         std::fs::write(destination.join(".ruster-assets.json"), b"changed catalog").unwrap();
-        assert!(prepared.publish().is_err());
+        assert_eq!(prepared.publish().unwrap_err().code(), "save_error");
         assert!(!catalog_race.exists());
 
         // Ordinary associated Save retains its baseline-checked overwrite
@@ -331,8 +442,10 @@ mod tests {
             fresh_destination: true,
         }
         .prepare();
-        assert!(rejected.unwrap_err().contains("undo/redo history"));
+        assert_eq!(rejected.unwrap_err().code(), "asset_root_mismatch");
         assert_eq!(history.snapshot_bytes().unwrap(), history_bytes);
         assert!(!destination.join("history.json").exists());
+        let bounded = SaveFailure::new(SaveFailureKind::SaveError, "é".repeat(5000));
+        assert_eq!(bounded.message.chars().count(), 4096);
     }
 }

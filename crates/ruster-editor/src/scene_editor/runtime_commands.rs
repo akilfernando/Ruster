@@ -99,7 +99,7 @@ impl SceneEditor {
                 return Err(fail("stale_revision"));
             }
             if op != "behavior_debug_inspect" && op != "behavior_runtime_stop" {
-                if op == "behavior_runtime_reset" && self.asset_ops.busy() {
+                if op == "behavior_runtime_reset" && self.asset_busy() {
                     return Err((
                         "asset_busy".into(),
                         "Content work is finishing; wait before Reset.".into(),

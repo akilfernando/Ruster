@@ -125,10 +125,28 @@ struct Active {
     reply: Option<Reply>,
     cancel: Option<Error>,
 }
+pub(super) struct OpenIntent {
+    pub root: PathBuf,
+    pub seed_preview: bool,
+    pub recovered: bool,
+    pub recovery_shader: bool,
+}
+struct Opening {
+    job: u64,
+    generation: u64,
+    root: PathBuf,
+    recovered_origin: Option<PathBuf>,
+    identity: Option<AssetStateIdentity>,
+    seed_preview: bool,
+    recovered: bool,
+    recovery_shader: bool,
+    cancelled: bool,
+}
 #[derive(Default)]
 pub(super) struct Controller {
     worker: Option<Worker>,
     active: Option<Active>,
+    opening: Option<Opening>,
     request: Option<AssetRequest>,
     retired: Option<RetiredAssets>,
     retiring: bool,
@@ -146,7 +164,11 @@ pub(super) struct Controller {
 }
 impl Controller {
     fn pending(&self) -> bool {
-        self.active.is_some() || self.request.is_some() || self.retired.is_some() || self.retiring
+        self.active.is_some()
+            || self.opening.is_some()
+            || self.request.is_some()
+            || self.retired.is_some()
+            || self.retiring
     }
     pub fn busy(&self) -> bool {
         self.pending() || self.restart_after_retirement
@@ -157,12 +179,13 @@ impl Controller {
         self.restart_after_retirement = self.disconnected;
     }
     fn cancellable(&self) -> bool {
-        self.active.as_ref().is_some_and(|a| {
-            matches!(
-                a.phase,
-                Phase::Submitting | Phase::Preparing | Phase::Prepared
-            )
-        })
+        self.opening.as_ref().is_some_and(|open| !open.cancelled)
+            || self.active.as_ref().is_some_and(|a| {
+                matches!(
+                    a.phase,
+                    Phase::Submitting | Phase::Preparing | Phase::Prepared
+                )
+            })
     }
     pub fn publishing(&self) -> bool {
         self.active
@@ -203,7 +226,7 @@ impl Controller {
             args,
             own_dialog,
         } = admission;
-        if self.busy() {
+        if self.busy() || editor.pending_asset_open.is_some() {
             return Err((error("asset_busy","Another asset operation is preparing, publishing or retiring. Wait or cancel preparation."),reply));
         }
         if let Err(failure) = self.ensure_worker(ctx) {
@@ -233,6 +256,9 @@ impl Controller {
         Ok(())
     }
     pub fn cancel(&mut self) {
+        if let Some(opening) = &mut self.opening {
+            opening.cancelled = true;
+        }
         if let Some(active) = &mut self.active {
             if !matches!(active.phase, Phase::CommitQueued | Phase::Publishing) {
                 active.cancel = Some(error(
@@ -263,6 +289,8 @@ impl Controller {
     }
     fn terminal(&mut self, editor: &mut SceneEditor) {
         self.disconnected = true;
+        self.opening = None;
+        editor.pending_asset_open = None;
         if self.active.is_none() {
             self.status="Asset retirement worker disconnected; resources are retained until cleanup handoff completes.".into();
             editor.error = self.status.clone();
@@ -379,14 +407,89 @@ impl Controller {
                 }
                 self.status = "Finishing content update…".into();
             }
-            Event::Opened { result, .. } => {
-                if let Ok(store) = result {
-                    self.retired = Some(RetiredAssets {
-                        store: Some(store),
-                        ..Default::default()
-                    });
+            Event::Opened {
+                job,
+                canonical_root,
+                result,
+            } => {
+                let opening = if self.opening.as_ref().is_some_and(|open| open.job == job) {
+                    self.opening.take()
+                } else {
+                    None
+                };
+                let matches = opening.as_ref().is_some_and(|open| {
+                    open.job == job
+                        && !open.cancelled
+                        && open.generation == editor.generation
+                        && editor.asset_origin.as_ref() == Some(&open.root)
+                        && editor.recovered_origin == open.recovered_origin
+                        && match (&open.identity, &editor.assets) {
+                            (None, None) => true,
+                            (Some(identity), Some(store)) => store.matches_identity(identity),
+                            _ => false,
+                        }
+                });
+                match result {
+                    Ok(store) if matches && canonical_root.as_deref() == Some(store.root()) => {
+                        let meshes = store.mesh_snapshots();
+                        let textures = store.texture_snapshots();
+                        let old = AssetMaps {
+                            meshes: std::mem::replace(&mut editor.resolved, meshes),
+                            textures: std::mem::replace(&mut editor.resolved_textures, textures),
+                        };
+                        self.queue_maps(0, old);
+                        if opening.as_ref().unwrap().seed_preview {
+                            let old = AssetMaps {
+                                meshes: std::mem::replace(
+                                    &mut editor.preview_assets,
+                                    editor.resolved.clone(),
+                                ),
+                                textures: std::mem::replace(
+                                    &mut editor.preview_textures,
+                                    editor.resolved_textures.clone(),
+                                ),
+                            };
+                            self.queue_maps(1, old);
+                        }
+                        self.queue_store(editor.assets.replace(*store));
+                        editor.content_search.key = None;
+                        editor.error.clear();
+                        self.status = "Project content loaded.".into();
+                        if opening.as_ref().unwrap().recovery_shader
+                            && editor
+                                .assets
+                                .as_ref()
+                                .is_some_and(|store| store.root().join("scene.wgsl").is_file())
+                        {
+                            if let Err(error) = editor.refresh_shader() {
+                                editor.shader_notice =
+                                    format!("Recovered shader unavailable: {error}");
+                            }
+                        }
+                    }
+                    Ok(store) => {
+                        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+                        assert!(retired.store.is_none());
+                        retired.store = Some(*store);
+                        self.retired_frame = self.root_frame;
+                        self.status = "Finishing content loading…".into();
+                        if opening.as_ref().is_some_and(|open| !open.cancelled) {
+                            editor.error = "Content load no longer matches this document; retained content was preserved. Retry explicitly.".into();
+                        }
+                    }
+                    Err(message) if matches => {
+                        let open = opening.unwrap();
+                        editor.error = if open.recovered {
+                            format!("Recovery catalog {} is unavailable: {}. Restore the original catalog at that path, then Retry recovered content. References were preserved.", open.root.display(), persistence_commands::bounded(&message))
+                        } else {
+                            format!("Cannot load project content: {}. Repair the catalog, then Retry content.", persistence_commands::bounded(&message))
+                        };
+                        self.status = "Project content could not be loaded.".into();
+                    }
+                    Err(_) => {
+                        self.status = "Content loading cancelled.".into();
+                    }
                 }
-                editor.error="Unexpected catalog-open result retained; current asset controller owns mutations only.".into();
             }
         }
     }
@@ -499,6 +602,46 @@ impl Controller {
         }
         if !authorize {
             return;
+        }
+        if !self.busy() && editor.pending_asset_open.is_some() {
+            if let Err((code, message)) = self.ensure_worker(ctx) {
+                if code != "asset_busy" {
+                    editor.pending_asset_open = None;
+                }
+                editor.error = message;
+                return;
+            }
+            let intent = editor.pending_asset_open.take().unwrap();
+            let Some(job) = self.next.checked_add(1) else {
+                editor.error = "Content job identity exhausted.".into();
+                return;
+            };
+            match self
+                .worker
+                .as_mut()
+                .unwrap()
+                .try_open(job, intent.root.clone())
+            {
+                Ok(()) => {
+                    self.next = job;
+                    self.opening = Some(Opening {
+                        job,
+                        generation: editor.generation,
+                        root: intent.root,
+                        recovered_origin: editor.recovered_origin.clone(),
+                        identity: editor.assets.as_ref().map(AssetStore::state_identity),
+                        seed_preview: intent.seed_preview,
+                        recovered: intent.recovered,
+                        recovery_shader: intent.recovery_shader,
+                        cancelled: false,
+                    });
+                    self.status = "Loading project content…".into();
+                }
+                Err(TrySendError::Full(_)) => editor.pending_asset_open = Some(intent),
+                Err(TrySendError::Disconnected(_)) => {
+                    self.terminal(editor);
+                }
+            }
         }
         if let Some(active) = &self.active {
             if !matches!(
@@ -622,10 +765,66 @@ impl SceneEditor {
         self.retire_reset_assets();
         self.asset_ops.queue_store(self.assets.take());
     }
+    pub(super) fn asset_loading(&self) -> bool {
+        self.pending_asset_open.is_some() || self.asset_ops.opening.is_some()
+    }
+    pub(super) fn asset_busy(&self) -> bool {
+        self.pending_asset_open.is_some() || self.asset_ops.busy()
+    }
+    pub(super) fn asset_observation(&self) -> Value {
+        json!({ "loading": self.asset_loading(), "busy": self.asset_busy(), "phase":
+            if self.pending_asset_open.is_some() { "queued" }
+            else if let Some(open) = &self.asset_ops.opening { if open.cancelled { "cancelling" } else { "opening" } }
+            else if self.asset_ops.retired.is_some() || self.asset_ops.retiring { "retiring" }
+            else if self.asset_ops.publishing() { "publishing" }
+            else if self.asset_ops.active.is_some() { "preparing" }
+            else if self.asset_ops.disconnected { "failed" } else { "idle" }
+        })
+    }
+    pub(super) fn retry_asset_open(&mut self) -> Result<(), String> {
+        if self.asset_ops.disconnected && !self.asset_ops.restart_after_retirement {
+            return Err("Content worker failed; reopen the scene before Retry.".into());
+        }
+        if self.asset_busy()
+            || self.recovery_transition.is_some()
+            || self.close_approved
+            || self.close_pending
+        {
+            return Err("Content work is finishing; wait before Retry.".into());
+        }
+        let root = self
+            .asset_origin
+            .clone()
+            .ok_or("No project content origin is available.")?;
+        if self.assets.is_some() {
+            return Err("Project content is already loaded.".into());
+        }
+        self.pending_asset_open = Some(OpenIntent {
+            root,
+            seed_preview: false,
+            recovered: self.recovered_origin.is_some() || self.session.path().is_none(),
+            recovery_shader: self.recovered_origin.is_some() || self.session.path().is_none(),
+        });
+        self.error.clear();
+        Ok(())
+    }
+    pub(super) fn cancel_asset_work(&mut self) {
+        if self.pending_asset_open.take().is_some() {
+            self.asset_ops.status = "Content loading cancelled; Retry when ready.".into();
+            self.notice = self.asset_ops.status.clone();
+        }
+        self.asset_ops.cancel();
+    }
     pub(super) fn asset_publishing(&self) -> bool {
         self.asset_ops.publishing()
     }
     fn asset_owner_guard(&self, own_dialog: bool) -> Result<(), Error> {
+        if self.asset_loading() {
+            return Err(error(
+                "asset_busy",
+                "Project content is loading; wait or cancel loading.",
+            ));
+        }
         if self.drafts() || self.manipulation.active() || self.manipulation.offset_pending() {
             return Err(error(
                 "drafts_pending",
@@ -820,23 +1019,38 @@ impl SceneEditor {
         }
     }
     pub(super) fn asset_frame(&mut self, ctx: &egui::Context, authorize: bool) {
+        let cancel_key_available = if self.asset_loading() {
+            self.dialog.is_none()
+                && !self.export_dialog
+                && !self.asset_dialog
+                && !self.rename_pending
+                && !self.new_scene_pending
+                && !self.close_pending
+                && !self.close_approved
+                && !self.workspace.settings_open
+                && !self.recovery.open
+                && self.recovery_transition.is_none()
+        } else {
+            self.asset_owner_guard(false).is_ok()
+        };
         if authorize
-            && self.asset_ops.cancellable()
-            && self.asset_owner_guard(false).is_ok()
+            && (self.pending_asset_open.is_some() || self.asset_ops.cancellable())
+            && cancel_key_available
             && !ctx.egui_wants_keyboard_input()
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            self.asset_ops.cancel();
+            self.cancel_asset_work();
         }
         let mut controller = std::mem::take(&mut self.asset_ops);
         controller.frame(self, ctx, authorize);
         if controller.retired.is_some() && controller.retired_frame.is_none() {
             controller.retired_frame = controller.root_frame;
         }
-        if controller.busy() {
+        if controller.busy() || self.pending_asset_open.is_some() {
             ctx.request_repaint_after(Duration::from_millis(16));
         }
-        let close = controller.close_after && !controller.busy();
+        let close =
+            controller.close_after && !controller.busy() && self.pending_asset_open.is_none();
         if close {
             controller.close_after = false;
         }
@@ -940,6 +1154,7 @@ impl SceneEditor {
         self.asset_outcome(op, adoption.result)
     }
     pub(super) fn asset_close_guard(&mut self) -> bool {
+        self.pending_asset_open = None;
         if self.asset_ops.busy() {
             self.asset_ops.close_after = true;
             self.asset_ops.cancel();
@@ -953,6 +1168,10 @@ impl SceneEditor {
         }
     }
     pub(super) fn asset_shutdown(&mut self) {
+        self.pending_asset_open = None;
+        if self.asset_ops.opening.is_some() {
+            self.asset_ops.cancel();
+        }
         if !self.asset_ops.close_resources_taken && !self.asset_ops.busy() {
             self.retire_root_assets();
             self.asset_ops.close_resources_taken = true;
@@ -960,9 +1179,12 @@ impl SceneEditor {
         self.asset_ops.shutdown();
     }
     pub(super) fn asset_finished(&self) -> bool {
-        !self.asset_ops.busy() && self.asset_ops.finished()
+        !self.asset_busy() && self.asset_ops.finished()
     }
     pub(super) fn asset_root_guard(&mut self) -> Result<(), String> {
+        if self.asset_loading() {
+            return Err("Project content is loading; wait or cancel loading before changing or saving the document.".into());
+        }
         if self.asset_ops.busy() {
             self.asset_ops.cancel();
             Err("Asset work is finishing; cancel preparation or wait for publication before changing or saving the document.".into())
@@ -971,12 +1193,18 @@ impl SceneEditor {
         }
     }
     pub(super) fn asset_progress_ui(&mut self, ui: &mut egui::Ui) {
-        if self.asset_ops.busy() {
+        if self.asset_busy() {
             ui.horizontal_wrapped(|ui| {
                 ui.spinner();
-                ui.label(&self.asset_ops.status);
-                if self.asset_ops.cancellable() && ui.button("Cancel content update").clicked() {
-                    self.asset_ops.cancel();
+                ui.label(if self.pending_asset_open.is_some() {
+                    "Loading project content…"
+                } else {
+                    &self.asset_ops.status
+                });
+                if (self.pending_asset_open.is_some() || self.asset_ops.cancellable())
+                    && ui.button("Cancel content work").clicked()
+                {
+                    self.cancel_asset_work();
                 }
             });
         }
@@ -994,6 +1222,9 @@ mod tests {
                 ctx.run_ui(egui::RawInput::default(), |_ui| {
                     editor.asset_begin_root_frame(ctx);
                     editor.asset_frame(ctx, false);
+                    if editor.pending_asset_open.is_some() {
+                        editor.asset_frame(ctx, true);
+                    }
                 })
                 .drop_without_applying_deltas();
             } else {
@@ -1019,6 +1250,221 @@ mod tests {
             editor.asset_ops.disconnected, editor.asset_ops.shutting_down,
             editor.asset_ops.worker.as_ref().is_some_and(Worker::is_finished), editor.asset_ops.status
         );
+    }
+    fn exercise_open_case(
+        editor: &mut SceneEditor,
+        ctx: &egui::Context,
+        case: &str,
+        root: &std::path::Path,
+    ) {
+        assert!(editor.assets.is_none());
+        assert!(editor.pending_asset_open.is_some());
+        assert!(editor.asset_ops.worker.is_none());
+        if case.starts_with("open_recovered_") {
+            std::fs::write(root.join("scene.wgsl"), ruster_render::default_shader()).unwrap();
+            let recovery = crate::recovery::Store::open(root.join("recovery-test")).unwrap();
+            let linked = root.join("retained-link");
+            std::os::unix::fs::symlink(root, &linked).unwrap();
+            let mut drafts = editor.recovery_snapshot().unwrap().drafts().unwrap();
+            drafts["fields"]["translation"][0] = json!("unfinished recovered draft");
+            let snapshot =
+                crate::recovery::Snapshot::capture(&editor.session, Some(linked.clone()), &drafts)
+                    .unwrap();
+            let mut journal = recovery.allocate().unwrap();
+            journal.checkpoint(snapshot).unwrap();
+            drop(journal);
+            let id = recovery.scan().unwrap().remove(0).id;
+            editor.recovery = crate::recovery_ui::RecoveryUi::at(recovery);
+            editor.restore_checkpoint(&id).unwrap();
+            editor.wait_recovery();
+            assert_eq!(editor.asset_origin.as_ref(), Some(&linked));
+            assert!(
+                !editor
+                    .shader_notice
+                    .contains("Recovered shader unavailable"),
+                "recovery shader must wait for its catalog"
+            );
+            assert!(editor.session.path().is_none());
+            assert_eq!(
+                editor.draft.as_ref().unwrap().translation[0],
+                "unfinished recovered draft"
+            );
+        }
+        let generation = editor.generation;
+        let revision = editor.session.scene().revision;
+        let selected = editor.selected.clone();
+        let origin = editor.asset_origin.clone();
+        let recovered_origin = editor.recovered_origin.clone();
+        let scene = editor.command("test", "scene_inspect", json!({}));
+        assert_eq!(scene["result"]["asset_revision"], Value::Null);
+        assert_eq!(scene["result"]["asset_operation"]["phase"], "queued");
+        assert_eq!(scene["result"]["unresolved_assets"], json!([]));
+        let catalog = editor.command("test", "asset_inspect", json!({}));
+        assert_eq!(catalog["ok"], true);
+        assert_eq!(catalog["result"]["asset_revision"], Value::Null);
+        assert_eq!(catalog["result"]["asset_operation"]["loading"], true);
+        let material = editor.command("test", "material_inspect", json!({}));
+        assert_eq!(material["result"]["asset_revision"], Value::Null);
+        assert_eq!(material["result"]["asset_operation"]["loading"], true);
+        assert_eq!(
+            material["result"]["drafts_pending"],
+            case.starts_with("open_recovered_")
+        );
+        assert_eq!(editor.guard().unwrap_err(), "asset_busy");
+        assert!(!editor.behavior_editable());
+        assert!(editor.save_scene(root.join("must-not-save.json")).is_err());
+        assert!(!root.join("must-not-save.json").exists());
+        assert!(editor.retry_asset_open().is_err());
+        if case == "open_queued_cancel" {
+            ctx.run_ui(
+                egui::RawInput {
+                    events: vec![egui::Event::Key {
+                        key: egui::Key::Escape,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    ..Default::default()
+                },
+                |ui| {
+                    editor.asset_begin_root_frame(ctx);
+                    ui.label("Loading project content…");
+                    editor.asset_frame(ctx, true);
+                },
+            )
+            .drop_without_applying_deltas();
+            assert!(!editor.asset_loading());
+            assert!(editor.asset_ops.worker.is_none());
+            assert!(editor.assets.is_none());
+            return;
+        }
+        if case == "open_failure_retry" {
+            std::fs::write(root.join(".ruster-assets.json"), b"invalid catalog").unwrap();
+        }
+        ctx.run_ui(egui::RawInput::default(), |ui| {
+            editor.asset_begin_root_frame(ctx);
+            editor.asset_frame(ctx, false);
+            assert!(
+                editor.asset_ops.worker.is_none(),
+                "shell paints before catalog IO submission"
+            );
+            ui.label("Loading project content…");
+            editor.asset_frame(ctx, true);
+            assert!(editor.pending_asset_open.is_none());
+            assert!(editor.asset_ops.opening.is_some());
+        })
+        .drop_without_applying_deltas();
+        if case == "open_disconnect" {
+            // Exercise the real disconnected event path while the controller
+            // still owns an in-flight opening record. No fabricated completion.
+            editor
+                .asset_ops
+                .worker
+                .as_mut()
+                .unwrap()
+                .try_shutdown()
+                .unwrap();
+            until(editor, ctx, |e| e.asset_ops.disconnected);
+            assert!(!editor.asset_loading());
+            assert!(editor.assets.is_none());
+            assert!(editor.pending_asset_open.is_none());
+            assert_eq!(editor.asset_observation()["phase"], "failed");
+            assert!(editor.retry_asset_open().unwrap_err().contains("reopen"));
+            assert!(editor.pending_asset_open.is_none());
+            editor.asset_shutdown();
+            until(editor, ctx, SceneEditor::asset_finished);
+            return;
+        }
+        if matches!(case, "open_cancel" | "open_recovered_cancel") {
+            editor.cancel_asset_work();
+        }
+        if matches!(case, "open_stale" | "open_recovered_stale") {
+            editor.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
+        }
+        if case == "open_close" {
+            editor.request_close();
+            assert!(!editor.close_approved);
+        }
+        until(editor, ctx, |e| !e.asset_loading());
+        if matches!(
+            case,
+            "open_cancel"
+                | "open_stale"
+                | "open_close"
+                | "open_recovered_cancel"
+                | "open_recovered_stale"
+        ) {
+            assert!(editor.assets.is_none());
+            assert!(
+                !editor
+                    .shader_notice
+                    .contains("Recovered shader unavailable"),
+                "cancelled/stale loads cannot run the recovery shader continuation"
+            );
+            let store = editor
+                .asset_ops
+                .retired
+                .as_ref()
+                .unwrap()
+                .store
+                .as_ref()
+                .unwrap();
+            let weak = Arc::downgrade(&store.mesh_snapshots()["triangle"]);
+            until(editor, ctx, |e| !e.asset_busy());
+            assert!(weak.upgrade().is_none());
+            if case == "open_close" {
+                assert!(editor.close_approved);
+                editor.start_close_cleanup();
+                editor.asset_shutdown();
+            }
+        } else if case == "open_failure_retry" {
+            assert!(editor.assets.is_none());
+            assert!(!editor.error.is_empty());
+            assert!(
+                editor.pending_asset_open.is_none(),
+                "failed loads never automatically retry"
+            );
+            std::fs::remove_file(root.join(".ruster-assets.json")).unwrap();
+            editor.draft.as_mut().unwrap().translation[0] =
+                "invalid draft retained across Retry".into();
+            editor.retry_asset_open().unwrap();
+            assert!(editor.retry_asset_open().is_err());
+            until(editor, ctx, |e| !e.asset_busy());
+            assert!(editor.assets.is_some());
+            assert_eq!(
+                editor.draft.as_ref().unwrap().translation[0],
+                "invalid draft retained across Retry"
+            );
+            assert!(
+                editor.preview_assets.is_empty(),
+                "Retry does not reset frozen preview resources"
+            );
+        } else {
+            assert_eq!(
+                editor.assets.as_ref().unwrap().root(),
+                root.canonicalize().unwrap()
+            );
+            assert!(editor.preview_assets.contains_key("triangle"));
+            assert_eq!(
+                editor.shader_notice,
+                "Recovered shader unavailable: GPU renderer unavailable"
+            );
+            assert_eq!(
+                editor.draft.as_ref().unwrap().translation[0],
+                "unfinished recovered draft"
+            );
+            assert!(editor.session.path().is_none());
+        }
+        assert_eq!(editor.asset_origin, origin);
+        assert_eq!(editor.recovered_origin, recovered_origin);
+        assert_eq!(editor.selected, selected);
+        assert_eq!(editor.session.scene().revision, revision);
+        if !matches!(case, "open_stale" | "open_recovered_stale") {
+            assert_eq!(editor.generation, generation);
+        }
+        editor.asset_shutdown();
+        until(editor, ctx, SceneEditor::asset_finished);
     }
     // Real egui multipass output owns a discarded callback until AFTER pass1
     // app code. Only a later root-frame pass0 can hand its last map owner off.
@@ -1160,6 +1606,15 @@ mod tests {
             "reset_submitting_cancel",
             "terminal_close",
             "terminal_reopen",
+            "open_queued_cancel",
+            "open_cancel",
+            "open_stale",
+            "open_failure_retry",
+            "open_recovered_origin",
+            "open_recovered_cancel",
+            "open_recovered_stale",
+            "open_close",
+            "open_disconnect",
         ] {
             let directory = tempfile::tempdir().unwrap();
             std::fs::write(
@@ -1173,15 +1628,22 @@ mod tests {
             .unwrap();
             let mut session = Session::new(Scene::demo()).unwrap();
             session.save(directory.path().join("scene.json")).unwrap();
-            if matches!(case, "terminal_close" | "terminal_reopen") {
+            if matches!(case, "terminal_close" | "terminal_reopen") || case.starts_with("open_") {
                 let mut store = AssetStore::open(directory.path()).unwrap();
                 store.import("triangle", "triangle.obj").unwrap();
             }
             let mut editor = SceneEditor::with_workspace(session, Workspace::detached());
+            if !case.starts_with("open_") {
+                editor.test_finish_asset_work();
+            }
             let ctx = egui::Context::default();
             let generation = editor.generation;
             let preview = editor.preview.scene.fingerprint();
             let scene_revision = editor.session.scene().revision;
+            if case.starts_with("open_") {
+                exercise_open_case(&mut editor, &ctx, case, directory.path());
+                continue;
+            }
             if matches!(case, "terminal_close" | "terminal_reopen") {
                 let weak = Arc::downgrade(&editor.resolved["triangle"]);
                 let (worker, barrier) = Worker::panic_after_event_for_test().unwrap();
@@ -1206,6 +1668,8 @@ mod tests {
                     !editor.asset_ops.shutting_down,
                     "live-root payloads still need the failed worker's cleanup drainer"
                 );
+                assert_eq!(editor.asset_observation()["phase"], "failed");
+                assert_eq!(editor.asset_observation()["busy"], false);
                 assert!(!editor.asset_ops.worker.as_ref().unwrap().is_finished());
                 assert!(weak.upgrade().is_some());
                 ctx.run_ui(egui::RawInput::default(), |ui| {
@@ -1229,6 +1693,12 @@ mod tests {
                             editor.begin_replacement(next, None, false, false);
                             assert_ne!(editor.generation, generation);
                             assert!(editor.asset_ops.restart_after_retirement);
+                            assert!(editor.pending_asset_open.is_some());
+                            assert!(editor.retry_asset_open().is_err());
+                            assert!(
+                                editor.pending_asset_open.is_some(),
+                                "Retry rejection cannot clear authorized replacement load intent"
+                            );
                         }
                         ctx.request_discard("failed-worker root handoff");
                     }
@@ -1242,9 +1712,10 @@ mod tests {
                     until(&mut editor, &ctx, SceneEditor::asset_finished);
                 } else {
                     until(&mut editor, &ctx, |e| {
-                        !e.asset_ops.busy() && !e.asset_ops.disconnected
+                        !e.asset_busy() && !e.asset_ops.disconnected
                     });
-                    assert!(editor.asset_ops.worker.is_none());
+                    assert!(editor.asset_ops.worker.is_some());
+                    assert!(editor.assets.is_some());
                     assert!(
                         editor.error.is_empty(),
                         "fresh root must not retain the failed incarnation's diagnostic"

@@ -237,7 +237,6 @@ impl SceneEditor {
             return Err(error("invalid_arguments", "Offset exceeds material count"));
         }
         let limit = limit as usize;
-        let infos = self.assets.as_ref().map(|store| store.inspect());
         let materials: Vec<_> = self.session.scene().materials.iter().skip(offset).take(limit)
             .map(|(id, value)| {
                 let users: Vec<_> = self.session.scene().objects.iter()
@@ -247,14 +246,14 @@ impl SceneEditor {
                         && self.validate_material_object_uvs(&object.id).is_err()
                 }).collect();
                 let texture = value.base_color_texture.as_ref().map(|texture_id| {
-                    let info = infos.as_ref().and_then(|infos| {
-                        infos.iter().find(|info| &info.id == texture_id)
+                    let info = self.assets.as_ref().and_then(|store| {
+                        store.infos().find(|info| &info.id == texture_id)
                     });
                     let accepted = self.assets.as_ref()
                         .is_some_and(|store| store.texture(texture_id).is_some());
                     let (status, diagnostic) = match info {
                         Some(info) if info.kind != AssetKind::Texture => (
-                            "wrong_kind", Some("Referenced asset is not a texture".to_string())
+                            "wrong_kind", Some("Referenced asset is not a texture")
                         ),
                         Some(info) => (
                             match info.status {
@@ -262,12 +261,12 @@ impl SceneEditor {
                                 AssetStatus::Ready => "ready",
                                 AssetStatus::Missing => "missing",
                                 AssetStatus::Invalid => "invalid",
-                            }, info.diagnostic.clone()
+                            }, info.diagnostic.as_deref()
                         ),
                         None if self.assets.is_none() => (
-                            "catalog_unavailable", Some("Repair/open a valid project catalog".to_string())
+                            "catalog_unavailable", Some("Repair/open a valid project catalog")
                         ),
-                        None => ("unregistered", Some("Texture is not registered in this project".to_string())),
+                        None => ("unregistered", Some("Texture is not registered in this project")),
                     };
                     json!({
                         "asset_id":texture_id, "status":status,
@@ -292,8 +291,14 @@ impl SceneEditor {
                     }
                 })
             }).collect();
+        let asset_revision = (!self.asset_loading()).then(|| {
+            self.assets
+                .as_ref()
+                .map_or(0, |store| store.revision())
+                .to_string()
+        });
         Ok(
-            json!({"session_token":token,"scene_id":self.session.scene().id,"revision":self.session.scene().revision.to_string(),"asset_revision":self.assets.as_ref().map_or(0,|store|store.revision()).to_string(),"catalog_available":self.assets.is_some(),"materials":materials,"material_count":count,"next_offset":if offset+limit<count {Some((offset+limit).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.guard().is_err()||self.manipulation.offset_pending()}),
+            json!({"session_token":token,"scene_id":self.session.scene().id,"revision":self.session.scene().revision.to_string(),"asset_revision":asset_revision,"asset_operation":self.asset_observation(),"catalog_available":self.assets.is_some(),"materials":materials,"material_count":count,"next_offset":if offset+limit<count {Some((offset+limit).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending()}),
         )
     }
 

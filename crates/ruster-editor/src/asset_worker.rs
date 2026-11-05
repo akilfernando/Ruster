@@ -60,7 +60,8 @@ pub(super) enum Event {
     },
     Opened {
         job: JobId,
-        result: Result<AssetStore, String>,
+        canonical_root: Option<PathBuf>,
+        result: Result<Box<AssetStore>, String>,
     },
     Discarded {
         job: JobId,
@@ -71,27 +72,11 @@ pub(super) enum Event {
 }
 
 enum Command {
-    Prepare {
-        job: JobId,
-        request: AssetRequest,
-    },
+    Prepare { job: JobId, request: AssetRequest },
     Publish(JobId),
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Async catalog open is the next V1 host integration slice"
-        )
-    )]
-    Open {
-        job: JobId,
-        root: PathBuf,
-    },
+    Open { job: JobId, root: PathBuf },
     Discard(JobId),
-    Retire {
-        job: JobId,
-        retired: RetiredAssets,
-    },
+    Retire { job: JobId, retired: RetiredAssets },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -253,13 +238,6 @@ impl Worker {
         }
     }
 
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "Async catalog open is the next V1 host integration slice"
-        )
-    )]
     pub fn try_open(&mut self, job: JobId, root: PathBuf) -> Result<(), TrySendError<PathBuf>> {
         if self.active.is_some() && !self.disconnected && self.commands.is_some() {
             return Err(TrySendError::Full(root));
@@ -481,9 +459,17 @@ fn run(
             }
             Command::Open { job, root } => {
                 debug_assert!(candidate.is_none());
+                let canonical = root.canonicalize().map_err(|error| error.to_string());
+                let canonical_root = canonical.as_ref().ok().cloned();
+                let result = canonical.and_then(|root| {
+                    AssetStore::open(root)
+                        .map(Box::new)
+                        .map_err(|error| error.to_string())
+                });
                 outgoing = Some(Event::Opened {
                     job,
-                    result: AssetStore::open(root).map_err(|error| error.to_string()),
+                    canonical_root,
+                    result,
                 });
             }
             Command::Discard(job) => {
@@ -719,7 +705,8 @@ mod tests {
             Event::Opened {
                 job: 5,
                 result: Ok(store),
-            } => store,
+                ..
+            } => *store,
             other => panic!("unexpected open completion: {other:?}"),
         };
         assert_eq!(opened.revision(), 1);
@@ -756,7 +743,8 @@ mod tests {
             Event::Opened {
                 job: 7,
                 result: Ok(store),
-            } => store,
+                ..
+            } => *store,
             other => panic!("capacity notification lost: {other:?}"),
         };
         // Retired6/Opened7 are generations8/9. Opened7 must not steal the
@@ -820,7 +808,8 @@ mod tests {
             Event::Opened {
                 job: 1,
                 result: Ok(store),
-            } => store,
+                ..
+            } => *store,
             other => panic!("unexpected fault fixture event: {other:?}"),
         };
         let maps = AssetMaps {
