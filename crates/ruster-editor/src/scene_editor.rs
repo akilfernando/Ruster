@@ -2339,9 +2339,30 @@ impl SceneEditor {
     }
 
     pub fn command(&mut self, nonce: &str, op: &str, args: Value) -> Value {
+        #[cfg(feature = "inspection")]
+        let observed = if matches!(
+            op,
+            "scene_light_create" | "scene_light_set" | "scene_ambient_set"
+        ) {
+            Some((
+                self.asset_ops.timing_immediate_begin(op, "mcp"),
+                self.session.scene().revision,
+            ))
+        } else {
+            None
+        };
         let token = format!("{nonce}:scene:{}", self.generation);
         let outcome = self.execute(&token, op, &args);
-        self.finish_command(nonce, outcome)
+        let response = self.finish_command(nonce, outcome);
+        #[cfg(feature = "inspection")]
+        if let Some((started, before)) = observed {
+            self.asset_ops.timing_immediate_finished(
+                started,
+                response["ok"] == true,
+                self.session.scene().revision != before,
+            );
+        }
+        response
     }
     fn finish_command(&mut self, nonce: &str, outcome: Result<Value, (String, String)>) -> Value {
         // A committed cross-root Save As changes the content incarnation.
@@ -4520,7 +4541,10 @@ fn run_session(session: Session) -> Result<(), String> {
         options,
         Box::new(move |cc| {
             crate::editor_theme::configure(&cc.egui_ctx);
+            #[cfg(feature = "inspection")]
+            let metrics = cc.wgpu_render_state.as_ref().map(ruster_render::install);
             if let Some(render) = cc.wgpu_render_state.as_ref() {
+                #[cfg(not(feature = "inspection"))]
                 ruster_render::install(render);
                 eprintln!("Scene editor adapter: {:?}", render.adapter.get_info());
             }
@@ -4534,6 +4558,8 @@ fn run_session(session: Session) -> Result<(), String> {
                 input: Default::default(),
                 editor: {
                     let mut editor = SceneEditor::new(session);
+                    #[cfg(feature = "inspection")]
+                    editor.asset_ops.probe.attach_metrics(metrics);
                     editor.save_grant = save_grant;
                     editor.creation_export = creation_export;
                     if let Some(path) = editor.session.path() {

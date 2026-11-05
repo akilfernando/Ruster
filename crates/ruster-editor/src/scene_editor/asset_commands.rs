@@ -162,6 +162,7 @@ struct Opening {
 #[cfg(feature = "inspection")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum TimingKind {
+    Immediate,
     Asset,
     Save,
     Open,
@@ -217,6 +218,48 @@ impl Controller {
         if !self.probe.active() {
             self.timed = None;
         }
+    }
+    #[cfg(feature = "inspection")]
+    pub(super) fn timing_immediate_begin(
+        &mut self,
+        operation: &str,
+        origin: &'static str,
+    ) -> Option<Instant> {
+        // A nested UI counterpart belongs to an already observed outer command.
+        if self.timed.as_ref().is_some_and(|timed| timed.admitting) {
+            return None;
+        }
+        let started = self.probe.begin_immediate(operation, origin)?;
+        self.timed = Some(TimedOperation {
+            kind: TimingKind::Immediate,
+            job: None,
+            outcome: None,
+            admitting: true,
+            enqueue_attempted: false,
+        });
+        Some(started)
+    }
+    #[cfg(feature = "inspection")]
+    pub(super) fn timing_immediate_finished(
+        &mut self,
+        started: Option<Instant>,
+        success: bool,
+        changed: bool,
+    ) {
+        if started.is_none() {
+            return;
+        }
+        self.probe.immediate_record(started);
+        let timed = self.timed.as_mut().unwrap();
+        debug_assert!(timed.kind == TimingKind::Immediate);
+        timed.admitting = false;
+        timed.outcome = Some(if !success {
+            "rejected"
+        } else if changed {
+            "changed"
+        } else {
+            "no_op"
+        });
     }
     #[cfg(feature = "inspection")]
     pub(super) fn timing_begin(&mut self, operation: &str) -> Option<Instant> {
@@ -2224,7 +2267,7 @@ mod tests {
                 ])
                 .env(CHILD, "1")
                 .env("RUSTER_ASSET_TIMING", "1")
-                .env("RUSTER_ASSET_TIMING_OPS", "asset_import,asset_refresh")
+                .env("RUSTER_ASSET_TIMING_OPS", "asset_import,asset_refresh,scene_light_create,scene_light_set,scene_ambient_set,scene_save")
                 .output()
                 .unwrap();
             assert!(
@@ -2316,7 +2359,14 @@ mod tests {
         assert_eq!(summary["outcome"], "success");
         assert_eq!(
             summary["operation_filter"],
-            json!(["asset_import", "asset_refresh"])
+            json!([
+                "asset_import",
+                "asset_refresh",
+                "scene_light_create",
+                "scene_light_set",
+                "scene_ambient_set",
+                "scene_save"
+            ])
         );
         assert_eq!(summary["complete"], true);
         assert_eq!(summary["nonvisual"], false);
@@ -2361,6 +2411,166 @@ mod tests {
             named("adoption")[0]["end_ms"].as_f64().unwrap()
                 <= named("retire_submit")[0]["start_ms"].as_f64().unwrap()
         );
+        // Same production bridge/Host boundary for synchronous edits. F12 is
+        // an unbound fresh human event: dispatch waits until UI has consumed
+        // input, AFTER this frame's viewport callback has already been built.
+        for (op, expected) in [
+            ("scene_light_create", "changed"),
+            ("scene_light_set", "changed"),
+            ("scene_ambient_set", "changed"),
+            ("scene_ambient_set", "no_op"),
+            ("scene_ambient_set", "rejected"),
+        ] {
+            let revision = host.editor.session.scene().revision;
+            let mut args = json!({"expected_session_token":format!("test:scene:{}", host.editor.generation),
+                "expected_revision": if expected == "rejected" { "0".to_owned() } else { revision.to_string() }});
+            if op == "scene_ambient_set" {
+                args["ambient"] = json!({"color":[0.7,0.8,1.0],"intensity":0.19});
+            } else {
+                let mut light = ruster_scene::Light::point(Some("Timed point".into()));
+                if op == "scene_light_set" {
+                    light.intensity = 2.;
+                }
+                args["light_id"] = json!("timed-point");
+                args["light"] = serde_json::to_value(light).unwrap();
+            }
+            let (bridge, mut observe) = crate::bridge::queued_test_bridge(
+                json!({"operation":op,"arguments":args}),
+                Instant::now() + Duration::from_secs(3),
+            );
+            host.bridge = Some(bridge);
+            let mut raw = egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::F12,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(&mut host, &ctx, &mut raw);
+            ctx.run_ui(raw, |ui| {
+                eframe::App::logic(&mut host, ui.ctx(), &mut frame);
+                assert!(!host.editor.asset_ops.probe.active());
+                assert!(observe().is_none());
+                eframe::App::ui(&mut host, ui, &mut frame);
+            })
+            .drop_without_applying_deltas();
+            assert_eq!(observe().unwrap()["ok"], expected != "rejected");
+            assert!(host.editor.asset_ops.probe.active());
+            root_frame(&mut host, &mut frame);
+            assert!(
+                host.editor.asset_ops.probe.active(),
+                "first later UI frame must render before counter/summary completion"
+            );
+            root_frame(&mut host, &mut frame);
+            assert!(!host.editor.asset_ops.probe.active());
+            let summary = host.editor.asset_ops.probe.last_summary().unwrap();
+            assert_eq!(summary["operation"], op);
+            assert_eq!(summary["origin"], "mcp");
+            assert_eq!(summary["outcome"], expected);
+            assert_eq!(summary["complete"], true);
+            assert_eq!(
+                summary["resources"]["complete"], false,
+                "no GPU renderer in this owning case"
+            );
+            assert_eq!(summary["spans"].as_array().unwrap().len(), 1);
+            assert_eq!(summary["spans"][0]["name"], "foreground_commit_elapsed");
+        }
+        for valid in [false, true] {
+            let mut draft =
+                super::super::lighting_ui::LightingDraft::ambient(host.editor.session.scene());
+            if let super::super::lighting_ui::LightingDraft::Ambient { intensity, .. } = &mut draft
+            {
+                *intensity = if valid { "0.23" } else { "unfinished" }.into();
+            }
+            host.editor.lighting_draft = Some(draft);
+            let mut raw = egui::RawInput::default();
+            eframe::App::raw_input_hook(&mut host, &ctx, &mut raw);
+            ctx.run_ui(raw, |ui| {
+                eframe::App::logic(&mut host, ui.ctx(), &mut frame);
+                assert_eq!(host.editor.apply_lighting_draft(), valid);
+                eframe::App::ui(&mut host, ui, &mut frame);
+            })
+            .drop_without_applying_deltas();
+            root_frame(&mut host, &mut frame);
+            assert!(host.editor.asset_ops.probe.active());
+            root_frame(&mut host, &mut frame);
+            let summary = host.editor.asset_ops.probe.last_summary().unwrap();
+            assert_eq!(summary["origin"], "human");
+            assert_eq!(
+                summary["outcome"],
+                if valid { "changed" } else { "rejected" }
+            );
+            assert_eq!(summary["spans"].as_array().unwrap().len(), 1);
+        }
+        // Save's implicit Apply is nested in its outer admission. Even when
+        // both operations are selected, it must not create a second sample or
+        // steal the asynchronous Save's outcome.
+        let mut draft =
+            super::super::lighting_ui::LightingDraft::ambient(host.editor.session.scene());
+        if let super::super::lighting_ui::LightingDraft::Ambient { intensity, .. } = &mut draft {
+            *intensity = "0.27".into();
+        }
+        host.editor.lighting_draft = Some(draft);
+        let mut raw = egui::RawInput::default();
+        eframe::App::raw_input_hook(&mut host, &ctx, &mut raw);
+        ctx.run_ui(raw, |ui| {
+            eframe::App::logic(&mut host, ui.ctx(), &mut frame);
+            host.editor
+                .save_with_continuation(save_commands::Continuation::SaveOnly);
+            eframe::App::ui(&mut host, ui, &mut frame);
+        })
+        .drop_without_applying_deltas();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while host.editor.asset_ops.probe.active() && Instant::now() < deadline {
+            root_frame(&mut host, &mut frame);
+            std::thread::yield_now();
+        }
+        let saved = host.editor.asset_ops.probe.last_summary().unwrap();
+        assert_eq!(saved["operation"], "scene_save");
+        assert_eq!(saved["outcome"], "success");
+        assert_eq!(saved["overlap"], false);
+        assert!(saved["spans"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|span| span["name"] != "foreground_commit_elapsed"));
+
+        // Real hidden logic admits the command, never a fake paint observation.
+        let revision = host.editor.session.scene().revision;
+        let request = json!({"operation":"scene_ambient_set","arguments":{
+            "expected_session_token":format!("test:scene:{}",host.editor.generation),
+            "expected_revision":revision.to_string(),"ambient":{"color":[0.7,0.8,1.0],"intensity":0.31}}});
+        let (bridge, mut observe) = crate::bridge::queued_test_bridge(
+            request.clone(),
+            Instant::now() + Duration::from_secs(3),
+        );
+        host.bridge = Some(bridge);
+        let frames = ctx.cumulative_frame_nr();
+        let mut raw = egui::RawInput::default();
+        eframe::App::raw_input_hook(&mut host, &ctx, &mut raw);
+        let _ = ctx.run_logic(&raw, |ctx| eframe::App::logic(&mut host, ctx, &mut frame));
+        assert_eq!(observe().unwrap()["ok"], true);
+        assert_eq!(ctx.cumulative_frame_nr(), frames);
+        for _ in 0..3 {
+            root_frame(&mut host, &mut frame);
+        }
+        assert!(!host.editor.asset_ops.probe.active());
+        let hidden = host.editor.asset_ops.probe.last_summary().unwrap();
+        assert_eq!(hidden["operation"], "scene_ambient_set");
+        assert_eq!(hidden["nonvisual"], true);
+        assert_eq!(hidden["complete"], false);
+        let revision = host.editor.session.scene().revision;
+        let (bridge, mut expired) =
+            crate::bridge::queued_test_bridge(request, Instant::now() - Duration::from_secs(1));
+        host.bridge = Some(bridge);
+        eframe::App::raw_input_hook(&mut host, &ctx, &mut raw);
+        let _ = ctx.run_logic(&raw, |ctx| eframe::App::logic(&mut host, ctx, &mut frame));
+        assert!(expired().is_none());
+        assert!(!host.editor.asset_ops.probe.active());
+        assert_eq!(host.editor.session.scene().revision, revision);
         assert!(!host.editor.asset_ops.probe.active());
         assert!(!asset_timing::in_real_pass(&ctx));
         let frames = ctx.cumulative_frame_nr();

@@ -200,6 +200,23 @@ impl SceneEditor {
             && self.recovery_transition.is_none()
     }
     pub(super) fn apply_lighting_draft(&mut self) -> bool {
+        #[cfg(feature = "inspection")]
+        let observed = self
+            .lighting_draft
+            .as_ref()
+            .map(|draft| {
+                if draft.is_ambient() {
+                    "scene_ambient_set"
+                } else {
+                    "scene_light_set"
+                }
+            })
+            .map(|op| {
+                (
+                    self.asset_ops.timing_immediate_begin(op, "human"),
+                    self.session.scene().revision,
+                )
+            });
         let Some(draft) = self.lighting_draft.clone() else {
             return true;
         };
@@ -226,7 +243,7 @@ impl SceneEditor {
                     .map_err(|error| error.to_string()),
             }
         })();
-        match result {
+        let success = match result {
             Ok(created) => {
                 self.lighting_draft = None;
                 self.draft_generation = self.draft_generation.wrapping_add(1);
@@ -248,7 +265,16 @@ impl SceneEditor {
                 self.error = error;
                 false
             }
+        };
+        #[cfg(feature = "inspection")]
+        if let Some((started, before)) = observed {
+            self.asset_ops.timing_immediate_finished(
+                started,
+                success,
+                self.session.scene().revision != before,
+            );
         }
+        success
     }
     pub(super) fn cancel_lighting_draft(&mut self) {
         self.lighting_draft = None;
@@ -257,9 +283,18 @@ impl SceneEditor {
         self.notice = "Lighting draft cancelled; authored state unchanged.".into();
     }
     pub(super) fn create_light_ui(&mut self, kind: LightKind) -> bool {
+        #[cfg(feature = "inspection")]
+        let observed = (
+            self.asset_ops
+                .timing_immediate_begin("scene_light_create", "human"),
+            self.session.scene().revision,
+        );
         if !self.lighting_editable(false) || self.lighting_draft.is_some() {
             self.error =
                 "Apply or cancel drafts and resolve dialogs before creating a light.".into();
+            #[cfg(feature = "inspection")]
+            self.asset_ops
+                .timing_immediate_finished(observed.0, false, false);
             return false;
         }
         let result = (|| {
@@ -278,7 +313,7 @@ impl SceneEditor {
                 .map_err(|error| error.to_string())?;
             Ok::<_, String>((id, edit.created_ids))
         })();
-        match result {
+        let success = match result {
             Ok((id, created)) => {
                 self.select_object(Some(id), false);
                 self.error.clear();
@@ -296,7 +331,14 @@ impl SceneEditor {
                 self.error = error;
                 false
             }
-        }
+        };
+        #[cfg(feature = "inspection")]
+        self.asset_ops.timing_immediate_finished(
+            observed.0,
+            success,
+            self.session.scene().revision != observed.1,
+        );
+        success
     }
     pub(super) fn light_inspector_ui(&mut self, ui: &mut egui::Ui) {
         let Some(id) = self

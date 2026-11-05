@@ -75,8 +75,60 @@ struct Point {
     focused: bool,
 }
 
+// Copy counters only: never clone resource payloads or the bounded timing
+// vectors, and release the metrics mutex before formatting observation output.
+#[derive(Clone, serde::Serialize)]
+struct Resources {
+    frames: u64,
+    lighting_bytes: u64,
+    lighting_uploads: u64,
+    lighting_upload_bytes: u64,
+    mesh_bytes: u64,
+    mesh_uploads: u64,
+    mesh_upload_bytes: u64,
+    texture_bytes: u64,
+    texture_uploads: u64,
+    texture_upload_bytes: u64,
+    instance_capacity_bytes: u64,
+    target_bytes: u64,
+    target_size: [u32; 2],
+    sample_count: u32,
+    objects: usize,
+    draw_calls: usize,
+}
+impl Resources {
+    fn read(handle: &ruster_render::MetricsHandle) -> Self {
+        let m = handle
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        Self {
+            frames: m.frames,
+            lighting_bytes: m.lighting_bytes,
+            lighting_uploads: m.lighting_uploads,
+            lighting_upload_bytes: m.lighting_upload_bytes,
+            mesh_bytes: m.mesh_bytes,
+            mesh_uploads: m.mesh_uploads,
+            mesh_upload_bytes: m.mesh_upload_bytes,
+            texture_bytes: m.texture_bytes,
+            texture_uploads: m.texture_uploads,
+            texture_upload_bytes: m.texture_upload_bytes,
+            instance_capacity_bytes: m.instance_capacity_bytes,
+            target_bytes: m.target_bytes,
+            target_size: m.target_size,
+            sample_count: m.sample_count,
+            objects: m.objects,
+            draw_calls: m.draw_calls,
+        }
+    }
+}
+
 struct Run {
     operation: String,
+    origin: Option<&'static str>,
+    immediate: bool,
+    committed_frame: Option<u64>,
+    resources_before: Option<Resources>,
+    render_frames_at_finish: Option<u64>,
     start: Option<Point>,
     terminal: Option<(u64, &'static str)>,
     spans: Vec<Value>,
@@ -91,6 +143,7 @@ struct Run {
 
 #[derive(Default)]
 pub(super) struct Probe {
+    metrics: Option<ruster_render::MetricsHandle>,
     latest: Option<Point>,
     run: Option<Run>,
     #[cfg(test)]
@@ -98,6 +151,23 @@ pub(super) struct Probe {
 }
 
 impl Probe {
+    pub fn attach_metrics(&mut self, metrics: Option<ruster_render::MetricsHandle>) {
+        self.metrics = metrics;
+    }
+    pub fn begin_immediate(&mut self, operation: &str, origin: &'static str) -> Option<Instant> {
+        let started = self.begin(operation)?;
+        let run = self.run.as_mut().unwrap();
+        run.origin = Some(origin);
+        run.immediate = true;
+        Some(started)
+    }
+    pub fn immediate_record(&mut self, started: Option<Instant>) {
+        if started.is_none() {
+            return;
+        }
+        self.record("foreground_commit_elapsed", started);
+        self.run.as_mut().unwrap().committed_frame = self.latest.map(|point| point.frame);
+    }
     pub fn hidden_logic(&mut self) {
         // No stale idle-frame anchor and no invented trailing frame. Raw
         // operation spans remain useful, but this cannot qualify a paint cohort.
@@ -190,6 +260,11 @@ impl Probe {
         }
         self.run = Some(Run {
             operation: operation.chars().take(64).collect(),
+            origin: None,
+            immediate: false,
+            committed_frame: None,
+            resources_before: self.metrics.as_ref().map(Resources::read),
+            render_frames_at_finish: None,
             start: self.latest,
             terminal: None,
             spans: Vec::new(),
@@ -235,7 +310,21 @@ impl Probe {
     /// complete. Request one trailing frame to include final paint/upload cost.
     pub fn finish(&mut self, ctx: &egui::Context, outcome: &'static str) {
         if let Some(run) = self.run.as_mut().filter(|run| run.terminal.is_none()) {
-            run.terminal = Some((ctx.cumulative_frame_nr_for(egui::ViewportId::ROOT), outcome));
+            let frame = ctx.cumulative_frame_nr_for(egui::ViewportId::ROOT);
+            // MCP can commit after this frame's viewport callback was built.
+            // First let a later genuine UI frame build the changed scene, then
+            // observe after its paint at the following real Host entry.
+            if (run.immediate || self.metrics.is_some())
+                && frame <= *run.committed_frame.get_or_insert(frame)
+            {
+                ctx.request_repaint();
+                return;
+            }
+            run.render_frames_at_finish = self
+                .metrics
+                .as_ref()
+                .map(|metrics| Resources::read(metrics).frames);
+            run.terminal = Some((frame, outcome));
             ctx.request_repaint();
         }
     }
@@ -245,7 +334,36 @@ impl Probe {
             .run
             .take()
             .expect("summary requires an active observation");
-        json!({"operation":run.operation,"outcome":run.terminal.map(|(_,outcome)|outcome),
+        let after = self.metrics.as_ref().map(Resources::read);
+        let resources = match (&run.resources_before, &after) {
+            (Some(before), Some(after)) => {
+                let rendered = trailing
+                    && run
+                        .render_frames_at_finish
+                        .is_some_and(|frames| after.frames > frames);
+                let monotonic = after.frames >= before.frames
+                    && after.lighting_uploads >= before.lighting_uploads
+                    && after.lighting_upload_bytes >= before.lighting_upload_bytes
+                    && after.mesh_uploads >= before.mesh_uploads
+                    && after.mesh_upload_bytes >= before.mesh_upload_bytes
+                    && after.texture_uploads >= before.texture_uploads
+                    && after.texture_upload_bytes >= before.texture_upload_bytes;
+                json!({"before":before,"after":after,"rendered_after_finish":rendered,
+                    "complete":rendered && monotonic && !run.nonvisual && !run.overlap && !run.overflow,
+                    "counter_monotonic":monotonic,
+                    "delta":{"frames":after.frames.checked_sub(before.frames),
+                        "lighting_uploads":after.lighting_uploads.checked_sub(before.lighting_uploads),
+                        "lighting_upload_bytes":after.lighting_upload_bytes.checked_sub(before.lighting_upload_bytes),
+                        "mesh_uploads":after.mesh_uploads.checked_sub(before.mesh_uploads),
+                        "mesh_upload_bytes":after.mesh_upload_bytes.checked_sub(before.mesh_upload_bytes),
+                        "texture_uploads":after.texture_uploads.checked_sub(before.texture_uploads),
+                        "texture_upload_bytes":after.texture_upload_bytes.checked_sub(before.texture_upload_bytes)},
+                    "scope":"logical renderer payload/cumulative uploads; not CPU ownership, driver allocation or peak memory"})
+            }
+            _ => json!({"complete":false,"reason":"renderer_metrics_unavailable"}),
+        };
+        json!({"operation":run.operation,"origin":run.origin,"outcome":run.terminal.map(|(_,outcome)|outcome),
+            "resources":resources,
             "operation_filter":operation_filter(),
             "reason":reason,"trailing_frame":trailing,"overflow":run.overflow,"overlap":run.overlap,
             "complete":trailing && run.start.is_some() && run.gap_count>0 && !run.overflow && !run.overlap && !run.nonvisual,
@@ -317,5 +435,69 @@ mod tests {
         assert_eq!(result["operation"], "asset_import");
         assert_eq!(result["overlap"], true);
         assert_eq!(result["complete"], false);
+
+        // Scalar fixture verifies sampling order/qualification, not real GPU
+        // execution. The native gate owns actual upload and resource evidence.
+        let metrics = std::sync::Arc::new(std::sync::Mutex::new(ruster_render::Metrics {
+            frames: 10,
+            lighting_bytes: 192,
+            lighting_uploads: 1,
+            lighting_upload_bytes: 192,
+            ..Default::default()
+        }));
+        let mut observed = Probe::default();
+        observed.attach_metrics(Some(metrics.clone()));
+        let ctx = egui::Context::default();
+        ctx.run_ui(Default::default(), |_| {
+            observed.frame_record(point(0, 0., true));
+            observed.begin_record("scene_ambient_set");
+            let run = observed.run.as_mut().unwrap();
+            run.origin = Some("mcp");
+            run.immediate = true;
+            run.committed_frame = Some(0);
+            observed.finish(&ctx, "changed");
+            assert!(observed.run.as_ref().unwrap().terminal.is_none());
+        })
+        .drop_without_applying_deltas();
+        // This may be the OLD callback, built before a UI-end command.
+        metrics.lock().unwrap().frames = 11;
+        ctx.run_ui(Default::default(), |_| {
+            assert!(observed.frame_record(point(1, 16., true)).is_none());
+            observed.finish(&ctx, "changed");
+            assert_eq!(
+                observed.run.as_ref().unwrap().terminal,
+                Some((1, "changed"))
+            );
+        })
+        .drop_without_applying_deltas();
+        {
+            let mut m = metrics.lock().unwrap();
+            m.frames = 12;
+            m.lighting_uploads = 2;
+            m.lighting_upload_bytes = 384;
+        }
+        let result = observed.frame_record(point(2, 32., true)).unwrap();
+        assert_eq!(result["origin"], "mcp");
+        assert_eq!(result["resources"]["complete"], true);
+        assert_eq!(result["resources"]["before"]["lighting_upload_bytes"], 192);
+        assert_eq!(result["resources"]["delta"]["lighting_upload_bytes"], 192);
+        assert_eq!(result["resources"]["delta"]["mesh_uploads"], 0);
+        assert_eq!(result["resources"]["delta"]["texture_uploads"], 0);
+        observed.begin_record("scene_ambient_set");
+        let run = observed.run.as_mut().unwrap();
+        run.terminal = Some((2, "no_op"));
+        run.render_frames_at_finish = Some(12);
+        let missing_render = observed.frame_record(point(3, 48., true)).unwrap();
+        assert_eq!(missing_render["resources"]["complete"], false);
+        assert_eq!(missing_render["resources"]["rendered_after_finish"], false);
+        observed.begin_record("scene_ambient_set");
+        observed.hidden_logic();
+        let run = observed.run.as_mut().unwrap();
+        run.terminal = Some((3, "changed"));
+        run.render_frames_at_finish = Some(12);
+        metrics.lock().unwrap().frames = 13;
+        let hidden = observed.frame_record(point(4, 64., true)).unwrap();
+        assert_eq!(hidden["complete"], false);
+        assert_eq!(hidden["resources"]["complete"], false);
     }
 }
