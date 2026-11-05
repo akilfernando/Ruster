@@ -212,7 +212,9 @@ fn validate_name(name: Option<&str>) -> Result<(), SceneError> {
     Ok(())
 }
 
-fn validate_id(id: &str) -> Result<(), SceneError> {
+/// Validate the shared stable object/source/mesh identifier grammar.
+/// Display names are separate and may contain Unicode and spaces.
+pub fn validate_id(id: &str) -> Result<(), SceneError> {
     if id.is_empty()
         || id.len() > 128
         || !id

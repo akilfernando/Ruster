@@ -59,3 +59,10 @@ Resource paths must be relative normal components. Canonical paths must stay ins
 The default-off `inspection` feature forwards to eframe's official native inspection support, just like the editor. It is a developer verification interface, not a runtime/editor/MCP requirement. Run native tests according to [AGENTS.md](../../AGENTS.md) and [TESTING.md](../../docs/TESTING.md), on the isolated workspace without global input or clipboard changes.
 
 Focused tests protect fixed-step replay/completion/reset, stalled scheduling and long tick intervals, failure/recovery, missing/invalid mesh rejection, and read-only resource confinement/errors. Real native rendering, focus behavior, resize/shutdown and Vulkan validation require separate device evidence; headless success does not establish them. The current distribution target is Linux development use on the documented workstation. Other operating systems, GPU classes, editor readiness, a general ECS, physics/audio, textures, a fixed-rate background simulation service and production distribution support are outside this kit's verified scope.
+
+
+## Creator launch resources
+
+`ruster_app::creation::CreationManifest` reads a bounded `app.json` (`ruster-application`, version1) with `title`, relative `scene` path, `meshes` ID/path map and `tick_millis` (1–1000). Unknown fields/versions and duplicate mesh IDs fail. The title supports Unicode; paths stay within a read-only ResourceRoot. `load_session` preserves Scene5 behavior/history without granting save association or writing caches/locks; `load_meshes` uses the same bounded OBJ reader. `Content` still validates required mesh availability and total geometry.
+
+This is a launch description, not an editable project manager or an export implementation. The creation entry in Motion consumes it; [decision0027](../../docs/decisions/0027-creator-content-and-runtime-delivery.md) distinguishes current foundations from pending runtime-kit/editor/MCP export work.

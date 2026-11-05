@@ -1,5 +1,9 @@
-use std::{path::PathBuf, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    time::Duration,
+};
 
+use ruster_app::creation::{CreationManifest, DESCRIPTOR_NAME};
 use ruster_app::{Application, HostOptions, MeshMap, ResourceRoot, Runtime};
 use ruster_motion_lab::generic::{self, GenericMotionLab};
 use ruster_motion_lab::{read_source, MotionLab, DEFAULT_SOURCE};
@@ -13,6 +17,8 @@ Usage: ruster-motion-lab [OPTIONS]
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
   --scene PATH     Read a generic Scene5 snapshot (sources, bindings and history retained)
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
+  --creation-info Print the runtime/descriptor compatibility profile and exit
+  --creation PATH Read an app.json creation descriptor and its relative resources
   --resources PATH Explicit read-only mesh resource directory for generic mode
   --mesh ID=PATH   Map a Scene mesh ID to a relative OBJ resource (repeat, at most 64)
   --project PATH   Open an authored Motion Lab project (instead of --script)
@@ -32,7 +38,14 @@ fixed dt0.1. Author/edit/save in ruster-editor, then reopen this read-only viewe
 Headless generic mode Resets and prints JSON with separate authored/runtime scenes.
 --speed changes only the runtime snapshot of enabled numeric speed properties.
 Mesh references require explicit --resources ROOT --mesh ID=relative.obj mappings;
-missing meshes are errors. No scene, script, catalog, lock or cache file is written.";
+missing meshes are errors. No scene, script, catalog, lock or cache file is written.
+
+Creation mode reads app.json and resources relative to its directory, uses the
+authored fixed tick, and starts running after validation. --creation cannot be
+combined with content flags or --speed; --headless/--ticks and --frames remain
+available. Without explicit content flags, app.json beside the executable selects
+creation mode automatically, independent of the working directory. An invalid
+present descriptor is an error. --help does not read application content.";
 
 #[derive(Default)]
 struct Options {
@@ -45,25 +58,31 @@ struct Options {
     speed: Option<f64>,
     scene: Option<PathBuf>,
     generic_demo: bool,
+    creation: Option<PathBuf>,
     resources: Option<PathBuf>,
     meshes: Vec<(String, PathBuf)>,
 }
 
 fn parse() -> Result<Option<Options>, String> {
+    parse_from(std::env::args().skip(1))
+}
+
+fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>, String> {
     let mut options = Options::default();
-    let mut args = std::env::args().skip(1);
+    let mut args = args.into_iter();
     while let Some(arg) = args.next() {
         match arg.as_str() {
             "--help" | "-h" => return Ok(None),
             "--headless" => options.headless = true,
             "--generic-demo" => options.generic_demo = true,
             "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project"
-            | "--scene" | "--resources" | "--mesh" => {
+            | "--scene" | "--resources" | "--mesh" | "--creation" => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{arg} requires a value. See --help."))?;
                 match arg.as_str() {
                     "--scene" => options.scene = Some(value.into()),
+                    "--creation" => options.creation = Some(value.into()),
                     "--resources" => options.resources = Some(value.into()),
                     "--mesh" => {
                         let (id, path) =
@@ -125,6 +144,9 @@ fn parse() -> Result<Option<Options>, String> {
     if options.project.is_some() && options.script.is_some() {
         return Err("Use either --project or --script.".into());
     }
+    if options.creation.is_some() {
+        validate_creation_options(&options)?;
+    }
     let generic = options.scene.is_some() || options.generic_demo;
     if options.scene.is_some() && options.generic_demo {
         return Err("Use either --scene or --generic-demo".into());
@@ -144,6 +166,16 @@ fn parse() -> Result<Option<Options>, String> {
 }
 
 fn execute(options: Options) -> Result<(), String> {
+    let creation = if options.creation.is_some() || !has_explicit_content(&options) {
+        let executable = std::env::current_exe()
+            .map_err(|e| format!("Cannot locate application executable: {e}"))?;
+        select_creation(&options, &executable)?
+    } else {
+        None
+    };
+    if let Some(path) = creation {
+        return execute_creation(options, &path);
+    }
     if options.scene.is_some() || options.generic_demo {
         return execute_generic(options);
     }
@@ -205,6 +237,119 @@ fn execute(options: Options) -> Result<(), String> {
     }
 }
 
+fn has_explicit_content(options: &Options) -> bool {
+    options.scene.is_some()
+        || options.generic_demo
+        || options.project.is_some()
+        || options.script.is_some()
+        || options.save_project.is_some()
+}
+
+fn validate_creation_options(options: &Options) -> Result<(), String> {
+    if has_explicit_content(options)
+        || options.resources.is_some()
+        || !options.meshes.is_empty()
+        || options.speed.is_some()
+    {
+        return Err("Creation mode uses its app.json content and tick settings; omit --scene, --generic-demo, --project, --script, --save-project, --resources, --mesh and --speed".into());
+    }
+    Ok(())
+}
+
+/// Only an absent descriptor permits the embedded legacy application fallback.
+fn select_creation(options: &Options, executable: &Path) -> Result<Option<PathBuf>, String> {
+    let descriptor = if let Some(path) = &options.creation {
+        if path.file_name() != Some(std::ffi::OsStr::new(DESCRIPTOR_NAME)) {
+            return Err("--creation must name an app.json descriptor".into());
+        }
+        path.clone()
+    } else {
+        if has_explicit_content(options) {
+            return Ok(None);
+        }
+        executable
+            .parent()
+            .ok_or("Application executable has no parent directory")?
+            .join(DESCRIPTOR_NAME)
+    };
+    // Explicit and discovered descriptors have the same physical-file policy.
+    // Only an absent optional descriptor permits legacy fallback.
+    match std::fs::symlink_metadata(&descriptor) {
+        Ok(metadata) if metadata.is_file() => {
+            validate_creation_options(options)?;
+            Ok(Some(descriptor))
+        }
+        Ok(_) => Err(format!(
+            "Creation descriptor {} must be a regular file",
+            descriptor.display()
+        )),
+        Err(error)
+            if error.kind() == std::io::ErrorKind::NotFound && options.creation.is_none() =>
+        {
+            Ok(None)
+        }
+        Err(error) => Err(format!(
+            "Cannot inspect creation descriptor {}: {error}",
+            descriptor.display()
+        )),
+    }
+}
+
+fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
+    validate_creation_options(&options)?;
+    let parent = descriptor
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let root = ResourceRoot::new(parent)?;
+    let manifest = CreationManifest::load(&root)?;
+    let tick_duration = manifest.tick_duration();
+    let mut app = GenericMotionLab::new(
+        manifest.load_session(&root)?,
+        manifest.load_meshes(&root)?,
+        tick_duration,
+    )?;
+    app.set_creation_presentation(manifest.title.clone());
+    if options.headless {
+        let mut runtime = Runtime::new(app, tick_duration)?;
+        runtime.reset()?;
+        for _ in 0..options.ticks.unwrap_or(10) {
+            runtime.step()?;
+        }
+        let app = runtime.app();
+        println!(
+            "{}",
+            serde_json::to_string_pretty(&serde_json::json!({
+                "mode": "creation",
+                "title": manifest.title,
+                "scene_id": app.session().scene().id,
+                "authored_revision": app.session().scene().revision.to_string(),
+                "tick": runtime.tick().to_string(),
+                "fixed_dt": tick_duration.as_secs_f64(),
+                "runtime_speed_override": null,
+                "authored_scene": app.session().scene(),
+                "runtime_scene": app.content().scene(),
+            }))
+            .map_err(|e| e.to_string())?
+        );
+        Ok(())
+    } else {
+        // The host preserves callers' reset policy. Validate authored behavior at dt0 before
+        // opening a running creation; its new host Runtime and behavior both begin at tick0.
+        app.reset()?;
+        ruster_app::run(
+            app,
+            HostOptions {
+                title: manifest.title,
+                app_id: "ruster-creation".into(),
+                tick_duration,
+                max_frames: options.frames,
+                start_running: true,
+            },
+        )
+    }
+}
+
 fn execute_generic(options: Options) -> Result<(), String> {
     let session = match &options.scene {
         Some(path) => generic::read_session(path)?,
@@ -258,6 +403,18 @@ fn execute_generic(options: Options) -> Result<(), String> {
 }
 
 fn main() {
+    if std::env::args().skip(1).eq(["--creation-info"]) {
+        println!(
+            "{}",
+            serde_json::json!({
+                "format":"ruster-runtime", "version":1,
+                "descriptor_format":ruster_app::creation::FORMAT,
+                "descriptor_version":ruster_app::creation::VERSION,
+                "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
+            })
+        );
+        return;
+    }
     let result = match parse() {
         Ok(None) => {
             println!("{HELP}");
@@ -268,8 +425,88 @@ fn main() {
     };
     if let Err(error) = result {
         eprintln!(
-            "Motion Lab: {error}\nFix the authored scene/script/options and retry. See --help."
+            "Ruster application: {error}\nFix the authored scene/script/options and retry. See --help."
         );
         std::process::exit(2);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn options(args: &[&str]) -> Result<Option<Options>, String> {
+        parse_from(args.iter().map(|arg| (*arg).into()))
+    }
+
+    #[test]
+    fn creation_keeps_run_limits_but_rejects_content_overrides() {
+        assert!(
+            options(&["--creation", "app.json", "--headless", "--ticks", "0"])
+                .unwrap()
+                .is_some()
+        );
+        assert!(options(&["--creation", "app.json", "--frames", "1"])
+            .unwrap()
+            .is_some());
+        for flags in [
+            vec!["--scene", "scene.json"],
+            vec!["--generic-demo"],
+            vec!["--script", "motion.rhai"],
+            vec!["--project", "project.json"],
+            vec!["--save-project", "project.json"],
+            vec!["--resources", "resources"],
+            vec!["--mesh", "mesh=shape.obj"],
+            vec!["--speed", "2"],
+        ] {
+            let mut args = vec!["--creation", "app.json"];
+            args.extend(flags);
+            assert!(options(&args).is_err(), "accepted {args:?}");
+        }
+        // Help exits in the parser; it does not require an existing descriptor.
+        assert!(options(&["--creation", "missing/app.json", "--help"])
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn creation_selection_uses_executable_directory_and_fails_on_present_invalid_type() {
+        let directory = tempfile::tempdir().unwrap();
+        let executable = directory.path().join("creation");
+        let descriptor = directory.path().join(DESCRIPTOR_NAME);
+        let default = Options::default();
+        assert!(select_creation(&default, &executable).unwrap().is_none());
+        // Selection must not parse content or silently fall back when it is corrupt.
+        std::fs::write(&descriptor, b"invalid JSON").unwrap();
+        assert_eq!(
+            select_creation(&default, &executable).unwrap(),
+            Some(descriptor.clone())
+        );
+        let generic = options(&["--generic-demo"]).unwrap().unwrap();
+        assert!(select_creation(&generic, &executable).unwrap().is_none());
+        let speed = options(&["--speed", "2"]).unwrap().unwrap();
+        assert!(select_creation(&speed, &executable).is_err());
+        std::fs::remove_file(&descriptor).unwrap();
+        std::fs::create_dir(&descriptor).unwrap();
+        assert!(select_creation(&default, &executable).is_err());
+        let explicit_nonregular = Options {
+            creation: Some(descriptor.clone()),
+            ..Default::default()
+        };
+        assert!(select_creation(&explicit_nonregular, &executable).is_err());
+        #[cfg(unix)]
+        {
+            std::fs::remove_dir(&descriptor).unwrap();
+            let target = directory.path().join("descriptor-source.json");
+            std::fs::write(&target, b"{}").unwrap();
+            std::os::unix::fs::symlink(&target, &descriptor).unwrap();
+            assert!(select_creation(&default, &executable).is_err());
+            assert!(select_creation(&explicit_nonregular, &executable).is_err());
+        }
+
+        let explicit = options(&["--creation", "another-name.json"])
+            .unwrap()
+            .unwrap();
+        assert!(select_creation(&explicit, &executable).is_err());
     }
 }

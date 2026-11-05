@@ -30,3 +30,4 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0024](0024-owned-behavior-debug-stops.md) | Owned debug stops, exact stepping and asynchronous cancellation |
 | [0025](0025-first-alpha-platform-scope.md) | First alpha Linux x86_64 scope with named evidence and Windows retained as intended target |
 | [0026](0026-editor-granted-scene-persistence.md) | Explicit editor-granted scene Save/SaveAs through MCP |
+| [0027](0027-creator-content-and-runtime-delivery.md) | Creator launch descriptor, accepted source closure and shared standalone export direction |

@@ -74,6 +74,13 @@ impl ResourceRoot {
             .map(Arc::new)
             .map_err(|e| format!("mesh resource {}: {e}", path.display()))
     }
+
+    /// Bounded regular-file bytes beneath this read-only resource root.
+    pub fn read(&self, relative: impl AsRef<Path>, limit: usize) -> Result<Vec<u8>, String> {
+        let path = self.resolve(relative)?;
+        ruster_assets::read_regular_file(&path, limit)
+            .map_err(|error| format!("resource {}: {error}", path.display()))
+    }
 }
 
 fn validate_relative(path: &Path) -> Result<(), String> {

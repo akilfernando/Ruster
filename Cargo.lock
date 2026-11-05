@@ -2933,6 +2933,8 @@ dependencies = [
  "ruster-assets",
  "ruster-render",
  "ruster-scene",
+ "serde",
+ "serde_json",
  "tempfile",
  "wgpu",
 ]

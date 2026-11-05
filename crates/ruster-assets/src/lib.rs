@@ -122,6 +122,60 @@ pub struct AssetStore {
     meshes: BTreeMap<String, Arc<Mesh>>,
     infos: BTreeMap<String, AssetInfo>,
 }
+
+/// Read-only export authority for the selected, accepted asset sources. Capture
+/// is filesystem-free; workers read only matching source bytes and never open
+/// an AssetStore, acquire a project lock, rebuild caches or accept source edits.
+#[derive(Clone, Debug)]
+pub struct ExportSnapshot {
+    root: PathBuf,
+    baseline: Option<Vec<u8>>,
+    revision: u64,
+    sources: BTreeMap<String, ExportSource>,
+}
+
+#[derive(Clone, Debug)]
+struct ExportSource {
+    source: String,
+    hash: String,
+}
+
+impl ExportSnapshot {
+    pub fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    /// Read at most MAX_ASSETS sources, each at most MAX_SOURCE_BYTES. Catalog
+    /// equality is checked before and after reading against the editor's exact
+    /// accepted baseline. Source hashes preserve that same accepted-content
+    /// boundary without parsing the already validated OBJ again. Like the shared
+    /// file/path policy, this is not a hostile same-user filesystem race sandbox.
+    pub fn read_sources(&self) -> Result<BTreeMap<String, Vec<u8>>, AssetError> {
+        self.check_baseline()?;
+        let mut sources = BTreeMap::new();
+        for (id, source) in &self.sources {
+            let bytes = read_source_bytes(&self.root, &source.source)?;
+            if digest(&bytes) != source.hash {
+                return Err(error(format!(
+                    "asset {id:?} source changed since its accepted content; Refresh the asset and retry export"
+                )));
+            }
+            sources.insert(id.clone(), bytes);
+        }
+        self.check_baseline()?;
+        Ok(sources)
+    }
+
+    fn check_baseline(&self) -> Result<(), AssetError> {
+        if registry_bytes(&self.root)? != self.baseline {
+            return Err(error(
+                "asset catalog changed on disk; reopen the project before retrying export",
+            ));
+        }
+        Ok(())
+    }
+}
+
 impl AssetStore {
     pub fn open(root: impl AsRef<Path>) -> Result<Self, AssetError> {
         let root = fs::canonicalize(root.as_ref())?;
@@ -219,6 +273,45 @@ impl AssetStore {
     /// across unrelated imports/refreshes/renames and failed mutations.
     pub fn mesh_snapshots(&self) -> BTreeMap<String, Arc<Mesh>> {
         self.meshes.clone()
+    }
+    /// Capture only the IDs used by the runtime scene, excluding unrelated
+    /// catalog/history assets. No files are inspected or changed here, so this
+    /// bounded metadata capture may run on the editor thread.
+    pub fn export_snapshot(&self, ids: &BTreeSet<String>) -> Result<ExportSnapshot, AssetError> {
+        if ids.len() > MAX_ASSETS {
+            return Err(error("export exceeds 64 assets"));
+        }
+        let mut sources = BTreeMap::new();
+        for id in ids {
+            let record = self
+                .registry
+                .assets
+                .get(id)
+                .ok_or_else(|| error(format!("unknown export asset ID {id:?}")))?;
+            let hash = record.hash.as_ref().ok_or_else(|| {
+                error(format!(
+                    "asset {id:?} has no accepted content; Refresh the asset before exporting"
+                ))
+            })?;
+            if !self.meshes.contains_key(id) {
+                return Err(error(format!(
+                    "asset {id:?} has no accepted mesh; repair its source and Refresh before exporting"
+                )));
+            }
+            sources.insert(
+                id.clone(),
+                ExportSource {
+                    source: record.source.clone(),
+                    hash: hash.clone(),
+                },
+            );
+        }
+        Ok(ExportSnapshot {
+            root: self.root.clone(),
+            baseline: self.baseline.clone(),
+            revision: self.revision(),
+            sources,
+        })
     }
     pub fn inspect(&self) -> Vec<AssetInfo> {
         self.infos.values().cloned().collect()
@@ -443,8 +536,7 @@ impl AssetStore {
         Ok(())
     }
     fn read_source_bytes(&self, source: &str) -> Result<Vec<u8>, AssetError> {
-        let path = confined(&self.root, source, false)?;
-        read_bounded(&path, MAX_SOURCE_BYTES).map_err(|e| error(format!("source {source:?}: {e}")))
+        read_source_bytes(&self.root, source)
     }
     fn read_source(&self, source: &str) -> Result<(String, Mesh), AssetError> {
         let bytes = self.read_source_bytes(source)?;
@@ -648,6 +740,10 @@ fn registry_bytes(root: &Path) -> Result<Option<Vec<u8>>, AssetError> {
         Err(_) if !path.exists() => Ok(None),
         Err(e) => Err(e),
     }
+}
+fn read_source_bytes(root: &Path, source: &str) -> Result<Vec<u8>, AssetError> {
+    let path = confined(root, source, false)?;
+    read_bounded(&path, MAX_SOURCE_BYTES).map_err(|e| error(format!("source {source:?}: {e}")))
 }
 /// Shared bounded regular-file ingestion for project shader hosts as well as
 /// asset sources. This rejects special files before opening; it is not a
@@ -948,6 +1044,103 @@ fn obj_index(word: &str, count: usize) -> Result<usize, AssetError> {
 
 #[cfg(test)]
 mod tests {
+    // Export must preserve the editor's accepted source/catalog identity without
+    // touching project state or pulling unrelated catalog assets into a package.
+    #[test]
+    fn export_snapshot_reads_only_accepted_sources_without_project_writes() {
+        use super::*;
+
+        fn files(root: &Path) -> BTreeMap<PathBuf, (Vec<u8>, std::time::SystemTime)> {
+            let mut result = BTreeMap::new();
+            for entry in fs::read_dir(root).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    result.extend(files(&path));
+                } else {
+                    result.insert(
+                        path.clone(),
+                        (
+                            fs::read(&path).unwrap(),
+                            path.metadata().unwrap().modified().unwrap(),
+                        ),
+                    );
+                }
+            }
+            result
+        }
+
+        const TRIANGLE: &str = "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("mesh.obj");
+        let catalog = root.path().join(REGISTRY);
+        fs::write(&source, TRIANGLE).unwrap();
+        fs::write(root.path().join("unrelated.obj"), TRIANGLE).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        store.import("triangle", "mesh.obj").unwrap();
+        store.import("unrelated", "unrelated.obj").unwrap();
+        fs::remove_file(root.path().join("unrelated.obj")).unwrap();
+        let selected = BTreeSet::from(["triangle".into()]);
+        let original_mesh = store.mesh_snapshots()["triangle"].clone();
+        let baseline = fs::read(&catalog).unwrap();
+        // Capture is metadata-only even when the entire on-disk input is absent.
+        fs::remove_file(&source).unwrap();
+        fs::remove_file(&catalog).unwrap();
+        let snapshot = store.export_snapshot(&selected).unwrap();
+        assert_eq!(snapshot.revision(), store.revision());
+        fs::write(&source, TRIANGLE).unwrap();
+        fs::write(&catalog, &baseline).unwrap();
+        assert!(store
+            .export_snapshot(&BTreeSet::from(["unknown".into()]))
+            .is_err());
+        assert!(store
+            .export_snapshot(&(0..=MAX_ASSETS).map(|i| format!("asset{i}")).collect())
+            .is_err());
+
+        let before = files(root.path());
+        // A held lock also proves reads do not reopen AssetStore or acquire it.
+        let held = lock(root.path()).unwrap();
+        assert_eq!(
+            snapshot.clone().read_sources().unwrap(),
+            BTreeMap::from([("triangle".into(), TRIANGLE.as_bytes().to_vec())])
+        );
+        drop(held);
+        assert_eq!(files(root.path()), before);
+
+        let changed = TRIANGLE.replace("v 1 0 0", "v 2 0 0");
+        fs::write(&source, &changed).unwrap();
+        let before_failure = files(root.path());
+        assert!(snapshot
+            .read_sources()
+            .unwrap_err()
+            .to_string()
+            .contains("Refresh"));
+        assert!(Arc::ptr_eq(
+            &original_mesh,
+            &store.mesh_snapshots()["triangle"]
+        ));
+        assert_eq!(files(root.path()), before_failure);
+
+        store.refresh("triangle").unwrap();
+        let refreshed = store.export_snapshot(&selected).unwrap();
+        assert_eq!(refreshed.revision(), snapshot.revision() + 1);
+        assert_eq!(
+            refreshed.read_sources().unwrap()["triangle"],
+            changed.as_bytes()
+        );
+        // Even semantically identical external catalog edits conflict: exact
+        // baseline bytes, rather than only the revision, are authoritative.
+        let mut external = fs::read(&catalog).unwrap();
+        external.push(b'\n');
+        fs::write(&catalog, external).unwrap();
+        let before_conflict = files(root.path());
+        assert!(refreshed
+            .read_sources()
+            .unwrap_err()
+            .to_string()
+            .contains("reopen"));
+        assert_eq!(files(root.path()), before_conflict);
+    }
+
     // File close alone does not end an advisory lock with duplicated/inherited
     // descriptors. Scope exit must explicitly unlock the shared description.
     #[test]

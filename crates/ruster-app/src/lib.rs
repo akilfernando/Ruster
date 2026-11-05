@@ -1,4 +1,5 @@
 //! Bounded Linux application host: application-owned behavior, shared Vulkan rendering.
+pub mod creation;
 mod host;
 mod resources;
 #[cfg(test)]

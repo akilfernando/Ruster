@@ -34,3 +34,8 @@ All mutation APIs compare the complete on-disk catalog baseline under a project 
 ## Verification
 
 `cargo test --locked -p ruster-assets` covers import/reopen, cache deletion/corruption, version 1 recovery and version 2 publication, shared snapshot identity, explicit refresh, invalid/missing recovery, stable rename/no-overwrite, revision and full-file conflict guards, failed cache publication, failed catalog publication with source rollback, path/symlink/version/duplicate-source bounds, representative OBJ rejection and CLI exit/wiring. A bounded Unix CLI child regression checks FIFO sources, catalogs, caches, lock paths and actual held-lock Busy/failure atomicity without risking a hung test runner. A focused unit regression checks explicit unlock while a duplicate descriptor remains alive. Unix permission/symlink tests exercise the local platform; other platforms require their own filesystem evidence. The package contains original implementation only and inherits the workspace MIT OR Apache-2.0 license.
+
+
+## Read-only accepted-source export
+
+`AssetStore::export_snapshot(&BTreeSet<String>)` captures bounded metadata for the selected current-scene asset IDs without filesystem I/O. `ExportSnapshot::read_sources()` is the worker-side read: it returns only source bytes matching the editor's accepted hashes and exact catalog baseline, checked before and after the read. Changed source content requires explicit Refresh. It reuses confinement/bounded reads without opening another store, writing caches, locking or including unrelated/history-only assets. This supports the pending creator-content exporter; it is not an exporter by itself.

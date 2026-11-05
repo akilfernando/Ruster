@@ -27,6 +27,7 @@ pub struct GenericMotionLab {
     needs_reset: bool,
     diagnostic: Option<Diagnostic>,
     selected: Option<String>,
+    creation_title: Option<String>,
 }
 
 impl GenericMotionLab {
@@ -48,6 +49,7 @@ impl GenericMotionLab {
             needs_reset: true,
             diagnostic: None,
             selected,
+            creation_title: None,
         })
     }
 
@@ -62,6 +64,12 @@ impl GenericMotionLab {
     }
     pub fn fixed_dt(&self) -> Duration {
         self.fixed_dt
+    }
+
+    /// Present packaged content using its own identity over the same behavior/runtime path.
+    pub fn set_creation_presentation(&mut self, title: String) {
+        self.creation_title = Some(title);
+        self.selected = None;
     }
 
     /// Application configuration only: never changes embedded properties, history or Save bytes.
@@ -188,12 +196,20 @@ impl Application for GenericMotionLab {
         self.selected.as_deref()
     }
     fn select(&mut self, id: &str) {
-        if self.session.scene().objects.iter().any(|o| o.id == id) {
+        if self.creation_title.is_none() && self.session.scene().objects.iter().any(|o| o.id == id)
+        {
             self.selected = Some(id.into());
         }
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) -> Result<(), String> {
+        if let Some(title) = &self.creation_title {
+            ui.heading(title);
+            if let Some(error) = &self.diagnostic {
+                ui.colored_label(ui.visuals().error_fg_color, error.to_string());
+            }
+            return Ok(());
+        }
         ui.heading("Motion comparison");
         ui.label("Compare authored positions with fixed-step motion.");
         ui.small("Author sources, properties and history in the generic Ruster editor. This viewer reads a snapshot; reopen after saving changes.");

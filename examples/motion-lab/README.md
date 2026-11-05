@@ -2,6 +2,14 @@
 
 A non-game motion comparison application using `ruster-app`, its shared Vulkan viewport and the same fixed-step `Runtime` as Yard. Its generic Scene5/Lua mode consumes authored sources, typed properties/references and history from the shared editor. The legacy Rhai project1 mode remains compatible. Neither mode establishes full M8 creator acceptance.
 
+## Creator application entry
+
+`--creation /path/to/app.json` loads a bounded `ruster-application` version1 descriptor. Without an explicit legacy/generic content mode, an `app.json` beside the executable selects that creation automatically; current working directory does not select it. A present invalid descriptor fails rather than falling back to the Motion demo. `--creation-info` prints the runtime/descriptor profile without creating a window.
+
+The descriptor names the creation, Scene5 file, mesh-ID/relative-OBJ map and fixed `tick_millis`. Resources resolve beneath the descriptor directory without catalog/cache/lock writes. Headless mode accepts `--headless --ticks N` and reports mode `creation`, title, authored/runtime scenes and tick. Native mode validates Reset at dt0, starts running and uses a quiet creation title/diagnostic panel with shared Run/Pause/Reset controls. No Motion-comparison metrics or authoring guidance appear in creation mode. Other content/speed overrides are rejected, preserving the selected authored content. Existing explicit generic/legacy modes retain their prior behavior.
+
+The shared [launch descriptor](../../crates/ruster-app/README.md#creator-launch-resources) and accepted-source snapshots are foundations for standalone export; the runtime kit and shared editor/MCP export command are still pending. No packaged creation or full end-to-end parity is implied merely by adding this entry.
+
 ## Shared Scene5 motion comparison
 
 ```sh
