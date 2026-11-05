@@ -758,7 +758,12 @@ impl Controller {
                             }
                         }
                         Ok(saved) => {
-                            let (returned, request) = editor.adopt_saved(*saved, &save.pin);
+                            let (returned, request) = editor.adopt_saved(
+                                *saved,
+                                &save.pin,
+                                #[cfg(feature = "inspection")]
+                                &mut self.probe,
+                            );
                             self.merge_save_retirement(returned);
                             save.phase = Phase::FollowingUp;
                             save.followup = Some(SaveFollowup {

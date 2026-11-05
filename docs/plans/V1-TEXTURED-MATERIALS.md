@@ -45,7 +45,7 @@ Native injected app-scoped interaction, actual focused-window testing and an ext
 
 No authored lights, shadows, PBR/metallic/roughness/normal maps, transparency, environment/reflection system, shader graph, glTF/FBX importer, hierarchy/prefabs, physics/audio/animation, LOD/streaming or ray tracing in this goal. Each has a named later stage; these exclusions do not downgrade their product importance. No mandatory new renderer/backend, public release or expanded platform support.
 
-PumpBench's focused native keyboard check remains an outstanding obligation from the cleared goal. Preserve its artifacts, source pins, test reports, Tideglass review window and human fixtures. Perform that bounded check when normal access permits, record it separately, and do not retrofit the old packages with this new feature. The user clearing its goal is not evidence that the check passed.
+PumpBench's separately retained focused native keyboard check now passes on2026-11-05; [its evidence](../creations/PUMPBENCH.md#focused-native-keyboard-completion--2026-11-05) distinguishes actual OS focus/injected keys from physical-human input. Preserve its frozen artifacts/source/test reports and human fixtures; do not retrofit old packages with V1. Clearing its prior goal was not proof; the later actual focused run supplies this scoped evidence.
 
 ## Evaluation and next decision
 

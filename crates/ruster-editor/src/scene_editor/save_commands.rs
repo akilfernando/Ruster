@@ -152,26 +152,38 @@ impl SceneEditor {
     }
     // The returned bundle includes the old Session, so its final owned source /
     // history buffers are released on the worker after the paint boundary.
-    pub(super) fn adopt_saved(&mut self, saved: Saved, pin: &Pin) -> (RetiredAssets, Option<u64>) {
+    pub(super) fn adopt_saved(
+        &mut self,
+        saved: Saved,
+        pin: &Pin,
+        #[cfg(feature = "inspection")] probe: &mut asset_timing::Probe,
+    ) -> (RetiredAssets, Option<u64>) {
         let reset = |render: Option<&eframe::egui_wgpu::RenderState>| match render {
             Some(render) => ruster_render::refresh_shader(render, ruster_render::default_shader()),
             None => Ok(()),
         };
         #[cfg(test)]
         let failure = self.save_shader_reset_failure.take();
-        self.adopt_saved_with_reset(saved, pin, |render| {
-            #[cfg(test)]
-            if let Some(failure) = failure {
-                return Err(failure);
-            }
-            reset(render)
-        })
+        self.adopt_saved_with_reset(
+            saved,
+            pin,
+            |render| {
+                #[cfg(test)]
+                if let Some(failure) = failure {
+                    return Err(failure);
+                }
+                reset(render)
+            },
+            #[cfg(feature = "inspection")]
+            probe,
+        )
     }
     fn adopt_saved_with_reset(
         &mut self,
         saved: Saved,
         pin: &Pin,
         reset: impl FnOnce(Option<&eframe::egui_wgpu::RenderState>) -> Result<(), String>,
+        #[cfg(feature = "inspection")] probe: &mut asset_timing::Probe,
     ) -> (RetiredAssets, Option<u64>) {
         let Saved {
             session,
@@ -210,7 +222,12 @@ impl SceneEditor {
                 retired.maps[2] = AssetMaps { meshes, textures };
             }
             self.content_search.key = None;
-            match reset(self.render.as_ref()) {
+            #[cfg(feature = "inspection")]
+            let shader_started = probe.span_start();
+            let reset_result = reset(self.render.as_ref());
+            #[cfg(feature = "inspection")]
+            probe.record("save_shader_reset", shader_started);
+            match reset_result {
                 Ok(()) => {
                     self.shader_revision = 0;
                     self.shader_builtin = true;
@@ -231,11 +248,15 @@ impl SceneEditor {
         self.asset_origin = Some(root);
         self.recovered_origin = None;
         self.draft_generation = self.draft_generation.wrapping_add(1);
+        #[cfg(feature = "inspection")]
+        let workspace_started = probe.span_start();
         if let Some(path) = self.session.path() {
             self.workspace.remember(path);
         }
         self.remember_camera();
         self.workspace.flush();
+        #[cfg(feature = "inspection")]
+        probe.record("save_workspace_update", workspace_started);
         if self.workspace.state_path().is_some() && !self.workspace.error.is_empty() {
             self.append_save_warning(&format!("workspace settings: {}", self.workspace.error));
         }
@@ -404,7 +425,13 @@ impl SceneEditor {
             .prepare()
             .and_then(|prepared| prepared.publish())
             .map_err(|error| error.to_string())?;
-        let (retired, request) = self.adopt_saved_with_reset(saved, &pin, reset);
+        let (retired, request) = self.adopt_saved_with_reset(
+            saved,
+            &pin,
+            reset,
+            #[cfg(feature = "inspection")]
+            &mut asset_timing::Probe::default(),
+        );
         self.asset_ops.merge_save_retirement(retired);
         if let Some(request) = request {
             self.recovery.wait_idle();
@@ -437,7 +464,12 @@ impl SceneEditor {
             .prepare()
             .and_then(|prepared| prepared.publish())
             .map_err(|failure| (failure.code().into(), failure.message))?;
-        let (retired, request) = self.adopt_saved(saved, &pin);
+        let (retired, request) = self.adopt_saved(
+            saved,
+            &pin,
+            #[cfg(feature = "inspection")]
+            &mut asset_timing::Probe::default(),
+        );
         self.asset_ops.merge_save_retirement(retired);
         if let Some(request) = request {
             self.recovery.wait_idle();
