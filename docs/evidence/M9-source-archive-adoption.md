@@ -1,0 +1,27 @@
+# M9 source-archive adoption findings
+
+2026-11-05. The first local evaluation snapshot is **m9-eval-1**, source commit `5247d2ac1703a9a3de2a18aedc7865d21a3e7668`, tree `0bc337cc47f5ac8321870e4d9667dbca88b22cd8`. Its25,501,114byte complete source archive has SHA256 `4dd44eded71e0f85cf2079f50c89c5fbd78e3e061c27ea381bafe29a1a7dedb6`, with696regular source files exactly matching the committed inventory. Inventory SHA256 `853a34b734a41a00e67dae0042e37effe78afdb361f219589e503bde8477b446`. Artifact, inventory, paired `SOURCE-MANIFEST.json` and checksums remain under `/home/akilf/.local/state/ruster-candidates/m9-eval-1`. This source freeze is not alpha acceptance or publication.
+
+The assembly guard initially rejected the benign top-level tar directory because its name lacked a trailing slash. Root checked the archive's exact PAX commit and sole generated artifact, corrected that directory-name guard and completed inventory/manifest validation without rewriting the source archive. This was an assembly-check error, distinct from the product defects below.
+
+## Actual adopter blockers
+
+1. After extracting the archive without Git initialization, `python3 scripts/check.py --full` exited1 before Cargo: Markdown inventory invoked `git ls-files`, which exited128 because the archive has no checkout metadata. The artifact is complete; manually inventing Git history would hide an onboarding defect. The original log is retained beside the snapshot at `adopter-first-check.log`.
+2. A separate agent followed the delivered export guide in the isolated Ubuntu userspace. Yard exported142files and its headless baseline worked. Motion export exited2 because the explicit vendor allowlist required `third_party/mlua/Cargo.lock`, an ignored development file absent from the committed archive. The root workspace lock is present. The prior Ubuntu full build already compiled the real mlua dependency without that ignored file; no runtime dependency was missing.
+
+The frozen archive/extraction were not patched to make them pass. Preserve both failures and use a revised source snapshot after fixing the owning tools. This rehearsal is agent-executed with cached prerequisites, not independent human/fresh-machine acceptance.
+
+## Bounded repairs and evidence so far
+
+The checker now treats absence of root-owned `.git` metadata as archive mode, selects full scope and inventories the archive's own source Markdown while excluding root `target/` and Git metadata. It never borrows a surrounding repository's history/inventory. Explicit `--base` needs the source root's own checkout metadata. Real checkouts/worktrees keep Git inventory; corrupt own metadata stays an error. Only an actual symbolic branch with no branch ref is treated as unborn. Git remains a documented prerequisite. This is not a generic `.gitignore` parser.
+
+One integrated temporary-directory case protects Gitless/parent-Git archive inventory, real worktrees, full checks and bad Markdown; the existing unborn/error case covers corrupt refs. Before repair, actual archive checking failed and a corrupt-branch case exposed overly broad fallback. The worker's final22-test Python suite passed1.140s; after integrating the separate exporter correction, root ran the required final full gate:176Rust/22tooling tests, strict workspace/all-target Clippy, formatting and docs passed54.55s (1existing GPU-only test ignored).
+
+The Motion exporter drops only the ignored nested mlua development lock from its required copy allowlist. The root workspace lock and pinned versions remain. Root extended the existing optional-backend export case to omit that ignored file, verify root lock retention and ensure no nested development lock is exported. Before the fix, the existing6-test package suite failed with the same FileNotFoundError; after the one-entry allowlist correction, all6passed0.143s. No new package test or vendor-source change was added.
+
+Final-state full verification has passed; actual corrected Motion source-archive export/package and the revised archive’s own checker path remain to be exercised. Candidate `m9-eval-2` is planned; it is not frozen yet. The original snapshot remains immutable evidence of what an adopter actually received.
+
+
+## Retained first-snapshot/fix evidence
+
+The [13-file archive](m9-source-archive-fixes.tar.gz) is52,992bytes, SHA256 `a04e5085d8618ab0c259fc2af8bdb6e7df230562ae80bce8d55037bc6b0ad495`. It retains the unchanged eval1source manifest/inventory; actual checker/Motion export failures; optional-backend test red/green logs; full final gate log/result; four-file tooling/test patch; provenance/README/checksums. Private absolute paths in logs are replaced with documented placeholders; original log hashes are retained. Source archive, binaries, caches, credentials, user state and desktop data are excluded. Root verified exact payload/member/checksum integrity and reviewed the owning-tool diff.

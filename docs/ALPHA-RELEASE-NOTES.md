@@ -1,6 +1,6 @@
 # First alpha candidate — working release notes
 
-Updated2026-11-05. **Candidate preparation, not accepted or published.** The local evaluation identifier is **m9-eval-1**; workspace package version remains0.1.0. The paired `SOURCE-MANIFEST.json` identifies the exact frozen commit/tree and complete source archive. This label does not assert gate acceptance. [Candidate gates](ALPHA-CANDIDATE.md) own readiness. [Decision0025](decisions/0025-first-alpha-platform-scope.md) selects Linux x86_64 for this first candidate; Windows remains an intended future target.
+Updated2026-11-05. **Candidate preparation, not accepted or published.** The first evaluation snapshot **m9-eval-1** exposed [source-archive verification/export blockers](evidence/M9-source-archive-adoption.md); the owning-tool repairs pass the full gate, and **m9-eval-2** names the corrected evaluation snapshot. Workspace package version remains0.1.0. The paired `SOURCE-MANIFEST.json` identifies the exact frozen commit/tree and complete source archive. This label does not assert gate acceptance. [Candidate gates](ALPHA-CANDIDATE.md) own readiness. [Decision0025](decisions/0025-first-alpha-platform-scope.md) selects Linux x86_64 for this first candidate; Windows remains an intended future target.
 
 ## Creator workflow
 

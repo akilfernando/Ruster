@@ -4,6 +4,7 @@ import contextlib
 import importlib.util
 import io
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -84,6 +85,56 @@ class RunnerTests(unittest.TestCase):
             for base in ("HEAD", "missing-ref"):
                 with self.subTest(base=base), self.assertRaises(subprocess.CalledProcessError):
                     check.changed_files(root, base)
+            # A broken branch object must not be mistaken for a valid unborn repo.
+            branch = check.git(root, "symbolic-ref", "HEAD").decode().strip()
+            ref = root / ".git" / branch
+            ref.parent.mkdir(parents=True, exist_ok=True)
+            ref.write_text("1" * 40 + "\n")
+            with self.assertRaises(subprocess.CalledProcessError):
+                check.changed_files(root)
+            (root / ".git/HEAD").write_text("ref: refs/tags/not-a-branch\n")
+            with self.assertRaises(subprocess.CalledProcessError):
+                check.changed_files(root)
+
+    def test_source_archive_checks_its_docs_without_parent_git_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            archive = Path(directory) / "source"
+
+            def write(relative, content):
+                path = archive / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(content)
+
+            write("README.md", "# Source archive\n")
+            write(".github/CONTRIBUTING.md", "[Home](../README.md)\n")
+            write("docs/target/guide.md", "# Genuine source docs\n")
+            write("target/generated.md", "[Broken artifact](missing.md)\n")
+            write("third_party/dependency/.git/generated.md", "[Git metadata](missing.md)\n")
+            expected = {"README.md", ".github/CONTRIBUTING.md", "docs/target/guide.md"}
+            self.assertEqual(check.markdown_files(archive), expected)
+            paths, reason = check.changed_files(archive)
+            self.assertEqual(check.choose_plan(archive, paths, reason).scope, "full")
+            self.assertIn("source archive", reason)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()), patch.object(check, "__file__", str(archive / "scripts/check.py")), patch.object(check, "commands", return_value=[]), patch.object(check, "metadata", side_effect=AssertionError("Cargo was invoked")):
+                self.assertEqual(check.main(["--full"]), 0)
+                write("docs/broken.md", "[Missing source](missing.md)\n")
+                self.assertEqual(check.main(["--full"]), 1)
+            # Moving the same archive inside an unrelated checkout must not change
+            # its inventory or borrow that checkout's otherwise valid HEAD/base.
+            nested = self.root / "extracted"
+            shutil.move(str(archive), nested)
+            archive = nested
+            self.assertEqual(check.markdown_files(archive), expected | {"docs/broken.md"})
+            paths, reason = check.changed_files(archive)
+            self.assertEqual(check.choose_plan(archive, paths, reason).scope, "full")
+            with self.assertRaisesRegex(RuntimeError, "--base"):
+                check.changed_files(archive, "HEAD")
+            # A real worktree's own .git file is valid metadata, unlike the
+            # enclosing repository alone; keep its normal clean-tree behavior.
+            worktree = self.root / "linked"
+            self.git("worktree", "add", "--detach", "-q", str(worktree), "HEAD")
+            self.assertEqual(check.changed_files(worktree), (set(), None))
+            self.assertEqual(check.markdown_files(worktree), {"README.md"})
 
     def test_invalid_base_fails(self):
         with self.assertRaises(subprocess.CalledProcessError):

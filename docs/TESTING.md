@@ -36,6 +36,8 @@ python3 scripts/check.py --full
 python3 -m unittest discover -s scripts/tests -v
 ```
 
+Source archives without root-owned Git metadata select full verification, including with `--full`; no manual Git initialization is needed. Their Markdown inventory walks the source itself, excluding root `target/` and Git metadata. An unrelated parent checkout is not used. Git remains a prerequisite; `--base` requires an actual checkout/worktree and fails for an archive. Corrupt own metadata fails visibly instead of becoming archive/unborn mode.
+
 Default base is HEAD. The runner includes changes since the merge base plus working-tree/index/untracked changes, including deleted paths. Before the first commit it selects full scope. An explicitly supplied invalid base fails. It computes Rust reverse dependencies from Cargo metadata; it cannot infer semantic dependencies, external consumers, feature-gated integration or GPU behavior. Review the plan and broaden manually when these matter. A printed dry plan does not execute checks.
 
 The runner uses Cargo's normal incremental cache and `--locked` for builds/tests. Missing Cargo/toolchain, stale lockfiles and nonzero child exits are visible failures. Bootstrap commands for a deliberately changed dependency/lockfile must be explicit in the task evidence. No pass-result cache or silent retry loop exists.

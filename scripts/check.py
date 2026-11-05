@@ -4,6 +4,7 @@
 import argparse
 from dataclasses import dataclass
 import json
+import os
 from pathlib import Path
 import re
 import shutil
@@ -26,11 +27,43 @@ def git(root, *args):
     ).stdout
 
 
+def has_own_git(root):
+    """Absent root metadata is an archive; never borrow an enclosing checkout."""
+    try:
+        (root / ".git").lstat()
+    except FileNotFoundError:
+        # Git remains an explicit prerequisite. Do not reinterpret executable,
+        # permission or corrupt-own-metadata errors as source-archive mode.
+        git(root, "--version")
+        return False
+    top = Path(git(root, "rev-parse", "--show-toplevel").decode().strip()).resolve()
+    if top != root.resolve():
+        raise RuntimeError("Git metadata does not belong to the source root")
+    return True
+
+
 def changed_files(root, base=None):
     """Return committed, index, worktree and untracked paths, plus a full reason."""
+    if not has_own_git(root):
+        if base is not None:
+            raise RuntimeError("--base requires Git metadata owned by this source root")
+        return set(), "source archive without Git metadata: verify the entire workspace"
     try:
         git(root, "rev-parse", "--verify", "HEAD^{commit}")
     except subprocess.CalledProcessError:
+        # Only a symbolic HEAD whose branch does not exist is genuinely unborn.
+        # Detached/corrupt HEADs, bad branch objects and other Git failures remain
+        # errors rather than silently entering a successful fallback.
+        branch = git(root, "symbolic-ref", "--quiet", "HEAD").decode().strip()
+        if not branch.startswith("refs/heads/"):
+            raise
+        try:
+            git(root, "show-ref", "--verify", "--quiet", branch)
+        except subprocess.CalledProcessError as error:
+            if error.returncode != 1:
+                raise
+        else:
+            raise
         if base is not None:
             git(root, "rev-parse", "--verify", base + "^{commit}")
         return set(), "unborn HEAD: verify the entire workspace"
@@ -49,8 +82,20 @@ def changed_files(root, base=None):
 
 
 def markdown_files(root):
-    """Use Git inventory so ignored build artifacts are never scanned."""
-    return {p.decode("utf-8", "surrogateescape") for p in git(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z").split(b"\0") if p and docs_path(p.decode("utf-8", "surrogateescape"))}
+    """Use Git inventory, or source-only archive traversal without build output."""
+    if has_own_git(root):
+        return {p.decode("utf-8", "surrogateescape") for p in git(root, "ls-files", "--cached", "--others", "--exclude-standard", "-z").split(b"\0") if p and docs_path(p.decode("utf-8", "surrogateescape"))}
+
+    def walk_error(error):
+        raise error
+
+    paths = set()
+    for directory, children, files in os.walk(root, onerror=walk_error):
+        # Do not invent a partial .gitignore parser for archives. Root target/
+        # is generated; a source directory such as docs/target/ remains valid.
+        children[:] = [name for name in children if name != ".git" and not (Path(directory) == root and name == "target")]
+        paths.update((Path(directory) / name).relative_to(root).as_posix() for name in files if docs_path(name))
+    return paths
 
 
 def cargo_binary():

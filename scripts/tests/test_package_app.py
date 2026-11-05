@@ -132,8 +132,10 @@ class DistributionTests(unittest.TestCase):
         put("examples/motion-lab/resources/private.json", "SECRET")
         put("packaging/MOTION-SOURCE-README.md", "Motion source\n")
         put("packaging/MOTION-BINARY-README.txt", "Motion binary\n")
+        # A source archive omits mlua's ignored development lockfile.
         for name in new_app.MLUA_FILES:
-            put("third_party/mlua/" + name, "pinned upstream fixture\n")
+            if name != "Cargo.lock":
+                put("third_party/mlua/" + name, "pinned upstream fixture\n")
         for directory in ("src", "docs", "tests", "examples", "benches"):
             put(f"third_party/mlua/{directory}/fixture.rs", "// pinned fixture\n")
         source = self.base / "motion-source"
@@ -143,6 +145,8 @@ class DistributionTests(unittest.TestCase):
         self.assertIn("crates/ruster-behavior", cargo["workspace"]["members"])
         self.assertIn("third_party/mlua", cargo["workspace"]["exclude"])
         self.assertTrue((source / "third_party/mlua/RUSTER-PATCH.md").is_file())
+        self.assertTrue((source / "Cargo.lock").is_file())
+        self.assertFalse((source / "third_party/mlua/Cargo.lock").exists())
         self.assertTrue((source / "crates/ruster-behavior/templates/follower.lua").is_file())
         self.assertFalse((source / "examples/yard-app").exists())
         self.assertFalse((source / "examples/motion-lab/resources/private.json").exists())
