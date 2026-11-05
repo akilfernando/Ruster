@@ -617,15 +617,17 @@ fn prepare(
         .map_err(|e| e.to_string())?;
     let scene6 = captured.loaded_format_version() >= 6;
     let (mesh_ids, texture_ids) = scene_dependencies(captured.scene())?;
-    let sources = request
+    let source_ids = request
         .assets
         .as_ref()
-        .map(|assets| assets.read_sources().map_err(|e| e.to_string()))
-        .transpose()?
+        .map(|assets| {
+            assets
+                .source_ids()
+                .map(str::to_owned)
+                .collect::<BTreeSet<_>>()
+        })
         .unwrap_or_default();
-    if sources.keys().cloned().collect::<BTreeSet<_>>()
-        != mesh_ids.union(&texture_ids).cloned().collect()
-    {
+    if source_ids != mesh_ids.union(&texture_ids).cloned().collect() {
         return Err(
             "Accepted asset sources differ from the captured scene dependency closure.".into(),
         );
@@ -645,20 +647,33 @@ fn prepare(
     fs::write(content.join("scene.json"), &request.scene_bytes).map_err(|e| e.to_string())?;
     let mut meshes = BTreeMap::new();
     let mut textures = BTreeMap::new();
-    for (ids, folder, extension, records) in [
-        (&mesh_ids, "meshes", "obj", &mut meshes),
-        (&texture_ids, "textures", "png", &mut textures),
+    let mut source_paths = BTreeMap::new();
+    for (ids, folder, extension) in [
+        (&mesh_ids, "meshes", "obj"),
+        (&texture_ids, "textures", "png"),
     ] {
         if !ids.is_empty() {
             fs::create_dir(content.join(folder)).map_err(|e| e.to_string())?;
         }
         for (index, id) in ids.iter().enumerate() {
-            cancelled(cancel)?;
-            let source = &sources[id];
-            let path = format!("{folder}/{index:04}.{extension}");
-            fs::write(content.join(&path), source).map_err(|e| e.to_string())?;
-            records.insert(id, json!({"path":path,"sha256":digest(source)}));
+            source_paths.insert(id.clone(), format!("{folder}/{index:04}.{extension}"));
         }
+    }
+    if let Some(assets) = &request.assets {
+        assets
+            .read_verified_sources(|id, source| {
+                cancelled(cancel).map_err(ruster_assets::AssetError)?;
+                let path = &source_paths[id];
+                fs::write(content.join(path), &source)?;
+                let record = json!({"path":path,"sha256":digest(&source)});
+                if mesh_ids.contains(id) {
+                    meshes.insert(id.to_owned(), record);
+                } else {
+                    textures.insert(id.to_owned(), record);
+                }
+                Ok(())
+            })
+            .map_err(|error| error.to_string())?;
     }
     let scene_hash = digest(&request.scene_bytes);
     let mut content_manifest = json!({"schema":if scene6 { 2 } else { 1 }, "title":request.title, "tick_millis":100,

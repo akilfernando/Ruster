@@ -252,14 +252,34 @@ impl ExportSnapshot {
         self.revision
     }
 
+    /// Metadata-only dependency identities; does not inspect the filesystem.
+    pub fn source_ids(&self) -> impl Iterator<Item = &str> {
+        self.sources.keys().map(String::as_str)
+    }
+
     /// Read at most MAX_ASSETS sources, using the mesh/texture source-byte bounds. Catalog
     /// equality is checked before and after reading against the editor's exact
     /// accepted baseline. Source hashes preserve that same accepted-content
     /// boundary without parsing the already validated content again. Like the shared
     /// file/path policy, this is not a hostile same-user filesystem race sandbox.
     pub fn read_sources(&self) -> Result<BTreeMap<String, Vec<u8>>, AssetError> {
-        self.check_baseline()?;
         let mut sources = BTreeMap::new();
+        self.read_verified_sources(|id, bytes| {
+            sources.insert(id.into(), bytes);
+            Ok(())
+        })?;
+        Ok(sources)
+    }
+
+    /// Verify one bounded source at a time. The owned buffer avoids copying when
+    /// collecting through read_sources; streaming consumers can drop it after
+    /// writing disposable staging. A callback or final catalog-check failure
+    /// invalidates the whole traversal: publish nothing until this returns Ok.
+    pub fn read_verified_sources(
+        &self,
+        mut visit: impl FnMut(&str, Vec<u8>) -> Result<(), AssetError>,
+    ) -> Result<(), AssetError> {
+        self.check_baseline()?;
         for (id, source) in &self.sources {
             let bytes = read_source_bytes(&self.root, &source.source, source.kind)?;
             if digest(&bytes) != source.hash {
@@ -267,10 +287,10 @@ impl ExportSnapshot {
                     "asset {id:?} source changed since its accepted content; Refresh the asset and retry export"
                 )));
             }
-            sources.insert(id.clone(), bytes);
+            visit(id, bytes)?;
         }
         self.check_baseline()?;
-        Ok(sources)
+        Ok(())
     }
 
     fn check_baseline(&self) -> Result<(), AssetError> {
@@ -1399,6 +1419,31 @@ mod tests {
         );
         drop(held);
         assert_eq!(files(root.path()), before);
+
+        // Streaming callbacks may only write disposable staging: both consumer
+        // failure and a catalog change at the end must invalidate publication.
+        assert_eq!(snapshot.source_ids().collect::<Vec<_>>(), ["triangle"]);
+        let mut visited = 0;
+        let failed = snapshot
+            .read_verified_sources(|_, bytes| {
+                visited += 1;
+                assert_eq!(bytes, TRIANGLE.as_bytes());
+                Err(error("staging write failed"))
+            })
+            .unwrap_err();
+        assert_eq!(visited, 1);
+        assert_eq!(failed.to_string(), "staging write failed");
+        assert_eq!(files(root.path()), before);
+        let late_change = snapshot
+            .read_verified_sources(|_, _| {
+                fs::write(&catalog, b"external catalog change")?;
+                Ok(())
+            })
+            .unwrap_err();
+        assert!(late_change.to_string().contains("catalog changed"));
+        fs::write(&catalog, &baseline).unwrap();
+        // The fixture intentionally wrote this file, so its mtime changed.
+        assert_eq!(fs::read(&catalog).unwrap(), baseline);
 
         let changed = TRIANGLE.replace("v 1 0 0", "v 2 0 0");
         fs::write(&source, &changed).unwrap();

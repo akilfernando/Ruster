@@ -367,7 +367,7 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     return meshes, textures
 
 
-def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, dict, dict[str, bytes]]:
+def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, dict, dict[str, tuple[int, str, str]]]:
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
@@ -399,7 +399,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
         raise ValueError("content exceeds 64 combined asset mappings")
     if set(meshes) != mesh_ids or set(textures) != texture_ids or set(meshes) & set(textures):
         raise ValueError("content mappings differ from the current scene mesh/texture dependency closure")
-    source_data = {}
+    source_specs = {}
     for kind, records, pattern, maximum in (("mesh", meshes, MESH_PATH, MIB),
                                             ("texture", textures, TEXTURE_PATH, MAX_TEXTURE_BYTES)):
         for identity, record in records.items():
@@ -408,15 +408,15 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
             if not isinstance(identity, str) or not IDENTITY.fullmatch(identity):
                 raise ValueError(f"invalid {kind} identity")
             name = record["path"]
-            if not isinstance(name, str) or not pattern.fullmatch(name) or name in source_data:
+            if not isinstance(name, str) or not pattern.fullmatch(name) or name in source_specs:
                 raise ValueError(f"{kind} sources require unique generated {kind} paths")
-            data = read_bounded(root, name, maximum)
-            if (not isinstance(record["sha256"], str) or not HASH.fullmatch(record["sha256"])
-                    or sha256(data) != record["sha256"]):
+            if not isinstance(record["sha256"], str) or not HASH.fullmatch(record["sha256"]):
                 raise ValueError(f"{kind} checksum mismatch: {identity}")
-            source_data[name] = data
+            # Keep bounded metadata, not the entire encoded source closure.
+            # Each source is checked while copying into disposable staging.
+            source_specs[name] = (maximum, record["sha256"], f"{kind} checksum mismatch: {identity}")
     cancelled(cancel_file)
-    return content, scene_data, document, source_data
+    return content, scene_data, document, source_specs
 
 
 def typed_scene(document: dict) -> dict:
@@ -447,7 +447,7 @@ def typed_scene(document: dict) -> dict:
 def package(runtime_kit: Path, content_root: Path, output: Path,
             cancel_file: Path | None = None) -> dict:
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
-    content, scene_data, document, sources = source_content(content_root, cancel_file)
+    content, scene_data, document, source_specs = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
     if content["schema"] == 2 and kit["profile"] != MATERIAL_PROFILE:
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
@@ -469,9 +469,13 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             cancelled(cancel_file)
             package_app.put(stage, name, payload[name])
         package_app.put(stage, "resources/scene.json", scene_data)
-        for name, data in sources.items():
+        for name, (maximum, expected_hash, diagnostic) in source_specs.items():
             cancelled(cancel_file)
+            data = read_bounded(content_root, name, maximum)
+            if sha256(data) != expected_hash:
+                raise ValueError(diagnostic)
             package_app.put(stage, "resources/" + name, data)
+            del data
         package_app.put(stage, "app.json", encoded(descriptor))
         requirements = kit["elf"]
         readme = (content["title"] + "\n\nRun ./application from any working directory.\n"
