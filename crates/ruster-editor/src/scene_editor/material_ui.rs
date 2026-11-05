@@ -140,7 +140,8 @@ impl SceneEditor {
         self.material_editable_for_save(false)
     }
     fn material_editable_for_save(&self, saving: bool) -> bool {
-        self.color_draft.is_none()
+        !self.asset_publishing()
+            && self.color_draft.is_none()
             && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && !self.manipulation.offset_pending()

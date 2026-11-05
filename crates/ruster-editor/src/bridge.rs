@@ -345,6 +345,15 @@ impl Drop for Bridge {
 }
 
 #[cfg(test)]
+pub(crate) fn preparing_test_lease(
+    deadline: Instant,
+) -> (RequestLease, impl FnMut() -> Option<Value>) {
+    let (pending, state, _wake) = new_pending(json!({}), deadline);
+    assert!(state.begin_prepare_with(|| deadline - Duration::from_nanos(1)));
+    (pending.lease, move || state.take_reply_or_expire())
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

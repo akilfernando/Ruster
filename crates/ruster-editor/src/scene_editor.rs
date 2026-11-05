@@ -1,4 +1,5 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
+mod asset_commands;
 mod behavior_commands;
 mod capture_commands;
 mod color_commands;
@@ -17,6 +18,20 @@ use eframe::{
 };
 use ruster_assets::{AssetStore, Mesh, Texture};
 type TextureMap = BTreeMap<String, Arc<Texture>>;
+// AssetStore retains Arc identity for unchanged accepted payloads. Inspecting
+// staleness must never compare decoded pixels/vertices on the editor thread.
+fn same_asset_snapshots<T>(
+    left: &BTreeMap<String, Arc<T>>,
+    right: &BTreeMap<String, Arc<T>>,
+) -> bool {
+    left.len() == right.len()
+        && left
+            .iter()
+            .zip(right)
+            .all(|((left_id, left), (right_id, right))| {
+                left_id == right_id && Arc::ptr_eq(left, right)
+            })
+}
 use ruster_scene::{Object, Preview, Scene, Session, Transform};
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, sync::Arc};
@@ -314,6 +329,7 @@ pub struct SceneEditor {
     dialog: Option<bool>,
     close_pending: bool,
     close_approved: bool,
+    asset_ops: asset_commands::Controller,
     assets: Option<AssetStore>,
     resolved: BTreeMap<String, Arc<Mesh>>,
     resolved_textures: TextureMap,
@@ -457,6 +473,7 @@ impl SceneEditor {
             dialog: None,
             close_pending: false,
             close_approved: false,
+            asset_ops: Default::default(),
             assets,
             resolved,
             preview_assets,
@@ -485,7 +502,8 @@ impl SceneEditor {
         self.drafts() || self.rename_pending || self.manipulation.offset_pending()
     }
     fn behavior_editable(&self) -> bool {
-        (self.color_draft.is_none() && self.material_draft.is_none())
+        !self.asset_publishing()
+            && (self.color_draft.is_none() && self.material_draft.is_none())
             && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && self.draft == self.baseline_fields
@@ -829,6 +847,7 @@ impl SceneEditor {
         Ok(())
     }
     fn restore_checkpoint(&mut self, id: &str) -> Result<(), String> {
+        self.asset_root_guard()?;
         if self.recovery.boundary_pending() || self.recovery_transition.is_some() {
             return Err(
                 "Recovery is finishing the previous boundary; retry once it completes.".into(),
@@ -1118,6 +1137,12 @@ impl SceneEditor {
         }
     }
     fn start_close_cleanup(&mut self) {
+        if self.asset_ops.busy() {
+            return;
+        }
+        if self.close_approved {
+            self.asset_shutdown();
+        }
         if self.close_approved {
             self.creation_export.cancel();
         }
@@ -1153,7 +1178,8 @@ impl SceneEditor {
         let Some((id, additive)) = self.queued_selection.take() else {
             return;
         };
-        if self.manipulation.active()
+        if self.asset_publishing()
+            || self.manipulation.active()
             || self.dialog.is_some()
             || self.rename_pending
             || self.new_scene_pending
@@ -1197,6 +1223,9 @@ impl SceneEditor {
         self.guard_except_export_dialog()
     }
     fn guard_except_export_dialog(&self) -> Result<(), String> {
+        if self.asset_publishing() {
+            return Err("asset_busy".into());
+        }
         if self.drafts() || self.manipulation.active() {
             Err("drafts_pending".into())
         } else if self.dialog.is_some()
@@ -1215,6 +1244,10 @@ impl SceneEditor {
         }
     }
     fn apply(&mut self) -> bool {
+        if self.asset_publishing() {
+            self.error="Asset publication is finishing; authored edits are reserved until acknowledgement.".into();
+            return false;
+        }
         if self.material_draft.is_some() {
             return self.apply_material_draft();
         }
@@ -1295,6 +1328,10 @@ impl SceneEditor {
         }
     }
     fn save(&mut self) {
+        if let Err(error) = self.asset_root_guard() {
+            self.error = error;
+            return;
+        }
         if !self.apply() {
             return;
         }
@@ -1404,6 +1441,10 @@ impl SceneEditor {
         }
     }
     fn replace_with_empty(&mut self) {
+        if let Err(error) = self.asset_root_guard() {
+            self.error = error;
+            return;
+        }
         self.remember_camera();
         let render = self.render.clone();
         if let Some(render) = render.as_ref().filter(|_| self.shader_revision > 0) {
@@ -1635,6 +1676,7 @@ impl SceneEditor {
         path: PathBuf,
         reset: impl FnOnce(Option<&eframe::egui_wgpu::RenderState>) -> Result<(), String>,
     ) -> Result<(), String> {
+        self.asset_root_guard()?;
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -1936,6 +1978,19 @@ impl SceneEditor {
         op: &str,
         args: &Value,
     ) -> Result<Value, (String, String)> {
+        if asset_commands::supported(op) {
+            #[cfg(test)]
+            {
+                return self.asset_sync_command(token, op, args);
+            }
+            #[cfg(not(test))]
+            {
+                return Err((
+                    "deferred_dispatch_required".into(),
+                    "Asset mutations require the native deferred request path.".into(),
+                ));
+            }
+        }
         let err = |code: &str, message: String| (code.to_string(), message);
         let allowed: &[&str] = match op {
             "asset_inspect" => &["offset"],
@@ -2126,49 +2181,15 @@ impl SceneEditor {
                 json!({"revision":revision.to_string(),"asset_revision":expected_asset.to_string(),"object_id":id,"before":previous,"after":mesh,"dirty":self.session.is_dirty()}),
             );
         }
-        let id = args["asset_id"]
-            .as_str()
-            .ok_or_else(|| err("invalid_arguments", "asset_id required".into()))?;
-        let store = self.assets.as_mut().ok_or_else(|| {
-            err(
-                "assets_unavailable",
-                "Open a project with a valid catalog".into(),
-            )
-        })?;
-        let result = match op {
-            "asset_import" => store.import_at(
-                expected_asset,
-                id,
-                args["source"]
-                    .as_str()
-                    .ok_or_else(|| err("invalid_arguments", "source required".into()))?,
-            ),
-            "asset_refresh" => store.refresh_at(expected_asset, id),
-            "asset_rename" => store.rename_at(
-                expected_asset,
-                id,
-                args["source"]
-                    .as_str()
-                    .ok_or_else(|| err("invalid_arguments", "source required".into()))?,
-            ),
-            _ => unreachable!(),
-        };
-        let revision = store.revision();
-        self.asset_snapshot();
-        match result {
-            Ok(info) => {
-                self.notice =
-                    format!("Agent {op}: catalog revision{revision}; scene/preview unchanged.");
-                Ok(
-                    json!({"asset":info,"asset_revision":revision.to_string(),"scene_revision":self.session.scene().revision.to_string()}),
-                )
-            }
-            Err(e) => Err(err("asset_error", e.to_string())),
-        }
+        Err(err("unsupported_operation", op.into()))
     }
+
     pub fn command(&mut self, nonce: &str, op: &str, args: Value) -> Value {
         let token = format!("{nonce}:scene:{}", self.generation);
         let outcome = self.execute(&token, op, &args);
+        self.finish_command(nonce, outcome)
+    }
+    fn finish_command(&mut self, nonce: &str, outcome: Result<Value, (String, String)>) -> Value {
         // A committed cross-root Save As changes the content incarnation.
         // Replies must describe the resulting state, not the admitted request.
         let token = format!("{nonce}:scene:{}", self.generation);
@@ -2297,7 +2318,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved || self.preview_textures!=self.resolved_textures,"capabilities":["material_inspect","scene_material_set","scene_material_assign","scene_material_copy","scene_material_remove","scene_color","viewport_inspect","viewport_camera","scene_select","viewport_capture_start","viewport_capture_inspect","creation_export_inspect","creation_export_start","creation_export_cancel","scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":["material_inspect","scene_material_set","scene_material_assign","scene_material_copy","scene_material_remove","scene_color","viewport_inspect","viewport_camera","scene_select","viewport_capture_start","viewport_capture_inspect","creation_export_inspect","creation_export_start","creation_export_cancel","scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -2685,6 +2706,11 @@ impl SceneEditor {
         self.content_scroll_to = true;
     }
     fn inspector_contents(&mut self, ui: &mut egui::Ui) {
+        ui.add_enabled_ui(!self.asset_publishing(), |ui| {
+            self.inspector_contents_inner(ui)
+        });
+    }
+    fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
         let title = if self.manipulation.ids.len() > 1 {
             format!("{} objects", self.manipulation.ids.len())
         } else {
@@ -2892,24 +2918,8 @@ impl SceneEditor {
         }
     }
     fn refresh_content_asset(&mut self, id: &str) {
-        let result = self.guard().and_then(|()| {
-            self.assets
-                .as_mut()
-                .ok_or_else(|| "Open a saved scene with a valid catalog first.".to_string())
-                .and_then(|store| {
-                    store
-                        .refresh_at(store.revision(), id)
-                        .map_err(|e| e.to_string())
-                })
-        });
-        self.asset_snapshot();
-        match result {
-            Ok(info) => {
-                self.error.clear();
-                self.notice=format!("Refreshed {} in the immediately saved catalog; scene undo and preview are unchanged.",info.id);
-            }
-            Err(error) => self.error = error,
-        }
+        let ctx = self.export_context.clone().unwrap_or_default();
+        self.start_human_asset(&ctx, "asset_refresh", id, "", false);
     }
     fn browser_contents(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
@@ -2957,6 +2967,10 @@ impl SceneEditor {
             if let Some(root) = self.asset_origin.clone() {
                 ui.label(format!("Recovered content origin: {}", root.display()));
                 if ui.button("Retry recovered content").clicked() {
+                    if let Err(error) = self.asset_root_guard() {
+                        self.error = error;
+                        return;
+                    }
                     match AssetStore::open(&root) {
                         Ok(store) => { self.assets=Some(store); self.asset_snapshot(); self.error.clear(); }
                         Err(error) => self.error=format!("Cannot reopen {}: {error}. Restore the catalog at this original path; references will not be rebased.",root.display()),
@@ -3104,9 +3118,7 @@ impl SceneEditor {
                         "Last-good content remains available; fix and explicitly refresh the source.",
                     );
                 }
-                ui.small(
-                    "Catalog Import/Refresh/Rename persists immediately, outside scene Undo/Save.",
-                );
+                ui.small("Content source updates save separately from scene Undo and Save.");
             } else {
                 ui.label(format!("Reference {id} is not registered in this catalog; import or repair its source."));
             }
@@ -3160,6 +3172,7 @@ impl SceneEditor {
         if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
             self.asset_dialog = false;
             self.asset_focused = false;
+            self.asset_ops.cancel();
             return;
         }
         self.content_search
@@ -3167,8 +3180,8 @@ impl SceneEditor {
         egui::Modal::new(egui::Id::unique("asset_dialog")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 520.0));
             ui.heading(if self.asset_rename_intent { "Rename asset source" } else { "Project assets" });
-            egui::ScrollArea::vertical().id_salt("asset_tools_body").max_height((ctx.content_rect().height() - 110.0).max(80.0)).show(ui, |ui| {
-            ui.label("Imports and source renames save the asset catalog immediately. Scene Undo reverses assignments only.");
+            ui.add_enabled_ui(!self.asset_publishing(),|ui|{egui::ScrollArea::vertical().id_salt("asset_tools_body").max_height((ctx.content_rect().height() - 110.0).max(80.0)).show(ui, |ui| {
+            ui.label("Content source updates save separately. Scene Undo reverses object and material edits.");
             ui.label("Stable asset ID");
             if self.asset_rename_intent {
                 ui.label(&self.asset_id);
@@ -3185,35 +3198,19 @@ impl SceneEditor {
                 source.request_focus(); source.scroll_to_me(Some(egui::Align::Center)); self.asset_focused = true;
             }
             let mut operation = None;
-            if self.asset_rename_intent && enter && (source.has_focus() || source.lost_focus()) {
-                operation = Some("rename");
+            if !self.asset_ops.busy() && enter && (source.has_focus() || source.lost_focus()) {
+                operation = Some(if self.asset_rename_intent {"rename"} else {"import"});
             }
-            ui.horizontal_wrapped(|ui| {
+            ui.add_enabled_ui(!self.asset_ops.busy(),|ui|{ui.horizontal_wrapped(|ui| {
                 if !self.asset_rename_intent {
                     if ui.button("Import asset").clicked() { operation = Some("import"); }
                     if ui.button("Refresh asset").clicked() { operation = Some("refresh"); }
                 }
                 if ui.button("Rename asset source").clicked() { operation = Some("rename"); }
-            });
+            });});
             if let Some(op) = operation {
-                if self.drafts() || self.manipulation.active() {
-                    self.error = "Apply/revert transform drafts and finish gestures before asset operations.".into();
-                } else {
-                    let id = self.asset_id.clone(); let source = self.asset_source.clone();
-                    let result = self.assets.as_mut().ok_or_else(|| "Asset catalog unavailable; reopen a saved project".to_string()).and_then(|store| {
-                        match op { "import" => store.import(&id, &source), "refresh" => store.refresh(&id), _ => store.rename(&id, &source) }.map_err(|e| e.to_string())
-                    });
-                    self.asset_snapshot();
-                    self.content_search.update(self.assets.as_ref(), &self.content_query);
-                    match result {
-                        Ok(info) => {
-                            self.notice = format!("Asset {} ready; catalog saved, preview unchanged until Reset.", info.id);
-                            self.error.clear();
-                            if self.asset_rename_intent { self.asset_dialog = false; self.asset_focused = false; }
-                        }
-                        Err(error) => self.error = error,
-                    }
-                }
+                let id=self.asset_id.clone();let source=self.asset_source.clone();
+                self.start_human_asset(ctx,match op {"import"=>"asset_import","refresh"=>"asset_refresh",_=>"asset_rename"},&id,&source,true);
             }
             if let Some(store) = &self.assets {
                 ui.label(format!("Catalog revision {}", store.revision()));
@@ -3226,7 +3223,8 @@ impl SceneEditor {
             }
             if !self.error.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.error).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&self.error); }
             });
-            if ui.button("Close assets").clicked() { self.asset_dialog = false; self.asset_focused = false; }
+            });
+            if ui.button("Close assets").clicked() { self.asset_dialog = false; self.asset_focused = false; self.asset_ops.cancel(); }
         });
     }
     fn rename_dialog(&mut self, ctx: &egui::Context) {
@@ -3292,6 +3290,9 @@ impl SceneEditor {
                     && self.session.redo_len() == 0))
     }
     fn request_close(&mut self) {
+        if !self.asset_close_guard() {
+            return;
+        }
         self.export_dialog = false;
         self.creation_export.cancel();
         self.runtime
@@ -3318,6 +3319,10 @@ impl SceneEditor {
         }
     }
     fn request_new(&mut self) {
+        if let Err(error) = self.asset_root_guard() {
+            self.error = error;
+            return;
+        }
         if self.needs_recovery() {
             self.new_scene_pending = true;
         } else {
@@ -3345,6 +3350,17 @@ impl SceneEditor {
         let Some(action) = self.queued_action.take() else {
             return;
         };
+        if self.asset_ops.busy()
+            && matches!(
+                action,
+                Action::New | Action::Open | Action::Save | Action::SaveAs
+            )
+        {
+            self.asset_ops.cancel();
+            self.queued_action = Some(action);
+            self.notice = "Waiting for asset work before the requested document action.".into();
+            return;
+        }
         if self.close_approved
             || self.export_dialog
             || self.workspace.settings_open
@@ -3807,6 +3823,7 @@ impl SceneEditor {
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         self.export_context = Some(ctx.clone());
+        self.asset_frame(&ctx, false);
         let focused = ctx.input(|input| input.focused);
         if focused && !self.external_focused {
             self.external.focus_returned();
@@ -3852,6 +3869,7 @@ impl SceneEditor {
                     .then_some(self.shader_notice.as_str());
                     Self::status_problem_ui(ui, &self.error, shader);
                     self.recovery.warning_ui(ui);
+                    self.asset_progress_ui(ui);
                     if !self.workspace.error.is_empty() {
                         ui.colored_label(egui::Color32::YELLOW, &self.workspace.error);
                         if ui.button("Recover workspace preferences…").clicked() {
@@ -3961,7 +3979,7 @@ impl SceneEditor {
             );
             self.captures.rect = Some(viewport.rect);
             self.view_state.input_active = ui.input(|input| input.pointer.any_down());
-            let may_draw = !self.runtime.visible
+            let may_draw = !self.asset_publishing() && !self.runtime.visible
                 && !self.drafts()
                 && self.dialog.is_none()
                 && !self.asset_dialog
@@ -4054,6 +4072,7 @@ impl SceneEditor {
                     if ui.button(if open {"Open and discard current"}else{"Save to new path"}).clicked()||submit {
                         let path=PathBuf::from(self.path_text.trim());
                         if open {
+                            if let Err(error)=self.asset_root_guard(){self.error=error;return;}
                             match Session::open(path) {
                                 Ok(session)=> {
                                     let render=self.render.clone();
@@ -4133,12 +4152,15 @@ impl SceneEditor {
         }
         self.export_frame(&ctx);
         self.close_finalization_ui(&ctx);
+        // Final authorization follows every human dialog/cancel/close action.
+        self.asset_frame(&ctx, true);
         self.start_close_cleanup();
         if self.close_shutdown {
             if self.recovery.shutdown_finished()
                 && self.runtime.finished()
                 && self.external.finished()
                 && self.creation_export.finished()
+                && self.asset_finished()
             {
                 self.close_ready_to_exit = true;
                 self.remember_camera();
@@ -4161,7 +4183,14 @@ impl eframe::App for Host {
         self.editor.poll_capture(ui.ctx());
         #[cfg(unix)]
         if let Some(bridge) = &mut self.bridge {
-            if bridge.dispatch_command(|nonce, op, args| self.editor.command(nonce, op, args)) {
+            if bridge.dispatch_request(|nonce, op, args, lease| {
+                if asset_commands::supported(op) {
+                    self.editor
+                        .dispatch_asset_request(ui.ctx(), nonce, op, args, lease);
+                } else {
+                    lease.run_immediate(|| self.editor.command(nonce, op, args));
+                }
+            }) {
                 ui.ctx().request_repaint();
             }
         }
@@ -4741,6 +4770,43 @@ mod tests {
         let new_texture = texture(192);
         editor.preview_assets = BTreeMap::from([("old-mesh".into(), old.clone())]);
         editor.preview_textures = BTreeMap::from([("texture".into(), old_texture.clone())]);
+        editor.resolved = editor.preview_assets.clone();
+        editor.resolved_textures = editor.preview_textures.clone();
+        assert!(same_asset_snapshots(
+            &editor.preview_assets,
+            &editor.resolved
+        ));
+        assert!(same_asset_snapshots(
+            &editor.preview_textures,
+            &editor.resolved_textures
+        ));
+        assert_eq!(
+            editor.command("test", "scene_inspect", json!({}))["result"]["preview_stale"],
+            false
+        );
+        // Equal values in a fresh Arc are conservatively stale. This catches a
+        // pixel/vertex equality regression without requiring a large fixture.
+        editor.resolved.insert("old-mesh".into(), new.clone());
+        assert!(!same_asset_snapshots(
+            &editor.preview_assets,
+            &editor.resolved
+        ));
+        assert_eq!(
+            editor.command("test", "scene_inspect", json!({}))["result"]["preview_stale"],
+            true
+        );
+        editor.resolved = editor.preview_assets.clone();
+        editor
+            .resolved_textures
+            .insert("texture".into(), Arc::new(old_texture.as_ref().clone()));
+        assert!(!same_asset_snapshots(
+            &editor.preview_textures,
+            &editor.resolved_textures
+        ));
+        assert_eq!(
+            editor.command("test", "scene_inspect", json!({}))["result"]["preview_stale"],
+            true
+        );
         editor.reset_assets = Some((
             second,
             BTreeMap::from([("new-mesh".into(), new.clone())]),
@@ -5855,7 +5921,7 @@ mod tests {
             );
             output.textures_delta.clear();
         };
-        // Repair the source first: rename validates source content too.
+        // Restore a valid source for this ordinary keyboard rename journey.
         std::fs::write(&source, "v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n").unwrap();
         frame(&mut e, None);
         assert!(ctx.memory(|memory| memory.focused().is_some()));
@@ -5865,6 +5931,14 @@ mod tests {
         e.asset_dialog = true;
         frame(&mut e, None);
         frame(&mut e, Some(egui::Key::Enter));
+        // Enter admits one async rename and dismisses its owned modal. Final
+        // authorization follows the dialog frame; the real worker then commits.
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while e.asset_ops.busy() && Instant::now() < deadline {
+            e.asset_frame(&ctx, true);
+            std::thread::yield_now();
+        }
+        assert!(!e.asset_ops.busy());
         assert!(!e.asset_dialog, "{}", e.error);
         assert!(dir.path().join("renamed.obj").exists());
         assert!(!source.exists());
