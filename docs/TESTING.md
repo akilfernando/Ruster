@@ -82,7 +82,7 @@ Scope/base and why; commands; pass/fail/counts; wall time and cold/warm context 
 
 The editor quickstart in `crates/ruster-editor/README.md` is the manual journey. Its optional `inspection` feature supports app-scoped widget/input/framebuffer checks without global desktop input. Keep it default-off and loopback-only. Test on disposable scenario copies. Record platform/window context and distinguish model tests, native interaction, framebuffer inspection and external human usability studies.
 
-On the current workstation, follow AGENTS.md’s workspace-2 isolation rule. Hidden Wayland windows may stop painting, so an inspection timeout is an environment observation rather than evidence that a UI action succeeded. A temporary, editor-scoped Hyprland `render_unfocused=true` rule can permit background verification; remove it after testing and record the altered rendering condition. Do not compare those measurements with normal occluded idle behavior or switch the user’s workspace for convenience.
+On the current workstation, follow AGENTS.md’s workspace-2 isolation rule. Hidden Wayland windows may stop painting, so an inspection timeout is an environment observation rather than evidence that a UI action succeeded. A temporary, editor-scoped Hyprland `render_unfocused=true` rule can permit background verification; remove it after testing and record the altered rendering condition. Do not compare those measurements with normal occluded idle behavior. AGENTS.md permits required focused tests while the user is away; preserve/restore their workspace and exact window, stop on unexpected activity and require a normally unlocked session. While the user actively uses the computer, the silent workspace2 restriction remains.
 
 ## Captured Vulkan diagnostics
 

@@ -1,6 +1,6 @@
 # First alpha candidate — working release notes
 
-Updated2026-11-05. **Candidate preparation, not accepted or published.** The first evaluation snapshot **m9-eval-1** exposed [source-archive verification/export blockers](evidence/M9-source-archive-adoption.md); the owning-tool repairs pass the full gate, and **m9-eval-2** names the corrected evaluation snapshot. Workspace package version remains0.1.0. The paired `SOURCE-MANIFEST.json` identifies the exact frozen commit/tree and complete source archive. This label does not assert gate acceptance. [Candidate gates](ALPHA-CANDIDATE.md) own readiness. [Decision0025](decisions/0025-first-alpha-platform-scope.md) selects Linux x86_64 for this first candidate; Windows remains an intended future target.
+Updated2026-11-05. **Candidate preparation, not accepted or published.** The first evaluation snapshot **m9-eval-1** exposed [source-archive verification/export blockers](evidence/M9-source-archive-adoption.md); the owning-tool repairs pass the full gate, and **m9-eval-2** names the corrected evaluation snapshot. Workspace package version remains0.1.0. The paired `SOURCE-MANIFEST.json` identifies frozen commit `c0eb451`/tree and the complete698-file source archive. Its actual read-only Gitless Ubuntu extraction passes176Rust/22Python tests, strict lint/format/docs (1existing GPU test ignored). This label does not assert gate acceptance. [Candidate gates](ALPHA-CANDIDATE.md) own readiness. [Decision0025](decisions/0025-first-alpha-platform-scope.md) selects Linux x86_64 for this first candidate; Windows remains an intended future target.
 
 ## Creator workflow
 
@@ -13,6 +13,10 @@ Build your application in Rust using the shared kit. Yard and the non-game Motio
 - Reliable viewport picking and live inspector values during manipulation. The Unity-experienced user confirms both repairs in the latest physical review and reports a significant improvement.
 - Readable Transform-first inspector, clearer grouping and error details, compact runtime controls, command menus and current shortcut hints. Small windows preserve a usable viewport and restore ordinary panel sizes. The visual defaults follow the user's clean Obsidian/Notion direction; final visual approval remains separate.
 - Successful shader repair clears a matching stale warning while preserving unrelated errors and the last-good shader on rejection.
+
+## Local evaluation artifacts
+
+The complete `m9-eval-2` source and separate source-matching Yard/Motion stock packages are assembled locally with manifests and checksums. [Source adoption findings](evidence/M9-source-archive-adoption.md) preserve the original failures and corrected full check. Partial agent rehearsals changed Yard capacity and a Motion scene property using only app-owned files, then built and ran relocated read-only packages with source/cache/toolchain hidden. [Stock package evidence](evidence/M9-eval2-stock-packages.md) records the unchanged defaults separately. These are headless, supplied-prerequisite observations, not an independent human/fresh-machine acceptance or a published download.
 
 ## Recorded configurations
 
@@ -34,6 +38,6 @@ The default editor's named hidden-idle CPU/RSS cases and one history-heavy repea
 
 Current [compatibility inventory](ALPHA-CANDIDATE.md#candidate-compatibility-inventory) owns scene/recovery/workspace/cache readers and writers. Explicit Save is the documented migration boundary. API/file-format evolution remains possible during alpha; there is no stable Rust ABI promise.
 
-The complete external adopter journey, broader keyboard/focus/gizmo and accessibility checks, experienced-Unreal familiarity, another physical machine, exact candidate CI and candidate-specific distribution/notices review remain open. No Unreal participant is available; that does not waive the familiarity requirement. Lua remains provisional. Asset catalog edits persist separately from scene Undo. These limits are tracked acceptance work, rather than completed gates.
+The complete external adopter journey, broader keyboard/focus/gizmo and accessibility checks, experienced-Unreal familiarity, another physical machine, exact candidate CI and final distribution review remain open. Selected package dependency notices/readability and integrity checks pass in the recorded Ubuntu/headless scope. No Unreal participant is available; that does not waive the familiarity requirement. Lua remains provisional. Asset catalog edits persist separately from scene Undo. These limits are tracked acceptance work, rather than completed gates.
 
 Original project code/resources use MIT OR Apache-2.0; retained third-party notices and target-specific obligations remain part of distribution. [Contribution guidance](../CONTRIBUTING.md) and [security reporting](../SECURITY.md) define the current collaboration/reporting paths; no guaranteed response time or maintenance SLA is promised. Actual public publication remains a separate action after a concrete reviewed candidate exists.
