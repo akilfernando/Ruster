@@ -28,6 +28,8 @@ Confirmed by the user on2026-11-05 after reviewing PumpBench: lighting, shaders 
 
 Current implementation is narrower: the shared scene shader uses a fixed directional diffuse term plus a constant ambient contribution and object colors. Bounded WGSL replacement/validation and last-good recovery exist; this is not a material authoring system. The mesh vertex format currently carries position/normal, without texture UVs. Creator-placeable lights, authored materials/texture assignment and associated editor/MCP workflows are missing. Prototype milestone completion and PumpBench delivery do not establish those capabilities.
 
+The user also explicitly identifies LOD and ray tracing as capabilities required further down the line. Preserve them in the long-term plan without inferring an immediate implementation slice, mandatory ray-tracing hardware or a selected renderer architecture. The [capability gap assessment](ENGINE-CAPABILITIES.md) separates this confirmed direction from proposed priorities.
+
 The user has confirmed importance, not individual light types, shading models, map formats, node-editor design or a rendering architecture. Those remain design choices to assess against representative creations and measured cost. Schedule a bounded visual-authoring plan before claiming the intended product baseline; preserve the current PumpBench verification gate and distinguish any proposed release-scope revision from an accepted one.
 
 ## Autonomous delivery authorization
@@ -39,6 +41,14 @@ The user has confirmed importance, not individual light types, shading models, m
 The user accepted the [Astra/root reassessment](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly adding MCP as a core part of the outcome: creators must be able to realize the same small creation directly in the app and through MCP. Deliver a creator-owned Scene5/Lua workflow with imported content through authoring, preview, repair, save/recovery and relocated standalone Linux execution. Both routes use shared validated operations, preserve human/agent interleaving and conflict/authority boundaries, and receive journey verification. Human-only use remains complete; optional MCP activation does not make MCP a secondary product concern.
 
 Separate the finite engineering-ready evaluation handoff from externally validated alpha. Continue useful bounded engineering while participants/machines/desktop focus are unavailable; resume permitted focused tests after normal unlock. Fix demonstrated usability/delivery gaps with existing mechanisms and proportionate correctness/performance checks. No speculative engine subsystem/project/publishing framework or replacement language is selected. M9 acceptance retains its human/platform/resource requirements; public push/tag/release remains separate. Stop at the engineering handoff or a genuine external-access/user-decision dependency.
+
+## Session goal discipline
+
+Confirmed by the user on2026-11-05: future session goals must be more targeted; generic long-horizon goals led to overlooked key details. Keep the product vision separate from the finite objective of an implementation session. Before setting a substantial goal, inspect the actual capability baseline and identify missing dependencies; a successful example must not stand in for the engine capabilities it bypasses.
+
+Use one concrete creator outcome and record: the starting state and final runnable artifact, included behavior and explicit exclusions, required direct-editor/MCP and exported-runtime journeys, failure/recovery/keyboard cases, relevant correctness and measured-cost evidence, unresolved decisions/external gates, and an objective stopping condition. Scale this checklist to the work; it is not a new universal test suite. User confirmation is needed for consequential scope/product choices, not routine authorized implementation details. Set the goal only after it is concrete enough to evaluate, and do not silently grow it into a new subsystem.
+
+At close, evaluate the original requirements against observed evidence, explain what the creator can now do and what remains unsupported, record new gaps and propose the next bounded slice. If a supposedly small goal exposes a consequential dependency, make the scope change explicit and revisit the plan rather than counting a workaround as completion. Historical prototype milestones and a finished demonstration never imply a complete game-engine baseline. [Capability gaps](ENGINE-CAPABILITIES.md) are a planning input, not an instruction to implement all subsystems in one session.
 
 ## Pillars and observable outcomes
 

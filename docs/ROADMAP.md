@@ -227,6 +227,8 @@ Source licensing, public hosting and scoped Linux CI are delivered under decisio
 
 Lighting, shaders and textures are now explicitly confirmed core product requirements; see [visual authoring scope](DIRECTION.md#visual-authoring-is-core-product-scope). Their missing authoring workflows must receive an explicit implementation and acceptance allocation, rather than being hidden under a generic post-alpha rendering track. Exact slices and any resulting release-scope revision remain unselected; historical milestone acceptance does not prove this baseline. Advanced rendering beyond that baseline, animation, larger simulations, networking, extensibility and enterprise integrations remain evidence-driven future tracks, not simultaneous scope commitments.
 
+The user also requires LOD and ray tracing further down the line. The [capability gap assessment](ENGINE-CAPABILITIES.md) records confirmed direction, missing non-rendering workflows and root/Astra’s proposed dependency order. It does not assign new milestone numbers or silently revise the current release gates.
+
 ## Milestone review and scheduling
 
 At each close record: artifact/launch command, demo steps, acceptance evidence, UX/performance observations, remaining limitations, architectural decisions and the next slice. Reference existing valid test results rather than rerunning everything to prepare the demonstration. If an exit criterion fails, fix it or explicitly revise scope and rationale; never silently mark it complete.
