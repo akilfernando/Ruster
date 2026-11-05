@@ -1,10 +1,10 @@
 # Engine capability gaps
 
-Updated2026-11-05. Root/Astra strategic assessment after the user reviewed PumpBench. This is a product gap inventory and proposed dependency order, not an approved implementation schedule, feature-parity promise or evidence of support. [STATUS](STATUS.md) owns verified deliveries; [ROADMAP](ROADMAP.md) owns milestones.
+Updated2026-11-06. Root/Astra strategic assessment after the user reviewed PumpBench. This is a product gap inventory and proposed dependency order, not an approved implementation schedule, feature-parity promise or evidence of support. [STATUS](STATUS.md) owns verified deliveries; [ROADMAP](ROADMAP.md) owns milestones.
 
 ## Confirmed direction versus proposed scope
 
-The user explicitly requires lighting, shaders and textures as core product capabilities, and LOD and ray tracing further down the line. Creator-first design, lean measured implementation and first-class direct-editor/native-MCP workflows remain requirements. V1’s bounded opaque-material/UV/PNG contract is selected and verified; richer material/shading contracts, authored-lighting choices, physics libraries, general asset formats, animation systems and future rendering architecture remain to be selected. Historical M0–M8 checkpoints are narrow prototype achievements, not a complete game-engine baseline.
+The user explicitly requires lighting, shaders and textures as core product capabilities, and LOD and ray tracing further down the line. Creator-first design, lean measured implementation and first-class direct-editor/native-MCP workflows remain requirements. V1’s bounded opaque-material/UV/PNG contract is selected and verified; richer material/shading and shadow contracts, physics libraries, general asset formats, animation systems and future rendering architecture remain to be selected. Historical M0–M8 checkpoints are narrow prototype achievements, not a complete game-engine baseline.
 
 ## Capability inventory
 
@@ -12,7 +12,7 @@ Inspected owning sources: `crates/ruster-scene/src/lib.rs` and `authoring.rs`, `
 
 | Area | Current boundary | Missing product workflow to plan |
 | --- | --- | --- |
-| Visual authoring | V1 shared opaque materials, complete OBJ UVs, bounded opaque PNGs/samplers/linear-light mips, safe refresh and direct/MCP/recovery/standalone workflows; lighting remains fixed diffuse/ambient, with bounded last-good WGSL replacement | Creator-placed lights and shadows; deeper/PBR materials/maps, transparency, environment/reflections and exposure/color management through equally complete workflows |
+| Visual authoring | V1 shared opaque materials, complete OBJ UVs, bounded opaque PNGs/samplers/linear-light mips, safe refresh and direct/MCP/recovery/standalone workflows; V2a accepted one Sun/four points/ambient with diffuse authoring and last-good WGSL replacement | Authored shadows; deeper/PBR materials/maps, transparency, environment/reflections and exposure/color management through equally complete workflows |
 | Scene composition | Flat stable-ID objects with transforms/meshes, shared history and save/recovery | Parent-child transforms, reusable prefabs/instances with clear overrides, scene composition/loading and runtime lifecycle |
 | Content pipeline | Bounded UV OBJ/opaque PNG import, stable IDs, source-preserving caches and accepted material/texture export closure | Rich scene/material/animation import, dependency tracking, reimport, compression and runtime asset loading/unloading; select formats from actual creator needs |
 | Interaction and player UI | Code-first egui application UI, keyboard state and picking | Authorable application/game UI, input actions/remapping, pointer/gamepad support and focus/accessibility suitable for exported creations |

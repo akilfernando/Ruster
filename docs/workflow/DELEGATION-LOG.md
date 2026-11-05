@@ -362,3 +362,8 @@ Astra (`v2_foundation_review`, existing root-session routing) performs bounded r
 ## 2026-11-06 — V2a final bounded acceptance review
 
 Astra independently reviews the unchanged plan/current source and final source/native/resource artifacts. Finds no implementation blocker; recommends accepting after both underway default reopens and final audit/handoff. Requires authoritative parent exit/scanner/restoration links rather than Close-request files, precise default opt-in Unix MCP versus absent TCP/TCP6 inspection listener wording, and preservation of renderer-tail/layout-failure qualifications. Root finishes both reopens/actual SDK captures, reviews images, verifies all indexed copies/originals/archives/binaries/final source hashes and integrates audit/evaluation/status/history. No worker writes/builds/UI or new stage. Review usage/elapsed metrics unknown.
+
+
+## 2026-11-06 — Next bounded goal definition
+
+At the user's request, Astra performs read-only strategic planning after V2a acceptance. Recommends one optional shadow-casting Sun on an original bounded architectural exhibit over broader PBR/composition work; all opaque geometry casts/receives, points/ambient stay unshadowed. Root independently inspects current renderer/light/profile source and primary Godot/Unity guidance, integrates coverage/bias/ownership/invalidation/runtime compatibility, proposed pre-result numerical ceilings, direct/MCP/recovery/export gates and explicit exclusions into V2B-SUN-SHADOWS.md. Per-object flags are deferred unless feasibility proves a blocked creation; no general graph/ECS/cascades inferred. Proposal only, no goal activation/engine change. Review elapsed/usage unknown; documentation-only check recorded in STATUS.
