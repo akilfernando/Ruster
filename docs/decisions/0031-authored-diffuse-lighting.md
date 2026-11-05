@@ -1,6 +1,6 @@
 # 0031 Bounded authored diffuse lighting
 
-Date:2026-11-05. Status: **selected V2a feasibility/implementation contract; full creator/runtime/visual/cost acceptance remains open.** The user approved the [V2a goal](../plans/V2A-AUTHORED-LIGHTING.md). Data ownership and numerical defaults are root/Astra-selected, not individually user-selected. Retain/revise at the early rendered/exported feasibility checkpoint, not by component presence.
+Date:2026-11-05. Status: **accepted and verified within the bounded V2a audit2026-11-06.** The user approved the [V2a goal](../plans/V2A-AUTHORED-LIGHTING.md). Data ownership and numerical defaults are root/Astra-selected, not individually user-selected. Retain/revise at the early rendered/exported feasibility checkpoint, not by component presence.
 
 ## Context and alternatives
 
@@ -46,6 +46,6 @@ Retain5ms simple foreground edit/adoption and50ms focused Host-gap investigation
 
 ## Evidence and consequences
 
-[Foundation evidence](../evidence/V2A-foundation.md) owns baseline pins/results and later failures. First scene→render→save→runtime proof must verify legacy agreement, authored zero/ambient/directional/point/range/near-source/normal cases and old-kit rejection before broad UI work. Source Scene7/types/history work is implementation in progress, not native authoring acceptance. Reassess the first complete runnable path or every90active implementation minutes; explicitly replan a general entity rewrite, incompatible shader truthfulness, required HDR or measured-budget failure. No shadow or next-goal implementation follows automatically.
+[Foundation evidence](../evidence/V2A-foundation.md) owns baseline pins/results and later failures. First scene→render→save→runtime proof must verify legacy agreement, authored zero/ambient/directional/point/range/near-source/normal cases and old-kit rejection before broad UI work. The original source-only Scene7/types/history checkpoint did not establish native authoring acceptance; the final bounded [audit](../evidence/V2A-readiness.md) now does. Reassess the first complete runnable path or every90active implementation minutes; explicitly replan a general entity rewrite, incompatible shader truthfulness, required HDR or measured-budget failure. No shadow or next-goal implementation follows automatically.
 
 Primary references accessed2026-11-05: [Godot lights/shadows](https://docs.godotengine.org/en/stable/tutorials/3d/lights_and_shadows.html), [Filament punctual lighting](https://google.github.io/filament/main/filament.html#lighting/directlighting/punctuallights). They inform types/falloff tradeoffs; no external engine architecture or photometric system is adopted.

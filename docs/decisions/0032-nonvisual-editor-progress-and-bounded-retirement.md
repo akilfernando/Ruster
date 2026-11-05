@@ -1,6 +1,6 @@
 # 0032: nonvisual editor progress and bounded retirement
 
-Status: accepted implementation design2026-11-06 by root after Astra assessment; source implemented and verified, integrated native qualification in progress. Agent-selected dependency of the user-approved [V2a goal](../plans/V2A-AUTHORED-LIGHTING.md), preserving first-class direct/MCP parity. Refines [0030](0030-bounded-asset-preparation-and-publication.md); does not remove callback lifetime fences or change lighting scope.
+Status: accepted implementation design2026-11-06 by root after Astra assessment; source and integrated native qualification verified under the bounded [V2a audit](../evidence/V2A-readiness.md). Agent-selected dependency of the user-approved [V2a goal](../plans/V2A-AUTHORED-LIGHTING.md), preserving first-class direct/MCP parity. Refines [0030](0030-bounded-asset-preparation-and-publication.md); does not remove callback lifetime fences or change lighting scope.
 
 ## Context and evidence
 
