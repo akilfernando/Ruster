@@ -1,6 +1,6 @@
 # M9 candidate resource and feedback plan
 
-2026-11-05. Agent-selected measurement plan, **not measured acceptance, user-approved budgets or a frozen candidate**. The user requires a lean, optimized editor; [PERFORMANCE.md](../PERFORMANCE.md) owns the method. No new scheduler, cache, allocator or benchmark framework is justified by this audit.
+2026-11-05. Agent-selected measurement plan, **not measured acceptance, user-approved budgets or a frozen candidate**. The user requires a lean, optimized editor; [PERFORMANCE.md](../PERFORMANCE.md) owns the method. No new scheduler, cache, allocator or benchmark framework is justified by this audit. The [executed editor resource observations](M9-editor-resources.md) now cover named hidden-idle CPU/RSS cases and one paired retained-runtime journey; all other scopes below remain separate.
 
 ## Workloads and investigation thresholds
 
