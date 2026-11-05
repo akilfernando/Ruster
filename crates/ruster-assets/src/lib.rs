@@ -329,13 +329,21 @@ impl AssetStore {
                 Ok(bytes) => {
                     let hash = digest(&bytes);
                     if record.hash.as_ref() != Some(&hash) {
-                        // Parse for a truthful format diagnostic, never accept changed bytes.
                         info.status = AssetStatus::Invalid;
-                        info.diagnostic =
-                            Some(match parse_source(&record.source, record.kind, &bytes) {
-                                Ok(_) => "source changed; Refresh to accept new content".into(),
-                                Err(e) => e.to_string(),
-                            });
+                        info.diagnostic = Some(match record.kind {
+                            // These bytes are not accepted. Avoid decoding/mip work
+                            // whose result would be discarded; Refresh validates them.
+                            AssetKind::Texture => {
+                                "Source changed; Refresh to validate and accept".into()
+                            }
+                            // Preserve the existing mesh-open format diagnostics.
+                            AssetKind::Mesh => {
+                                match parse_source(&record.source, record.kind, &bytes) {
+                                    Ok(_) => "source changed; Refresh to accept new content".into(),
+                                    Err(e) => e.to_string(),
+                                }
+                            }
+                        });
                     } else if !current_cache {
                         match parse_source(&record.source, record.kind, &bytes) {
                             Ok(payload) => match store.check_payload_budget(&id, &payload) {
@@ -1547,8 +1555,29 @@ mod tests {
         assert!(Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
         assert_eq!(store.revision(), revision);
         assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), baseline);
-        let reopened = AssetStore::open(root.path()).unwrap();
+        let mut reopened = AssetStore::open(root.path()).unwrap();
         assert_eq!(reopened.texture("color"), Some(old.as_ref()));
+        let pending = reopened
+            .inspect()
+            .into_iter()
+            .find(|i| i.id == "color")
+            .unwrap();
+        assert_eq!(
+            pending.diagnostic.as_deref(),
+            Some("Source changed; Refresh to validate and accept")
+        );
+        assert_eq!(reopened.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), baseline);
+        // Open reports unaccepted bytes without treating them as validated. Only
+        // explicit Refresh produces a format diagnostic and may accept content.
+        assert!(reopened
+            .refresh("color")
+            .unwrap_err()
+            .to_string()
+            .contains("PNG signature"));
+        assert_eq!(reopened.texture("color"), Some(old.as_ref()));
+        assert_eq!(reopened.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), baseline);
         assert_eq!(
             reopened
                 .inspect()
@@ -1563,6 +1592,22 @@ mod tests {
             AssetStore::open(root.path()).unwrap().texture("color"),
             Some(old.as_ref())
         );
+        // Filesystem failures retain their specific bounded-read diagnostics.
+        fs::write(
+            root.path().join("color.png"),
+            vec![0; MAX_TEXTURE_SOURCE_BYTES + 1],
+        )
+        .unwrap();
+        let oversized = AssetStore::open(root.path()).unwrap();
+        let oversized_info = oversized
+            .inspect()
+            .into_iter()
+            .find(|i| i.id == "color")
+            .unwrap();
+        assert_eq!(oversized_info.status, AssetStatus::Invalid);
+        assert!(oversized_info.diagnostic.unwrap().contains("byte limit"));
+        assert_eq!(oversized.texture("color"), Some(old.as_ref()));
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), baseline);
         // Repairing unchanged accepted bytes clears the prior failure, rebuilds
         // a missing cache and retains both Arc identity and catalog authority.
         fs::write(root.path().join("color.png"), &first).unwrap();
@@ -1619,11 +1664,34 @@ mod tests {
             &[255, 0, 0],
         );
         fs::write(root.path().join("color.png"), &changed).unwrap();
+        let mut changed_open = AssetStore::open(root.path()).unwrap();
+        assert_eq!(changed_open.texture("color"), Some(old.as_ref()));
+        let pending = changed_open
+            .inspect()
+            .into_iter()
+            .find(|i| i.id == "color")
+            .unwrap();
+        assert_eq!(pending.status, AssetStatus::Invalid);
         assert_eq!(
-            AssetStore::open(root.path()).unwrap().texture("color"),
-            Some(old.as_ref())
+            pending.diagnostic.as_deref(),
+            Some("Source changed; Refresh to validate and accept")
         );
-        store.refresh("color").unwrap();
+        let pending_revision = changed_open.revision();
+        let pending_snapshot = changed_open.texture_snapshots()["color"].clone();
+        assert_eq!(
+            changed_open.refresh("color").unwrap().status,
+            AssetStatus::Ready
+        );
+        assert_eq!(changed_open.revision(), pending_revision + 1);
+        assert!(!Arc::ptr_eq(
+            &pending_snapshot,
+            &changed_open.texture_snapshots()["color"]
+        ));
+        assert_eq!(
+            changed_open.texture("color").unwrap().mips[0].rgba,
+            [255, 0, 0, 255]
+        );
+        store = changed_open;
         assert!(!Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
         assert_eq!(
             store.export_snapshot(&ids).unwrap().read_sources().unwrap()["color"],
@@ -1648,6 +1716,41 @@ mod tests {
         );
         assert_eq!(unavailable.revision(), final_revision);
         assert_eq!(unavailable.texture("color"), store.texture("color"));
+        // No cache means no accepted payload: changed bytes, valid or corrupt,
+        // remain visibly unresolved until explicit validation succeeds.
+        fs::remove_dir_all(root.path().join(".ruster-cache/textures")).unwrap();
+        fs::write(root.path().join("color.png"), b"corrupt").unwrap();
+        let mut unresolved = AssetStore::open(root.path()).unwrap();
+        assert!(unresolved.texture("color").is_none());
+        let unresolved_revision = unresolved.revision();
+        let unresolved_baseline = fs::read(root.path().join(REGISTRY)).unwrap();
+        let pending = unresolved
+            .inspect()
+            .into_iter()
+            .find(|i| i.id == "color")
+            .unwrap();
+        assert_eq!(pending.status, AssetStatus::Invalid);
+        assert_eq!(
+            pending.diagnostic.as_deref(),
+            Some("Source changed; Refresh to validate and accept")
+        );
+        assert!(unresolved.refresh("color").is_err());
+        assert!(unresolved.texture("color").is_none());
+        assert_eq!(unresolved.revision(), unresolved_revision);
+        assert_eq!(
+            fs::read(root.path().join(REGISTRY)).unwrap(),
+            unresolved_baseline
+        );
+        fs::write(root.path().join("color.png"), &first).unwrap();
+        let mut unresolved = AssetStore::open(root.path()).unwrap();
+        assert!(unresolved.texture("color").is_none());
+        assert_eq!(unresolved.revision(), unresolved_revision);
+        assert_eq!(
+            unresolved.refresh("color").unwrap().status,
+            AssetStatus::Ready
+        );
+        assert_eq!(unresolved.revision(), unresolved_revision + 1);
+        assert_eq!(unresolved.texture("color"), Some(old.as_ref()));
     }
 
     // File close alone does not end an advisory lock with duplicated/inherited
