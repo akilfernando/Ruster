@@ -1,6 +1,6 @@
 # 0027 Creator-owned content and standalone delivery
 
-Status: accepted agent-selected implementation direction,2026-11-05, under the user's approved direct-editor/MCP creator goal. Launch/resource foundations are implemented with component checks; runtime-kit packaging and the shared editor/MCP export controller remain in progress. This record does not accept a public alpha or authorize publication.
+Status: accepted agent-selected implementation direction,2026-11-05, under the user's approved direct-editor/MCP creator goal. Launch/resource foundations are implemented with component checks; runtime-kit packaging and shared editor/MCP export controller are implemented, with integration verification in progress. This record does not accept a public alpha or authorize publication.
 
 ## Context
 
@@ -27,3 +27,5 @@ The shared app crate directly uses serde/serde_json already present in its depen
 ## Acceptance
 
 Both editor and MCP must export one creator-owned named scene with imported OBJ, Lua behavior and an editable property; relocated no-argument/headless execution must retain authored identity/content and expected runtime results. Cover stale source/catalog/save identities, invalid behavior, unsupported shaders, output collisions, cancellation and response-loss receipts proportionately. Read-only runtime/resource and wire tests supplement that journey, not replace it. Current verification and remaining steps belong in STATUS; no product-wide familiarity/performance pass follows from this decision.
+
+Implementation detail2026-11-05: one process-owned export-directory grant, one worker job, monotonically advancing configuration/operation IDs, eight terminal receipts and fixed verified Python helper argv. The UI and MCP use the same start/poll/cancel controller. Directory identity and no-overwrite publication are rechecked; pending human drafts also cancel publication. Bounds, legal-notice correction and exact actual-artifact evidence are recorded in [creator export evidence](../evidence/CREATOR-export.md). The prepared template is trusted code, not an arbitrary uploaded executable or security sandbox.

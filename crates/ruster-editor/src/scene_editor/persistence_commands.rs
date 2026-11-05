@@ -15,11 +15,7 @@ pub(super) fn document_hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
 
-pub(super) struct SaveGrant {
-    root: PathBuf,
-    #[cfg(unix)]
-    identity: (u64, u64),
-}
+pub(super) struct SaveGrant(crate::directory_grant::DirectoryGrant);
 impl SaveGrant {
     pub(super) fn from_environment(enabled: bool) -> std::result::Result<Option<Self>, String> {
         if !enabled {
@@ -30,43 +26,16 @@ impl SaveGrant {
             .transpose()
     }
     pub(super) fn new(path: &Path) -> std::result::Result<Self, String> {
-        let root = path.canonicalize().map_err(|error| error.to_string())?;
-        let metadata = root.metadata().map_err(|error| error.to_string())?;
-        if !metadata.is_dir() {
-            return Err("RUSTER_MCP_SAVE_DIR must be an existing directory".into());
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            Ok(Self {
-                root,
-                identity: (metadata.dev(), metadata.ino()),
-            })
-        }
-        #[cfg(not(unix))]
-        Err("MCP save directory authority is currently supported on Unix only".into())
+        crate::directory_grant::DirectoryGrant::new(path).map(Self)
+    }
+    fn root(&self) -> &Path {
+        self.0.root()
     }
     fn validate(&self) -> Result<&Path> {
-        let invalid = || {
-            error("save_permission_required", "Save directory changed or became unavailable; restart with an explicit valid RUSTER_MCP_SAVE_DIR grant")
-        };
-        if self.root.canonicalize().map_err(|_| invalid())? != self.root {
-            return Err(invalid());
-        }
-        let metadata = self.root.symlink_metadata().map_err(|_| invalid())?;
-        if !metadata.is_dir() {
-            return Err(invalid());
-        }
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            if (metadata.dev(), metadata.ino()) != self.identity {
-                return Err(invalid());
-            }
-        }
-        Ok(&self.root)
+        self.0.validate().map_err(|_| error("save_permission_required", "Save directory changed or became unavailable; restart with an explicit valid RUSTER_MCP_SAVE_DIR grant"))
     }
 }
+
 fn filename(value: &Value) -> Result<&str> {
     let name = value
         .as_str()
@@ -168,7 +137,7 @@ impl SceneEditor {
                 "revision": self.session.scene().revision.to_string(),
                 "persistence_token": self.persistence_token(),
                 "associated_path": self.session.path().map(|path| bounded(&path.display().to_string())),
-                "granted_directory": self.save_grant.as_ref().map(|grant| bounded(&grant.root.display().to_string())),
+                "granted_directory": self.save_grant.as_ref().map(|grant| bounded(&grant.root().display().to_string())),
                 "grant_valid": self.granted_save_root().is_ok(),
                 "can_save": save.is_ok(),
                 "can_save_as": save_as.is_ok(),

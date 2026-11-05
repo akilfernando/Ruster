@@ -1,6 +1,8 @@
 # Standalone application and development distribution
 
-Updated 2026-11-04. This is the bounded Linux x86_64 development workflow for M7 Yard and the M8 Motion Lab consumer, not a public binary release or supported OS/GPU matrix. The shared kit is `crates/ruster-app`. Yard remains the default `--app yard`; `--app motion-lab` selects the non-game Scene5/Lua consumer and its legacy Rhai compatibility mode. [M8 independent source/build/package evidence](evidence/M8-independent-reuse.md) passed on the recorded local configuration; native presentation remains a separate check.
+Updated2026-11-05. Creator-owned saved scenes use the [shared editor/MCP creator workflow](CREATOR-WORKFLOW.md), with a once-prepared runtime template and no per-creation Cargo. Its integration verification is tracked separately.
+
+ This is the bounded Linux x86_64 development workflow for M7 Yard and the M8 Motion Lab consumer, not a public binary release or supported OS/GPU matrix. The shared kit is `crates/ruster-app`. Yard remains the default `--app yard`; `--app motion-lab` selects the non-game Scene5/Lua consumer and its legacy Rhai compatibility mode. [M8 independent source/build/package evidence](evidence/M8-independent-reuse.md) passed on the recorded local configuration; native presentation remains a separate check.
 The app owns its logistics rules, challenge settings, scene and UI. The kit
 supplies bounded ticking, lifecycle, read-only resource access and the shared
 Vulkan host. Editor and MCP are independent authoring tools, not runtime

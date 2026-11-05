@@ -12,6 +12,7 @@ pub(super) enum Action {
     Open,
     Save,
     SaveAs,
+    Export,
     Undo,
     Redo,
     Copy,
@@ -38,11 +39,12 @@ pub(super) enum Action {
     SelectAll,
 }
 impl Action {
-    pub const ALL: [Self; 28] = [
+    pub const ALL: [Self; 29] = [
         Self::New,
         Self::Open,
         Self::Save,
         Self::SaveAs,
+        Self::Export,
         Self::Undo,
         Self::Redo,
         Self::Copy,
@@ -74,6 +76,7 @@ impl Action {
             Self::Open => "Open scene",
             Self::Save => "Save scene",
             Self::SaveAs => "Save scene as",
+            Self::Export => "Export application",
             Self::Undo => "Undo",
             Self::Redo => "Redo",
             Self::Copy => "Copy objects",
@@ -167,6 +170,7 @@ impl Default for Preferences {
             (Action::Open, Key::O, true, false),
             (Action::Save, Key::S, true, false),
             (Action::SaveAs, Key::S, true, true),
+            (Action::Export, Key::E, true, true),
             (Action::Undo, Key::Z, true, false),
             (Action::Redo, Key::Z, true, true),
             (Action::Copy, Key::C, true, false),

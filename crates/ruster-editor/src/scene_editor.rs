@@ -1,5 +1,6 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
 mod behavior_commands;
+mod export_commands;
 mod persistence_commands;
 mod runtime_commands;
 use crate::workspace::{Action, Side, Workspace};
@@ -228,6 +229,15 @@ pub struct SceneEditor {
     save_sequence: u64,
     save_receipt: Option<Value>,
     save_warning: Option<String>,
+    creation_export: crate::creation_export::Controller,
+    export_context: Option<egui::Context>,
+    export_dialog: bool,
+    export_title: String,
+    export_destination: String,
+    export_runtime_kit: String,
+    export_focused: bool,
+    export_error: String,
+    export_status_open: bool,
     selected: Option<String>,
     manipulation: crate::manipulation::Manipulation,
     behavior: crate::behavior_ui::BehaviorUi,
@@ -290,6 +300,7 @@ pub struct SceneEditor {
     render: Option<eframe::egui_wgpu::RenderState>,
     shader_revision: u64,
     shader_notice: String,
+    shader_builtin: bool,
 }
 impl SceneEditor {
     fn new(session: Session) -> Self {
@@ -345,6 +356,15 @@ impl SceneEditor {
             save_sequence: 0,
             save_receipt: None,
             save_warning: None,
+            creation_export: crate::creation_export::Controller::disabled(),
+            export_context: None,
+            export_dialog: false,
+            export_title: String::new(),
+            export_destination: String::new(),
+            export_runtime_kit: String::new(),
+            export_focused: false,
+            export_error: String::new(),
+            export_status_open: false,
             selected,
             manipulation,
             behavior: crate::behavior_ui::BehaviorUi::default(),
@@ -411,6 +431,7 @@ impl SceneEditor {
             render: None,
             shader_revision: 0,
             shader_notice: "Built-in scene shader".into(),
+            shader_builtin: true,
         }
     }
     fn drafts(&self) -> bool {
@@ -427,6 +448,7 @@ impl SceneEditor {
             && self.draft == self.baseline_fields
             && !self.manipulation.offset_pending()
             && self.dialog.is_none()
+            && !self.export_dialog
             && !self.asset_dialog
             && !self.new_scene_pending
             && !self.rename_pending
@@ -820,6 +842,7 @@ impl SceneEditor {
         clipboard: bool,
         shader: bool,
     ) {
+        self.creation_export.scene_replaced();
         self.remember_camera();
         self.runtime
             .stop(self.generation, self.session.scene().revision);
@@ -857,6 +880,11 @@ impl SceneEditor {
                 // grant. Human New/Open/Restore changes the scene incarnation,
                 // never the granted root; move it only when replacement commits.
                 next.save_grant = self.save_grant.take();
+                next.creation_export = std::mem::replace(
+                    &mut self.creation_export,
+                    crate::creation_export::Controller::disabled(),
+                );
+                next.export_context = self.export_context.take();
                 next.workspace = std::mem::replace(&mut self.workspace, Workspace::detached());
                 next.workspace.welcome = clipboard
                     && next.session.path().is_none()
@@ -974,6 +1002,9 @@ impl SceneEditor {
         }
     }
     fn start_close_cleanup(&mut self) {
+        if self.close_approved {
+            self.creation_export.cancel();
+        }
         if self.close_approved
             && self.recovery_transition.is_none()
             && self.close_cleanup_error.is_none()
@@ -1044,6 +1075,12 @@ impl SceneEditor {
         self.baseline_fields = self.draft.clone();
     }
     fn guard(&self) -> Result<(), String> {
+        if self.export_dialog {
+            return Err("recovery_pending".into());
+        }
+        self.guard_except_export_dialog()
+    }
+    fn guard_except_export_dialog(&self) -> Result<(), String> {
         if self.drafts() || self.manipulation.active() {
             Err("drafts_pending".into())
         } else if self.dialog.is_some()
@@ -1495,6 +1532,7 @@ impl SceneEditor {
             match reset(self.render.as_ref()) {
                 Ok(()) => {
                     self.shader_revision = 0;
+                    self.shader_builtin = true;
                     self.shader_notice = "Built-in scene shader".into();
                 }
                 Err(error) => {
@@ -1692,6 +1730,7 @@ impl SceneEditor {
             .ok_or("shader revision exhausted")?;
         ruster_render::refresh_shader(render, &source)?;
         self.shader_revision = next_revision;
+        self.shader_builtin = source == ruster_render::default_shader();
         if self.error == self.shader_notice {
             self.error.clear();
         }
@@ -1731,6 +1770,7 @@ impl SceneEditor {
                 "expected_session_token",
                 "expected_revision",
                 "expected_shader_revision",
+                "builtin",
             ],
             _ => return Err(err("unsupported_operation", op.into())),
         };
@@ -1738,9 +1778,15 @@ impl SceneEditor {
             .as_object()
             .ok_or_else(|| err("invalid_arguments", "Expected object arguments".into()))?;
         if object.keys().any(|k| !allowed.contains(&k.as_str()))
-            || (op != "asset_inspect" && allowed.iter().any(|key| !object.contains_key(*key)))
+            || (op != "asset_inspect"
+                && allowed
+                    .iter()
+                    .any(|key| *key != "builtin" && !object.contains_key(*key)))
         {
             return Err(err("invalid_arguments", "Unknown argument".into()));
+        }
+        if op == "shader_refresh" && args.get("builtin").is_some_and(|value| !value.is_boolean()) {
+            return Err(err("invalid_arguments", "builtin must be a boolean".into()));
         }
         let number = |key: &str| -> Result<u64, (String, String)> {
             let value = args[key].as_str().ok_or_else(|| {
@@ -1810,7 +1856,12 @@ impl SceneEditor {
                     "Inspect shader status again".into(),
                 ));
             }
-            self.refresh_shader().map_err(|e| {
+            let refreshed = if args.get("builtin").and_then(Value::as_bool) == Some(true) {
+                self.use_builtin_export_appearance()
+            } else {
+                self.refresh_shader()
+            };
+            refreshed.map_err(|e| {
                 self.shader_notice = format!(
                     "Refresh rejected; last good pipeline retained: {}",
                     e.chars().take(512).collect::<String>()
@@ -1933,6 +1984,12 @@ impl SceneEditor {
         }
     }
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
+        if matches!(
+            op,
+            "creation_export_inspect" | "creation_export_start" | "creation_export_cancel"
+        ) {
+            return self.export_command(token, op, args);
+        }
         if matches!(op, "scene_persistence_inspect" | "scene_save") {
             return self.persistence_command(token, op, args);
         }
@@ -2012,7 +2069,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["creation_export_inspect","creation_export_start","creation_export_cancel","scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -2953,6 +3010,8 @@ impl SceneEditor {
                     && self.session.redo_len() == 0))
     }
     fn request_close(&mut self) {
+        self.export_dialog = false;
+        self.creation_export.cancel();
         self.runtime
             .stop(self.generation, self.session.scene().revision);
         if self.recovery_transition.is_some() {
@@ -2986,6 +3045,7 @@ impl SceneEditor {
     fn route_shortcuts(&mut self, ctx: &egui::Context) {
         let blocked = self.manipulation.active()
             || self.dialog.is_some()
+            || self.export_dialog
             || self.close_pending
             || self.close_approved
             || self.rename_pending
@@ -3004,6 +3064,7 @@ impl SceneEditor {
             return;
         };
         if self.close_approved
+            || self.export_dialog
             || self.workspace.settings_open
             || self.recovery.open
             || self.recovery_transition.is_some()
@@ -3020,6 +3081,7 @@ impl SceneEditor {
             Action::Quit => self.request_close(),
             Action::Open => self.dialog = Some(true),
             Action::Save => self.save(),
+            Action::Export => self.open_export_dialog(),
             Action::SaveAs => {
                 if self.apply() {
                     self.dialog = Some(false);
@@ -3215,6 +3277,7 @@ impl SceneEditor {
                     ("Open scene…", Action::Open),
                     ("Save", Action::Save),
                     ("Save as…", Action::SaveAs),
+                    ("Export application…", Action::Export),
                 ] {
                     self.command_menu_item(ui, label, action);
                 }
@@ -3458,6 +3521,7 @@ impl SceneEditor {
     }
     fn ui(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
+        self.export_context = Some(ctx.clone());
         let focused = ctx.input(|input| input.focused);
         if focused && !self.external_focused {
             self.external.focus_returned();
@@ -3591,7 +3655,7 @@ impl SceneEditor {
                 None
             };
             let selected: Vec<_> = self.manipulation.ids.iter().map(String::as_str).collect();
-            self.navigation.enabled=!self.close_approved && !self.manipulation.active() && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none() && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending;
+            self.navigation.enabled=!self.export_dialog && !self.close_approved && !self.manipulation.active() && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none() && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending;
             self.navigation.keyboard_enabled=self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
             self.navigation.movement_speed=self.workspace.prefs.movement_speed;
             let viewport = ruster_render::viewport_with_navigation(
@@ -3778,12 +3842,14 @@ impl SceneEditor {
         if self.observe_history_evictions() {
             ctx.request_repaint();
         }
+        self.export_frame(&ctx);
         self.close_finalization_ui(&ctx);
         self.start_close_cleanup();
         if self.close_shutdown {
             if self.recovery.shutdown_finished()
                 && self.runtime.finished()
                 && self.external.finished()
+                && self.creation_export.finished()
             {
                 self.close_ready_to_exit = true;
                 self.remember_camera();
@@ -3821,6 +3887,7 @@ pub fn run(path: PathBuf) -> Result<(), String> {
 fn run_session(session: Session) -> Result<(), String> {
     let mcp_enabled = std::env::var("RUSTER_MCP_ENABLE").as_deref() == Ok("1");
     let save_grant = persistence_commands::SaveGrant::from_environment(mcp_enabled)?;
+    let creation_export = crate::creation_export::Controller::from_environment(mcp_enabled)?;
     let mut setup = WgpuSetupCreateNew::without_display_handle();
     setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
     ruster_render::configure_setup(&mut setup);
@@ -3854,6 +3921,7 @@ fn run_session(session: Session) -> Result<(), String> {
                 editor: {
                     let mut editor = SceneEditor::new(session);
                     editor.save_grant = save_grant;
+                    editor.creation_export = creation_export;
                     if let Some(path) = editor.session.path() {
                         editor.workspace.remember(path);
                         editor.workspace.welcome = false;

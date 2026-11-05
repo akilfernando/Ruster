@@ -1,5 +1,6 @@
 //! Narrow MCP 2025-06-18 stdio profile. See the crate README for limits.
 mod behavior_tools;
+mod export_tools;
 mod persistence_tools;
 mod runtime_tools;
 use serde_json::{json, Map, Value};
@@ -86,6 +87,9 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if export_tools::supported(name) {
+        return export_tools::valid(name, arguments);
+    }
     if persistence_tools::supported(name) {
         return persistence_tools::valid(name, arguments);
     }
@@ -194,15 +198,22 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                 .as_str()
                 .is_some_and(|s| !s.is_empty() && s.len() <= limit)
         };
-        if !exact_keys(args, &keys, &[])
-            || !bounded_string(&args["expected_session_token"], 256)
+        if !exact_keys(
+            args,
+            &keys,
+            if name == "shader_refresh" {
+                &["builtin"]
+            } else {
+                &[]
+            },
+        ) || !bounded_string(&args["expected_session_token"], 256)
             || !canonical_u64(&args["expected_revision"])
             || !canonical_u64(&args[revision])
         {
             return false;
         }
         match name {
-            "shader_refresh" => true,
+            "shader_refresh" => args.get("builtin").is_none_or(Value::is_boolean),
             "scene_mesh" => {
                 bounded_string(&args["object_id"], 128)
                     && (args["asset_id"].is_null() || bounded_string(&args["asset_id"], 128))
@@ -321,7 +332,7 @@ fn tools() -> Value {
             if matches!(name,"asset_import"|"asset_rename") {properties.insert("source".into(),json!({"type":"string","minLength":1,"maxLength":256,"description":"Relative project path; no traversal, absolute paths or escaping symlinks."}));required.push("source");}
             if name=="scene_mesh" {properties.insert("object_id".into(),json!({"type":"string","minLength":1,"maxLength":128}));required.push("object_id");}
         }
-        if name=="shader_refresh" {properties.insert("expected_shader_revision".into(),decimal.clone());required.push("expected_shader_revision");}
+        if name=="shader_refresh" {properties.insert("expected_shader_revision".into(),decimal.clone());properties.insert("builtin".into(),json!({"type":"boolean","description":"Explicitly select built-in appearance instead of reading scene.wgsl; preserves the source file."}));required.push("expected_shader_revision");}
         if matches!(name, "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete") {
             properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Immutable object identity, distinct from its display name."}));
             required.push("object_id");
@@ -362,6 +373,7 @@ fn tools() -> Value {
             "inputSchema":object_schema(Value::Object(properties),required),
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
+    tools.extend(export_tools::list());
     tools.extend(persistence_tools::list());
     tools.extend(behavior_tools::list());
     tools.extend(runtime_tools::list());
@@ -433,7 +445,7 @@ impl Server {
                     Ok(
                         json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},
                         "serverInfo":{"name":"ruster-mcp","version":env!("CARGO_PKG_VERSION")},
-                        "instructions":"Local live editor attachment. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision. No retries. Cancellation cannot roll back dispatched commands; after disconnect/timeout inspect before deciding whether to retry. Edits remain unsaved until explicit persistence. Generic scene_save requires an editor-granted directory plus session/revision/persistence tokens; legacy configuration Save remains human-only. After an unknown save outcome inspect the last committed receipt without automatic retry. Asset catalog changes persist immediately."}),
+                        "instructions":"Local live editor attachment. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision. No retries. Cancellation cannot roll back dispatched commands; after disconnect/timeout inspect before deciding whether to retry. Edits remain unsaved until explicit persistence. Generic scene_save requires an editor-granted directory plus session/revision/persistence tokens; legacy configuration Save remains human-only. After an unknown save outcome inspect the last committed receipt without automatic retry. Creator export requires a prepared runtime kit and explicit output directory; start returns an operation ID. Inspect that ID for completion/receipt after response loss rather than restarting. Asset catalog changes persist immediately."}),
                     )
                 }
             }
@@ -487,6 +499,7 @@ impl Server {
                         "shader_refresh",
                     ]
                     .contains(&name)
+                        && !export_tools::supported(name)
                         && !persistence_tools::supported(name)
                         && !behavior_tools::supported(name)
                         && !runtime_tools::supported(name)
@@ -748,7 +761,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 46);
+        assert_eq!(tools.len(), 49);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -779,6 +792,9 @@ mod tests {
                 "scene_undo",
                 "scene_redo",
                 "scene_replay",
+                "creation_export_inspect",
+                "creation_export_start",
+                "creation_export_cancel",
                 "scene_persistence_inspect",
                 "scene_save",
                 "behavior_inspect",
@@ -902,6 +918,40 @@ mod tests {
             args[field] = json!(vec![item; 257]);
             assert!(!valid_arguments(name, &args));
         }
+        let builtin = json!({"expected_session_token":"s","expected_revision":"0","expected_shader_revision":"0","builtin":true});
+        assert!(valid_arguments("shader_refresh", &builtin));
+        let mut invalid = builtin;
+        invalid["builtin"] = json!("true");
+        assert!(!valid_arguments("shader_refresh", &invalid));
+        let export = json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p","expected_asset_revision":"0","expected_shader_revision":"0","expected_export_token":"0","title":"Creator app","filename":"creator.tar.gz"});
+        assert!(valid_arguments("creation_export_start", &export));
+        for field in export.as_object().unwrap().keys() {
+            let mut missing = export.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(!valid_arguments("creation_export_start", &missing));
+        }
+        for field in [
+            "expected_revision",
+            "expected_asset_revision",
+            "expected_shader_revision",
+            "expected_export_token",
+        ] {
+            let mut rounded = export.clone();
+            rounded[field] = json!(7);
+            assert!(!valid_arguments("creation_export_start", &rounded));
+        }
+        assert!(valid_arguments(
+            "creation_export_inspect",
+            &json!({"operation_id":"18446744073709551615"})
+        ));
+        assert!(!valid_arguments(
+            "creation_export_inspect",
+            &json!({"operation_id":"0"})
+        ));
+        assert!(!valid_arguments(
+            "creation_export_start",
+            &json!({"command":"shell"})
+        ));
         // Persistence adds an independent save-association precondition, without
         // letting the adapter infer paths or apply pending editor drafts.
         assert!(valid_arguments("scene_persistence_inspect", &json!({})));
@@ -1017,6 +1067,15 @@ mod tests {
                 json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1"}),
             ),
             ("scene_inspect", json!({"offset":"16"})),
+            ("creation_export_inspect", json!({"operation_id":"1"})),
+            (
+                "creation_export_start",
+                json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p","expected_asset_revision":null,"expected_shader_revision":"0","expected_export_token":"0","title":"Creator app","filename":"creator.tar.gz"}),
+            ),
+            (
+                "creation_export_cancel",
+                json!({"expected_session_token":"s","operation_id":"1"}),
+            ),
             ("scene_persistence_inspect", json!({})),
             (
                 "scene_save",

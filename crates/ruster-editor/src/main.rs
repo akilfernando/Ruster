@@ -6,6 +6,8 @@ mod behavior_worker;
 #[cfg(unix)]
 mod bridge;
 mod commands;
+mod creation_export;
+mod directory_grant;
 mod editor_theme;
 mod manipulation;
 mod model;

@@ -20,6 +20,7 @@ CRATES = KIT_CRATES
 ROOT_FILES = ("Cargo.lock", "rust-toolchain.toml", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt")
 VENDOR_FILES = ("Cargo.toml", "Cargo.toml.orig", "build.rs", "README.md", "LICENSE.MIT", "LICENSE.APACHE", "RUSTER-PATCH.md")
 PACKAGING_FILES = ("scripts/package_app.py", "scripts/dependency_notices.py")
+CREATION_PACKAGING_FILE = "scripts/package_creation.py"
 MLUA_FILES = ("Cargo.toml", "Cargo.toml.orig", "README.md", "README.upstream", "FAQ.upstream", "CHANGELOG.upstream", "LICENSE", "RUSTER-PATCH.md", "RUSTER-local.patch", ".cargo_vcs_info.json", "rustfmt.toml", "tarpaulin.toml", "typos.toml", "codecov.yml", ".gitignore")
 
 
@@ -80,7 +81,8 @@ def export(root: Path, output: Path, normalize_lock: bool = True, app: str = "ya
         put(stage, "Cargo.toml", "\n".join(lines).encode())
         for name in ROOT_FILES:
             put(stage, name, read_regular(root, name))
-        for name in PACKAGING_FILES:
+        packaging_files = PACKAGING_FILES + ((CREATION_PACKAGING_FILE,) if app == "motion-lab" else ())
+        for name in packaging_files:
             put(stage, name, read_regular(root, name))
         put(stage, spec.binary_readme, read_regular(root, spec.binary_readme))
         for name in spec.crates:

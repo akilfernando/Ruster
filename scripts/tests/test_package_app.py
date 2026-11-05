@@ -132,6 +132,7 @@ class DistributionTests(unittest.TestCase):
         put("examples/motion-lab/resources/private.json", "SECRET")
         put("packaging/MOTION-SOURCE-README.md", "Motion source\n")
         put("packaging/MOTION-BINARY-README.txt", "Motion binary\n")
+        put(new_app.CREATION_PACKAGING_FILE, "fixture creator packaging helper\n")
         # A source archive omits mlua's ignored development lockfile.
         for name in new_app.MLUA_FILES:
             if name != "Cargo.lock":
@@ -147,6 +148,7 @@ class DistributionTests(unittest.TestCase):
         self.assertTrue((source / "third_party/mlua/RUSTER-PATCH.md").is_file())
         self.assertTrue((source / "Cargo.lock").is_file())
         self.assertFalse((source / "third_party/mlua/Cargo.lock").exists())
+        self.assertTrue((source / new_app.CREATION_PACKAGING_FILE).is_file())
         self.assertTrue((source / "crates/ruster-behavior/templates/follower.lua").is_file())
         self.assertFalse((source / "examples/yard-app").exists())
         self.assertFalse((source / "examples/motion-lab/resources/private.json").exists())
