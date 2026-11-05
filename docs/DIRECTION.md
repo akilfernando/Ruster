@@ -41,7 +41,7 @@ Do not trade simplicity for speculative optimizations. Record a hypothesis, base
 
 ## Initial audience and scope
 
-Initial proving ground: small teams and individual developers making small-to-medium factory, colony or management-style games. The user explicitly broadened the engine beyond games: training, visualization, configurators and digital-twin applications are potential future uses, not current support commitments. Start with a tiny logistics scenario (source, processing/transport, destination) as the reference project. Initial development is Linux; Windows is an intended target, not verified support. Desktop 3D and Vulkan remain the rendering direction.
+Initial proving ground: small teams and individual developers making small-to-medium factory, colony or management-style games. The user explicitly broadened the engine beyond games: training, visualization, configurators and digital-twin applications are potential future uses, not current support commitments. Start with a tiny logistics scenario (source, processing/transport, destination) as the reference project. Initial development is Linux; Windows is an intended target, not verified support. [Decision0025](decisions/0025-first-alpha-platform-scope.md) explicitly selects Linux x86_64 for the first alpha candidate, with named test limits and remaining adoption gates. Desktop 3D and Vulkan remain the rendering direction.
 
 The reference game must exercise the engine, not become a second large product. Defer multiplayer, massive worlds, unrestricted executable mods, advanced GI, terrain, visual scripting, marketplace, and a custom general ECS until justified.
 

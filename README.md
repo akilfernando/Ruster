@@ -9,7 +9,7 @@ Ruster's purpose is to help people turn their own ideas into working creations. 
 
 Familiarity for experienced Unity and Unreal creators, including everyday editor conveniences, is a core requirement. The [editor experience baseline](docs/EDITOR-EXPERIENCE.md) describes the target and the gaps still to close.
 
-**Early development:** milestones M0–M8 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan/editor smoke covers NVIDIA RTX4060 Laptop and Intel Iris Xe on the recorded Linux workstation; Windows and other machines remain unverified. Physical repaired-build input and experienced-creator acceptance also remain open. The [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the interaction repairs and remaining adoption/platform limits.
+**Early development:** milestones M0–M8 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan/editor smoke covers NVIDIA RTX4060 Laptop and Intel Iris Xe on the recorded Linux workstation; Windows and other machines remain unverified. The Unity-experienced user confirms repaired viewport selection and live Transform feedback; broader creator-workflow acceptance remains open. The [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the interaction repairs and remaining adoption/platform limits.
 
 ![Ruster scene editor with command menus, transform inspector and content browser](docs/evidence/m9-editor-overview.png)
 
@@ -39,7 +39,7 @@ The current scene limit is 256 objects and one viewport. Scene format v5 carries
 
 A documented [upstream SPIR-V compatibility patch](third_party/wgpu-hal/RUSTER-PATCH.md) is included with full source and licenses; newer GPU feature requirements must revisit this temporary boundary.
 
-Native Vulkan smoke currently covers CachyOS with NVIDIA RTX4060 Laptop and Intel Iris Xe graphics. This is a named-workstation check, not a broad support matrix. Windows and clean-machine runtime remain unverified. Development-library package names vary by distribution; the [Linux CI workflow](.github/workflows/ci.yml) shows the Ubuntu build prerequisites.
+Native Vulkan smoke currently covers CachyOS with NVIDIA RTX4060 Laptop and Intel Iris Xe graphics. This is a named-workstation check, not a broad support matrix. The [first alpha target](docs/decisions/0025-first-alpha-platform-scope.md) is Linux x86_64. Separate [Ubuntu userspace evidence](docs/evidence/M9-ubuntu-userspace.md) covers source checks and Intel startup/resize/shutdown, sharing the same host kernel/devices; another-machine and complete Ubuntu workflow acceptance remain open. Windows remains an intended future target. Development-library package names vary by distribution; the [Linux CI workflow](.github/workflows/ci.yml) shows the Ubuntu build prerequisites.
 
 ```sh
 git clone https://github.com/akilfernando/Ruster.git

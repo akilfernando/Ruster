@@ -28,3 +28,4 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0022](0022-independent-scene5-consumer.md) | Non-game Scene5 consumer and selected independent app exports |
 | [0023](0023-derived-behavior-working-copies.md) | Derived working copies, explicit conflicts and saved-base authority |
 | [0024](0024-owned-behavior-debug-stops.md) | Owned debug stops, exact stepping and asynchronous cancellation |
+| [0025](0025-first-alpha-platform-scope.md) | First alpha Linux x86_64 scope with named evidence and Windows retained as intended target |

@@ -193,6 +193,8 @@ M8 completion,2026-11-04: independent application changes/exports/relocation, al
 
 ## M9 Public alpha candidate
 
+2026-11-05 scope decision: [0025](decisions/0025-first-alpha-platform-scope.md) selects Linux x86_64 for the first alpha under the target-verification exception below. Windows remains intended future scope; no remaining Linux resource/adoption or Unity/Unreal familiarity gate is waived.
+
 **User outcome:** another developer can adopt the engine without continual assistance from its authors.
 
 **Deliverable:** versioned source release candidate, tested examples/packages, quickstart/API guidance, known limitations, compatibility matrix, contribution process and release notes. Actual public publication is a separate concrete release action.
