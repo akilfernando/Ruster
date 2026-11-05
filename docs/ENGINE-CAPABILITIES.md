@@ -4,7 +4,7 @@ Updated2026-11-05. Root/Astra strategic assessment after the user reviewed PumpB
 
 ## Confirmed direction versus proposed scope
 
-The user explicitly requires lighting, shaders and textures as core product capabilities, and LOD and ray tracing further down the line. Creator-first design, lean measured implementation and first-class direct-editor/native-MCP workflows remain requirements. Specific lighting models, material interfaces, physics libraries, asset formats, animation systems and rendering architecture have not been chosen. Historical M0–M8 checkpoints are narrow prototype achievements, not a complete game-engine baseline.
+The user explicitly requires lighting, shaders and textures as core product capabilities, and LOD and ray tracing further down the line. Creator-first design, lean measured implementation and first-class direct-editor/native-MCP workflows remain requirements. V1’s bounded opaque-material/UV/PNG contract is selected and verified; richer material/shading contracts, authored-lighting choices, physics libraries, general asset formats, animation systems and future rendering architecture remain to be selected. Historical M0–M8 checkpoints are narrow prototype achievements, not a complete game-engine baseline.
 
 ## Capability inventory
 
@@ -12,14 +12,14 @@ Inspected owning sources: `crates/ruster-scene/src/lib.rs` and `authoring.rs`, `
 
 | Area | Current boundary | Missing product workflow to plan |
 | --- | --- | --- |
-| Visual authoring | Object colors, fixed diffuse/ambient shading and bounded last-good WGSL replacement | Lights, materials, UV/textured assets, samplers/mipmaps, shadows, transparency, environment/reflections and exposure/color management; editable/recoverable/exported results through UI and MCP |
+| Visual authoring | V1 shared opaque materials, complete OBJ UVs, bounded opaque PNGs/samplers/linear-light mips, safe refresh and direct/MCP/recovery/standalone workflows; lighting remains fixed diffuse/ambient, with bounded last-good WGSL replacement | Creator-placed lights and shadows; deeper/PBR materials/maps, transparency, environment/reflections and exposure/color management through equally complete workflows |
 | Scene composition | Flat stable-ID objects with transforms/meshes, shared history and save/recovery | Parent-child transforms, reusable prefabs/instances with clear overrides, scene composition/loading and runtime lifecycle |
-| Content pipeline | Bounded OBJ meshes and source-preserving local caches | Rich scene/material/animation import, dependency tracking, reimport, compression and runtime asset loading/unloading; select formats from actual creator needs |
+| Content pipeline | Bounded UV OBJ/opaque PNG import, stable IDs, source-preserving caches and accepted material/texture export closure | Rich scene/material/animation import, dependency tracking, reimport, compression and runtime asset loading/unloading; select formats from actual creator needs |
 | Interaction and player UI | Code-first egui application UI, keyboard state and picking | Authorable application/game UI, input actions/remapping, pointer/gamepad support and focus/accessibility suitable for exported creations |
 | Motion and physical interaction | Scripted transforms and fixed stepping | Collision queries, triggers, rigid-body/character behavior where needed; animation clips, skeletal animation and blending; scripted motion does not establish these |
 | Sound | No general authored audio workflow demonstrated | Import/playback, spatial sound, volume/mixing and packaged resources |
 | Application state | Authored scene persistence and explicit runtime reset | Creator-defined runtime save/load, scene transitions and reference/lifecycle rules; editor recovery is not a player save system |
-| Scale and diagnostics | Mesh instancing, retained buffers and bounded resource counters; scenes capped at256objects | Representative CPU/GPU profiling, visibility culling, mesh LOD, texture mip/streaming policy and asset memory budgets; then larger scenes/streaming as justified |
+| Scale and diagnostics | Mesh instancing, retained buffers, bounded basic texture mips and named V1 native/CPU/GPU/resource observations; scenes capped at256objects | Representative larger-workload profiling/budgets, visibility culling, mesh LOD and expanded texture scaling/streaming; then larger scenes as justified |
 | Delivery and extensibility | Linux code-first/content exports, source/API documentation and provisional Lua tooling | Broader platform/input/device acceptance, project settings/build ergonomics and a stable extension path; no unsupported-platform promise |
 
 Navigation/pathfinding, terrain/world tools, particles/VFX, cinematics and networking are additional application-dependent tracks. Proper 2D tooling is a separate product-scope question. Not every engine needs all of them at once; choose them from creations that exercise real needs. Reuse suitable maintained libraries where they fit rather than rebuilding every subsystem.
@@ -34,6 +34,6 @@ Primary sources accessed2026-11-05: [Godot mesh LOD](https://docs.godotengine.or
 
 ## Current allocation and acceptance
 
-The user subsequently requested Astra's roadmap realignment and a targeted quality-first session goal. [ROADMAP.md](ROADMAP.md#quality-first-capability-sequence) now owns the working capability sequence and qualification track; [V1](plans/V1-TEXTURED-MATERIALS.md) owns the first bounded implementation contract. This inventory is not a competing schedule. PumpBench's separately recorded focused keyboard check now passes within [its native injected-input limits](creations/PUMPBENCH.md#focused-native-keyboard-completion--2026-11-05); this closes that finite obligation without qualifying V1 or M9.
+The user subsequently requested Astra's roadmap realignment and a targeted quality-first session goal. [ROADMAP.md](ROADMAP.md#quality-first-capability-sequence) now owns the working capability sequence and qualification track; [V1](plans/V1-TEXTURED-MATERIALS.md) owns the first accepted bounded implementation contract; [V1 acceptance](evidence/V1-readiness.md) records its actual limits. This inventory is not a competing schedule. PumpBench's separately recorded focused keyboard check now passes within [its native injected-input limits](creations/PUMPBENCH.md#focused-native-keyboard-completion--2026-11-05); this closes that finite obligation without qualifying V1 or M9.
 
 The working sequence is root/Astra-selected under the user’s realignment authorization, not user-selected individual architecture or a waiver of existing M9 adoption gates. Every selected capability includes creator interaction, scripting/Rust access where relevant, guarded MCP operations, persistence/recovery, standalone delivery, documentation and proportionate verification. Do not reduce MCP parity to setting raw numbers without useful observation/diagnostics. No public release is authorized by this assessment.
