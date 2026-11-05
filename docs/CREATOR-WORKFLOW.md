@@ -2,7 +2,7 @@
 
 Updated2026-11-05. The engineering implementation targets Linux x86_64, built-in appearance, Scene5, Lua and triangle OBJ meshes. Native MCP and direct-editor export journeys pass within the recorded engineering scope; this guide does not claim completed human acceptance. [Current evidence](evidence/CREATOR-export.md) owns verification limits.
 
-V1 foundation update2026-11-05: current Save writes Scene6; prepare a current descriptor2 runtime kit for these files, including untextured scenes. Old frozen kits remain valid only for their recorded Scene1–5 scope. Shared CLI/controller packaging now includes active material texture dependencies as exact accepted PNG sources. The new complete editor/MCP material-authoring journey is still in progress; see [V1 scope and acceptance](plans/V1-TEXTURED-MATERIALS.md). Historical creator-eval-1 evidence above remains Scene5-specific.
+V1 foundation update2026-11-05: current Save writes Scene6; prepare a current descriptor2 runtime kit for these files, including untextured scenes. Old frozen kits remain valid only for their recorded Scene1–5 scope. Shared CLI/controller packaging now includes active material texture dependencies as exact accepted PNG sources. The complete direct-editor/native-MCP material workflow, real draft recovery, named costs and exact relocated default delivery now have [V1 evidence and evaluation](evidence/V1-readiness.md). Historical creator-eval-1 evidence above remains Scene5-specific.
 
 ## Prepare a Linux export template
 

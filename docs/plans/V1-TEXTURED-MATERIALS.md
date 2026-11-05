@@ -1,6 +1,6 @@
 # V1: opaque textured materials
 
-Updated2026-11-05. **In progress; first foundation/feasibility checkpoint passes, creator-workflow acceptance remains open.** First bounded implementation goal under the user's quality-first roadmap realignment, selected by root/Astra. The user requires lighting/shaders/textures; this slice delivers the texture/material dependency before authored lights. [Roadmap](../ROADMAP.md) owns the broader sequence. Exact storage/API decisions require the early checkpoint below.
+Updated2026-11-05. **Accepted complete2026-11-05 after source, actual direct/native-MCP, recovery, relocated native delivery and named cost gates.** First bounded implementation goal under the user's quality-first roadmap realignment, selected by root/Astra. The user requires lighting/shaders/textures; this slice delivers the texture/material dependency before authored lights. [Roadmap](../ROADMAP.md) owns the broader sequence. Selected storage/API decisions and early checkpoints are retained below; the [final audit](../evidence/V1-readiness.md) records acceptance and limitations.
 
 ## Creator outcome and goal
 
@@ -58,3 +58,8 @@ First checkpoint2026-11-05 09:13UTC: source-backed asset/render/export path is f
 ## Measured dependency replan — 2026-11-05
 
 After creator controls and focused cases, the release asset baseline exposes roughly219–274ms2048² operations and32ms accepted-cache opens on the named host. Root/Astra select [bounded background preparation/publication](../decisions/0030-bounded-asset-preparation-and-publication.md), including explicit deferred MCP expiry and root-lifecycle ownership, before native acceptance. First remove redundant unchanged-texture decoding with matched correctness/cost evidence; then implement the bounded controller and nonblocking open paths in reviewable stages. The decision records numerical foreground/frame targets and failure-ordering evidence. These are agent-selected engineering requirements serving this existing creator outcome, not a new product feature or user-selected implementation. Required acceptance is unchanged; do not call V1 complete from component tests or the small offscreen prototype.
+
+
+## Final evaluation — 2026-11-05
+
+Root/Astra accept V1 after mapping every original requirement to actual source/native evidence. The single-worker/ownership dependency remains bounded and justified by measured stalls; the final measured preference coalescing removes redundant persistence without a new subsystem. Both creator paths, real recovery, exact source-hidden default runtime delivery, visual/sampling/lifecycle and named responsiveness/resource observations pass. [Readiness and artifacts](../evidence/V1-readiness.md) retain failures, evidence reuse, exact source/build pins and physical-input/presentation/peak-memory/custom-shader/hardware limits. Stop implementation at this slice; a targeted V2 authored-lighting contract is the next roadmap consideration, not automatic authorization to implement it.

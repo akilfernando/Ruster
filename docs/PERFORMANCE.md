@@ -1,6 +1,6 @@
 # Performance learning and improvement
 
-Updated 2026-11-04. The user explicitly wants ongoing learning from established engines, documented findings and willingness to redesign early foundations. Competitive performance is an objective, not an established result.
+Updated2026-11-05. The user explicitly wants ongoing learning from established engines, documented findings and willingness to redesign early foundations. Competitive performance is an objective, not an established result.
 
 ## Working method
 
@@ -105,3 +105,8 @@ The changed-unaccepted PNG open comparison subsequently removes discarded decode
 [Encoded-source pressure](evidence/V1-foundation.md#encoded-source-staging-pressure-and-checkpoint2--2026-11-05) retains one verified source buffer in editor staging and the Python helper instead of the entire encoded closure. With32×7MiB synthetic metadata-heavy PNGs, largest measured Rust-process VmHWM269,444→15,840KiB and Python-process323,108→96,916KiB; real package medians4456.816→4477.016ms. Exact extracted file hashes/modes/manifests match. Warm hard-linked highly compressible inputs and per-process counters limit this claim; neither whole-editor/child-family peaks nor focused latency is proven. Old immutable kits are not silently patched; final editor acceptance must prepare a fresh helper kit.
 
 The [paint-boundary ownership extension](decisions/0030-bounded-asset-preparation-and-publication.md#cpu-payload-ownership-at-the-paint-boundary--2026-11-05-extension) addresses a source-proven lifetime gap: strong GPU identity Arcs and egui callback ownership can make a later UI drop the final CPU owner despite worker-side store retirement. Selected weak cache identities plus one later-root-frame retirement slot are pending implementation/proof; no measured stall, memory saving or frame-budget pass is claimed from the review alone. No new collector/thread is selected.
+
+
+## V1 named-workload acceptance — 2026-11-05
+
+The [final audit](evidence/V1-readiness.md) records20fresh-process Imports and20measured changed-sourceRefreshes meeting predeclared5ms foreground enqueue/adoption and50ms focused Host-gap targets; raw elapsed/controller boundaries are not CPU/presentation latency. Background-video and cleaner conditions remain separate. Six paired offscreen release processes measure actual shared CPU/GPU timestamps with pixel/hash/lifecycle checks and stable uploads; no CPU texture speedup or competitive scaling is inferred. A measured SaveAs follow-up identifies two preference writes; one bounded coalescing repair preserves guard/failure semantics and joint recent/camera persistence, with descriptive N1 before/after attribution rather than percentile claims. Sampled RSS/PSS/high-water, GPU endpoints and logical payload/source overlap complement bounds but do not establish a universal process/driver peak. Exact source/features/conditions/raw reports and exclusions are retained; no benchmark subsystem or shader cache was added.
