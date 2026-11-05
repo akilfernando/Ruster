@@ -1,6 +1,7 @@
 //! Explicit destination authority for guarded scene saves. No project replacement.
 use super::SceneEditor;
 use serde_json::{json, Value};
+#[cfg(test)]
 use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 
@@ -11,6 +12,7 @@ fn error(code: &str, message: &str) -> (String, String) {
 pub(super) fn bounded(text: &str) -> String {
     text.chars().take(4096).collect()
 }
+#[cfg(test)]
 pub(super) fn document_hash(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -28,7 +30,7 @@ impl SaveGrant {
     pub(super) fn new(path: &Path) -> std::result::Result<Self, String> {
         crate::directory_grant::DirectoryGrant::new(path).map(Self)
     }
-    fn root(&self) -> &Path {
+    pub(super) fn root(&self) -> &Path {
         self.0.root()
     }
     fn validate(&self) -> Result<&Path> {
@@ -97,10 +99,91 @@ impl SceneEditor {
         Ok(path.to_path_buf())
     }
     fn save_as_root_guard(&self, root: &Path) -> Result<()> {
-        if self.session.has_asset_references() && self.asset_origin.as_deref() != Some(root) {
+        if self.session.has_asset_references()
+            && self.canonical_asset_root().as_deref() != Some(root)
+        {
             return Err(error("asset_root_mismatch", "Save As across asset roots is unavailable while scene or history references meshes; use the existing project root"));
         }
         Ok(())
+    }
+    pub(super) fn admit_agent_save(
+        &self,
+        token: &str,
+        args: &Value,
+    ) -> Result<(PathBuf, crate::directory_grant::DirectoryGrant, bool)> {
+        let map = args
+            .as_object()
+            .ok_or_else(|| error("invalid_arguments", "Expected an argument object"))?;
+        if map.keys().any(|key| {
+            ![
+                "expected_session_token",
+                "expected_revision",
+                "expected_persistence_token",
+                "filename",
+            ]
+            .contains(&key.as_str())
+        }) {
+            return Err(error("invalid_arguments", "Unknown argument"));
+        }
+        if args["expected_session_token"].as_str() != Some(token) {
+            return Err(error(
+                "stale_session",
+                "Inspect the current scene incarnation",
+            ));
+        }
+        let revision = args["expected_revision"].as_str().ok_or_else(|| {
+            error(
+                "invalid_arguments",
+                "expected_revision must be a canonical u64 decimal string",
+            )
+        })?;
+        if revision.is_empty()
+            || (revision != "0" && revision.starts_with('0'))
+            || !revision.bytes().all(|b| b.is_ascii_digit())
+        {
+            return Err(error(
+                "invalid_arguments",
+                "expected_revision must be a canonical u64 decimal string",
+            ));
+        }
+        let revision: u64 = revision
+            .parse()
+            .map_err(|_| error("invalid_arguments", "Revision out of range"))?;
+        if revision != self.session.scene().revision {
+            return Err(error("stale_revision", "Inspect authored scene again"));
+        }
+        if args["expected_persistence_token"].as_str() != Some(self.persistence_token().as_str()) {
+            return Err(error("stale_persistence", "A save changed the scene association or committed identity; inspect persistence again"));
+        }
+        self.persistence_guard()?;
+        let grant = self
+            .save_grant
+            .as_ref()
+            .ok_or_else(|| {
+                error(
+                    "save_permission_required",
+                    "Restart with an explicit RUSTER_MCP_SAVE_DIR grant",
+                )
+            })?
+            .0
+            .clone();
+        let root = grant.root();
+        let path = if let Some(value) = args.get("filename") {
+            let path = root.join(filename(value)?);
+            path
+        } else {
+            let associated = self.session.path().ok_or_else(|| {
+                error(
+                    "fresh_filename_required",
+                    "This scene has no saved association; provide a fresh filename",
+                )
+            })?;
+            if associated.parent() != Some(root) {
+                return Err(error("save_permission_required", "Associated scene is outside the granted save directory; provide a fresh filename within the grant"));
+            }
+            associated.to_path_buf()
+        };
+        Ok((path, grant, args.get("filename").is_some()))
     }
     pub(super) fn persistence_command(
         &mut self,
@@ -151,61 +234,17 @@ impl SceneEditor {
                 "filename_policy": "Fresh visible .json leaf, <=128 UTF-8 bytes; Unicode/internal spaces allowed; no '/', '\\', controls, leading dot or leading/trailing whitespace",
             }));
         }
-        if args["expected_session_token"].as_str() != Some(token) {
-            return Err(error(
-                "stale_session",
-                "Inspect the current scene incarnation",
-            ));
-        }
-        let revision = args["expected_revision"].as_str().ok_or_else(|| {
-            error(
-                "invalid_arguments",
-                "expected_revision must be a canonical u64 decimal string",
-            )
-        })?;
-        if revision.is_empty()
-            || (revision != "0" && revision.starts_with('0'))
-            || !revision.bytes().all(|b| b.is_ascii_digit())
+        #[cfg(test)]
         {
-            return Err(error(
-                "invalid_arguments",
-                "expected_revision must be a canonical u64 decimal string",
-            ));
+            self.save_sync_command(token, args)
         }
-        let revision: u64 = revision
-            .parse()
-            .map_err(|_| error("invalid_arguments", "Revision out of range"))?;
-        if revision != self.session.scene().revision {
-            return Err(error("stale_revision", "Inspect authored scene again"));
+        #[cfg(not(test))]
+        {
+            Err(error(
+                "deferred_dispatch_required",
+                "scene_save must run through deferred Host dispatch",
+            ))
         }
-        if args["expected_persistence_token"].as_str() != Some(self.persistence_token().as_str()) {
-            return Err(error("stale_persistence", "A save changed the scene association or committed identity; inspect persistence again"));
-        }
-        self.persistence_guard()?;
-        let root = self.granted_save_root()?;
-        let path = if let Some(value) = args.get("filename") {
-            self.save_as_root_guard(root)?;
-            let path = root.join(filename(value)?);
-            reject_symlink(&path)?;
-            match path.symlink_metadata() {
-                Ok(_) => return Err(error("destination_exists", "Save As requires a fresh filename, including when the name matches the current association")),
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
-                Err(e) => return Err(error("save_error", &e.to_string())),
-            }
-            path
-        } else {
-            self.associated_save_path(root)?
-        };
-        self.save_scene(path)
-            .map_err(|message| error("save_error", &message))?;
-        self.notice = "Scene saved through MCP.".into();
-        Ok(json!({
-            "session_token": token,
-            "revision": self.session.scene().revision.to_string(),
-            "persistence_token": self.persistence_token(),
-            "dirty": self.session.is_dirty(),
-            "receipt": self.save_receipt,
-        }))
     }
 }
 
@@ -233,7 +272,21 @@ mod tests {
     }
     fn save(editor: &mut SceneEditor, name: Option<&str>) -> Value {
         let args = arguments(editor, name);
-        editor.command("test", "scene_save", args)
+        #[cfg(unix)]
+        {
+            let ctx = editor.export_context.clone().unwrap_or_default();
+            editor.export_context = Some(ctx.clone());
+            let (lease, mut observe) = crate::bridge::preparing_test_lease(
+                super::super::Instant::now() + super::super::Duration::from_secs(2),
+            );
+            editor.dispatch_save_request(&ctx, "test", &args, lease);
+            editor.test_finish_asset_work();
+            observe().expect("production deferred Save must return its terminal response")
+        }
+        #[cfg(not(unix))]
+        {
+            editor.command("test", "scene_save", args)
+        }
     }
     fn rejected(reply: Value, code: &str) {
         assert_eq!(reply["ok"], false, "{reply}");
@@ -502,9 +555,10 @@ mod tests {
         let before = editor.persistence_token();
         editor.recovered_origin = Some(dir.path().join("origin.json"));
         editor.shader_revision = 3;
-        editor
-            .save_scene_with_reset(path.clone(), |_| Err("injected reset failure".into()))
-            .unwrap();
+        editor.save_grant = Some(SaveGrant::new(dir.path()).unwrap());
+        editor.save_shader_reset_failure = Some("injected reset failure".into());
+        let reply = save(&mut editor, Some("saved.json"));
+        assert_eq!(reply["ok"], true, "{reply}");
         assert_eq!(editor.session.path(), Some(path.as_path()));
         assert!(!editor.session.is_dirty());
         assert!(editor.recovered_origin.is_none());
@@ -526,7 +580,7 @@ mod tests {
             editor.shader_revision, 3,
             "failed reset must not report a built-in shader as active"
         );
-        editor.save_scene(path).unwrap(); // baseline/association is usable after warning
+        assert_eq!(save(&mut editor, None)["ok"], true); // baseline remains usable through worker after warning
         assert!(inspect(&mut editor)["last_committed_save"]["warning"].is_null());
     }
 }

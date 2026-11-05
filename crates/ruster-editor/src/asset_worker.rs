@@ -27,6 +27,9 @@ pub(super) struct RetiredAssets {
     pub request: Option<Box<AssetRequest>>,
     pub completion: Option<AssetCompletion>,
     pub maps: [AssetMaps; 3],
+    pub save_request: Option<Box<crate::asset_save::Request>>,
+    pub saved: Option<Box<crate::asset_save::Saved>>,
+    pub session: Option<Box<ruster_scene::Session>>,
 }
 
 impl RetiredAssets {
@@ -38,10 +41,16 @@ impl RetiredAssets {
             request,
             completion,
             maps,
+            save_request,
+            saved,
+            session,
         } = self;
         drop(store);
         drop(request);
         drop(completion);
+        drop(save_request);
+        drop(saved);
+        drop(session);
         for AssetMaps { meshes, textures } in maps {
             drop(meshes);
             drop(textures);
@@ -53,6 +62,14 @@ impl RetiredAssets {
 pub(super) enum Event {
     Prepared {
         job: JobId,
+    },
+    SavePrepared {
+        job: JobId,
+        result: Result<(), crate::asset_save::SaveFailure>,
+    },
+    Saved {
+        job: JobId,
+        result: Result<Box<crate::asset_save::Saved>, crate::asset_save::SaveFailure>,
     },
     Complete {
         job: JobId,
@@ -72,11 +89,24 @@ pub(super) enum Event {
 }
 
 enum Command {
-    Prepare { job: JobId, request: AssetRequest },
+    Prepare {
+        job: JobId,
+        request: AssetRequest,
+    },
+    PrepareSave {
+        job: JobId,
+        request: Box<crate::asset_save::Request>,
+    },
     Publish(JobId),
-    Open { job: JobId, root: PathBuf },
+    Open {
+        job: JobId,
+        root: PathBuf,
+    },
     Discard(JobId),
-    Retire { job: JobId, retired: RetiredAssets },
+    Retire {
+        job: JobId,
+        retired: RetiredAssets,
+    },
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -145,11 +175,20 @@ impl Worker {
     // Reuse the real post-event panic/drainer path for host ownership tests.
     #[cfg(test)]
     pub fn panic_after_event_for_test() -> std::io::Result<(Self, Arc<std::sync::Barrier>)> {
+        Self::panic_after_n_events_for_test(1)
+    }
+    #[cfg(test)]
+    pub fn panic_after_n_events_for_test(
+        after: usize,
+    ) -> std::io::Result<(Self, Arc<std::sync::Barrier>)> {
         let barrier = Arc::new(std::sync::Barrier::new(2));
         let worker_barrier = barrier.clone();
+        let count = std::sync::atomic::AtomicUsize::new(0);
         let worker = Self::spawn(Arc::new(move || {
-            worker_barrier.wait();
-            panic!("intentional worker fault after event transfer");
+            if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1 == after {
+                worker_barrier.wait();
+                panic!("intentional worker fault after event transfer");
+            }
         }))?;
         Ok((worker, barrier))
     }
@@ -234,6 +273,31 @@ impl Worker {
                     Err(Box::new(TrySendError::Disconnected(request)))
                 }
                 _ => unreachable!("submit returns the same command"),
+            },
+        }
+    }
+
+    pub fn try_prepare_save(
+        &mut self,
+        job: JobId,
+        request: Box<crate::asset_save::Request>,
+    ) -> Result<(), TrySendError<Box<crate::asset_save::Request>>> {
+        if self.active.is_some() && !self.disconnected && self.commands.is_some() {
+            return Err(TrySendError::Full(request));
+        }
+        match self.submit(Command::PrepareSave { job, request }) {
+            Ok(()) => {
+                self.active = Some((job, Phase::Preparing));
+                Ok(())
+            }
+            Err(error) => match *error {
+                TrySendError::Full(Command::PrepareSave { request, .. }) => {
+                    Err(TrySendError::Full(request))
+                }
+                TrySendError::Disconnected(Command::PrepareSave { request, .. }) => {
+                    Err(TrySendError::Disconnected(request))
+                }
+                _ => unreachable!("submit returns its original command"),
             },
         }
     }
@@ -365,6 +429,18 @@ impl Worker {
             Event::Prepared { job } if self.active == Some((*job, Phase::Preparing)) => {
                 self.active = Some((*job, Phase::Prepared))
             }
+            Event::SavePrepared { job, result }
+                if self.active.is_some_and(|(id, _)| id == *job) =>
+            {
+                if result.is_err() {
+                    self.active = None;
+                } else if self.active == Some((*job, Phase::Preparing)) {
+                    self.active = Some((*job, Phase::Prepared));
+                }
+            }
+            Event::Saved { job, .. } if self.active == Some((*job, Phase::Publishing)) => {
+                self.active = None;
+            }
             Event::Complete { job, .. } if self.active == Some((*job, Phase::Publishing)) => {
                 self.active = None
             }
@@ -419,13 +495,32 @@ impl Drop for Worker {
     }
 }
 
+enum Candidate {
+    Asset(Box<PreparedAsset>),
+    Save(Box<crate::asset_save::Prepared>),
+}
+impl Candidate {
+    fn publish(self, job: JobId) -> Event {
+        match self {
+            Self::Asset(prepared) => Event::Complete {
+                job,
+                completion: (*prepared).publish(),
+            },
+            Self::Save(prepared) => Event::Saved {
+                job,
+                result: (*prepared).publish().map(Box::new),
+            },
+        }
+    }
+}
+
 fn run(
     commands: &Receiver<Command>,
     events: &SyncSender<Event>,
     shutdown: &Shutdown,
     repaint: &Repaint,
 ) {
-    let mut candidate: Option<(JobId, PreparedAsset)> = None;
+    let mut candidate: Option<(JobId, Candidate)> = None;
     let mut outgoing = None;
     loop {
         if let Some(event) = outgoing.take() {
@@ -442,16 +537,24 @@ fn run(
         match command {
             Command::Prepare { job, request } => {
                 debug_assert!(candidate.is_none());
-                candidate = Some((job, request.prepare()));
+                candidate = Some((job, Candidate::Asset(Box::new(request.prepare()))));
                 outgoing = Some(Event::Prepared { job });
+            }
+            Command::PrepareSave { job, request } => {
+                debug_assert!(candidate.is_none());
+                let result = match (*request).prepare() {
+                    Ok(prepared) => {
+                        candidate = Some((job, Candidate::Save(Box::new(prepared))));
+                        Ok(())
+                    }
+                    Err(error) => Err(error),
+                };
+                outgoing = Some(Event::SavePrepared { job, result });
             }
             Command::Publish(job) => {
                 if let Some((id, prepared)) = candidate.take() {
                     if id == job {
-                        outgoing = Some(Event::Complete {
-                            job,
-                            completion: prepared.publish(),
-                        });
+                        outgoing = Some(prepared.publish(job));
                     } else {
                         candidate = Some((id, prepared));
                     }
@@ -490,7 +593,7 @@ fn run(
         if let Command::Publish(job) = command {
             if let Some((id, prepared)) = candidate.take() {
                 if id == job {
-                    drop(prepared.publish());
+                    drop(prepared.publish(job));
                 } else {
                     candidate = Some((id, prepared));
                 }
@@ -777,6 +880,68 @@ mod tests {
         assert!(repaints.load(Ordering::SeqCst) >= 5);
 
         // Exercise the production egui constructor without creating a window.
+        // Save uses the same candidate/authority slot. Failed preparation must
+        // release it without a nonexistent Discarded event; publication still
+        // forbids shutdown and returns Session ownership for worker retirement.
+        let mut saving = Worker::start(egui::Context::default()).unwrap();
+        let request = |path| {
+            Box::new(crate::asset_save::Request {
+                session: ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap(),
+                destination: path,
+                original_asset_root: Some(root.to_path_buf()),
+                grant: None,
+                fresh_destination: true,
+            })
+        };
+        saving
+            .try_prepare_save(10, request(root.join("missing-parent/save.json")))
+            .unwrap();
+        assert!(matches!(
+            next(&mut saving),
+            Event::SavePrepared {
+                job: 10,
+                result: Err(_)
+            }
+        ));
+        saving
+            .try_prepare_save(11, request(root.join("worker-saved.json")))
+            .unwrap();
+        assert!(matches!(
+            next(&mut saving),
+            Event::SavePrepared {
+                job: 11,
+                result: Ok(())
+            }
+        ));
+        saving.try_publish(11).unwrap();
+        assert_eq!(saving.try_shutdown(), Err(ShutdownError::Publishing));
+        let saved = match next(&mut saving) {
+            Event::Saved {
+                job: 11,
+                result: Ok(saved),
+            } => saved,
+            other => panic!("unexpected saved completion: {other:?}"),
+        };
+        assert_eq!(
+            saved.session.path(),
+            Some(root.join("worker-saved.json").as_path())
+        );
+        saving
+            .try_retire(
+                12,
+                RetiredAssets {
+                    saved: Some(saved),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        assert!(matches!(next(&mut saving), Event::Retired { job: 12 }));
+        saving.try_shutdown().unwrap();
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !saving.is_finished() && Instant::now() < deadline {
+            thread::yield_now();
+        }
+        assert!(saving.is_finished());
         let mut idle = Worker::start(egui::Context::default()).unwrap();
         idle.try_shutdown().unwrap();
         let deadline = Instant::now() + Duration::from_secs(2);

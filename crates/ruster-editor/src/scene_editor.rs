@@ -11,6 +11,7 @@ mod material_ui;
 mod material_visual_probe;
 mod persistence_commands;
 mod runtime_commands;
+mod save_commands;
 mod view_commands;
 use crate::workspace::{Action, Side, Workspace};
 use eframe::{
@@ -262,6 +263,10 @@ pub struct SceneEditor {
     save_sequence: u64,
     save_receipt: Option<Value>,
     save_warning: Option<String>,
+    save_continuation: Option<save_commands::AfterSave>,
+    save_dialog_continuation: save_commands::Continuation,
+    #[cfg(test)]
+    save_shader_reset_failure: Option<String>,
     creation_export: crate::creation_export::Controller,
     export_context: Option<egui::Context>,
     export_dialog: bool,
@@ -376,6 +381,8 @@ impl SceneEditor {
             ctx.run_ui(egui::RawInput::default(), |ui| {
                 self.asset_begin_root_frame(&ctx);
                 self.asset_frame(&ctx, false);
+                self.recovery.poll(&ctx);
+                self.process_recovery_ack();
                 if self.asset_loading() {
                     ui.label("Loading project content…");
                 }
@@ -426,6 +433,10 @@ impl SceneEditor {
             save_sequence: 0,
             save_receipt: None,
             save_warning: None,
+            save_continuation: None,
+            save_dialog_continuation: Default::default(),
+            #[cfg(test)]
+            save_shader_reset_failure: None,
             creation_export: crate::creation_export::Controller::disabled(),
             export_context: None,
             export_dialog: false,
@@ -1035,6 +1046,9 @@ impl SceneEditor {
         let Some((id, result)) = self.recovery.take_ack() else {
             return;
         };
+        if self.asset_ops.save_recovery_ack(id, &result) {
+            return;
+        }
         let Some(transition) = self.recovery_transition.take() else {
             return;
         };
@@ -1360,28 +1374,7 @@ impl SceneEditor {
         }
     }
     fn save(&mut self) {
-        if let Err(error) = self.asset_root_guard() {
-            self.error = error;
-            return;
-        }
-        if !self.apply() {
-            return;
-        }
-        let path = self.session.path().map(|p| p.to_path_buf());
-        if let Some(path) = path {
-            match self.save_scene(path) {
-                Ok(()) => {
-                    if self.pending_recovery_drafts() {
-                        self.error="Scene saved, but unapplied fields remain. Cancel the close/New dialog and apply or reset the translation offset, or explicitly discard it.".into();
-                    } else {
-                        self.notice = "Scene saved.".into();
-                    }
-                }
-                Err(e) => self.error = e.to_string(),
-            }
-        } else {
-            self.dialog = Some(false);
-        }
+        self.save_with_continuation(save_commands::Continuation::SaveOnly);
     }
     fn history(&mut self, redo: bool) {
         if let Err(e) = self.guard() {
@@ -1473,6 +1466,7 @@ impl SceneEditor {
         }
     }
     fn replace_with_empty(&mut self) {
+        self.save_continuation = None;
         if self.asset_loading() {
             self.cancel_asset_work();
         }
@@ -1673,6 +1667,7 @@ impl SceneEditor {
             });
         });
     }
+    #[cfg(test)]
     fn asset_snapshot(&mut self) {
         self.content_search.key = None;
         let meshes = self
@@ -1700,100 +1695,6 @@ impl SceneEditor {
         if let (Some(path), Some(camera)) = (self.session.path(), self.navigation.camera) {
             self.workspace.remember_camera(path, camera);
         }
-    }
-    fn save_scene(&mut self, path: PathBuf) -> Result<(), String> {
-        self.save_scene_with_reset(path, |render| match render {
-            Some(render) => ruster_render::refresh_shader(render, ruster_render::default_shader()),
-            None => Ok(()),
-        })
-    }
-    // The injected reset keeps post-commit failure testable without a GPU. After
-    // Session::save succeeds this operation always completes its save boundary.
-    fn save_scene_with_reset(
-        &mut self,
-        path: PathBuf,
-        reset: impl FnOnce(Option<&eframe::egui_wgpu::RenderState>) -> Result<(), String>,
-    ) -> Result<(), String> {
-        self.asset_root_guard()?;
-        let parent = path
-            .parent()
-            .filter(|p| !p.as_os_str().is_empty())
-            .unwrap_or(std::path::Path::new("."))
-            .canonicalize()
-            .map_err(|e| e.to_string())?;
-        let old_root = self.asset_origin.clone();
-        if self.session.has_asset_references() && old_root.as_ref() != Some(&parent) {
-            return Err("Save As across asset roots is unavailable while scene or undo/redo history references project assets; save beside the existing project.".into());
-        }
-        let destination_store = if old_root.as_ref() != Some(&parent) {
-            Some(AssetStore::open(&parent).map_err(|e| e.to_string())?)
-        } else {
-            None
-        };
-        let sequence = self
-            .save_sequence
-            .checked_add(1)
-            .ok_or("save identity exhausted")?;
-        // snapshot_bytes is exactly Session's canonical save encoding, including
-        // history and behavior. Capture before writing; never infer a committed
-        // identity from a later disk read which could observe an external writer.
-        let bytes = self.session.snapshot_bytes().map_err(|e| e.to_string())?;
-        let digest = persistence_commands::document_hash(&bytes);
-        self.session.save(path).map_err(|e| e.to_string())?;
-        self.save_sequence = sequence;
-        self.save_warning = None;
-        if old_root.as_ref() != Some(&parent) {
-            // Catalog and shader revisions belong to their project root. A
-            // different root can have identical counters, so retire the old
-            // command/worker incarnation only after the disk save commits.
-            self.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
-            self.creation_export.cancel();
-            let old = std::mem::replace(&mut self.assets, destination_store);
-            self.asset_ops.queue_store(old);
-            self.asset_snapshot();
-            match reset(self.render.as_ref()) {
-                Ok(()) => {
-                    self.shader_revision = 0;
-                    self.shader_builtin = true;
-                    self.shader_notice = "Built-in scene shader".into();
-                }
-                Err(error) => {
-                    let warning = format!(
-                        "Scene saved; viewport shader reset failed: {}",
-                        persistence_commands::bounded(&error)
-                    );
-                    self.shader_notice = warning.clone();
-                    self.error = warning.clone();
-                    self.save_warning = Some(warning);
-                }
-            }
-            self.retire_reset_assets();
-            self.observe_runtime();
-        }
-        self.asset_origin = Some(parent);
-        self.recovered_origin = None;
-        self.draft_generation = self.draft_generation.wrapping_add(1);
-        if let Some(path) = self.session.path() {
-            self.workspace.remember(path);
-        }
-        self.remember_camera();
-        self.workspace.flush();
-        self.external.saved(&self.session, self.generation);
-        if !self.pending_recovery_drafts() {
-            self.recovery.retire();
-        } else {
-            self.notice="Scene saved; unapplied fields remain. Apply or reset the translation offset before closing, or explicitly discard it.".into();
-        }
-        self.save_receipt = Some(json!({
-            "committed": true,
-            "persistence_token": self.persistence_token(),
-            "revision": self.session.scene().revision.to_string(),
-            "path": self.session.path().map(|path| persistence_commands::bounded(&path.display().to_string())),
-            "document_sha256": digest,
-            "document_bytes": bytes.len(),
-            "warning": self.save_warning,
-        }));
-        Ok(())
     }
     fn assign_mesh(&mut self, mesh: Option<String>) -> Result<u64, String> {
         let id = self.selected.clone().ok_or("Select an object first")?;
@@ -3381,6 +3282,7 @@ impl SceneEditor {
         }
     }
     fn request_new(&mut self) {
+        self.save_continuation = None;
         if self.asset_loading() {
             self.cancel_asset_work();
         }
@@ -3424,6 +3326,7 @@ impl SceneEditor {
                 Action::New | Action::Open | Action::Save | Action::SaveAs
             )
         {
+            self.save_continuation = None;
             if !self.asset_loading() {
                 self.asset_ops.cancel();
             }
@@ -3452,6 +3355,7 @@ impl SceneEditor {
             Action::Export => self.open_export_dialog(),
             Action::SaveAs => {
                 if self.apply() {
+                    self.save_dialog_continuation = save_commands::Continuation::SaveOnly;
                     self.dialog = Some(false);
                 }
             }
@@ -4123,10 +4027,7 @@ impl SceneEditor {
                     self.confirm_focused = Some("new");
                 }
                 if save.clicked() {
-                    self.save();
-                    if !self.session.is_dirty() && !self.pending_recovery_drafts() {
-                        self.replace_with_empty();
-                    }
+                    self.save_with_continuation(save_commands::Continuation::ThenNew);
                 }
                 if ui.button("Discard and create new scene").clicked() {
                     self.replace_with_empty();
@@ -4164,10 +4065,7 @@ impl SceneEditor {
                                 Err(error)=>self.error=error.to_string()
                             }
                         } else {
-                            match self.save_scene(path) {
-                                Ok(())=>{self.dialog=None;if self.close_pending && !self.pending_recovery_drafts() {self.close_approved=true;}self.notice="Scene saved.".into();if self.new_scene_pending && !self.pending_recovery_drafts() {self.replace_with_empty();}},
-                                Err(e)=>self.error=e.to_string()
-                            }
+                            self.start_human_save(path, self.save_dialog_continuation);
                         }
                     }
                     if ui.button("Cancel scene dialog").clicked()||cancel {self.dialog=None;self.path_focused=false;}
@@ -4206,10 +4104,7 @@ impl SceneEditor {
                     self.confirm_focused = Some("close");
                 }
                 if save.clicked() {
-                    self.save();
-                    if !self.session.is_dirty() && !self.pending_recovery_drafts() {
-                        self.close_approved = true;
-                    }
+                    self.save_with_continuation(save_commands::Continuation::ThenClose);
                 }
                 if ui.button("Discard and close scene").clicked() {
                     self.close_approved = true;
@@ -4236,6 +4131,7 @@ impl SceneEditor {
         self.close_finalization_ui(&ctx);
         // Final authorization follows every human dialog/cancel/close action.
         self.asset_frame(&ctx, true);
+        self.finish_save_continuation();
         self.start_close_cleanup();
         if self.close_shutdown {
             self.asset_shutdown();
@@ -4267,7 +4163,10 @@ impl eframe::App for Host {
         #[cfg(unix)]
         if let Some(bridge) = &mut self.bridge {
             if bridge.dispatch_request(|nonce, op, args, lease| {
-                if asset_commands::supported(op) {
+                if op == "scene_save" {
+                    self.editor
+                        .dispatch_save_request(ui.ctx(), nonce, &args, lease);
+                } else if asset_commands::supported(op) {
                     self.editor
                         .dispatch_asset_request(ui.ctx(), nonce, op, args, lease);
                 } else {
@@ -4996,6 +4895,7 @@ mod tests {
             ],
         );
         assert!(!editor.behavior.pending(), "{}", editor.error);
+        editor.test_finish_asset_work();
         assert!(!editor.session.is_dirty());
         let reopened = Session::open(path).unwrap();
         assert_eq!(reopened.authoring(), editor.session.authoring());

@@ -46,9 +46,10 @@ enum Phase {
     Prepared,
     CommitQueued,
     Publishing,
+    FollowingUp,
     Cancelling,
 }
-enum Reply {
+pub(super) enum Reply {
     Human,
     #[cfg(unix)]
     Agent {
@@ -88,7 +89,7 @@ impl Reply {
             }
         }
     }
-    fn finish(self, editor: &mut SceneEditor, outcome: Outcome) {
+    pub(super) fn finish(self, editor: &mut SceneEditor, outcome: Outcome) {
         match self {
             Self::Human => {
                 if let Err((_, message)) = outcome {
@@ -125,6 +126,22 @@ struct Active {
     reply: Option<Reply>,
     cancel: Option<Error>,
 }
+struct SaveFollowup {
+    recovery_request: Option<u64>,
+    result: Option<Result<(), String>>,
+    generation: u64,
+    sequence: u64,
+    revision: u64,
+}
+struct Saving {
+    job: u64,
+    phase: Phase,
+    pin: save_commands::Pin,
+    continuation: save_commands::Continuation,
+    followup: Option<SaveFollowup>,
+    reply: Option<Reply>,
+    cancel: Option<Error>,
+}
 pub(super) struct OpenIntent {
     pub root: PathBuf,
     pub seed_preview: bool,
@@ -147,6 +164,8 @@ pub(super) struct Controller {
     worker: Option<Worker>,
     active: Option<Active>,
     opening: Option<Opening>,
+    saving: Option<Saving>,
+    save_request: Option<Box<crate::asset_save::Request>>,
     request: Option<AssetRequest>,
     retired: Option<RetiredAssets>,
     retiring: bool,
@@ -166,6 +185,8 @@ impl Controller {
     fn pending(&self) -> bool {
         self.active.is_some()
             || self.opening.is_some()
+            || self.saving.is_some()
+            || self.save_request.is_some()
             || self.request.is_some()
             || self.retired.is_some()
             || self.retiring
@@ -179,7 +200,12 @@ impl Controller {
         self.restart_after_retirement = self.disconnected;
     }
     fn cancellable(&self) -> bool {
-        self.opening.as_ref().is_some_and(|open| !open.cancelled)
+        self.saving.as_ref().is_some_and(|save| {
+            matches!(
+                save.phase,
+                Phase::Submitting | Phase::Preparing | Phase::Prepared
+            )
+        }) || self.opening.as_ref().is_some_and(|open| !open.cancelled)
             || self.active.as_ref().is_some_and(|a| {
                 matches!(
                     a.phase,
@@ -188,7 +214,13 @@ impl Controller {
             })
     }
     pub fn publishing(&self) -> bool {
-        self.active
+        self.saving.as_ref().is_some_and(|save| {
+            matches!(
+                save.phase,
+                Phase::CommitQueued | Phase::Publishing | Phase::FollowingUp
+            )
+        }) || self
+            .active
             .as_ref()
             .is_some_and(|a| matches!(a.phase, Phase::CommitQueued | Phase::Publishing))
     }
@@ -212,6 +244,112 @@ impl Controller {
                 Some(Worker::start(ctx.clone()).map_err(|e| error("asset_error", e.to_string()))?);
         }
         Ok(())
+    }
+    pub(super) fn begin_save(
+        &mut self,
+        ctx: &egui::Context,
+        request: Box<crate::asset_save::Request>,
+        pin: save_commands::Pin,
+        continuation: save_commands::Continuation,
+        reply: Reply,
+    ) -> Result<(), (Error, Box<crate::asset_save::Request>, Reply)> {
+        let failure = if self.busy() {
+            Some(error(
+                "asset_busy",
+                "Another content or Save operation is active.",
+            ))
+        } else {
+            self.ensure_worker(ctx).err()
+        };
+        if let Some(failure) = failure {
+            return Err((failure, request, reply));
+        }
+        let Some(job) = self.next.checked_add(1) else {
+            return Err((
+                error("save_error", "Save job identity exhausted"),
+                request,
+                reply,
+            ));
+        };
+        self.next = job;
+        self.saving = Some(Saving {
+            job,
+            phase: Phase::Submitting,
+            pin,
+            continuation,
+            followup: None,
+            reply: Some(reply),
+            cancel: None,
+        });
+        self.save_request = Some(request);
+        self.status = "Preparing Save…".into();
+        Ok(())
+    }
+    pub(super) fn retire_unsent_save(&mut self, request: Box<crate::asset_save::Request>) {
+        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+        assert!(retired.save_request.is_none());
+        retired.save_request = Some(request);
+        self.retired_frame = self.root_frame;
+    }
+    pub(super) fn merge_save_retirement(&mut self, returned: RetiredAssets) {
+        let retired = self.retired.get_or_insert_with(RetiredAssets::default);
+        let RetiredAssets {
+            store,
+            request,
+            completion,
+            maps,
+            save_request,
+            saved,
+            session,
+        } = returned;
+        if let Some(store) = store {
+            assert!(retired.store.is_none());
+            retired.store = Some(store);
+        }
+        if let Some(request) = request {
+            assert!(retired.request.is_none());
+            retired.request = Some(request);
+        }
+        if let Some(completion) = completion {
+            assert!(retired.completion.is_none());
+            retired.completion = Some(completion);
+        }
+        if let Some(request) = save_request {
+            assert!(retired.save_request.is_none());
+            retired.save_request = Some(request);
+        }
+        if let Some(saved) = saved {
+            assert!(retired.saved.is_none());
+            retired.saved = Some(saved);
+        }
+        if let Some(session) = session {
+            assert!(retired.session.is_none());
+            retired.session = Some(session);
+        }
+        for (slot, maps) in maps.into_iter().enumerate() {
+            if !maps.meshes.is_empty() || !maps.textures.is_empty() {
+                assert!(
+                    retired.maps[slot].meshes.is_empty() && retired.maps[slot].textures.is_empty()
+                );
+                retired.maps[slot] = maps;
+            }
+        }
+        self.retired_frame = self.root_frame;
+    }
+    fn reject_save(&mut self, editor: &mut SceneEditor, failure: Error) {
+        if let Some(save) = &mut self.saving {
+            if let Some(reply) = save.reply.take() {
+                reply.finish(editor, Err(failure.clone()));
+            }
+            save.phase = Phase::Cancelling;
+            save.continuation = save_commands::Continuation::SaveOnly;
+            save.cancel = Some(failure.clone());
+        }
+        self.status = failure.1;
+        if let Some(request) = self.save_request.take() {
+            self.retire_unsent_save(request);
+            self.saving = None;
+        }
     }
     fn begin(
         &mut self,
@@ -256,6 +394,18 @@ impl Controller {
         Ok(())
     }
     pub fn cancel(&mut self) {
+        if let Some(save) = &mut self.saving {
+            save.continuation = save_commands::Continuation::SaveOnly;
+            if !matches!(
+                save.phase,
+                Phase::CommitQueued | Phase::Publishing | Phase::FollowingUp
+            ) {
+                save.cancel = Some(error(
+                    "save_cancelled",
+                    "Save preparation cancelled; the current document was preserved.",
+                ));
+            }
+        }
         if let Some(opening) = &mut self.opening {
             opening.cancelled = true;
         }
@@ -291,7 +441,33 @@ impl Controller {
         self.disconnected = true;
         self.opening = None;
         editor.pending_asset_open = None;
-        if self.active.is_none() {
+        let handled_save = self.saving.is_some();
+        if self
+            .saving
+            .as_ref()
+            .is_some_and(|save| save.followup.is_some())
+        {
+            editor.append_save_warning("content worker stopped after the scene committed; reopen the scene before further content work");
+            self.status = "Scene saved; finishing cleanup after content worker failure…".into();
+        } else if let Some(mut save) = self.saving.take() {
+            let message = if matches!(
+                save.phase,
+                Phase::CommitQueued | Phase::Publishing | Phase::FollowingUp
+            ) {
+                "Save worker disconnected after authorization; publication may have committed. Inspect or reopen before retrying."
+            } else {
+                "Save worker disconnected before publication; the current document was preserved."
+            };
+            if let Some(reply) = save.reply.take() {
+                reply.finish(editor, Err(error("save_error", message)));
+            }
+            editor.error = message.into();
+            self.status = message.into();
+        }
+        if let Some(request) = self.save_request.take() {
+            self.retire_unsent_save(request);
+        }
+        if self.active.is_none() && !handled_save {
             self.status="Asset retirement worker disconnected; resources are retained until cleanup handoff completes.".into();
             editor.error = self.status.clone();
         }
@@ -333,6 +509,78 @@ impl Controller {
             _ => return,
         };
         match event {
+            Event::SavePrepared { job, result } => {
+                if self.saving.as_ref().is_some_and(|save| save.job == job) {
+                    match result {
+                        Ok(()) => {
+                            if let Some(save) = &mut self.saving {
+                                if save.phase == Phase::Preparing {
+                                    save.phase = Phase::Prepared;
+                                }
+                            }
+                        }
+                        Err(failure) => {
+                            let mut save = self.saving.take().unwrap();
+                            if let Some(reply) = save.reply.take() {
+                                reply.finish(editor, Err((failure.code().into(), failure.message)));
+                            }
+                            self.status = "Save could not be prepared.".into();
+                        }
+                    }
+                }
+            }
+            Event::Saved { job, result } => {
+                let matched = self
+                    .saving
+                    .as_ref()
+                    .is_some_and(|save| save.job == job && save.phase == Phase::Publishing);
+                if !matched {
+                    if let Ok(saved) = result {
+                        self.merge_save_retirement(RetiredAssets {
+                            saved: Some(saved),
+                            ..Default::default()
+                        });
+                    }
+                    editor.error = "Unexpected Save completion retained for worker cleanup; inspect the destination before retrying.".into();
+                } else {
+                    let mut save = self.saving.take().unwrap();
+                    match result {
+                        Err(failure) => {
+                            if let Some(reply) = save.reply.take() {
+                                reply.finish(editor, Err((failure.code().into(), failure.message)));
+                            }
+                        }
+                        Ok(saved)
+                            if editor.validate_save_pin(&save.pin).is_err()
+                                || (save.pin.accepted_root.as_deref()
+                                    != Some(saved.root.as_path())
+                                    && saved.destination_store.is_none()) =>
+                        {
+                            self.merge_save_retirement(RetiredAssets {
+                                saved: Some(saved),
+                                ..Default::default()
+                            });
+                            if let Some(reply) = save.reply.take() {
+                                reply.finish(editor, Err(error("save_error", "Save committed but its document identity could not be adopted; inspect or reopen before retrying.")));
+                            }
+                        }
+                        Ok(saved) => {
+                            let (returned, request) = editor.adopt_saved(*saved, &save.pin);
+                            self.merge_save_retirement(returned);
+                            save.phase = Phase::FollowingUp;
+                            save.followup = Some(SaveFollowup {
+                                recovery_request: request,
+                                result: request.is_none().then_some(Ok(())),
+                                generation: editor.generation,
+                                sequence: editor.save_sequence,
+                                revision: editor.session.scene().revision,
+                            });
+                            self.saving = Some(save);
+                        }
+                    }
+                    self.status = "Finishing Save…".into();
+                }
+            }
             Event::Prepared { job } => {
                 if let Some(active) = self
                     .active
@@ -343,6 +591,13 @@ impl Controller {
                 }
             }
             Event::Discarded { job } => {
+                if self
+                    .saving
+                    .as_ref()
+                    .is_some_and(|save| save.job == job && save.phase == Phase::Cancelling)
+                {
+                    self.saving = None;
+                }
                 if self
                     .active
                     .as_ref()
@@ -569,6 +824,62 @@ impl Controller {
             },
         }
     }
+    pub(super) fn save_recovery_ack(&mut self, request: u64, result: &Result<(), String>) -> bool {
+        if let Some(followup) = self.saving.as_mut().and_then(|save| save.followup.as_mut()) {
+            if followup.recovery_request == Some(request) {
+                followup.result = Some(match result {
+                    Ok(()) => Ok(()),
+                    Err(message) => Err(persistence_commands::bounded(message)),
+                });
+                return true;
+            }
+        }
+        false
+    }
+    fn finish_saved_followup(&mut self, editor: &mut SceneEditor) {
+        if self.retired.is_some() || self.retiring {
+            return;
+        }
+        if !self.saving.as_ref().is_some_and(|save| {
+            save.followup
+                .as_ref()
+                .is_some_and(|followup| followup.result.is_some())
+        }) {
+            return;
+        }
+        let mut save = self.saving.take().unwrap();
+        let followup = save.followup.take().unwrap();
+        if (followup.generation, followup.sequence, followup.revision)
+            != (
+                editor.generation,
+                editor.save_sequence,
+                editor.session.scene().revision,
+            )
+        {
+            editor.append_save_warning("document state changed during committed Save cleanup; automatic New or Close was cancelled");
+            save.continuation = save_commands::Continuation::SaveOnly;
+        }
+        editor.finalize_saved_followup(save.continuation, followup.result.unwrap());
+        if editor.save_warning.is_some() {
+            if matches!(
+                editor.queued_action,
+                Some(Action::New | Action::Open | Action::Save | Action::SaveAs)
+            ) {
+                editor.queued_action = None;
+            }
+            if self.close_after {
+                editor.notice = format!(
+                    "{} Stayed in this scene; Close was not performed.",
+                    editor.notice
+                );
+            }
+            self.close_after = false;
+        }
+        if let Some(reply) = save.reply.take() {
+            reply.finish(editor, Ok(editor.saved_result()));
+        }
+        self.status = "Scene saved.".into();
+    }
     fn frame(&mut self, editor: &mut SceneEditor, ctx: &egui::Context, authorize: bool) {
         // The native host calls begin_root_frame before poll/new callbacks.
         // Non-UI model clients have no callback ownership to fence.
@@ -579,6 +890,7 @@ impl Controller {
         if self.retired.is_some() && self.retired_frame.is_none() {
             self.retired_frame = self.root_frame;
         }
+        self.finish_saved_followup(editor);
         if self.disconnected {
             // Keep the failed worker's cleanup drainer alive while this live
             // root still owns payloads. Close or a genuinely adopted fresh root
@@ -602,6 +914,84 @@ impl Controller {
         }
         if !authorize {
             return;
+        }
+        if let Some(save) = &self.saving {
+            if !matches!(
+                save.phase,
+                Phase::CommitQueued | Phase::Publishing | Phase::FollowingUp | Phase::Cancelling
+            ) {
+                let failure = save
+                    .cancel
+                    .clone()
+                    .or_else(|| {
+                        save.reply.as_ref().is_some_and(Reply::expired).then(|| {
+                            error(
+                                "save_expired",
+                                "Save request expired before publication; no scene was saved.",
+                            )
+                        })
+                    })
+                    .or_else(|| {
+                        (!save.pin.permits_continuation(save.continuation)).then(|| {
+                            error(
+                                "stale_persistence",
+                                "Save continuation changed during preparation",
+                            )
+                        })
+                    })
+                    .or_else(|| editor.validate_save_pin(&save.pin).err())
+                    .or_else(|| editor.save_owner_guard().err());
+                if let Some(failure) = failure {
+                    self.reject_save(editor, failure);
+                }
+            }
+        }
+        if self
+            .saving
+            .as_ref()
+            .is_some_and(|save| save.phase == Phase::Prepared)
+        {
+            if self
+                .saving
+                .as_mut()
+                .and_then(|save| save.reply.as_mut())
+                .is_some_and(Reply::authorize)
+            {
+                self.saving.as_mut().unwrap().phase = Phase::CommitQueued;
+                self.status = "Saving scene…".into();
+            } else {
+                self.reject_save(
+                    editor,
+                    error(
+                        "save_expired",
+                        "Save request expired before publication; no scene was saved.",
+                    ),
+                );
+            }
+        }
+        if let Some(save) = &mut self.saving {
+            if let Some(worker) = &mut self.worker {
+                match save.phase {
+                    Phase::Submitting => {
+                        if let Some(request) = self.save_request.take() {
+                            match worker.try_prepare_save(save.job, request) {
+                                Ok(()) => save.phase = Phase::Preparing,
+                                Err(
+                                    TrySendError::Full(request)
+                                    | TrySendError::Disconnected(request),
+                                ) => self.save_request = Some(request),
+                            }
+                        }
+                    }
+                    Phase::Cancelling => {
+                        let _ = worker.try_discard(save.job);
+                    }
+                    Phase::CommitQueued if worker.try_publish(save.job).is_ok() => {
+                        save.phase = Phase::Publishing;
+                    }
+                    _ => (),
+                }
+            }
         }
         if !self.busy() && editor.pending_asset_open.is_some() {
             if let Err((code, message)) = self.ensure_worker(ctx) {
@@ -777,7 +1167,7 @@ impl SceneEditor {
             else if let Some(open) = &self.asset_ops.opening { if open.cancelled { "cancelling" } else { "opening" } }
             else if self.asset_ops.retired.is_some() || self.asset_ops.retiring { "retiring" }
             else if self.asset_ops.publishing() { "publishing" }
-            else if self.asset_ops.active.is_some() { "preparing" }
+            else if self.asset_ops.active.is_some() || self.asset_ops.saving.is_some() { "preparing" }
             else if self.asset_ops.disconnected { "failed" } else { "idle" }
         })
     }
@@ -809,6 +1199,7 @@ impl SceneEditor {
         Ok(())
     }
     pub(super) fn cancel_asset_work(&mut self) {
+        self.save_continuation = None;
         if self.pending_asset_open.take().is_some() {
             self.asset_ops.status = "Content loading cancelled; Retry when ready.".into();
             self.notice = self.asset_ops.status.clone();
@@ -1018,7 +1409,32 @@ impl SceneEditor {
             }
         }
     }
+    pub(super) fn revoke_save_continuation(&mut self) {
+        self.save_continuation = None;
+        if let Some(save) = &mut self.asset_ops.saving {
+            save.continuation = save_commands::Continuation::SaveOnly;
+        }
+        self.asset_ops.close_after = false;
+    }
     pub(super) fn asset_frame(&mut self, ctx: &egui::Context, authorize: bool) {
+        let continuation = self.save_continuation.is_some()
+            || self
+                .asset_ops
+                .saving
+                .as_ref()
+                .is_some_and(|save| save.continuation != save_commands::Continuation::SaveOnly);
+        let revoke_key_available = self.dialog.is_none()
+            && !self.asset_dialog
+            && !self.export_dialog
+            && !self.rename_pending
+            && !self.new_scene_pending
+            && !self.close_pending
+            && !self.close_approved
+            && !self.workspace.settings_open
+            && !self.recovery.open
+            && self.recovery_transition.is_none()
+            && !self.manipulation.active()
+            && !ctx.egui_wants_keyboard_input();
         let cancel_key_available = if self.asset_loading() {
             self.dialog.is_none()
                 && !self.export_dialog
@@ -1030,6 +1446,8 @@ impl SceneEditor {
                 && !self.workspace.settings_open
                 && !self.recovery.open
                 && self.recovery_transition.is_none()
+        } else if self.asset_ops.saving.is_some() {
+            self.save_owner_guard().is_ok()
         } else {
             self.asset_owner_guard(false).is_ok()
         };
@@ -1040,6 +1458,12 @@ impl SceneEditor {
             && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
             self.cancel_asset_work();
+        } else if authorize
+            && continuation
+            && revoke_key_available
+            && ctx.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
+        {
+            self.revoke_save_continuation();
         }
         let mut controller = std::mem::take(&mut self.asset_ops);
         controller.frame(self, ctx, authorize);
@@ -1101,6 +1525,58 @@ impl SceneEditor {
         self.asset_ops = controller;
     }
     #[cfg(unix)]
+    pub(super) fn dispatch_save_request(
+        &mut self,
+        ctx: &egui::Context,
+        nonce: &str,
+        args: &Value,
+        lease: crate::bridge::RequestLease,
+    ) {
+        let reply = Reply::Agent {
+            nonce: nonce.into(),
+            lease: Some(lease),
+            commit: None,
+        };
+        if self.asset_busy() {
+            reply.finish(
+                self,
+                Err(error(
+                    "asset_busy",
+                    "Content or Save work is already active.",
+                )),
+            );
+            return;
+        }
+        let token = format!("{nonce}:scene:{}", self.generation);
+        let capture = self
+            .admit_agent_save(&token, args)
+            .and_then(|(path, grant, fresh)| {
+                self.capture_save(
+                    path,
+                    Some(grant),
+                    fresh,
+                    save_commands::Continuation::SaveOnly,
+                )
+            });
+        match capture {
+            Err(failure) => reply.finish(self, Err(failure)),
+            Ok((request, pin)) => {
+                let mut controller = std::mem::take(&mut self.asset_ops);
+                if let Err((failure, request, reply)) = controller.begin_save(
+                    ctx,
+                    request,
+                    pin,
+                    save_commands::Continuation::SaveOnly,
+                    reply,
+                ) {
+                    reply.finish(self, Err(failure));
+                    controller.retire_unsent_save(request);
+                }
+                self.asset_ops = controller;
+            }
+        }
+    }
+    #[cfg(unix)]
     pub(super) fn dispatch_asset_request(
         &mut self,
         ctx: &egui::Context,
@@ -1154,6 +1630,7 @@ impl SceneEditor {
         self.asset_outcome(op, adoption.result)
     }
     pub(super) fn asset_close_guard(&mut self) -> bool {
+        self.save_continuation = None;
         self.pending_asset_open = None;
         if self.asset_ops.busy() {
             self.asset_ops.close_after = true;
@@ -1193,7 +1670,7 @@ impl SceneEditor {
         }
     }
     pub(super) fn asset_progress_ui(&mut self, ui: &mut egui::Ui) {
-        if self.asset_busy() {
+        if self.asset_busy() || self.save_continuation.is_some() {
             ui.horizontal_wrapped(|ui| {
                 ui.spinner();
                 ui.label(if self.pending_asset_open.is_some() {
@@ -1201,6 +1678,14 @@ impl SceneEditor {
                 } else {
                     &self.asset_ops.status
                 });
+                if (self.save_continuation.is_some()
+                    || self.asset_ops.saving.as_ref().is_some_and(|save| {
+                        save.continuation != save_commands::Continuation::SaveOnly
+                    }))
+                    && ui.button("Keep editing after Save").clicked()
+                {
+                    self.revoke_save_continuation();
+                }
                 if (self.pending_asset_open.is_some() || self.asset_ops.cancellable())
                     && ui.button("Cancel content work").clicked()
                 {
@@ -1222,6 +1707,8 @@ mod tests {
                 ctx.run_ui(egui::RawInput::default(), |_ui| {
                     editor.asset_begin_root_frame(ctx);
                     editor.asset_frame(ctx, false);
+                    editor.recovery.poll(ctx);
+                    editor.process_recovery_ack();
                     if editor.pending_asset_open.is_some() {
                         editor.asset_frame(ctx, true);
                     }
@@ -1234,6 +1721,11 @@ mod tests {
             // Prepared stays untouched until the case explicitly authorizes it.
             if editor.asset_ops.active.as_ref().is_some_and(|active| {
                 matches!(active.phase, Phase::CommitQueued | Phase::Cancelling)
+            }) || editor.asset_ops.saving.as_ref().is_some_and(|save| {
+                matches!(
+                    save.phase,
+                    Phase::CommitQueued | Phase::Cancelling | Phase::FollowingUp
+                )
             }) {
                 editor.asset_frame(ctx, true);
             }
@@ -1250,6 +1742,456 @@ mod tests {
             editor.asset_ops.disconnected, editor.asset_ops.shutting_down,
             editor.asset_ops.worker.as_ref().is_some_and(Worker::is_finished), editor.asset_ops.status
         );
+    }
+    fn escape_save_continuation(editor: &mut SceneEditor, ctx: &egui::Context) {
+        ctx.run_ui(
+            egui::RawInput {
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Escape,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                editor.asset_begin_root_frame(ctx);
+                editor.asset_frame(ctx, false);
+                editor.recovery.poll(ctx);
+                editor.process_recovery_ack();
+                ui.label("Finishing Save…");
+                editor.asset_frame(ctx, true);
+            },
+        )
+        .drop_without_applying_deltas();
+    }
+    fn exercise_save_case(
+        editor: &mut SceneEditor,
+        ctx: &egui::Context,
+        case: &str,
+        root: &std::path::Path,
+    ) {
+        use save_commands::Continuation;
+        editor.export_context = Some(ctx.clone());
+        editor.save_grant = Some(persistence_commands::SaveGrant::new(root).unwrap());
+        if case == "save_symlink_root" {
+            let link = root.join("retained-save-link");
+            std::os::unix::fs::symlink(root, &link).unwrap();
+            editor.asset_origin = Some(link);
+            editor.recovered_origin = Some(root.join("original.json"));
+            editor
+                .session
+                .set_mesh(
+                    editor.session.scene().revision,
+                    "left",
+                    Some("triangle".into()),
+                )
+                .unwrap();
+        }
+        editor
+            .session
+            .rename(
+                editor.session.scene().revision,
+                "left",
+                Some("Saved through worker".into()),
+            )
+            .unwrap();
+        editor.sync_draft();
+        let revision = editor.session.scene().revision;
+        let generation = editor.generation;
+        let identity = editor.assets.as_ref().unwrap().state_identity();
+        let accepted = editor.resolved["triangle"].clone();
+        let associated = editor.session.path().unwrap().to_path_buf();
+        let before = std::fs::read(&associated).unwrap();
+        let human = matches!(
+            case,
+            "save_human_offset"
+                | "save_human_offset_cancel"
+                | "save_human_offset_revoke"
+                | "save_then_new"
+                | "save_then_close"
+                | "save_revoke"
+                | "save_revoke_after"
+                | "save_warning_close"
+                | "save_terminal_prepared"
+                | "save_terminal_publishing"
+                | "save_recovery_error_new"
+                | "save_recovery_error_close"
+        );
+        let continuation = match case {
+            "save_then_new" | "save_revoke" | "save_revoke_after" | "save_recovery_error_new" => {
+                Continuation::ThenNew
+            }
+            "save_then_close"
+            | "save_human_offset"
+            | "save_human_offset_revoke"
+            | "save_human_offset_cancel"
+            | "save_warning_close"
+            | "save_recovery_error_close" => Continuation::ThenClose,
+            _ => Continuation::SaveOnly,
+        };
+        let destination = if case == "save_warning_close" {
+            let other = root.join("destination");
+            std::fs::create_dir(&other).unwrap();
+            editor.save_shader_reset_failure = Some("injected committed warning".into());
+            other.join("saved.json")
+        } else if case == "save_symlink_root" {
+            root.join("normalized.json")
+        } else {
+            associated.clone()
+        };
+        let delayed_recovery =
+            case.starts_with("save_recovery_error_") || case == "save_committed_disconnect";
+        let mut release_recovery = None;
+        if delayed_recovery {
+            let store = crate::recovery::Store::open(root.join("save-recovery")).unwrap();
+            editor.recovery = crate::recovery_ui::RecoveryUi::at(store);
+            let snapshot = editor.recovery_snapshot();
+            editor.recovery.checkpoint(snapshot);
+            if case != "save_committed_disconnect" {
+                let record = std::fs::read_dir(root.join("save-recovery"))
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .find(|path| {
+                        path.file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .starts_with("window-")
+                    })
+                    .unwrap()
+                    .join("checkpoint.json");
+                std::fs::write(record, "external checkpoint replacement").unwrap();
+            }
+            let snapshot = editor.recovery_snapshot();
+            let (started, entered) = std::sync::mpsc::channel();
+            let (release, gate) = std::sync::mpsc::channel();
+            editor
+                .recovery
+                .dispatch(Box::new(move || {
+                    started.send(()).unwrap();
+                    gate.recv_timeout(Duration::from_secs(3)).unwrap();
+                    snapshot
+                }))
+                .unwrap();
+            entered.recv_timeout(Duration::from_secs(3)).unwrap();
+            release_recovery = Some(release);
+        }
+        let fault = if matches!(
+            case,
+            "save_terminal_prepared" | "save_terminal_publishing" | "save_committed_disconnect"
+        ) {
+            let after = if case == "save_committed_disconnect" {
+                2
+            } else {
+                1
+            };
+            let (worker, barrier) = Worker::panic_after_n_events_for_test(after).unwrap();
+            editor.asset_ops.worker = Some(worker);
+            Some(barrier)
+        } else {
+            None
+        };
+        let mut observe: Option<Box<dyn FnMut() -> Option<Value>>> = None;
+        if human {
+            if matches!(
+                case,
+                "save_human_offset" | "save_human_offset_cancel" | "save_human_offset_revoke"
+            ) {
+                editor.manipulation.delta[0] = "2.25".into();
+            }
+            editor.start_human_save(destination.clone(), continuation);
+        } else {
+            let deadline = if case == "save_expired" {
+                Instant::now() - Duration::from_secs(1)
+            } else {
+                Instant::now() + Duration::from_secs(2)
+            };
+            let (lease, receiver) = crate::bridge::preparing_test_lease(deadline);
+            observe = Some(Box::new(receiver));
+            let mut args = json!({"expected_session_token":format!("test:scene:{generation}"),
+                "expected_revision":revision.to_string(),"expected_persistence_token":editor.persistence_token()});
+            if case == "save_symlink_root" {
+                args["filename"] = json!("normalized.json");
+            }
+            if case == "save_prepare_failure" {
+                std::fs::create_dir(root.join("blocked.json")).unwrap();
+                args["filename"] = json!("blocked.json");
+            }
+            editor.dispatch_save_request(ctx, "test", &args, lease);
+        }
+        assert!(editor.asset_ops.saving.is_some());
+        editor.asset_frame(ctx, true);
+        if matches!(case, "save_terminal_prepared" | "save_terminal_publishing") {
+            until(editor, ctx, |e| {
+                e.asset_ops
+                    .saving
+                    .as_ref()
+                    .is_some_and(|save| save.phase == Phase::Prepared)
+            });
+            if case == "save_terminal_publishing" {
+                editor.asset_frame(ctx, true);
+                assert!(editor.asset_publishing());
+            }
+            fault.unwrap().wait();
+            until(editor, ctx, |e| e.asset_ops.disconnected);
+            assert!(editor.error.starts_with("Save worker disconnected"));
+            assert_eq!(editor.asset_ops.status, editor.error);
+            assert_eq!(
+                editor.error.contains("publication may have committed"),
+                case == "save_terminal_publishing"
+            );
+            assert_eq!(std::fs::read(&associated).unwrap(), before);
+            assert!(editor.save_receipt.is_none());
+            editor.asset_shutdown();
+            until(editor, ctx, SceneEditor::asset_finished);
+            return;
+        }
+        if !matches!(case, "save_expired" | "save_prepare_failure") {
+            until(editor, ctx, |e| {
+                e.asset_ops
+                    .saving
+                    .as_ref()
+                    .is_some_and(|save| save.phase == Phase::Prepared)
+            });
+            assert_eq!(
+                std::fs::read(&associated).unwrap(),
+                before,
+                "preparation cannot publish"
+            );
+            if let Some(observe) = &mut observe {
+                assert!(observe().is_none());
+            }
+            match case {
+                "save_stale" => editor.generation = GENERATION.fetch_add(1, Ordering::Relaxed),
+                "save_draft" => {
+                    editor.draft.as_mut().unwrap().translation[0] = "new unfinished draft".into()
+                }
+                "save_cancel" => editor.cancel_asset_work(),
+                "save_close_prepared" => editor.request_close(),
+                "save_reply_loss" => {
+                    observe = None;
+                }
+                _ => (),
+            }
+            if case == "save_human_offset_cancel" {
+                ctx.run_ui(
+                    egui::RawInput {
+                        events: vec![egui::Event::Key {
+                            key: egui::Key::Escape,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers: egui::Modifiers::NONE,
+                        }],
+                        ..Default::default()
+                    },
+                    |ui| {
+                        editor.asset_begin_root_frame(ctx);
+                        ui.label("Preparing Save…");
+                        editor.asset_frame(ctx, true);
+                    },
+                )
+                .drop_without_applying_deltas();
+            } else {
+                editor.asset_frame(ctx, true);
+            }
+            if !matches!(
+                case,
+                "save_stale"
+                    | "save_draft"
+                    | "save_cancel"
+                    | "save_close_prepared"
+                    | "save_human_offset_cancel"
+            ) {
+                assert!(editor.asset_publishing());
+                assert_eq!(editor.guard().unwrap_err(), "asset_busy");
+                assert!(!editor.behavior_editable());
+                if case == "save_close_publishing" {
+                    editor.request_close();
+                }
+                if case == "save_recovery_error_new" {
+                    editor.queued_action = Some(Action::New);
+                    editor.process_queued_action();
+                    assert_eq!(editor.queued_action, Some(Action::New));
+                }
+                if matches!(case, "save_revoke" | "save_human_offset_revoke") {
+                    escape_save_continuation(editor, ctx);
+                    assert_eq!(
+                        editor.asset_ops.saving.as_ref().unwrap().continuation,
+                        Continuation::SaveOnly
+                    );
+                }
+                if case == "save_stale_after_commit" {
+                    editor.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
+                }
+                until(editor, ctx, |e| {
+                    e.asset_ops
+                        .saving
+                        .as_ref()
+                        .is_some_and(|save| save.followup.is_some())
+                        || e.asset_ops.saving.is_none()
+                });
+                if delayed_recovery {
+                    assert_eq!(editor.save_receipt.as_ref().unwrap()["committed"], true);
+                    assert_eq!(
+                        editor.save_receipt.as_ref().unwrap()["followup_pending"],
+                        true
+                    );
+                    assert!(editor.save_continuation.is_none());
+                    assert!(!editor.close_approved);
+                    if let Some(observe) = &mut observe {
+                        assert!(
+                            observe().is_none(),
+                            "reply must wait for actual recovery boundary ack"
+                        );
+                    }
+                    if case == "save_committed_disconnect" {
+                        fault.as_ref().unwrap().wait();
+                        until(editor, ctx, |e| e.asset_ops.disconnected);
+                        assert!(editor
+                            .asset_ops
+                            .saving
+                            .as_ref()
+                            .is_some_and(|save| save.followup.is_some()));
+                        assert_eq!(editor.save_receipt.as_ref().unwrap()["committed"], true);
+                    }
+                    release_recovery.take().unwrap().send(()).unwrap();
+                }
+                if let Some(retired) = &editor.asset_ops.retired {
+                    if case == "save_stale_after_commit" {
+                        assert!(retired.saved.is_some());
+                    } else {
+                        assert!(retired.session.is_some());
+                    }
+                } else {
+                    assert_eq!(case, "save_committed_disconnect");
+                    assert!(editor.asset_ops.disconnected);
+                }
+
+                editor.finish_save_continuation();
+                assert!(
+                    !editor.close_approved,
+                    "post-save continuation must wait for retirement"
+                );
+            }
+        }
+        if case == "save_revoke_after" {
+            assert!(editor
+                .asset_ops
+                .saving
+                .as_ref()
+                .is_some_and(|save| save.followup.is_some()));
+            assert!(editor.asset_ops.retired.is_some() || editor.asset_ops.retiring);
+            escape_save_continuation(editor, ctx);
+            assert!(editor.save_continuation.is_none());
+            assert!(editor
+                .asset_ops
+                .saving
+                .as_ref()
+                .is_none_or(|save| save.continuation == Continuation::SaveOnly));
+        }
+        until(editor, ctx, |e| !e.asset_busy());
+        let committed = !matches!(
+            case,
+            "save_expired"
+                | "save_prepare_failure"
+                | "save_stale"
+                | "save_draft"
+                | "save_cancel"
+                | "save_close_prepared"
+                | "save_human_offset_cancel"
+        );
+        let adopted = committed && case != "save_stale_after_commit";
+        assert_eq!(editor.save_receipt.is_some(), adopted, "{case}");
+        if committed {
+            assert_eq!(
+                Session::open(&destination).unwrap().scene().objects[0].display_name(),
+                "Saved through worker"
+            );
+        } else {
+            assert_eq!(std::fs::read(&associated).unwrap(), before);
+        }
+        if let Some(observe) = &mut observe {
+            let reply = observe();
+            if case == "save_expired" {
+                assert!(reply.is_none());
+            } else {
+                assert_eq!(reply.as_ref().unwrap()["ok"], adopted, "{reply:?}");
+            }
+        }
+        if adopted && case != "save_warning_close" {
+            assert_eq!(editor.generation, generation);
+            assert!(editor.assets.as_ref().unwrap().matches_identity(&identity));
+            assert!(Arc::ptr_eq(&editor.resolved["triangle"], &accepted));
+        }
+        if case == "save_symlink_root" {
+            assert_eq!(editor.asset_origin.as_deref(), Some(root));
+            assert!(editor.recovered_origin.is_none());
+        }
+        editor.finish_save_continuation();
+        match case {
+            "save_then_new" => {
+                editor.wait_recovery();
+                assert_ne!(editor.generation, generation);
+                assert!(editor.session.path().is_none());
+                editor.test_finish_asset_work();
+            }
+            "save_then_close" | "save_close_publishing" => assert!(editor.close_approved),
+            "save_warning_close" => {
+                assert!(!editor.close_approved);
+                assert!(editor.save_continuation.is_none());
+                assert!(editor.save_receipt.as_ref().unwrap()["warning"]
+                    .as_str()
+                    .unwrap()
+                    .contains("injected committed warning"));
+                assert!(editor.notice.contains("Stayed in this scene"));
+            }
+            "save_human_offset" | "save_human_offset_cancel" | "save_human_offset_revoke" => {
+                assert!(editor.manipulation.offset_pending());
+                assert!(editor.save_continuation.is_none());
+                assert!(!editor.close_approved);
+            }
+            "save_revoke" | "save_revoke_after" => {
+                assert_eq!(editor.generation, generation);
+                assert!(editor.session.path().is_some());
+            }
+            "save_recovery_error_agent"
+            | "save_recovery_error_new"
+            | "save_recovery_error_close"
+            | "save_committed_disconnect" => {
+                assert!(!editor.close_approved);
+                assert!(editor.save_continuation.is_none());
+                assert!(
+                    editor.queued_action.is_none(),
+                    "warning requires a fresh document action after review"
+                );
+                let receipt = editor.save_receipt.as_ref().unwrap();
+                assert_eq!(receipt["committed"], true);
+                assert_eq!(receipt["followup_pending"], false);
+                let warning = receipt["warning"].as_str().unwrap();
+                if case == "save_committed_disconnect" {
+                    assert!(warning.contains("content worker stopped after the scene committed"));
+                } else {
+                    assert!(warning.contains("recovery cleanup failed"));
+                }
+            }
+            "save_prepare_failure" => {
+                let (lease, mut response) =
+                    crate::bridge::preparing_test_lease(Instant::now() + Duration::from_secs(2));
+                let args = json!({"expected_session_token":format!("test:scene:{}",editor.generation),"expected_revision":revision.to_string(),"expected_persistence_token":editor.persistence_token()});
+                editor.dispatch_save_request(ctx, "test", &args, lease);
+                editor.test_finish_asset_work();
+                assert_eq!(
+                    response().unwrap()["ok"],
+                    true,
+                    "failed preparation must release the one candidate slot"
+                );
+            }
+            _ => (),
+        }
+        editor.asset_shutdown();
+        until(editor, ctx, SceneEditor::asset_finished);
     }
     fn exercise_open_case(
         editor: &mut SceneEditor,
@@ -1470,7 +2412,7 @@ mod tests {
     // app code. Only a later root-frame pass0 can hand its last map owner off.
     #[test]
     fn discarded_pass_resources_wait_for_later_root_frame_and_worker_ack() {
-        for case in ["replace", "close", "preview", "pending_reset"] {
+        for case in ["replace", "close", "preview", "pending_reset", "save"] {
             let ctx = egui::Context::default();
             let mut editor = SceneEditor::with_workspace(
                 Session::new(Scene::empty("retirement")).unwrap(),
@@ -1493,9 +2435,11 @@ mod tests {
                 editor.resolved.clone(),
                 BTreeMap::new(),
             ));
+            editor.export_context = Some(ctx.clone());
+            let save_root = tempfile::tempdir().unwrap();
             let generation = editor.generation;
             let key = editor.reset_assets.as_ref().unwrap().0;
-            let owners = if matches!(case, "replace" | "close") {
+            let owners = if matches!(case, "replace" | "close" | "save") {
                 3
             } else {
                 1
@@ -1533,6 +2477,62 @@ mod tests {
                                 editor.replace_with_empty();
                                 assert_ne!(editor.generation, generation);
                             }
+                            "save" => {
+                                editor.start_human_save(
+                                    save_root.path().join("saved.json"),
+                                    save_commands::Continuation::SaveOnly,
+                                );
+                                editor.asset_frame(&ctx, true);
+                                let deadline = Instant::now() + Duration::from_secs(3);
+                                while !editor
+                                    .asset_ops
+                                    .saving
+                                    .as_ref()
+                                    .is_some_and(|save| save.phase == Phase::Prepared)
+                                    && Instant::now() < deadline
+                                {
+                                    editor.asset_frame(&ctx, false);
+                                    std::thread::yield_now();
+                                }
+                                assert!(editor
+                                    .asset_ops
+                                    .saving
+                                    .as_ref()
+                                    .is_some_and(|save| save.phase == Phase::Prepared));
+                                editor.asset_frame(&ctx, true);
+                                while !editor
+                                    .asset_ops
+                                    .saving
+                                    .as_ref()
+                                    .is_some_and(|save| save.followup.is_some())
+                                    && Instant::now() < deadline
+                                {
+                                    editor.asset_frame(&ctx, false);
+                                    editor.recovery.poll(&ctx);
+                                    editor.process_recovery_ack();
+                                    if editor.asset_ops.saving.as_ref().is_some_and(|save| {
+                                        matches!(
+                                            save.phase,
+                                            Phase::CommitQueued | Phase::FollowingUp
+                                        )
+                                    }) {
+                                        editor.asset_frame(&ctx, true);
+                                    }
+                                    std::thread::yield_now();
+                                }
+                                assert!(editor
+                                    .asset_ops
+                                    .saving
+                                    .as_ref()
+                                    .is_some_and(|save| save.followup.is_some()));
+                                assert!(editor
+                                    .asset_ops
+                                    .retired
+                                    .as_ref()
+                                    .unwrap()
+                                    .session
+                                    .is_some());
+                            }
                             "preview" => {
                                 editor.accept_runtime_resources();
                                 assert!(editor.preview_assets.is_empty());
@@ -1555,6 +2555,9 @@ mod tests {
                     assert_eq!(ctx.cumulative_frame_nr(), 0);
                     assert!(editor.asset_ops.retired.is_some());
                     assert!(!editor.asset_ops.retiring);
+                    if case == "save" {
+                        assert!(editor.asset_ops.retired.as_ref().unwrap().session.is_some());
+                    }
                     // Fixed map roles plus the old pass0 callback, which
                     // FullOutput::append has not yet replaced during app.ui.
                     assert_eq!(weak.strong_count(), owners + 1);
@@ -1573,6 +2576,16 @@ mod tests {
                     assert!(ctx.cumulative_frame_nr() > 0);
                     editor.asset_begin_root_frame(&ctx);
                     editor.asset_frame(&ctx, false);
+                    editor.recovery.poll(&ctx);
+                    editor.process_recovery_ack();
+                    if editor
+                        .asset_ops
+                        .saving
+                        .as_ref()
+                        .is_some_and(|save| save.followup.is_some())
+                    {
+                        editor.asset_frame(&ctx, true);
+                    }
                 });
                 output.drop_without_applying_deltas();
                 std::thread::yield_now();
@@ -1580,9 +2593,18 @@ mod tests {
             assert!(!editor.asset_ops.busy());
             // No foreground owner remained after callback disposal. The sole
             // bundle moved through Worker::Retire and its acknowledgement.
-            assert!(weak.upgrade().is_none());
+            if case == "save" {
+                assert_eq!(
+                    weak.strong_count(),
+                    1,
+                    "active frozen preview legitimately keeps its source until Close"
+                );
+            } else {
+                assert!(weak.upgrade().is_none());
+            }
             editor.asset_shutdown();
             until(&mut editor, &ctx, SceneEditor::asset_finished);
+            assert!(weak.upgrade().is_none());
         }
     }
     // Actual worker preparation/publication/adoption and the real affine bridge
@@ -1615,6 +2637,31 @@ mod tests {
             "open_recovered_stale",
             "open_close",
             "open_disconnect",
+            "save_agent",
+            "save_expired",
+            "save_reply_loss",
+            "save_stale",
+            "save_draft",
+            "save_cancel",
+            "save_prepare_failure",
+            "save_close_prepared",
+            "save_close_publishing",
+            "save_human_offset",
+            "save_human_offset_cancel",
+            "save_then_new",
+            "save_then_close",
+            "save_revoke",
+            "save_revoke_after",
+            "save_human_offset_revoke",
+            "save_terminal_prepared",
+            "save_terminal_publishing",
+            "save_recovery_error_agent",
+            "save_recovery_error_new",
+            "save_recovery_error_close",
+            "save_committed_disconnect",
+            "save_warning_close",
+            "save_stale_after_commit",
+            "save_symlink_root",
         ] {
             let directory = tempfile::tempdir().unwrap();
             std::fs::write(
@@ -1628,7 +2675,10 @@ mod tests {
             .unwrap();
             let mut session = Session::new(Scene::demo()).unwrap();
             session.save(directory.path().join("scene.json")).unwrap();
-            if matches!(case, "terminal_close" | "terminal_reopen") || case.starts_with("open_") {
+            if matches!(case, "terminal_close" | "terminal_reopen")
+                || case.starts_with("open_")
+                || case.starts_with("save_")
+            {
                 let mut store = AssetStore::open(directory.path()).unwrap();
                 store.import("triangle", "triangle.obj").unwrap();
             }
@@ -1640,6 +2690,10 @@ mod tests {
             let generation = editor.generation;
             let preview = editor.preview.scene.fingerprint();
             let scene_revision = editor.session.scene().revision;
+            if case.starts_with("save_") {
+                exercise_save_case(&mut editor, &ctx, case, directory.path());
+                continue;
+            }
             if case.starts_with("open_") {
                 exercise_open_case(&mut editor, &ctx, case, directory.path());
                 continue;
