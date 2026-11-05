@@ -44,7 +44,7 @@ These are current owning-source contracts, not stable future-format promises. Un
 | Assets/cache | `ruster-assets` catalog1; binary derived mesh cache2 with validated legacy cache1 fallback/rebuild. Catalog persists independently of scene Undo. Triangle-only OBJ and controlled WGSL remain bounded. | [Assets](../crates/ruster-assets/README.md), [decision0016](decisions/0016-derived-mesh-cache-and-snapshots.md) |
 | External working copies | `ruster-behavior-files` manifest1; derived paths/hash bases and explicit observed conflicts, not project/executable authority. | [decision0023](decisions/0023-derived-behavior-working-copies.md) |
 | Legacy Motion | `ruster-motion-project`1 remains separate from Scene5; legacy Rhai Save requires runnable code. Generic Motion consumes Scene5 read-only. | [Motion](../examples/motion-lab/README.md), `project.rs` |
-| MCP | Bounded stdio profile2025-06-18;44discoverable tools; opt-in same-user Unix socket, identity/revision/run/stop guards. No Windows attachment claim. | [MCP](../crates/ruster-mcp/README.md) |
+| MCP | Bounded stdio profile2025-06-18; current source adds2explicitly granted persistence tools to the eval2snapshot’s44 (46total), retaining opt-in same-user Unix socket and identity/revision/run/stop/persistence guards. No Windows attachment claim. | [MCP](../crates/ruster-mcp/README.md) |
 | API/packages | Workspace0.1.0, no stable Rust ABI/API or crates.io publication commitment; exported/binary app manifests are development artifacts. | [Distribution](DISTRIBUTION.md), workspace Cargo manifest |
 
 ## Acceptance order

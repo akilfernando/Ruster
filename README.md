@@ -117,7 +117,7 @@ RUSTER_MCP_ENABLE=1 cargo run --locked -p ruster-editor -- --scene examples/arra
 
 The editor prints a private socket path to stderr. Configure a stdio MCP client to launch the absolute path to `target/debug/ruster-mcp` with that path in `RUSTER_MCP_SOCKET`. Start with `scene_inspect`; changes require the exact inspected session token and revision. Unapplied human drafts block agent edits, and agent changes share the editor's undo history.
 
-The current adapter exposes 44 bounded tools across scene/content authoring, behavior data, runtime and debugging. The tested client is the official Python MCP SDK 2.3.0 with protocol revision 2025-06-18. The [MCP guide](crates/ruster-mcp/README.md) includes client configuration, the reproducible SDK demo and connection limits. There are no shell, arbitrary file access or scene-save tools.
+The current adapter exposes 46 bounded tools across scene/content authoring, behavior data, runtime/debugging and explicitly granted scene persistence. The tested client is the official Python MCP SDK 2.3.0 with protocol revision 2025-06-18. The [MCP guide](crates/ruster-mcp/README.md) includes client configuration, the reproducible SDK demo and connection limits. There are no shell or arbitrary file-access tools. Scene Save/SaveAs additionally requires an explicit `RUSTER_MCP_SAVE_DIR` grant; its independent persistence token protects against a human changing the save association.
 
 ### Logistics reference
 

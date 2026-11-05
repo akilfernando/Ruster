@@ -1,5 +1,6 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
 mod behavior_commands;
+mod persistence_commands;
 mod runtime_commands;
 use crate::workspace::{Action, Side, Workspace};
 use eframe::{
@@ -223,6 +224,10 @@ enum RecoveryTransition {
 
 pub struct SceneEditor {
     session: Session,
+    save_grant: Option<persistence_commands::SaveGrant>,
+    save_sequence: u64,
+    save_receipt: Option<Value>,
+    save_warning: Option<String>,
     selected: Option<String>,
     manipulation: crate::manipulation::Manipulation,
     behavior: crate::behavior_ui::BehaviorUi,
@@ -336,6 +341,10 @@ impl SceneEditor {
         let seen_history_evictions = session.history_evictions();
         Self {
             session,
+            save_grant: None,
+            save_sequence: 0,
+            save_receipt: None,
+            save_warning: None,
             selected,
             manipulation,
             behavior: crate::behavior_ui::BehaviorUi::default(),
@@ -844,6 +853,10 @@ impl SceneEditor {
                 clipboard,
                 shader,
             } if request == id => {
+                // Directory authority belongs to this process's explicit startup
+                // grant. Human New/Open/Restore changes the scene incarnation,
+                // never the granted root; move it only when replacement commits.
+                next.save_grant = self.save_grant.take();
                 next.workspace = std::mem::replace(&mut self.workspace, Workspace::detached());
                 next.workspace.welcome = clipboard
                     && next.session.path().is_none()
@@ -1437,6 +1450,18 @@ impl SceneEditor {
         }
     }
     fn save_scene(&mut self, path: PathBuf) -> Result<(), String> {
+        self.save_scene_with_reset(path, |render| match render {
+            Some(render) => ruster_render::refresh_shader(render, ruster_render::default_shader()),
+            None => Ok(()),
+        })
+    }
+    // The injected reset keeps post-commit failure testable without a GPU. After
+    // Session::save succeeds this operation always completes its save boundary.
+    fn save_scene_with_reset(
+        &mut self,
+        path: PathBuf,
+        reset: impl FnOnce(Option<&eframe::egui_wgpu::RenderState>) -> Result<(), String>,
+    ) -> Result<(), String> {
         let parent = path
             .parent()
             .filter(|p| !p.as_os_str().is_empty())
@@ -1452,15 +1477,36 @@ impl SceneEditor {
         } else {
             None
         };
+        let sequence = self
+            .save_sequence
+            .checked_add(1)
+            .ok_or("save identity exhausted")?;
+        // snapshot_bytes is exactly Session's canonical save encoding, including
+        // history and behavior. Capture before writing; never infer a committed
+        // identity from a later disk read which could observe an external writer.
+        let bytes = self.session.snapshot_bytes().map_err(|e| e.to_string())?;
+        let digest = persistence_commands::document_hash(&bytes);
         self.session.save(path).map_err(|e| e.to_string())?;
+        self.save_sequence = sequence;
+        self.save_warning = None;
         if old_root.as_ref() != Some(&parent) {
             self.assets = destination_store;
             self.asset_snapshot();
-            if let Some(render) = &self.render {
-                ruster_render::refresh_shader(render, ruster_render::default_shader())?;
+            match reset(self.render.as_ref()) {
+                Ok(()) => {
+                    self.shader_revision = 0;
+                    self.shader_notice = "Built-in scene shader".into();
+                }
+                Err(error) => {
+                    let warning = format!(
+                        "Scene saved; viewport shader reset failed: {}",
+                        persistence_commands::bounded(&error)
+                    );
+                    self.shader_notice = warning.clone();
+                    self.error = warning.clone();
+                    self.save_warning = Some(warning);
+                }
             }
-            self.shader_revision = 0;
-            self.shader_notice = "Built-in scene shader".into();
         }
         self.asset_origin = Some(parent);
         self.recovered_origin = None;
@@ -1476,6 +1522,15 @@ impl SceneEditor {
         } else {
             self.notice="Scene saved; unapplied fields remain. Apply or reset the translation offset before closing, or explicitly discard it.".into();
         }
+        self.save_receipt = Some(json!({
+            "committed": true,
+            "persistence_token": self.persistence_token(),
+            "revision": self.session.scene().revision.to_string(),
+            "path": self.session.path().map(|path| persistence_commands::bounded(&path.display().to_string())),
+            "document_sha256": digest,
+            "document_bytes": bytes.len(),
+            "warning": self.save_warning,
+        }));
         Ok(())
     }
     fn assign_mesh(&mut self, mesh: Option<String>) -> Result<u64, String> {
@@ -1878,6 +1933,9 @@ impl SceneEditor {
         }
     }
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
+        if matches!(op, "scene_persistence_inspect" | "scene_save") {
+            return self.persistence_command(token, op, args);
+        }
         if runtime_commands::supported(op) {
             return self.runtime_command(token, op, args);
         }
@@ -1954,7 +2012,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
+                json!({"session_token":token,"scene_id":scene.id,"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"unresolved_assets":scene.objects.iter().filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.preview.scene!=*scene || self.preview_assets!=self.resolved,"capabilities":["scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_reset","behavior_runtime_play","behavior_runtime_pause","behavior_runtime_step","behavior_runtime_stop","behavior_breakpoints","behavior_breakpoint_set","behavior_debug_inspect","behavior_debug_next","behavior_debug_continue","behavior_inspect","behavior_source","behavior_source_set","behavior_source_remove","behavior_create","behavior_binding","behavior_binding_set","behavior_binding_remove","behavior_property","behavior_property_set","scene_inspect","scene_transform","scene_create","scene_rename","scene_duplicate","scene_delete","scene_transform_many","scene_delete_many","scene_duplicate_many","scene_undo","scene_redo","scene_replay","asset_inspect","asset_import","asset_refresh","asset_rename","scene_mesh","shader_refresh"]}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -3761,6 +3819,8 @@ pub fn run(path: PathBuf) -> Result<(), String> {
     run_session(session)
 }
 fn run_session(session: Session) -> Result<(), String> {
+    let mcp_enabled = std::env::var("RUSTER_MCP_ENABLE").as_deref() == Ok("1");
+    let save_grant = persistence_commands::SaveGrant::from_environment(mcp_enabled)?;
     let mut setup = WgpuSetupCreateNew::without_display_handle();
     setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
     ruster_render::configure_setup(&mut setup);
@@ -3785,7 +3845,7 @@ fn run_session(session: Session) -> Result<(), String> {
                 eprintln!("Scene editor adapter: {:?}", render.adapter.get_info());
             }
             #[cfg(unix)]
-            let bridge = if std::env::var("RUSTER_MCP_ENABLE").as_deref() == Ok("1") {
+            let bridge = if mcp_enabled {
                 Some(crate::bridge::Bridge::start(cc.egui_ctx.clone())?)
             } else {
                 None
@@ -3793,6 +3853,7 @@ fn run_session(session: Session) -> Result<(), String> {
             Ok(Box::new(Host {
                 editor: {
                     let mut editor = SceneEditor::new(session);
+                    editor.save_grant = save_grant;
                     if let Some(path) = editor.session.path() {
                         editor.workspace.remember(path);
                         editor.workspace.welcome = false;
@@ -4500,6 +4561,17 @@ mod tests {
     // granting overwrite authority to the original project, even if it changed.
     #[test]
     fn recovery_restores_invalid_drafts_and_assets_as_a_leased_unsaved_copy() {
+        let inspect = |editor: &mut SceneEditor| {
+            editor.command("test", "scene_persistence_inspect", json!({}))["result"].clone()
+        };
+        let save_args = |state: &Value, filename: &str| {
+            json!({
+                "expected_session_token": state["session_token"],
+                "expected_revision": state["revision"],
+                "expected_persistence_token": state["persistence_token"],
+                "filename": filename,
+            })
+        };
         let dir = tempfile::tempdir().unwrap();
         let project = dir.path().join("project");
         std::fs::create_dir(&project).unwrap();
@@ -4560,9 +4632,40 @@ mod tests {
         let id = store.scan().unwrap().remove(0).id;
         std::fs::write(&path, "external project replacement").unwrap();
         let mut restored = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
+        // Explicit process startup grant precedes the human-owned Restore.
+        restored.save_grant = Some(persistence_commands::SaveGrant::new(&project).unwrap());
+        let before_restore = inspect(&mut restored);
         restored.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
         restored.restore_checkpoint(&id).unwrap();
         restored.wait_recovery();
+        let after_restore = inspect(&mut restored);
+        assert_eq!(after_restore["grant_valid"], true);
+        assert_eq!(
+            after_restore["granted_directory"],
+            before_restore["granted_directory"]
+        );
+        assert_ne!(
+            after_restore["session_token"],
+            before_restore["session_token"]
+        );
+        assert!(after_restore["last_committed_save"].is_null());
+        assert_eq!(
+            restored.command(
+                "test",
+                "scene_save",
+                save_args(&before_restore, "stale.json")
+            )["error"]["code"],
+            "stale_session"
+        );
+        assert_eq!(
+            restored.command(
+                "test",
+                "scene_save",
+                save_args(&after_restore, "blocked-draft.json")
+            )["error"]["code"],
+            "drafts_pending"
+        );
+        assert!(!project.join("blocked-draft.json").exists());
         assert!(
             store.scan().unwrap().is_empty(),
             "adoption keeps the claimed lease"
@@ -4603,15 +4706,32 @@ mod tests {
             "saving with drafts does not retire recovery"
         );
         let mut final_copy = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
+        final_copy.save_grant = Some(persistence_commands::SaveGrant::new(&project).unwrap());
         final_copy.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
         final_copy.restore_checkpoint(&id).unwrap();
         final_copy.wait_recovery();
         final_copy.rename_pending = false;
         final_copy.sync_draft();
         final_copy.manipulation.delta = std::array::from_fn(|_| "0".into());
-        final_copy
-            .save_scene(project.join("recovered.json"))
-            .unwrap();
+        let repaired = inspect(&mut final_copy);
+        assert_eq!(repaired["grant_valid"], true);
+        assert_eq!(repaired["can_save_as"], true);
+        assert_eq!(
+            final_copy.command("test", "scene_save", save_args(&repaired, "scene.json"))["error"]
+                ["code"],
+            "destination_exists"
+        );
+        let committed =
+            final_copy.command("test", "scene_save", save_args(&repaired, "recovered.json"));
+        assert_eq!(committed["ok"], true, "{committed}");
+        assert_eq!(committed["result"]["receipt"]["committed"], true);
+        assert_eq!(
+            Session::open(project.join("recovered.json"))
+                .unwrap()
+                .snapshot_bytes()
+                .unwrap(),
+            final_copy.session.snapshot_bytes().unwrap()
+        );
         final_copy.recovery.disconnect_wait();
         drop(final_copy);
         assert!(

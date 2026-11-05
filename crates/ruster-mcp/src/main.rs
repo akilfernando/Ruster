@@ -1,5 +1,6 @@
 //! Narrow MCP 2025-06-18 stdio profile. See the crate README for limits.
 mod behavior_tools;
+mod persistence_tools;
 mod runtime_tools;
 use serde_json::{json, Map, Value};
 use std::io::{self, BufRead, BufReader, Write};
@@ -85,6 +86,9 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if persistence_tools::supported(name) {
+        return persistence_tools::valid(name, arguments);
+    }
     if runtime_tools::supported(name) {
         return runtime_tools::valid(name, arguments);
     }
@@ -358,6 +362,7 @@ fn tools() -> Value {
             "inputSchema":object_schema(Value::Object(properties),required),
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
+    tools.extend(persistence_tools::list());
     tools.extend(behavior_tools::list());
     tools.extend(runtime_tools::list());
     json!({"tools":tools})
@@ -428,7 +433,7 @@ impl Server {
                     Ok(
                         json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},
                         "serverInfo":{"name":"ruster-mcp","version":env!("CARGO_PKG_VERSION")},
-                        "instructions":"Local live editor attachment. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision. No retries. Cancellation cannot roll back dispatched commands; after disconnect/timeout inspect before deciding whether to retry. Scene/config edits remain unsaved until a human saves; asset catalog changes persist immediately."}),
+                        "instructions":"Local live editor attachment. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision. No retries. Cancellation cannot roll back dispatched commands; after disconnect/timeout inspect before deciding whether to retry. Edits remain unsaved until explicit persistence. Generic scene_save requires an editor-granted directory plus session/revision/persistence tokens; legacy configuration Save remains human-only. After an unknown save outcome inspect the last committed receipt without automatic retry. Asset catalog changes persist immediately."}),
                     )
                 }
             }
@@ -482,6 +487,7 @@ impl Server {
                         "shader_refresh",
                     ]
                     .contains(&name)
+                        && !persistence_tools::supported(name)
                         && !behavior_tools::supported(name)
                         && !runtime_tools::supported(name)
                 {
@@ -742,7 +748,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 44);
+        assert_eq!(tools.len(), 46);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -773,6 +779,8 @@ mod tests {
                 "scene_undo",
                 "scene_redo",
                 "scene_replay",
+                "scene_persistence_inspect",
+                "scene_save",
                 "behavior_inspect",
                 "behavior_source",
                 "behavior_source_set",
@@ -894,6 +902,46 @@ mod tests {
             args[field] = json!(vec![item; 257]);
             assert!(!valid_arguments(name, &args));
         }
+        // Persistence adds an independent save-association precondition, without
+        // letting the adapter infer paths or apply pending editor drafts.
+        assert!(valid_arguments("scene_persistence_inspect", &json!({})));
+        assert!(!valid_arguments(
+            "scene_persistence_inspect",
+            &json!({"path":"secret"})
+        ));
+        let save = json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p"});
+        assert!(valid_arguments("scene_save", &save));
+        let mut fresh = save.clone();
+        fresh["filename"] = json!("creation.json");
+        assert!(valid_arguments("scene_save", &fresh));
+        for invalid in [json!(null), json!(1), json!(""), json!("x".repeat(129))] {
+            fresh["filename"] = invalid;
+            assert!(!valid_arguments("scene_save", &fresh));
+        }
+        for field in [
+            "expected_session_token",
+            "expected_revision",
+            "expected_persistence_token",
+        ] {
+            let mut missing = save.clone();
+            missing.as_object_mut().unwrap().remove(field);
+            assert!(!valid_arguments("scene_save", &missing));
+        }
+        for field in ["expected_session_token", "expected_persistence_token"] {
+            for value in [json!(null), json!(7), json!(""), json!("x".repeat(257))] {
+                let mut invalid = save.clone();
+                invalid[field] = value;
+                assert!(!valid_arguments("scene_save", &invalid));
+            }
+        }
+        for value in [json!(7), json!("01"), json!("18446744073709551616")] {
+            let mut invalid = save.clone();
+            invalid["expected_revision"] = value;
+            assert!(!valid_arguments("scene_save", &invalid));
+        }
+        let mut invalid = save;
+        invalid["path"] = json!("/arbitrary/path");
+        assert!(!valid_arguments("scene_save", &invalid));
         // Object operations have distinct, bounded shapes before forwarding to the owner.
         for (name, mut args) in [
             (
@@ -969,6 +1017,15 @@ mod tests {
                 json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1"}),
             ),
             ("scene_inspect", json!({"offset":"16"})),
+            ("scene_persistence_inspect", json!({})),
+            (
+                "scene_save",
+                json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p"}),
+            ),
+            (
+                "scene_save",
+                json!({"expected_session_token":"s","expected_revision":"7","expected_persistence_token":"p","filename":"creation.json"}),
+            ),
             (
                 "scene_undo",
                 json!({"expected_session_token":"scene-session","expected_revision":"7"}),

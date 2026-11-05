@@ -22,7 +22,7 @@ Diagnostics preserve source/hash/line and binding/object context. Open the curre
 
 ## Command parity
 
-Add bounded data-only MCP source/binding/property tools with inspected session/revision and the same human draft/modal/gesture guards. Lists omit bodies. Base64 transports at most16KiB decoded UTF-8 source within the existing64KiB bridge; individual property values avoid oversized maps. Binding metadata edits preserve properties. No new filesystem, Save, project replacement or script-execution authority is exposed. Source SHA256 identifies exact bytes; unfinished/unknown-backend source remains saveable data.
+Add bounded data-only MCP source/binding/property tools with inspected session/revision and the same human draft/modal/gesture guards. Lists omit bodies. Base64 transports at most16KiB decoded UTF-8 source within the existing64KiB bridge; individual property values avoid oversized maps. Binding metadata edits preserve properties. Those data tools expose no filesystem, Save, project replacement or script-execution authority. [Decision0026](0026-editor-granted-scene-persistence.md) subsequently adds a separate explicitly granted scene-persistence operation under the user’s end-to-end MCP requirement. Source SHA256 identifies exact bytes; unfinished/unknown-backend source remains saveable data.
 
 ## Alternatives and consequences
 
