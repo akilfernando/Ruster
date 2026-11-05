@@ -4138,14 +4138,22 @@ impl SceneEditor {
         egui::Panel::bottom("scene_status").show(ui, |ui| {
             egui::ScrollArea::vertical()
                 .id_salt("global_status_scroll")
-                .max_height(96.0)
+                .min_scrolled_height(0.0)
+                // Keep progress/actions outside scrolling diagnostics. Reserve
+                // most of a compact window for creation, while long errors
+                // remain available through scrolling and Details.
+                .max_height(
+                    ((ctx.content_rect().height() * 0.15).min(96.0)
+                        - ui.spacing().interact_size.y
+                        - ui.spacing().item_spacing.y)
+                        .max(ui.spacing().interact_size.y),
+                )
                 .show(ui, |ui| {
                     let shader = (self.shader_notice.contains("rejected")
                         || self.shader_notice.contains("unavailable"))
                     .then_some(self.shader_notice.as_str());
                     Self::status_problem_ui(ui, &self.error, shader);
                     self.recovery.warning_ui(ui);
-                    self.asset_progress_ui(ui);
                     if !self.workspace.error.is_empty() {
                         ui.colored_label(egui::Color32::YELLOW, &self.workspace.error);
                         if ui.button("Recover workspace preferences…").clicked() {
@@ -4157,10 +4165,6 @@ impl SceneEditor {
                         ui.add(egui::Label::new(&self.runtime.status).truncate())
                             .on_hover_text(&self.runtime.status);
                     }
-                    if !self.notice.is_empty() {
-                        ui.add(egui::Label::new(&self.notice).truncate())
-                            .on_hover_text(&self.notice);
-                    }
                     if !self.external.status.is_empty() {
                         ui.add(egui::Label::new(&self.external.status).truncate())
                             .on_hover_text(&self.external.status);
@@ -4169,6 +4173,7 @@ impl SceneEditor {
                         }
                     }
                 });
+            self.asset_status_ui(ui);
         });
         if self.workspace.prefs.content_visible {
             let remaining = ui.available_height();
@@ -4225,7 +4230,6 @@ impl SceneEditor {
                 // Stop remains available for an older retained runtime while
                 // Reset and playback edits wait for content authority.
                 let _ = self.runtime.controls(ui, &self.session, self.generation, true);
-                self.asset_progress_ui(ui);
                 return;
             }
             self.manipulation_tools_ui(ui);
@@ -4612,12 +4616,14 @@ mod tests {
             let preferred = (320.0, 400.0);
             let events = std::cell::RefCell::new(Vec::new());
             let details_center = std::cell::Cell::new(None);
+            let details_visible = std::cell::Cell::new(false);
             let full_problem_count = std::cell::Cell::new(0);
             let content_rect = std::cell::Cell::new(None);
             let asset_row_visible = std::cell::Cell::new(false);
             let mut time = 0.0;
             let mut frame = |editor: &mut SceneEditor, size| {
                 time += 0.1;
+                let progress_action = editor.save_continuation.is_some();
                 let mut output = ctx.run_ui(
                     egui::RawInput {
                         focused: true,
@@ -4638,6 +4644,13 @@ mod tests {
                     },
                 );
                 output.textures_delta.clear();
+                if progress_action {
+                    assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                        egui::epaint::Shape::Text(text)
+                        if text.galley.job.text == "Keep editing"
+                        && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))),
+                        "long progress must not clip its action");
+                }
                 let viewport = output.shapes.iter().find_map(|shape| match &shape.shape {
                     egui::epaint::Shape::Callback(callback) => {
                         Some(callback.rect.intersect(shape.clip_rect))
@@ -4661,6 +4674,9 @@ mod tests {
                     }
                     _ => None,
                 }));
+                details_visible.set(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == "Details"
+                    && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))));
                 if !editor.error.is_empty() && editor.shader_notice.contains("rejected") {
                     for (index, message) in [&editor.error, &editor.shader_notice]
                         .into_iter()
@@ -4689,6 +4705,26 @@ mod tests {
                 asset_row_visible.get(),
                 "real asset row must be visible before the resize journey"
             );
+            let idle_viewport = frame(&mut editor, normal_size);
+            editor.asset_ops.status = "Preparing Save… ".repeat(80);
+            for _ in 0..2 {
+                editor.save_continuation = Some(save_commands::AfterSave {
+                    kind: save_commands::Continuation::ThenNew,
+                    // Expire after drawing, without replacing the test scene.
+                    generation: editor.generation.wrapping_add(1),
+                    sequence: 0,
+                    revision: editor.session.scene().revision,
+                });
+                assert_eq!(
+                    frame(&mut editor, normal_size),
+                    idle_viewport,
+                    "transient content progress must not resize the render target"
+                );
+            }
+            editor.save_continuation = None;
+            editor.notice = "Scene saved. ".repeat(80);
+            frame(&mut editor, normal_size);
+            assert_eq!(frame(&mut editor, normal_size), idle_viewport);
             let before = content_rect.get().expect("normal Content panel state");
             let divider = egui::pos2(before.center().x, before.top());
             let pointer = |pos, pressed| egui::Event::PointerButton {
@@ -4718,6 +4754,13 @@ mod tests {
             ] {
                 frame(&mut editor, size);
                 let viewport = frame(&mut editor, size);
+                editor.save_continuation = Some(save_commands::AfterSave {
+                    kind: save_commands::Continuation::ThenNew,
+                    generation: editor.generation.wrapping_add(1),
+                    sequence: 0,
+                    revision: editor.session.scene().revision,
+                });
+                assert_eq!(frame(&mut editor, size), viewport);
                 assert!(
                     viewport.width() >= 256.0,
                     "viewport width {} at {size:?}",
@@ -4756,6 +4799,22 @@ mod tests {
                         original = Some(viewport);
                     }
                 }
+            }
+            for scale in [1.25, 1.0] {
+                editor.workspace.prefs.scale = scale;
+                // Zoom applies on a subsequent pass; settle panel geometry
+                // before comparing operation states at the same scale.
+                frame(&mut editor, normal_size);
+                frame(&mut editor, normal_size);
+                frame(&mut editor, normal_size);
+                let viewport = frame(&mut editor, normal_size);
+                editor.save_continuation = Some(save_commands::AfterSave {
+                    kind: save_commands::Continuation::ThenNew,
+                    generation: editor.generation.wrapping_add(1),
+                    sequence: 0,
+                    revision: editor.session.scene().revision,
+                });
+                assert_eq!(frame(&mut editor, normal_size), viewport);
             }
             editor
                 .runtime
@@ -4846,6 +4905,49 @@ mod tests {
                 viewport.width() > 600.0,
                 "hidden panels must release their budget"
             );
+            // Isolate footer accessibility from the preceding runtime-title
+            // assertion, whose full title cannot fit at this extreme zoom.
+            editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+            editor.error = retained.clone();
+            editor.shader_notice = retained;
+            editor.workspace.prefs.scale = 2.0;
+            for _ in 0..4 {
+                frame(&mut editor, egui::vec2(320.0, 240.0));
+            }
+            assert_eq!(ctx.content_rect().size(), egui::vec2(320.0, 240.0));
+            assert!(
+                details_visible.get(),
+                "diagnostic Details must remain reachable at maximum zoom"
+            );
+            editor.pending_asset_open = Some(asset_commands::OpenIntent {
+                root: project.path().into(),
+                seed_preview: false,
+                recovered: false,
+                recovery_shader: false,
+            });
+            editor.save_continuation = Some(save_commands::AfterSave {
+                kind: save_commands::Continuation::ThenNew,
+                generation: editor.generation,
+                sequence: 0,
+                revision: editor.session.scene().revision,
+            });
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(320.0, 240.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| editor.asset_status_ui(ui),
+            );
+            output.textures_delta.clear();
+            for action in ["Cancel", "Keep editing"] {
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == action
+                    && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))),
+                    "both progress actions must fit at maximum zoom: {action}");
+            }
         }
     }
     // Folding advanced controls must never hide recovered/invalid input, and

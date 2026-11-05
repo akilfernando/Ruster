@@ -352,3 +352,8 @@ V2a observer freeze2026-11-06: Astra implements only four granted editor files. 
 
 
 V2a post-delivery checkpoint2026-11-06: Astra read-only review verifies native shader matched-layout artifact and retains scope after both creator journeys/four exact default apps. It prioritizes permitted hidden populated-catalog root transition/actual stale token/reappearance cleanup, current RGB recovery/narrow inspector, then frozen costs/resources. Original median pass and tail uncertainty stay separate from new native results. Root independently completes current741 interaction and real RGB crash/restore/repair/fresh-save/reopen/normal-close proof; raw harness/layout/preflight failures remain explicit. No further architecture or feature stage is selected.
+
+
+## 2026-11-06 — Stable operation footer and retirement-test review
+
+Astra (`v2_foundation_review`, existing root-session routing) performs bounded read-only review of the actual40Save/Refresh target-resize failures and root's two-file UI repair. Recommends persistent action-first row outside diagnostics, style-sized spinner, accessible minimum diagnostic row and genuine logical-coordinate2×zoom evidence. Root integrates these and extends existing compact case. A final107-case gate exposes an existing transient FollowingUp polling assumption; independent source review validates a durable fresh commit-receipt/destination assertion while preserving every paint-fence/worker ownership invariant. No production controller/observer/resource rule changes, no nested delegation/native work by reviewer. Corrected final default107/inspection109+1ignored/strict gates pass; native verification remains root-owned. Exact elapsed/credits for review unknown; failures/source pins are retained in V2a evidence.

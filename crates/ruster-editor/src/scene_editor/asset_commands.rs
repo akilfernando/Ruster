@@ -2219,30 +2219,57 @@ impl SceneEditor {
             Ok(())
         }
     }
-    pub(super) fn asset_progress_ui(&mut self, ui: &mut egui::Ui) {
-        if self.asset_busy() || self.save_continuation.is_some() {
-            ui.horizontal_wrapped(|ui| {
-                ui.spinner();
-                ui.label(if self.pending_asset_open.is_some() {
-                    "Loading project content…"
-                } else {
-                    &self.asset_ops.status
-                });
-                if (self.save_continuation.is_some()
-                    || self.asset_ops.saving.as_ref().is_some_and(|save| {
-                        save.continuation != save_commands::Continuation::SaveOnly
-                    }))
-                    && ui.button("Keep editing after Save").clicked()
-                {
-                    self.revoke_save_continuation();
-                }
-                if (self.pending_asset_open.is_some() || self.asset_ops.cancellable())
-                    && ui.button("Cancel content work").clicked()
+    pub(super) fn asset_status_ui(&mut self, ui: &mut egui::Ui) {
+        let busy = self.asset_busy() || self.save_continuation.is_some();
+        // Progress replaces the idle message in one stable row. Adding a
+        // temporary wrapped row resizes the viewport (and its GPU targets)
+        // on every Save/Refresh. Allocate actions first so long summaries
+        // cannot push cancellation outside the window.
+        ui.allocate_ui_with_layout(
+            egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
+            egui::Layout::right_to_left(egui::Align::Center),
+            |ui| {
+                if busy
+                    && (self.pending_asset_open.is_some() || self.asset_ops.cancellable())
+                    && ui
+                        .button("Cancel")
+                        .on_hover_text("Cancel content work before publication.")
+                        .clicked()
                 {
                     self.cancel_asset_work();
                 }
-            });
-        }
+                if busy
+                    && (self.save_continuation.is_some()
+                        || self.asset_ops.saving.as_ref().is_some_and(|save| {
+                            save.continuation != save_commands::Continuation::SaveOnly
+                        }))
+                    && ui
+                        .button("Keep editing")
+                        .on_hover_text("Finish saving without closing or starting a new scene.")
+                        .clicked()
+                {
+                    self.revoke_save_continuation();
+                }
+                if busy {
+                    ui.add(egui::Spinner::new().size(ui.spacing().interact_size.y));
+                }
+                let message = if busy {
+                    if self.pending_asset_open.is_some() {
+                        "Loading project content…"
+                    } else {
+                        &self.asset_ops.status
+                    }
+                } else if self.notice.is_empty() {
+                    "Ready"
+                } else {
+                    &self.notice
+                };
+                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                    ui.add(egui::Label::new(message).truncate())
+                        .on_hover_text(message);
+                });
+            },
+        );
     }
 }
 
@@ -3651,6 +3678,7 @@ mod tests {
                                 assert_ne!(editor.generation, generation);
                             }
                             "save" => {
+                                assert!(editor.save_receipt.is_none());
                                 editor.start_human_save(
                                     save_root.path().join("saved.json"),
                                     save_commands::Continuation::SaveOnly,
@@ -3673,11 +3701,12 @@ mod tests {
                                     .as_ref()
                                     .is_some_and(|save| save.phase == Phase::Prepared));
                                 editor.asset_frame(&ctx, true);
-                                while !editor
-                                    .asset_ops
-                                    .saving
-                                    .as_ref()
-                                    .is_some_and(|save| save.followup.is_some())
+                                // Adoption may finalize its follow-up in this
+                                // same poll if the immediate-retirement ack is
+                                // ready. Observe the durable commit receipt,
+                                // not a transient FollowingUp phase. Painted
+                                // owners must still satisfy the fence below.
+                                while editor.save_receipt.is_none()
                                     && Instant::now() < deadline
                                 {
                                     editor.asset_frame(&ctx, false);
@@ -3693,11 +3722,13 @@ mod tests {
                                     }
                                     std::thread::yield_now();
                                 }
-                                assert!(editor
-                                    .asset_ops
-                                    .saving
-                                    .as_ref()
-                                    .is_some_and(|save| save.followup.is_some()));
+                                assert_eq!(
+                                    editor.save_receipt.as_ref().map(|r| &r["committed"]),
+                                    Some(&json!(true)),
+                                    "Save must actually commit before testing its painted retirement: {}",
+                                    editor.error
+                                );
+                                assert_eq!(editor.session.path(), Some(save_root.path().join("saved.json").as_path()));
                                 assert!(editor
                                     .asset_ops
                                     .retired
