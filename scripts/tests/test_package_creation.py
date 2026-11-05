@@ -209,6 +209,62 @@ class CreationDistributionTests(unittest.TestCase):
                                       if record["path"] == "resources/textures/0000.png"],
                                      [{"path": "resources/textures/0000.png", "bytes": len(png),
                                        "sha256": package_creation.sha256(png)}])
+                # Scene7 has a new exact capability/schema but keeps descriptor2.
+                # Lighting is scene state, never an extra resource dependency.
+                lit_scene = copy.deepcopy(textured_scene)
+                lit_scene["format_version"] = 7
+                lit_scene["scene"]["lighting"] = {
+                    "mode": "authored", "ambient": {"color": [0.1, 0.5, 1], "intensity": 0.28},
+                    "lights": {"point": {"name": None,
+                        "transform": {"translation": [0.1, 2, 0], "rotation": [0, 0.4, 0], "scale": [1, 1, 1]},
+                        "enabled": True, "color": [0.2, 0.5, 1], "intensity": 0.72,
+                        "kind": {"type": "point", "range": 0.1}}}}
+                lit_bytes = package_creation.encoded(lit_scene)
+                lit_content = {**textured, "schema": 3, "scene_sha256": package_creation.sha256(lit_bytes)}
+                (content_root / "scene.json").write_bytes(lit_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(lit_content))
+                for old_profile in (package_creation.PROFILE, package_creation.CAMERA_PROFILE,
+                                    package_creation.MATERIAL_PROFILE):
+                    capable["profile"] = old_profile
+                    (kit / "runtime.json").write_bytes(package_creation.encoded(capable))
+                    with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old-kit preflight")):
+                        with self.assertRaisesRegex(ValueError, "Scene7 authored_lighting"):
+                            package_creation.package(kit, content_root, failed)
+                    self.assertFalse(failed.exists())
+                capable["profile"] = package_creation.LIGHTING_PROFILE
+                (kit / "runtime.json").write_bytes(package_creation.encoded(capable))
+                lit_response = {**framed_response, "authored_scene": package_creation.typed_scene(lit_scene)}
+                typed_lighting = lit_response["authored_scene"]["lighting"]
+                self.assertEqual(typed_lighting["ambient"]["intensity"], 0.2800000011920929)
+                self.assertEqual(typed_lighting["lights"]["point"]["kind"]["range"], 0.10000000149011612)
+                self.assertNotIn("name", typed_lighting["lights"]["point"])
+                with patch.object(package_creation, "run_runtime", return_value=lit_response):
+                    lit_output = base / "lighting.tar.gz"
+                    package_creation.package(kit, content_root, lit_output)
+                with tarfile.open(lit_output) as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"], 2)
+                    self.assertEqual(set(descriptor), {"format", "version", "title", "scene", "tick_millis",
+                                                       "meshes", "textures", "initial_camera"})
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), lit_bytes)
+                    self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"],
+                                     package_creation.LIGHTING_PROFILE)
+                wrong_lighting = copy.deepcopy(lit_response)
+                wrong_lighting["authored_scene"]["lighting"]["lights"]["point"]["intensity"] = 1
+                with patch.object(package_creation, "run_runtime", return_value=wrong_lighting):
+                    rejected()
+                for schema in (1, 2):
+                    (content_root / "content.json").write_bytes(package_creation.encoded({**lit_content, "schema": schema}))
+                    rejected()
+                legacy_lighting = copy.deepcopy(lit_scene)
+                legacy_lighting["scene"]["lighting"] = {"mode": "legacy"}
+                self.assertNotIn("lighting", package_creation.typed_scene(legacy_lighting))
+                # The new kit still packages Scene6; the old Scene5 fixture below
+                # exercises the older descriptor1 path through this same kit.
+                (content_root / "scene.json").write_bytes(textured_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(textured))
+                with patch.object(package_creation, "run_runtime", return_value=textured_response):
+                    package_creation.package(kit, content_root, base / "material-with-lighting-kit.tar.gz")
                 # A claimed texture cannot hide missing dependencies or smuggle
                 # unrelated source bytes, kinds, paths or a second identity.
                 for mutation in ("missing", "extra", "wrong-kind", "traversal", "hash", "schema"):
@@ -248,6 +304,8 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.MATERIAL_PROFILE, "descriptor_version": 1},
                         {**package_creation.MATERIAL_PROFILE, "capabilities": ["opaque_materials"]},
                         {**package_creation.MATERIAL_PROFILE, "capabilities": ["opaque_materials", "initial_camera"]},
+                        {**package_creation.LIGHTING_PROFILE, "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "shadows"]},
+                        {**package_creation.LIGHTING_PROFILE, "capabilities": ["authored_lighting", "initial_camera", "opaque_materials"]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
                         package_creation.check_profile(invalid_profile)

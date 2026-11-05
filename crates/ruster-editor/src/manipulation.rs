@@ -263,6 +263,7 @@ impl Clipboard {
             );
         }
         Scene {
+            lighting: Default::default(),
             id: "clipboard".into(),
             revision: 0,
             objects: self.objects.clone(),

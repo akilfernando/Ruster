@@ -256,6 +256,7 @@ fn scene_for(delivery: &Delivery) -> Scene {
     truck.mesh = Some("yard-truck".into());
     let cargo_height = 0.03 + delivery.last_shipment as f32 / settings.capacity as f32 * 0.5;
     Scene {
+        lighting: Default::default(),
         materials: Default::default(),
         id: "delivery-yard".into(),
         revision: 0,

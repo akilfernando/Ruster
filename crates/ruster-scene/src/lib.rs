@@ -12,12 +12,16 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 6;
+pub const FORMAT_VERSION: u32 = 7;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
+mod lighting;
+mod lighting_authoring;
 mod strict_json;
 pub use authoring::*;
+pub use lighting::*;
+pub use lighting_authoring::LightingEdit;
 pub const MAX_OBJECTS: usize = 256;
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub const HISTORY_LIMIT: usize = 32;
@@ -191,6 +195,8 @@ pub struct Scene {
     pub objects: Vec<Object>,
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub materials: BTreeMap<String, OpaqueMaterial>,
+    #[serde(default, skip_serializing_if = "Lighting::is_legacy")]
+    pub lighting: Lighting,
 }
 
 impl Scene {
@@ -200,7 +206,16 @@ impl Scene {
             revision: 0,
             objects: Vec::new(),
             materials: BTreeMap::new(),
+            lighting: Lighting::Legacy,
         }
+    }
+
+    /// New editor documents have a visible, editable sun; legacy/code-first
+    /// callers of `empty` retain their existing fixed-lighting appearance.
+    pub fn authored_empty(id: impl Into<String>) -> Self {
+        let mut scene = Self::empty(id);
+        scene.lighting = Lighting::authored_default("light-1");
+        scene
     }
 
     pub fn demo() -> Self {
@@ -208,6 +223,7 @@ impl Scene {
             id: "procedural-demo".into(),
             revision: 0,
             materials: BTreeMap::new(),
+            lighting: Lighting::Legacy,
             objects: [
                 ("left", [-2.0, 0.0, 0.0], [0.12, 0.58, 0.85, 1.0]),
                 ("center", [0.0, 0.0, 0.0], [0.9, 0.4, 0.16, 1.0]),
@@ -241,6 +257,12 @@ impl Scene {
                 "scene exceeds {MAX_MATERIALS} materials"
             )));
         }
+        self.lighting.validate()?;
+        if self.objects.len() + self.lighting.light_count() > MAX_OBJECTS {
+            return Err(SceneError::Invalid(format!(
+                "scene exceeds {MAX_OBJECTS} geometry and light targets"
+            )));
+        }
         for (id, material) in &self.materials {
             validate_id(id)?;
             material.validate()?;
@@ -248,7 +270,7 @@ impl Scene {
         let mut ids = HashSet::new();
         for object in &self.objects {
             validate_id(&object.id)?;
-            if !ids.insert(&object.id) {
+            if !ids.insert(object.id.as_str()) {
                 return Err(SceneError::Invalid(format!(
                     "duplicate object id {}",
                     object.id
@@ -266,6 +288,13 @@ impl Scene {
                 )));
             }
         }
+        for (id, _) in self.lighting.lights() {
+            if !ids.insert(id) {
+                return Err(SceneError::Invalid(format!(
+                    "duplicate scene target id {id}"
+                )));
+            }
+        }
         Ok(())
     }
 
@@ -277,6 +306,33 @@ impl Scene {
             (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3)
         });
         format!("{hash:016x}")
+    }
+
+    pub fn target_count(&self) -> usize {
+        self.objects.len() + self.lighting.light_count()
+    }
+
+    /// A borrowed authoring lookup; geometry storage and runtime instances stay
+    /// separate from the small non-geometric light collection.
+    pub fn target_transform(&self, id: &str) -> Option<&Transform> {
+        self.objects
+            .iter()
+            .find(|object| object.id == id)
+            .map(|object| &object.transform)
+            .or_else(|| self.lighting.light(id).map(|light| &light.transform))
+    }
+
+    pub fn target_display_name(&self, id: &str) -> Option<&str> {
+        self.objects
+            .iter()
+            .find(|object| object.id == id)
+            .map(Object::display_name)
+            .or_else(|| {
+                self.lighting
+                    .lights()
+                    .find(|(key, _)| *key == id)
+                    .map(|(key, light)| light.display_name(key))
+            })
     }
 
     pub fn load(path: impl AsRef<Path>) -> Result<Self, SceneError> {
@@ -340,6 +396,7 @@ pub enum SceneError {
     RevisionOverflow,
     TickOverflow,
     ObjectNotFound(String),
+    LightNotFound(String),
     NoUndo,
     NoRedo,
     Conflict,
@@ -364,6 +421,7 @@ impl fmt::Display for SceneError {
             Self::TickOverflow => write!(f, "preview tick exhausted; no step applied"),
             Self::RevisionOverflow => write!(f, "scene revision exhausted; no change applied"),
             Self::ObjectNotFound(id) => write!(f, "object {id} does not exist"),
+            Self::LightNotFound(id) => write!(f, "light {id} does not exist"),
             Self::NoUndo => write!(f, "no authored change to undo"),
             Self::NoRedo => write!(f, "no authored change to redo"),
             Self::Conflict => write!(
@@ -454,6 +512,10 @@ enum SceneDelta {
         before: [f32; 4],
         after: [f32; 4],
     },
+    Lighting {
+        before: Lighting,
+        after: Lighting,
+    },
 }
 
 impl SceneDelta {
@@ -480,11 +542,34 @@ impl SceneDelta {
             Self::Objects { created, deleted } => {
                 created.iter().chain(deleted).any(|e| e.object.id == id)
             }
+            Self::Lighting { before, after } => {
+                before.light(id).is_some() || after.light(id).is_some()
+            }
         }
     }
     fn apply(&self, scene: &mut Scene, undo: bool) -> Result<(), SceneError> {
         let inconsistent = || SceneError::Invalid("inconsistent authored history".into());
         match self {
+            Self::Lighting { before, after } => {
+                before.validate()?;
+                after.validate()?;
+                if before.lights().any(|(id, light)| {
+                    after.light(id).is_some_and(|other| {
+                        std::mem::discriminant(&light.kind) != std::mem::discriminant(&other.kind)
+                    })
+                }) {
+                    return Err(inconsistent());
+                }
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &scene.lighting != expected {
+                    return Err(inconsistent());
+                }
+                scene.lighting = replacement.clone();
+            }
             Self::Transforms { changes } => {
                 if changes.is_empty() || changes.len() > MAX_OBJECTS {
                     return Err(inconsistent());
@@ -836,6 +921,7 @@ impl From<LegacyDocument> for Document {
                 id: old.scene.id,
                 revision: old.scene.revision,
                 materials: BTreeMap::new(),
+                lighting: Lighting::Legacy,
                 objects: old
                     .scene
                     .objects
@@ -921,6 +1007,7 @@ impl From<V2Document> for Document {
                 id: old.scene.id,
                 revision: old.scene.revision,
                 materials: BTreeMap::new(),
+                lighting: Lighting::Legacy,
                 objects: old
                     .scene
                     .objects
@@ -1035,11 +1122,14 @@ impl Document {
         if (3..=5).contains(&version) {
             reject_pre_v6_material_fields(&value, version)?;
         }
+        if (1..7).contains(&version) {
+            reject_pre_v7_lighting_fields(&value, version)?;
+        }
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5 | 6 => serde_json::from_value(value)?,
+            5..=7 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1110,6 +1200,32 @@ impl Document {
     }
 }
 
+// Old envelopes must not acquire new semantics merely through serde defaults.
+fn reject_pre_v7_lighting_fields(
+    value: &serde_json::Value,
+    version: u64,
+) -> Result<(), SceneError> {
+    let mut found = value["scene"]
+        .as_object()
+        .is_some_and(|scene| scene.contains_key("lighting"));
+    for stack in ["undo", "redo"] {
+        if let Some(entries) = value[stack].as_array() {
+            for entry in entries {
+                if version <= 4 {
+                    found |= entry["kind"] == "lighting";
+                } else if let Some(deltas) = entry["scene"].as_array() {
+                    found |= deltas.iter().any(|delta| delta["kind"] == "lighting");
+                }
+            }
+        }
+    }
+    if found {
+        Err(SceneError::Invalid("lighting requires scene v7".into()))
+    } else {
+        Ok(())
+    }
+}
+
 // V3–V5 used today's scene/object structs. Reject V6 additions at their
 // exact bounded schema positions before deserializing defaults, including null/empty.
 fn reject_pre_v6_material_fields(
@@ -1166,6 +1282,8 @@ fn check_serialized_size(
         objects: &'a [Object],
         #[serde(skip_serializing_if = "BTreeMap::is_empty")]
         materials: &'a BTreeMap<String, OpaqueMaterial>,
+        #[serde(skip_serializing_if = "Lighting::is_legacy")]
+        lighting: &'a Lighting,
     }
     impl<'a> From<&'a Scene> for SceneView<'a> {
         fn from(scene: &'a Scene) -> Self {
@@ -1174,6 +1292,7 @@ fn check_serialized_size(
                 revision: u64::MAX,
                 objects: &scene.objects,
                 materials: &scene.materials,
+                lighting: &scene.lighting,
             }
         }
     }
@@ -1631,6 +1750,7 @@ impl Session {
     /// IDs retained by reversible history are reserved, preventing accidental identity reuse.
     pub fn contains_object_id(&self, id: &str) -> bool {
         self.scene().objects.iter().any(|o| o.id == id)
+            || self.scene().lighting.light(id).is_some()
             || self.document.authoring.object_ids().any(|used| used == id)
             || self
                 .document
@@ -1640,12 +1760,10 @@ impl Session {
                 .any(|c| c.contains_id(id))
     }
 
-    /// Allocate bounded IDs with one transient history scan, including grouped reservations.
-    pub fn allocate_object_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
-        if count > MAX_OBJECTS {
-            return Err(SceneError::Invalid("ID request exceeds256 objects".into()));
-        }
+    // Geometry and lights share a namespace, including reversible identities.
+    fn reserved_target_ids(&self) -> HashSet<&str> {
         let mut used: HashSet<&str> = self.scene().objects.iter().map(|o| o.id.as_str()).collect();
+        used.extend(self.scene().lighting.lights().map(|(id, _)| id));
         used.extend(self.document.authoring.object_ids());
         for change in self.document.undo.iter().chain(&self.document.redo) {
             used.extend(change.object_ids());
@@ -1667,14 +1785,22 @@ impl Session {
                     SceneDelta::Objects { created, deleted } => {
                         used.extend(created.iter().chain(deleted).map(|e| e.object.id.as_str()));
                     }
+                    SceneDelta::Lighting { before, after } => {
+                        used.extend(before.lights().chain(after.lights()).map(|(id, _)| id));
+                    }
                 }
             }
         }
-        Ok((1..=used.len() + count)
-            .map(|n| format!("object-{n}"))
-            .filter(|id| !used.contains(id.as_str()))
-            .take(count)
-            .collect())
+        used
+    }
+
+    /// Allocate bounded IDs with one transient history scan, including grouped reservations.
+    pub fn allocate_object_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        allocate_ids("object", count, MAX_OBJECTS, self.reserved_target_ids())
+    }
+
+    pub fn allocate_light_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        allocate_ids("light", count, MAX_LIGHTS, self.reserved_target_ids())
     }
 
     /// Append a validated object. Its ID cannot collide with current or reversible state.
@@ -1702,6 +1828,15 @@ impl Session {
         name: Option<String>,
     ) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
+        if let Some(light) = self.scene().lighting.light(source) {
+            let mut light = light.clone();
+            if name.is_some() {
+                light.name = name;
+            }
+            return self
+                .create_light(expected_revision, new_id, light)
+                .map(|edit| edit.revision);
+        }
         let index = self
             .scene()
             .objects
@@ -1736,6 +1871,11 @@ impl Session {
     ) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
         validate_name(name.as_deref())?;
+        if let Some(light) = self.scene().lighting.light(id) {
+            let mut light = light.clone();
+            light.name = name;
+            return self.set_light(expected_revision, id, light);
+        }
         let object = self
             .scene()
             .objects
@@ -1753,6 +1893,9 @@ impl Session {
     }
     pub fn delete(&mut self, expected_revision: u64, id: &str) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
+        if self.scene().lighting.light(id).is_some() {
+            return self.remove_light(expected_revision, id);
+        }
         let index = self
             .scene()
             .objects
@@ -1813,29 +1956,54 @@ impl Session {
         }
         let mut ids = HashSet::new();
         let mut changes = Vec::new();
+        let mut lighting = None;
         for (id, transform) in edits {
             if !ids.insert(id) {
                 return Err(SceneError::Invalid("duplicate transform target".into()));
             }
             transform.validate()?;
-            let object = self
+            let before = self
                 .scene()
-                .objects
-                .iter()
-                .find(|o| &o.id == id)
+                .target_transform(id)
                 .ok_or_else(|| SceneError::ObjectNotFound(id.clone()))?;
-            if &object.transform != transform {
+            if self.scene().lighting.light(id).is_some() {
+                if transform.scale != [1.; 3] {
+                    return Err(SceneError::Invalid(
+                        "lights cannot be scaled; use intensity or range".into(),
+                    ));
+                }
+                if before != transform {
+                    let after = lighting.get_or_insert_with(|| self.scene().lighting.clone());
+                    let Lighting::Authored { lights, .. } = after else {
+                        unreachable!()
+                    };
+                    lights.get_mut(id).expect("resolved light").transform = transform.clone();
+                }
+            } else if before != transform {
                 changes.push(TransformDelta {
                     id: id.clone(),
-                    before: object.transform.clone(),
+                    before: before.clone(),
                     after: transform.clone(),
                 });
             }
         }
-        if changes.is_empty() {
+        let mut scene = Vec::new();
+        if !changes.is_empty() {
+            scene.push(SceneDelta::Transforms { changes });
+        }
+        if let Some(after) = lighting {
+            scene.push(SceneDelta::Lighting {
+                before: self.scene().lighting.clone(),
+                after,
+            });
+        }
+        if scene.is_empty() {
             return Ok(self.scene().revision);
         }
-        self.commit_change(SceneDelta::Transforms { changes })
+        self.commit_change(Change {
+            scene,
+            ..Change::default()
+        })
     }
     /// Append a copied group atomically. IDs must be fresh in current and reversible state.
     pub fn create_many(
@@ -1853,13 +2021,36 @@ impl Session {
         objects: Vec<Object>,
         materials: BTreeMap<String, OpaqueMaterial>,
     ) -> Result<u64, SceneError> {
+        self.create_many_with_materials_and_lights(
+            expected_revision,
+            objects,
+            materials,
+            BTreeMap::new(),
+        )
+        .map(|edit| edit.revision)
+    }
+
+    /// Append a clipboard group atomically, preserving scene-global ambient.
+    /// Receipt IDs identify incoming lights plus any explicit promoted Sun.
+    pub fn create_many_with_materials_and_lights(
+        &mut self,
+        expected_revision: u64,
+        objects: Vec<Object>,
+        materials: BTreeMap<String, OpaqueMaterial>,
+        lights: BTreeMap<String, Light>,
+    ) -> Result<LightingEdit, SceneError> {
         self.check_revision(expected_revision)?;
-        if objects.is_empty() && materials.is_empty() {
-            return Ok(self.scene().revision);
+        if objects.is_empty() && materials.is_empty() && lights.is_empty() {
+            return Ok(LightingEdit {
+                revision: self.scene().revision,
+                created_ids: Vec::new(),
+            });
         }
-        if objects.len() > MAX_OBJECTS || self.scene().objects.len() + objects.len() > MAX_OBJECTS {
+        if objects.len() + lights.len() > MAX_OBJECTS
+            || self.scene().target_count() + objects.len() + lights.len() > MAX_OBJECTS
+        {
             return Err(SceneError::Invalid(
-                "object group exceeds 256 objects".into(),
+                "selection exceeds 256 geometry and light targets".into(),
             ));
         }
         if materials.len() > MAX_MATERIALS
@@ -1887,6 +2078,31 @@ impl Session {
                 ));
             }
         }
+        for (id, light) in &lights {
+            validate_id(id)?;
+            light.validate()?;
+            if !ids.insert(id) || self.contains_object_id(id) {
+                return Err(SceneError::Invalid(
+                    "new target ID collides with current or reversible state".into(),
+                ));
+            }
+        }
+        let (lighting, created_ids) = if lights.is_empty() {
+            (None, Vec::new())
+        } else {
+            let incoming_directional = lights
+                .values()
+                .any(|light| matches!(light.kind, LightKind::Directional));
+            let incoming_ids = ids.iter().map(|id| id.as_str()).collect::<Vec<_>>();
+            let (mut after, mut created_ids) =
+                self.promoted_lighting(&incoming_ids, incoming_directional)?;
+            let Lighting::Authored { lights: target, .. } = &mut after else {
+                unreachable!()
+            };
+            created_ids.extend(lights.keys().cloned());
+            target.extend(lights);
+            (Some(after), created_ids)
+        };
         let start = self.scene().objects.len();
         let created: Vec<_> = objects
             .into_iter()
@@ -1896,7 +2112,7 @@ impl Session {
                 index: start + i,
             })
             .collect();
-        let scene = if created.is_empty() {
+        let mut scene = if created.is_empty() {
             Vec::new()
         } else {
             vec![SceneDelta::Objects {
@@ -1904,7 +2120,13 @@ impl Session {
                 deleted: Vec::new(),
             }]
         };
-        self.commit_change(Change {
+        if let Some(after) = lighting {
+            scene.push(SceneDelta::Lighting {
+                before: self.scene().lighting.clone(),
+                after,
+            });
+        }
+        let revision = self.commit_change(Change {
             scene,
             materials: materials
                 .into_iter()
@@ -1915,6 +2137,10 @@ impl Session {
                 })
                 .collect(),
             ..Change::default()
+        })?;
+        Ok(LightingEdit {
+            revision,
+            created_ids,
         })
     }
     /// Delete a selection atomically, retaining its original scene order for undo.
@@ -1928,36 +2154,54 @@ impl Session {
             return Ok(self.scene().revision);
         }
         if ids.len() > MAX_OBJECTS {
-            return Err(SceneError::Invalid(
-                "object group exceeds 256 objects".into(),
-            ));
+            return Err(SceneError::Invalid("selection exceeds 256 targets".into()));
         }
         let mut unique = HashSet::new();
         let mut deleted = Vec::with_capacity(ids.len());
+        let mut lighting = None;
         for id in ids {
             if !unique.insert(id) {
                 return Err(SceneError::Invalid("duplicate deletion target".into()));
             }
-            let index = self
-                .scene()
-                .objects
-                .iter()
-                .position(|o| &o.id == id)
-                .ok_or_else(|| SceneError::ObjectNotFound(id.clone()))?;
-            deleted.push(IndexedObject {
-                object: self.scene().objects[index].clone(),
-                index,
-            });
+            if self.scene().lighting.light(id).is_some() {
+                let after = lighting.get_or_insert_with(|| self.scene().lighting.clone());
+                let Lighting::Authored { lights, .. } = after else {
+                    unreachable!()
+                };
+                lights.remove(id);
+            } else {
+                let index = self
+                    .scene()
+                    .objects
+                    .iter()
+                    .position(|o| &o.id == id)
+                    .ok_or_else(|| SceneError::ObjectNotFound(id.clone()))?;
+                deleted.push(IndexedObject {
+                    object: self.scene().objects[index].clone(),
+                    index,
+                });
+            }
         }
         deleted.sort_unstable_by_key(|e| e.index);
-        let mut change: Change = SceneDelta::Objects {
-            created: Vec::new(),
-            deleted,
+        let mut scene = Vec::new();
+        if !deleted.is_empty() {
+            scene.push(SceneDelta::Objects {
+                created: Vec::new(),
+                deleted,
+            });
         }
-        .into();
-        change.bindings =
-            self.owned_binding_deletions(&ids.iter().map(String::as_str).collect::<Vec<_>>());
-        self.commit_change(change)
+        if let Some(after) = lighting {
+            scene.push(SceneDelta::Lighting {
+                before: self.scene().lighting.clone(),
+                after,
+            });
+        }
+        self.commit_change(Change {
+            scene,
+            bindings: self
+                .owned_binding_deletions(&ids.iter().map(String::as_str).collect::<Vec<_>>()),
+            ..Change::default()
+        })
     }
     /// Copy selected objects in caller order, appending the copies as one undo step.
     pub fn duplicate_many(
@@ -1967,58 +2211,69 @@ impl Session {
     ) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
         if pairs.len() > MAX_OBJECTS {
-            return Err(SceneError::Invalid(
-                "object group exceeds 256 objects".into(),
-            ));
+            return Err(SceneError::Invalid("selection exceeds 256 targets".into()));
+        }
+        if pairs.is_empty() {
+            return Ok(self.scene().revision);
         }
         let mut sources = HashSet::new();
-        let mut objects = Vec::with_capacity(pairs.len());
+        let mut fresh_ids = HashSet::new();
+        let mut objects = Vec::new();
+        let mut lighting = None;
         for (source, id) in pairs {
             if !sources.insert(source) {
                 return Err(SceneError::Invalid("duplicate source in selection".into()));
             }
-            let mut object = self
-                .scene()
-                .objects
-                .iter()
-                .find(|o| &o.id == source)
-                .ok_or_else(|| SceneError::ObjectNotFound(source.clone()))?
-                .clone();
-            object.id.clone_from(id);
-            objects.push(object);
-        }
-        if objects.is_empty() {
-            return Ok(self.scene().revision);
-        }
-        if self.scene().objects.len() + objects.len() > MAX_OBJECTS {
-            return Err(SceneError::Invalid(
-                "object group exceeds256 objects".into(),
-            ));
-        }
-        let mut ids = HashSet::new();
-        for object in &objects {
-            object.validate()?;
-            if !ids.insert(&object.id) || self.contains_object_id(&object.id) {
+            validate_id(id)?;
+            if !fresh_ids.insert(id) || self.contains_object_id(id) {
                 return Err(SceneError::Invalid(
-                    "new object ID collides with current or reversible state".into(),
+                    "new target ID collides with current or reversible state".into(),
                 ));
+            }
+            if let Some(light) = self.scene().lighting.light(source) {
+                let after = lighting.get_or_insert_with(|| self.scene().lighting.clone());
+                let Lighting::Authored { lights, .. } = after else {
+                    unreachable!()
+                };
+                lights.insert(id.clone(), light.clone());
+            } else {
+                let mut object = self
+                    .scene()
+                    .objects
+                    .iter()
+                    .find(|o| &o.id == source)
+                    .ok_or_else(|| SceneError::ObjectNotFound(source.clone()))?
+                    .clone();
+                object.id.clone_from(id);
+                objects.push(object);
             }
         }
         let start = self.scene().objects.len();
-        let mut change: Change = SceneDelta::Objects {
-            created: objects
-                .into_iter()
-                .enumerate()
-                .map(|(i, object)| IndexedObject {
-                    object,
-                    index: start + i,
-                })
-                .collect(),
-            deleted: Vec::new(),
+        let mut scene = Vec::new();
+        if !objects.is_empty() {
+            scene.push(SceneDelta::Objects {
+                created: objects
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, object)| IndexedObject {
+                        object,
+                        index: start + i,
+                    })
+                    .collect(),
+                deleted: Vec::new(),
+            });
         }
-        .into();
-        change.bindings = self.cloned_bindings(pairs)?;
-        self.commit_change(change)
+        if let Some(after) = lighting {
+            scene.push(SceneDelta::Lighting {
+                before: self.scene().lighting.clone(),
+                after,
+            });
+        }
+        self.commit_change(Change {
+            scene,
+            bindings: self.cloned_bindings(pairs)?,
+            ..Change::default()
+        })
     }
     fn check_revision(&self, expected: u64) -> Result<(), SceneError> {
         let actual = self.scene().revision;
@@ -2033,23 +2288,7 @@ impl Session {
         id: &str,
         transform: &Transform,
     ) -> Result<u64, SceneError> {
-        self.check_revision(expected_revision)?;
-        transform.validate()?;
-        let object = self
-            .document
-            .scene
-            .objects
-            .iter()
-            .find(|o| o.id == id)
-            .ok_or_else(|| SceneError::ObjectNotFound(id.into()))?;
-        if &object.transform == transform {
-            return Ok(self.document.scene.revision);
-        }
-        self.commit_change(SceneDelta::Transform {
-            id: id.into(),
-            before: object.transform.clone(),
-            after: transform.clone(),
-        })
+        self.edit_transforms(expected_revision, &[(id.into(), transform.clone())])
     }
 
     /// Replace one object's authored RGBA channels with one shared Undo entry.

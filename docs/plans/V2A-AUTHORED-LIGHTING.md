@@ -1,14 +1,14 @@
 # V2a: authored diffuse lighting
 
-Proposed2026-11-05 by Astra/root at the user's request after accepted V1. **Planning proposal for review; not an active implementation goal or accepted lighting architecture.** The user confirms lighting as core scope, direct-editor/native-MCP parity, controlled milestones and quality over completion speed. Counts, light types, units and implementation choices below are agent-selected proposals. [Roadmap](../ROADMAP.md#quality-first-capability-sequence) owns the wider sequence; [V1 acceptance](../evidence/V1-readiness.md) owns the starting material/content capability.
+Approved2026-11-05 by the user after Astra/root mapping and accepted V1. **Active implementation goal; early feasibility work is in progress, not feature acceptance.** The user confirms lighting as core scope, direct-editor/native-MCP parity, controlled milestones and quality over completion speed. Counts, light types, units and implementation choices below are agent-selected defaults, retained or revised at the explicit feasibility checkpoint. [Roadmap](../ROADMAP.md#quality-first-capability-sequence) owns the wider sequence; [V1 acceptance](../evidence/V1-readiness.md) owns the starting material/content capability.
 
-## Proposed goal
+## Accepted goal
 
 Let a creator light an original textured exhibit/workbench scene using a directional light, a bounded set of movable point lights and adjustable ambient illumination through both ordinary editor controls and actual native MCP. Deliver meaningful visual control, reversible and recoverable editing, preserved legacy appearance, and matching results in a relocated standalone application. Verify keyboard interaction, shader failure recovery, compatibility and measured CPU/GPU/resource costs. Stop after the requirement audit; do not add shadows, PBR or another capability stage.
 
 The final artifact is an editable original scene with a textured focal object, shared-material objects, an untextured object and surfaces at different distances/orientations. Create two deliberately different lighting arrangements through normal authoring. Point placement must visibly change local illumination, directional rotation must change surface response, and ambient must work independently. Save/reopen and both exports must retain the selected arrangement. Generated scene JSON or a demo-specific shader cannot replace ordinary authoring.
 
-## Proposed boundary
+## Approved slice boundary and feasibility defaults
 
 - One directional light: stable identity/name, enable state, color/intensity and direction controlled by rotation.
 - Up to four point lights: stable identity/name, enable state, position, color/intensity and finite influence range. Confirm this conservative cap against feasibility measurements before selecting it; it is not a measured engine limit.
@@ -18,11 +18,11 @@ The final artifact is an editable original scene with a textured focal object, s
 
 Exclude shadows, spot/area lights, baking/GI, HDR/exposure redesign, PBR/specular maps, light-animation tooling, hierarchy/prefabs, light layers, clustered/deferred rendering and a general component/ECS framework. Existing Rust-facing authored data remains available; a new Lua lighting-animation API is not required for this static-authoring outcome. These exclusions do not downgrade later product needs.
 
-Directional-only plus ambient is smaller but mostly exposes current fixed shader constants. Adding bounded point lights supplies meaningful placement/local contrast. Shadows introduce separate views/passes, coverage/bias/filtering and resource lifetime work; plan that after usable authored-light identity and controls. This is the proposed scope choice to review before coding.
+Directional-only plus ambient is smaller but mostly exposes current fixed shader constants. Adding bounded point lights supplies meaningful placement/local contrast. Shadows introduce separate views/passes, coverage/bias/filtering and resource lifetime work; plan that after usable authored-light identity and controls. The user approved this scope boundary; exact implementation choices are selected at the early feasibility checkpoint.
 
 ## Actual baseline and early feasibility gate
 
-Scene6 has256bounded flat objects and shared opaque materials. OBJ UV/PNG import, safe iteration, scene/history/recovery and runtime material closure are verified. The shader still hardcodes normalized direction(0.4,0.8,0.6), ambient0.28 and diffuse0.72. There is no authored light resource or light-only entity. `mesh=None` currently means a procedural cube, not a non-geometric node. Renderer/picking, shader bindings, scene migration and export profiles therefore need a coherent contract before broad implementation.
+At the accepted V1 starting source, Scene6 has256bounded flat objects and shared opaque materials. OBJ UV/PNG import, safe iteration, scene/history/recovery and runtime material closure are verified. The shader still hardcodes normalized direction(0.4,0.8,0.6), ambient0.28 and diffuse0.72. There is no authored light resource or light-only entity. `mesh=None` currently means a procedural cube, not a non-geometric node. Renderer/picking, shader bindings, scene migration and export profiles therefore need a coherent contract before broad implementation.
 
 | Early decision | Required resolution before extensive UI/format work |
 | --- | --- |
@@ -62,4 +62,4 @@ Use V1's5ms foreground and50ms focused Host-gap values only as initial investiga
 
 Primary references accessed2026-11-05: [Godot lights and shadows](https://docs.godotengine.org/en/stable/tutorials/3d/lights_and_shadows.html) distinguishes directional/finite-range omni tools and optional shadow costs; [Filament lighting](https://google.github.io/filament/main/filament.html#lighting) explains inverse-square attenuation, near-source singularity and smooth finite-range treatment. They inform the early choices, not a selected dependency/architecture or claims of Ruster capability.
 
-Source-backed planning review: `crates/ruster-scene/src/lib.rs` Object/Scene/format policy, `crates/ruster-render/src/scene.wgsl` and renderer camera/material bindings, editor `creation_export.rs` and `scripts/package_creation.py` profile/version checks. Source52099d2 follows final code252fe48 with documentation only; working source changes for V2 have not started. No new goal has been set. Review the proposed directional+point+ambient/no-shadow boundary before coding; consequential accepted architecture belongs in a later decision record.
+Source-backed planning review: `crates/ruster-scene/src/lib.rs` Object/Scene/format policy, `crates/ruster-render/src/scene.wgsl` and renderer camera/material bindings, editor `creation_export.rs` and `scripts/package_creation.py` profile/version checks. Implementation begins from planning commit47ec15a/engine252fe48. The user approved the directional+point+ambient/no-shadow boundary and explicitly requested setting/starting the goal. The active goal is now set; [0031](../decisions/0031-authored-diffuse-lighting.md) records early selected contracts and [foundation evidence](../evidence/V2A-foundation.md) records measured baseline and work still open.

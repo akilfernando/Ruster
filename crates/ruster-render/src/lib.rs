@@ -1,7 +1,9 @@
 //! Shared bounded 3D viewport. No application behavior or editor state lives here.
+mod lighting_gpu;
 mod material_gpu;
 #[cfg(test)]
 mod material_probe;
+use lighting_gpu::{LightingGpu, LightingPacket, LIGHTING_BYTES};
 use material_gpu::{BindingKey, MaterialGpu};
 use std::collections::BTreeMap;
 use std::ops::Range;
@@ -68,6 +70,11 @@ pub struct Metrics {
     pub texture_bytes: u64,
     pub texture_uploads: u64,
     pub texture_upload_bytes: u64,
+    /// Fixed uniform payload; excludes backend binding/alignment allocations.
+    pub lighting_bytes: u64,
+    /// Initial legacy buffer payload plus subsequent changed-packet writes.
+    pub lighting_uploads: u64,
+    pub lighting_upload_bytes: u64,
     /// Indexed scene draw calls in the last frame, excluding composite/UI.
     pub draw_calls: usize,
     pub instance_capacity_bytes: u64,
@@ -555,6 +562,10 @@ pub fn viewport_with_materials(
         None
     };
     let start = Instant::now();
+    let (lighting, invalid_lighting) = match LightingPacket::try_pack(&scene.lighting) {
+        Ok(packet) => (packet, false),
+        Err(_) => (LightingPacket::authored_dark(), true),
+    };
     let mut grouped = BTreeMap::<(Option<String>, BindingKey), DrawGroup>::new();
     for object in &scene.objects {
         let mesh = object_mesh(object, meshes);
@@ -629,10 +640,20 @@ pub fn viewport_with_materials(
         SceneCallback {
             groups,
             camera: view_projection.to_cols_array(),
+            lighting,
             size: rect.size(),
             cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
         },
     ));
+    if invalid_lighting {
+        ui.painter().text(
+            rect.left_bottom() + egui::vec2(8.0, -8.0),
+            egui::Align2::LEFT_BOTTOM,
+            "Invalid lighting. Repair scene light values.",
+            egui::FontId::proportional(13.0),
+            egui::Color32::YELLOW,
+        );
+    }
     ViewportInteraction {
         rect,
         response,
@@ -861,6 +882,7 @@ struct Resources {
     meshes: BTreeMap<String, GpuMesh>,
     pipeline_layout: wgpu::PipelineLayout,
     materials: MaterialGpu,
+    lighting: LightingGpu,
     instances: wgpu::Buffer,
     capacity: usize,
     camera: wgpu::Buffer,
@@ -892,9 +914,14 @@ impl Resources {
             }],
         });
         let materials = MaterialGpu::new(device, queue);
+        let lighting = LightingGpu::new(device);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fixed scene ABI"),
-            bind_group_layouts: &[Some(&camera_layout), Some(&materials.layout)],
+            bind_group_layouts: &[
+                Some(&camera_layout),
+                Some(&materials.layout),
+                Some(&lighting.layout),
+            ],
             immediate_size: 0,
         });
         let pipeline = scene_pipeline(device, &pipeline_layout, default_shader(), sample_count);
@@ -964,6 +991,9 @@ impl Resources {
             mesh_bytes,
             mesh_uploads: 1,
             mesh_upload_bytes: mesh_bytes,
+            lighting_bytes: LIGHTING_BYTES,
+            lighting_uploads: 1,
+            lighting_upload_bytes: LIGHTING_BYTES,
             timestamp_enabled: timestamps.is_some(),
             sample_count,
             ..Default::default()
@@ -975,6 +1005,7 @@ impl Resources {
             meshes: BTreeMap::new(),
             pipeline_layout,
             materials,
+            lighting,
             instances,
             capacity: 1,
             camera,
@@ -1279,6 +1310,7 @@ struct DrawGroup {
 struct SceneCallback {
     groups: Vec<DrawGroup>,
     camera: [f32; 16],
+    lighting: LightingPacket,
     size: egui::Vec2,
     cpu_us: f64,
 }
@@ -1338,6 +1370,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             }
         }
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
+        let lighting_uploaded = r.lighting.prepare(queue, &self.lighting);
         let target = r.target.as_ref().expect("target just resized");
         let timing = r
             .timestamps
@@ -1365,6 +1398,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             });
             pass.set_pipeline(&r.pipeline);
             pass.set_bind_group(0, &r.camera_bind, &[]);
+            pass.set_bind_group(2, &r.lighting.bind, &[]);
             pass.set_vertex_buffer(1, r.instances.slice(..));
             for group in &self.groups {
                 pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
@@ -1420,6 +1454,10 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.mesh_upload_bytes += mesh_upload_bytes;
         metrics.texture_uploads += texture_uploads.count;
         metrics.texture_upload_bytes += texture_uploads.bytes;
+        if lighting_uploaded {
+            metrics.lighting_uploads += 1;
+            metrics.lighting_upload_bytes += LIGHTING_BYTES;
+        }
         metrics.texture_bytes = r.materials.bytes();
         metrics.draw_calls = self.groups.len();
         metrics.objects = instance_count;
@@ -1448,6 +1486,164 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Protect the actual Rust/WGSL uniform boundary and direction convention;
+    // scene validation alone cannot establish these renderer requirements.
+    #[test]
+    fn lighting_packet_matches_shader_layout_and_preserves_explicit_modes() {
+        use ruster_scene::{Ambient, Light, LightKind, Lighting};
+        use std::mem::{align_of, offset_of, size_of};
+        assert_eq!(size_of::<LightingPacket>(), LIGHTING_BYTES as usize);
+        assert_eq!(align_of::<LightingPacket>(), 16);
+        assert_eq!(size_of::<lighting_gpu::PointPacket>(), 32);
+        let offsets = [
+            offset_of!(LightingPacket, mode_counts),
+            offset_of!(LightingPacket, ambient),
+            offset_of!(LightingPacket, direction_to_light),
+            offset_of!(LightingPacket, directional_color_intensity),
+            offset_of!(LightingPacket, points),
+        ];
+        assert_eq!(offsets, [0, 16, 32, 48, 64]);
+        let module = wgpu::naga::front::wgsl::parse_str(default_shader())
+            .expect("built-in lighting WGSL parses");
+        wgpu::naga::valid::Validator::new(
+            wgpu::naga::valid::ValidationFlags::all(),
+            wgpu::naga::valid::Capabilities::all(),
+        )
+        .validate(&module)
+        .expect("built-in lighting WGSL validates");
+        let uniform = module
+            .global_variables
+            .iter()
+            .map(|(_, var)| var)
+            .find(|var| {
+                var.binding
+                    .as_ref()
+                    .is_some_and(|binding| binding.group == 2 && binding.binding == 0)
+            })
+            .unwrap();
+        let wgpu::naga::TypeInner::Struct { members, span } = &module.types[uniform.ty].inner
+        else {
+            panic!("lighting uniform is a struct")
+        };
+        assert_eq!(*span, LIGHTING_BYTES as u32);
+        assert_eq!(
+            members
+                .iter()
+                .map(|member| member.offset as usize)
+                .collect::<Vec<_>>(),
+            offsets
+        );
+
+        let legacy = LightingPacket::try_pack(&Lighting::Legacy).unwrap();
+        assert!(bytemuck::bytes_of(&legacy).iter().all(|byte| *byte == 0));
+        let dark = Lighting::Authored {
+            ambient: Ambient {
+                color: [0.; 3],
+                intensity: 0.,
+            },
+            lights: BTreeMap::new(),
+        };
+        let dark_packet = LightingPacket::try_pack(&dark).unwrap();
+        assert_eq!(dark_packet.mode_counts, [1, 0, 0, 0]);
+        assert_eq!(dark_packet.ambient, [0.; 4]);
+        assert_ne!(
+            bytemuck::bytes_of(&dark_packet),
+            bytemuck::bytes_of(&legacy)
+        );
+
+        let mut authored = Lighting::authored_default("sun");
+        let sun = LightingPacket::try_pack(&authored).unwrap();
+        assert_eq!(sun.mode_counts, [1, 0, 1, 0]);
+        assert_eq!(sun.ambient, [0.28, 0.28, 0.28, 0.]);
+        assert_eq!(sun.directional_color_intensity, [0.72, 0.72, 0.72, 0.]);
+        let incoming = Vec3::new(
+            sun.direction_to_light[0],
+            sun.direction_to_light[1],
+            sun.direction_to_light[2],
+        );
+        assert!(incoming.abs_diff_eq(Vec3::new(0.4, 0.8, 0.6).normalize(), 1e-6));
+        let Lighting::Authored { lights, .. } = &mut authored else {
+            unreachable!()
+        };
+        lights.get_mut("sun").unwrap().transform.translation = [10000., -10000., 10000.];
+        assert_eq!(
+            bytemuck::bytes_of(&sun),
+            bytemuck::bytes_of(&LightingPacket::try_pack(&authored).unwrap()),
+            "directional translation must not change illumination"
+        );
+        for (rotation, expected) in [
+            ([0., 0., 0.], Vec3::Z),
+            ([std::f32::consts::FRAC_PI_2, 0., 0.], -Vec3::Y),
+            ([0., std::f32::consts::FRAC_PI_2, 0.], Vec3::X),
+            (
+                [std::f32::consts::FRAC_PI_2, 0., std::f32::consts::FRAC_PI_2],
+                Vec3::X,
+            ),
+        ] {
+            let Lighting::Authored { lights, .. } = &mut authored else {
+                unreachable!()
+            };
+            lights.get_mut("sun").unwrap().transform.rotation = rotation;
+            let packet = LightingPacket::try_pack(&authored).unwrap();
+            let actual = Vec3::from_slice(&packet.direction_to_light[..3]);
+            assert!((actual.length() - 1.).abs() < 1e-6);
+            assert!(actual.abs_diff_eq(expected, 1e-6));
+        }
+        let Lighting::Authored { lights, .. } = &mut authored else {
+            unreachable!()
+        };
+        for i in 0..4 {
+            let mut point = Light::point(None);
+            point.transform.translation = [10000., -10000., 10000.];
+            point.color = [0.25, 0.5, 1.];
+            point.intensity = 16.;
+            point.kind = LightKind::Point {
+                range: if i % 2 == 0 { 0.1 } else { 10000. },
+            };
+            lights.insert(format!("point{i}"), point);
+        }
+        let packet = LightingPacket::try_pack(&authored).unwrap();
+        assert_eq!(packet.mode_counts, [1, 4, 1, 0]);
+        for (index, point) in packet.points.iter().enumerate() {
+            assert_eq!(point.color_intensity, [4., 8., 16., 0.]);
+            let expected_inverse_range_squared = if index % 2 == 0 { 100. } else { 1e-8 };
+            assert!(
+                (point.position_inverse_range_squared[3] / expected_inverse_range_squared - 1.)
+                    .abs()
+                    < 1e-6
+            );
+            assert!(point
+                .position_inverse_range_squared
+                .iter()
+                .chain(point.color_intensity.iter())
+                .all(|x| x.is_finite()));
+            assert!(point.position_inverse_range_squared[3] > 0.);
+        }
+        let Lighting::Authored { lights, .. } = &mut authored else {
+            unreachable!()
+        };
+        lights.get_mut("point0").unwrap().transform.rotation = [1., 2., 3.];
+        assert_eq!(
+            bytemuck::bytes_of(&packet),
+            bytemuck::bytes_of(&LightingPacket::try_pack(&authored).unwrap()),
+            "point rotation must not change illumination"
+        );
+        let Lighting::Authored { lights, .. } = &mut authored else {
+            unreachable!()
+        };
+        lights.values_mut().for_each(|light| light.enabled = false);
+        let disabled = LightingPacket::try_pack(&authored).unwrap();
+        assert_eq!(disabled.mode_counts, [1, 0, 0, 0]);
+        let Lighting::Authored { lights, .. } = &mut authored else {
+            unreachable!()
+        };
+        lights.get_mut("point0").unwrap().intensity = f32::NAN;
+        assert!(
+            LightingPacket::try_pack(&authored).is_err(),
+            "invalid public input must not reach GPU floats or pretend to be legacy"
+        );
+    }
+
     // Resized side panels can make the viewport portrait. Fit must keep all
     // transformed corners visible in both projections and preserve view intent.
     #[test]
@@ -1827,6 +2023,7 @@ mod tests {
             for source in [
                 "invalid shader",
                 &default_shader().replace("@binding(0)", "@binding(1)"),
+                &default_shader().replace("@group(2) @binding(0)", "@group(2) @binding(1)"),
             ] {
                 assert!(validated_pipeline(&device, &r.pipeline_layout, source, samples).is_err());
             }
@@ -1869,6 +2066,7 @@ mod tests {
                     pass.set_pipeline(&r.pipeline);
                     pass.set_bind_group(0, &r.camera_bind, &[]);
                     pass.set_bind_group(1, r.materials.bind(&BindingKey::default()), &[]);
+                    pass.set_bind_group(2, &r.lighting.bind, &[]);
                     pass.set_vertex_buffer(0, r.cube.vertices.slice(..));
                     pass.set_vertex_buffer(1, r.instances.slice(..));
                     pass.set_index_buffer(r.cube.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -1878,8 +2076,10 @@ mod tests {
             }
             if samples == 1 {
                 material_probe::verify(&device, &queue, &mut r);
+                material_probe::verify_lighting(&device, &queue, r);
+            } else {
+                drop(r);
             }
-            drop(r);
             device
                 .poll(wgpu::PollType::wait_indefinitely())
                 .expect("submitted work");

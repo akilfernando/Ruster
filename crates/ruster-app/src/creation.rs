@@ -1,5 +1,5 @@
 //! A small read-only launch descriptor for exported creator content.
-//! Scene5 remains the authored document; this is not a second project editor.
+//! The supported scene document owns authored state; this is not a second project editor.
 use crate::{MeshMap, ResourceRoot, TextureMap};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path, time::Duration};
@@ -181,6 +181,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let scene_path = directory.path().join("scene.json");
         let mut scene = ruster_scene::Scene::demo();
+        scene.lighting = ruster_scene::Lighting::authored_default("sun");
         scene.objects[0].mesh = Some("marker".into());
         let mut session = ruster_scene::Session::new(scene).unwrap();
         session.save(&scene_path).unwrap();
@@ -230,6 +231,7 @@ mod tests {
             assert!(framed.validate().is_err());
         }
         let input = loaded.load_session(&root).unwrap();
+        assert_eq!(input.scene().lighting, session.scene().lighting);
         assert!(
             input.path().is_none(),
             "runtime resources confer no save association"

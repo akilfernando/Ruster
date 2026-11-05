@@ -39,6 +39,8 @@ PROFILE = {"format": "ruster-runtime", "version": 1,
 CAMERA_PROFILE = {**PROFILE, "capabilities": ["initial_camera"]}
 MATERIAL_PROFILE = {**PROFILE, "descriptor_version": 2,
                     "capabilities": ["initial_camera", "opaque_materials"]}
+LIGHTING_PROFILE = {**PROFILE, "descriptor_version": 2,
+                    "capabilities": ["initial_camera", "opaque_materials", "authored_lighting"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -152,7 +154,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -334,8 +336,8 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     version = document.get("format_version")
     scene = document.get("scene")
     if (document.get("format") != "ruster-scene" or type(version) is not int
-            or not 1 <= version <= 6 or not isinstance(scene, dict)):
-        raise ValueError("content requires a supported Scene1–6 document")
+            or not 1 <= version <= 7 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–7 document")
     objects = scene.get("objects")
     materials = scene.get("materials", {})
     if not isinstance(objects, list) or len(objects) > MAX_OBJECTS:
@@ -345,6 +347,8 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     if version < 6 and ("materials" in scene or any(
             isinstance(obj, dict) and "material" in obj for obj in objects)):
         raise ValueError("material fields require Scene6")
+    if version < 7 and "lighting" in scene:
+        raise ValueError("lighting fields require Scene7")
 
     def identity(value: object, label: str) -> str:
         if not isinstance(value, str) or not IDENTITY.fullmatch(value):
@@ -371,10 +375,10 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
-    if type(schema) is not int or schema not in (1, 2):
+    if type(schema) is not int or schema not in (1, 2, 3):
         raise ValueError("invalid content schema")
     fields = {"schema", "title", "tick_millis", "scene_sha256", "meshes"}
-    if schema == 2:
+    if schema >= 2:
         fields.add("textures")
     exact_fields(content, fields | ({"initial_camera"} if "initial_camera" in content else set()), "content")
     if "initial_camera" in content:
@@ -391,8 +395,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     document = decode(scene_data, "authored scene")
     mesh_ids, texture_ids = scene_dependencies(document)
     if (schema == 1 and document["format_version"] > 5
-            or schema == 2 and document["format_version"] != 6):
-        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6")
+            or schema == 2 and document["format_version"] != 6
+            or schema == 3 and document["format_version"] != 7):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7")
     meshes, textures = content["meshes"], content.get("textures", {})
     if (not isinstance(meshes, dict) or not isinstance(textures, dict)
             or len(meshes) + len(textures) > MAX_MESHES):
@@ -423,6 +428,27 @@ def typed_scene(document: dict) -> dict:
     """Scene fields are f32; serde_json::Value exposes their exact f64 promotions."""
     scene = json.loads(json.dumps(document["scene"]))
     try:
+        lighting = scene.get("lighting", {"mode": "legacy"})
+        if lighting["mode"] == "legacy":
+            scene.pop("lighting", None)
+        elif lighting["mode"] == "authored":
+            ambient = lighting["ambient"]
+            ambient["color"] = [struct.unpack("f", struct.pack("f", value))[0]
+                                for value in ambient["color"]]
+            ambient["intensity"] = struct.unpack("f", struct.pack("f", ambient["intensity"]))[0]
+            for light in lighting["lights"].values():
+                if light.get("name") is None:
+                    light.pop("name", None)
+                light["color"] = [struct.unpack("f", struct.pack("f", value))[0]
+                                  for value in light["color"]]
+                light["intensity"] = struct.unpack("f", struct.pack("f", light["intensity"]))[0]
+                for field in ("translation", "rotation", "scale"):
+                    light["transform"][field] = [struct.unpack("f", struct.pack("f", value))[0]
+                                                for value in light["transform"][field]]
+                if light["kind"]["type"] == "point":
+                    light["kind"]["range"] = struct.unpack("f", struct.pack("f", light["kind"]["range"]))[0]
+        else:
+            raise ValueError("unsupported scene lighting mode")
         if not scene.get("materials"):
             scene.pop("materials", None)
         for material in scene.get("materials", {}).values():
@@ -449,15 +475,17 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
     content, scene_data, document, source_specs = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
-    if content["schema"] == 2 and kit["profile"] != MATERIAL_PROFILE:
+    if content["schema"] == 3 and kit["profile"] != LIGHTING_PROFILE:
+        raise ValueError("runtime kit does not support Scene7 authored_lighting; prepare a current runtime kit")
+    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE):
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
-    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE):
+    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor = {"format": "ruster-application", "version": content["schema"], "title": content["title"],
+    descriptor = {"format": "ruster-application", "version": min(content["schema"], 2), "title": content["title"],
                   "scene": "resources/scene.json", "tick_millis": content["tick_millis"],
                   "meshes": {identity: "resources/" + record["path"]
                              for identity, record in content["meshes"].items()}}
-    if content["schema"] == 2:
+    if content["schema"] >= 2:
         descriptor["textures"] = {identity: "resources/" + record["path"]
                                   for identity, record in content["textures"].items()}
     if camera is not None:
