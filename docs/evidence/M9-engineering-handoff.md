@@ -2,7 +2,13 @@
 
 This document owns disposable artifact/desktop continuation details. [STATUS](../STATUS.md) owns current priorities; the [candidate matrix](../ALPHA-CANDIDATE.md) owns acceptance. No M9 completion or publication is implied.
 
-## Artifacts and unchanged verification
+## Current creator workflow continuation
+
+The active goal is creator-owned Scene5/Lua → standalone Linux application through editor and native MCP, with an engineering handoff distinct from M9 alpha acceptance. Current implementation: `58626f4` adds runtime-template/per-creation packaging and shared async export; `c14fd41` repairs session identity on root-changing SaveAs. [Creator export evidence](CREATOR-export.md) owns current commands, hashes,68-call native SDK proof and verification boundaries; [creator guide](../CREATOR-WORKFLOW.md) owns the journey. The snapshots/binaries below are historical pins, not current source verification.
+
+Preserve `/home/akilf/.local/state/ruster-creator-evaluation/runtime-kit-1.tar.gz` and its extracted kit, CLI Orbital Beacon archive and `/tmp/ruster-creator-export-8pmbihiu` successful SDK fixture. Do not patch immutable artifacts. Current `target/debug/ruster-editor` was rebuilt with default-off inspection enabled for a disposable native frontend export check; verify exact hash/feature/worker state before reuse. Direct native export and integrated recovery now pass on the inspection-enabled build, with reports `/tmp/ruster-manual-export-run/result.json` and `/tmp/ruster-creator-recovery-6qhh4kuh/result.json`. Root inspected dialog/restored/reopened framebuffers. Native workers are finished; no owned process remains and config/workspace/focus are restored. Root owns the necessary default remapped release editor/MCP build, final artifact verification and immutable engineering handoff. Physical human usability, wider hardware and M9 alpha acceptance remain separate.
+
+## Historical eval2 artifacts and verification
 
 Corrected source snapshot `m9-eval-2` is frozen at `c0eb45130d27f63da17e8128da11f4bb53f474f8`, with source manifest/inventory/checksums and separately assembled stock example packages beneath `/home/akilf/.local/state/ruster-candidates/m9-eval-2`. Preserve immutable eval1 and eval2. [Archive adoption](M9-source-archive-adoption.md), [Yard](M9-adopter-yard.md), [Motion](M9-adopter-motion.md) and [stock packages](M9-eval2-stock-packages.md) own exact provenance and boundaries. Subsequent work through `be5a482` changed documentation/evidence only.
 

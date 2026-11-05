@@ -1,6 +1,6 @@
 # From a scene to an application
 
-Updated2026-11-05. The engineering implementation targets Linux x86_64, built-in appearance, Scene5, Lua and triangle OBJ meshes. Native/MCP export integration is under verification; this guide describes its intended reproducible journey, not completed human acceptance. [Current evidence](evidence/CREATOR-export.md) owns verification limits.
+Updated2026-11-05. The engineering implementation targets Linux x86_64, built-in appearance, Scene5, Lua and triangle OBJ meshes. Native MCP and direct-editor export journeys pass within the recorded engineering scope; this guide does not claim completed human acceptance. [Current evidence](evidence/CREATOR-export.md) owns verification limits.
 
 ## Prepare a Linux export template
 
@@ -14,11 +14,11 @@ tar -xzf /tmp/ruster-runtime.tar.gz -C /tmp/ruster-template
 RUSTER_RUNTIME_KIT=/tmp/ruster-template/ruster-runtime target/debug/ruster-editor
 ```
 
-Choose a fresh archive path. Preparation verifies the Linux executable/profile and includes dependency/license notices, requirements, fixed helpers and hashed inventory. The template contains trusted executable code; use a template you prepared or trust. It is specific to its recorded Linux requirements, not a universal Linux binary. Each later scene export uses this template without Cargo or recompiling. Changing the runtime/helpers requires a new template.
+Choose a fresh archive path. Preparation verifies the Linux executable/profile and includes dependency/license notices, requirements, fixed helpers and hashed inventory. The template contains trusted executable code; use a template you prepared or trust. It is specific to its recorded Linux requirements, not a universal Linux binary. Each later scene export uses this template without Cargo or recompiling. Changing the runtime/helpers requires a new template. Editor export requires Python3 and the current Linux process-cleanup utility `/usr/bin/kill`; standalone application execution does not require Python or Rust.
 
 ## Create and export in the editor
 
-1. Start with the empty welcome scene or **File → New scene**. Create an object, name it, save into your own project directory and import a triangle OBJ through Content. Assign the imported mesh to the object.
+1. Start with the empty welcome scene or **File → New scene**. Create an object, name it, save into your own project directory and import a triangle OBJ through Content. Assign it using **Edit → Assign mesh…** while the object is selected (or the Content item’s **Assign to active object** context menu). Drag-and-drop is also available; physical-focus validation remains separately recorded.
 2. Add a Lua behavior, edit its source and typed properties, and use Preview/Reset/Step to check it. Correct any reported source/runtime errors. Stop preview before editing authored transforms; running transforms are separate from saved values.
 3. Save the scene. **File → Export application…** or **Ctrl+Shift+E** opens export. Enter a title, the prepared template directory and a fresh `.tar.gz` destination. Relative archive paths resolve beside the saved scene. Shortcuts are remappable in editor settings.
 4. Enter submits text fields; Tab traverses controls, Enter on Cancel cancels, and Escape closes the dialog. Export runs in the background with a status/cancel window. A clean saved scene and accepted mesh sources are required. Resolve drafts/dialogs first; changed OBJ sources require explicit Refresh. Custom shaders require an explicit choice of built-in appearance for this session; their source file is preserved.
