@@ -1,6 +1,6 @@
 # Product direction
 
-Updated 2026-11-04. Working direction adopted under authorization to define the product and start development; see [decision 0001](decisions/0001-product-foundation.md). Specific scope defaults were selected by the agent and remain revisable.
+Updated 2026-11-05. Working direction adopted under authorization to define the product and start development; see [decision 0001](decisions/0001-product-foundation.md). Specific scope defaults were selected by the agent and remain revisable.
 
 ## Promise
 
@@ -16,7 +16,7 @@ For Ruster, this means helping creators turn their own ideas into working applic
 
 This is a long-term design principle, not a claim that the current prototype can build every kind of application or a request to add every subsystem now. Keep staged scope explicit. When choosing or reviewing work, identify the creator's intended result, the obstacle it removes, and the evidence that the workflow is usable. Internal infrastructure can be necessary; connect it to that result rather than treating its existence as the product outcome. Prefer understandable defaults and documented ways to extend behavior over assumptions that constrain every application to the sample's needs.
 
-The user did not request a roadmap change with this clarification. The existing M7–M9 sequence remains in force; the [post-M6 assessment](ROADMAP-REVIEW.md#post-m6-creator-outcome-review--2026-11-04) records current gaps and recommendations separately from accepted scope.
+The original ethos clarification did not itself revise the milestone sequence. The user’s subsequent2026-11-05 request explicitly authorizes the [quality-first roadmap realignment](ROADMAP.md#quality-first-capability-sequence); earlier sequence statements remain historical.
 
 ## Familiarity is a product requirement
 
@@ -34,13 +34,15 @@ The user has confirmed importance, not individual light types, shading models, m
 
 ## Autonomous delivery authorization
 
-2026-11-04: the user authorized continued development through M9, adjusting short-term goals when they serve the creator outcome above, with an evaluation after each milestone. Lean, efficient and optimized code is an explicit priority. Measure meaningful runtime/memory/iteration costs, avoid speculative framework/dependency growth, and retain optimizations only with relevant correctness and before/after evidence. The user later narrowed the current run to complete M8 only and defer M9. The milestone sequence is unchanged. On2026-11-05 the user reactivated the original through-M9 goal, superseding that stop for development; actual public publication remains separate. This authorization does not turn unverified human/platform gates into completed milestones or authorize claiming publication/readiness without evidence.
+2026-11-04: the user authorized continued development through M9, adjusting short-term goals when they serve the creator outcome above, with an evaluation after each milestone. Lean, efficient and optimized code is an explicit priority. Measure meaningful runtime/memory/iteration costs, avoid speculative framework/dependency growth, and retain optimizations only with relevant correctness and before/after evidence. The user later narrowed the current run to complete M8 only and defer M9. The milestone sequence remained unchanged at that point; the later quality-first realignment now supersedes its scheduling. On2026-11-05 the user reactivated the original through-M9 goal, superseding that stop for development; actual public publication remains separate. This authorization does not turn unverified human/platform gates into completed milestones or authorize claiming publication/readiness without evidence.
 
 ## Current working goal — 2026-11-05
 
-The user accepted the [Astra/root reassessment](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly adding MCP as a core part of the outcome: creators must be able to realize the same small creation directly in the app and through MCP. Deliver a creator-owned Scene5/Lua workflow with imported content through authoring, preview, repair, save/recovery and relocated standalone Linux execution. Both routes use shared validated operations, preserve human/agent interleaving and conflict/authority boundaries, and receive journey verification. Human-only use remains complete; optional MCP activation does not make MCP a secondary product concern.
+The user cleared the PumpBench goal and requested Astra's quality-first roadmap realignment and a targeted new objective. The current root/Astra-selected goal is [V1 opaque textured materials](plans/V1-TEXTURED-MATERIALS.md): one fresh-project UV/base-color-image/material workflow through direct editor and native MCP, real rendered observation, safe iteration/history/save/recovery and matching relocated standalone delivery. It includes an early dependency/feasibility checkpoint and ends at its acceptance audit, not at “complete rendering.” Exact format/material/storage choices are selected at that checkpoint, not inferred as user decisions.
 
-Separate the finite engineering-ready evaluation handoff from externally validated alpha. Continue useful bounded engineering while participants/machines/desktop focus are unavailable; resume permitted focused tests after normal unlock. Fix demonstrated usability/delivery gaps with existing mechanisms and proportionate correctness/performance checks. No speculative engine subsystem/project/publishing framework or replacement language is selected. M9 acceptance retains its human/platform/resource requirements; public push/tag/release remains separate. Stop at the engineering handoff or a genuine external-access/user-decision dependency.
+The [canonical capability sequence](ROADMAP.md#quality-first-capability-sequence) explicitly allocates lighting, deeper material/shader work, scene composition, interaction/audio/physics/animation, runtime state, pipeline/scale and later ray tracing. These stages are not one long-horizon session goal. The former finish-M9-first/stop-after-handoff schedule is superseded by this user-authorized realignment. Preserve M9 human/platform/resource gates as a separate qualification track and define an explicit capability contract before a future creator-ready alpha; passing the historical matrix alone is insufficient.
+
+The user-confirmed requirement that direct-editor and native-MCP routes are first-class remains in force. Preserve shared validation, human/agent interleaving and authority boundaries; human-only creation needs no AI service. Useful bounded engineering may continue while the desktop is locked, but required focused checks remain incomplete until normal unlock. PumpBench's pending keyboard check is retained separately; clearing its goal did not pass it. No public push/tag/release, replacement language or broad framework rewrite is authorized by this planning revision.
 
 ## Session goal discipline
 
@@ -81,7 +83,7 @@ The reference game must exercise the engine, not become a second large product. 
 
 ## Delivery sequence
 
-The canonical phase definitions, deliverables, scope limits and acceptance gates are in [ROADMAP.md](ROADMAP.md). M0–M3 now provide the local seed, saved-scenario workflow, first Vulkan schematic view and visual authoring. M4 now provides the bounded native editor-owned MCP proof; M5 now supplies bounded neutral scenes and shared procedural3D; M6 now supplies the bounded OBJ/cache/WGSL iteration route; M7 now provides the standalone application kit and delivery challenge; M8 independent reuse and the allocated editor authoring/tooling slices are complete within their recorded Linux development scope; M9 adoption/release validation is active again under the2026-11-05 goal resumption. The accepted post-M3 revision separates shared scene/3D foundations, content iteration, standalone application kit, independent reuse proof and public alpha (M5–M9).
+The canonical phase definitions, deliverables, scope limits and acceptance gates are in [ROADMAP.md](ROADMAP.md). M0–M3 now provide the local seed, saved-scenario workflow, first Vulkan schematic view and visual authoring. M4 now provides the bounded native editor-owned MCP proof; M5 now supplies bounded neutral scenes and shared procedural3D; M6 now supplies the bounded OBJ/cache/WGSL iteration route; M7 now provides the standalone application kit and delivery challenge; M8 independent reuse and the allocated editor authoring/tooling slices are complete within their recorded Linux development scope; M9 prototype qualification remains incomplete alongside the new2026-11-05 capability sequence. The accepted post-M3 revision separates shared scene/3D foundations, content iteration, standalone application kit, independent reuse proof and public alpha (M5–M9).
 
 A dependency-free prototype is a temporary scope choice, not a ban on libraries. Authoring undo restores authored changes; simulation reset/replay is distinct from runtime rollback.
 

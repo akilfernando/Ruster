@@ -32,12 +32,8 @@ Ray tracing is a later quality/rendering path, potentially starting with a bound
 
 Primary sources accessed2026-11-05: [Godot mesh LOD](https://docs.godotengine.org/en/stable/tutorials/3d/mesh_lod.html) documents import-time simplification, quality pitfalls and measuring effectiveness; [Epic hardware ray tracing](https://dev.epicgames.com/documentation/en-us/unreal-engine/hardware-ray-tracing-in-unreal-engine) documents hybrid raster/ray approaches, denoising, hardware conditions and scene-update costs. These inform tradeoffs, not Ruster capability or comparative-performance claims.
 
-## Proposed order and acceptance
+## Current allocation and acceptance
 
-1. Close the existing PumpBench focused keyboard gate without expanding that finite objective.
-2. Plan a bounded visual-authoring vertical slice: import a textured object, author a material and light, inspect/adjust through editor and MCP, undo/save/recover, then export the same appearance. Exact minimum maps/light types/shadows remain to be selected.
-3. Expand to an actual small game or interactive application requiring reusable scenes, UI/input, sound and physical/animated interaction. Allocate these dependencies explicitly rather than hiding sample-specific implementations in applications or declaring transform scripting sufficient.
-4. Establish representative scene-scale workloads and add measured culling/LOD/resource management. Plan data ownership for future scale now without prebuilding speculative frameworks.
-5. Add advanced quality paths including ray tracing against explicit supported hardware, visual outcomes and budgets.
+The user subsequently requested Astra's roadmap realignment and a targeted quality-first session goal. [ROADMAP.md](ROADMAP.md#quality-first-capability-sequence) now owns the working capability sequence and qualification track; [V1](plans/V1-TEXTURED-MATERIALS.md) owns the first bounded implementation contract. This inventory is not a competing schedule. PumpBench's pending focused keyboard check remains separately recorded; source work on V1 may proceed without claiming that old check passed.
 
-This order is root/Astra advice, not user-approved milestone numbering or a waiver of existing M9 adoption gates. Every selected capability includes creator interaction, scripting/Rust access where relevant, guarded MCP operations, persistence/recovery, standalone delivery, documentation and proportionate verification. Do not reduce MCP parity to setting raw numbers without useful observation/diagnostics. No public release is authorized by this assessment.
+The working sequence is root/Astra-selected under the user’s realignment authorization, not user-selected individual architecture or a waiver of existing M9 adoption gates. Every selected capability includes creator interaction, scripting/Rust access where relevant, guarded MCP operations, persistence/recovery, standalone delivery, documentation and proportionate verification. Do not reduce MCP parity to setting raw numbers without useful observation/diagnostics. No public release is authorized by this assessment.

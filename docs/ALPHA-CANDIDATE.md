@@ -2,6 +2,10 @@
 
 Updated2026-11-05. **Working candidate, not accepted or published.** The user reactivated the through-M9 goal after the M8 checkpoint. The intended outcome is adoption by another developer without continual author assistance. A version label, local green gate or successful example alone does not prove that outcome.
 
+## Qualification versus product capability
+
+The user-requested2026-11-05 [quality-first roadmap realignment](ROADMAP.md#quality-first-capability-sequence) supersedes finish-M9-first/no-feature-expansion scheduling. This matrix remains the retained prototype qualification track, not proof of the expanded creator-ready product baseline. Missing visual authoring and other capability workflows are explicitly allocated in the roadmap. Before freezing a future creator-ready release, define its advertised capability contract from delivered slices and qualify that exact candidate using these gates. No old snapshot is retroactively certified for new features, and no human/platform/resource/compatibility requirement is waived.
+
 ## Candidate identity and gate ownership
 
 The accepted functional baseline is local commit45a9a92(M8); workspace version remains0.1.0 and packages remain `publish=false`. The first snapshot `m9-eval-1` froze5247d2a, then the [extracted-source rehearsal](evidence/M9-source-archive-adoption.md) exposed checker and Motion-export blockers. Both owning-tool repairs now pass the full gate. **m9-eval-2** names the corrected local evaluation snapshot; frozen at `c0eb451`, its paired `SOURCE-MANIFEST.json` owns exact commit/tree/archive identity. Freeze, gate acceptance and publication are separate. [Decision0025](decisions/0025-first-alpha-platform-scope.md) owns Linux x86_64 scope. No tag, hosted release, source upload or binary publication is implied.
@@ -55,4 +59,4 @@ These are current owning-source contracts, not stable future-format promises. Un
 4. Collect clean-environment/platform, performance/resource and human evidence against that exact candidate. Missing participants/hardware and failed commands remain open evidence, not passed gates.
 5. Reconcile candidate notes/support conditions and run the affected/full checks required by TESTING. Perform the requirement-by-requirement completion audit before M9 acceptance. Actual publication is separate.
 
-No engine feature expansion, generalized scheduler, storage rewrite or new scripting language is justified by this audit. The next implementation serves the directly observed creator workflow.
+The earlier audit did not justify feature expansion on its own. The subsequent explicit user-requested quality-first realignment now selects bounded capability development alongside qualification. A generalized scheduler, storage rewrite or new scripting language is still not justified merely by this matrix; each consequential dependency needs its own evidence and decision.

@@ -1,6 +1,6 @@
 # PumpBench — industry creator exercise
 
-Updated2026-11-05. **In progress: the application and core workflow are verified within the limits below; focused native keyboard acceptance is still pending.** The user requested a realistic industry creation workflow after repairing the MCP gaps exposed by [Tideglass](TIDEGLASS.md), permitted Blender/Blender MCP if useful, and asked Astra to define a new session goal.
+Updated2026-11-05. **The user cleared this session goal after its engineering handoff; the application and core workflow are verified within the limits below, but focused native keyboard acceptance is still pending. Clearing the goal is not completion evidence.** The user requested a realistic industry creation workflow after repairing the MCP gaps exposed by [Tideglass](TIDEGLASS.md), permitted Blender/Blender MCP if useful, and asked Astra to define a new session goal.
 
 ## Requirements and chosen exercise
 
@@ -10,7 +10,7 @@ The agent-selected brief is **PumpBench**, an illustrative pump assembly review 
 
 The selected workflow uses Blender assets, native MCP scene/behavior authoring and visual observation, then the supported project-owned Rust application API for reviewer controls. The code-first distinction is explicit: generic Scene5/Lua content-only exports currently do not expose authored end-user UI. No pump-specific engine behavior is planned, and autoplay separation will not count as interactivity.
 
-## Active session goal
+## Recorded session goal (subsequently cleared)
 
 Astra reviewed the initiative and root set the following session goal on2026-11-05 under the user's explicit authorization:
 
