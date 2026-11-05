@@ -1,6 +1,6 @@
 # First alpha candidate — working release notes
 
-Updated2026-11-05. **Candidate preparation, not accepted or published.** Workspace package version remains0.1.0; the exact evaluation identifier, commit and complete source archive are not frozen yet. [Candidate gates](ALPHA-CANDIDATE.md) own readiness. [Decision0025](decisions/0025-first-alpha-platform-scope.md) selects Linux x86_64 for this first candidate; Windows remains an intended future target.
+Updated2026-11-05. **Candidate preparation, not accepted or published.** The local evaluation identifier is **m9-eval-1**; workspace package version remains0.1.0. The paired `SOURCE-MANIFEST.json` identifies the exact frozen commit/tree and complete source archive. This label does not assert gate acceptance. [Candidate gates](ALPHA-CANDIDATE.md) own readiness. [Decision0025](decisions/0025-first-alpha-platform-scope.md) selects Linux x86_64 for this first candidate; Windows remains an intended future target.
 
 ## Creator workflow
 
@@ -28,7 +28,7 @@ Build your application in Rust using the shared kit. Yard and the non-game Motio
 
 The default editor's named hidden-idle CPU/RSS cases and one history-heavy repeated runtime/recovery journey are recorded in [resource observations](evidence/M9-editor-resources.md) and [pressure evidence](evidence/M9-editor-pressure.md). The latter finished at303,748KiB RSS,5,196KiB above its baseline; coarse sampling can miss peaks and its reported VmHWM was nonmonotonic. These are observations, not a total-process ceiling or leak proof.
 
-[Captured agent feedback](evidence/M9-editor-feedback.md) verifies transform and error/repair states through exact receipts, UI trees and images. Its0.38–0.58s intervals include safety checks, polling, file writes and screenshot processing, so they do not establish physical input latency or satisfy the separate provisional product-latency targets. Earlier CPU/GPU/iteration baselines retain their named scope; no cross-engine performance claim is made.
+[Captured agent feedback](evidence/M9-editor-feedback.md) verifies transform and error/repair states through exact receipts, UI trees and images. Its0.38–0.58s intervals include safety checks, polling, file writes and screenshot processing, so they do not establish physical input latency or satisfy the separate provisional product-latency targets. [Final default build](evidence/M9-candidate-build.md) passed17.45s, with69affected editor tests and separately sampled compiler-process memory. Earlier CPU/GPU/iteration baselines retain their named scope; no cross-engine performance claim is made.
 
 ## Compatibility and remaining acceptance
 
