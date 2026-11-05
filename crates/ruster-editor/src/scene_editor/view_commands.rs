@@ -171,13 +171,7 @@ impl SceneEditor {
                     if next.iter().any(|existing| existing == id) {
                         return Err(fail("duplicate_object"));
                     }
-                    if !self
-                        .session
-                        .scene()
-                        .objects
-                        .iter()
-                        .any(|object| object.id == id)
-                    {
+                    if self.session.scene().target_transform(id).is_none() {
                         return Err(fail("missing_object"));
                     }
                     next.push(id.to_string());

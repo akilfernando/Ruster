@@ -143,6 +143,7 @@ impl SceneEditor {
         !self.asset_publishing()
             && !self.asset_loading()
             && self.color_draft.is_none()
+            && self.lighting_draft.is_none()
             && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && !self.manipulation.offset_pending()
@@ -892,7 +893,7 @@ mod tests {
         let id = candidates[0].id.clone();
         let (_journal, snapshot) = store.claim(&id).unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 4);
+        assert_eq!(payload["version"], 5);
         assert_eq!(payload["material"]["tint"][1], "unfinished green");
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();

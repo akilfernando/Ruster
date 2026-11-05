@@ -3,6 +3,7 @@ mod behavior_tools;
 mod capture_tools;
 mod color_tools;
 mod export_tools;
+mod lighting_tools;
 mod material_tools;
 mod persistence_tools;
 mod runtime_tools;
@@ -105,6 +106,9 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if lighting_tools::supported(name) {
+        return lighting_tools::valid(name, arguments);
+    }
     if material_tools::supported(name) {
         return material_tools::valid(name, arguments);
     }
@@ -405,6 +409,7 @@ fn tools() -> Value {
     }
     tools.extend(color_tools::list());
     tools.extend(material_tools::list());
+    tools.extend(lighting_tools::list());
     tools.extend(view_tools::list());
     tools.extend(capture_tools::list());
     tools.extend(export_tools::list());
@@ -535,6 +540,7 @@ impl Server {
                     .contains(&name)
                         && !color_tools::supported(name)
                         && !material_tools::supported(name)
+                        && !lighting_tools::supported(name)
                         && !view_tools::supported(name)
                         && !capture_tools::supported(name)
                         && !export_tools::supported(name)
@@ -817,7 +823,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 60);
+        assert_eq!(tools.len(), 64);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -854,6 +860,10 @@ mod tests {
                 "scene_material_assign",
                 "scene_material_copy",
                 "scene_material_remove",
+                "lighting_inspect",
+                "scene_light_create",
+                "scene_light_set",
+                "scene_ambient_set",
                 "viewport_inspect",
                 "viewport_camera",
                 "scene_select",
@@ -1134,6 +1144,23 @@ mod tests {
                 json!({"expected_session_token":"s","expected_revision":"7","object_id":"cube-1"}),
             ),
             ("scene_inspect", json!({"offset":"16"})),
+            ("lighting_inspect", json!({})),
+            (
+                "scene_light_create",
+                json!({"expected_session_token":"s","expected_revision":"7","light_id":"sun",
+                    "light":{"transform":{"translation":[0,2,0],"rotation":[0,0,0],"scale":[1,1,1]},
+                        "enabled":true,"color":[1,1,1],"intensity":0.72,"kind":{"type":"directional"}}}),
+            ),
+            (
+                "scene_light_set",
+                json!({"expected_session_token":"s","expected_revision":"7","light_id":"point",
+                    "light":{"transform":{"translation":[0,2,0],"rotation":[0,0,0],"scale":[1,1,1]},
+                        "enabled":false,"color":[1,0.5,0],"intensity":1,"kind":{"type":"point","range":5}}}),
+            ),
+            (
+                "scene_ambient_set",
+                json!({"expected_session_token":"s","expected_revision":"7","ambient":{"color":[1,1,1],"intensity":0.28}}),
+            ),
             ("creation_export_inspect", json!({"operation_id":"1"})),
             (
                 "creation_export_start",

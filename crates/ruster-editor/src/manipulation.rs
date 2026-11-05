@@ -69,25 +69,51 @@ fn nearby_euler(q: DQuat, original: [f32; 3]) -> [f32; 3] {
     })
     .unwrap_or(original)
 }
+// Resolve the whole bounded selection before any transform/draft mutation.
+// An absent or repeated target must never become a partial mixed transaction.
+fn selected_transforms<'a>(scene: &'a Scene, ids: &[String]) -> Result<Vec<&'a Transform>, String> {
+    if ids.len() > ruster_scene::MAX_OBJECTS {
+        return Err("Selection exceeds256 authoring targets.".into());
+    }
+    let mut seen = BTreeSet::new();
+    ids.iter()
+        .map(|id| {
+            if ruster_scene::validate_id(id).is_err() {
+                return Err("Selection contains an invalid target ID.".into());
+            }
+            if !seen.insert(id.as_str()) {
+                return Err("Selection repeats an authoring target.".into());
+            }
+            scene.target_transform(id).ok_or_else(|| {
+                format!("Selected target {id} disappeared; the operation was preserved.")
+            })
+        })
+        .collect()
+}
+fn reject_light_scale(scene: &Scene, ids: &[String]) -> Result<(), String> {
+    if let Some(id) = ids.iter().find(|id| scene.lighting.light(id).is_some()) {
+        let name = scene.target_display_name(id).unwrap_or(id);
+        return Err(format!(
+            "Light {name} cannot be scaled; use intensity or point range."
+        ));
+    }
+    Ok(())
+}
+
 fn proxy_for(
     session: &Session,
     ids: &[String],
     pivot: Pivot,
     local: bool,
 ) -> Result<GizmoTransform, String> {
+    let transforms = selected_transforms(session.scene(), ids)?;
     let mut center = DVec3::ZERO;
-    let mut active = None;
-    for id in ids {
-        let object = session
-            .scene()
-            .objects
-            .iter()
-            .find(|o| &o.id == id)
-            .ok_or("Selected object disappeared.")?;
-        center += DVec3::from_array(object.transform.translation.map(f64::from));
-        active = Some(&object.transform);
+    for transform in &transforms {
+        center += DVec3::from_array(transform.translation.map(f64::from));
     }
-    let active = active.ok_or("Select an object first.")?;
+    let active = transforms
+        .last()
+        .ok_or("Select geometry or a light first.")?;
     center /= ids.len() as f64;
     let position = if pivot == Pivot::Active {
         DVec3::from_array(active.translation.map(f64::from))
@@ -127,18 +153,15 @@ impl Gesture {
         pivot: Pivot,
         local: bool,
     ) -> Result<Self, String> {
+        let transforms = selected_transforms(session.scene(), ids)?;
+        if tool == Tool::Scale {
+            reject_light_scale(session.scene(), ids)?;
+        }
         let start: Vec<_> = ids
             .iter()
-            .map(|id| {
-                session
-                    .scene()
-                    .objects
-                    .iter()
-                    .find(|o| &o.id == id)
-                    .map(|o| (id.clone(), o.transform.clone()))
-                    .ok_or_else(|| format!("Object {id} disappeared; gesture cancelled."))
-            })
-            .collect::<Result<_, _>>()?;
+            .zip(transforms)
+            .map(|(id, transform)| (id.clone(), transform.clone()))
+            .collect();
         let proxy = proxy_for(session, ids, pivot, local)?;
         Ok(Self {
             revision: session.scene().revision,
@@ -427,13 +450,14 @@ impl Manipulation {
         }
     }
     pub fn restore_drafts(&mut self, scene: &Scene, draft: DraftSnapshot) -> Result<(), String> {
-        self.reset_precision_unit(scene, draft.rotation_unit);
+        let transforms = selected_transforms(scene, &self.ids)?;
+        let (baseline, mixed) = precision_components(transforms.into_iter(), draft.rotation_unit);
         if draft
             .precision
             .iter()
             .chain(draft.delta.iter())
             .any(|text| text.chars().count() > 1024)
-            || draft.mixed != self.mixed
+            || draft.mixed != mixed
             || draft.revision
                 != draft
                     .edited
@@ -445,16 +469,19 @@ impl Manipulation {
                 .precision
                 .iter()
                 .enumerate()
-                .any(|(i, text)| !draft.edited[i] && text != &self.precision[i])
+                .any(|(i, text)| !draft.edited[i] && text != &baseline[i])
         {
             return Err("Recovery precision drafts have invalid selection, masks, revision or text bounds; checkpoint preserved.".into());
         }
+        self.rotation_unit = draft.rotation_unit;
+        self.precision_had_focus = false;
+        self.mixed = mixed;
         self.precision = draft.precision;
         self.edited = draft.edited;
         self.precision_revision = draft.revision;
         self.delta = draft.delta;
         if !self.precision_pending() {
-            self.reset_precision(scene);
+            self.reset_precision(scene)?;
         }
         self.draft_changed();
         Ok(())
@@ -462,22 +489,24 @@ impl Manipulation {
     pub fn precision_pending(&self) -> bool {
         self.edited.iter().any(|v| *v)
     }
-    pub fn reset_precision(&mut self, scene: &Scene) {
-        self.reset_precision_unit(scene, AngleUnit::Degrees);
+    pub fn reset_precision(&mut self, scene: &Scene) -> Result<(), String> {
+        self.reset_precision_unit(scene, AngleUnit::Degrees)
     }
-    fn reset_precision_unit(&mut self, scene: &Scene, unit: AngleUnit) {
+    fn reset_precision_unit(&mut self, scene: &Scene, unit: AngleUnit) -> Result<(), String> {
+        let transforms = selected_transforms(scene, &self.ids)?;
+        let (precision, mixed) = precision_components(transforms.into_iter(), unit);
         self.rotation_unit = unit;
         self.draft_changed();
         self.edited = [false; 9];
         self.precision_revision = None;
         self.precision_had_focus = false;
-        (self.precision, self.mixed) = precision_components(
-            self.ids
-                .iter()
-                .filter_map(|id| scene.objects.iter().find(|o| &o.id == id))
-                .map(|object| &object.transform),
-            unit,
-        );
+        self.precision = precision;
+        self.mixed = mixed;
+        Ok(())
+    }
+    pub fn scale_allowed(&self, scene: &Scene) -> bool {
+        selected_transforms(scene, &self.ids).is_ok()
+            && reject_light_scale(scene, &self.ids).is_ok()
     }
     fn preview_precision(&self) -> Option<([String; 9], [bool; 9])> {
         self.gesture.as_ref().map(|gesture| {
@@ -488,6 +517,10 @@ impl Manipulation {
         })
     }
     pub fn apply_precision(&mut self, session: &mut Session) -> Result<(), String> {
+        let selected = selected_transforms(session.scene(), &self.ids)?;
+        if self.edited[6..].iter().any(|edited| *edited) {
+            reject_light_scale(session.scene(), &self.ids)?;
+        }
         if !self.precision_pending() {
             return Ok(());
         }
@@ -508,15 +541,9 @@ impl Manipulation {
         let edits: Vec<_> = self
             .ids
             .iter()
-            .map(|id| {
-                let mut next = session
-                    .scene()
-                    .objects
-                    .iter()
-                    .find(|o| &o.id == id)
-                    .ok_or("Selected object disappeared.")?
-                    .transform
-                    .clone();
+            .zip(selected)
+            .map(|(id, original)| {
+                let mut next = original.clone();
                 for (i, value) in values.iter().copied().enumerate() {
                     if self.edited[i] {
                         if i < 3 {
@@ -541,7 +568,7 @@ impl Manipulation {
                 &edits,
             )
             .map_err(|e| e.to_string())?;
-        self.reset_precision(session.scene());
+        self.reset_precision(session.scene())?;
         Ok(())
     }
     pub fn precision_ui(
@@ -550,6 +577,8 @@ impl Manipulation {
         session: &mut Session,
         auto_commit: bool,
     ) -> Result<bool, String> {
+        selected_transforms(session.scene(), &self.ids)?;
+        let scale_allowed = reject_light_scale(session.scene(), &self.ids).is_ok();
         let mut preview = self.preview_precision();
         let previewing = preview.is_some();
         let mixed = preview
@@ -567,10 +596,13 @@ impl Manipulation {
         let mut focused = false;
         let mut field_has_focus = false;
         if mixed.iter().any(|mixed| *mixed) {
-            ui.label("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected objects; other components keep their individual values.");
+            ui.label("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected targets; other components keep their individual values.");
         }
         for (row, label) in ["Position", unit.label(), "Scale"].into_iter().enumerate() {
             ui.label(label);
+            if row == 2 && !scale_allowed {
+                ui.small("Lights keep unit scale; use intensity or point range.");
+            }
             let group_width = component_group_width(ui);
             ui.horizontal_wrapped(|ui| {
                 for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
@@ -578,12 +610,12 @@ impl Manipulation {
                     ui.allocate_ui_with_layout(egui::vec2(group_width,ui.spacing().interact_size.y),egui::Layout::left_to_right(egui::Align::Center),|ui| {
                         ui.label(label);
                         let response = ui.add_sized([ui.available_width().max(48.0),ui.spacing().interact_size.y],
-                            egui::TextEdit::singleline(if let Some((text,_))=&mut preview {&mut text[i]} else {&mut self.precision[i]}).char_limit(1024).interactive(!previewing && ui.is_enabled())
+                            egui::TextEdit::singleline(if let Some((text,_))=&mut preview {&mut text[i]} else {&mut self.precision[i]}).char_limit(1024).interactive(!previewing && ui.is_enabled() && (row != 2 || scale_allowed))
                                 .hint_text(if mixed[i] { "—" } else { "" }));
                         let response=response.on_hover_ui(|ui| {
                             let value=preview.as_ref().map(|(text,_)|text[i].as_str()).unwrap_or(&self.precision[i]);
                             if !value.is_empty() && value.chars().count()<=128 {ui.label(value);}
-                            ui.label("Editing changes only this component for selected objects. Long input stays in the field; use the cursor to scroll through it.");
+                            ui.label("Editing changes only this component for selected targets. Long input stays in the field; use the cursor to scroll through it.");
                         });
                         focused |= response.has_focus() || response.lost_focus();
                         field_has_focus |= response.has_focus();
@@ -622,7 +654,7 @@ impl Manipulation {
             });
         }
         if cancel {
-            self.reset_precision(session.scene());
+            self.reset_precision(session.scene())?;
             return Ok(false);
         }
         if apply {
@@ -643,8 +675,7 @@ impl Manipulation {
         self.clipboard = other.clipboard.take();
     }
     pub fn reconcile(&mut self, scene: &Scene) {
-        self.ids
-            .retain(|id| scene.objects.iter().any(|o| &o.id == id));
+        self.ids.retain(|id| scene.target_transform(id).is_some());
     }
     pub fn select(&mut self, id: Option<String>, additive: bool) {
         if !additive {
@@ -670,6 +701,14 @@ impl Manipulation {
         root: Option<&Path>,
         document_generation: u64,
     ) -> Result<(), String> {
+        selected_transforms(session.scene(), &self.ids)?;
+        if self
+            .ids
+            .iter()
+            .any(|id| session.scene().lighting.light(id).is_some())
+        {
+            return Err("Light Copy is not available yet; select only geometry before Copy. The previous clipboard was preserved.".into());
+        }
         let objects: Vec<_> = self
             .ids
             .iter()
@@ -772,6 +811,7 @@ impl Manipulation {
         Ok(())
     }
     pub fn apply_delta(&self, session: &mut Session) -> Result<(), String> {
+        let selected = selected_transforms(session.scene(), &self.ids)?;
         let mut delta = [0.0_f32; 3];
         for (axis, text) in self.delta.iter().enumerate() {
             delta[axis] = text
@@ -783,15 +823,8 @@ impl Manipulation {
             }
         }
         let mut edits = Vec::with_capacity(self.ids.len());
-        for id in &self.ids {
-            let mut transform = session
-                .scene()
-                .objects
-                .iter()
-                .find(|o| &o.id == id)
-                .ok_or("Selected object disappeared.")?
-                .transform
-                .clone();
+        for (id, original) in self.ids.iter().zip(selected) {
+            let mut transform = original.clone();
             for (value, offset) in transform.translation.iter_mut().zip(delta) {
                 *value += offset;
             }
@@ -803,15 +836,33 @@ impl Manipulation {
         Ok(())
     }
     pub fn transient_scene(&self, scene: &Scene) -> Option<Scene> {
-        self.gesture.as_ref().map(|gesture| {
-            let mut candidate = scene.clone();
-            for (id, transform) in &gesture.candidate {
-                if let Some(object) = candidate.objects.iter_mut().find(|o| &o.id == id) {
-                    object.transform.clone_from(transform);
+        let gesture = self.gesture.as_ref()?;
+        if gesture.revision != scene.revision {
+            return None;
+        }
+        let ids = gesture
+            .candidate
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        selected_transforms(scene, &ids).ok()?;
+        let mut candidate = scene.clone();
+        for (id, transform) in &gesture.candidate {
+            transform.validate().ok()?;
+            if let Some(object) = candidate.objects.iter_mut().find(|object| &object.id == id) {
+                object.transform.clone_from(transform);
+            } else {
+                if transform.scale != [1.; 3] {
+                    return None;
                 }
+                let ruster_scene::Lighting::Authored { lights, .. } = &mut candidate.lighting
+                else {
+                    return None;
+                };
+                lights.get_mut(id)?.transform.clone_from(transform);
             }
-            candidate
-        })
+        }
+        Some(candidate)
     }
     /// Returns true when the overlay owns the pointer (including a release).
     pub fn draw(
@@ -823,6 +874,16 @@ impl Manipulation {
         if self.ids.is_empty() {
             self.cancel();
             return Ok(false);
+        }
+        if let Err(error) = selected_transforms(session.scene(), &self.ids) {
+            self.cancel();
+            return Err(error);
+        }
+        if self.tool == Tool::Scale {
+            if let Err(error) = reject_light_scale(session.scene(), &self.ids) {
+                self.cancel();
+                return Err(error);
+            }
         }
         let cancelled = ui.input(|i| !i.focused || i.key_pressed(egui::Key::Escape))
             || self
@@ -1077,7 +1138,7 @@ mod tests {
             ids: vec!["left".into()],
             ..Default::default()
         };
-        m.reset_precision(session.scene());
+        m.reset_precision(session.scene()).unwrap();
         assert_eq!(m.precision[3], 0.2_f32.to_degrees().to_string());
         let original = session.scene().objects[0].transform.clone();
         m.edited[3] = true;
@@ -1102,7 +1163,8 @@ mod tests {
             ]
         );
         assert_eq!(session.undo_len(), 1);
-        m.reset_precision_unit(session.scene(), AngleUnit::Radians);
+        m.reset_precision_unit(session.scene(), AngleUnit::Radians)
+            .unwrap();
         let mut old = serde_json::to_value(m.snapshot_drafts()).unwrap();
         old.as_object_mut().unwrap().remove("rotation_unit");
         old["precision"][3] = "-".into();
@@ -1131,7 +1193,7 @@ mod tests {
             ids: vec!["left".into(), "right".into()],
             ..Default::default()
         };
-        m.reset_precision(session.scene());
+        m.reset_precision(session.scene()).unwrap();
         assert!(m.mixed[0]);
         assert!(m.precision[0].is_empty());
         m.precision[0] = "7".into();
@@ -1162,7 +1224,7 @@ mod tests {
             assert_eq!(actual.scale, before.scale);
         }
         session.undo(1).unwrap();
-        m.reset_precision(session.scene());
+        m.reset_precision(session.scene()).unwrap();
         m.precision[6] = "-1".into();
         m.edited[6] = true;
         m.precision_revision = Some(session.scene().revision);
@@ -1178,7 +1240,7 @@ mod tests {
         let before = session.scene().clone();
         assert!(m.apply_precision(&mut session).is_err());
         assert_eq!(session.scene(), &before);
-        m.reset_precision(session.scene());
+        m.reset_precision(session.scene()).unwrap();
         assert!(!m.precision_pending());
         let ctx = egui::Context::default();
         m.precision[0] = "9".into();
@@ -1226,6 +1288,182 @@ mod tests {
             m.precision_pending(),
             "modal focus loss preserves the draft instead of committing or discarding it"
         );
+    }
+
+    // Unique new boundary: mixed geometry/light transforms share one transaction,
+    // while unsupported Scale/Copy and malformed recovery cannot become partial.
+    #[test]
+    fn light_and_mixed_precision_gestures_preserve_live_preview_and_raw_recovery() {
+        use ruster_scene::{Light, Lighting};
+        let mut scene = Scene::demo();
+        scene.lighting = Lighting::authored_default("sun");
+        let Lighting::Authored { lights, .. } = &mut scene.lighting else {
+            unreachable!()
+        };
+        let mut point = Light::point(Some("Fill".into()));
+        point.transform.translation = [2., 3., 4.];
+        lights.insert("point".into(), point);
+        let mut session = Session::new(scene).unwrap();
+        let ids = vec!["left".into(), "sun".into(), "point".into()];
+        let mut m = Manipulation {
+            ids: ids.clone(),
+            ..Default::default()
+        };
+        m.reset_precision(session.scene()).unwrap();
+        assert!(!m.scale_allowed(session.scene()));
+        let before = session.scene().clone();
+        let mut gesture =
+            Gesture::configured(&session, &ids, Tool::Translate, Pivot::Center, false).unwrap();
+        let mut proxy = gesture.proxy;
+        proxy.translation = (DVec3::from(proxy.translation) + DVec3::new(0.5, -0.25, 1.)).into();
+        gesture.transform(proxy).unwrap();
+        m.gesture = Some(gesture);
+        // Same-revision live properties are intentional here: a transform-only
+        // preview must clone current lighting, not replace it with an old map.
+        let mut live = before.clone();
+        let Lighting::Authored { ambient, lights } = &mut live.lighting else {
+            unreachable!()
+        };
+        ambient.color = [0.3, 0.4, 0.5];
+        lights.get_mut("point").unwrap().color = [0.1, 0.2, 0.3];
+        let preview = m.transient_scene(&live).unwrap();
+        assert_eq!(
+            preview.objects.len(),
+            before.objects.len(),
+            "lights must not become geometry"
+        );
+        for id in &ids {
+            let old = before.target_transform(id).unwrap();
+            let next = preview.target_transform(id).unwrap();
+            assert_eq!(
+                next.translation,
+                [
+                    old.translation[0] + 0.5,
+                    old.translation[1] - 0.25,
+                    old.translation[2] + 1.
+                ]
+            );
+            assert_eq!(next.scale, old.scale);
+        }
+        assert_eq!(
+            preview.lighting.light("point").unwrap().color,
+            [0.1, 0.2, 0.3]
+        );
+        let Lighting::Authored { ambient, .. } = &preview.lighting else {
+            unreachable!()
+        };
+        assert_eq!(ambient.color, [0.3, 0.4, 0.5]);
+        assert_eq!(session.scene(), &before);
+        let Lighting::Authored { lights, .. } = &mut live.lighting else {
+            unreachable!()
+        };
+        lights.remove("point");
+        assert!(
+            m.transient_scene(&live).is_none(),
+            "missing target cancels the whole preview"
+        );
+        m.gesture.take().unwrap().commit(&mut session).unwrap();
+        assert_eq!(session.undo_len(), 1);
+        for id in ["sun", "point"] {
+            assert_eq!(session.scene().target_transform(id).unwrap().scale, [1.; 3]);
+        }
+        let mut rotation =
+            Gesture::configured(&session, &ids, Tool::Rotate, Pivot::Individual, true).unwrap();
+        let mut proxy = rotation.proxy;
+        proxy.rotation = (DQuat::from(proxy.rotation) * DQuat::from_rotation_y(0.25)).into();
+        rotation.transform(proxy).unwrap();
+        for (id, next) in &rotation.candidate {
+            assert_eq!(
+                next.translation,
+                session.scene().target_transform(id).unwrap().translation
+            );
+            assert_eq!(
+                next.scale,
+                session.scene().target_transform(id).unwrap().scale
+            );
+        }
+        rotation.commit(&mut session).unwrap();
+        assert_eq!(session.undo_len(), 2);
+        assert!(
+            Gesture::configured(&session, &ids, Tool::Scale, Pivot::Individual, true)
+                .err()
+                .unwrap()
+                .contains("cannot be scaled")
+        );
+        m.reset_precision(session.scene()).unwrap();
+        m.precision[0] = "9999".into();
+        m.edited[0] = true;
+        m.precision[6] = "1".into();
+        m.edited[6] = true;
+        m.precision_revision = Some(session.scene().revision);
+        let before = session.scene().clone();
+        let undo = session.undo_len();
+        assert!(m
+            .apply_precision(&mut session)
+            .unwrap_err()
+            .contains("cannot be scaled"));
+        assert_eq!(session.scene(), &before);
+        assert_eq!(session.undo_len(), undo);
+        assert_eq!(m.precision[0], "9999");
+        assert_eq!(m.precision[6], "1");
+        m.reset_precision(session.scene()).unwrap();
+        m.precision[3] = "not-a-number".into();
+        m.edited[3] = true;
+        m.precision_revision = Some(session.scene().revision);
+        let checkpoint = serde_json::to_value(m.snapshot_drafts()).unwrap();
+        m.restore_drafts(
+            session.scene(),
+            serde_json::from_value(checkpoint.clone()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(m.precision[3], "not-a-number");
+        assert!(m.apply_precision(&mut session).is_err());
+        assert_eq!(session.scene(), &before);
+        for invalid in [
+            vec!["left".into(), "sun".into(), "sun".into()],
+            vec!["left".into(), "missing".into()],
+        ] {
+            m.ids = invalid;
+            assert!(m.reset_precision(session.scene()).is_err());
+            assert!(m
+                .restore_drafts(
+                    session.scene(),
+                    serde_json::from_value(checkpoint.clone()).unwrap()
+                )
+                .is_err());
+            assert_eq!(
+                serde_json::to_value(m.snapshot_drafts()).unwrap(),
+                checkpoint,
+                "failed recovery keeps raw state"
+            );
+            assert!(m.apply_delta(&mut session).is_err());
+            assert!(Gesture::begin(&session, &m.ids).is_err());
+            assert_eq!(session.scene(), &before);
+        }
+        m.ids = vec!["left".into()];
+        m.copy(&session, None, 1).unwrap();
+        let clipboard = serde_json::to_value(m.clipboard.as_ref().unwrap()).unwrap();
+        m.ids = ids.clone();
+        assert!(m
+            .copy(&session, None, 1)
+            .unwrap_err()
+            .contains("Light Copy"));
+        assert_eq!(
+            serde_json::to_value(m.clipboard.as_ref().unwrap()).unwrap(),
+            clipboard
+        );
+        m.ids.push("deleted".into());
+        m.reconcile(session.scene());
+        assert_eq!(m.ids, ids);
+        m.reset_precision(session.scene()).unwrap();
+        m.delta = ["2".into(), "0".into(), "0".into()];
+        m.apply_delta(&mut session).unwrap();
+        for id in &m.ids {
+            assert_eq!(
+                session.scene().target_transform(id).unwrap().translation[0],
+                before.target_transform(id).unwrap().translation[0] + 2.
+            );
+        }
     }
 
     // Unique boundary: copied membership/mesh origins and group precision edits
@@ -1557,7 +1795,7 @@ mod tests {
                 assert_eq!(session.scene(), &scene);
                 assert_eq!(session.undo_len(), 0);
             }
-            m.reset_precision(session.scene());
+            m.reset_precision(session.scene()).unwrap();
             // A zero-motion handle press owns release without touching history.
             frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
             frame(&mut m, &mut session, vec![Event::PointerMoved(start)], true);
