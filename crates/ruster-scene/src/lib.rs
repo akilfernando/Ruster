@@ -12,7 +12,8 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 5;
+pub const FORMAT_VERSION: u32 = 6;
+pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
 mod strict_json;
@@ -61,6 +62,67 @@ impl Transform {
     }
 }
 
+/// Supported base-color texture sampling. Scene storage owns no image/GPU payload.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextureFilter {
+    Nearest,
+    #[default]
+    Linear,
+}
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TextureAddress {
+    #[default]
+    Repeat,
+    Clamp,
+}
+/// Reusable scene-owned opaque material. Tint is linear RGB; external texture
+/// availability is diagnosed by asset-aware callers, not silently repaired here.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct OpaqueMaterial {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub name: Option<String>,
+    pub tint: [f32; 3],
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub base_color_texture: Option<String>,
+    pub filter: TextureFilter,
+    pub address: TextureAddress,
+}
+impl Default for OpaqueMaterial {
+    fn default() -> Self {
+        Self {
+            name: None,
+            tint: [1.0; 3],
+            base_color_texture: None,
+            filter: TextureFilter::Linear,
+            address: TextureAddress::Repeat,
+        }
+    }
+}
+impl OpaqueMaterial {
+    pub fn validate(&self) -> Result<(), SceneError> {
+        validate_name(self.name.as_deref())?;
+        if !self
+            .tint
+            .iter()
+            .all(|x| x.is_finite() && (0.0..=1.0).contains(x))
+        {
+            return Err(SceneError::Invalid(
+                "material tint must be finite in 0..=1".into(),
+            ));
+        }
+        if let Some(id) = &self.base_color_texture {
+            validate_id(id)?;
+        }
+        Ok(())
+    }
+    pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
+        self.name.as_deref().unwrap_or(id)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Object {
@@ -75,6 +137,9 @@ pub struct Object {
     /// Asset existence is checked by the asset/editor boundary, not this crate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh: Option<String>,
+    /// Scene-owned material identity; None preserves legacy object color.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub material: Option<String>,
 }
 
 impl Object {
@@ -85,6 +150,7 @@ impl Object {
             transform: Transform::default(),
             color: [0.6, 0.6, 0.6, 1.0],
             mesh: None,
+            material: None,
         }
     }
     pub fn display_name(&self) -> &str {
@@ -96,6 +162,9 @@ impl Object {
         self.transform.validate()?;
         if let Some(mesh) = &self.mesh {
             validate_id(mesh)?;
+        }
+        if let Some(id) = &self.material {
+            validate_id(id)?;
         }
         validate_color(&self.color)
     }
@@ -120,6 +189,8 @@ pub struct Scene {
     pub id: String,
     pub revision: u64,
     pub objects: Vec<Object>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub materials: BTreeMap<String, OpaqueMaterial>,
 }
 
 impl Scene {
@@ -128,6 +199,7 @@ impl Scene {
             id: id.into(),
             revision: 0,
             objects: Vec::new(),
+            materials: BTreeMap::new(),
         }
     }
 
@@ -135,6 +207,7 @@ impl Scene {
         Self {
             id: "procedural-demo".into(),
             revision: 0,
+            materials: BTreeMap::new(),
             objects: [
                 ("left", [-2.0, 0.0, 0.0], [0.12, 0.58, 0.85, 1.0]),
                 ("center", [0.0, 0.0, 0.0], [0.9, 0.4, 0.16, 1.0]),
@@ -150,6 +223,7 @@ impl Scene {
                 },
                 color,
                 mesh: None,
+                material: None,
             })
             .collect(),
         }
@@ -162,6 +236,15 @@ impl Scene {
                 "scene exceeds {MAX_OBJECTS} objects"
             )));
         }
+        if self.materials.len() > MAX_MATERIALS {
+            return Err(SceneError::Invalid(format!(
+                "scene exceeds {MAX_MATERIALS} materials"
+            )));
+        }
+        for (id, material) in &self.materials {
+            validate_id(id)?;
+            material.validate()?;
+        }
         let mut ids = HashSet::new();
         for object in &self.objects {
             validate_id(&object.id)?;
@@ -172,6 +255,16 @@ impl Scene {
                 )));
             }
             object.validate()?;
+            if object
+                .material
+                .as_ref()
+                .is_some_and(|id| !self.materials.contains_key(id))
+            {
+                return Err(SceneError::Invalid(format!(
+                    "object {} references missing material",
+                    object.id
+                )));
+            }
         }
         Ok(())
     }
@@ -351,6 +444,11 @@ enum SceneDelta {
         before: Option<String>,
         after: Option<String>,
     },
+    Material {
+        id: String,
+        before: Option<String>,
+        after: Option<String>,
+    },
     Color {
         id: String,
         before: [f32; 4],
@@ -376,7 +474,8 @@ impl SceneDelta {
             Self::Name { id: old, .. }
             | Self::Transform { id: old, .. }
             | Self::Color { id: old, .. }
-            | Self::Mesh { id: old, .. } => old == id,
+            | Self::Mesh { id: old, .. }
+            | Self::Material { id: old, .. } => old == id,
             Self::Transforms { changes } => changes.iter().any(|e| e.id == id),
             Self::Objects { created, deleted } => {
                 created.iter().chain(deleted).any(|e| e.object.id == id)
@@ -511,6 +610,26 @@ impl SceneDelta {
                 }
                 object.color = *replacement;
             }
+            Self::Material { id, before, after } => {
+                validate_id(id)?;
+                for material in [before, after].into_iter().flatten() {
+                    validate_id(material)?;
+                }
+                let object = scene
+                    .objects
+                    .iter_mut()
+                    .find(|o| &o.id == id)
+                    .ok_or_else(inconsistent)?;
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &object.material != expected {
+                    return Err(inconsistent());
+                }
+                object.material = replacement.clone();
+            }
             Self::Mesh { id, before, after } => {
                 validate_id(id)?;
                 for mesh in [before, after].into_iter().flatten() {
@@ -548,6 +667,8 @@ struct ValueDelta<T> {
 struct Change {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     scene: Vec<SceneDelta>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    materials: Vec<ValueDelta<OpaqueMaterial>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     sources: Vec<ValueDelta<BehaviorSource>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -597,6 +718,12 @@ impl Change {
     fn references_asset(&self) -> bool {
         self.scene.iter().any(SceneDelta::references_asset)
             || self
+                .materials
+                .iter()
+                .flat_map(|d| [&d.before, &d.after])
+                .flatten()
+                .any(|m| m.base_color_texture.is_some())
+            || self
                 .bindings
                 .iter()
                 .flat_map(|d| [&d.before, &d.after])
@@ -630,14 +757,18 @@ impl Change {
         authoring: &mut Authoring,
         undo: bool,
     ) -> Result<(), SceneError> {
-        if self.scene.is_empty() && !self.has_authoring()
+        if self.scene.is_empty() && self.materials.is_empty() && !self.has_authoring()
             || self.scene.len() > MAX_OBJECTS
+            || self.materials.len() > MAX_MATERIALS
             || self.sources.len() > MAX_SOURCES
             || self.bindings.len() > MAX_BINDINGS
         {
             return Err(SceneError::Invalid(
                 "empty or oversized authored history change".into(),
             ));
+        }
+        if !undo {
+            apply_values(&self.materials, &mut scene.materials, false)?;
         }
         if undo {
             for delta in self.scene.iter().rev() {
@@ -648,7 +779,10 @@ impl Change {
                 delta.apply(scene, false)?;
             }
         }
-        // All three sections form one atomic authored state. Validate only after all apply.
+        if undo {
+            apply_values(&self.materials, &mut scene.materials, true)?;
+        }
+        // All sections form one atomic authored state. Validate only after all apply.
         apply_values(&self.sources, &mut authoring.sources, undo)?;
         apply_values(&self.bindings, &mut authoring.bindings, undo)?;
         scene.validate()?;
@@ -701,6 +835,7 @@ impl From<LegacyDocument> for Document {
             scene: Scene {
                 id: old.scene.id,
                 revision: old.scene.revision,
+                materials: BTreeMap::new(),
                 objects: old
                     .scene
                     .objects
@@ -711,6 +846,7 @@ impl From<LegacyDocument> for Document {
                         transform: o.transform,
                         color: o.color,
                         mesh: None,
+                        material: None,
                     })
                     .collect(),
             },
@@ -784,6 +920,7 @@ impl From<V2Document> for Document {
             scene: Scene {
                 id: old.scene.id,
                 revision: old.scene.revision,
+                materials: BTreeMap::new(),
                 objects: old
                     .scene
                     .objects
@@ -794,6 +931,7 @@ impl From<V2Document> for Document {
                         transform: o.transform,
                         color: o.color,
                         mesh: o.mesh,
+                        material: None,
                     })
                     .collect(),
             },
@@ -894,11 +1032,14 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (3..=5).contains(&version) {
+            reject_pre_v6_material_fields(&value, version)?;
+        }
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5 => serde_json::from_value(value)?,
+            5 | 6 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -969,6 +1110,46 @@ impl Document {
     }
 }
 
+// V3–V5 used today's scene/object structs. Reject V6 additions at their
+// exact bounded schema positions before deserializing defaults, including null/empty.
+fn reject_pre_v6_material_fields(
+    value: &serde_json::Value,
+    version: u64,
+) -> Result<(), SceneError> {
+    let object_has_material = |object: &serde_json::Value| object.get("material").is_some();
+    let scene = &value["scene"];
+    let mut has_new = scene.get("materials").is_some()
+        || scene["objects"]
+            .as_array()
+            .is_some_and(|objects| objects.iter().any(object_has_material));
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            has_new |= version == 5 && change.get("materials").is_some();
+            let deltas: &[serde_json::Value] = if version == 5 {
+                change["scene"].as_array().map(Vec::as_slice).unwrap_or(&[])
+            } else {
+                std::slice::from_ref(change)
+            };
+            for delta in deltas {
+                has_new |= delta["kind"].as_str() == Some("material")
+                    || delta.get("object").is_some_and(object_has_material);
+                for section in ["created", "deleted"] {
+                    has_new |= delta[section].as_array().is_some_and(|entries| {
+                        entries
+                            .iter()
+                            .any(|entry| object_has_material(&entry["object"]))
+                    });
+                }
+            }
+        }
+    }
+    if has_new {
+        Err(SceneError::Invalid("materials require scene v6".into()))
+    } else {
+        Ok(())
+    }
+}
+
 // Count history once and reserve the largest scene reachable through Undo/Redo.
 // This includes restored deleted objects/sources and maximum revision width.
 // Compact encoding is shared with the writer; concatenating stacks is conservative.
@@ -983,6 +1164,8 @@ fn check_serialized_size(
         id: &'a str,
         revision: u64,
         objects: &'a [Object],
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        materials: &'a BTreeMap<String, OpaqueMaterial>,
     }
     impl<'a> From<&'a Scene> for SceneView<'a> {
         fn from(scene: &'a Scene) -> Self {
@@ -990,6 +1173,7 @@ fn check_serialized_size(
                 id: &scene.id,
                 revision: u64::MAX,
                 objects: &scene.objects,
+                materials: &scene.materials,
             }
         }
     }
@@ -1431,6 +1615,11 @@ impl Session {
     /// Hosts use this to avoid relocating a scene away from its catalog.
     pub fn has_asset_references(&self) -> bool {
         self.scene().objects.iter().any(|o| o.mesh.is_some())
+            || self
+                .scene()
+                .materials
+                .values()
+                .any(|m| m.base_color_texture.is_some())
             || self.document.authoring.has_asset_references()
             || self
                 .document
@@ -1468,7 +1657,8 @@ impl Session {
                     SceneDelta::Name { id, .. }
                     | SceneDelta::Transform { id, .. }
                     | SceneDelta::Color { id, .. }
-                    | SceneDelta::Mesh { id, .. } => {
+                    | SceneDelta::Mesh { id, .. }
+                    | SceneDelta::Material { id, .. } => {
                         used.insert(id);
                     }
                     SceneDelta::Transforms { changes } => {
@@ -1843,6 +2033,196 @@ impl Session {
             id: object_id.into(),
             before: object.color,
             after: color,
+        })
+    }
+
+    fn reserved_material_ids(&self) -> HashSet<&str> {
+        let mut used: HashSet<_> = self.scene().materials.keys().map(String::as_str).collect();
+        used.extend(
+            self.scene()
+                .objects
+                .iter()
+                .filter_map(|o| o.material.as_deref()),
+        );
+        for change in self.document.undo.iter().chain(&self.document.redo) {
+            used.extend(change.materials.iter().map(|d| d.id.as_str()));
+            for delta in &change.scene {
+                match delta {
+                    SceneDelta::Material { before, after, .. } => {
+                        used.extend([before.as_deref(), after.as_deref()].into_iter().flatten());
+                    }
+                    SceneDelta::Create { object, .. } | SceneDelta::Delete { object, .. } => {
+                        used.extend(object.material.as_deref());
+                    }
+                    SceneDelta::Objects { created, deleted } => {
+                        used.extend(
+                            created
+                                .iter()
+                                .chain(deleted)
+                                .filter_map(|e| e.object.material.as_deref()),
+                        );
+                    }
+                    _ => {}
+                }
+            }
+        }
+        used
+    }
+    /// Material identity is separate from the object/source namespaces.
+    pub fn contains_material_id(&self, id: &str) -> bool {
+        self.reserved_material_ids().contains(id)
+    }
+    pub fn allocate_material_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        allocate_ids(
+            "material",
+            count,
+            MAX_MATERIALS,
+            self.reserved_material_ids(),
+        )
+    }
+    /// Create a fresh identity or replace a live shared material in one Undo step.
+    /// Absent historical identities cannot be recycled until their history expires.
+    pub fn set_material(
+        &mut self,
+        expected_revision: u64,
+        id: &str,
+        value: OpaqueMaterial,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(id)?;
+        value.validate()?;
+        let before = self.scene().materials.get(id).cloned();
+        if before.as_ref() == Some(&value) {
+            return Ok(self.scene().revision);
+        }
+        if before.is_none() && self.contains_material_id(id) {
+            return Err(SceneError::Invalid(
+                "material ID is reserved by history".into(),
+            ));
+        }
+        self.commit_change(Change {
+            materials: vec![ValueDelta {
+                id: id.into(),
+                before,
+                after: Some(value),
+            }],
+            ..Change::default()
+        })
+    }
+    /// Copy a material under a fresh identity; None preserves the source label.
+    pub fn copy_material(
+        &mut self,
+        expected_revision: u64,
+        source: &str,
+        id: &str,
+        name: Option<String>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        if self.contains_material_id(id) {
+            return Err(SceneError::Invalid(
+                "material ID is present or reserved".into(),
+            ));
+        }
+        let mut value = self
+            .scene()
+            .materials
+            .get(source)
+            .cloned()
+            .ok_or_else(|| SceneError::Invalid(format!("material {source} does not exist")))?;
+        if name.is_some() {
+            value.name = name;
+        }
+        self.set_material(expected_revision, id, value)
+    }
+    /// Delete only an unassigned live material. Undo keeps its identity reserved.
+    pub fn remove_material(&mut self, expected_revision: u64, id: &str) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(id)?;
+        let Some(before) = self.scene().materials.get(id).cloned() else {
+            return Ok(self.scene().revision);
+        };
+        if self
+            .scene()
+            .objects
+            .iter()
+            .any(|o| o.material.as_deref() == Some(id))
+        {
+            return Err(SceneError::Invalid(format!(
+                "material {id} is assigned to an object"
+            )));
+        }
+        self.commit_change(Change {
+            materials: vec![ValueDelta {
+                id: id.into(),
+                before: Some(before),
+                after: None,
+            }],
+            ..Change::default()
+        })
+    }
+    /// Assign a scene-owned material, preserving the object's existing RGBA tint.
+    pub fn assign_material(
+        &mut self,
+        expected_revision: u64,
+        object_id: &str,
+        material: Option<String>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        if let Some(id) = &material {
+            validate_id(id)?;
+            if !self.scene().materials.contains_key(id) {
+                return Err(SceneError::Invalid(format!("material {id} does not exist")));
+            }
+        }
+        let object = self
+            .scene()
+            .objects
+            .iter()
+            .find(|o| o.id == object_id)
+            .ok_or_else(|| SceneError::ObjectNotFound(object_id.into()))?;
+        if object.material == material {
+            return Ok(self.scene().revision);
+        }
+        self.commit_change(SceneDelta::Material {
+            id: object_id.into(),
+            before: object.material.clone(),
+            after: material,
+        })
+    }
+    /// Atomically create and assign one fresh material: one revision and Undo entry.
+    pub fn create_and_assign_material(
+        &mut self,
+        expected_revision: u64,
+        object_id: &str,
+        id: &str,
+        value: OpaqueMaterial,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(id)?;
+        value.validate()?;
+        if self.contains_material_id(id) {
+            return Err(SceneError::Invalid(
+                "material ID is present or reserved".into(),
+            ));
+        }
+        let object = self
+            .scene()
+            .objects
+            .iter()
+            .find(|o| o.id == object_id)
+            .ok_or_else(|| SceneError::ObjectNotFound(object_id.into()))?;
+        self.commit_change(Change {
+            materials: vec![ValueDelta {
+                id: id.into(),
+                before: None,
+                after: Some(value),
+            }],
+            scene: vec![SceneDelta::Material {
+                id: object_id.into(),
+                before: object.material.clone(),
+                after: Some(id.into()),
+            }],
+            ..Change::default()
         })
     }
 
@@ -2361,7 +2741,7 @@ mod tests {
         reopened.undo(5).unwrap();
         assert_eq!(reopened.scene().objects, Scene::demo().objects);
         reopened.save(&path).unwrap();
-        assert_eq!(reopened.loaded_format_version(), 5);
+        assert_eq!(reopened.loaded_format_version(), FORMAT_VERSION);
         assert_eq!(Session::open(&path).unwrap().redo_len(), 2);
         for version in [3, 4] {
             for location in ["envelope", "history"] {
@@ -2458,7 +2838,7 @@ mod tests {
         reopened.undo(34).unwrap();
         assert_eq!(reopened.scene().objects, objects);
         reopened.save(&path).unwrap();
-        assert_eq!(reopened.loaded_format_version(), 5);
+        assert_eq!(reopened.loaded_format_version(), FORMAT_VERSION);
         assert_eq!((reopened.undo_len(), reopened.redo_len()), (31, 1));
         let compact = std::fs::read(&path).unwrap();
         assert!(compact.len() <= MAX_FILE_BYTES as usize);
@@ -3085,6 +3465,209 @@ mod tests {
         value["undo"][0]["kind"] = "transform".into();
         std::fs::write(&path, serde_json::to_vec(&value).unwrap()).unwrap();
         assert!(Session::open(&path).is_err());
+    }
+
+    // Unique risk: reusable material edits, assignment and atomic creation must
+    // share ordinary history/storage while preserving tint and distinct ID namespaces.
+    #[test]
+    fn material_authoring_shared_history_roundtrip_and_atomic_failures() {
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let original_color = session.scene().objects[0].color;
+        let original_authoring = session.authoring().clone();
+        let material = OpaqueMaterial {
+            base_color_texture: Some("unavailable-texture".into()),
+            ..OpaqueMaterial::default()
+        };
+        session
+            .create_and_assign_material(0, "left", "left", material.clone())
+            .unwrap();
+        assert_eq!(session.undo_len(), 1);
+        assert_eq!(session.scene().objects[0].color, original_color);
+        assert_eq!(session.authoring(), &original_authoring);
+        assert!(session.contains_object_id("left") && session.contains_material_id("left"));
+        let before = session.document.clone();
+        assert!(session.remove_material(1, "left").is_err());
+        assert!(session
+            .assign_material(1, "right", Some("absent".into()))
+            .is_err());
+        assert!(session
+            .create_and_assign_material(1, "absent", "new", material.clone())
+            .is_err());
+        assert!(session.set_material(0, "new", material.clone()).is_err());
+        let invalid = OpaqueMaterial {
+            tint: [f32::NAN, 0.0, 1.0],
+            ..material.clone()
+        };
+        assert!(session.set_material(1, "left", invalid).is_err());
+        assert_eq!(session.document, before);
+        session.undo(1).unwrap();
+        assert!(
+            session.scene().materials.is_empty() && session.scene().objects[0].material.is_none()
+        );
+        assert!(
+            session.has_asset_references(),
+            "Redo material textures retain the root guard"
+        );
+        assert!(session.contains_material_id("left"));
+        assert!(!session.contains_object_id("material-1"));
+        let before = session.document.clone();
+        assert!(session.set_material(2, "left", material.clone()).is_err());
+        assert_eq!(session.assign_material(2, "left", None).unwrap(), 2);
+        assert_eq!(session.document, before);
+        session.redo(2).unwrap();
+        session
+            .assign_material(3, "right", Some("left".into()))
+            .unwrap();
+        let edited = OpaqueMaterial {
+            tint: [0.25, 0.5, 1.0],
+            ..material.clone()
+        };
+        session.set_material(4, "left", edited.clone()).unwrap();
+        session.duplicate(5, "left", "copy", None).unwrap();
+        assert_eq!(session.scene().objects[1].material.as_deref(), Some("left"));
+        assert_eq!(session.scene().materials.len(), 1);
+        session
+            .copy_material(6, "left", "material-1", Some("Copied".into()))
+            .unwrap();
+        session.remove_material(7, "material-1").unwrap();
+        assert!(session.contains_material_id("material-1"));
+        assert!(!session.contains_object_id("material-1"));
+        assert_eq!(
+            session.allocate_material_ids(1).unwrap(),
+            vec!["material-2"]
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("materials.json");
+        session.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.document, session.document);
+        reopened.undo(8).unwrap();
+        assert_eq!(
+            reopened.scene().materials["material-1"].name.as_deref(),
+            Some("Copied")
+        );
+        reopened.redo(9).unwrap();
+        let recovered = Session::from_snapshot_bytes(&reopened.snapshot_bytes().unwrap()).unwrap();
+        assert_eq!(recovered.document, reopened.document);
+        assert!(recovered.is_dirty() && recovered.path().is_none());
+        let preview = Preview::new(reopened.scene());
+        reopened.set_material(10, "left", material).unwrap();
+        assert_eq!(preview.scene.materials["left"], edited);
+        assert_eq!(Scene::load(&path).unwrap().materials["left"], edited);
+    }
+
+    // Unique risk: old structs using the live Scene/Change types accidentally
+    // accept new empty/null fields, nested lifecycle references or material deltas.
+    #[test]
+    fn pre_v6_schemas_reject_material_fields_at_every_owning_boundary() {
+        let clean = serde_json::to_value(Document::new(Scene::demo())).unwrap();
+        for version in 1..=5 {
+            let mut old = clean.clone();
+            old["format_version"] = version.into();
+            let bytes = serde_json::to_vec(&old).unwrap();
+            let loaded = Document::decode(&bytes).unwrap();
+            assert_eq!(serde_json::to_value(loaded.scene).unwrap(), clean["scene"]);
+            for field in ["map", "ref"] {
+                let mut invalid = old.clone();
+                if field == "map" {
+                    invalid["scene"]["materials"] = serde_json::json!({});
+                } else {
+                    invalid["scene"]["objects"][0]["material"] = serde_json::Value::Null;
+                }
+                assert!(Document::decode(&serde_json::to_vec(&invalid).unwrap()).is_err());
+            }
+        }
+        for version in 3..=5 {
+            for stack in ["undo", "redo"] {
+                let mut old = clean.clone();
+                old["format_version"] = version.into();
+                let mut object = old["scene"]["objects"][0].clone();
+                object["material"] = serde_json::Value::Null;
+                for delta in [
+                    serde_json::json!({"kind":"create","object":object,"index":0}),
+                    serde_json::json!({"kind":"objects","created":[{"object":object,"index":0}],"deleted":[]}),
+                    serde_json::json!({"kind":"material","id":"left","before":null,"after":"mat"}),
+                ] {
+                    old[stack] = if version == 5 {
+                        serde_json::json!([{"scene":[delta]}])
+                    } else {
+                        serde_json::json!([delta])
+                    };
+                    let error = Document::decode(&serde_json::to_vec(&old).unwrap()).unwrap_err();
+                    assert!(
+                        error.to_string().contains("materials require scene v6"),
+                        "{error}"
+                    );
+                }
+            }
+        }
+        let mut old = clean.clone();
+        old["format_version"] = 5.into();
+        old["undo"] = serde_json::json!([{"materials":[]}]);
+        assert!(Document::decode(&serde_json::to_vec(&old).unwrap())
+            .unwrap_err()
+            .to_string()
+            .contains("materials require scene v6"));
+        let mut invalid = clean;
+        invalid["scene"]["objects"][0]["material"] = "absent".into();
+        assert!(Document::decode(&serde_json::to_vec(&invalid).unwrap()).is_err());
+    }
+
+    // Unique risk: material maps escape current/reachable byte accounting, or
+    // material count overflow/create-and-assign leaves a half-applied reference.
+    #[test]
+    fn material_bounds_and_reachable_payload_admission_are_atomic() {
+        let mut scene = Scene::demo();
+        scene.materials = (0..MAX_MATERIALS)
+            .map(|n| {
+                (
+                    format!("mat-{n}"),
+                    OpaqueMaterial {
+                        name: Some("n".repeat(128)),
+                        base_color_texture: Some("t".repeat(128)),
+                        ..OpaqueMaterial::default()
+                    },
+                )
+            })
+            .collect();
+        let mut session = Session::new(scene).unwrap();
+        let before = session.document.clone();
+        assert!(session
+            .create_and_assign_material(0, "left", "overflow", OpaqueMaterial::default())
+            .is_err());
+        assert_eq!(session.document, before);
+        // Leave a narrow but valid compact-save margin. The newest removal
+        // requires reserving the larger pre-removal material map plus its delta.
+        let target = MAX_FILE_BYTES as usize - 64;
+        for n in 0..MAX_SOURCES {
+            let key = format!("source-{n}");
+            session
+                .document
+                .authoring
+                .sources
+                .insert(key.clone(), source(""));
+            let size = serde_json::to_vec(&session.document).unwrap().len() + 1;
+            assert!(size < target);
+            let count = (target - size).min(MAX_SOURCE_BYTES);
+            session
+                .document
+                .authoring
+                .sources
+                .get_mut(&key)
+                .unwrap()
+                .text = "x".repeat(count);
+            if count < MAX_SOURCE_BYTES {
+                break;
+            }
+        }
+        session.document.validate().unwrap();
+        let before = session.document.clone();
+        assert!(matches!(
+            session.remove_material(0, "mat-0"),
+            Err(SceneError::Capacity)
+        ));
+        assert_eq!(session.document, before);
+        assert_eq!(session.history_evictions(), 0);
     }
 
     // Unique risk: color deltas must retain reversible persisted history without

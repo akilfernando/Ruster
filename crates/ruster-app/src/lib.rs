@@ -14,6 +14,7 @@ use ruster_scene::Scene;
 use std::{collections::BTreeMap, sync::Arc, time::Duration};
 
 pub type MeshMap = BTreeMap<String, Arc<Mesh>>;
+pub type TextureMap = BTreeMap<String, Arc<ruster_assets::Texture>>;
 
 /// Validated immutable mesh snapshots alongside application-owned scene state.
 /// Construct a new Content to replace meshes; this keeps retained GPU identities stable.
@@ -21,23 +22,50 @@ pub type MeshMap = BTreeMap<String, Arc<Mesh>>;
 pub struct Content {
     scene: Scene,
     meshes: MeshMap,
+    textures: TextureMap,
 }
 
 impl Content {
     pub fn new(scene: Scene, meshes: MeshMap) -> Result<Self, String> {
-        if meshes.len() > ruster_assets::MAX_ASSETS {
-            return Err("application mesh count exceeds 64".into());
+        Self::with_textures(scene, meshes, TextureMap::new())
+    }
+
+    /// Capture validated immutable texture/mesh payloads once; runtime edits only
+    /// revalidate authored references, not every pixel or vertex on each UI pass.
+    pub fn with_textures(
+        scene: Scene,
+        meshes: MeshMap,
+        textures: TextureMap,
+    ) -> Result<Self, String> {
+        if meshes.len() + textures.len() > ruster_assets::MAX_ASSETS {
+            return Err("application asset count exceeds 64".into());
+        }
+        if meshes.keys().any(|id| textures.contains_key(id)) {
+            return Err("application mesh/texture asset IDs must be distinct".into());
         }
         let mut bytes = 0;
         for (id, mesh) in &meshes {
             ruster_assets::validate_mesh(mesh).map_err(|e| format!("mesh {id}: {e}"))?;
-            bytes += mesh.vertices.len() * std::mem::size_of::<ruster_assets::Vertex>()
-                + mesh.indices.len() * std::mem::size_of::<u32>();
+            bytes += mesh.payload_bytes();
         }
         if bytes > ruster_assets::MAX_RESOLVED_BYTES {
-            return Err("application meshes exceed 32 MiB resolved geometry".into());
+            return Err("application meshes exceed 48 MiB resolved geometry".into());
         }
-        let content = Self { scene, meshes };
+        let mut texture_bytes = 0;
+        for (id, texture) in &textures {
+            ruster_scene::validate_id(id).map_err(|error| error.to_string())?;
+            ruster_assets::validate_texture(texture)
+                .map_err(|error| format!("texture {id}: {error}"))?;
+            texture_bytes += texture.payload_bytes();
+        }
+        if texture_bytes > ruster_assets::MAX_TEXTURE_RESOLVED_BYTES {
+            return Err("application textures exceed 64 MiB resolved payload".into());
+        }
+        let content = Self {
+            scene,
+            meshes,
+            textures,
+        };
         content.validate()?;
         Ok(content)
     }
@@ -52,12 +80,38 @@ impl Content {
         &self.meshes
     }
 
+    pub fn textures(&self) -> &TextureMap {
+        &self.textures
+    }
+
     /// Check runtime scene mutations without scanning the immutable mesh payload again.
     pub fn validate(&self) -> Result<(), String> {
         self.scene
             .validate()
             .map_err(|e| format!("application scene: {e}"))?;
         for object in &self.scene.objects {
+            if let Some(material) = object
+                .material
+                .as_ref()
+                .and_then(|id| self.scene.materials.get(id))
+            {
+                if let Some(texture) = &material.base_color_texture {
+                    if !self.textures.contains_key(texture) {
+                        return Err(format!("object {} requires missing texture {texture}; load accepted texture content before starting", object.id));
+                    }
+                    if !object
+                        .mesh
+                        .as_ref()
+                        .and_then(|id| self.meshes.get(id))
+                        .is_some_and(|mesh| mesh.has_complete_uvs())
+                    {
+                        return Err(format!(
+                            "object {} needs a mesh with complete UVs for its textured material",
+                            object.id
+                        ));
+                    }
+                }
+            }
             if let Some(id) = &object.mesh {
                 if !self.meshes.contains_key(id) {
                     return Err(format!(

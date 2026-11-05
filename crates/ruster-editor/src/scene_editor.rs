@@ -4523,10 +4523,12 @@ mod tests {
             ..first
         };
         let old = Arc::new(Mesh {
+            texcoords: None,
             vertices: Vec::new(),
             indices: Vec::new(),
         });
         let new = Arc::new(Mesh {
+            texcoords: None,
             vertices: Vec::new(),
             indices: Vec::new(),
         });

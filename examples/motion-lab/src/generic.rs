@@ -2,7 +2,7 @@
 
 use std::{path::Path, time::Duration};
 
-use ruster_app::{egui, Application, Content, MeshMap, Step};
+use ruster_app::{egui, Application, Content, MeshMap, Step, TextureMap};
 use ruster_behavior::{Diagnostic, Engine, Limits, Runtime};
 use ruster_scene::{PropertyValue, Session};
 
@@ -34,10 +34,19 @@ impl GenericMotionLab {
     /// Load complete authored data, including unfinished sources and history, without running it.
     /// Engine is created lazily by Reset on this application's owning thread.
     pub fn new(session: Session, meshes: MeshMap, fixed_dt: Duration) -> Result<Self, String> {
+        Self::with_textures(session, meshes, TextureMap::new(), fixed_dt)
+    }
+
+    pub fn with_textures(
+        session: Session,
+        meshes: MeshMap,
+        textures: TextureMap,
+        fixed_dt: Duration,
+    ) -> Result<Self, String> {
         if !(Duration::from_millis(1)..=Duration::from_secs(1)).contains(&fixed_dt) {
             return Err("Motion comparison tick duration must be 1 ms..=1 s".into());
         }
-        let content = Content::new(session.scene().clone(), meshes)?;
+        let content = Content::with_textures(session.scene().clone(), meshes, textures)?;
         let selected = session.scene().objects.first().map(|o| o.id.clone());
         Ok(Self {
             session,
@@ -99,7 +108,11 @@ impl GenericMotionLab {
     /// Explicit caller reload; retained runtime remains visible but stale until successful Reset.
     /// The generic editor remains the authoring surface.
     pub fn replace_session(&mut self, session: Session) -> Result<(), String> {
-        Content::new(session.scene().clone(), self.content.meshes().clone())?;
+        Content::with_textures(
+            session.scene().clone(),
+            self.content.meshes().clone(),
+            self.content.textures().clone(),
+        )?;
         self.session = session;
         self.needs_reset = true;
         self.diagnostic = None;

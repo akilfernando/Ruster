@@ -8,6 +8,8 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import struct
+import zlib
 import tarfile
 import tempfile
 import threading
@@ -152,6 +154,136 @@ class CreationDistributionTests(unittest.TestCase):
                         {**content, "initial_camera": invalid_camera}))
                     rejected()
                 (kit / "runtime.json").write_bytes(runtime_json)
+                (content_root / "content.json").write_bytes(package_creation.encoded(content))
+                # Scene6 uses the exact v2 capability profile and an independently
+                # derived closure; unused material textures are deliberately absent.
+                textured_scene = copy.deepcopy(scene)
+                textured_scene["format_version"] = 6
+                textured_scene["scene"]["objects"][0]["material"] = "paint"
+                textured_scene["scene"]["materials"] = {
+                    "paint": {"name": None, "tint": [0.1, 0.5, 1], "base_color_texture": "albedo",
+                              "filter": "linear", "address": "repeat"},
+                    "unused": {"tint": [1, 1, 1], "base_color_texture": "not-exported",
+                               "filter": "nearest", "address": "clamp"}}
+                textured_bytes = json.dumps(textured_scene, indent=3).encode() + b"\n\n"
+                def png_chunk(kind, data):
+                    return (struct.pack(">I", len(data)) + kind + data
+                            + struct.pack(">I", zlib.crc32(kind + data)))
+                png = (b"\x89PNG\r\n\x1a\n"
+                       + png_chunk(b"IHDR", struct.pack(">IIBBBBB", 1, 1, 8, 6, 0, 0, 0))
+                       + png_chunk(b"IDAT", zlib.compress(b"\0\x25\x80\xff\0"))
+                       + png_chunk(b"IEND", b""))
+                textured = {**content, "schema": 2, "scene_sha256": package_creation.sha256(textured_bytes),
+                            "initial_camera": camera,
+                            "textures": {"albedo": {"path": "textures/0000.png",
+                                                    "sha256": package_creation.sha256(png)}}}
+                package_app.put(content_root, "textures/0000.png", png)
+                (content_root / "scene.json").write_bytes(textured_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(textured))
+                for legacy_profile in (package_creation.PROFILE, package_creation.CAMERA_PROFILE):
+                    capable["profile"] = legacy_profile
+                    (kit / "runtime.json").write_bytes(package_creation.encoded(capable))
+                    with self.assertRaisesRegex(ValueError, "Scene6 opaque_materials"):
+                        package_creation.package(kit, content_root, failed)
+                    self.assertFalse(failed.exists())
+                capable["profile"] = package_creation.MATERIAL_PROFILE
+                (kit / "runtime.json").write_bytes(package_creation.encoded(capable))
+                textured_response = {**framed_response, "authored_scene": package_creation.typed_scene(textured_scene)}
+                self.assertEqual(textured_response["authored_scene"]["materials"]["paint"]["tint"],
+                                 [0.10000000149011612, 0.5, 1.0])
+                self.assertNotIn("name", textured_response["authored_scene"]["materials"]["paint"])
+                material_output = base / "material.tar.gz"
+                with patch.object(package_creation, "run_runtime", return_value=textured_response):
+                    material_receipt = package_creation.package(kit, content_root, material_output)
+                self.assertEqual(set(material_receipt), set(framed_receipt))
+                with tarfile.open(material_output) as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"], 2)
+                    self.assertEqual(descriptor["textures"], {"albedo": "resources/textures/0000.png"})
+                    self.assertEqual(descriptor["initial_camera"], normalized_camera)
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), textured_bytes)
+                    self.assertEqual(archive.extractfile("application/resources/textures/0000.png").read(), png)
+                    material_manifest = json.load(archive.extractfile("application/manifest.json"))
+                    self.assertEqual(material_manifest["profile"], package_creation.MATERIAL_PROFILE)
+                    self.assertEqual([record for record in material_manifest["files"]
+                                      if record["path"] == "resources/textures/0000.png"],
+                                     [{"path": "resources/textures/0000.png", "bytes": len(png),
+                                       "sha256": package_creation.sha256(png)}])
+                # A claimed texture cannot hide missing dependencies or smuggle
+                # unrelated source bytes, kinds, paths or a second identity.
+                for mutation in ("missing", "extra", "wrong-kind", "traversal", "hash", "schema"):
+                    invalid = copy.deepcopy(textured)
+                    if mutation == "missing":
+                        invalid["textures"] = {}
+                    elif mutation == "extra":
+                        invalid["textures"]["unused"] = invalid["textures"]["albedo"]
+                    elif mutation == "wrong-kind":
+                        invalid["textures"]["albedo"]["path"] = "meshes/0000.obj"
+                    elif mutation == "traversal":
+                        invalid["textures"]["albedo"]["path"] = "textures/../private.obj"
+                    elif mutation == "hash":
+                        invalid["textures"]["albedo"]["sha256"] = "0" * 64
+                    else:
+                        invalid["schema"] = 1
+                    (content_root / "content.json").write_bytes(package_creation.encoded(invalid))
+                    with self.subTest(texture_mutation=mutation):
+                        rejected()
+                (content_root / "content.json").write_bytes(package_creation.encoded(textured))
+                texture_path = content_root / "textures/0000.png"
+                texture_path.unlink()
+                texture_path.symlink_to(content_root / "private.obj")
+                rejected()
+                texture_path.unlink()
+                with texture_path.open("wb") as oversized:
+                    oversized.truncate(package_creation.MAX_TEXTURE_BYTES + 1)
+                rejected()
+                texture_path.write_bytes(png)
+                with patch.object(package_creation, "run_runtime", side_effect=ValueError("invalid PNG or missing UVs")):
+                    rejected()
+                wrong_tint = copy.deepcopy(textured_response)
+                wrong_tint["authored_scene"]["materials"]["paint"]["tint"][0] = 0.1
+                with patch.object(package_creation, "run_runtime", return_value=wrong_tint):
+                    rejected()
+                for invalid_profile in (
+                        {**package_creation.MATERIAL_PROFILE, "descriptor_version": 1},
+                        {**package_creation.MATERIAL_PROFILE, "capabilities": ["opaque_materials"]},
+                        {**package_creation.MATERIAL_PROFILE, "capabilities": ["opaque_materials", "initial_camera"]},
+                        {**package_creation.MATERIAL_PROFILE, "version": True}):
+                    with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
+                        package_creation.check_profile(invalid_profile)
+                # Current runtimes preserve the old descriptor1 path as well.
+                (content_root / "scene.json").write_bytes(scene_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(content))
+                with patch.object(package_creation, "run_runtime", return_value=response):
+                    legacy_output = base / "legacy-with-current-kit.tar.gz"
+                    package_creation.package(kit, content_root, legacy_output)
+                with tarfile.open(legacy_output) as archive:
+                    legacy_descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(legacy_descriptor["version"], 1)
+                    self.assertNotIn("textures", legacy_descriptor)
+                overlapping = copy.deepcopy(textured_scene)
+                overlapping["scene"]["materials"]["paint"]["base_color_texture"] = "triangle"
+                overlapping_bytes = package_creation.encoded(overlapping)
+                (content_root / "scene.json").write_bytes(overlapping_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(
+                    {**textured, "scene_sha256": package_creation.sha256(overlapping_bytes),
+                     "textures": {"triangle": textured["textures"]["albedo"]}}))
+                with self.assertRaisesRegex(ValueError, "dependency closure"):
+                    package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                # Scene6 still requires v2 for a material with no texture. There
+                # is no inference that an empty texture map makes old runtimes safe.
+                no_texture = copy.deepcopy(textured_scene)
+                no_texture["scene"]["materials"]["paint"].pop("base_color_texture")
+                no_texture_bytes = package_creation.encoded(no_texture)
+                (content_root / "scene.json").write_bytes(no_texture_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(
+                    {**textured, "textures": {}, "scene_sha256": package_creation.sha256(no_texture_bytes)}))
+                (kit / "runtime.json").write_bytes(runtime_json)
+                with self.assertRaisesRegex(ValueError, "Scene6 opaque_materials"):
+                    package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                (content_root / "scene.json").write_bytes(scene_bytes)
                 (content_root / "content.json").write_bytes(package_creation.encoded(content))
                 # Exact bounded kit inventory and hashed bytes, including nested duplicate JSON keys.
                 for mutation in ("tamper", "extra", "duplicate-record", "traversal", "oversize", "duplicate-key"):

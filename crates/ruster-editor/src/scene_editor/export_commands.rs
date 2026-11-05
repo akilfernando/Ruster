@@ -3,7 +3,7 @@ use super::SceneEditor;
 use crate::creation_export::{Identity, Request};
 use eframe::egui;
 use serde_json::{json, Value};
-use std::{collections::BTreeSet, path::PathBuf};
+use std::path::PathBuf;
 
 type Result<T> = std::result::Result<T, (String, String)>;
 fn fail(code: &str, message: impl Into<String>) -> (String, String) {
@@ -71,18 +71,29 @@ impl SceneEditor {
                     .into(),
             );
         }
-        let ids: BTreeSet<String> = self
-            .session
-            .scene()
-            .objects
-            .iter()
-            .filter_map(|o| o.mesh.clone())
-            .collect();
+        let (mesh_ids, texture_ids) =
+            crate::creation_export::scene_dependencies(self.session.scene())?;
+        let ids = mesh_ids.union(&texture_ids).cloned().collect();
         let assets = match self.assets.as_ref() {
-            Some(store) => Some(store.export_snapshot(&ids).map_err(|e| e.to_string())?),
-            None if ids.is_empty() => None,
+            Some(store) => {
+                for id in &mesh_ids {
+                    if store.mesh(id).is_none() {
+                        return Err(format!("Mesh {id} has no accepted mesh content; repair its source and Refresh before exporting."));
+                    }
+                }
+                for id in &texture_ids {
+                    if store.texture(id).is_none() {
+                        return Err(format!("Texture {id} has no accepted texture content; repair its source and Refresh before exporting."));
+                    }
+                }
+                Some(store.export_snapshot(&ids).map_err(|e| e.to_string())?)
+            }
+            None if mesh_ids.is_empty() && texture_ids.is_empty() => None,
             None => {
-                return Err("Repair the content catalog before exporting imported models.".into());
+                return Err(
+                    "Repair the content catalog before exporting imported models or textures."
+                        .into(),
+                )
             }
         };
         let ctx = self

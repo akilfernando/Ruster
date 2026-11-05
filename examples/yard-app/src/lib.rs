@@ -224,6 +224,7 @@ fn setting(ui: &mut egui::Ui, label: &str, value: &mut u64, range: std::ops::Ran
 
 fn block(id: &str, position: [f32; 3], scale: [f32; 3], color: [f32; 4]) -> Object {
     Object {
+        material: None,
         name: None,
         id: id.into(),
         transform: Transform {
@@ -255,6 +256,7 @@ fn scene_for(delivery: &Delivery) -> Scene {
     truck.mesh = Some("yard-truck".into());
     let cargo_height = 0.03 + delivery.last_shipment as f32 / settings.capacity as f32 * 0.5;
     Scene {
+        materials: Default::default(),
         id: "delivery-yard".into(),
         revision: 0,
         objects: vec![

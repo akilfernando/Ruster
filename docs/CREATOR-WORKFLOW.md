@@ -2,6 +2,8 @@
 
 Updated2026-11-05. The engineering implementation targets Linux x86_64, built-in appearance, Scene5, Lua and triangle OBJ meshes. Native MCP and direct-editor export journeys pass within the recorded engineering scope; this guide does not claim completed human acceptance. [Current evidence](evidence/CREATOR-export.md) owns verification limits.
 
+V1 foundation update2026-11-05: current Save writes Scene6; prepare a current descriptor2 runtime kit for these files, including untextured scenes. Old frozen kits remain valid only for their recorded Scene1–5 scope. Shared CLI/controller packaging now includes active material texture dependencies as exact accepted PNG sources. The new complete editor/MCP material-authoring journey is still in progress; see [V1 scope and acceptance](plans/V1-TEXTURED-MATERIALS.md). Historical creator-eval-1 evidence above remains Scene5-specific.
+
 ## Prepare a Linux export template
 
 Do this once for an engine version, with the pinned toolchain and native development prerequisites. Build a release Motion runtime with source/home path remapping as described in [distribution](DISTRIBUTION.md), then:
@@ -24,7 +26,7 @@ Choose a fresh archive path. Preparation verifies the Linux executable/profile a
 4. Enter submits text fields; Tab traverses controls, Enter on Cancel cancels, and Escape closes the dialog. Export runs in the background with a status/cancel window. A clean saved scene and accepted mesh sources are required. Resolve drafts/dialogs first; changed OBJ sources require explicit Refresh. Custom shaders require an explicit choice of built-in appearance for this session; their source file is preserved.
 5. Extract the archive elsewhere and run `application/application`. It discovers its adjacent `app.json`, starts the saved creation and needs neither editor nor MCP. For a deterministic check, run `application/application --headless --ticks 10` from another working directory. At the default100ms step, ten ticks simulate one second.
 
-The artifact contains exact saved Scene5 bytes/history plus only the current runtime mesh closure. It is a runnable application, not a relocated editable project: meshes referenced only by historical undo entries are not copied. Export does not include unrelated project files.
+The artifact contains exact saved scene bytes/history plus only the current runtime mesh and assigned-material texture closure. It is a runnable application, not a relocated editable project: assets referenced only by historical undo entries or unused materials are not copied. Export does not include unrelated project files.
 
 ## Perform the same export through MCP
 

@@ -75,6 +75,16 @@ impl ResourceRoot {
             .map_err(|e| format!("mesh resource {}: {e}", path.display()))
     }
 
+    pub fn texture(
+        &self,
+        relative: impl AsRef<Path>,
+    ) -> Result<Arc<ruster_assets::Texture>, String> {
+        let bytes = self.read(relative, ruster_assets::MAX_TEXTURE_SOURCE_BYTES)?;
+        ruster_assets::decode_png(&bytes)
+            .map(Arc::new)
+            .map_err(|error| format!("texture resource: {error}"))
+    }
+
     /// Bounded regular-file bytes beneath this read-only resource root.
     pub fn read(&self, relative: impl AsRef<Path>, limit: usize) -> Result<Vec<u8>, String> {
         let path = self.resolve(relative)?;

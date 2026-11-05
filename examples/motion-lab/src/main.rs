@@ -305,9 +305,10 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     let root = ResourceRoot::new(parent)?;
     let manifest = CreationManifest::load(&root)?;
     let tick_duration = manifest.tick_duration();
-    let mut app = GenericMotionLab::new(
+    let mut app = GenericMotionLab::with_textures(
         manifest.load_session(&root)?,
         manifest.load_meshes(&root)?,
+        manifest.load_textures(&root)?,
         tick_duration,
     )?;
     app.set_creation_presentation(manifest.title.clone());
@@ -420,7 +421,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera"],
+                "capabilities":["initial_camera", "opaque_materials"],
             })
         );
         return;

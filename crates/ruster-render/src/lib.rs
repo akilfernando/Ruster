@@ -1,4 +1,8 @@
 //! Shared bounded 3D viewport. No application behavior or editor state lives here.
+mod material_gpu;
+#[cfg(test)]
+mod material_probe;
+use material_gpu::{BindingKey, MaterialGpu};
 use std::collections::BTreeMap;
 use std::ops::Range;
 use std::sync::{Arc, Mutex};
@@ -14,7 +18,6 @@ const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MAX_SAMPLES: usize = 4096;
 const MAX_MESHES: usize = ruster_assets::MAX_ASSETS;
-const MAX_MESH_INDICES: usize = ruster_assets::MAX_TRIANGLES * 3;
 // Retained attachment payload only, excluding driver allocations and resize overlap.
 const MAX_TARGET_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_SHADER_BYTES: usize = 64 * 1024;
@@ -61,6 +64,10 @@ pub struct Metrics {
     /// Cumulative vertex/index payload creation, including the built-in cube.
     pub mesh_uploads: u64,
     pub mesh_upload_bytes: u64,
+    /// Retained immutable base-color payload, including the two one-pixel defaults.
+    pub texture_bytes: u64,
+    pub texture_uploads: u64,
+    pub texture_upload_bytes: u64,
     /// Indexed scene draw calls in the last frame, excluding composite/UI.
     pub draw_calls: usize,
     pub instance_capacity_bytes: u64,
@@ -88,7 +95,12 @@ pub fn install(render: &egui_wgpu::RenderState) -> MetricsHandle {
         Err(_) => 4,
     };
     let sample_count = supported_samples(&render.adapter, &render.device, requested);
-    let resources = Resources::new(&render.device, render.target_format, sample_count);
+    let resources = Resources::new(
+        &render.device,
+        &render.queue,
+        render.target_format,
+        sample_count,
+    );
     let metrics = resources.metrics.clone();
     eprintln!(
         "Ruster shared 3D: adapter={} backend={:?} timestamps={} msaa_requested={} msaa_effective={} target_payload_cap_bytes={}",
@@ -383,6 +395,19 @@ pub fn viewport_with_navigation(
     meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
     navigation: &mut NavigationOptions,
 ) -> ViewportInteraction {
+    viewport_with_materials(ui, scene, selected, meshes, &BTreeMap::new(), navigation)
+}
+
+/// Shared material route. Hosts retain immutable accepted texture snapshots and expose
+/// missing-content diagnostics; faithful runtime content must validate its dependency closure.
+pub fn viewport_with_materials(
+    ui: &mut egui::Ui,
+    scene: &Scene,
+    selected: &[&str],
+    meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+    textures: &BTreeMap<String, Arc<ruster_assets::Texture>>,
+    navigation: &mut NavigationOptions,
+) -> ViewportInteraction {
     let navigation_enabled = navigation.enabled;
     let camera_id = ui.scope_id().with(("ruster-3d-camera", &scene.id));
     let stored_camera = ui.ctx().data_mut(|data| data.get_temp::<Camera>(camera_id));
@@ -530,16 +555,51 @@ pub fn viewport_with_navigation(
         None
     };
     let start = Instant::now();
-    let mut grouped = BTreeMap::<Option<String>, DrawGroup>::new();
+    let mut grouped = BTreeMap::<(Option<String>, BindingKey), DrawGroup>::new();
     for object in &scene.objects {
         let mesh = object_mesh(object, meshes);
         let key = mesh.and_then(|_| object.mesh.clone());
-        let group = grouped.entry(key.clone()).or_insert_with(|| DrawGroup {
-            key,
-            mesh: mesh.cloned(),
-            instances: Vec::new(),
-            range: 0..0,
-        });
+        let material = object
+            .material
+            .as_ref()
+            .and_then(|id| scene.materials.get(id));
+        let binding = BindingKey {
+            texture: material.and_then(|material| material.base_color_texture.clone()),
+            missing: material.is_some_and(|material| material.base_color_texture.is_some())
+                && !mesh.is_some_and(|mesh| mesh.has_complete_uvs()),
+            sampling: material.map_or(1, |material| {
+                u8::from(material.filter == ruster_scene::TextureFilter::Linear)
+                    | (u8::from(material.address == ruster_scene::TextureAddress::Clamp) << 1)
+            }),
+        };
+        let mut base_color = object.color;
+        if let Some(material) = material {
+            for (channel, tint) in base_color[..3].iter_mut().zip(material.tint) {
+                *channel *= tint;
+            }
+        }
+        base_color[3] = if selected.contains(&object.id.as_str()) {
+            0.35
+        } else {
+            0.0
+        };
+        let group = grouped
+            .entry((key.clone(), binding.clone()))
+            .or_insert_with(|| DrawGroup {
+                key,
+                texture: binding
+                    .texture
+                    .as_ref()
+                    .and_then(|id| {
+                        mesh.filter(|mesh| mesh.has_complete_uvs())
+                            .and_then(|_| textures.get(id))
+                    })
+                    .cloned(),
+                binding,
+                mesh: mesh.cloned(),
+                instances: Vec::new(),
+                range: 0..0,
+            });
         let matrix = model(object);
         let normal = Mat3::from_mat4(matrix).inverse().transpose();
         let mut color = object.color;
@@ -552,6 +612,7 @@ pub fn viewport_with_navigation(
             model: matrix.to_cols_array_2d(),
             normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.0]),
             color,
+            base_color,
         });
     }
     let mut offset = 0;
@@ -671,6 +732,7 @@ fn ray_triangle(origin: Vec3, direction: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Opt
 struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
+    uv: [f32; 2],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -678,6 +740,7 @@ struct Instance {
     model: [[f32; 4]; 4],
     normal: [[f32; 4]; 3],
     color: [f32; 4],
+    base_color: [f32; 4],
 }
 fn cube() -> (Vec<Vertex>, Vec<u32>) {
     let mut vertices = Vec::new();
@@ -695,6 +758,7 @@ fn cube() -> (Vec<Vertex>, Vec<u32>) {
             vertices.push(Vertex {
                 position: ((normal + u * x + v * y) * 0.5).to_array(),
                 normal: normal.to_array(),
+                uv: [x * 0.5 + 0.5, y * 0.5 + 0.5],
             });
         }
         indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
@@ -796,6 +860,7 @@ struct Resources {
     cube: GpuMesh,
     meshes: BTreeMap<String, GpuMesh>,
     pipeline_layout: wgpu::PipelineLayout,
+    materials: MaterialGpu,
     instances: wgpu::Buffer,
     capacity: usize,
     camera: wgpu::Buffer,
@@ -806,7 +871,12 @@ struct Resources {
     metrics: MetricsHandle,
 }
 impl Resources {
-    fn new(device: &wgpu::Device, output: wgpu::TextureFormat, sample_count: u32) -> Self {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        output: wgpu::TextureFormat,
+        sample_count: u32,
+    ) -> Self {
         let composite_shader = device.create_shader_module(wgpu::include_wgsl!("composite.wgsl"));
         let camera_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("fixed scene camera ABI"),
@@ -821,9 +891,10 @@ impl Resources {
                 count: None,
             }],
         });
+        let materials = MaterialGpu::new(device, queue);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fixed scene ABI"),
-            bind_group_layouts: &[Some(&camera_layout)],
+            bind_group_layouts: &[Some(&camera_layout), Some(&materials.layout)],
             immediate_size: 0,
         });
         let pipeline = scene_pipeline(device, &pipeline_layout, default_shader(), sample_count);
@@ -903,6 +974,7 @@ impl Resources {
             cube,
             meshes: BTreeMap::new(),
             pipeline_layout,
+            materials,
             instances,
             capacity: 1,
             camera,
@@ -1018,15 +1090,59 @@ fn scene_pipeline(
         label: Some("Ruster refreshable scene shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     });
+    // Old shaders keep their original input locations/strides without feeding
+    // undeclared material attributes (which Vulkan reports as unused inputs).
+    let locations = wgpu::naga::front::wgsl::parse_str(source)
+        .ok()
+        .map(|module| {
+            let mut locations = std::collections::BTreeSet::new();
+            if let Some(entry) = module
+                .entry_points
+                .iter()
+                .find(|entry| entry.name == "vs" && entry.stage == wgpu::naga::ShaderStage::Vertex)
+            {
+                for argument in &entry.function.arguments {
+                    if let Some(wgpu::naga::Binding::Location { location, .. }) = argument.binding {
+                        locations.insert(location);
+                    } else if let wgpu::naga::TypeInner::Struct { ref members, .. } =
+                        module.types[argument.ty].inner
+                    {
+                        for member in members {
+                            if let Some(wgpu::naga::Binding::Location { location, .. }) =
+                                member.binding
+                            {
+                                locations.insert(location);
+                            }
+                        }
+                    }
+                }
+            }
+            locations
+        });
+    let used = |attributes: &[wgpu::VertexAttribute]| {
+        attributes
+            .iter()
+            .copied()
+            .filter(|attribute| {
+                locations
+                    .as_ref()
+                    .is_none_or(|locations| locations.contains(&attribute.shader_location))
+            })
+            .collect::<Vec<_>>()
+    };
+    let mesh_attributes = used(&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,10=>Float32x2]);
+    let instance_attributes = used(
+        &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4],
+    );
     let mesh_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<Vertex>() as u64,
         step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3],
+        attributes: &mesh_attributes,
     };
     let instance_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<Instance>() as u64,
         step_mode: wgpu::VertexStepMode::Instance,
-        attributes: &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4],
+        attributes: &instance_attributes,
     };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some("Ruster shared depth-tested instanced meshes"),
@@ -1096,6 +1212,8 @@ impl GpuMesh {
 }
 struct DrawGroup {
     key: Option<String>,
+    binding: BindingKey,
+    texture: Option<Arc<ruster_assets::Texture>>,
     mesh: Option<Arc<ruster_assets::Mesh>>,
     instances: Vec<Instance>,
     range: Range<u32>,
@@ -1126,6 +1244,13 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             r.sample_count,
         );
         r.resize(device, size);
+        let texture_uploads = r.materials.prepare(
+            device,
+            queue,
+            self.groups
+                .iter()
+                .map(|group| (&group.binding, group.texture.as_ref())),
+        );
         let instance_count = self
             .groups
             .iter()
@@ -1159,20 +1284,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 if r.meshes.len() >= MAX_MESHES && !r.meshes.contains_key(id) {
                     continue;
                 }
-                if mesh.vertices.is_empty()
-                    || mesh.vertices.len() > MAX_MESH_INDICES
-                    || mesh.indices.is_empty()
-                    || mesh.indices.len() > MAX_MESH_INDICES
-                    || !mesh.indices.len().is_multiple_of(3)
-                    || mesh
-                        .vertices
-                        .iter()
-                        .any(|v| v.position.iter().chain(&v.normal).any(|x| !x.is_finite()))
-                    || mesh
-                        .indices
-                        .iter()
-                        .any(|i| *i as usize >= mesh.vertices.len())
-                {
+                if ruster_assets::validate_mesh(mesh).is_err() {
                     eprintln!("Ruster mesh {id} invalid or over renderer limits; cube fallback");
                     r.meshes.remove(id);
                     continue;
@@ -1188,7 +1300,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     .sum::<u64>();
                 if candidate_bytes + retained_bytes > ruster_assets::MAX_RESOLVED_BYTES as u64 {
                     eprintln!(
-                        "Ruster mesh {id} exceeds total 32 MiB mesh payload limit; cube fallback"
+                        "Ruster mesh {id} exceeds total 48 MiB mesh payload limit; cube fallback"
                     );
                     r.meshes.remove(id);
                     continue;
@@ -1196,9 +1308,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 let vertices = mesh
                     .vertices
                     .iter()
-                    .map(|v| Vertex {
+                    .enumerate()
+                    .map(|(index, v)| Vertex {
                         position: v.position,
                         normal: v.normal,
+                        uv: mesh
+                            .texcoords
+                            .as_ref()
+                            .and_then(|uvs| uvs.get(index))
+                            .copied()
+                            .unwrap_or([0.0; 2]),
                     })
                     .collect::<Vec<_>>();
                 let gpu = GpuMesh::new(device, Some(mesh.clone()), &vertices, &mesh.indices);
@@ -1237,6 +1356,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             pass.set_bind_group(0, &r.camera_bind, &[]);
             pass.set_vertex_buffer(1, r.instances.slice(..));
             for group in &self.groups {
+                pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
                 let mesh = group
                     .key
                     .as_ref()
@@ -1287,6 +1407,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         }
         metrics.mesh_uploads += mesh_uploads;
         metrics.mesh_upload_bytes += mesh_upload_bytes;
+        metrics.texture_uploads += texture_uploads.count;
+        metrics.texture_upload_bytes += texture_uploads.bytes;
+        metrics.texture_bytes = r.materials.bytes();
         metrics.draw_calls = self.groups.len();
         metrics.objects = instance_count;
         metrics.mesh_bytes = r.cube.bytes + r.meshes.values().map(|mesh| mesh.bytes).sum::<u64>();
@@ -1562,6 +1685,7 @@ mod tests {
         object.transform.rotation = [0.0; 3];
         object.transform.scale = [1.2, 0.8, 1.0];
         let mesh = Arc::new(ruster_assets::Mesh {
+            texcoords: None,
             vertices: [[2.0, -1.0, 0.0], [4.0, -1.0, 0.0], [2.0, 1.0, 0.0]]
                 .into_iter()
                 .map(|position| ruster_assets::Vertex {
@@ -1673,7 +1797,19 @@ mod tests {
                 continue;
             }
             let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
-            let mut r = Resources::new(&device, COLOR, samples);
+            let mut r = Resources::new(&device, &queue, COLOR, samples);
+            validated_pipeline(
+                &device,
+                &r.pipeline_layout,
+                include_str!("../../../examples/content/scene.wgsl"),
+                samples,
+            )
+            .expect("legacy shader input locations retain their meaning");
+            r.materials.prepare(
+                &device,
+                &queue,
+                std::iter::once((&BindingKey::default(), None)),
+            );
             r.pipeline = validated_pipeline(&device, &r.pipeline_layout, default_shader(), samples)
                 .expect("valid replacement");
             for source in [
@@ -1696,6 +1832,7 @@ mod tests {
                     [0.0, 0.0, 1.0, 0.0],
                 ],
                 color: [1.0; 4],
+                base_color: [1.0, 1.0, 1.0, 0.0],
             };
             queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&object));
             // The second submission replaces attachments while prior work may be pending.
@@ -1719,12 +1856,16 @@ mod tests {
                     });
                     pass.set_pipeline(&r.pipeline);
                     pass.set_bind_group(0, &r.camera_bind, &[]);
+                    pass.set_bind_group(1, r.materials.bind(&BindingKey::default()), &[]);
                     pass.set_vertex_buffer(0, r.cube.vertices.slice(..));
                     pass.set_vertex_buffer(1, r.instances.slice(..));
                     pass.set_index_buffer(r.cube.indices.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..r.cube.count, 0, 0..1);
                 }
                 queue.submit([encoder.finish()]);
+            }
+            if samples == 1 {
+                material_probe::verify(&device, &queue, &mut r);
             }
             drop(r);
             device

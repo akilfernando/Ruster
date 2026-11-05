@@ -191,12 +191,19 @@ fn corrupt_nonregular_and_external_changes_fail_visibly_without_replacing_record
     let mut bad_checksum: Value = serde_json::from_slice(&good).unwrap();
     bad_checksum["snapshot"]["document_sha256"] = "0".repeat(64).into();
     let mut duplicated = snapshot(&session);
-    duplicated.document = RawValue::from_string(duplicated.document.get().replacen(
-        "\"format_version\":5",
-        "\"format_version\":5,\"format_version\":5",
-        1,
-    ))
-    .unwrap();
+    let version_field = format!("\"format_version\":{}", ruster_scene::FORMAT_VERSION);
+    let duplicate_field = format!("{version_field},{version_field}");
+    let duplicate_document =
+        duplicated
+            .document
+            .get()
+            .replacen(&version_field, &duplicate_field, 1);
+    assert_ne!(
+        duplicate_document,
+        duplicated.document.get(),
+        "fixture must insert a duplicate key"
+    );
+    duplicated.document = RawValue::from_string(duplicate_document).unwrap();
     duplicated.document_sha256 = digest(duplicated.document.get().as_bytes());
     let duplicated = serde_json::to_vec(&Record {
         format: "ruster-editor-recovery".into(),

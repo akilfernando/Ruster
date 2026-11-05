@@ -62,6 +62,33 @@ pub(crate) struct Request {
     pub initial_camera: Option<ruster_render::CameraState>,
 }
 
+/// Current runtime closure only: history and unused material textures are not
+/// launch dependencies. Both entry points and the worker use this typed view.
+pub(crate) fn scene_dependencies(
+    scene: &ruster_scene::Scene,
+) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
+    scene.validate().map_err(|e| e.to_string())?;
+    let meshes: BTreeSet<_> = scene
+        .objects
+        .iter()
+        .filter_map(|o| o.mesh.clone())
+        .collect();
+    let textures: BTreeSet<_> = scene
+        .objects
+        .iter()
+        .filter_map(|o| o.material.as_ref())
+        .filter_map(|id| scene.materials.get(id))
+        .filter_map(|material| material.base_color_texture.clone())
+        .collect();
+    if meshes.len() + textures.len() > ruster_assets::MAX_ASSETS {
+        return Err("Export exceeds 64 combined mesh/texture assets.".into());
+    }
+    if !meshes.is_disjoint(&textures) {
+        return Err("Mesh and texture asset IDs must be distinct before export.".into());
+    }
+    Ok((meshes, textures))
+}
+
 pub(crate) fn camera_value(camera: ruster_render::CameraState) -> Value {
     json!({"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,
         "distance":camera.distance,"orthographic":camera.orthographic})
@@ -470,7 +497,11 @@ fn checked_kit_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
 
 // Verify fixed Python code before Python can import it. The configured kit is
 // explicitly trusted executable code, not a sandbox or a source upload service.
-fn verify_helpers(kit: &Path, initial_camera: bool) -> Result<(String, String), String> {
+fn verify_helpers(
+    kit: &Path,
+    initial_camera: bool,
+    scene6: bool,
+) -> Result<(String, String), String> {
     let raw = read_regular(&kit.join("runtime.json"), MAX_DOCUMENT)?;
     let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
     if manifest["schema"] != 1
@@ -480,7 +511,24 @@ fn verify_helpers(kit: &Path, initial_camera: bool) -> Result<(String, String), 
     {
         return Err("unsupported runtime kit manifest".into());
     }
-    if initial_camera && manifest["profile"]["capabilities"] != json!(["initial_camera"]) {
+    let legacy_profile = json!({"format":"ruster-runtime","version":1,
+        "descriptor_format":"ruster-application","descriptor_version":1,
+        "os":"linux","arch":"x86_64"});
+    let mut camera_profile = legacy_profile.clone();
+    camera_profile["capabilities"] = json!(["initial_camera"]);
+    let mut material_profile = camera_profile.clone();
+    material_profile["descriptor_version"] = json!(2);
+    material_profile["capabilities"] = json!(["initial_camera", "opaque_materials"]);
+    let profile = &manifest["profile"];
+    if scene6 && profile != &material_profile {
+        return Err("runtime kit does not support Scene6 opaque_materials; prepare a current Linux runtime kit".into());
+    }
+    if profile != &legacy_profile && profile != &camera_profile && profile != &material_profile {
+        return Err(
+            "unsupported runtime kit creation profile; prepare a current Linux runtime kit".into(),
+        );
+    }
+    if initial_camera && profile != &camera_profile && profile != &material_profile {
         return Err(
             "runtime kit does not support initial_camera; prepare a current runtime kit".into(),
         );
@@ -565,15 +613,29 @@ fn prepare(
     if detached.snapshot_bytes().map_err(|e| e.to_string())? != request.scene_bytes {
         return Err("saved scene changed on disk; reopen or save before exporting".into());
     }
+    let captured = ruster_scene::Session::from_snapshot_bytes(&request.scene_bytes)
+        .map_err(|e| e.to_string())?;
+    let scene6 = captured.loaded_format_version() >= 6;
+    let (mesh_ids, texture_ids) = scene_dependencies(captured.scene())?;
     let sources = request
         .assets
         .as_ref()
         .map(|assets| assets.read_sources().map_err(|e| e.to_string()))
         .transpose()?
         .unwrap_or_default();
+    if sources.keys().cloned().collect::<BTreeSet<_>>()
+        != mesh_ids.union(&texture_ids).cloned().collect()
+    {
+        return Err(
+            "Accepted asset sources differ from the captured scene dependency closure.".into(),
+        );
+    }
     cancelled(cancel)?;
-    let (kit_hash, runtime_hash) =
-        verify_helpers(&request.runtime_kit, request.initial_camera.is_some())?;
+    let (kit_hash, runtime_hash) = verify_helpers(
+        &request.runtime_kit,
+        request.initial_camera.is_some(),
+        scene6,
+    )?;
     let temporary = tempfile::Builder::new()
         .prefix(".ruster-export-")
         .tempdir_in(directory.validate()?)
@@ -582,17 +644,28 @@ fn prepare(
     fs::create_dir(&content).map_err(|e| e.to_string())?;
     fs::write(content.join("scene.json"), &request.scene_bytes).map_err(|e| e.to_string())?;
     let mut meshes = BTreeMap::new();
-    if !sources.is_empty() {
-        fs::create_dir(content.join("meshes")).map_err(|e| e.to_string())?;
-    }
-    for (index, (id, source)) in sources.into_iter().enumerate() {
-        let path = format!("meshes/{index:04}.obj");
-        fs::write(content.join(&path), &source).map_err(|e| e.to_string())?;
-        meshes.insert(id, json!({"path": path, "sha256": digest(&source)}));
+    let mut textures = BTreeMap::new();
+    for (ids, folder, extension, records) in [
+        (&mesh_ids, "meshes", "obj", &mut meshes),
+        (&texture_ids, "textures", "png", &mut textures),
+    ] {
+        if !ids.is_empty() {
+            fs::create_dir(content.join(folder)).map_err(|e| e.to_string())?;
+        }
+        for (index, id) in ids.iter().enumerate() {
+            cancelled(cancel)?;
+            let source = &sources[id];
+            let path = format!("{folder}/{index:04}.{extension}");
+            fs::write(content.join(&path), source).map_err(|e| e.to_string())?;
+            records.insert(id, json!({"path":path,"sha256":digest(source)}));
+        }
     }
     let scene_hash = digest(&request.scene_bytes);
-    let mut content_manifest = json!({"schema":1, "title":request.title, "tick_millis":100,
+    let mut content_manifest = json!({"schema":if scene6 { 2 } else { 1 }, "title":request.title, "tick_millis":100,
         "scene_sha256":scene_hash, "meshes":meshes});
+    if scene6 {
+        content_manifest["textures"] = json!(textures);
+    }
     let initial_camera = request.initial_camera.map(camera_value);
     if let Some(camera) = &initial_camera {
         content_manifest["initial_camera"] = camera.clone();
@@ -981,6 +1054,212 @@ mod tests {
         receipt["initial_camera"] = Value::Null;
         assert!(validate(&receipt, Some(&camera)).is_err(), "null camera");
         validate(&receipt, None).unwrap();
+    }
+
+    // Unique risk: material launch dependencies omit textures, include unused
+    // definitions, or select a legacy runtime by inspecting only camera flags.
+    #[test]
+    fn typed_material_closure_and_exact_runtime_profiles() {
+        let mut scene = ruster_scene::Scene::demo();
+        scene.objects[0].mesh = Some("mesh".into());
+        scene.objects[0].material = Some("paint".into());
+        scene.materials.insert(
+            "paint".into(),
+            ruster_scene::OpaqueMaterial {
+                base_color_texture: Some("texture".into()),
+                ..Default::default()
+            },
+        );
+        scene.materials.insert(
+            "unused".into(),
+            ruster_scene::OpaqueMaterial {
+                base_color_texture: Some("unavailable-unused".into()),
+                ..Default::default()
+            },
+        );
+        assert_eq!(
+            scene_dependencies(&scene).unwrap(),
+            (
+                BTreeSet::from(["mesh".into()]),
+                BTreeSet::from(["texture".into()])
+            )
+        );
+        scene.materials.get_mut("paint").unwrap().base_color_texture = Some("mesh".into());
+        assert!(scene_dependencies(&scene).unwrap_err().contains("distinct"));
+        let root = tempfile::tempdir().unwrap();
+        fs::create_dir(root.path().join("scripts")).unwrap();
+        let mut records = Vec::new();
+        for name in [
+            "runtime",
+            "scripts/package_creation.py",
+            "scripts/package_app.py",
+            "scripts/dependency_notices.py",
+        ] {
+            fs::write(root.path().join(name), b"fixture").unwrap();
+            records.push(json!({"path":name,"bytes":7,"sha256":digest(b"fixture")}));
+        }
+        let mut manifest = json!({"schema":1,"kind":"ruster-runtime-kit","executable":"runtime",
+            "helper":"scripts/package_creation.py","files":records,"profile":{
+                "format":"ruster-runtime","version":1,"descriptor_format":"ruster-application",
+                "descriptor_version":1,"os":"linux","arch":"x86_64"}});
+        let write = |manifest: &Value| {
+            fs::write(
+                root.path().join("runtime.json"),
+                serde_json::to_vec(manifest).unwrap(),
+            )
+            .unwrap()
+        };
+        write(&manifest);
+        verify_helpers(root.path(), false, false).unwrap();
+        assert!(verify_helpers(root.path(), true, false)
+            .unwrap_err()
+            .contains("initial_camera"));
+        assert!(verify_helpers(root.path(), false, true)
+            .unwrap_err()
+            .contains("Scene6 opaque_materials"));
+        manifest["profile"]["capabilities"] = json!(["initial_camera"]);
+        write(&manifest);
+        verify_helpers(root.path(), true, false).unwrap();
+        assert!(verify_helpers(root.path(), false, true).is_err());
+        manifest["profile"]["descriptor_version"] = json!(2);
+        manifest["profile"]["capabilities"] = json!(["initial_camera", "opaque_materials"]);
+        write(&manifest);
+        verify_helpers(root.path(), true, true).unwrap();
+        verify_helpers(root.path(), false, true).unwrap();
+        verify_helpers(root.path(), true, false).unwrap();
+        manifest["profile"]["descriptor_version"] = json!(1);
+        write(&manifest);
+        assert!(verify_helpers(root.path(), false, false).is_err());
+    }
+
+    // Unique risk: the real worker stages accepted PNGs as OBJ files or packages
+    // an overbroad snapshot. This trusted fake helper checks transport, not rendering.
+    #[test]
+    fn worker_stages_exact_typed_accepted_material_sources() {
+        let root = tempfile::tempdir().unwrap();
+        let kit = root.path().join("kit");
+        fs::create_dir_all(kit.join("scripts")).unwrap();
+        let helper = br#"
+import hashlib,json,pathlib,sys
+args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
+content=pathlib.Path(args['--content'])
+kit=pathlib.Path(args['--runtime-kit'])
+value=json.loads((content/'content.json').read_bytes())
+assert value['schema']==2
+assert set(value['meshes'])=={'mesh'} and set(value['textures'])=={'texture'}
+assert value['meshes']['mesh']['path']=='meshes/0000.obj'
+assert value['textures']['texture']['path']=='textures/0000.png'
+for section in ('meshes','textures'):
+    for record in value[section].values():
+        assert hashlib.sha256((content/record['path']).read_bytes()).hexdigest()==record['sha256']
+archive=pathlib.Path(args['--output'])
+data=json.dumps(value).encode()
+archive.write_bytes(data)
+hash=lambda data:hashlib.sha256(data).hexdigest()
+print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha256=hash(data),
+    manifest_sha256='a'*64,scene_sha256=hash((content/'scene.json').read_bytes()),
+    runtime_kit_sha256=hash((kit/'runtime.json').read_bytes()),runtime_binary_sha256=hash((kit/'runtime').read_bytes()),
+    file_count=4,title=value['title'])))
+"#;
+        let mut records = Vec::new();
+        for (name, data) in [
+            ("runtime", b"fixture".as_slice()),
+            ("scripts/package_creation.py", helper.as_slice()),
+            ("scripts/package_app.py", b"# fixture".as_slice()),
+            ("scripts/dependency_notices.py", b"# fixture".as_slice()),
+        ] {
+            fs::write(kit.join(name), data).unwrap();
+            records.push(json!({"path":name,"bytes":data.len(),"sha256":digest(data)}));
+        }
+        fs::write(kit.join("runtime.json"), serde_json::to_vec(&json!({
+            "schema":1,"kind":"ruster-runtime-kit","executable":"runtime",
+            "helper":"scripts/package_creation.py","files":records,
+            "profile":{"format":"ruster-runtime","version":1,"descriptor_format":"ruster-application",
+                "descriptor_version":2,"os":"linux","arch":"x86_64",
+                "capabilities":["initial_camera","opaque_materials"]}})).unwrap()).unwrap();
+        let mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
+        fs::write(root.path().join("source.obj"), mesh).unwrap();
+        fs::write(root.path().join("unused.obj"), mesh).unwrap();
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, 1, 1);
+            encoder.set_color(png::ColorType::Rgba);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[12, 34, 56, 0])
+                .unwrap();
+        }
+        fs::write(root.path().join("source.png"), &png).unwrap();
+        let mut store = ruster_assets::AssetStore::open(root.path()).unwrap();
+        store.import("mesh", "source.obj").unwrap();
+        store.import("texture", "source.png").unwrap();
+        store.import("unused", "unused.obj").unwrap();
+        let mut scene = ruster_scene::Scene::demo();
+        scene.objects[0].mesh = Some("mesh".into());
+        scene.objects[0].material = Some("paint".into());
+        scene.materials.insert(
+            "paint".into(),
+            ruster_scene::OpaqueMaterial {
+                base_color_texture: Some("texture".into()),
+                ..Default::default()
+            },
+        );
+        scene.materials.insert(
+            "unused".into(),
+            ruster_scene::OpaqueMaterial {
+                base_color_texture: Some("not-exported".into()),
+                ..Default::default()
+            },
+        );
+        let mut session = ruster_scene::Session::new(scene).unwrap();
+        let scene_path = root.path().join("scene.json");
+        session.save(&scene_path).unwrap();
+        let scene_bytes = session.snapshot_bytes().unwrap();
+        let request = |assets| Request {
+            identity: identity(),
+            title: "Material transport".into(),
+            scene_path: scene_path.clone(),
+            scene_bytes: scene_bytes.clone(),
+            assets: Some(assets),
+            destination: root.path().join("result.tar.gz"),
+            runtime_kit: kit.clone(),
+            mcp_scope: false,
+            initial_camera: None,
+        };
+        let cancel = AtomicBool::new(false);
+        let snapshot = store
+            .export_snapshot(&BTreeSet::from(["mesh".into(), "texture".into()]))
+            .unwrap();
+        let prepared = prepare(
+            request(snapshot),
+            DirectoryGrant::new(root.path()).unwrap(),
+            &cancel,
+        )
+        .unwrap();
+        let staged: Value = serde_json::from_slice(&fs::read(&prepared.archive).unwrap()).unwrap();
+        assert_eq!(staged["schema"], 2);
+        assert_eq!(staged["textures"]["texture"]["sha256"], digest(&png));
+        assert!(
+            !root.path().join("result.tar.gz").exists(),
+            "worker does not publish"
+        );
+        let extra = store
+            .export_snapshot(&BTreeSet::from([
+                "mesh".into(),
+                "texture".into(),
+                "unused".into(),
+            ]))
+            .unwrap();
+        let error = prepare(
+            request(extra),
+            DirectoryGrant::new(root.path()).unwrap(),
+            &cancel,
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("dependency closure"), "{error}");
     }
 
     fn identity() -> Identity {

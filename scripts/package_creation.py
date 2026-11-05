@@ -30,10 +30,15 @@ MAX_BINARY_BYTES = 256 * MIB
 MAX_METADATA_BYTES = MIB
 MAX_NOTICE_BYTES = 8 * MIB
 MAX_MESHES = 64
+MAX_OBJECTS = 256
+MAX_MATERIALS = 64
+MAX_TEXTURE_BYTES = 8 * MIB
 PROFILE = {"format": "ruster-runtime", "version": 1,
            "descriptor_format": "ruster-application", "descriptor_version": 1,
            "os": "linux", "arch": "x86_64"}
 CAMERA_PROFILE = {**PROFILE, "capabilities": ["initial_camera"]}
+MATERIAL_PROFILE = {**PROFILE, "descriptor_version": 2,
+                    "capabilities": ["initial_camera", "opaque_materials"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -41,6 +46,8 @@ HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
 KIT_FILES = frozenset(("runtime", "README.txt") + LICENSE_FILES + HELPER_FILES)
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 MESH_PATH = re.compile(r"meshes/[0-9]{4}\.obj\Z")
+TEXTURE_PATH = re.compile(r"textures/[0-9]{4}\.png\Z")
+IDENTITY = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 
 
 def sha256(data: bytes) -> str:
@@ -145,9 +152,9 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
-        raise ValueError("unsupported runtime creation profile; expected Linux x86_64 protocol version 1")
+        raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
 
 def initial_camera(value: object) -> dict | None:
@@ -318,71 +325,141 @@ def load_kit(root: Path, cancel_file: Path | None = None) -> tuple[dict, dict[st
     return manifest, payload, sha256(raw)
 
 
+def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
+    """Derive current runtime dependencies independently of the content request.
+
+    Full scene/history/material/UV validation remains the actual runtime's job.
+    No traversal of arbitrary property/history JSON or external paths is needed.
+    """
+    version = document.get("format_version")
+    scene = document.get("scene")
+    if (document.get("format") != "ruster-scene" or type(version) is not int
+            or not 1 <= version <= 6 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–6 document")
+    objects = scene.get("objects")
+    materials = scene.get("materials", {})
+    if not isinstance(objects, list) or len(objects) > MAX_OBJECTS:
+        raise ValueError("invalid scene object collection")
+    if not isinstance(materials, dict) or len(materials) > MAX_MATERIALS:
+        raise ValueError("invalid scene material collection")
+    if version < 6 and ("materials" in scene or any(
+            isinstance(obj, dict) and "material" in obj for obj in objects)):
+        raise ValueError("material fields require Scene6")
+
+    def identity(value: object, label: str) -> str:
+        if not isinstance(value, str) or not IDENTITY.fullmatch(value):
+            raise ValueError(f"invalid {label} identity")
+        return value
+
+    meshes, textures = set(), set()
+    for obj in objects:
+        if not isinstance(obj, dict):
+            raise ValueError("invalid scene object")
+        if obj.get("mesh") is not None:
+            meshes.add(identity(obj["mesh"], "mesh"))
+        if obj.get("material") is not None:
+            material_id = identity(obj["material"], "material")
+            material = materials.get(material_id)
+            if not isinstance(material, dict):
+                raise ValueError(f"missing assigned material: {material_id}")
+            if material.get("base_color_texture") is not None:
+                textures.add(identity(material["base_color_texture"], "texture"))
+    return meshes, textures
+
+
 def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, dict, dict[str, bytes]]:
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
+    schema = content.get("schema")
+    if type(schema) is not int or schema not in (1, 2):
+        raise ValueError("invalid content schema")
     fields = {"schema", "title", "tick_millis", "scene_sha256", "meshes"}
+    if schema == 2:
+        fields.add("textures")
     exact_fields(content, fields | ({"initial_camera"} if "initial_camera" in content else set()), "content")
     if "initial_camera" in content:
         content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
-    if (type(content["schema"]) is not int or content["schema"] != 1
-            or not isinstance(title, str) or not title or title != title.strip()
+    if (not isinstance(title, str) or not title or title != title.strip()
             or len(title.encode()) > 128 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in title)
             or type(content["tick_millis"]) is not int or not 1 <= content["tick_millis"] <= 1000):
-        raise ValueError("invalid content schema, title or fixed tick")
+        raise ValueError("invalid content title or fixed tick")
     scene_data = read_bounded(root, "scene.json", MIB)
-    if not isinstance(content["scene_sha256"], str) or sha256(scene_data) != content["scene_sha256"]:
+    if (not isinstance(content["scene_sha256"], str) or not HASH.fullmatch(content["scene_sha256"])
+            or sha256(scene_data) != content["scene_sha256"]):
         raise ValueError("scene checksum mismatch")
-    document = decode(scene_data, "Scene5")
-    if document.get("format") != "ruster-scene" or type(document.get("format_version")) is not int or document["format_version"] != 5 or not isinstance(document.get("scene"), dict):
-        raise ValueError("content requires a canonical Scene5 document")
-    meshes = content["meshes"]
-    if not isinstance(meshes, dict) or len(meshes) > MAX_MESHES:
-        raise ValueError("content exceeds 64 mesh mappings")
-    mesh_data = {}
-    for identity, record in meshes.items():
-        cancelled(cancel_file)
-        exact_fields(record, {"path", "sha256"}, "mesh record")
-        # The runtime remains the authority for scene IDs and OBJ semantics.
-        if not isinstance(identity, str) or not identity or len(identity.encode()) > 128:
-            raise ValueError("invalid mesh identity")
-        name = record["path"]
-        if not isinstance(name, str) or not MESH_PATH.fullmatch(name) or name in mesh_data:
-            raise ValueError("meshes require unique generated meshes/0000.obj paths")
-        data = read_bounded(root, name, MIB)
-        if not isinstance(record["sha256"], str) or sha256(data) != record["sha256"]:
-            raise ValueError(f"mesh checksum mismatch: {identity}")
-        mesh_data[name] = data
+    document = decode(scene_data, "authored scene")
+    mesh_ids, texture_ids = scene_dependencies(document)
+    if (schema == 1 and document["format_version"] > 5
+            or schema == 2 and document["format_version"] != 6):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6")
+    meshes, textures = content["meshes"], content.get("textures", {})
+    if (not isinstance(meshes, dict) or not isinstance(textures, dict)
+            or len(meshes) + len(textures) > MAX_MESHES):
+        raise ValueError("content exceeds 64 combined asset mappings")
+    if set(meshes) != mesh_ids or set(textures) != texture_ids or set(meshes) & set(textures):
+        raise ValueError("content mappings differ from the current scene mesh/texture dependency closure")
+    source_data = {}
+    for kind, records, pattern, maximum in (("mesh", meshes, MESH_PATH, MIB),
+                                            ("texture", textures, TEXTURE_PATH, MAX_TEXTURE_BYTES)):
+        for identity, record in records.items():
+            cancelled(cancel_file)
+            exact_fields(record, {"path", "sha256"}, f"{kind} record")
+            if not isinstance(identity, str) or not IDENTITY.fullmatch(identity):
+                raise ValueError(f"invalid {kind} identity")
+            name = record["path"]
+            if not isinstance(name, str) or not pattern.fullmatch(name) or name in source_data:
+                raise ValueError(f"{kind} sources require unique generated {kind} paths")
+            data = read_bounded(root, name, maximum)
+            if (not isinstance(record["sha256"], str) or not HASH.fullmatch(record["sha256"])
+                    or sha256(data) != record["sha256"]):
+                raise ValueError(f"{kind} checksum mismatch: {identity}")
+            source_data[name] = data
     cancelled(cancel_file)
-    return content, scene_data, document, mesh_data
+    return content, scene_data, document, source_data
 
 
 def typed_scene(document: dict) -> dict:
     """Scene fields are f32; serde_json::Value exposes their exact f64 promotions."""
     scene = json.loads(json.dumps(document["scene"]))
     try:
+        if not scene.get("materials"):
+            scene.pop("materials", None)
+        for material in scene.get("materials", {}).values():
+            material["tint"] = [struct.unpack("f", struct.pack("f", value))[0]
+                                for value in material["tint"]]
+            for field in ("name", "base_color_texture"):
+                if material.get(field) is None:
+                    material.pop(field, None)
         for obj in scene["objects"]:
+            for field in ("name", "mesh", "material"):
+                if obj.get(field) is None:
+                    obj.pop(field, None)
             obj["color"] = [struct.unpack("f", struct.pack("f", value))[0] for value in obj["color"]]
             for field in ("translation", "rotation", "scale"):
                 obj["transform"][field] = [struct.unpack("f", struct.pack("f", value))[0]
                                             for value in obj["transform"][field]]
     except (KeyError, TypeError, OverflowError, struct.error) as exc:
-        raise ValueError("invalid Scene5 numeric fields") from exc
+        raise ValueError("invalid scene numeric fields") from exc
     return scene
 
 
 def package(runtime_kit: Path, content_root: Path, output: Path,
             cancel_file: Path | None = None) -> dict:
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
-    content, scene_data, document, meshes = source_content(content_root, cancel_file)
+    content, scene_data, document, sources = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
-    if camera is not None and kit["profile"] != CAMERA_PROFILE:
+    if content["schema"] == 2 and kit["profile"] != MATERIAL_PROFILE:
+        raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
+    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor = {"format": "ruster-application", "version": 1, "title": content["title"],
+    descriptor = {"format": "ruster-application", "version": content["schema"], "title": content["title"],
                   "scene": "resources/scene.json", "tick_millis": content["tick_millis"],
                   "meshes": {identity: "resources/" + record["path"]
                              for identity, record in content["meshes"].items()}}
+    if content["schema"] == 2:
+        descriptor["textures"] = {identity: "resources/" + record["path"]
+                                  for identity, record in content["textures"].items()}
     if camera is not None:
         descriptor["initial_camera"] = camera
     with tempfile.TemporaryDirectory(prefix="ruster-creation-") as temporary:
@@ -392,7 +469,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             cancelled(cancel_file)
             package_app.put(stage, name, payload[name])
         package_app.put(stage, "resources/scene.json", scene_data)
-        for name, data in meshes.items():
+        for name, data in sources.items():
             cancelled(cancel_file)
             package_app.put(stage, "resources/" + name, data)
         package_app.put(stage, "app.json", encoded(descriptor))
@@ -400,7 +477,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
         readme = (content["title"] + "\n\nRun ./application from any working directory.\n"
                   "Linux x86_64; native graphics require a Vulkan-capable driver and desktop session.\n"
                   "ELF prerequisites: " + json.dumps(requirements, sort_keys=True) + "\n"
-                  "The saved authored Scene5 bytes and mapped OBJ resources accompany this runtime.\n")
+                  "The saved authored scene bytes and mapped original content resources accompany this runtime.\n")
         package_app.put(stage, "README.txt", readme.encode())
         result = run_runtime(stage / "application", ["--headless", "--ticks", "0"], cancel_file)
         if (result.get("mode") != "creation" or result.get("title") != content["title"]

@@ -1,4 +1,4 @@
-//! Bounded, project-local OBJ import. Sources are authoritative; caches are disposable.
+//! Bounded, project-local mesh and opaque texture import. Sources are authoritative; caches are disposable.
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -15,12 +15,17 @@ pub const MAX_SOURCE_BYTES: usize = 1024 * 1024;
 pub const MAX_TRIANGLES: usize = 32_768;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 pub const MAX_ASSETS: usize = 64;
-pub const MAX_RESOLVED_BYTES: usize = 32 * 1024 * 1024;
+pub const MAX_RESOLVED_BYTES: usize = 48 * 1024 * 1024;
+mod texture;
+pub use texture::{
+    decode_png, validate_texture, Texture, TextureMip, MAX_TEXTURE_BYTES, MAX_TEXTURE_EDGE,
+    MAX_TEXTURE_RESOLVED_BYTES, MAX_TEXTURE_SOURCE_BYTES,
+};
 const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_REGISTRY_BYTES: usize = 64 * 1024;
 const REGISTRY: &str = ".ruster-assets.json";
 const CACHE_MAGIC: &[u8; 8] = b"RUSTMESH";
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 3;
 // magic, version, vertex/index counts, ASCII source SHA-256, binary SHA-256.
 const CACHE_SEMANTIC_BYTES: usize = 8 + 4 + 4 + 4 + 64;
 const CACHE_HEADER_BYTES: usize = CACHE_SEMANTIC_BYTES + 32;
@@ -37,6 +42,50 @@ pub struct Vertex {
 pub struct Mesh {
     pub vertices: Vec<Vertex>,
     pub indices: Vec<u32>,
+    /// Complete raw OBJ UVs, one per expanded vertex. No V flip is applied here.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub texcoords: Option<Vec<[f32; 2]>>,
+}
+impl Mesh {
+    pub fn has_complete_uvs(&self) -> bool {
+        self.texcoords
+            .as_ref()
+            .is_some_and(|uv| uv.len() == self.vertices.len())
+    }
+    /// Logical payload only, excluding container/Arc overhead and retained snapshots.
+    pub fn payload_bytes(&self) -> usize {
+        self.vertices.len() * 24
+            + self.indices.len() * 4
+            + self.texcoords.as_ref().map_or(0, |uv| uv.len() * 8)
+    }
+    pub fn uv_diagnostic(&self) -> Option<&'static str> {
+        (!self.has_complete_uvs())
+            .then_some("UVs missing/incomplete; textured materials require a complete UV set")
+    }
+}
+
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssetKind {
+    Mesh,
+    Texture,
+}
+impl AssetKind {
+    fn from_source(source: &str) -> Result<Self, AssetError> {
+        if source.ends_with(".obj") {
+            Ok(Self::Mesh)
+        } else if source.ends_with(".png") {
+            Ok(Self::Texture)
+        } else {
+            Err(error("source must use a supported .obj or .png extension"))
+        }
+    }
+    fn source_limit(self) -> usize {
+        match self {
+            Self::Mesh => MAX_SOURCE_BYTES,
+            Self::Texture => MAX_TEXTURE_SOURCE_BYTES,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -49,6 +98,7 @@ pub enum AssetStatus {
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AssetInfo {
+    pub kind: AssetKind,
     pub id: String,
     pub source: String,
     pub hash: Option<String>,
@@ -81,6 +131,7 @@ fn error(message: impl Into<String>) -> AssetError {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Record {
+    kind: AssetKind,
     source: String,
     hash: Option<String>,
 }
@@ -96,7 +147,7 @@ impl Default for Registry {
     fn default() -> Self {
         Self {
             format: "ruster-assets".into(),
-            version: 1,
+            version: 2,
             revision: 0,
             assets: BTreeMap::new(),
         }
@@ -109,10 +160,64 @@ struct CachedMesh {
     version: u32,
     source_hash: String,
     mesh_hash: String,
-    mesh: Mesh,
+    mesh: LegacyMesh,
 }
 
-/// A bounded in-memory last-good mesh catalog. Every mutation checks both the
+// Decode historical representations strictly; new fields under old labels are errors.
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyMesh {
+    vertices: Vec<Vertex>,
+    indices: Vec<u32>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyRecord {
+    source: String,
+    hash: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyRegistry {
+    format: String,
+    version: u32,
+    revision: u64,
+    assets: BTreeMap<String, LegacyRecord>,
+}
+fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
+    let value: serde_json::Value = serde_json::from_slice(bytes)?;
+    if value.get("version").and_then(serde_json::Value::as_u64) == Some(1) {
+        let old: LegacyRegistry = serde_json::from_slice(bytes)?;
+        Ok(Registry {
+            format: old.format,
+            version: old.version,
+            revision: old.revision,
+            assets: old
+                .assets
+                .into_iter()
+                .map(|(id, r)| {
+                    (
+                        id,
+                        Record {
+                            kind: AssetKind::Mesh,
+                            source: r.source,
+                            hash: r.hash,
+                        },
+                    )
+                })
+                .collect(),
+        })
+    } else {
+        Ok(serde_json::from_slice(bytes)?)
+    }
+}
+#[derive(PartialEq)]
+enum Payload {
+    Mesh(Mesh),
+    Texture(Texture),
+}
+
+/// A bounded in-memory last-good mesh/texture catalog. Every mutation checks both the
 /// expected revision and complete on-disk catalog baseline under an advisory lock.
 #[derive(Debug)]
 pub struct AssetStore {
@@ -120,6 +225,7 @@ pub struct AssetStore {
     registry: Registry,
     baseline: Option<Vec<u8>>,
     meshes: BTreeMap<String, Arc<Mesh>>,
+    textures: BTreeMap<String, Arc<Texture>>,
     infos: BTreeMap<String, AssetInfo>,
 }
 
@@ -136,6 +242,7 @@ pub struct ExportSnapshot {
 
 #[derive(Clone, Debug)]
 struct ExportSource {
+    kind: AssetKind,
     source: String,
     hash: String,
 }
@@ -145,16 +252,16 @@ impl ExportSnapshot {
         self.revision
     }
 
-    /// Read at most MAX_ASSETS sources, each at most MAX_SOURCE_BYTES. Catalog
+    /// Read at most MAX_ASSETS sources, using the mesh/texture source-byte bounds. Catalog
     /// equality is checked before and after reading against the editor's exact
     /// accepted baseline. Source hashes preserve that same accepted-content
-    /// boundary without parsing the already validated OBJ again. Like the shared
+    /// boundary without parsing the already validated content again. Like the shared
     /// file/path policy, this is not a hostile same-user filesystem race sandbox.
     pub fn read_sources(&self) -> Result<BTreeMap<String, Vec<u8>>, AssetError> {
         self.check_baseline()?;
         let mut sources = BTreeMap::new();
         for (id, source) in &self.sources {
-            let bytes = read_source_bytes(&self.root, &source.source)?;
+            let bytes = read_source_bytes(&self.root, &source.source, source.kind)?;
             if digest(&bytes) != source.hash {
                 return Err(error(format!(
                     "asset {id:?} source changed since its accepted content; Refresh the asset and retry export"
@@ -185,7 +292,7 @@ impl AssetStore {
         let _lock = lock(&root)?;
         let baseline = registry_bytes(&root)?;
         let registry: Registry = match &baseline {
-            Some(bytes) => serde_json::from_slice(bytes)?,
+            Some(bytes) => parse_registry(bytes)?,
             None => Registry::default(),
         };
         validate_registry(&registry)?;
@@ -194,49 +301,56 @@ impl AssetStore {
             registry,
             baseline,
             meshes: BTreeMap::new(),
+            textures: BTreeMap::new(),
             infos: BTreeMap::new(),
         };
-        // First recover the previous accepted cache, then inspect current sources.
-        // Opening never silently accepts changed source bytes: explicit Refresh is
-        // the catalog revision boundary. Missing caches can be reproduced from
-        // unchanged valid source content without changing catalog state.
+        // Recover last-good derived content before inspecting mutable sources.
+        // Old mesh caches do not establish UV absence; matching sources are reparsed.
         for (id, record) in store.registry.assets.clone() {
+            let mut current_cache = false;
             if let Some(hash) = &record.hash {
-                if let Ok(mesh) = store.read_cache(hash).and_then(|mesh| {
-                    store.check_mesh_budget(&id, &mesh)?;
-                    Ok(mesh)
-                }) {
-                    store.meshes.insert(id.clone(), Arc::new(mesh));
+                let cached = match record.kind {
+                    AssetKind::Mesh => store
+                        .read_cache(hash)
+                        .map(|(mesh, current)| (Payload::Mesh(mesh), current)),
+                    AssetKind::Texture => store
+                        .read_texture_cache(hash)
+                        .map(|texture| (Payload::Texture(texture), true)),
+                };
+                if let Ok((payload, current)) = cached {
+                    if store.check_payload_budget(&id, &payload).is_ok() {
+                        store.install_payload(&id, payload);
+                        current_cache = current;
+                    }
                 }
             }
             let mut info = store.info(&id, AssetStatus::Ready, None);
-            match store.read_source_bytes(&record.source) {
+            match read_source_bytes(&store.root, &record.source, record.kind) {
                 Ok(bytes) => {
                     let hash = digest(&bytes);
-                    if record.hash.as_ref() == Some(&hash) && store.meshes.contains_key(&id) {
-                        // Exact accepted source bytes plus validated cache: parsing
-                        // OBJ again cannot change the deterministic import result.
-                    } else {
-                        match parse_source(&record.source, &bytes) {
-                            Ok(mesh) if record.hash.as_ref() == Some(&hash) => {
-                                if let Err(e) = store.check_mesh_budget(&id, &mesh) {
-                                    info.status = AssetStatus::Invalid;
-                                    info.diagnostic = Some(e.to_string());
-                                } else {
-                                    // Rebuild failure is recoverable: the unchanged
-                                    // valid source remains usable in memory.
-                                    if let Err(e) = store.write_cache(&hash, &mesh) {
+                    if record.hash.as_ref() != Some(&hash) {
+                        // Parse for a truthful format diagnostic, never accept changed bytes.
+                        info.status = AssetStatus::Invalid;
+                        info.diagnostic =
+                            Some(match parse_source(&record.source, record.kind, &bytes) {
+                                Ok(_) => "source changed; Refresh to accept new content".into(),
+                                Err(e) => e.to_string(),
+                            });
+                    } else if !current_cache {
+                        match parse_source(&record.source, record.kind, &bytes) {
+                            Ok(payload) => match store.check_payload_budget(&id, &payload) {
+                                Ok(()) => {
+                                    if let Err(e) = store.write_payload_cache(&hash, &payload) {
                                         info.diagnostic =
                                             Some(format!("cache rebuild failed: {e}"));
                                     }
-                                    store.meshes.insert(id.clone(), Arc::new(mesh));
+                                    store.install_payload(&id, payload);
                                 }
-                            }
-                            Ok(_) => {
-                                info.status = AssetStatus::Invalid;
-                                info.diagnostic =
-                                    Some("source changed; Refresh to accept new content".into());
-                            }
+                                Err(e) => {
+                                    info.status = AssetStatus::Invalid;
+                                    info.diagnostic = Some(e.to_string());
+                                }
+                            },
                             Err(e) => {
                                 info.status = AssetStatus::Invalid;
                                 info.diagnostic = Some(e.to_string());
@@ -274,6 +388,12 @@ impl AssetStore {
     pub fn mesh_snapshots(&self) -> BTreeMap<String, Arc<Mesh>> {
         self.meshes.clone()
     }
+    pub fn texture(&self, id: &str) -> Option<&Texture> {
+        self.textures.get(id).map(Arc::as_ref)
+    }
+    pub fn texture_snapshots(&self) -> BTreeMap<String, Arc<Texture>> {
+        self.textures.clone()
+    }
     /// Capture only the IDs used by the runtime scene, excluding unrelated
     /// catalog/history assets. No files are inspected or changed here, so this
     /// bounded metadata capture may run on the editor thread.
@@ -293,14 +413,18 @@ impl AssetStore {
                     "asset {id:?} has no accepted content; Refresh the asset before exporting"
                 ))
             })?;
-            if !self.meshes.contains_key(id) {
+            if !match record.kind {
+                AssetKind::Mesh => self.meshes.contains_key(id),
+                AssetKind::Texture => self.textures.contains_key(id),
+            } {
                 return Err(error(format!(
-                    "asset {id:?} has no accepted mesh; repair its source and Refresh before exporting"
+                    "asset {id:?} has no accepted content; repair its source and Refresh before exporting"
                 )));
             }
             sources.insert(
                 id.clone(),
                 ExportSource {
+                    kind: record.kind,
                     source: record.source.clone(),
                     hash: hash.clone(),
                 },
@@ -344,19 +468,21 @@ impl AssetStore {
         if self.registry.assets.len() >= MAX_ASSETS {
             return Err(error("asset catalog limit (64) reached"));
         }
-        let (hash, mesh) = self.read_source(source)?;
-        self.check_mesh_budget(id, &mesh)?;
-        self.write_cache(&hash, &mesh)?;
+        let kind = AssetKind::from_source(source)?;
+        let (hash, payload) = self.read_source(source, kind)?;
+        self.check_payload_budget(id, &payload)?;
+        self.write_payload_cache(&hash, &payload)?;
         let mut next = self.registry.clone();
         next.assets.insert(
             id.into(),
             Record {
+                kind,
                 source: source.into(),
                 hash: Some(hash),
             },
         );
         self.commit(next)?;
-        self.meshes.insert(id.into(), Arc::new(mesh));
+        self.install_payload(id, payload);
         let info = self.info(id, AssetStatus::Ready, None);
         self.infos.insert(id.into(), info.clone());
         Ok(info)
@@ -372,7 +498,7 @@ impl AssetStore {
             .get(id)
             .cloned()
             .ok_or_else(|| error(format!("unknown asset ID {id:?}")))?;
-        let (hash, mesh) = match self.read_source(&record.source) {
+        let (hash, payload) = match self.read_source(&record.source, record.kind) {
             Ok(result) => result,
             Err(e) => {
                 let info = self.info(id, self.failure_status(&record.source), Some(e.to_string()));
@@ -380,13 +506,13 @@ impl AssetStore {
                 return Err(e);
             }
         };
-        if let Err(e) = self.check_mesh_budget(id, &mesh) {
+        if let Err(e) = self.check_payload_budget(id, &payload) {
             self.mark_failure(id, &e);
             return Err(e);
         }
         // Publish cache before catalog. An orphan cache after a catalog write
-        // failure is disposable; accepted mesh/hash/revision stay unchanged.
-        if let Err(e) = self.write_cache(&hash, &mesh) {
+        // failure is disposable; accepted payload/hash/revision stay unchanged.
+        if let Err(e) = self.write_payload_cache(&hash, &payload) {
             self.mark_failure(id, &e);
             return Err(e);
         }
@@ -401,12 +527,7 @@ impl AssetStore {
         // Source-only edits (for example comments) still advance the accepted
         // hash/revision, but need not replace identical renderer geometry. Only
         // the changed asset needs comparison; unchanged assets need no copies.
-        let replace = self.meshes.get(id).is_none_or(|accepted| {
-            record.hash.as_ref() != Some(&hash) && accepted.as_ref() != &mesh
-        });
-        if replace {
-            self.meshes.insert(id.into(), Arc::new(mesh));
-        }
+        self.install_payload(id, payload);
         let info = self.info(id, AssetStatus::Ready, None);
         self.infos.insert(id.into(), info.clone());
         Ok(info)
@@ -427,6 +548,10 @@ impl AssetStore {
             .get(id)
             .cloned()
             .ok_or_else(|| error(format!("unknown asset ID {id:?}")))?;
+        validate_relative(source)?;
+        if AssetKind::from_source(source)? != record.kind {
+            return Err(error("rename cannot change an asset's kind"));
+        }
         let old = confined(&self.root, &record.source, false)?;
         let new = confined(&self.root, source, true)?;
         if old == new {
@@ -469,6 +594,7 @@ impl AssetStore {
     fn info(&self, id: &str, status: AssetStatus, diagnostic: Option<String>) -> AssetInfo {
         let record = &self.registry.assets[id];
         AssetInfo {
+            kind: record.kind,
             id: id.into(),
             source: record.source.clone(),
             hash: record.hash.clone(),
@@ -505,6 +631,7 @@ impl AssetStore {
         Ok(lock)
     }
     fn commit(&mut self, mut next: Registry) -> Result<(), AssetError> {
+        next.version = 2;
         next.revision = next
             .revision
             .checked_add(1)
@@ -518,34 +645,89 @@ impl AssetStore {
         self.baseline = Some(bytes);
         Ok(())
     }
-    fn check_mesh_budget(&self, id: &str, replacement: &Mesh) -> Result<(), AssetError> {
-        let size = |mesh: &Mesh| {
-            mesh.vertices.len() * std::mem::size_of::<Vertex>()
-                + mesh.indices.len() * std::mem::size_of::<u32>()
-        };
-        let total: usize = self
-            .meshes
-            .iter()
-            .filter(|(key, _)| key.as_str() != id)
-            .map(|(_, mesh)| size(mesh))
-            .sum::<usize>()
-            + size(replacement);
-        if total > MAX_RESOLVED_BYTES {
-            return Err(error("resolved mesh payload exceeds 32 MiB project limit"));
+    fn check_payload_budget(&self, id: &str, replacement: &Payload) -> Result<(), AssetError> {
+        match replacement {
+            Payload::Mesh(mesh) => {
+                let total = self
+                    .meshes
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != id)
+                    .map(|(_, mesh)| mesh.payload_bytes())
+                    .sum::<usize>()
+                    + mesh.payload_bytes();
+                if total > MAX_RESOLVED_BYTES {
+                    return Err(error("resolved mesh payload exceeds 48 MiB project limit"));
+                }
+            }
+            Payload::Texture(texture) => {
+                let total = self
+                    .textures
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != id)
+                    .map(|(_, texture)| texture.payload_bytes())
+                    .sum::<usize>()
+                    + texture.payload_bytes();
+                if total > MAX_TEXTURE_RESOLVED_BYTES {
+                    return Err(error(
+                        "resolved texture payload exceeds 64 MiB project limit",
+                    ));
+                }
+            }
         }
         Ok(())
     }
-    fn read_source_bytes(&self, source: &str) -> Result<Vec<u8>, AssetError> {
-        read_source_bytes(&self.root, source)
+    fn install_payload(&mut self, id: &str, payload: Payload) {
+        match payload {
+            Payload::Mesh(mesh) => {
+                if self.meshes.get(id).is_none_or(|old| old.as_ref() != &mesh) {
+                    self.meshes.insert(id.into(), Arc::new(mesh));
+                }
+            }
+            Payload::Texture(texture) => {
+                if self
+                    .textures
+                    .get(id)
+                    .is_none_or(|old| old.as_ref() != &texture)
+                {
+                    self.textures.insert(id.into(), Arc::new(texture));
+                }
+            }
+        }
     }
-    fn read_source(&self, source: &str) -> Result<(String, Mesh), AssetError> {
-        let bytes = self.read_source_bytes(source)?;
-        let mesh = parse_source(source, &bytes)?;
-        Ok((digest(&bytes), mesh))
+    fn read_source(&self, source: &str, kind: AssetKind) -> Result<(String, Payload), AssetError> {
+        let bytes = read_source_bytes(&self.root, source, kind)?;
+        let payload = parse_source(source, kind, &bytes)?;
+        Ok((digest(&bytes), payload))
+    }
+    fn write_payload_cache(&self, hash: &str, payload: &Payload) -> Result<(), AssetError> {
+        match payload {
+            Payload::Mesh(mesh) => self.write_cache(hash, mesh),
+            Payload::Texture(texture) => {
+                let directory = self.kind_cache_directory("textures", true)?;
+                atomic_write(
+                    &directory,
+                    &directory.join(format!("v1-{hash}.bin")),
+                    &texture::encode_cache(hash, texture)?,
+                )
+            }
+        }
+    }
+    fn read_texture_cache(&self, hash: &str) -> Result<Texture, AssetError> {
+        let directory = self.kind_cache_directory("textures", false)?;
+        texture::decode_cache(
+            &read_bounded(
+                &directory.join(format!("v1-{hash}.bin")),
+                texture::MAX_TEXTURE_CACHE_BYTES,
+            )?,
+            hash,
+        )
     }
     fn cache_directory(&self, create: bool) -> Result<PathBuf, AssetError> {
+        self.kind_cache_directory("meshes", create)
+    }
+    fn kind_cache_directory(&self, kind: &str, create: bool) -> Result<PathBuf, AssetError> {
         let directory = self.root.join(".ruster-cache");
-        let meshes = directory.join("meshes");
+        let meshes = directory.join(kind);
         for path in [&directory, &meshes] {
             match fs::symlink_metadata(path) {
                 Ok(meta) if meta.file_type().is_dir() => (),
@@ -558,14 +740,20 @@ impl AssetStore {
         }
         Ok(meshes)
     }
-    fn read_cache(&self, hash: &str) -> Result<Mesh, AssetError> {
+    fn read_cache(&self, hash: &str) -> Result<(Mesh, bool), AssetError> {
         let directory = self.cache_directory(false)?;
-        let current = directory.join(format!("v2-{hash}.bin"));
-        // A valid legacy cache still protects last-good content when the newer
-        // disposable cache is missing/corrupt, even with invalid/missing source.
-        read_bounded(&current, MAX_CACHE_BYTES)
-            .and_then(|bytes| decode_cache(&bytes, hash))
-            .or_else(|_| self.read_legacy_cache(&directory, hash))
+        read_bounded(&directory.join(format!("v3-{hash}.bin")), MAX_CACHE_BYTES)
+            .and_then(|bytes| decode_cache(&bytes, hash, 3))
+            .map(|mesh| (mesh, true))
+            .or_else(|_| {
+                read_bounded(&directory.join(format!("v2-{hash}.bin")), MAX_CACHE_BYTES)
+                    .and_then(|bytes| decode_cache(&bytes, hash, 2))
+                    .map(|mesh| (mesh, false))
+            })
+            .or_else(|_| {
+                self.read_legacy_cache(&directory, hash)
+                    .map(|mesh| (mesh, false))
+            })
     }
     fn read_legacy_cache(&self, directory: &Path, hash: &str) -> Result<Mesh, AssetError> {
         let path = directory.join(format!("v1-{hash}.json"));
@@ -577,13 +765,18 @@ impl AssetStore {
         {
             return Err(error("invalid mesh cache identity/version/checksum"));
         }
-        validate_mesh(&cache.mesh)?;
-        Ok(cache.mesh)
+        let mesh = Mesh {
+            vertices: cache.mesh.vertices,
+            indices: cache.mesh.indices,
+            texcoords: None,
+        };
+        validate_mesh(&mesh)?;
+        Ok(mesh)
     }
     fn write_cache(&self, hash: &str, mesh: &Mesh) -> Result<(), AssetError> {
         let directory = self.cache_directory(true)?;
         let bytes = encode_cache(hash, mesh)?;
-        let path = directory.join(format!("v2-{hash}.bin"));
+        let path = directory.join(format!("v3-{hash}.bin"));
         atomic_write(&directory, &path, &bytes)
     }
 }
@@ -595,7 +788,7 @@ fn cache_checksum(bytes: &[u8]) -> [u8; 32] {
     hasher.update(&bytes[CACHE_HEADER_BYTES..]);
     hasher.finalize().into()
 }
-fn cache_length(vertices: usize, indices: usize) -> Result<usize, AssetError> {
+fn cache_length(vertices: usize, indices: usize, uvs: bool) -> Result<usize, AssetError> {
     if vertices == 0
         || vertices > MAX_VERTICES
         || indices == 0
@@ -605,7 +798,7 @@ fn cache_length(vertices: usize, indices: usize) -> Result<usize, AssetError> {
         return Err(error("invalid mesh cache counts"));
     }
     vertices
-        .checked_mul(6 * 4)
+        .checked_mul(if uvs { 8 * 4 } else { 6 * 4 })
         .and_then(|bytes| indices.checked_mul(4).and_then(|n| bytes.checked_add(n)))
         .and_then(|bytes| bytes.checked_add(CACHE_HEADER_BYTES))
         .filter(|&bytes| bytes <= MAX_CACHE_BYTES)
@@ -615,17 +808,32 @@ fn encode_cache(hash: &str, mesh: &Mesh) -> Result<Vec<u8>, AssetError> {
     if hash.len() != 64 {
         return Err(error("invalid source SHA-256 for mesh cache"));
     }
-    let length = cache_length(mesh.vertices.len(), mesh.indices.len())?;
+    validate_mesh(mesh)?;
+    let length = cache_length(
+        mesh.vertices.len(),
+        mesh.indices.len(),
+        mesh.texcoords.is_some(),
+    )?;
     let mut bytes = Vec::with_capacity(length);
     bytes.extend_from_slice(CACHE_MAGIC);
     bytes.extend_from_slice(&CACHE_VERSION.to_le_bytes());
-    bytes.extend_from_slice(&(mesh.vertices.len() as u32).to_le_bytes());
+    bytes.extend_from_slice(
+        &((mesh.vertices.len() as u32) | if mesh.texcoords.is_some() { 1 << 31 } else { 0 })
+            .to_le_bytes(),
+    );
     bytes.extend_from_slice(&(mesh.indices.len() as u32).to_le_bytes());
     bytes.extend_from_slice(hash.as_bytes());
     bytes.extend_from_slice(&[0; 32]);
     for vertex in &mesh.vertices {
         for value in vertex.position.iter().chain(&vertex.normal) {
             bytes.extend_from_slice(&value.to_le_bytes());
+        }
+    }
+    if let Some(uvs) = &mesh.texcoords {
+        for uv in uvs {
+            for value in uv {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
         }
     }
     for index in &mesh.indices {
@@ -635,18 +843,24 @@ fn encode_cache(hash: &str, mesh: &Mesh) -> Result<Vec<u8>, AssetError> {
     bytes[CACHE_SEMANTIC_BYTES..CACHE_HEADER_BYTES].copy_from_slice(checksum.as_ref());
     Ok(bytes)
 }
-fn decode_cache(bytes: &[u8], hash: &str) -> Result<Mesh, AssetError> {
+fn decode_cache(bytes: &[u8], hash: &str, version: u32) -> Result<Mesh, AssetError> {
     if bytes.len() < CACHE_HEADER_BYTES
         || &bytes[..8] != CACHE_MAGIC
-        || bytes[8..12] != CACHE_VERSION.to_le_bytes()
+        || bytes[8..12] != version.to_le_bytes()
         || &bytes[20..CACHE_SEMANTIC_BYTES] != hash.as_bytes()
     {
         return Err(error("invalid mesh cache identity/version"));
     }
     let number = |field: &[u8]| u32::from_le_bytes(field.try_into().expect("four byte field"));
-    let vertex_count = number(&bytes[12..16]) as usize;
+    let raw_count = number(&bytes[12..16]);
+    let uvs = version == 3 && raw_count & (1 << 31) != 0;
+    let vertex_count = (if version == 3 {
+        raw_count & !(1 << 31)
+    } else {
+        raw_count
+    }) as usize;
     let index_count = number(&bytes[16..20]) as usize;
-    let length = cache_length(vertex_count, index_count)?;
+    let length = cache_length(vertex_count, index_count, uvs)?;
     // Reject count overflows, truncation and trailing bytes before mesh allocation.
     if bytes.len() != length
         || cache_checksum(bytes).as_ref() != &bytes[CACHE_SEMANTIC_BYTES..CACHE_HEADER_BYTES]
@@ -666,21 +880,43 @@ fn decode_cache(bytes: &[u8], hash: &str) -> Result<Mesh, AssetError> {
             }
         })
         .collect();
-    let indices = bytes[vertex_end..]
+    let index_start = vertex_end + if uvs { vertex_count * 8 } else { 0 };
+    let texcoords = uvs.then(|| {
+        bytes[vertex_end..index_start]
+            .as_chunks::<8>()
+            .0
+            .iter()
+            .map(|chunk| {
+                [
+                    f32::from_bits(number(&chunk[..4])),
+                    f32::from_bits(number(&chunk[4..])),
+                ]
+            })
+            .collect()
+    });
+    let indices = bytes[index_start..]
         .as_chunks::<4>()
         .0
         .iter()
         .map(|chunk| number(chunk))
         .collect();
-    let mesh = Mesh { vertices, indices };
+    let mesh = Mesh {
+        vertices,
+        indices,
+        texcoords,
+    };
     validate_mesh(&mesh)?;
     Ok(mesh)
 }
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
-fn parse_source(source: &str, bytes: &[u8]) -> Result<Mesh, AssetError> {
-    parse_obj(bytes).map_err(|e| error(format!("source {source:?}: {e}")))
+fn parse_source(source: &str, kind: AssetKind, bytes: &[u8]) -> Result<Payload, AssetError> {
+    match kind {
+        AssetKind::Mesh => parse_obj(bytes).map(Payload::Mesh),
+        AssetKind::Texture => decode_png(bytes).map(Payload::Texture),
+    }
+    .map_err(|e| error(format!("source {source:?}: {e}")))
 }
 
 #[derive(Debug)]
@@ -741,9 +977,9 @@ fn registry_bytes(root: &Path) -> Result<Option<Vec<u8>>, AssetError> {
         Err(e) => Err(e),
     }
 }
-fn read_source_bytes(root: &Path, source: &str) -> Result<Vec<u8>, AssetError> {
+fn read_source_bytes(root: &Path, source: &str, kind: AssetKind) -> Result<Vec<u8>, AssetError> {
     let path = confined(root, source, false)?;
-    read_bounded(&path, MAX_SOURCE_BYTES).map_err(|e| error(format!("source {source:?}: {e}")))
+    read_bounded(&path, kind.source_limit()).map_err(|e| error(format!("source {source:?}: {e}")))
 }
 /// Shared bounded regular-file ingestion for project shader hosts as well as
 /// asset sources. This rejects special files before opening; it is not a
@@ -811,13 +1047,13 @@ fn validate_relative(source: &str) -> Result<(), AssetError> {
         || Path::new(source)
             .components()
             .any(|c| !matches!(c, Component::Normal(_)))
-        || !source.ends_with(".obj")
+        || AssetKind::from_source(source).is_err()
         || source
             .split('/')
             .any(|c| c.is_empty() || c == "." || c == ".." || c.starts_with(".ruster-"))
     {
         return Err(error(
-            "source must be a project-relative .obj path (<=256 bytes), without parent/dot/reserved components or symlinks",
+            "source must be a project-relative .obj/.png path (<=256 bytes), without parent/dot/reserved components or symlinks",
         ));
     }
     Ok(())
@@ -841,9 +1077,9 @@ fn confined(root: &Path, source: &str, allow_missing_leaf: bool) -> Result<PathB
     Ok(path)
 }
 fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
-    if registry.format != "ruster-assets" || registry.version != 1 {
+    if registry.format != "ruster-assets" || !matches!(registry.version, 1 | 2) {
         return Err(error(
-            "unsupported asset catalog format/version; expected ruster-assets version 1",
+            "unsupported asset catalog format/version; expected ruster-assets version 1 or 2",
         ));
     }
     if registry.assets.len() > MAX_ASSETS {
@@ -853,6 +1089,11 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
     for (id, record) in &registry.assets {
         validate_id(id)?;
         validate_relative(&record.source)?;
+        if AssetKind::from_source(&record.source)? != record.kind {
+            return Err(error(
+                "catalog asset kind does not match its source extension",
+            ));
+        }
         if !sources.insert(&record.source) {
             return Err(error(format!(
                 "duplicate registered source {:?}; one stable asset ID is required per source path",
@@ -883,6 +1124,13 @@ pub fn validate_mesh(mesh: &Mesh) -> Result<(), AssetError> {
             .indices
             .iter()
             .any(|&i| i as usize >= mesh.vertices.len())
+        || mesh.texcoords.as_ref().is_some_and(|uvs| {
+            uvs.len() != mesh.vertices.len()
+                || uvs
+                    .iter()
+                    .flatten()
+                    .any(|v| !v.is_finite() || v.abs() > 1_000_000.0)
+        })
         || mesh.vertices.iter().any(|v| {
             v.position.iter().chain(&v.normal).any(|c| !c.is_finite())
                 || v.position.iter().any(|c| c.abs() > 1_000_000.0)
@@ -905,11 +1153,14 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
     }
     let source = std::str::from_utf8(bytes).map_err(|_| error("OBJ must be UTF-8 text"))?;
     let mut positions: Vec<[f32; 3]> = Vec::new();
-    let mut textures = 0usize;
+    let mut textures: Vec<[f32; 2]> = Vec::new();
+    let mut complete_uvs = true;
+    let mut expanded_uvs = Vec::new();
     let mut normals = 0usize;
     let mut mesh = Mesh {
         vertices: Vec::new(),
         indices: Vec::new(),
+        texcoords: None,
     };
     for (number, line) in source.lines().enumerate() {
         let words: Vec<_> = line
@@ -948,8 +1199,8 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
                         positions.push(values);
                     }
                     "vt" => {
-                        textures += 1;
-                        if textures > MAX_VERTICES {
+                        textures.push([values[0], values[1]]);
+                        if textures.len() > MAX_VERTICES {
                             return Err(fail("texture-coordinate limit exceeded"));
                         }
                     }
@@ -971,6 +1222,7 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
                     return Err(fail("triangle limit exceeded"));
                 }
                 let mut triangle = [[0.0; 3]; 3];
+                let mut triangle_uvs = [[0.0; 2]; 3];
                 for (i, word) in words[1..].iter().enumerate() {
                     let parts: Vec<_> = word.split('/').collect();
                     if parts.is_empty() || parts.len() > 3 {
@@ -979,7 +1231,11 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
                     let index = obj_index(parts[0], positions.len()).map_err(|e| fail(&e.0))?;
                     triangle[i] = positions[index];
                     if parts.len() >= 2 && !parts[1].is_empty() {
-                        obj_index(parts[1], textures).map_err(|e| fail(&e.0))?;
+                        let uv_index =
+                            obj_index(parts[1], textures.len()).map_err(|e| fail(&e.0))?;
+                        triangle_uvs[i] = textures[uv_index];
+                    } else {
+                        complete_uvs = false;
                     }
                     if parts.len() == 3 {
                         if parts[2].is_empty() {
@@ -1009,6 +1265,7 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
                 if !length.is_finite() || length <= 1e-12 {
                     return Err(fail("degenerate triangle has no finite surface normal"));
                 }
+                expanded_uvs.extend(triangle_uvs);
                 let normal = cross.map(|v| v / length);
                 for position in triangle {
                     mesh.indices.push(mesh.vertices.len() as u32);
@@ -1023,6 +1280,9 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
             }
             _ => return Err(fail(&format!("unsupported OBJ directive {directive:?}"))),
         }
+    }
+    if complete_uvs {
+        mesh.texcoords = Some(expanded_uvs);
     }
     validate_mesh(&mesh)?;
     Ok(mesh)
@@ -1139,6 +1399,178 @@ mod tests {
             .to_string()
             .contains("reopen"));
         assert_eq!(files(root.path()), before_conflict);
+    }
+
+    // Supported old derived/catalog bytes remain usable, but cannot conceal UVs
+    // discarded by the old importer when exact accepted source is available.
+    #[test]
+    fn uv_seams_and_old_cache_catalog_migration() {
+        use super::*;
+        let source = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nvt 2 1\nf 1/1 2/2 3/3\nf 1/-1 2/-2 3/-3\n";
+        let mapped = parse_obj(source).unwrap();
+        assert_eq!(
+            mapped.texcoords.as_ref().unwrap(),
+            &[[0., 0.], [1., 0.], [0., 1.], [2., 1.], [0., 1.], [1., 0.]]
+        );
+        assert_eq!(mapped.vertices[0].position, mapped.vertices[3].position);
+        assert_eq!(mapped.payload_bytes(), 6 * 36);
+        let partial = parse_obj(
+            &String::from_utf8(source.to_vec())
+                .unwrap()
+                .replace("1/-1", "1")
+                .into_bytes(),
+        )
+        .unwrap();
+        assert!(partial.texcoords.is_none());
+        assert!(partial.uv_diagnostic().is_some());
+        let mut invalid = mapped.clone();
+        invalid.texcoords.as_mut().unwrap().pop();
+        assert!(validate_mesh(&invalid).is_err());
+        let hash = digest(source);
+        assert_eq!(
+            decode_cache(&encode_cache(&hash, &mapped).unwrap(), &hash, 3).unwrap(),
+            mapped
+        );
+        let legacy = Mesh {
+            vertices: mapped.vertices.clone(),
+            indices: mapped.indices.clone(),
+            texcoords: None,
+        };
+        assert!(!serde_json::to_string(&legacy)
+            .unwrap()
+            .contains("texcoords"));
+        let mut v2 = encode_cache(&hash, &legacy).unwrap();
+        v2[8..12].copy_from_slice(&2u32.to_le_bytes());
+        let sum = cache_checksum(&v2);
+        v2[CACHE_SEMANTIC_BYTES..CACHE_HEADER_BYTES].copy_from_slice(&sum);
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("mesh.obj"), source).unwrap();
+        let directory = root.path().join(".ruster-cache/meshes");
+        fs::create_dir_all(&directory).unwrap();
+        fs::write(directory.join(format!("v2-{hash}.bin")), &v2).unwrap();
+        let catalog = serde_json::to_vec(
+            &serde_json::json!({"format":"ruster-assets", "version":1, "revision":7,
+            "assets":{"mesh":{"source":"mesh.obj", "hash":hash}}}),
+        )
+        .unwrap();
+        fs::write(root.path().join(REGISTRY), &catalog).unwrap();
+        let upgraded = AssetStore::open(root.path()).unwrap();
+        assert_eq!(upgraded.mesh("mesh"), Some(&mapped));
+        assert_eq!(upgraded.revision(), 7);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), catalog);
+        assert_eq!(
+            fs::read(directory.join(format!("v2-{hash}.bin"))).unwrap(),
+            v2
+        );
+        fs::remove_file(directory.join(format!("v3-{hash}.bin"))).unwrap();
+        fs::remove_file(root.path().join("mesh.obj")).unwrap();
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().mesh("mesh"),
+            Some(&legacy)
+        );
+        let mut wrong_label: serde_json::Value = serde_json::from_slice(&catalog).unwrap();
+        wrong_label["assets"]["mesh"]["kind"] = serde_json::json!("mesh");
+        fs::write(
+            root.path().join(REGISTRY),
+            serde_json::to_vec(&wrong_label).unwrap(),
+        )
+        .unwrap();
+        assert!(AssetStore::open(root.path()).is_err());
+    }
+
+    // One mixed-source case protects typed catalog transactions, immutable
+    // texture last-good reopen and accepted-source export under source changes.
+    #[test]
+    fn texture_catalog_last_good_refresh_and_mixed_export() {
+        use super::*;
+        let root = tempfile::tempdir().unwrap();
+        fs::write(
+            root.path().join("mesh.obj"),
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        let first = texture::tests::png(
+            1,
+            1,
+            png::ColorType::Rgba,
+            png::BitDepth::Eight,
+            &[12, 34, 56, 0],
+        );
+        fs::write(root.path().join("color.png"), &first).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        store.import("mesh", "mesh.obj").unwrap();
+        assert_eq!(
+            store.import("color", "color.png").unwrap().kind,
+            AssetKind::Texture
+        );
+        let old = store.texture_snapshots()["color"].clone();
+        let revision = store.revision();
+        let baseline = fs::read(root.path().join(REGISTRY)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&baseline).unwrap()["version"],
+            2
+        );
+        assert!(store.rename("color", "color.obj").is_err());
+        assert!(!root.path().join("color.obj").exists());
+        let ids = BTreeSet::from(["mesh".into(), "color".into()]);
+        let snapshot = store.export_snapshot(&ids).unwrap();
+        assert_eq!(snapshot.read_sources().unwrap()["color"], first);
+        fs::write(root.path().join("color.png"), b"corrupt").unwrap();
+        assert!(snapshot.read_sources().is_err());
+        assert!(store.refresh("color").is_err());
+        assert!(Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
+        assert_eq!(store.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), baseline);
+        let reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.texture("color"), Some(old.as_ref()));
+        assert_eq!(
+            reopened
+                .inspect()
+                .into_iter()
+                .find(|i| i.id == "color")
+                .unwrap()
+                .status,
+            AssetStatus::Invalid
+        );
+        fs::remove_file(root.path().join("color.png")).unwrap();
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().texture("color"),
+            Some(old.as_ref())
+        );
+        let same = texture::tests::png(
+            1,
+            1,
+            png::ColorType::Rgba,
+            png::BitDepth::Eight,
+            &[12, 34, 56, 255],
+        );
+        fs::write(root.path().join("color.png"), &same).unwrap();
+        store.refresh("color").unwrap();
+        assert_eq!(store.revision(), revision + 1);
+        assert!(Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
+        let changed = texture::tests::png(
+            1,
+            1,
+            png::ColorType::Rgb,
+            png::BitDepth::Eight,
+            &[255, 0, 0],
+        );
+        fs::write(root.path().join("color.png"), &changed).unwrap();
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().texture("color"),
+            Some(old.as_ref())
+        );
+        store.refresh("color").unwrap();
+        assert!(!Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
+        assert_eq!(
+            store.export_snapshot(&ids).unwrap().read_sources().unwrap()["color"],
+            changed
+        );
+        fs::remove_dir_all(root.path().join(".ruster-cache/textures")).unwrap();
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().texture("color"),
+            store.texture("color")
+        );
     }
 
     // File close alone does not end an advisory lock with duplicated/inherited

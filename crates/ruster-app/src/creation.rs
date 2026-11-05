@@ -1,12 +1,12 @@
 //! A small read-only launch descriptor for exported creator content.
 //! Scene5 remains the authored document; this is not a second project editor.
-use crate::{MeshMap, ResourceRoot};
+use crate::{MeshMap, ResourceRoot, TextureMap};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, path::Path, time::Duration};
 
 pub const DESCRIPTOR_NAME: &str = "app.json";
 pub const FORMAT: &str = "ruster-application";
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;
 pub const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
@@ -45,6 +45,12 @@ pub struct CreationManifest {
     pub scene: String,
     #[serde(deserialize_with = "unique_meshes")]
     pub meshes: BTreeMap<String, String>,
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "unique_meshes"
+    )]
+    pub textures: BTreeMap<String, String>,
     pub tick_millis: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_camera: Option<InitialCamera>,
@@ -94,10 +100,14 @@ fn resource_path(path: &str) -> Result<(), String> {
 
 impl CreationManifest {
     pub fn validate(&self) -> Result<(), String> {
-        if self.format != FORMAT || self.version != VERSION {
+        if self.format != FORMAT || !matches!(self.version, 1 | VERSION) {
             return Err(
-                "Unsupported application descriptor; expected ruster-application version 1".into(),
+                "Unsupported application descriptor; expected ruster-application version 1 or 2"
+                    .into(),
             );
+        }
+        if self.version == 1 && !self.textures.is_empty() {
+            return Err("Application textures require descriptor version 2".into());
         }
         if self.title.trim().is_empty()
             || self.title.trim() != self.title
@@ -113,10 +123,10 @@ impl CreationManifest {
             camera.camera_state()?;
         }
         resource_path(&self.scene)?;
-        if self.meshes.len() > ruster_assets::MAX_ASSETS {
+        if self.meshes.len() + self.textures.len() > ruster_assets::MAX_ASSETS {
             return Err("Application mesh mappings exceed 64".into());
         }
-        for (id, path) in &self.meshes {
+        for (id, path) in self.meshes.iter().chain(&self.textures) {
             // Use the scene owner's identity grammar rather than a new dialect.
             ruster_scene::validate_id(id).map_err(|error| error.to_string())?;
             resource_path(path)?;
@@ -140,6 +150,14 @@ impl CreationManifest {
         self.validate()?;
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
         ruster_scene::Session::from_snapshot_bytes(&bytes).map_err(|error| error.to_string())
+    }
+
+    pub fn load_textures(&self, root: &ResourceRoot) -> Result<TextureMap, String> {
+        self.validate()?;
+        self.textures
+            .iter()
+            .map(|(id, path)| root.texture(path).map(|texture| (id.clone(), texture)))
+            .collect()
     }
 
     pub fn load_meshes(&self, root: &ResourceRoot) -> Result<MeshMap, String> {
@@ -178,6 +196,7 @@ mod tests {
             title: "My creation 世界".into(),
             scene: "scene.json".into(),
             meshes: [("marker".into(), "marker.obj".into())].into(),
+            textures: BTreeMap::new(),
             tick_millis: 100,
             initial_camera: None,
         };
@@ -234,8 +253,22 @@ mod tests {
             assert!(invalid.validate().is_err());
         }
         let mut invalid = manifest.clone();
-        invalid.version = 2;
+        invalid.version = VERSION + 1;
         assert!(invalid.validate().is_err());
+        let mut legacy = manifest.clone();
+        legacy.version = 1;
+        legacy
+            .validate()
+            .expect("old descriptors still read without textures");
+        legacy
+            .textures
+            .insert("base-color".into(), "color.png".into());
+        assert!(
+            legacy.validate().is_err(),
+            "texture resources must not hide under descriptor1"
+        );
+        legacy.version = VERSION;
+        legacy.validate().unwrap();
         let json = serde_json::to_string(&manifest).unwrap();
         let duplicate = json.replace(
             "\"marker\":\"marker.obj\"",

@@ -252,11 +252,12 @@ impl<A: Application> eframe::App for Host<A> {
                 let app = self.runtime.app();
                 let content = app.content();
                 let selected = app.selected();
-                let picked = ruster_render::viewport_with_navigation(
+                let picked = ruster_render::viewport_with_materials(
                     ui,
                     content.scene(),
                     selected.as_slice(),
                     content.meshes(),
+                    content.textures(),
                     &mut self.navigation,
                 )
                 .picked;

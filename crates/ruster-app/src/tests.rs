@@ -129,7 +129,57 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
         [("triangle".into(), Arc::new(invalid))].into()
     )
     .is_err());
-    assert!(Content::new(scene, [("triangle".into(), Arc::new(mesh))].into()).is_ok());
+    assert!(Content::new(
+        scene.clone(),
+        [("triangle".into(), Arc::new(mesh.clone()))].into()
+    )
+    .is_ok());
+    scene.materials.insert(
+        "shared".into(),
+        ruster_scene::OpaqueMaterial {
+            base_color_texture: Some("color".into()),
+            ..Default::default()
+        },
+    );
+    scene.objects[0].material = Some("shared".into());
+    let meshes = MeshMap::from([("triangle".into(), Arc::new(mesh.clone()))]);
+    assert!(Content::new(scene.clone(), meshes.clone())
+        .err()
+        .unwrap()
+        .contains("missing texture color"));
+    let texture = Arc::new(ruster_assets::Texture {
+        width: 1,
+        height: 1,
+        mips: vec![ruster_assets::TextureMip {
+            width: 1,
+            height: 1,
+            rgba: vec![255; 4],
+        }],
+    });
+    let textures = [("color".into(), texture.clone())].into();
+    assert!(Content::with_textures(scene.clone(), meshes, textures)
+        .err()
+        .unwrap()
+        .contains("complete UVs"));
+    let mut uv_mesh = mesh;
+    uv_mesh.texcoords = Some(vec![[0.0; 2]; uv_mesh.vertices.len()]);
+    let mut content = Content::with_textures(
+        scene,
+        [("triangle".into(), Arc::new(uv_mesh))].into(),
+        [("color".into(), texture.clone())].into(),
+    )
+    .unwrap();
+    assert!(Arc::ptr_eq(&texture, &content.textures()["color"]));
+    content
+        .scene_mut()
+        .materials
+        .get_mut("shared")
+        .unwrap()
+        .base_color_texture = Some("unavailable".into());
+    assert!(content
+        .validate()
+        .unwrap_err()
+        .contains("missing texture unavailable"));
 }
 
 #[test]

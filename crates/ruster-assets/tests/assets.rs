@@ -21,7 +21,7 @@ fn import_reopen_cache_rebuild_and_explicit_refresh() {
     let cache = root
         .path()
         .join(".ruster-cache/meshes")
-        .join(format!("v2-{}.bin", info.hash.unwrap()));
+        .join(format!("v3-{}.bin", info.hash.unwrap()));
     let valid_cache = fs::read(&cache).unwrap();
     assert_eq!(valid_cache.len(), 116 + 3 * 24 + 3 * 4);
     // Reject malformed structure, semantic-header mutations, payload corruption
@@ -93,9 +93,9 @@ fn import_reopen_cache_rebuild_and_explicit_refresh() {
 }
 
 // The supported v1 format remains readable, including last-good recovery when
-// v2 is corrupt and the authoritative source is unavailable or malformed.
+// v2/v3 are corrupt and the authoritative source is unavailable or malformed.
 #[test]
-fn legacy_cache_fallback_and_nondestructive_v2_publication() {
+fn legacy_cache_fallback_and_nondestructive_v3_publication() {
     use sha2::{Digest, Sha256};
     let root = project();
     let mut store = AssetStore::open(root.path()).unwrap();
@@ -103,7 +103,24 @@ fn legacy_cache_fallback_and_nondestructive_v2_publication() {
     let hash = info.hash.unwrap();
     let original = store.mesh("triangle").unwrap().clone();
     let directory = root.path().join(".ruster-cache/meshes");
+    let v3 = directory.join(format!("v3-{hash}.bin"));
     let v2 = directory.join(format!("v2-{hash}.bin"));
+    // Construct a genuine historical v2 byte layout from untextured geometry:
+    // its header/numeric payload match v3 without a UV stream, only version differs.
+    let mut historical = fs::read(&v3).unwrap();
+    historical[8..12].copy_from_slice(&2u32.to_le_bytes());
+    let mut checksum = Sha256::new();
+    checksum.update(&historical[..84]);
+    checksum.update(&historical[116..]);
+    historical[84..116].copy_from_slice(&checksum.finalize());
+    fs::write(&v2, &historical).unwrap();
+    fs::remove_file(&v3).unwrap();
+    fs::remove_file(root.path().join("mesh.obj")).unwrap();
+    assert_eq!(
+        AssetStore::open(root.path()).unwrap().mesh("triangle"),
+        Some(&original)
+    );
+    fs::write(root.path().join("mesh.obj"), TRIANGLE).unwrap();
     let v1 = directory.join(format!("v1-{hash}.json"));
     let legacy = serde_json::to_vec(&serde_json::json!({
         "format": "ruster-mesh", "version": 1, "source_hash": hash,
@@ -132,7 +149,8 @@ fn legacy_cache_fallback_and_nondestructive_v2_publication() {
     store.refresh("triangle").unwrap();
     assert_eq!(store.revision(), 1);
     assert_eq!(fs::read(&v1).unwrap(), legacy);
-    assert!(fs::read(&v2).unwrap().starts_with(b"RUSTMESH"));
+    assert!(fs::read(&v3).unwrap().starts_with(b"RUSTMESH"));
+    assert_eq!(fs::read(&v2).unwrap(), b"broken current cache");
     assert_eq!(
         AssetStore::open(root.path()).unwrap().mesh("triangle"),
         Some(&original)
@@ -340,7 +358,7 @@ fn paths_and_registry_versions_fail_closed() {
     assert!(store.inspect().is_empty());
     fs::write(
         root.path().join(".ruster-assets.json"),
-        r#"{"format":"ruster-assets","version":2,"revision":0,"assets":{}}"#,
+        r#"{"format":"ruster-assets","version":3,"revision":0,"assets":{}}"#,
     )
     .unwrap();
     assert!(AssetStore::open(root.path())
@@ -377,6 +395,10 @@ fn obj_index_and_format_boundaries() {
     let mesh = parse_obj(indexed.as_bytes()).unwrap();
     assert_eq!(mesh.vertices.len(), 3);
     assert_eq!(mesh.vertices[0].normal, [0.0, 0.0, 1.0]);
+    assert_eq!(
+        mesh.texcoords,
+        Some(vec![[0.0, 0.0], [1.0, 0.0], [0.0, 1.0]])
+    );
     for bad in [
         TRIANGLE.replace("f 1 2 3", "f 0 2 3"),
         TRIANGLE.replace("f 1 2 3", "f 1 2 4"),
@@ -423,7 +445,7 @@ fn catalog_and_resolved_payload_limits_preserve_previous_state() {
         .import("overflow", "mesh.obj")
         .unwrap_err()
         .to_string()
-        .contains("32 MiB"));
+        .contains("48 MiB"));
     assert_eq!(store.inspect().len(), accepted);
     assert_eq!(store.revision(), accepted as u64);
     assert_eq!(

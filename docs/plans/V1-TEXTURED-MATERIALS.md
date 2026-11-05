@@ -1,6 +1,6 @@
 # V1: opaque textured materials
 
-Updated2026-11-05. **Planned, not implemented.** First bounded implementation goal under the user's quality-first roadmap realignment, selected by root/Astra. The user requires lighting/shaders/textures; this slice delivers the texture/material dependency before authored lights. [Roadmap](../ROADMAP.md) owns the broader sequence. Exact storage/API decisions require the early checkpoint below.
+Updated2026-11-05. **In progress; first foundation/feasibility checkpoint passes, creator-workflow acceptance remains open.** First bounded implementation goal under the user's quality-first roadmap realignment, selected by root/Astra. The user requires lighting/shaders/textures; this slice delivers the texture/material dependency before authored lights. [Roadmap](../ROADMAP.md) owns the broader sequence. Exact storage/API decisions require the early checkpoint below.
 
 ## Creator outcome and goal
 
@@ -52,3 +52,5 @@ PumpBench's focused native keyboard check remains an outstanding obligation from
 Record the early design checkpoint, first full runnable path and final audit, including actual elapsed work and blockers where available. A candidate with source tests but missing required native/visual acceptance is not a completed slice. Stop at this boundary and evaluate creator value, correctness, keyboard/design quality, costs, compatibility and remaining gaps before selecting V2. If implementation reveals a deeper dependency, update the plan/goal transparently; do not increase success claims or weaken acceptance to finish faster.
 
 Primary material-workflow reference accessed2026-11-05: [Godot StandardMaterial3D](https://docs.godotengine.org/en/stable/tutorials/3d/standard_material_3d.html) separates ordinary material parameters/assignment from custom shaders and distinguishes opaque from transparent rendering. It informs the planning boundary, not an adopted storage/API design or a claim of equivalent capability.
+
+First checkpoint2026-11-05 09:13UTC: source-backed asset/render/export path is feasible within the selected scope; [evidence and evaluation](../evidence/V1-foundation.md) records passing offscreen output, component checks, failed native inspection and outstanding work. No acceptance criterion is waived. Continue editor/MCP integration; reassess at its first runnable result or after the next90active implementation minutes.

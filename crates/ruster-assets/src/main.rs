@@ -1,7 +1,7 @@
 use ruster_assets::AssetStore;
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let args: Vec<_> = std::env::args().skip(1).collect();
-    let usage = "usage: ruster-assets import ROOT ID SOURCE.obj | inspect ROOT | refresh ROOT ID | rename ROOT ID SOURCE.obj";
+    let usage = "usage: ruster-assets import ROOT ID SOURCE.obj|SOURCE.png | inspect ROOT | refresh ROOT ID | rename ROOT ID SOURCE.obj|SOURCE.png";
     if args.len() < 2 {
         return Err(usage.into());
     }
