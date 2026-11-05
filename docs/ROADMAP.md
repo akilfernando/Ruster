@@ -210,6 +210,12 @@ M8 completion,2026-11-04: independent application changes/exports/relocation, al
 
 **Boundaries:** alpha does not mean stable ABI, universal hardware support, feature parity with mature engines, or production enterprise guarantees.
 
+### Current execution focus — accepted 2026-11-05
+
+The user accepted the [creator-goal reassessment](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05) and explicitly required first-class direct-editor and MCP routes. The next finite engineering deliverable is a creator-owned scene with imported content and Lua behavior, preview/repair/save/recovery and relocated standalone execution through shared validated mechanisms. Verify corresponding manual and MCP outcomes, including interleaved human/agent edits and safe failures; editing tools alone do not prove end-to-end parity. Constrained persistence/delivery capability gaps are part of the work, with explicit project/destination authority and existing conflict/draft guards preserved.
+
+This changes execution order so unavailable participants or locked-desktop checks do not stall independent useful engineering. It does not complete M9, weaken its acceptance criteria, authorize public release or start a broad M10. Stop at an engineering-ready evaluation handoff and retain unavailable acceptance evidence explicitly. [Direction](DIRECTION.md#current-working-goal--2026-11-05) owns the accepted goal; [candidate gates](ALPHA-CANDIDATE.md) remain the acceptance matrix.
+
 ## Continuous adoption and engineering gates
 
 **Non-negotiable editor experience:** the user requires experienced Unity/Unreal creators to feel at home immediately. Apply [EDITOR-EXPERIENCE.md](EDITOR-EXPERIENCE.md) alongside each affected workflow and before editor/public-alpha acceptance. Track missing everyday interactions as unfinished product work; historical prototype milestones do not satisfy this gate. Validate with experienced users from both backgrounds. The milestone sequence is retained, but remaining baseline gaps must be scheduled and resolved for the supported creation journeys.

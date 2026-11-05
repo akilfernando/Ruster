@@ -6,6 +6,8 @@ Updated2026-11-05. **Working candidate, not accepted or published.** The user re
 
 The accepted functional baseline is local commit45a9a92(M8); workspace version remains0.1.0 and packages remain `publish=false`. The first snapshot `m9-eval-1` froze5247d2a, then the [extracted-source rehearsal](evidence/M9-source-archive-adoption.md) exposed checker and Motion-export blockers. Both owning-tool repairs now pass the full gate. **m9-eval-2** names the corrected local evaluation snapshot; frozen at `c0eb451`, its paired `SOURCE-MANIFEST.json` owns exact commit/tree/archive identity. Freeze, gate acceptance and publication are separate. [Decision0025](decisions/0025-first-alpha-platform-scope.md) owns Linux x86_64 scope. No tag, hosted release, source upload or binary publication is implied.
 
+The user accepted the [creator-owned workflow execution goal](DIRECTION.md#current-working-goal--2026-11-05), explicitly requiring direct-editor and MCP completion. Shared persistence and selected-content delivery gaps remain engineering work; existing MCP edit/runtime coverage alone does not establish end-to-end parity. Engineering-ready handoff and externally validated alpha remain separate states.
+
 This document owns the current candidate gate matrix. Existing architecture decisions, testing policy, distribution and security guides retain their contracts. Historical measurements and M8 reports remain scoped evidence, not candidate-wide certifications.
 
 | Gate | Current evidence | Remaining requirement |
