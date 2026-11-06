@@ -635,8 +635,8 @@ impl SceneEditor {
                 fields.push(response.response);
             });
             if draft.response_mode == MaterialResponseMode::Dielectric {
+                ui.label(if draft.roughness_texture.is_some() { "Roughness multiplier" } else { "Roughness" }).on_hover_text("Perceptual roughness, 0.08 to 1: lower values give a tighter highlight; higher values spread it. This is a nonmetallic surface response, without environment reflections.");
                 ui.horizontal(|ui| {
-                    ui.label(if draft.roughness_texture.is_some() { "Roughness multiplier" } else { "Roughness" }).on_hover_text("Perceptual roughness, 0.08 to 1: lower values give a tighter highlight; higher values spread it. This is a nonmetallic surface response, without environment reflections.");
                     let response = ui.add(egui::TextEdit::singleline(&mut draft.roughness)
                         .id(egui::Id::unique("material_roughness"))
                         .char_limit(64).desired_width(82.0));
@@ -1364,6 +1364,58 @@ mod tests {
                 .as_deref(),
             Some("pattern")
         );
+        // A mapped material's longer scalar label must fit the actual minimum
+        // inspector panel, rather than pushing a right panel under its clip.
+        let compact = egui::Context::default();
+        crate::editor_theme::configure(&compact);
+        for _ in 0..2 {
+            let mut central_right = 0.0;
+            let mut output = compact.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 480.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Panel::right("compact_mapped_material")
+                        .resizable(false)
+                        .exact_size(240.0)
+                        .show(ui, |ui| {
+                            egui::ScrollArea::vertical()
+                                .show(ui, |ui| mapped.material_inspector_ui(ui));
+                        });
+                    central_right = egui::CentralPanel::default()
+                        .show(ui, |_| {})
+                        .response
+                        .rect
+                        .right();
+                },
+            );
+            output.textures_delta.clear();
+            let label = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == "Roughness multiplier" => {
+                        Some((
+                            shape.clip_rect,
+                            egui::Rect::from_min_size(text.pos, text.galley.size()),
+                        ))
+                    }
+                    _ => None,
+                })
+                .expect("Mapped scalar label must be drawn");
+            assert!(
+                label.0.contains_rect(label.1),
+                "Mapped scalar label is clipped: {label:?}"
+            );
+            assert!(
+                central_right <= label.1.left(),
+                "Central panel covers mapped scalar label: {central_right} vs {label:?}"
+            );
+        }
     }
     // Exercise the production frame capture path, then restored text/authority
     // and pre-adoption rejection. Generic history/migration is covered by Scene.
