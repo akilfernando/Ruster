@@ -1,6 +1,6 @@
 # 0036 — Bound GPU asset replacement by submission completion
 
-Date: 2026-11-06. Status: accepted working implementation by root/Astra after source design review and targeted GPU proof; affected build6 integration/native/cost/resource and both exact kit2 applications now pass2026-11-07; final milestone requirement audit and review handoff remain pending. This refines the GPU owner assumption in [0035](0035-linear-roughness-map-feasibility.md), without changing its accepted roughness interpretation/schema decisions. It does not supersede [0032](0032-nonvisual-editor-progress-and-bounded-retirement.md)'s CPU final-owner contract.
+Date: 2026-11-06. Status: accepted and verified by root/Astra2026-11-07 after source review, adversarial GPU proof, affected build6 integration/native/cost/resource qualification, both exact kit2 applications and final requirement/review handoff audit. This refines the GPU owner assumption in [0035](0035-linear-roughness-map-feasibility.md), without changing its accepted roughness interpretation/schema decisions. It does not supersede [0032](0032-nonvisual-editor-progress-and-bounded-retirement.md)'s CPU final-owner contract.
 
 ## Context
 
