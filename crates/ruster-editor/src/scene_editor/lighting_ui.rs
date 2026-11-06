@@ -490,7 +490,10 @@ impl SceneEditor {
             },
         };
         let prefix = if ambient { "ambient" } else { "light" };
+        let clean_at_start = self.lighting_draft.is_none();
         let mut changed = false;
+        let mut discrete_changed = false;
+        let mut raw_changed = false;
         let mut enter = false;
         let mut escape = false;
         let mut submitting = None;
@@ -500,7 +503,7 @@ impl SceneEditor {
             let mut foldout_owns_focus = false;
             let (color, intensity) = match &mut draft {
                 LightingDraft::Light { enabled, color, intensity, .. } => {
-                    let response = ui.checkbox(enabled, "Enabled"); changed |= response.changed(); fields.push(response);
+                    let response = ui.checkbox(enabled, "Enabled"); changed |= response.changed(); discrete_changed |= response.changed(); fields.push(response);
                     (color, intensity)
                 }
                 LightingDraft::Ambient { color, intensity, .. } => { ui.label("Ambient light"); (color, intensity) }
@@ -514,6 +517,7 @@ impl SceneEditor {
                 if response.changed() {
                     *color = picked.map(|value| value.to_string());
                     changed = true;
+                    raw_changed = true;
                 }
                 fields.push(response);
             });
@@ -525,20 +529,20 @@ impl SceneEditor {
                         let response = ui.add(egui::TextEdit::singleline(&mut color[index])
                             .id(egui::Id::unique(("lighting_color", prefix, index)))
                             .char_limit(64).desired_width(46.0));
-                        changed |= response.changed(); fields.push(response);
+                        changed |= response.changed(); raw_changed |= response.changed(); fields.push(response);
                     });
                 }
             });
             ui.horizontal(|ui| {
                 ui.label("Intensity").on_hover_text(if ambient { "Relative artistic fill, 0 to 1. Linear RGB channels are 0 to 1." } else { "Relative artistic diffuse intensity, 0 to 16. Linear RGB channels are 0 to 1; not lux/lumens." });
                 let response = ui.add(egui::TextEdit::singleline(intensity).id(egui::Id::unique(("lighting_intensity", prefix))).char_limit(64).desired_width(82.0));
-                changed |= response.changed(); fields.push(response);
+                changed |= response.changed(); raw_changed |= response.changed(); fields.push(response);
             });
             if let LightingDraft::Light { range: Some(range), .. } = &mut draft {
                 ui.horizontal(|ui| {
                     ui.label("Range").on_hover_text("Smooth influence distance, from 0.1 to 10000 scene units.");
                     let response = ui.add(egui::TextEdit::singleline(range).id(egui::Id::unique("lighting_point_range")).char_limit(64).desired_width(82.0));
-                    changed |= response.changed(); fields.push(response);
+                    changed |= response.changed(); raw_changed |= response.changed(); fields.push(response);
                 });
             }
             if let LightingDraft::Light { shadow: Some(shadow), .. } = &mut draft {
@@ -546,6 +550,7 @@ impl SceneEditor {
                 let response = ui.checkbox(&mut shadow.enabled, "Shadows")
                     .on_hover_text("This Sun casts shadows from opaque scene geometry. Ambient and point lights remain independent.");
                 changed |= response.changed();
+                discrete_changed |= response.changed();
                 fields.push(response);
                 ui.horizontal(|ui| {
                     ui.label("Quality");
@@ -561,6 +566,7 @@ impl SceneEditor {
                             ui.selectable_value(&mut shadow.quality, ShadowQuality::High, "High · 2048");
                         });
                     changed |= before != shadow.quality;
+                    discrete_changed |= before != shadow.quality;
                     fields.push(response.response.on_hover_text("One shadow map covering the scene. High resolves finer details and uses more GPU memory."));
                 });
                 // Expose an unfinished recovered bias instead of hiding its
@@ -579,6 +585,7 @@ impl SceneEditor {
                                     .id(egui::Id::unique(id)).char_limit(64).desired_width(82.0))
                                     .on_hover_text("One world shadow texel is the scene coverage width divided by the map resolution.");
                                 changed |= response.changed();
+                                raw_changed |= response.changed();
                                 fields.push(response);
                             });
                         }
@@ -602,6 +609,18 @@ impl SceneEditor {
         if changed {
             self.lighting_draft = Some(draft);
             self.draft_generation = self.draft_generation.wrapping_add(1);
+        }
+        // Complete standalone controls behave like ordinary inspector toggles.
+        // Preserve the entire pending form whenever raw/color text changed too,
+        // or a draft already existed; only explicit Apply/Enter may submit it.
+        if editable
+            && clean_at_start
+            && discrete_changed
+            && !raw_changed
+            && !escape
+            && self.apply_lighting_draft()
+        {
+            return;
         }
         if own || changed {
             ui.horizontal_wrapped(|ui| {
@@ -773,6 +792,23 @@ mod tests {
 
     #[test]
     fn full_inspector_lighting_fields_own_enter_tab_and_escape() {
+        fn label_point(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {
+            fn point(shape: &egui::epaint::Shape, label: &str) -> Option<egui::Pos2> {
+                match shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                        Some(text.pos + text.galley.rect.center().to_vec2())
+                    }
+                    egui::epaint::Shape::Vec(shapes) => {
+                        shapes.iter().find_map(|shape| point(shape, label))
+                    }
+                    _ => None,
+                }
+            }
+            shapes
+                .iter()
+                .find_map(|shape| point(&shape.shape, label))
+                .unwrap_or_else(|| panic!("visible control label {label:?}"))
+        }
         for mode in ["light", "ambient", "shadow"] {
             let ambient = mode == "ambient";
             let shadow = mode == "shadow";
@@ -821,6 +857,7 @@ mod tests {
                     |ui| editor.inspector_contents(ui),
                 );
                 output.textures_delta.clear();
+                output.shapes
             };
             let key = |key| egui::Event::Key {
                 key,
@@ -937,6 +974,81 @@ mod tests {
             assert!(
                 matches!(&editor.session.scene().lighting, Lighting::Authored { ambient,lights } if ambient.intensity==0.28 && lights["light-1"].intensity==0.72)
             );
+            if shadow {
+                // Actual pointer activation of a clean discrete control must
+                // commit immediately, without exposing a transient Apply draft.
+                let before = editor.session.scene().revision;
+                let shapes = frame(&mut editor, vec![]);
+                let point = label_point(&shapes, "Shadows");
+                frame(
+                    &mut editor,
+                    vec![egui::Event::PointerMoved(point), pointer(point, true)],
+                );
+                frame(&mut editor, vec![pointer(point, false)]);
+                assert!(
+                    editor.lighting_draft.is_none(),
+                    "clean Shadows click must commit without Apply"
+                );
+                assert_eq!(editor.session.scene().revision, before + 1);
+                assert_eq!(editor.session.undo_len(), 1);
+                assert!(
+                    matches!(editor.session.scene().lighting.light("light-1").unwrap().kind,
+                    LightKind::Directional { shadow } if shadow.enabled)
+                );
+                editor.session.undo(before + 1).unwrap();
+                assert!(
+                    matches!(editor.session.scene().lighting.light("light-1").unwrap().kind,
+                    LightKind::Directional { shadow } if !shadow.enabled)
+                );
+
+                // Discrete changes cannot submit an already pending raw draft,
+                // even if a checkbox or dropdown itself has a complete value.
+                let mut draft = LightingDraft::light(editor.session.scene(), "light-1").unwrap();
+                if let LightingDraft::Light {
+                    shadow: Some(shadow),
+                    ..
+                } = &mut draft
+                {
+                    shadow.depth_bias_texels = "unfinished".into();
+                }
+                editor.lighting_draft = Some(draft);
+                let unchanged = editor.session.snapshot_bytes().unwrap();
+                let shapes = frame(&mut editor, vec![]);
+                let point = label_point(&shapes, "Shadows");
+                frame(
+                    &mut editor,
+                    vec![egui::Event::PointerMoved(point), pointer(point, true)],
+                );
+                let shapes = frame(&mut editor, vec![pointer(point, false)]);
+                assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+                assert!(matches!(&editor.lighting_draft,
+                    Some(LightingDraft::Light { shadow: Some(shadow), .. })
+                        if shadow.enabled && shadow.depth_bias_texels == "unfinished"));
+                let point = label_point(&shapes, "Standard");
+                frame(
+                    &mut editor,
+                    vec![egui::Event::PointerMoved(point), pointer(point, true)],
+                );
+                frame(&mut editor, vec![pointer(point, false)]);
+                assert!(
+                    egui::Popup::is_any_open(&ctx),
+                    "quality pointer activation opens its popup"
+                );
+                // Popup placement/fade begins on activation; observe a later
+                // genuine egui pass before selecting its rendered entry.
+                let shapes = frame(&mut editor, vec![]);
+                let point = label_point(&shapes, "High · 2048");
+                frame(
+                    &mut editor,
+                    vec![egui::Event::PointerMoved(point), pointer(point, true)],
+                );
+                frame(&mut editor, vec![pointer(point, false)]);
+                assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+                assert!(matches!(&editor.lighting_draft,
+                    Some(LightingDraft::Light { shadow: Some(shadow), .. })
+                        if shadow.enabled && shadow.quality == ShadowQuality::High
+                            && shadow.depth_bias_texels == "unfinished"));
+            }
         }
     }
 }
