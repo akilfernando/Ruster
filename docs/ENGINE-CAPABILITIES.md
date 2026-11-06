@@ -4,7 +4,7 @@ Updated2026-11-06. Root/Astra strategic assessment after the user reviewed PumpB
 
 ## Confirmed direction versus proposed scope
 
-The user explicitly requires lighting, shaders and textures as core product capabilities, and LOD and ray tracing further down the line. Creator-first design, lean measured implementation and first-class direct-editor/native-MCP workflows remain requirements. V1’s bounded opaque-material/UV/PNG contract, V2a authored diffuse lighting and V2b bounded Sun shadows are accepted within their recorded scopes. V3a direct-lit nonmetallic surfaces pass substantive qualification, with final handoff integrity pending. Richer material/shading/environment and broader shadow contracts, physics libraries, general asset formats, animation systems and future rendering architecture remain to be selected. Historical M0–M8 checkpoints are narrow prototype achievements, not a complete game-engine baseline.
+The user explicitly requires lighting, shaders and textures as core product capabilities, and LOD and ray tracing further down the line. Creator-first design, lean measured implementation and first-class direct-editor/native-MCP workflows remain requirements. V1’s bounded opaque-material/UV/PNG contract, V2a authored diffuse lighting and V2b bounded Sun shadows are accepted within their recorded scopes. V3a direct-lit nonmetallic surfaces are accepted with verified handoff within their bounded scope. Richer material/shading/environment and broader shadow contracts, physics libraries, general asset formats, animation systems and future rendering architecture remain to be selected. Historical M0–M8 checkpoints are narrow prototype achievements, not a complete game-engine baseline.
 
 ## Capability inventory
 
