@@ -32,5 +32,8 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0026](0026-editor-granted-scene-persistence.md) | Explicit editor-granted scene Save/SaveAs through MCP |
 | [0027](0027-creator-content-and-runtime-delivery.md) | Creator launch descriptor, accepted source closure and shared standalone export direction |
 | [0028](0028-viewport-observation-and-launch-framing.md) | Guarded rendered observation, transient viewport controls and explicit launch framing |
-| [0029](0029-opaque-material-and-texture-ownership.md) | V1 scene-owned opaque materials, typed texture assets and compatibility boundaries (foundation implemented; acceptance pending) |
-| [0030](0030-bounded-asset-preparation-and-publication.md) | V1 measured responsiveness dependency: bounded preparation/publication and deferred MCP/root ownership (selected; implementation pending) |
+| [0029](0029-opaque-material-and-texture-ownership.md) | V1 scene-owned opaque materials, typed texture assets and compatibility boundaries (accepted bounded V1) |
+| [0030](0030-bounded-asset-preparation-and-publication.md) | V1 measured responsiveness dependency: bounded preparation/publication and deferred MCP/root ownership (implemented and qualified within V1/V2a) |
+| [0031](0031-authored-diffuse-lighting.md) | Accepted bounded V2a authored diffuse lighting |
+| [0032](0032-nonvisual-editor-progress-and-bounded-retirement.md) | Nonvisual model progress and bounded retirement; fenced hidden Close may await exposure |
+| [0033](0033-bounded-sun-shadow-feasibility.md) | Bounded Sun shadows, actual-displayed bounds, map ownership and creator/runtime closure (accepted bounded V2b) |

@@ -1,6 +1,6 @@
 # V2b: Sun shadows for an authored daylight study
 
-Approved2026-11-06 by the user: “Set the goal and get started.” **Active goal; feasibility in progress.** Root/Astra defined this after accepted [V2a](V2A-AUTHORED-LIGHTING.md). The approved slice serves creator-first/manual-MCP/lean-quality requirements; numerical ceilings and concrete architecture remain agent-selected choices evaluated at the feasibility gate.
+Approved2026-11-06 by the user: “Set the goal and get started.” **Completed and accepted2026-11-06 by root/Astra; [final requirement audit](../evidence/V2B-readiness.md) and [quality evaluation](../ROADMAP-REVIEW.md#v2b-sun-shadow-quality-evaluation--2026-11-06) close this bounded goal.** Root/Astra defined this after accepted [V2a](V2A-AUTHORED-LIGHTING.md). The approved slice serves creator-first/manual-MCP/lean-quality requirements; numerical ceilings and concrete architecture remain agent-selected choices evaluated at the feasibility gate.
 
 ## Concrete goal
 
@@ -10,7 +10,7 @@ The artifact is **Daylight Study**: an original bounded exhibit with a floor, ra
 
 Both authoring paths must configure the shadows and produce both saved arrangements and actual exports. They may use equivalent copies of the same normally authored exhibit; repeating V1/V2a's entire blank-scene content pipeline twice is not a new acceptance requirement. Four exact exports cover the two arrangements through both export paths.
 
-## Verified starting state
+## Historical verified starting state
 
 Inspected2026-11-06 at code48ac34f/documentation232ac98. Scene7 has one directional/four point lights, ambient, separate bounded non-geometric identities, shared history, guarded editor/64-tool MCP controls, recovery5 and exact authored-lighting runtime profile. V1 opaque UV/PNG/shared materials and V2a creator/export/recovery/native outcomes are accepted under their recorded limits.
 
@@ -84,4 +84,4 @@ Primary sources accessed2026-11-06:
 - [Godot lights and shadows](https://docs.godotengine.org/en/stable/tutorials/3d/lights_and_shadows.html): directional depth projection, coverage/resolution and split cost; bias trades self-shadowing against detached/thinner shadows. This motivates the bounded coverage/quality gate, not copying a renderer or choosing cascades.
 - [Unity shadow troubleshooting](https://docs.unity.com/en-us/engine/6000.0/manual/lighting-overview/shadows/shadow-performance): shadow-map rendering adds geometry work; bias/normal bias can cause acne, detachment and leaks. This motivates actual contact/error review and measuring the full added pass, not a promised performance result.
 
-Inspected owning sources: `crates/ruster-render/src/lib.rs` Metrics/pipeline/callback pass and `scene.wgsl`; `crates/ruster-scene/src/lighting.rs`; app/export authored_lighting profile and `scripts/package_creation.py`. Renderer currently has no shadow implementation. The user approved activation; no architecture decision or implemented shadow capability is established by this plan alone. Feasibility protocol `.studio/feasibility-protocol-1.json` in the Daylight Study project freezes initial measurement ceilings/conditions before candidate implementation/results.
+Inspected owning sources: `crates/ruster-render/src/lib.rs` Metrics/pipeline/callback pass and `scene.wgsl`; `crates/ruster-scene/src/lighting.rs`; app/export authored_lighting profile and `scripts/package_creation.py`. At initial scope capture the renderer had no shadow implementation. The later implemented decision/evidence and final audit are in [0033](../decisions/0033-bounded-sun-shadow-feasibility.md), [feasibility](../evidence/V2B-feasibility.md) and [readiness](../evidence/V2B-readiness.md); this plan alone is not implementation proof. Feasibility protocol `.studio/feasibility-protocol-1.json` in the Daylight Study project freezes initial measurement ceilings/conditions before candidate implementation/results.
