@@ -240,7 +240,7 @@ impl HierarchySearch {
                 .collect();
             self.rows.extend(scene.lighting.lights().map(|(id, light)| {
                 let kind = match light.kind {
-                    ruster_scene::LightKind::Directional => "Directional light",
+                    ruster_scene::LightKind::Directional { .. } => "Directional light",
                     ruster_scene::LightKind::Point { .. } => "Point light",
                 };
                 HierarchyRow {
@@ -2787,7 +2787,9 @@ impl SceneEditor {
                     ui.close();
                 }
                 if ui.button("Directional light").clicked() {
-                    self.create_light_ui(ruster_scene::LightKind::Directional);
+                    self.create_light_ui(ruster_scene::LightKind::Directional {
+                        shadow: Default::default(),
+                    });
                     ui.close();
                 }
             });

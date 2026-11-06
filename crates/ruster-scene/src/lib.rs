@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 7;
+pub const FORMAT_VERSION: u32 = 8;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
@@ -1125,11 +1125,14 @@ impl Document {
         if (1..7).contains(&version) {
             reject_pre_v7_lighting_fields(&value, version)?;
         }
+        if (1..8).contains(&version) {
+            reject_pre_v8_shadow_fields(&value, version)?;
+        }
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=7 => serde_json::from_value(value)?,
+            5..=8 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1196,6 +1199,39 @@ impl Document {
                 .persist(path)
                 .map_err(|e| SceneError::Io(e.error))?;
         }
+        Ok(())
+    }
+}
+
+// Inspect only actual light definitions in the current lighting value and both
+// endpoints of lighting deltas. Behavior/application properties named `shadow`
+// remain independent data; recursively matching arbitrary keys would reject them.
+fn reject_pre_v8_shadow_fields(value: &serde_json::Value, version: u64) -> Result<(), SceneError> {
+    let has_shadow = |lighting: &serde_json::Value| {
+        lighting["lights"].as_object().is_some_and(|lights| {
+            lights
+                .values()
+                .any(|light| light.get("shadow").is_some() || light["kind"].get("shadow").is_some())
+        })
+    };
+    let mut found = has_shadow(&value["scene"]["lighting"]);
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            let deltas = if version <= 4 {
+                std::slice::from_ref(change)
+            } else {
+                change["scene"].as_array().map(Vec::as_slice).unwrap_or(&[])
+            };
+            for delta in deltas {
+                if delta["kind"] == "lighting" {
+                    found |= has_shadow(&delta["before"]) || has_shadow(&delta["after"]);
+                }
+            }
+        }
+    }
+    if found {
+        Err(SceneError::Invalid("Sun shadows require scene v8".into()))
+    } else {
         Ok(())
     }
 }
@@ -2092,7 +2128,7 @@ impl Session {
         } else {
             let incoming_directional = lights
                 .values()
-                .any(|light| matches!(light.kind, LightKind::Directional));
+                .any(|light| matches!(light.kind, LightKind::Directional { .. }));
             let incoming_ids = ids.iter().map(|id| id.as_str()).collect::<Vec<_>>();
             let (mut after, mut created_ids) =
                 self.promoted_lighting(&incoming_ids, incoming_directional)?;
@@ -3931,6 +3967,93 @@ mod tests {
         let mut invalid = clean;
         invalid["scene"]["objects"][0]["material"] = "absent".into();
         assert!(Document::decode(&serde_json::to_vec(&invalid).unwrap()).is_err());
+    }
+
+    // Unique risk: shared live light types must not smuggle new shadow semantics
+    // into Scene1–7, including either historical endpoint in a mixed change.
+    #[test]
+    fn scene8_shadow_migration_guards_exact_light_boundaries_only() {
+        use serde_json::json;
+        let clean = serde_json::to_value(Document::new(Scene::demo())).unwrap();
+        for version in 1..=7 {
+            let mut old = clean.clone();
+            old["format_version"] = version.into();
+            let migrated = Document::decode(&serde_json::to_vec(&old).unwrap()).unwrap();
+            assert!(migrated.scene.lighting.is_legacy());
+            let saved: serde_json::Value =
+                serde_json::from_slice(&migrated.encode().unwrap()).unwrap();
+            assert_eq!(saved["format_version"], 8);
+        }
+        let mut scene = Scene::demo();
+        scene.lighting = Lighting::authored_default("sun");
+        let mut session = Session::new(scene).unwrap();
+        let mut geometry = session.scene().objects[0].transform.clone();
+        geometry.translation[0] += 1.0;
+        let mut sun = session
+            .scene()
+            .lighting
+            .light("sun")
+            .unwrap()
+            .transform
+            .clone();
+        sun.translation[0] += 1.0;
+        session
+            .edit_transforms(0, &[("left".into(), geometry), ("sun".into(), sun)])
+            .unwrap();
+        let shadows = [
+            serde_json::to_value(SunShadow::default()).unwrap(),
+            serde_json::to_value(SunShadow {
+                quality: ShadowQuality::High,
+                ..SunShadow::default()
+            })
+            .unwrap(),
+            serde_json::Value::Null,
+        ];
+        for stack in ["undo", "redo"] {
+            let mut old: serde_json::Value =
+                serde_json::from_slice(&session.snapshot_bytes().unwrap()).unwrap();
+            old["format_version"] = 7.into();
+            Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
+            for shadow in &shadows {
+                let mut current = old.clone();
+                current["scene"]["lighting"]["lights"]["sun"]["kind"]["shadow"] = shadow.clone();
+                assert!(Document::decode(&serde_json::to_vec(&current).unwrap())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("Sun shadows require scene v8"));
+                for endpoint in ["before", "after"] {
+                    let mut historical = old.clone();
+                    historical[stack][0]["scene"][1][endpoint]["lights"]["sun"]["kind"]["shadow"] =
+                        shadow.clone();
+                    assert!(Document::decode(&serde_json::to_vec(&historical).unwrap())
+                        .unwrap_err()
+                        .to_string()
+                        .contains("Sun shadows require scene v8"));
+                }
+            }
+            if stack == "undo" {
+                session.undo(1).unwrap();
+            }
+        }
+        let mut behavior = Session::new(Scene::demo()).unwrap();
+        let mut b = binding("left", "missing-source");
+        b.properties
+            .insert("shadow".into(), PropertyValue::Bool(true));
+        behavior.set_binding(0, "binding", Some(b.clone())).unwrap();
+        b.properties
+            .insert("shadow".into(), PropertyValue::Bool(false));
+        behavior.set_binding(1, "binding", Some(b)).unwrap();
+        behavior.undo(2).unwrap();
+        for version in 5..=7 {
+            let mut old: serde_json::Value =
+                serde_json::from_slice(&behavior.snapshot_bytes().unwrap()).unwrap();
+            old["format_version"] = json!(version);
+            let migrated =
+                Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
+            assert_eq!(migrated.authoring(), behavior.authoring());
+            assert_eq!(migrated.undo_len(), 1);
+            assert_eq!(migrated.redo_len(), 1);
+        }
     }
 
     // Unique risk: material maps escape current/reachable byte accounting, or

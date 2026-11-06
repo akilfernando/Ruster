@@ -41,6 +41,8 @@ MATERIAL_PROFILE = {**PROFILE, "descriptor_version": 2,
                     "capabilities": ["initial_camera", "opaque_materials"]}
 LIGHTING_PROFILE = {**PROFILE, "descriptor_version": 2,
                     "capabilities": ["initial_camera", "opaque_materials", "authored_lighting"]}
+SUN_SHADOW_PROFILE = {**PROFILE, "descriptor_version": 2,
+                      "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -154,7 +156,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -327,6 +329,54 @@ def load_kit(root: Path, cancel_file: Path | None = None) -> tuple[dict, dict[st
     return manifest, payload, sha256(raw)
 
 
+def lighting_states(document: dict):
+    """Owning current/history positions only; never arbitrary behavior JSON."""
+    yield document.get("scene", {}).get("lighting", {})
+    for stack in ("undo", "redo"):
+        changes = document.get(stack, [])
+        if not isinstance(changes, list):
+            continue  # Full history validation belongs to the actual runtime.
+        for change in changes:
+            if not isinstance(change, dict):
+                continue
+            deltas = [change] if document["format_version"] <= 4 else change.get("scene", [])
+            if not isinstance(deltas, list):
+                continue
+            for delta in deltas:
+                if isinstance(delta, dict) and delta.get("kind") == "lighting":
+                    yield delta.get("before", {})
+                    yield delta.get("after", {})
+
+
+def validate_sun_shadows(document: dict) -> None:
+    """Shadow wire admission complements runtime-owned complete scene checks."""
+    for lighting in lighting_states(document):
+        lights = lighting.get("lights", {}) if isinstance(lighting, dict) else {}
+        if not isinstance(lights, dict):
+            continue
+        for light in lights.values():
+            if not isinstance(light, dict):
+                continue
+            kind = light.get("kind", {})
+            has_kind_shadow = isinstance(kind, dict) and "shadow" in kind
+            if document["format_version"] < 8 and ("shadow" in light or has_kind_shadow):
+                raise ValueError("Sun shadow fields require Scene8 sun_shadows")
+            if "shadow" in light:
+                raise ValueError("Sun shadow settings belong to directional kind.shadow")
+            if not has_kind_shadow:
+                continue  # Only whole-field omission selects disabled defaults.
+            if kind.get("type") != "directional":
+                raise ValueError("Sun shadow settings require a directional light")
+            shadow = kind["shadow"]
+            exact_fields(shadow, {"enabled", "quality", "depth_bias_texels", "normal_bias_texels"}, "Sun shadow")
+            if type(shadow["enabled"]) is not bool or shadow["quality"] not in ("standard", "high"):
+                raise ValueError("invalid Sun shadow enabled flag or quality")
+            for field in ("depth_bias_texels", "normal_bias_texels"):
+                value = shadow[field]
+                if type(value) not in (int, float) or not 0 <= value <= 4 or not math.isfinite(value):
+                    raise ValueError("Sun shadow biases must be finite numbers in 0..4 texels")
+
+
 def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     """Derive current runtime dependencies independently of the content request.
 
@@ -336,8 +386,9 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     version = document.get("format_version")
     scene = document.get("scene")
     if (document.get("format") != "ruster-scene" or type(version) is not int
-            or not 1 <= version <= 7 or not isinstance(scene, dict)):
-        raise ValueError("content requires a supported Scene1–7 document")
+            or not 1 <= version <= 8 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–8 document")
+    validate_sun_shadows(document)
     objects = scene.get("objects")
     materials = scene.get("materials", {})
     if not isinstance(objects, list) or len(objects) > MAX_OBJECTS:
@@ -375,7 +426,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
-    if type(schema) is not int or schema not in (1, 2, 3):
+    if type(schema) is not int or schema not in (1, 2, 3, 4):
         raise ValueError("invalid content schema")
     fields = {"schema", "title", "tick_millis", "scene_sha256", "meshes"}
     if schema >= 2:
@@ -396,8 +447,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     mesh_ids, texture_ids = scene_dependencies(document)
     if (schema == 1 and document["format_version"] > 5
             or schema == 2 and document["format_version"] != 6
-            or schema == 3 and document["format_version"] != 7):
-        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7")
+            or schema == 3 and document["format_version"] != 7
+            or schema == 4 and document["format_version"] != 8):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8")
     meshes, textures = content["meshes"], content.get("textures", {})
     if (not isinstance(meshes, dict) or not isinstance(textures, dict)
             or len(meshes) + len(textures) > MAX_MESHES):
@@ -426,6 +478,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
 
 def typed_scene(document: dict) -> dict:
     """Scene fields are f32; serde_json::Value exposes their exact f64 promotions."""
+    validate_sun_shadows(document)
     scene = json.loads(json.dumps(document["scene"]))
     try:
         lighting = scene.get("lighting", {"mode": "legacy"})
@@ -447,6 +500,14 @@ def typed_scene(document: dict) -> dict:
                                                 for value in light["transform"][field]]
                 if light["kind"]["type"] == "point":
                     light["kind"]["range"] = struct.unpack("f", struct.pack("f", light["kind"]["range"]))[0]
+                elif "shadow" in light["kind"]:
+                    shadow = light["kind"]["shadow"]
+                    for field in ("depth_bias_texels", "normal_bias_texels"):
+                        shadow[field] = struct.unpack("f", struct.pack("f", shadow[field]))[0]
+                    if shadow == {"enabled": False, "quality": "standard",
+                                  "depth_bias_texels": struct.unpack("f", struct.pack("f", 0.15))[0],
+                                  "normal_bias_texels": 0.0}:
+                        light["kind"].pop("shadow")
         else:
             raise ValueError("unsupported scene lighting mode")
         if not scene.get("materials"):
@@ -475,11 +536,13 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
     content, scene_data, document, source_specs = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
-    if content["schema"] == 3 and kit["profile"] != LIGHTING_PROFILE:
+    if content["schema"] == 4 and kit["profile"] != SUN_SHADOW_PROFILE:
+        raise ValueError("runtime kit does not support Scene8 sun_shadows; prepare a current runtime kit")
+    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE):
         raise ValueError("runtime kit does not support Scene7 authored_lighting; prepare a current runtime kit")
-    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE):
+    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE):
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
-    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE):
+    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
     descriptor = {"format": "ruster-application", "version": min(content["schema"], 2), "title": content["title"],
                   "scene": "resources/scene.json", "tick_millis": content["tick_millis"],

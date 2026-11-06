@@ -1,8 +1,8 @@
 //! Exact, bounded native commands sharing Scene lighting transactions.
 use super::SceneEditor;
 use ruster_scene::{
-    Ambient, Light, LightKind, SceneError, MAX_DIRECTIONAL_LIGHTS, MAX_LIGHTS, MAX_OBJECTS,
-    MAX_POINT_LIGHTS,
+    Ambient, Light, LightKind, SceneError, SunShadow, MAX_DIRECTIONAL_LIGHTS, MAX_LIGHTS,
+    MAX_OBJECTS, MAX_POINT_LIGHTS,
 };
 use serde_json::{json, Value};
 
@@ -91,6 +91,19 @@ fn light(value: &Value) -> Result<Light, CommandError> {
     if value["kind"]["type"] == "point" {
         finite(&value["kind"]["range"], 0.1, 10_000.0)?;
     }
+    if let Some(shadow) = value["kind"].get("shadow") {
+        if value["kind"]["type"] != "directional" {
+            return Err(error(
+                "invalid_arguments",
+                "Only directional lights support Sun shadow settings",
+            ));
+        }
+        // Preserve original-f64 admission: values just outside0..4 must not
+        // become accepted by rounding to a valid f32. Typed Light decoding
+        // below owns the complete strict shape, bool and quality enum checks.
+        finite(&shadow["depth_bias_texels"], 0.0, 4.0)?;
+        finite(&shadow["normal_bias_texels"], 0.0, 4.0)?;
+    }
     let candidate: Light = serde_json::from_value(value.clone())
         .map_err(|failure| error("invalid_arguments", failure.to_string()))?;
     candidate
@@ -151,7 +164,7 @@ impl SceneEditor {
             let directional = scene
                 .lighting
                 .lights()
-                .filter(|(_, light)| matches!(light.kind, LightKind::Directional))
+                .filter(|(_, light)| matches!(light.kind, LightKind::Directional { .. }))
                 .count();
             let point = scene.lighting.light_count() - directional;
             let enabled = scene
@@ -168,8 +181,13 @@ impl SceneEditor {
                 "counts":{"total":scene.lighting.light_count(),"directional":directional,"point":point,"enabled":enabled,"authoring_targets":scene.target_count()},
                 "limits":{"directional":MAX_DIRECTIONAL_LIGHTS,"point":MAX_POINT_LIGHTS,"total_lights":MAX_LIGHTS,"authoring_targets":MAX_OBJECTS,"disabled_lights_count_toward_capacity":true},
                 "active_shader":if self.shader_builtin {"builtin"} else {"custom"},"builtin_appearance":self.shader_builtin,
-                "lighting_appearance":if self.shader_builtin {"built-in diffuse lighting"} else {"Active custom shader controls appearance and may ignore authored lighting; semantic support is unverified"},
-                "units":"Relative artistic linear RGB diffuse; no shadows or photometric units",
+                "lighting_appearance":if self.shader_builtin {"Built-in diffuse lighting with authored Sun-shadow support; last-rendered status is not observed here"} else {"Active custom shader controls diffuse appearance and may ignore authored lighting; Sun shadows are unsupported and authored settings are retained"},
+                "sun_shadow_contract":{"light_kind":"directional","quality_map_sizes":{"standard":1024,"high":2048},
+                    "bias_bounds_texels":[0,4],"bias_units":"World shadow texels, not normalized depth or screen pixels",
+                    "omitted_shadow_default":SunShadow::default(),"present_shadow_requires_all_fields":true,
+                    "shader_support":if self.shader_builtin {"builtin_pipeline"} else {"unsupported_custom_shader"},
+                    "point_shadows_supported":false,"observation":"Authored settings and pipeline support only; no last-rendered shadow status"},
+                "units":"Relative artistic linear RGB diffuse, not photometric units; Sun biases use world shadow texels",
                 "drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending()}),
             );
         }
@@ -361,6 +379,73 @@ mod tests {
         assert_eq!(moved["light_diff"][0]["light_id"], "key");
         assert_eq!(moved["lighting_changed"], true);
         assert_eq!(editor.preview, preview);
+        // A full directional shadow transaction shares history, while the raw
+        // command boundary rejects f64 biases that would round into range.
+        let sun_id = editor
+            .session
+            .scene()
+            .lighting
+            .lights()
+            .find(|(_, light)| matches!(light.kind, LightKind::Directional { .. }))
+            .unwrap()
+            .0
+            .to_owned();
+        let old_sun = editor
+            .session
+            .scene()
+            .lighting
+            .light(&sun_id)
+            .unwrap()
+            .clone();
+        let mut shadowed = serde_json::to_value(&old_sun).unwrap();
+        shadowed["kind"]["shadow"] = json!({"enabled":true,"quality":"high","depth_bias_texels":0.15,"normal_bias_texels":0});
+        let shadow_args = json!({"expected_session_token":"scene","expected_revision":editor.session.scene().revision.to_string(),
+            "light_id":sun_id,"light":shadowed});
+        editor
+            .lighting_command("scene", "scene_light_set", &shadow_args)
+            .unwrap();
+        let authored_shadow = editor
+            .session
+            .scene()
+            .lighting
+            .light(&sun_id)
+            .unwrap()
+            .clone();
+        let after_shadow = editor.session.snapshot_bytes().unwrap();
+        for field in ["depth_bias_texels", "normal_bias_texels"] {
+            let mut invalid = shadow_args.clone();
+            invalid["expected_revision"] = json!(editor.session.scene().revision.to_string());
+            invalid["light"]["kind"]["shadow"][field] = json!(4.0000000001);
+            assert_eq!(
+                editor
+                    .lighting_command("scene", "scene_light_set", &invalid)
+                    .unwrap_err()
+                    .0,
+                "invalid_arguments"
+            );
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), after_shadow);
+        }
+        let mut point_shadow = make(editor.session.scene().revision, "key");
+        point_shadow["light"]["kind"]["shadow"] = shadow_args["light"]["kind"]["shadow"].clone();
+        assert_eq!(
+            editor
+                .lighting_command("scene", "scene_light_set", &point_shadow)
+                .unwrap_err()
+                .0,
+            "invalid_arguments"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), after_shadow);
+        editor.execute("scene", "scene_undo", &json!({"expected_session_token":"scene","expected_revision":editor.session.scene().revision.to_string()})).unwrap();
+        assert_eq!(
+            editor.session.scene().lighting.light(&sun_id),
+            Some(&old_sun)
+        );
+        editor.execute("scene", "scene_redo", &json!({"expected_session_token":"scene","expected_revision":editor.session.scene().revision.to_string()})).unwrap();
+        assert_eq!(
+            editor.session.scene().lighting.light(&sun_id),
+            Some(&authored_shadow)
+        );
+        assert_eq!(editor.preview, preview);
         editor.shader_builtin = false;
         editor.shader_notice = "Rejected candidate; last-good custom still active".into();
         assert_eq!(
@@ -368,6 +453,17 @@ mod tests {
                 .lighting_command("scene", "lighting_inspect", &json!({}))
                 .unwrap()["active_shader"],
             "custom"
+        );
+        let inspection = editor
+            .lighting_command("scene", "lighting_inspect", &json!({}))
+            .unwrap();
+        assert_eq!(
+            inspection["sun_shadow_contract"]["shader_support"],
+            "unsupported_custom_shader"
+        );
+        assert_eq!(
+            inspection["lighting"]["lights"][&sun_id]["kind"]["shadow"]["enabled"],
+            true
         );
         assert!(editor
             .lighting_command("scene", "lighting_inspect", &json!({"path":"ignored"}))

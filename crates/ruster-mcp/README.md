@@ -80,7 +80,7 @@ Every material mutation requires `expected_session_token`, `expected_revision` a
 
 `lighting_inspect {}` reads the complete bounded lighting state and current scene/session identities with mutation guards. It accepts no paging, paths or extra arguments. Legacy mode represents fixed illumination; Authored mode contains scene-global ambient and at most five lights. Shader appearance is reported truthfully by the editor: custom WGSL compilation or lighting-binding presence does not certify that the shader uses authored lighting. Inspect after rejected commands or unknown transport outcomes before deciding a next edit.
 
-`scene_light_create` and `scene_light_set` require `expected_session_token`, canonical decimal-string u64 `expected_revision`, stable `light_id` and a complete `light`. `create` requires a fresh ID; `set` replaces an existing light and rejects kind changes. The full light has optional nullable `name` (1–128 UTF-8 bytes without surrounding whitespace/controls), `transform` with three-number `translation`, `rotation` and `scale`, boolean `enabled`, three-channel linear RGB `color` in0–1, relative `intensity` in0–16, and strict `kind`: `{"type":"directional"}` or `{"type":"point","range":5}`. Point range is finite0.1–10000 scene units. Translation/rotation are finite±10000; rotation is Euler radians, fixed-axis X then Y then Z. Directional emission follows rotated local−Z; its translation only anchors the editor marker. Point translation positions its source; point rotation has no lighting effect. Light scale is exactly `[1,1,1]`. Intensities are artistic relative values, not lux/lumens; this diffuse workflow does not imply shadows/PBR/HDR.
+`scene_light_create` and `scene_light_set` require `expected_session_token`, canonical decimal-string u64 `expected_revision`, stable `light_id` and a complete `light`. `create` requires a fresh ID; `set` replaces an existing light and rejects kind changes. The full light has optional nullable `name` (1–128 UTF-8 bytes without surrounding whitespace/controls), `transform` with three-number `translation`, `rotation` and `scale`, boolean `enabled`, three-channel linear RGB `color` in0–1, relative `intensity` in0–16, and strict `kind`: `{"type":"directional"}` or `{"type":"point","range":5}`. Point range is finite0.1–10000 scene units. Translation/rotation are finite±10000; rotation is Euler radians, fixed-axis X then Y then Z. Directional emission follows rotated local−Z; its translation only anchors the editor marker. Point translation positions its source; point rotation has no lighting effect. Light scale is exactly `[1,1,1]`. Intensities are artistic relative values, not lux/lumens; PBR/HDR and point-light shadows remain unsupported. Directional Sun settings below extend this diffuse workflow.
 
 `scene_ambient_set` requires the same session/revision guards plus complete `ambient: {color:[1,1,1],intensity:0.28}`. Ambient color is linear RGB0–1 and intensity is finite0–1. It is scene-global, independent of selection. Every lighting payload rejects unknown properties; these tools grant no asset/catalog or filesystem authority.
 
@@ -185,3 +185,16 @@ Background servicing scope (V2a/0032): the repaired generic editor launched with
 
 
 Export presentation: MCP export start/inspect supplies structured progress and receipts without automatically opening the editor's export-status window. Manual export retains its visible status window. A status window explicitly opened by a human remains human-owned; capture may truthfully report viewport_occluded until that overlap is resolved. The first native iteration exposed/fixed the unsolicited popup; final workflow verification is tracked in STATUS.
+
+
+### Bounded Sun shadows (V2b integration)
+
+The directional kind accepts optional complete `shadow` settings through the existing create/set tools:
+
+```json
+{"type":"directional","shadow":{"enabled":true,"quality":"standard","depth_bias_texels":0.15,"normal_bias_texels":0}}
+```
+
+Omitting the whole `shadow` field selects disabled/Standard/0.15/0. If present, all four fields are required; null, partial, unknown fields, unsupported quality and shadows on point lights reject. Quality is `standard` (1024²) or `high` (2048²). Both biases must be finite0..4 in world shadow-texel units; validation checks original JSON precision before f32 narrowing. Excessive bias can detach contact or erase thin shadows. Disabled nondefault settings remain authored data, and enabling/editing is one shared whole-light Undo transaction. Existing stale/session/human-draft guards still apply.
+
+`lighting_inspect.sun_shadow_contract` reports bounded settings/defaults/units and built-in pipeline support. Active custom WGSL is explicitly unsupported for built-in Sun shadows while authored values are retained; rejected shader candidates preserve last-good support state. This inspection is authored/pipeline state, **not last-rendered map coverage or quality status**. Scene8 save/export requires the exact new runtime capability profile; controls/recovery/native/exact standalone acceptance is still in progress under [V2b](../../docs/plans/V2B-SUN-SHADOWS.md).

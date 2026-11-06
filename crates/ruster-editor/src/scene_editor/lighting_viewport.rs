@@ -255,7 +255,7 @@ pub(super) fn paint_and_pick(
         // shows the color without hiding the glyph's outline.
         let stroke = egui::Stroke::new(1.75, ink);
         let label = match marker.light.kind {
-            LightKind::Directional => {
+            LightKind::Directional { .. } => {
                 painter.circle_stroke(center, 4.0, stroke);
                 painter.circle_filled(center, 2.5, color);
                 for ray in 0..8 {

@@ -3,8 +3,11 @@ mod lighting_gpu;
 mod material_gpu;
 #[cfg(test)]
 mod material_probe;
-#[cfg(test)]
+mod shadow_gpu;
 mod shadow_math;
+pub use shadow_gpu::ShadowStatus;
+#[cfg(test)]
+mod shadow_lifecycle_probe;
 #[cfg(test)]
 mod shadow_probe;
 use lighting_gpu::{LightingGpu, LightingPacket, LIGHTING_BYTES};
@@ -30,7 +33,11 @@ pub const MAX_SHADER_BYTES: usize = 64 * 1024;
 
 /// Built-in source is a starting point for project-local scene.wgsl edits.
 pub fn default_shader() -> &'static str {
-    include_str!("scene.wgsl")
+    concat!(
+        include_str!("sun_shadow.wgsl"),
+        "\n",
+        include_str!("scene.wgsl")
+    )
 }
 
 /// Compile against the fixed camera/vertex ABI and replace only after validation succeeds.
@@ -45,6 +52,7 @@ pub fn refresh_shader(render: &egui_wgpu::RenderState, source: &str) -> Result<(
         .get_mut::<Resources>()
         .ok_or("scene renderer is not installed")?;
     r.pipeline = validated_pipeline(&render.device, &r.pipeline_layout, source, r.sample_count)?;
+    r.builtin_appearance = source == default_shader();
     Ok(())
 }
 
@@ -60,12 +68,26 @@ pub fn configure_setup(setup: &mut egui_wgpu::WgpuSetupCreateNew) {
     });
 }
 
-/// Raw bounded samples. GPU timing covers the offscreen scene pass only, not UI/presentation.
+/// Raw bounded samples. GPU scene time includes shadow depth plus color,
+/// excluding UI/composite/presentation; separate pass intervals stay available.
 #[derive(Clone, Debug, Default)]
 pub struct Metrics {
     pub frames: u64,
     pub cpu_prepare_us: Vec<f64>,
     pub gpu_scene_us: Vec<f64>,
+    /// Separate shadow/color intervals; None means no shadow pass encoded.
+    pub gpu_shadow_us: Vec<Option<f64>>,
+    pub gpu_color_us: Vec<f64>,
+    pub shadow_status: ShadowStatus,
+    pub shadow_pending: bool,
+    pub shadow_map_size: u32,
+    pub shadow_map_bytes: u64,
+    pub shadow_retiring_bytes: u64,
+    pub shadow_allocations: u64,
+    pub shadow_passes: u64,
+    pub shadow_draw_calls: usize,
+    pub shadow_units_per_texel: Option<f64>,
+    pub shadow_detail_limited: bool,
     pub mesh_bytes: u64,
     /// Cumulative vertex/index payload creation, including the built-in cube.
     pub mesh_uploads: u64,
@@ -647,6 +669,23 @@ pub fn viewport_with_materials(
             lighting,
             size: rect.size(),
             cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
+            shadow: if invalid_lighting {
+                None
+            } else {
+                scene
+                    .lighting
+                    .lights()
+                    .find_map(|(_, light)| match &light.kind {
+                        ruster_scene::LightKind::Directional { shadow }
+                            if light.enabled && shadow.enabled =>
+                        {
+                            Some(*shadow)
+                        }
+                        _ => None,
+                    })
+            },
+            context: ui.ctx().clone(),
+            prepared: std::sync::atomic::AtomicBool::new(false),
         },
     ));
     if invalid_lighting {
@@ -887,6 +926,8 @@ struct Resources {
     pipeline_layout: wgpu::PipelineLayout,
     materials: MaterialGpu,
     lighting: LightingGpu,
+    shadows: shadow_gpu::ShadowGpu,
+    builtin_appearance: bool,
     instances: wgpu::Buffer,
     capacity: usize,
     camera: wgpu::Buffer,
@@ -919,12 +960,14 @@ impl Resources {
         });
         let materials = MaterialGpu::new(device, queue);
         let lighting = LightingGpu::new(device);
+        let shadows = shadow_gpu::ShadowGpu::new(device, queue);
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("fixed scene ABI"),
             bind_group_layouts: &[
                 Some(&camera_layout),
                 Some(&materials.layout),
                 Some(&lighting.layout),
+                Some(&shadows.layout),
             ],
             immediate_size: 0,
         });
@@ -973,19 +1016,19 @@ impl Resources {
             .contains(wgpu::Features::TIMESTAMP_QUERY)
             .then(|| Timestamps {
                 queries: device.create_query_set(&wgpu::QuerySetDescriptor {
-                    label: Some("scene GPU time"),
+                    label: Some("shadow/color GPU times"),
                     ty: wgpu::QueryType::Timestamp,
-                    count: 2,
+                    count: 4,
                 }),
                 resolve: device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("scene timestamp resolve"),
-                    size: 16,
+                    size: 32,
                     usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC,
                     mapped_at_creation: false,
                 }),
                 read: device.create_buffer(&wgpu::BufferDescriptor {
                     label: Some("scene timestamp readback"),
-                    size: 16,
+                    size: 32,
                     usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
                     mapped_at_creation: false,
                 }),
@@ -1010,6 +1053,8 @@ impl Resources {
             pipeline_layout,
             materials,
             lighting,
+            shadows,
+            builtin_appearance: true,
             instances,
             capacity: 1,
             camera,
@@ -1220,6 +1265,7 @@ struct GpuMesh {
     indices: wgpu::Buffer,
     count: u32,
     bytes: u64,
+    bounds: [Vec3; 2],
 }
 impl GpuMesh {
     fn new(
@@ -1228,8 +1274,22 @@ impl GpuMesh {
         vertices: &[Vertex],
         indices: &[u32],
     ) -> Self {
+        // Cache bounds only when the existing GPU upload identity changes.
+        // Referenced vertices determine coverage; unused source vertices do not.
+        let mut low = Vec3::splat(f32::INFINITY);
+        let mut high = Vec3::splat(f32::NEG_INFINITY);
+        for &index in indices {
+            let position = Vec3::from(vertices[index as usize].position);
+            low = low.min(position);
+            high = high.max(position);
+        }
+        if indices.is_empty() {
+            low = Vec3::ZERO;
+            high = Vec3::ZERO;
+        }
         Self {
             source,
+            bounds: [low, high],
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("retained scene vertices"),
                 contents: bytemuck::cast_slice(vertices),
@@ -1317,6 +1377,11 @@ struct SceneCallback {
     lighting: LightingPacket,
     size: egui::Vec2,
     cpu_us: f64,
+    shadow: Option<ruster_scene::SunShadow>,
+    context: egui::Context,
+    // Callback resources are shared; a rejected callback must not composite
+    // another viewport's pixels after its own prepare was skipped.
+    prepared: std::sync::atomic::AtomicBool,
 }
 impl egui_wgpu::CallbackTrait for SceneCallback {
     fn prepare(
@@ -1327,10 +1392,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
+        self.prepared
+            .store(false, std::sync::atomic::Ordering::Relaxed);
         let start = Instant::now();
         let Some(r) = resources.get_mut::<Resources>() else {
             return Vec::new();
         };
+        if !r.shadows.claim_frame(&self.context) {
+            r.metrics.lock().expect("metrics lock").shadow_status = ShadowStatus::MultipleViewports;
+            return Vec::new();
+        }
         let size = target_size(
             self.size,
             screen.pixels_per_point,
@@ -1380,6 +1451,28 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             .timestamps
             .as_ref()
             .filter(|t| !*t.pending.lock().expect("timestamp lock"));
+        let shadow = r.shadows.prepare(
+            device,
+            queue,
+            encoder,
+            shadow_gpu::Geometry {
+                groups: &self.groups,
+                meshes: &r.meshes,
+                cube: &r.cube,
+                instances: &r.instances,
+            },
+            shadow_gpu::Request {
+                settings: self.shadow,
+                direction: Vec3::from_slice(&self.lighting.direction_to_light[..3]),
+                builtin: r.builtin_appearance,
+                context: &self.context,
+                timestamps: timing.map(|t| wgpu::RenderPassTimestampWrites {
+                    query_set: &t.queries,
+                    beginning_of_pass_write_index: Some(0),
+                    end_of_pass_write_index: Some(1),
+                }),
+            },
+        );
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Ruster 3D scene"),
@@ -1394,8 +1487,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 }),
                 timestamp_writes: timing.map(|t| wgpu::RenderPassTimestampWrites {
                     query_set: &t.queries,
-                    beginning_of_pass_write_index: Some(0),
-                    end_of_pass_write_index: Some(1),
+                    beginning_of_pass_write_index: Some(2),
+                    end_of_pass_write_index: Some(3),
                 }),
                 occlusion_query_set: None,
                 multiview_mask: None,
@@ -1403,6 +1496,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             pass.set_pipeline(&r.pipeline);
             pass.set_bind_group(0, &r.camera_bind, &[]);
             pass.set_bind_group(2, &r.lighting.bind, &[]);
+            pass.set_bind_group(3, r.shadows.bind(), &[]);
             pass.set_vertex_buffer(1, r.instances.slice(..));
             for group in &self.groups {
                 pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
@@ -1418,8 +1512,15 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         }
         if let Some(t) = timing {
             *t.pending.lock().expect("timestamp lock") = true;
-            encoder.resolve_query_set(&t.queries, 0..2, &t.resolve, 0);
-            encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.read, 0, 16);
+            let has_shadow = shadow.rendered;
+            let count = if has_shadow { 4 } else { 2 };
+            encoder.resolve_query_set(
+                &t.queries,
+                if has_shadow { 0..4 } else { 2..4 },
+                &t.resolve,
+                0,
+            );
+            encoder.copy_buffer_to_buffer(&t.resolve, 0, &t.read, 0, count * 8);
             let buffer = t.read.clone();
             let pending = t.pending.clone();
             let metrics = r.metrics.clone();
@@ -1432,11 +1533,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                         .get_mapped_range()
                         .expect("completed timestamp mapping");
                     let values: &[u64] = bytemuck::cast_slice(&bytes);
-                    if record && values[1] >= values[0] {
-                        let mut m = metrics.lock().expect("metrics lock");
-                        if m.gpu_scene_us.len() < MAX_SAMPLES {
-                            m.gpu_scene_us
-                                .push((values[1] - values[0]) as f64 * period / 1000.0);
+                    if record {
+                        if let Some((total, color, depth)) =
+                            gpu_durations(values, has_shadow, period)
+                        {
+                            let mut m = metrics.lock().expect("metrics lock");
+                            if m.gpu_scene_us.len() < MAX_SAMPLES {
+                                m.gpu_scene_us.push(total);
+                                m.gpu_color_us.push(color);
+                                m.gpu_shadow_us.push(depth);
+                            }
                         }
                     }
                     drop(bytes);
@@ -1462,6 +1568,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             metrics.lighting_uploads += 1;
             metrics.lighting_upload_bytes += LIGHTING_BYTES;
         }
+        metrics.shadow_status = shadow.status;
+        metrics.shadow_pending = shadow.pending;
+        metrics.shadow_map_size = shadow.map_size;
+        metrics.shadow_map_bytes = shadow.live_bytes;
+        metrics.shadow_retiring_bytes = shadow.retiring_bytes;
+        metrics.shadow_allocations = shadow.allocations;
+        metrics.shadow_passes = shadow.passes;
+        metrics.shadow_draw_calls = shadow.draw_calls;
+        metrics.shadow_units_per_texel = shadow.units_per_texel;
+        metrics.shadow_detail_limited = shadow.detail_limited;
         metrics.texture_bytes = r.materials.bytes();
         metrics.draw_calls = self.groups.len();
         metrics.objects = instance_count;
@@ -1469,6 +1585,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.instance_capacity_bytes = (r.capacity * size_of::<Instance>()) as u64;
         metrics.target_bytes = target_bytes(size, r.sample_count);
         metrics.target_size = size;
+        self.prepared
+            .store(true, std::sync::atomic::Ordering::Relaxed);
         Vec::new()
     }
     fn paint(
@@ -1477,6 +1595,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         pass: &mut wgpu::RenderPass<'static>,
         resources: &egui_wgpu::CallbackResources,
     ) {
+        if !self.prepared.load(std::sync::atomic::Ordering::Relaxed) {
+            return;
+        }
         if let Some(r) = resources.get::<Resources>() {
             if let Some(target) = r.target.as_ref() {
                 pass.set_pipeline(&r.composite);
@@ -1487,9 +1608,57 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
     }
 }
 
+// Resolve only written queries. A missing shadow pass is None, not measured0;
+// total includes any real inter-pass GPU gap rather than summing subintervals.
+fn gpu_durations(values: &[u64], shadow: bool, period: f64) -> Option<(f64, f64, Option<f64>)> {
+    if !period.is_finite() || period <= 0. {
+        return None;
+    }
+    let us = |ticks: u64| ticks as f64 * period / 1000.;
+    if shadow {
+        let v = values.get(..4)?;
+        if v.windows(2).any(|p| p[1] < p[0]) {
+            return None;
+        }
+        Some((us(v[3] - v[0]), us(v[3] - v[2]), Some(us(v[1] - v[0]))))
+    } else {
+        let v = values.get(..2)?;
+        if v[1] < v[0] {
+            return None;
+        }
+        let color = us(v[1] - v[0]);
+        Some((color, color, None))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn gpu_intervals_preserve_missing_shadow_and_complete_scene_gap() {
+        assert_eq!(
+            gpu_durations(&[10, 30, 40, 70], true, 1000.),
+            Some((60., 30., Some(20.)))
+        );
+        assert_eq!(
+            gpu_durations(&[40, 70], false, 1000.),
+            Some((30., 30., None))
+        );
+        for values in [
+            &[10, 9, 40, 70][..],
+            &[10, 30, 29, 70],
+            &[10, 30, 40, 39],
+            &[10, 30, 40],
+        ] {
+            assert_eq!(gpu_durations(values, true, 1000.), None);
+        }
+        assert_eq!(gpu_durations(&[40, 39], false, 1000.), None);
+        assert_eq!(gpu_durations(&[], false, 1000.), None);
+        for period in [0., -1., f64::NAN, f64::INFINITY] {
+            assert_eq!(gpu_durations(&[10, 20], false, period), None);
+        }
+    }
+
     // Protect the actual Rust/WGSL uniform boundary and direction convention;
     // scene validation alone cannot establish these renderer requirements.
     #[test]
@@ -2071,6 +2240,7 @@ mod tests {
                     pass.set_bind_group(0, &r.camera_bind, &[]);
                     pass.set_bind_group(1, r.materials.bind(&BindingKey::default()), &[]);
                     pass.set_bind_group(2, &r.lighting.bind, &[]);
+                    pass.set_bind_group(3, r.shadows.bind(), &[]);
                     pass.set_vertex_buffer(0, r.cube.vertices.slice(..));
                     pass.set_vertex_buffer(1, r.instances.slice(..));
                     pass.set_index_buffer(r.cube.indices.slice(..), wgpu::IndexFormat::Uint32);

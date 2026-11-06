@@ -4,7 +4,7 @@ use serde_json::{json, Map, Value};
 const TOOLS: &[(&str, &str, &[&str])] = &[
     (
         "lighting_inspect",
-        "Read all at-most-five authored lights, ambient, mode, session/revision and lighting mutation guards without filesystem access. Legacy means the fixed default illumination; no hidden authored light is synthesized. Custom-shader appearance is reported separately: successful compilation or binding presence does not certify authored-lighting semantics.",
+        "Read all at-most-five authored lights, ambient, mode, session/revision, mutation guards and the bounded authored Sun-shadow contract without filesystem access. Legacy means fixed illumination with no synthesized scene light. Authored settings are not last-rendered status. Sun shadows require the built-in pipeline; custom-shader appearance is separate and shadow support is unavailable, regardless of successful compilation or bindings.",
         &[],
     ),
     (
@@ -14,7 +14,7 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "scene_light_set",
-        "Replace the full value of an existing authored light; kind is immutable. No upsert or implicit replacement at capacity. Requires current scene session/revision and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Relative diffuse lighting has no shadows/PBR/HDR contract.",
+        "Replace the full value of an existing authored light; directional/point kind is immutable while directional shadow settings remain editable. No upsert or implicit replacement at capacity. Requires current scene session/revision and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Bounded Sun shadows require the built-in pipeline; no point shadows/PBR/HDR contract.",
         &["light_id", "light"],
     ),
     (
@@ -52,6 +52,28 @@ fn ambient_schema() -> Value {
     )
 }
 
+fn sun_shadow_schema() -> Value {
+    let mut schema = super::object_schema(
+        json!({
+            "enabled":{"type":"boolean"},
+            "quality":{"type":"string","enum":["standard","high"],
+                "description":"Bounded Sun depth map: standard1024 or high2048 texels per side."},
+            "depth_bias_texels":{"type":"number","minimum":0,"maximum":4,
+                "description":"Finite receiver depth bias in world shadow-texel units, not normalized depth or screen pixels."},
+            "normal_bias_texels":{"type":"number","minimum":0,"maximum":4,
+                "description":"Finite receiver normal offset in world shadow-texel units; excessive bias can detach or erase thin shadows."}
+        }),
+        vec![
+            "enabled",
+            "quality",
+            "depth_bias_texels",
+            "normal_bias_texels",
+        ],
+    );
+    schema["description"] = json!("Optional whole directional-only shadow value. Omission selects disabled/standard/depth0.15/normal0. A present object requires all four fields; null, partial values and unknown fields reject. Disabled nondefault settings remain authored data. Built-in pipeline only; inspect does not certify last-rendered status.");
+    schema
+}
+
 fn light_schema() -> Value {
     let transform = super::object_schema(
         json!({
@@ -72,7 +94,7 @@ fn light_schema() -> Value {
             "intensity":{"type":"number","minimum":0,"maximum":16,
                 "description":"Finite relative artistic intensity multiplied by linear RGB; not lux or lumens."},
             "kind":{"oneOf":[
-                super::object_schema(json!({"type":{"const":"directional"}}), vec!["type"]),
+                super::object_schema(json!({"type":{"const":"directional"},"shadow":sun_shadow_schema()}), vec!["type"]),
                 super::object_schema(json!({"type":{"const":"point"},
                     "range":{"type":"number","minimum":0.1,"maximum":10_000,
                         "description":"Finite point-light influence range in scene units."}}), vec!["type", "range"])
@@ -131,6 +153,26 @@ fn valid_ambient(value: &Value) -> bool {
     })
 }
 
+fn valid_sun_shadow(value: &Value) -> bool {
+    value.as_object().is_some_and(|shadow| {
+        super::exact_keys(
+            shadow,
+            &[
+                "enabled",
+                "quality",
+                "depth_bias_texels",
+                "normal_bias_texels",
+            ],
+            &[],
+        ) && shadow["enabled"].is_boolean()
+            && shadow["quality"]
+                .as_str()
+                .is_some_and(|quality| matches!(quality, "standard" | "high"))
+            && number(&shadow["depth_bias_texels"], 0.0, 4.0)
+            && number(&shadow["normal_bias_texels"], 0.0, 4.0)
+    })
+}
+
 fn valid_light(value: &Value) -> bool {
     let Some(light) = value.as_object() else {
         return false;
@@ -158,7 +200,10 @@ fn valid_light(value: &Value) -> bool {
         })
         && light["kind"].as_object().is_some_and(|kind| {
             match kind.get("type").and_then(Value::as_str) {
-                Some("directional") => super::exact_keys(kind, &["type"], &[]),
+                Some("directional") => {
+                    super::exact_keys(kind, &["type"], &["shadow"])
+                        && kind.get("shadow").is_none_or(valid_sun_shadow)
+                }
                 Some("point") => {
                     super::exact_keys(kind, &["type", "range"], &[])
                         && number(&kind["range"], 0.1, 10_000.0)
@@ -235,6 +280,60 @@ mod tests {
                 assert!(!valid(name, &missing));
             }
         }
+        let shadow = json!({"enabled":true,"quality":"high","depth_bias_texels":0.15,"normal_bias_texels":0});
+        let mut shadowed = set.clone();
+        shadowed["light"]["kind"]["shadow"] = shadow.clone();
+        assert!(valid("scene_light_create", &shadowed));
+        assert!(valid("scene_light_set", &shadowed));
+        shadowed["light"]["kind"]["shadow"]["enabled"] = json!(false);
+        assert!(
+            valid("scene_light_set", &shadowed),
+            "Disabled nondefault settings remain admitted"
+        );
+        let directional =
+            &advertised[2]["inputSchema"]["properties"]["light"]["properties"]["kind"]["oneOf"][0];
+        assert_eq!(
+            directional["required"],
+            json!(["type"]),
+            "Whole shadow field is optional"
+        );
+        assert_eq!(
+            directional["properties"]["shadow"]["additionalProperties"],
+            false
+        );
+        for field in directional["properties"]["shadow"]["required"]
+            .as_array()
+            .unwrap()
+        {
+            let mut missing = shadowed.clone();
+            missing["light"]["kind"]["shadow"]
+                .as_object_mut()
+                .unwrap()
+                .remove(field.as_str().unwrap());
+            assert!(
+                !valid("scene_light_set", &missing),
+                "Present shadow requires {field}"
+            );
+        }
+        for rejected in [
+            Value::Null,
+            json!({}),
+            json!({"enabled":1,"quality":"standard","depth_bias_texels":0,"normal_bias_texels":0}),
+            json!({"enabled":true,"quality":"ultra","depth_bias_texels":0,"normal_bias_texels":0}),
+            json!({"enabled":true,"quality":"standard","depth_bias_texels":4.00000001,"normal_bias_texels":0}),
+            json!({"enabled":true,"quality":"standard","depth_bias_texels":0,"normal_bias_texels":-1e-50}),
+            json!({"enabled":true,"quality":"standard","depth_bias_texels":0,"normal_bias_texels":0,"extra":true}),
+        ] {
+            let mut invalid = shadowed.clone();
+            invalid["light"]["kind"]["shadow"] = rejected;
+            assert!(!valid("scene_light_set", &invalid), "{invalid}");
+        }
+        let mut invalid = shadowed;
+        invalid["light"]["kind"] = json!({"type":"point","range":5,"shadow":shadow});
+        assert!(
+            !valid("scene_light_set", &invalid),
+            "Full valid shadow remains directional-only"
+        );
         for (pointer, value) in [
             ("/expected_revision", json!(9007199254740993u64)),
             ("/expected_revision", json!("01")),

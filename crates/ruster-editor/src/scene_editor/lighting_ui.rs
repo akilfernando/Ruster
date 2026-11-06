@@ -55,7 +55,7 @@ impl LightingDraft {
             color: baseline.color.map(|value| value.to_string()),
             intensity: baseline.intensity.to_string(),
             range: match baseline.kind {
-                LightKind::Directional => None,
+                LightKind::Directional { .. } => None,
                 LightKind::Point { range } => Some(range.to_string()),
             },
             baseline,
@@ -96,7 +96,7 @@ impl LightingDraft {
                     || baseline.validate().is_err()
                     || !matches!(
                         (&baseline.kind, range),
-                        (LightKind::Directional, None) | (LightKind::Point { .. }, Some(_))
+                        (LightKind::Directional { .. }, None) | (LightKind::Point { .. }, Some(_))
                     )
                     || range.as_ref().is_some_and(|text| !bounded(text))
                 {
@@ -304,7 +304,9 @@ impl SceneEditor {
                 .map_err(|error| error.to_string())?
                 .remove(0);
             let light = match kind {
-                LightKind::Directional => Light::directional(Some("Directional light".into())),
+                LightKind::Directional { .. } => {
+                    Light::directional(Some("Directional light".into()))
+                }
                 LightKind::Point { .. } => Light::point(Some("Point light".into())),
             };
             let edit = self
@@ -361,7 +363,7 @@ impl SceneEditor {
         ui.strong("Light");
         ui.label(
             match self.session.scene().lighting.light(&id).unwrap().kind {
-                LightKind::Directional => "Directional · rotation sets emitted direction",
+                LightKind::Directional { .. } => "Directional · rotation sets emitted direction",
                 LightKind::Point { .. } => "Point · position sets source; range is in scene units",
             },
         );

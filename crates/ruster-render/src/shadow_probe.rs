@@ -5,55 +5,7 @@ use crate::shadow_math::fit_directional_shadow;
 
 const SIZE: u32 = 128;
 const MAP: u32 = 512;
-const SHADOW: &str = r#"
-struct SunShadow { view_projection: mat4x4<f32>, parameters: vec4<f32> };
-@group(3) @binding(0) var<uniform> sun_shadow: SunShadow;
-@group(3) @binding(1) var sun_depth: texture_depth_2d;
-@group(3) @binding(2) var sun_compare: sampler_comparison;
-fn sun_visibility(world: vec3<f32>, normal: vec3<f32>) -> f32 {
-    let light_clip = sun_shadow.view_projection * vec4<f32>(world + normal * sun_shadow.parameters.w, 1.0);
-    let ndc = light_clip.xyz / light_clip.w;
-    let uv = vec2<f32>(ndc.x * 0.5 + 0.5, 0.5 - ndc.y * 0.5);
-    // Positional derivatives describe the receiver plane, independent of its
-    // interpolated shading normal. Evaluate before varying coverage returns.
-    let dx = dpdx(vec3<f32>(uv, ndc.z));
-    let dy = dpdy(vec3<f32>(uv, ndc.z));
-    let determinant = dx.x * dy.y - dx.y * dy.x;
-    let scale = abs(dx.x * dy.y) + abs(dx.y * dy.x);
-    var gradient = vec2<f32>(0.0);
-    if abs(determinant) > max(1e-12, scale * 1e-5) {
-        gradient = vec2<f32>(dx.z * dy.y - dy.z * dx.y,
-                             dy.z * dx.x - dx.z * dy.x) / determinant;
-    }
-    if abs(ndc.x) > 1.0 || abs(ndc.y) > 1.0 || ndc.z < 0.0 || ndc.z > 1.0 { return 1.0; }
-    let texel = floor(uv / sun_shadow.parameters.y);
-    var visibility = 0.0;
-    for (var y = -1; y <= 1; y = y + 1) {
-        for (var x = -1; x <= 1; x = x + 1) {
-            // Nearest comparison reads the actual texel center. Correcting
-            // nominal +/-1 offsets alone leaves a half-texel depth mismatch.
-            let sample_uv = (texel + vec2<f32>(f32(x), f32(y)) + vec2<f32>(0.5)) * sun_shadow.parameters.y;
-            let reference = ndc.z + dot(gradient, sample_uv - uv) - sun_shadow.parameters.z;
-            visibility += textureSampleCompareLevel(sun_depth, sun_compare,
-                sample_uv, reference);
-        }
-    }
-    return visibility / 9.0;
-}
-"#;
-const DEPTH_SHADER: &str = r#"
-struct SunShadow { view_projection: mat4x4<f32>, parameters: vec4<f32> };
-@group(0) @binding(0) var<uniform> sun_shadow: SunShadow;
-struct Vertex {
-    @location(0) position: vec3<f32>,
-    @location(2) model0: vec4<f32>, @location(3) model1: vec4<f32>,
-    @location(4) model2: vec4<f32>, @location(5) model3: vec4<f32>,
-};
-@vertex fn vs(v: Vertex) -> @builtin(position) vec4<f32> {
-    let model = mat4x4<f32>(v.model0, v.model1, v.model2, v.model3);
-    return sun_shadow.view_projection * model * vec4<f32>(v.position, 1.0);
-}
-"#;
+const DEPTH_SHADER: &str = include_str!("shadow_depth.wgsl");
 
 #[repr(C, align(16))]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -90,6 +42,7 @@ impl Default for Case {
 struct Probe {
     resources: Resources,
     shadow_color: wgpu::RenderPipeline,
+    baseline_color: wgpu::RenderPipeline,
     shadow_depth: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     shadow_bind: wgpu::BindGroup,
@@ -149,13 +102,15 @@ impl Probe {
             ],
             immediate_size: 0,
         });
-        let original = "light_sum += lighting.directional_color_intensity.rgb * max(dot(n, lighting.direction_to_light.xyz), 0.0);";
-        assert_eq!(default_shader().matches(original).count(), 1);
-        let body = default_shader().replacen(original,
-            "var direct = lighting.directional_color_intensity.rgb * max(dot(n, lighting.direction_to_light.xyz), 0.0);\nif sun_shadow.parameters.x > 0.5 { direct *= sun_visibility(v.world_position, n); }\nlight_sum += direct;",1);
-        let shadow_color =
-            validated_pipeline(device, &color_layout, &format!("{SHADOW}\n{body}"), 1)
-                .expect("generic shadow color pipeline");
+        let shadow_color = validated_pipeline(device, &color_layout, default_shader(), 1)
+            .expect("production Sun color shader");
+        let baseline_color = validated_pipeline(
+            device,
+            &color_layout,
+            include_str!("shadow_probe_v2a.wgsl"),
+            1,
+        )
+        .expect("immutable V2a compatibility fixture");
         let depth_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("depth-only uniform: no sampled attachment"),
             entries: &[uniform_entry],
@@ -242,6 +197,7 @@ impl Probe {
         Self {
             resources,
             shadow_color,
+            baseline_color,
             shadow_depth,
             uniform,
             shadow_bind,
@@ -392,7 +348,7 @@ impl Probe {
             pass.set_pipeline(if shadow.is_some() {
                 &self.shadow_color
             } else {
-                &self.resources.pipeline
+                &self.baseline_color
             });
             pass.set_bind_group(0, &self.resources.camera_bind, &[]);
             pass.set_bind_group(
@@ -401,9 +357,7 @@ impl Probe {
                 &[],
             );
             pass.set_bind_group(2, &self.resources.lighting.bind, &[]);
-            if shadow.is_some() {
-                pass.set_bind_group(3, &self.shadow_bind, &[]);
-            }
+            pass.set_bind_group(3, &self.shadow_bind, &[]);
             pass.set_vertex_buffer(0, self.resources.cube.vertices.slice(..));
             pass.set_vertex_buffer(1, self.resources.instances.slice(..));
             pass.set_index_buffer(

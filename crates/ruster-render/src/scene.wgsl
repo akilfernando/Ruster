@@ -62,7 +62,9 @@ struct Output {
     let n = v.normal / sqrt(max(dot(v.normal, v.normal), 1e-8));
     var light_sum = lighting.ambient.rgb;
     if lighting.mode_counts.z != 0u {
-        light_sum += lighting.directional_color_intensity.rgb * max(dot(n, lighting.direction_to_light.xyz), 0.0);
+        var direct = lighting.directional_color_intensity.rgb * max(dot(n, lighting.direction_to_light.xyz), 0.0);
+        if sun_shadow.parameters.x > 0.5 { direct *= sun_visibility(v.world_position, n); }
+        light_sum += direct;
     }
     for (var i = 0u; i < min(lighting.mode_counts.y, 4u); i++) {
         let point = lighting.points[i];

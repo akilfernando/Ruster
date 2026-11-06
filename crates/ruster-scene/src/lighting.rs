@@ -79,7 +79,7 @@ impl Lighting {
             validate_id(id)?;
             light.validate()?;
             match light.kind {
-                LightKind::Directional => directional_count += 1,
+                LightKind::Directional { .. } => directional_count += 1,
                 LightKind::Point { .. } => point_count += 1,
             }
         }
@@ -151,7 +151,9 @@ impl Light {
             enabled: true,
             color: [1.0; 3],
             intensity: 0.72,
-            kind: LightKind::Directional,
+            kind: LightKind::Directional {
+                shadow: SunShadow::default(),
+            },
         }
     }
 
@@ -186,11 +188,14 @@ impl Light {
                 "light intensity must be finite in 0..=16".into(),
             ));
         }
-        if let LightKind::Point { range } = self.kind {
-            if !range.is_finite() || !(0.1..=10_000.0).contains(&range) {
-                return Err(SceneError::Invalid(
-                    "point light range must be finite in 0.1..=10000".into(),
-                ));
+        match self.kind {
+            LightKind::Directional { shadow } => shadow.validate()?,
+            LightKind::Point { range } => {
+                if !range.is_finite() || !(0.1..=10_000.0).contains(&range) {
+                    return Err(SceneError::Invalid(
+                        "point light range must be finite in 0.1..=10000".into(),
+                    ));
+                }
             }
         }
         Ok(())
@@ -200,11 +205,74 @@ impl Light {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum LightKind {
-    #[serde(deserialize_with = "deserialize_empty_variant")]
-    Directional,
+    Directional {
+        #[serde(default, skip_serializing_if = "SunShadow::is_default")]
+        shadow: SunShadow,
+    },
     Point {
         range: f32,
     },
+}
+
+/// Bounded single-map Sun quality. These feasibility defaults remain subject to
+/// actual Daylight Study visual/cost evaluation; they are not native acceptance.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ShadowQuality {
+    #[default]
+    Standard,
+    High,
+}
+
+impl ShadowQuality {
+    pub fn map_size(self) -> u32 {
+        match self {
+            Self::Standard => 1024,
+            Self::High => 2048,
+        }
+    }
+}
+
+/// Authored Sun settings, retained even when disabled. Biases are in world
+/// shadow-texel units, not normalized depth or screen pixels. Only omission of
+/// the entire directional `shadow` field defaults; a present object is complete.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SunShadow {
+    pub enabled: bool,
+    pub quality: ShadowQuality,
+    pub depth_bias_texels: f32,
+    pub normal_bias_texels: f32,
+}
+
+impl Default for SunShadow {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            quality: ShadowQuality::Standard,
+            depth_bias_texels: 0.15,
+            normal_bias_texels: 0.0,
+        }
+    }
+}
+
+impl SunShadow {
+    pub fn is_default(&self) -> bool {
+        *self == Self::default()
+    }
+
+    pub fn validate(&self) -> Result<(), SceneError> {
+        if [self.depth_bias_texels, self.normal_bias_texels]
+            .into_iter()
+            .all(|bias| bias.is_finite() && (0.0..=4.0).contains(&bias))
+        {
+            Ok(())
+        } else {
+            Err(SceneError::Invalid(
+                "Sun shadow depth/normal bias must be finite in 0..=4 shadow texels".into(),
+            ))
+        }
+    }
 }
 
 fn validate_rgb(color: &[f32; 3]) -> Result<(), SceneError> {
@@ -260,6 +328,7 @@ mod tests {
         );
         for value in [
             json!({"mode": "legacy", "ambient": {"color": [1, 1, 1], "intensity": 0.28}}),
+            json!({"mode": "legacy", "shadow": null}),
             json!({"mode": "authored", "ambient": {"color": [1, 1, 1], "intensity": 0.28}, "lights": {}, "extra": true}),
             json!({"mode": "authored", "ambient": {"color": [1, 1, 1], "intensity": 0.28, "extra": true}, "lights": {}}),
         ] {
@@ -268,6 +337,7 @@ mod tests {
         for value in [
             json!({"type": "directional", "range": 5}),
             json!({"type": "point", "range": 5, "extra": true}),
+            json!({"type": "point", "range": 5, "shadow": null}),
         ] {
             assert!(serde_json::from_value::<LightKind>(value).is_err());
         }
@@ -279,6 +349,78 @@ mod tests {
         );
         value["id"] = json!("misplaced-id");
         assert!(serde_json::from_value::<Light>(value).is_err());
+    }
+
+    // Unique risk: disabled nondefault settings must persist, while omission is
+    // the only defaulting path and a present shadow object must be complete.
+    #[test]
+    fn sun_shadow_schema_defaults_and_bias_limits_preserve_disabled_settings() {
+        let default = SunShadow::default();
+        let directional = LightKind::Directional { shadow: default };
+        assert_eq!(
+            serde_json::to_value(&directional).unwrap(),
+            json!({"type": "directional"})
+        );
+        assert_eq!(
+            serde_json::from_value::<LightKind>(json!({"type": "directional"})).unwrap(),
+            directional
+        );
+        assert_eq!(ShadowQuality::Standard.map_size(), 1024);
+        assert_eq!(ShadowQuality::High.map_size(), 2048);
+        let disabled = SunShadow {
+            enabled: false,
+            quality: ShadowQuality::High,
+            depth_bias_texels: 1.25,
+            normal_bias_texels: 0.5,
+        };
+        let value = serde_json::to_value(LightKind::Directional { shadow: disabled }).unwrap();
+        assert_eq!(value["shadow"]["quality"], "high");
+        assert_eq!(
+            serde_json::from_value::<LightKind>(value.clone()).unwrap(),
+            LightKind::Directional { shadow: disabled }
+        );
+        for field in [
+            "enabled",
+            "quality",
+            "depth_bias_texels",
+            "normal_bias_texels",
+        ] {
+            let mut incomplete = value.clone();
+            incomplete["shadow"].as_object_mut().unwrap().remove(field);
+            assert!(
+                serde_json::from_value::<LightKind>(incomplete).is_err(),
+                "{field}"
+            );
+        }
+        for shadow in [
+            serde_json::Value::Null,
+            json!({}),
+            json!({"enabled": false, "quality": "ultra", "depth_bias_texels": 0.15, "normal_bias_texels": 0}),
+            json!({"enabled": false, "quality": "standard", "depth_bias_texels": 0.15, "normal_bias_texels": 0, "extra": true}),
+        ] {
+            assert!(serde_json::from_value::<LightKind>(
+                json!({"type": "directional", "shadow": shadow})
+            )
+            .is_err());
+        }
+        for bias in [0.0, 4.0, f32::NAN, f32::INFINITY, -0.1, 4.1] {
+            let expected_valid = bias.is_finite() && (0.0..=4.0).contains(&bias);
+            for shadow in [
+                SunShadow {
+                    depth_bias_texels: bias,
+                    ..default
+                },
+                SunShadow {
+                    normal_bias_texels: bias,
+                    ..default
+                },
+            ] {
+                assert_eq!(shadow.validate().is_ok(), expected_valid);
+                let mut light = Light::directional(None);
+                light.kind = LightKind::Directional { shadow };
+                assert_eq!(light.validate().is_ok(), expected_valid);
+            }
+        }
     }
 
     #[test]

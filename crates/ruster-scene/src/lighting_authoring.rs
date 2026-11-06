@@ -54,7 +54,7 @@ impl Session {
         }
         let before = self.scene().lighting.clone();
         let (mut after, mut created_ids) =
-            self.promoted_lighting(&[id], matches!(light.kind, LightKind::Directional))?;
+            self.promoted_lighting(&[id], matches!(light.kind, LightKind::Directional { .. }))?;
         let Lighting::Authored { lights, .. } = &mut after else {
             unreachable!()
         };
@@ -363,5 +363,67 @@ mod tests {
         let delta = SceneDelta::Lighting { before, after };
         assert!(delta.apply(&mut scene, false).is_err());
         assert_eq!(scene, unchanged);
+    }
+
+    // Unique risk: complete off-default Sun settings must survive whole-light
+    // history and mixed clipboard operations without changing kind/ID rules.
+    #[test]
+    fn shadow_settings_survive_disabled_history_and_atomic_mixed_clipboard() {
+        let mut scene = Scene::demo();
+        scene.lighting = Lighting::authored_default("sun");
+        let mut session = Session::new(scene).unwrap();
+        let mut sun = session.scene().lighting.light("sun").unwrap().clone();
+        let enabled = SunShadow {
+            enabled: true,
+            quality: ShadowQuality::High,
+            depth_bias_texels: 0.9,
+            normal_bias_texels: 0.25,
+        };
+        sun.kind = LightKind::Directional { shadow: enabled };
+        session.set_light(0, "sun", sun.clone()).unwrap();
+        let enabled_lighting = session.scene().lighting.clone();
+        sun.kind = LightKind::Directional {
+            shadow: SunShadow {
+                enabled: false,
+                ..enabled
+            },
+        };
+        session.set_light(1, "sun", sun.clone()).unwrap();
+        let mut restored =
+            Session::from_snapshot_bytes(&session.snapshot_bytes().unwrap()).unwrap();
+        assert_eq!(restored.scene(), session.scene());
+        restored.undo(2).unwrap();
+        assert_eq!(restored.scene().lighting, enabled_lighting);
+        restored.redo(3).unwrap();
+        assert_eq!(restored.scene().lighting.light("sun"), Some(&sun));
+        let unchanged = restored.snapshot_bytes().unwrap();
+        assert!(restored
+            .duplicate_many(
+                4,
+                &[
+                    ("left".into(), "copy".into()),
+                    ("sun".into(), "sun-copy".into())
+                ]
+            )
+            .is_err());
+        assert_eq!(restored.snapshot_bytes().unwrap(), unchanged);
+        let mut paste = Session::new(Scene::empty("shadow-paste")).unwrap();
+        paste
+            .create_many_with_materials_and_lights(
+                0,
+                vec![Object::cube("pasted-object", None)],
+                BTreeMap::new(),
+                BTreeMap::from([("pasted-sun".into(), sun.clone())]),
+            )
+            .unwrap();
+        let pasted = paste.scene().clone();
+        paste.undo(1).unwrap();
+        assert!(paste.scene().lighting.is_legacy());
+        assert!(paste.scene().objects.is_empty());
+        paste.redo(2).unwrap();
+        assert_eq!(paste.scene().objects, pasted.objects);
+        assert_eq!(paste.scene().lighting.light("pasted-sun"), Some(&sun));
+        let reopened = Session::from_snapshot_bytes(&paste.snapshot_bytes().unwrap()).unwrap();
+        assert_eq!(reopened.scene(), paste.scene());
     }
 }

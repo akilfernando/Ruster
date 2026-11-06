@@ -50,7 +50,7 @@ impl LightingPacket {
         for light in lights.values().filter(|light| light.enabled) {
             let color = (Vec3::from(light.color) * light.intensity).to_array();
             match light.kind {
-                LightKind::Directional => {
+                LightKind::Directional { .. } => {
                     let rotation = light.transform.rotation;
                     // Transform's fixed-axisXYZ is Rz*Ry*Rx. Local-Z is the
                     // emitted ray; local+Z is the direction toward its source.

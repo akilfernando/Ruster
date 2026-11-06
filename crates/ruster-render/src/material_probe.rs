@@ -246,6 +246,7 @@ fn render(
         pass.set_bind_group(0, &r.camera_bind, &[]);
         pass.set_bind_group(1, r.materials.bind(key), &[]);
         pass.set_bind_group(2, &r.lighting.bind, &[]);
+        pass.set_bind_group(3, r.shadows.bind(), &[]);
         pass.set_vertex_buffer(0, gpu.vertices.slice(..));
         pass.set_vertex_buffer(1, r.instances.slice(..));
         pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
@@ -460,7 +461,11 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
     let mut previous = LightingPacket::legacy();
     let mut legacy_pixels = None;
     let mut observations = BTreeMap::new();
+    let context = egui::Context::default();
     for (name, lighting) in cases.drain(..) {
+        context
+            .run_pass(egui::RawInput::default(), |_| {})
+            .drop_without_applying_deltas();
         scene.lighting = lighting;
         let source = if name.starts_with("rotated-") && name != "rotated-sun" {
             scene.objects[0].transform = Transform {
@@ -517,6 +522,9 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             lighting: packet,
             size: egui::vec2(64., 64.),
             cpu_us: 0.,
+            shadow: None,
+            context: context.clone(),
+            prepared: std::sync::atomic::AtomicBool::new(false),
         };
         let mut encoder = device.create_command_encoder(&Default::default());
         let extra = callback.prepare(device, queue, &screen, &mut encoder, &mut resources);
@@ -697,7 +705,7 @@ fn reference_lighting(
                 * f64::from(ambient.intensity);
             for light in lights.values().filter(|light| light.enabled) {
                 let amount = match light.kind {
-                    LightKind::Directional => normal
+                    LightKind::Directional { .. } => normal
                         .dot(rotate(glam::DVec3::Z, light.transform.rotation).normalize())
                         .max(0.),
                     LightKind::Point { range } => {

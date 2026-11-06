@@ -259,6 +259,53 @@ class CreationDistributionTests(unittest.TestCase):
                 legacy_lighting = copy.deepcopy(lit_scene)
                 legacy_lighting["scene"]["lighting"] = {"mode": "legacy"}
                 self.assertNotIn("lighting", package_creation.typed_scene(legacy_lighting))
+                # Scene8 always selects a new exact profile, even with no shadow
+                # field/enabled Sun. Light resources remain scene data only.
+                shadow_scene = copy.deepcopy(lit_scene)
+                shadow_scene["format_version"] = 8
+                shadow_bytes = package_creation.encoded(shadow_scene)
+                shadow_content = {**lit_content, "schema": 4,
+                                  "scene_sha256": package_creation.sha256(shadow_bytes)}
+                (content_root / "scene.json").write_bytes(shadow_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(shadow_content))
+                for old_profile in (package_creation.PROFILE, package_creation.CAMERA_PROFILE,
+                                    package_creation.MATERIAL_PROFILE, package_creation.LIGHTING_PROFILE):
+                    capable["profile"] = old_profile
+                    (kit / "runtime.json").write_bytes(package_creation.encoded(capable))
+                    with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old-kit preflight")):
+                        with self.assertRaisesRegex(ValueError, "Scene8 sun_shadows"):
+                            package_creation.package(kit, content_root, failed)
+                    self.assertFalse(failed.exists())
+                sun = copy.deepcopy(shadow_scene["scene"]["lighting"]["lights"]["point"])
+                sun["kind"] = {"type": "directional", "shadow": {"enabled": True, "quality": "high",
+                    "depth_bias_texels": 0.15, "normal_bias_texels": 0.1}}
+                shadow_scene["scene"]["lighting"]["lights"]["sun"] = sun
+                shadow_bytes = package_creation.encoded(shadow_scene)
+                shadow_content["scene_sha256"] = package_creation.sha256(shadow_bytes)
+                (content_root / "scene.json").write_bytes(shadow_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(shadow_content))
+                capable["profile"] = package_creation.SUN_SHADOW_PROFILE
+                (kit / "runtime.json").write_bytes(package_creation.encoded(capable))
+                shadow_response = {**framed_response, "authored_scene": package_creation.typed_scene(shadow_scene)}
+                typed_shadow = shadow_response["authored_scene"]["lighting"]["lights"]["sun"]["kind"]["shadow"]
+                self.assertEqual(typed_shadow["depth_bias_texels"], 0.15000000596046448)
+                self.assertEqual(typed_shadow["normal_bias_texels"], 0.10000000149011612)
+                shadow_output = base / "sun-shadow.tar.gz"
+                with patch.object(package_creation, "run_runtime", return_value=shadow_response):
+                    package_creation.package(kit, content_root, shadow_output)
+                with tarfile.open(shadow_output) as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"], 2)
+                    self.assertEqual(set(descriptor), {"format", "version", "title", "scene", "tick_millis",
+                                                       "meshes", "textures", "initial_camera"})
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), shadow_bytes)
+                    self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"],
+                                     package_creation.SUN_SHADOW_PROFILE)
+                # Current kit retains the Scene7/schema3 route as well.
+                (content_root / "scene.json").write_bytes(lit_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(lit_content))
+                with patch.object(package_creation, "run_runtime", return_value=lit_response):
+                    package_creation.package(kit, content_root, base / "lighting-with-shadow-kit.tar.gz")
                 # The new kit still packages Scene6; the old Scene5 fixture below
                 # exercises the older descriptor1 path through this same kit.
                 (content_root / "scene.json").write_bytes(textured_bytes)
@@ -306,6 +353,8 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.MATERIAL_PROFILE, "capabilities": ["opaque_materials", "initial_camera"]},
                         {**package_creation.LIGHTING_PROFILE, "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "shadows"]},
                         {**package_creation.LIGHTING_PROFILE, "capabilities": ["authored_lighting", "initial_camera", "opaque_materials"]},
+                        {**package_creation.SUN_SHADOW_PROFILE, "capabilities": ["initial_camera", "opaque_materials", "sun_shadows", "authored_lighting"]},
+                        {**package_creation.SUN_SHADOW_PROFILE, "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "point_shadows"]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
                         package_creation.check_profile(invalid_profile)
@@ -389,6 +438,67 @@ class CreationDistributionTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "cancelled"):
                     package_creation.package(kit, content_root, failed, cancellation)
                 self.assertFalse(failed.exists())
+
+    def test_sun_shadow_admission_uses_only_owning_current_and_history_fields(self):
+        """Strict settings cannot hide in history or be confused with behavior data."""
+        shadow = {"enabled": False, "quality": "standard", "depth_bias_texels": 0.15,
+                  "normal_bias_texels": 0}
+        sun = {"transform": {"translation": [0, 2, 0], "rotation": [0, 0, 0], "scale": [1, 1, 1]},
+               "enabled": True, "color": [1, 1, 1], "intensity": 0.72,
+               "kind": {"type": "directional", "shadow": shadow}}
+        lighting = {"mode": "authored", "ambient": {"color": [1, 1, 1], "intensity": 0.28},
+                    "lights": {"sun": sun}}
+        document = {"format": "ruster-scene", "format_version": 8,
+                    "scene": {"id": "shadow-admission", "revision": 0, "objects": [], "lighting": lighting},
+                    "authoring": {"bindings": {"behavior": {"properties": {"shadow": {"type": "bool", "value": True}}}}},
+                    "undo": [], "redo": []}
+        self.assertEqual(package_creation.scene_dependencies(document), (set(), set()))
+        typed = package_creation.typed_scene(document)
+        self.assertEqual(typed["lighting"]["lights"]["sun"]["kind"], {"type": "directional"})
+        omitted = copy.deepcopy(document)
+        omitted["scene"]["lighting"]["lights"]["sun"]["kind"].pop("shadow")
+        self.assertEqual(package_creation.typed_scene(omitted), typed)
+        retained = copy.deepcopy(document)
+        retained["scene"]["lighting"]["lights"]["sun"]["kind"]["shadow"]["quality"] = "high"
+        self.assertIn("shadow", package_creation.typed_scene(retained)["lighting"]["lights"]["sun"]["kind"],
+                      "Disabled nondefault settings remain authored data")
+        invalid_shadows = [None, {}, {**shadow, "enabled": 0}, {**shadow, "quality": "ultra"},
+                           {**shadow, "depth_bias_texels": -1e-50}, {**shadow, "normal_bias_texels": 4.00000001},
+                           {**shadow, "depth_bias_texels": True}, {**shadow, "normal_bias_texels": float("inf")},
+                           {**shadow, "extra": 0}]
+        invalid_shadows.extend({key: value for key, value in shadow.items() if key != missing} for missing in shadow)
+        for candidate in invalid_shadows:
+            invalid = copy.deepcopy(document)
+            invalid["scene"]["lighting"]["lights"]["sun"]["kind"]["shadow"] = candidate
+            with self.subTest(shadow=candidate), self.assertRaises(ValueError):
+                package_creation.scene_dependencies(invalid)
+        for stack, endpoint in (("undo", "before"), ("redo", "after")):
+            invalid = copy.deepcopy(omitted)
+            delta = {"kind": "lighting", "before": copy.deepcopy(lighting), "after": copy.deepcopy(lighting)}
+            invalid[stack] = [{"scene": [copy.deepcopy(delta)]}]
+            invalid[stack][0]["scene"][0][endpoint]["lights"]["sun"]["kind"]["shadow"] = None
+            with self.subTest(stack=stack, endpoint=endpoint), self.assertRaises(ValueError):
+                package_creation.scene_dependencies(invalid)
+        point = copy.deepcopy(document)
+        point["scene"]["lighting"]["lights"]["sun"]["kind"] = {"type": "point", "range": 5, "shadow": shadow}
+        with self.assertRaisesRegex(ValueError, "directional"):
+            package_creation.scene_dependencies(point)
+        for version in range(1, 8):
+            old = copy.deepcopy(document)
+            old["format_version"] = version
+            with self.subTest(version=version), self.assertRaisesRegex(ValueError, "Scene8 sun_shadows"):
+                package_creation.validate_sun_shadows(old)
+            old["scene"].pop("lighting")
+            # Arbitrary behavior property names are not scene-light definitions.
+            package_creation.validate_sun_shadows(old)
+            delta = {"kind": "lighting", "before": lighting, "after": {"mode": "legacy"}}
+            old["redo"] = [delta] if version <= 4 else [{"scene": [delta]}]
+            with self.subTest(history_version=version), self.assertRaisesRegex(ValueError, "Scene8 sun_shadows"):
+                package_creation.validate_sun_shadows(old)
+        top_level = copy.deepcopy(omitted)
+        top_level["scene"]["lighting"]["lights"]["sun"]["shadow"] = shadow
+        with self.assertRaisesRegex(ValueError, "kind.shadow"):
+            package_creation.scene_dependencies(top_level)
 
     @unittest.skipUnless(sys.platform == "linux", "Linux process lifecycle required")
     def test_cancellation_reaps_the_owned_preflight_child(self):
