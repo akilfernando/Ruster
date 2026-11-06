@@ -3,6 +3,10 @@ mod lighting_gpu;
 mod material_gpu;
 #[cfg(test)]
 mod material_probe;
+#[cfg(test)]
+mod shadow_math;
+#[cfg(test)]
+mod shadow_probe;
 use lighting_gpu::{LightingGpu, LightingPacket, LIGHTING_BYTES};
 use material_gpu::{BindingKey, MaterialGpu};
 use std::collections::BTreeMap;

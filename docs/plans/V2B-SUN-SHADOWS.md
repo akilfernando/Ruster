@@ -1,6 +1,6 @@
-# V2b proposal: Sun shadows for an authored daylight study
+# V2b: Sun shadows for an authored daylight study
 
-Proposed2026-11-06 by root/Astra after accepted [V2a](V2A-AUTHORED-LIGHTING.md). **Not user-approved, not an active goal, no implementation started.** The user requested definition of the next goal. This proposal serves the confirmed creator-first/manual-MCP/lean-quality requirements; shadow type, limits, demonstration and numerical ceilings below are agent-selected proposals.
+Approved2026-11-06 by the user: “Set the goal and get started.” **Active goal; feasibility in progress.** Root/Astra defined this after accepted [V2a](V2A-AUTHORED-LIGHTING.md). The approved slice serves creator-first/manual-MCP/lean-quality requirements; numerical ceilings and concrete architecture remain agent-selected choices evaluated at the feasibility gate.
 
 ## Concrete goal
 
@@ -18,7 +18,7 @@ Inspected2026-11-06 at code48ac34f/documentation232ac98. Scene7 has one directio
 
 The accepted V2a CPU/GPU medians and native reference values provide context, not a pass for the extra rendering work. The new matched baseline must pin the current V2a release rather than comparing against V1 or mixing historical dimensions/tails.
 
-## Proposed functional boundary
+## Approved functional boundary
 
 - One optional shadow-casting **Sun**. Existing point lights and ambient remain independently unshadowed. A shadow attenuates only the Sun's direct contribution, never the complete shaded color.
 - All supported opaque geometry casts and receives shadows. Defer per-object cast/receive flags unless the feasibility exhibit demonstrates a concrete blocked creator need; replan that addition explicitly.
@@ -33,7 +33,7 @@ First demonstrate the smallest shared scene→shadow-render→save→standalone 
 
 | Decision | Required evidence/choice |
 | --- | --- |
-| Coverage and stability | Start by evaluating a camera-independent bounded-scene orthographic fit. Include off-camera casters, broad receivers, thin geometry, negative/nonuniform transforms, near-parallel Sun directions and finite degenerate/empty scenes. Prevent unexplained clipping and camera-motion shimmer. Document supported coverage/scale and expose an intelligible diagnostic or control where needed. Do not silently add cascades/open-world coverage. |
+| Coverage and stability | Start by evaluating a camera-independent bounded-scene orthographic fit. Include off-camera casters, broad receivers, thin geometry, negative vertex coordinates and supported positive nonuniform scales (negative transform scale remains rejected), near-parallel Sun directions and finite degenerate/empty scenes. Prevent unexplained clipping and camera-motion shimmer. Document supported coverage/scale and expose an intelligible diagnostic or control where needed. Do not silently add cascades/open-world coverage. |
 | Bias/filter quality | Select practical defaults using actual contact, grazing surfaces, small/large features and edge motion. Avoid objectionable self-shadow patterns, detached contact shadows and leaks. Show advanced controls only when they solve a demonstrated problem; specify units/ranges. |
 | GPU/CPU ownership | Select depth format/sample capability, comparison/filter sampling, pass order, stable pipeline/bindings and callback lifetime. Reuse accepted mesh/instance data. Bound replacement/in-flight overlap and release on disabling/scene replacement/close. Do not assume logical texture payload is whole-driver allocation. |
 | Invalidation | Evaluate caching unchanged shadow data against real cost. If retained, key it to the actual rendered geometry/assets/transforms/light/coverage state, including transient and runtime views—not only authored revision. Static redraw must not cause needless allocation, pipeline rebuilding or source reupload. |
@@ -84,4 +84,4 @@ Primary sources accessed2026-11-06:
 - [Godot lights and shadows](https://docs.godotengine.org/en/stable/tutorials/3d/lights_and_shadows.html): directional depth projection, coverage/resolution and split cost; bias trades self-shadowing against detached/thinner shadows. This motivates the bounded coverage/quality gate, not copying a renderer or choosing cascades.
 - [Unity shadow troubleshooting](https://docs.unity.com/en-us/engine/6000.0/manual/lighting-overview/shadows/shadow-performance): shadow-map rendering adds geometry work; bias/normal bias can cause acne, detachment and leaks. This motivates actual contact/error review and measuring the full added pass, not a promised performance result.
 
-Inspected owning sources: `crates/ruster-render/src/lib.rs` Metrics/pipeline/callback pass and `scene.wgsl`; `crates/ruster-scene/src/lighting.rs`; app/export authored_lighting profile and `scripts/package_creation.py`. Renderer currently has no shadow implementation. This proposal and numerical ceilings require scope approval before activation; no architecture decision or implemented capability is established by this document.
+Inspected owning sources: `crates/ruster-render/src/lib.rs` Metrics/pipeline/callback pass and `scene.wgsl`; `crates/ruster-scene/src/lighting.rs`; app/export authored_lighting profile and `scripts/package_creation.py`. Renderer currently has no shadow implementation. The user approved activation; no architecture decision or implemented shadow capability is established by this plan alone. Feasibility protocol `.studio/feasibility-protocol-1.json` in the Daylight Study project freezes initial measurement ceilings/conditions before candidate implementation/results.
