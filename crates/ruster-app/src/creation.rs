@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, path::Path, time::Duration};
 
 pub const DESCRIPTOR_NAME: &str = "app.json";
 pub const FORMAT: &str = "ruster-application";
-pub const VERSION: u32 = 3;
+pub const VERSION: u32 = 4;
 pub const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
@@ -58,6 +58,14 @@ pub struct CreationManifest {
         deserialize_with = "unique_meshes"
     )]
     pub textures: BTreeMap<String, String>,
+    /// Descriptor4 requires an explicit interpretation for every texture ID,
+    /// including an empty map when there are no textures. Older descriptors omit it.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "unique_texture_roles"
+    )]
+    pub texture_roles: Option<BTreeMap<String, ruster_assets::TextureRole>>,
     pub tick_millis: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_camera: Option<InitialCamera>,
@@ -77,6 +85,16 @@ where
     D: serde::Deserializer<'de>,
 {
     unique_mapping(deserializer)
+}
+
+fn unique_texture_roles<'de, D>(
+    deserializer: D,
+) -> Result<Option<BTreeMap<String, ruster_assets::TextureRole>>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    // A present null must not become an omitted old-descriptor field.
+    unique_mapping(deserializer).map(Some)
 }
 
 fn unique_mapping<'de, D, T>(deserializer: D) -> Result<BTreeMap<String, T>, D::Error>
@@ -126,7 +144,7 @@ impl CreationManifest {
     pub fn validate(&self) -> Result<(), String> {
         if self.format != FORMAT || !(1..=VERSION).contains(&self.version) {
             return Err(
-                "Unsupported application descriptor; expected ruster-application version 1 through 3"
+                "Unsupported application descriptor; expected ruster-application version 1 through 4"
                     .into(),
             );
         }
@@ -136,8 +154,20 @@ impl CreationManifest {
         if self.version < 3 && !self.mesh_normal_policies.is_empty() {
             return Err("Mesh normal policies require descriptor version 3".into());
         }
-        if self.version == 3 && !self.meshes.keys().eq(self.mesh_normal_policies.keys()) {
-            return Err("Descriptor3 requires one normal policy per mesh".into());
+        if self.version >= 3 && !self.meshes.keys().eq(self.mesh_normal_policies.keys()) {
+            return Err("Descriptor3 and later require one normal policy per mesh".into());
+        }
+        if self.version < 4 && self.texture_roles.is_some() {
+            return Err("Texture roles require descriptor version 4".into());
+        }
+        if self.version == 4 {
+            let roles = self
+                .texture_roles
+                .as_ref()
+                .ok_or("Descriptor4 requires texture_roles, including an empty map")?;
+            if !self.textures.keys().eq(roles.keys()) {
+                return Err("Descriptor4 requires exactly one role per texture".into());
+            }
         }
         if self.title.trim().is_empty()
             || self.title.trim() != self.title
@@ -168,6 +198,11 @@ impl CreationManifest {
         let bytes = root.read(DESCRIPTOR_NAME, MAX_DESCRIPTOR_BYTES)?;
         let raw: serde_json::Value = serde_json::from_slice(&bytes)
             .map_err(|error| format!("Invalid {DESCRIPTOR_NAME}: {error}"))?;
+        if raw["version"].as_u64().is_some_and(|version| version < 4)
+            && raw.get("texture_roles").is_some()
+        {
+            return Err("Texture roles require descriptor version 4".into());
+        }
         if raw["version"].as_u64().is_some_and(|version| version < 3)
             && raw.get("mesh_normal_policies").is_some()
         {
@@ -186,14 +221,28 @@ impl CreationManifest {
     pub fn load_session(&self, root: &ResourceRoot) -> Result<ruster_scene::Session, String> {
         self.validate()?;
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
-        ruster_scene::Session::from_snapshot_bytes(&bytes).map_err(|error| error.to_string())
+        let session = ruster_scene::Session::from_snapshot_bytes(&bytes)
+            .map_err(|error| error.to_string())?;
+        if session.loaded_format_version() >= 10 && self.version < 4 {
+            return Err("Scene10 roughness_maps requires descriptor version 4".into());
+        }
+        Ok(session)
     }
 
     pub fn load_textures(&self, root: &ResourceRoot) -> Result<TextureMap, String> {
         self.validate()?;
         self.textures
             .iter()
-            .map(|(id, path)| root.texture(path).map(|texture| (id.clone(), texture)))
+            .map(|(id, path)| {
+                let role = self
+                    .texture_roles
+                    .as_ref()
+                    .and_then(|roles| roles.get(id))
+                    .copied()
+                    .unwrap_or(ruster_assets::TextureRole::BaseColor);
+                root.texture_with_role(path, role)
+                    .map(|texture| (id.clone(), texture))
+            })
             .collect()
     }
 
@@ -245,6 +294,7 @@ mod tests {
             meshes: [("marker".into(), "marker.obj".into())].into(),
             mesh_normal_policies: [("marker".into(), ruster_assets::MeshNormalPolicy::Flat)].into(),
             textures: BTreeMap::new(),
+            texture_roles: Some(BTreeMap::new()),
             tick_millis: 100,
             initial_camera: None,
         };
@@ -303,6 +353,7 @@ mod tests {
         let mut legacy = manifest.clone();
         legacy.version = 2;
         legacy.mesh_normal_policies.clear();
+        legacy.texture_roles = None;
         assert_eq!(
             legacy.load_meshes(&root).unwrap()["marker"].vertices[0].normal,
             [0., 0., 1.]
@@ -326,6 +377,82 @@ mod tests {
         smooth.mesh_normal_policies.clear();
         assert!(smooth.validate().is_err());
 
+        for version in 1..=3 {
+            let mut old = manifest.clone();
+            old.version = version;
+            old.texture_roles = None;
+            if version < 3 {
+                old.mesh_normal_policies.clear();
+            }
+            old.validate().unwrap();
+            assert!(old
+                .load_session(&root)
+                .unwrap_err()
+                .contains("Scene10 roughness_maps"));
+            // Genuine old documents still load through old descriptors.
+            let mut old_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            old_scene["format_version"] = serde_json::json!(9);
+            std::fs::write(&scene_path, serde_json::to_vec(&old_scene).unwrap()).unwrap();
+            old.load_session(&root).unwrap();
+            std::fs::write(&scene_path, &original).unwrap();
+            for roles in [serde_json::json!(null), serde_json::json!({})] {
+                let mut raw = serde_json::to_value(&old).unwrap();
+                raw["texture_roles"] = roles;
+                std::fs::write(
+                    directory.path().join(DESCRIPTOR_NAME),
+                    serde_json::to_vec(&raw).unwrap(),
+                )
+                .unwrap();
+                assert!(CreationManifest::load(&root)
+                    .unwrap_err()
+                    .contains("version 4"));
+            }
+        }
+        let mut missing_roles = manifest.clone();
+        missing_roles.texture_roles = None;
+        assert!(missing_roles.validate().is_err());
+        let mut extra_role = manifest.clone();
+        extra_role
+            .texture_roles
+            .as_mut()
+            .unwrap()
+            .insert("extra".into(), ruster_assets::TextureRole::Roughness);
+        assert!(extra_role.validate().is_err());
+        let mut textured = manifest.clone();
+        textured
+            .textures
+            .insert("roughness".into(), "roughness.png".into());
+        assert!(textured.validate().is_err());
+        textured
+            .texture_roles
+            .as_mut()
+            .unwrap()
+            .insert("roughness".into(), ruster_assets::TextureRole::Roughness);
+        textured.validate().unwrap();
+        // One RGB PNG exercises descriptor-controlled interpretation through the
+        // actual read-only resource loader, with no catalog or cache available.
+        let png = b"\x89\x50\x4e\x47\x0d\x0a\x1a\x0a\x00\x00\x00\x0d\x49\x48\x44\x52\x00\x00\x00\x01\x00\x00\x00\x01\x08\x02\x00\x00\x00\x90\x77\x53\xde\x00\x00\x00\x0c\x49\x44\x41\x54\x78\x9c\x63\x68\x50\x70\x00\x00\x02\x04\x00\xe1\xa5\xdf\x7f\x0d\x00\x00\x00\x00\x49\x45\x4e\x44\xae\x42\x60\x82";
+        std::fs::write(directory.path().join("roughness.png"), png).unwrap();
+        let textures = textured.load_textures(&root).unwrap();
+        assert_eq!(
+            textures["roughness"].role,
+            ruster_assets::TextureRole::Roughness
+        );
+        assert_eq!(textures["roughness"].mips[0].bytes, [128]);
+        let mut old_color = textured.clone();
+        old_color.version = 3;
+        old_color.texture_roles = None;
+        assert_eq!(
+            old_color.load_textures(&root).unwrap()["roughness"].role,
+            ruster_assets::TextureRole::BaseColor
+        );
+        let serialized = serde_json::to_string(&textured).unwrap();
+        let duplicate = serialized.replace(
+            "\"roughness\":\"roughness_linear\"",
+            "\"roughness\":\"roughness_linear\",\"roughness\":\"base_color_srgb\"",
+        );
+        assert!(serde_json::from_str::<CreationManifest>(&duplicate).is_err());
+
         for path in [
             "../outside.json",
             "/outside.json",
@@ -348,6 +475,7 @@ mod tests {
         let mut legacy = manifest.clone();
         legacy.version = 1;
         legacy.mesh_normal_policies.clear();
+        legacy.texture_roles = None;
         legacy
             .validate()
             .expect("old descriptors still read without textures");
@@ -360,6 +488,8 @@ mod tests {
         );
         legacy.version = VERSION;
         legacy.mesh_normal_policies = manifest.mesh_normal_policies.clone();
+        legacy.texture_roles =
+            Some([("base-color".into(), ruster_assets::TextureRole::BaseColor)].into());
         legacy.validate().unwrap();
         let json = serde_json::to_string(&manifest).unwrap();
         let duplicate = json.replace(

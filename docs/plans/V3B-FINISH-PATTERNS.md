@@ -1,6 +1,6 @@
-# V3b proposal — Finish Patterns
+# V3b — Finish Patterns
 
-Proposed2026-11-06 by Astra after accepted [V3a](../evidence/V3A-readiness.md), source `ce5309b`. **Planning only: the user requested the next goal, not implementation.** The outcome, ordering, defaults and numerical investigation references below are agent proposals for approval. No new goal is activated by this document. Preserve the immutable Surface Study handoff and earlier creations.
+Proposed2026-11-06 by Astra after accepted [V3a](../evidence/V3A-readiness.md), source `ce5309b`. **Approved2026-11-06: the user says “Set goal and start work.” Active at baseline/early feasibility.** The outcome, ordering, defaults and numerical investigation references below are agent proposals for approval. The approved goal is now active; implementation choices remain subject to the early evidence gate. Preserve the immutable Surface Study handoff and earlier creations.
 
 ## Proposed session objective
 

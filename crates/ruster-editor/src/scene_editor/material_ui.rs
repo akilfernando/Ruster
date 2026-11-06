@@ -32,6 +32,7 @@ pub(super) struct MaterialDraft {
     pub response_mode: MaterialResponseMode,
     pub roughness: String,
     pub texture: Option<String>,
+    pub roughness_texture: Option<String>,
     pub filter: TextureFilter,
     pub address: TextureAddress,
 }
@@ -79,6 +80,7 @@ impl MaterialDraft {
             },
             roughness: value.response.roughness().unwrap_or(0.5).to_string(),
             texture: value.base_color_texture,
+            roughness_texture: value.roughness_texture,
             filter: value.filter,
             address: value.address,
         })
@@ -95,6 +97,10 @@ impl MaterialDraft {
                 .is_none_or(|value| value.validate().is_ok())
             && self
                 .texture
+                .as_ref()
+                .is_none_or(|id| ruster_scene::validate_id(id).is_ok())
+            && self
+                .roughness_texture
                 .as_ref()
                 .is_none_or(|id| ruster_scene::validate_id(id).is_ok())
             && self.name.len() <= 512
@@ -160,6 +166,7 @@ impl MaterialDraft {
             response,
             tint: self.tint_value()?,
             base_color_texture: self.texture.clone(),
+            roughness_texture: self.roughness_texture.clone(),
             filter: self.filter,
             address: self.address,
         };
@@ -243,7 +250,7 @@ impl SceneEditor {
                 let id = &ids[0];
                 self.validate_material_candidate(id, &value)?;
                 // Validate the new user's UVs before introducing its reference.
-                if value.base_color_texture.is_some()
+                if (value.base_color_texture.is_some() || value.roughness_texture.is_some())
                     && !self
                         .session
                         .scene()
@@ -349,6 +356,7 @@ impl SceneEditor {
                 && store.inspect().iter().any(|info| {
                     info.id == texture_id
                         && info.kind == ruster_assets::AssetKind::Texture
+                        && info.texture_role == Some(ruster_assets::TextureRole::BaseColor)
                         && info.status == ruster_assets::AssetStatus::Ready
                 })
         });
@@ -373,6 +381,7 @@ impl SceneEditor {
         // choosing an image must not discard those text fields or apply them.
         let candidate = OpaqueMaterial {
             base_color_texture: Some(texture_id.into()),
+            roughness_texture: draft.roughness_texture.clone(),
             filter: draft.filter,
             address: draft.address,
             ..Default::default()
@@ -625,7 +634,8 @@ impl SceneEditor {
                 .map(|store| {
                     store
                         .infos()
-                        .filter(|info| info.kind == ruster_assets::AssetKind::Texture)
+                        .filter(|info| info.kind == ruster_assets::AssetKind::Texture
+                            && info.texture_role == Some(ruster_assets::TextureRole::BaseColor))
                         .collect::<Vec<_>>()
                 })
                 .unwrap_or_default();
@@ -819,7 +829,7 @@ impl SceneEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
+    use serde_json::{json, Value};
     fn editor() -> SceneEditor {
         let mut scene = Scene::demo();
         scene.materials.insert(
@@ -840,6 +850,27 @@ mod tests {
     #[test]
     fn material_form_keyboard_and_shared_unique_transactions() {
         let mut editor = editor();
+        // The existing form must preserve a map authored through another path,
+        // without presenting new map controls at this early foundation stage.
+        let mut mapped = editor.session.scene().clone();
+        mapped
+            .materials
+            .get_mut("shared")
+            .unwrap()
+            .roughness_texture = Some("retained-map".into());
+        let mut raw = MaterialDraft::new(&mapped, "left", MaterialIntent::EditShared).unwrap();
+        raw.name = "Renamed".into();
+        raw.tint[0] = "0.25".into();
+        assert_eq!(
+            raw.parse().unwrap().roughness_texture.as_deref(),
+            Some("retained-map")
+        );
+        assert_eq!(
+            MaterialDraft::new(&mapped, "left", MaterialIntent::MakeUnique)
+                .unwrap()
+                .roughness_texture,
+            raw.roughness_texture
+        );
         let preview = editor.preview.clone();
         let ctx = egui::Context::default();
         let mut time = 0.0;
@@ -1217,6 +1248,7 @@ mod tests {
         draft.tint[1] = "0.5".into();
         draft.response_mode = MaterialResponseMode::Dielectric;
         draft.roughness = "unfinished roughness".into();
+        draft.roughness_texture = Some("pending-map".into());
         source.material_draft = Some(draft);
         source.draft_generation = 1;
         let exact = source.material_draft.clone();
@@ -1251,13 +1283,60 @@ mod tests {
         let id = candidates[0].id.clone();
         let (_journal, snapshot) = store.claim(&id).unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 7);
+        assert_eq!(payload["version"], 8);
         assert_eq!(payload["material"]["roughness"], "unfinished roughness");
         assert_eq!(payload["material"]["response_mode"], "dielectric");
+        assert_eq!(payload["material"]["roughness_texture"], "pending-map");
+        let mut explicit_clear = payload.clone();
+        explicit_clear["material"]["roughness_texture"] = Value::Null;
+        let mut cleared = SceneEditor::new(snapshot.restore().unwrap());
+        cleared.restore_recovery_drafts(explicit_clear).unwrap();
+        assert_eq!(cleared.material_draft.unwrap().roughness_texture, None);
+        let mut old7 = payload.clone();
+        old7["version"] = json!(7);
+        old7["material"]
+            .as_object_mut()
+            .unwrap()
+            .remove("roughness_texture");
+        let mut migrated7 = SceneEditor::new(snapshot.restore().unwrap());
+        migrated7.restore_recovery_drafts(old7.clone()).unwrap();
+        assert_eq!(
+            migrated7.material_draft.as_ref().unwrap().roughness_texture,
+            None
+        );
+        assert_eq!(
+            migrated7.material_draft.as_ref().unwrap().roughness,
+            "unfinished roughness"
+        );
+        for version in 1..=7 {
+            for pointer in [
+                "/material/roughness_texture",
+                "/material/original_material/roughness_texture",
+            ] {
+                let mut bad = old7.clone();
+                bad["version"] = json!(version);
+                let (parent, key) = pointer.rsplit_once('/').unwrap();
+                bad.pointer_mut(parent)
+                    .unwrap()
+                    .as_object_mut()
+                    .unwrap()
+                    .insert(key.into(), Value::Null);
+                let mut target = SceneEditor::new(snapshot.restore().unwrap());
+                assert!(target
+                    .restore_recovery_drafts(bad)
+                    .unwrap_err()
+                    .contains("version8"));
+                assert!(target.material_draft.is_none());
+            }
+        }
         // Genuine Recovery6 has neither raw surface controls nor a response
         // key in its typed baseline. Only that old shape gains defaults.
         let mut old = payload.clone();
         old["version"] = json!(6);
+        old["material"]
+            .as_object_mut()
+            .unwrap()
+            .remove("roughness_texture");
         old["material"]
             .as_object_mut()
             .unwrap()
@@ -1272,6 +1351,7 @@ mod tests {
         let migrated = migrated.material_draft.unwrap();
         assert_eq!(migrated.response_mode, MaterialResponseMode::Diffuse);
         assert_eq!(migrated.roughness, "0.5");
+        assert_eq!(migrated.roughness_texture, None);
         assert_eq!(migrated.tint[1], "0.5");
         for (pointer, value) in [
             ("/material/response_mode", serde_json::Value::Null),
@@ -1319,6 +1399,8 @@ mod tests {
             "oversized",
             "missing-mode",
             "missing-roughness",
+            "missing-map",
+            "invalid-map",
         ] {
             let mut bad = payload.clone();
             match case {
@@ -1338,6 +1420,13 @@ mod tests {
                 "missing-roughness" => {
                     bad["material"].as_object_mut().unwrap().remove("roughness");
                 }
+                "missing-map" => {
+                    bad["material"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("roughness_texture");
+                }
+                "invalid-map" => bad["material"]["roughness_texture"] = json!("bad/map"),
                 _ => bad["material"]["roughness"] = json!("x".repeat(257)),
             }
             assert!(restored.restore_recovery_drafts(bad).is_err(), "{case}");
@@ -1349,6 +1438,8 @@ mod tests {
             assert_eq!(restored.material_draft, exact, "{case}");
         }
         restored.material_draft.as_mut().unwrap().roughness = "0.08".into();
+        // Repair the pending, unavailable selection explicitly before Apply.
+        restored.material_draft.as_mut().unwrap().roughness_texture = None;
         restored.request_close();
         assert!(restored.close_pending);
         assert!(

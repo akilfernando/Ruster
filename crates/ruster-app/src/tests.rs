@@ -148,12 +148,13 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
         .unwrap()
         .contains("missing texture color"));
     let texture = Arc::new(ruster_assets::Texture {
+        role: ruster_assets::TextureRole::BaseColor,
         width: 1,
         height: 1,
         mips: vec![ruster_assets::TextureMip {
             width: 1,
             height: 1,
-            rgba: vec![255; 4],
+            bytes: vec![255; 4],
         }],
     });
     let textures = [("color".into(), texture.clone())].into();
@@ -170,6 +171,39 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
     )
     .unwrap();
     assert!(Arc::ptr_eq(&texture, &content.textures()["color"]));
+    // Even an inactive Diffuse/Legacy map is a faithful launch dependency.
+    content
+        .scene_mut()
+        .materials
+        .get_mut("shared")
+        .unwrap()
+        .roughness_texture = Some("color".into());
+    assert!(content.validate().unwrap_err().contains("wrong role"));
+    content
+        .scene_mut()
+        .materials
+        .get_mut("shared")
+        .unwrap()
+        .roughness_texture = Some("roughness".into());
+    assert!(content
+        .validate()
+        .unwrap_err()
+        .contains("missing texture roughness"));
+    let roughness = Arc::new(ruster_assets::Texture {
+        role: ruster_assets::TextureRole::Roughness,
+        width: 1,
+        height: 1,
+        mips: vec![ruster_assets::TextureMip {
+            width: 1,
+            height: 1,
+            bytes: vec![128],
+        }],
+    });
+    let mut textures = content.textures().clone();
+    textures.insert("roughness".into(), roughness.clone());
+    content = Content::with_textures(content.scene().clone(), content.meshes().clone(), textures)
+        .unwrap();
+    assert!(Arc::ptr_eq(&roughness, &content.textures()["roughness"]));
     content
         .scene_mut()
         .materials

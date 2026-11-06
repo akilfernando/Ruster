@@ -820,7 +820,7 @@ impl SceneEditor {
     #[cfg(test)]
     fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
         let drafts = RecoveryDrafts {
-            version: 7,
+            version: 8,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -847,6 +847,27 @@ impl SceneEditor {
         let material_field = value.get("material").is_some();
         let lighting_field = value.get("lighting").is_some();
         let version = value.get("version").and_then(Value::as_u64);
+        let roughness_fields = value.get("material").is_some_and(|material| {
+            material.get("roughness_texture").is_some()
+                || material
+                    .pointer("/original_material/roughness_texture")
+                    .is_some()
+        });
+        if version.is_some_and(|version| version < 8) && roughness_fields {
+            return Err(
+                "Roughness map recovery fields require draft version8; checkpoint preserved."
+                    .into(),
+            );
+        }
+        // Option fields otherwise deserialize missing and null identically.
+        if version == Some(8)
+            && value
+                .get("material")
+                .and_then(Value::as_object)
+                .is_some_and(|material| !material.contains_key("roughness_texture"))
+        {
+            return Err("Recovery8 material drafts require roughness_texture, including null; checkpoint preserved.".into());
+        }
         // Presence matters, including null/default values. Never reinterpret a
         // relabeled surface checkpoint as a genuine pre-surface draft.
         if version.is_some_and(|version| version < 7)
@@ -899,7 +920,7 @@ impl SceneEditor {
                     && fields_unit != Some(false)
             }
             Some(4) => !lighting_field && manipulation_unit && fields_unit != Some(false),
-            Some(5..=7) => manipulation_unit && fields_unit != Some(false),
+            Some(5..=8) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -913,6 +934,11 @@ impl SceneEditor {
                 material.insert("roughness".into(), json!("0.5"));
             }
         }
+        if version.is_some_and(|version| version < 8) {
+            if let Some(material) = value.get_mut("material").and_then(Value::as_object_mut) {
+                material.insert("roughness_texture".into(), Value::Null);
+            }
+        }
         let mut draft: RecoveryDrafts = serde_json::from_value(value)
             .map_err(|e| format!("Unsupported recovery drafts: {e}; checkpoint preserved."))?;
         if draft.version < 6 {
@@ -922,7 +948,7 @@ impl SceneEditor {
         }
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((2..=7).contains(&draft.version) && draft.behavior.is_some()))
+            || ((2..=8).contains(&draft.version) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -1205,7 +1231,7 @@ impl SceneEditor {
             let asset_origin = self.asset_origin.clone();
             let recovered_origin = self.recovered_origin.clone();
             let drafts = RecoveryDrafts {
-                version: 7,
+                version: 8,
                 revision: session.scene().revision,
                 selection: self.manipulation.ids.clone(),
                 fields: self.draft.clone(),
@@ -2031,7 +2057,9 @@ impl SceneEditor {
             .material
             .as_ref()
             .and_then(|id| self.session.scene().materials.get(id))
-            .is_some_and(|material| material.base_color_texture.is_some());
+            .is_some_and(|material| {
+                material.base_color_texture.is_some() || material.roughness_texture.is_some()
+            });
         if textured
             && !mesh
                 .as_ref()
@@ -2120,6 +2148,7 @@ impl SceneEditor {
                             .and_then(|id| self.session.scene().materials.get(id))
                             .is_some_and(|material| {
                                 material.base_color_texture.as_deref() == Some(asset.as_str())
+                                    || material.roughness_texture.as_deref() == Some(asset.as_str())
                             })
                 })
                 .map(|o| o.id.clone())
@@ -5335,12 +5364,13 @@ mod tests {
         });
         let texture = |rgb| {
             Arc::new(Texture {
+                role: ruster_assets::TextureRole::BaseColor,
                 width: 1,
                 height: 1,
                 mips: vec![ruster_assets::TextureMip {
                     width: 1,
                     height: 1,
-                    rgba: vec![rgb, 0, 0, 255],
+                    bytes: vec![rgb, 0, 0, 255],
                 }],
             })
         };
@@ -5470,7 +5500,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 7);
+        assert_eq!(payload["version"], 8);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -6740,7 +6770,7 @@ mod tests {
             assert_eq!(candidates.len(), 1);
             let (_journal, snapshot) = store.claim(&candidates[0].id).unwrap();
             let payload = snapshot.drafts().unwrap();
-            assert_eq!(payload["version"], 7);
+            assert_eq!(payload["version"], 8);
             if shadow {
                 assert_eq!(
                     payload["lighting"]["shadow"]["depth_bias_texels"],
@@ -6858,7 +6888,7 @@ mod tests {
         let exact = source.display_draft.clone();
         let snapshot = source.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 7);
+        assert_eq!(payload["version"], 8);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.display_draft, exact);

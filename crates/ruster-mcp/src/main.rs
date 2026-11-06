@@ -238,7 +238,7 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             if name == "shader_refresh" {
                 &["builtin"]
             } else if name == "asset_import" {
-                &["normal_policy"]
+                &["normal_policy", "texture_role"]
             } else {
                 &[]
             },
@@ -261,8 +261,18 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                     && args.get("normal_policy").is_none_or(|value| {
                         value.as_str().is_some_and(|policy| {
                             matches!(policy, "flat" | "authored_when_complete")
-                        })
+                        }) && args["source"]
+                            .as_str()
+                            .is_some_and(|source| source.ends_with(".obj"))
                     })
+                    && args.get("texture_role").is_none_or(|value| {
+                        value.as_str().is_some_and(|role| {
+                            matches!(role, "base_color_srgb" | "roughness_linear")
+                        }) && args["source"]
+                            .as_str()
+                            .is_some_and(|source| source.ends_with(".png"))
+                    })
+                    && !(args.contains_key("normal_policy") && args.contains_key("texture_role"))
             }
         }
     } else {
@@ -334,8 +344,8 @@ fn tools() -> Value {
         ("undo", "Undo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("redo", "Redo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("replay", "Replay the inspected authored snapshot in isolation for at most 10000 ticks; return one aggregate state. Does not alter editor playback."),
-        ("asset_inspect", "Inspect one page of up to 16 registered project OBJ meshes and PNG textures with typed status and catalog revision; bounded metadata only."),
-        ("asset_import", "Import one bounded project-relative OBJ mesh or supported PNG base-color texture into the immediately persisted typed catalog. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves the existing flat import route. Texture imports reject normal_policy. Requires scene/session/catalog revisions. Does not assign it or save the scene; Refresh preserves the accepted policy."),
+        ("asset_inspect", "Inspect one page of up to 16 registered project OBJ meshes and PNG textures with typed status, immutable normal policy/texture role and catalog revision; bounded metadata only."),
+        ("asset_import", "Import one bounded project-relative OBJ mesh or supported PNG texture into the immediately persisted typed catalog. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
         ("asset_refresh", "Reimport one registered mesh or texture, retaining last-good accepted content on failure. Catalog persists independently of scene history."),
         ("asset_rename", "Rename one registered OBJ or PNG source within the project without overwrite or changing its extension/kind, preserving stable asset ID; catalog update is independent of scene undo."),
         ("scene_mesh", "Assign a registered mesh ID or null for procedural cube to one scene object; revisioned shared authored undo. A changed mesh beneath a textured material requires complete UVs; clear the material first to repair. Preview snapshot unchanged."),
@@ -374,6 +384,7 @@ fn tools() -> Value {
             if name=="scene_mesh" {properties.insert("object_id".into(),json!({"type":"string","minLength":1,"maxLength":128}));required.push("object_id");}
         }
         if name=="asset_import" {properties.insert("normal_policy".into(),json!({"type":"string","enum":["flat","authored_when_complete"],"description":"OBJ mesh import interpretation: flat geometric normals, or complete valid authored corner normals with flat fallback when incomplete. Omitted uses the existing flat route; textures reject this field. Import another asset identity to change an accepted interpretation."}));}
+        if name=="asset_import" {properties.insert("texture_role".into(),json!({"type":"string","enum":["base_color_srgb","roughness_linear"],"description":"PNG-only immutable interpretation. Base color decodes sRGB; roughness reads grayscale/red as linear byte/255 and builds arithmetic perceptual-roughness mips. Omission uses base_color_srgb. Cannot combine with normal_policy; use a distinct asset ID for another interpretation of the same source."}));}
         if name=="shader_refresh" {properties.insert("expected_shader_revision".into(),decimal.clone());properties.insert("builtin".into(),json!({"type":"boolean","description":"Explicitly select built-in appearance instead of reading scene.wgsl; preserves the source file."}));required.push("expected_shader_revision");}
         if matches!(name, "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete") {
             properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Immutable object identity, distinct from its display name."}));
@@ -411,8 +422,16 @@ fn tools() -> Value {
             properties.insert("ticks".into(), decimal.clone());
             required.push("ticks");
         }
+        let mut input_schema = object_schema(Value::Object(properties),required);
+        if name == "asset_import" {
+            input_schema["allOf"] = json!([
+                {"not":{"required":["normal_policy","texture_role"]}},
+                {"if":{"required":["normal_policy"]},"then":{"properties":{"source":{"pattern":"\\.obj$"}}}},
+                {"if":{"required":["texture_role"]},"then":{"properties":{"source":{"pattern":"\\.png$"}}}}
+            ]);
+        }
         tools.push(json!({"name":name,"description":description,
-            "inputSchema":object_schema(Value::Object(properties),required),
+            "inputSchema":input_schema,
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
     tools.extend(color_tools::list());
@@ -1235,6 +1254,11 @@ mod tests {
         flat_import["normal_policy"] = json!("flat");
         let mut authored_import = import.clone();
         authored_import["normal_policy"] = json!("authored_when_complete");
+        let mut color_import = import.clone();
+        color_import["source"] = json!("images/finish.png");
+        color_import["texture_role"] = json!("base_color_srgb");
+        let mut roughness_import = color_import.clone();
+        roughness_import["texture_role"] = json!("roughness_linear");
         let mut refresh = import.clone();
         refresh.as_object_mut().unwrap().remove("source");
         let mut mesh = refresh.clone();
@@ -1247,6 +1271,8 @@ mod tests {
             ("asset_import", import.clone()),
             ("asset_import", flat_import),
             ("asset_import", authored_import),
+            ("asset_import", color_import.clone()),
+            ("asset_import", roughness_import.clone()),
             ("asset_rename", import.clone()),
             ("asset_refresh", refresh.clone()),
             ("scene_mesh", mesh.clone()),
@@ -1319,6 +1345,20 @@ mod tests {
                 "Normal policy is an import-only argument"
             );
         }
+        for value in [Value::Null, json!(true), json!("roughness"), json!({})] {
+            let mut invalid = roughness_import.clone();
+            invalid["texture_role"] = value;
+            assert!(!valid_arguments("asset_import", &invalid));
+        }
+        let mut wrong_source = import.clone();
+        wrong_source["texture_role"] = json!("roughness_linear");
+        assert!(!valid_arguments("asset_import", &wrong_source));
+        let mut conflict = roughness_import;
+        conflict["normal_policy"] = json!("flat");
+        assert!(!valid_arguments("asset_import", &conflict));
+        color_import["normal_policy"] = json!("flat");
+        color_import.as_object_mut().unwrap().remove("texture_role");
+        assert!(!valid_arguments("asset_import", &color_import));
         for value in [json!(4), json!(""), json!("x".repeat(129))] {
             let mut invalid = mesh.clone();
             invalid["asset_id"] = value;
@@ -1362,6 +1402,11 @@ mod tests {
             schema("asset_import")["properties"]["normal_policy"]["enum"],
             json!(["flat", "authored_when_complete"])
         );
+        assert_eq!(
+            schema("asset_import")["properties"]["texture_role"]["enum"],
+            json!(["base_color_srgb", "roughness_linear"])
+        );
+        assert_eq!(schema("asset_import")["allOf"].as_array().unwrap().len(), 3);
     }
 
     #[test]

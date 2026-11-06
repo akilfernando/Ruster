@@ -31,6 +31,7 @@ pub(super) fn page(store: &AssetStore, offset: usize) -> Result<Value, &'static 
                 "id": info.id, "kind": info.kind, "source": info.source,
                 "hash": info.hash, "status": info.status,
                 "mesh_normal_policy": info.mesh_normal_policy,
+                "texture_role": info.texture_role,
                 "diagnostic": diagnostic, "diagnostic_truncated": truncated,
             })
         })

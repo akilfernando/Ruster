@@ -1,7 +1,9 @@
 //! One bounded asset controller shared by human Content actions and deferred MCP.
 use super::*;
 use crate::asset_worker::{AssetMaps, Event, RetiredAssets, Worker};
-use ruster_assets::{AssetMutation, AssetRequest, AssetStateIdentity, MeshNormalPolicy};
+use ruster_assets::{
+    AssetMutation, AssetRequest, AssetStateIdentity, MeshNormalPolicy, TextureRole,
+};
 use std::sync::mpsc::{TryRecvError, TrySendError};
 
 type Error = (String, String);
@@ -1773,7 +1775,9 @@ impl SceneEditor {
         if !supported(op)
             || fields.iter().any(|key| !map.contains_key(*key))
             || map.keys().any(|key| {
-                !fields.contains(&key.as_str()) && !(op == "asset_import" && key == "normal_policy")
+                !fields.contains(&key.as_str())
+                    && !(op == "asset_import"
+                        && matches!(key.as_str(), "normal_policy" | "texture_role"))
             })
         {
             return Err(error("invalid_arguments", "Unknown or missing argument"));
@@ -1807,7 +1811,35 @@ impl SceneEditor {
                 let source = args["source"]
                     .as_str()
                     .ok_or_else(|| error("invalid_arguments", "source required"))?;
-                if let Some(policy) = map.get("normal_policy") {
+                if map.contains_key("normal_policy") && map.contains_key("texture_role") {
+                    return Err(error(
+                        "invalid_arguments",
+                        "normal_policy and texture_role cannot be combined",
+                    ));
+                }
+                if let Some(role) = map.get("texture_role") {
+                    if !source.ends_with(".png") {
+                        return Err(error(
+                            "invalid_arguments",
+                            "texture_role is available only for .png texture imports",
+                        ));
+                    }
+                    let role = match role.as_str() {
+                        Some("base_color_srgb") => TextureRole::BaseColor,
+                        Some("roughness_linear") => TextureRole::Roughness,
+                        _ => {
+                            return Err(error(
+                                "invalid_arguments",
+                                "texture_role must be base_color_srgb or roughness_linear",
+                            ))
+                        }
+                    };
+                    AssetMutation::ImportTexture {
+                        id,
+                        source: source.into(),
+                        role,
+                    }
+                } else if let Some(policy) = map.get("normal_policy") {
                     if !source.ends_with(".obj") {
                         return Err(error(
                             "invalid_arguments",
@@ -4118,6 +4150,39 @@ mod tests {
                         assert_eq!(editor.assets.as_ref().unwrap().revision(), 0);
                         assert!(!directory.path().join(".ruster-assets.json").exists());
                     }
+                    for (source, role, conflict) in [
+                        ("color.png", Value::Null, false),
+                        ("color.png", json!("roughness"), false),
+                        ("triangle.obj", json!("roughness_linear"), false),
+                        ("color.png", json!("roughness_linear"), true),
+                    ] {
+                        let mut invalid = args.clone();
+                        invalid["source"] = json!(source);
+                        invalid["texture_role"] = role;
+                        if conflict {
+                            invalid["normal_policy"] = json!("flat");
+                        }
+                        assert_eq!(
+                            editor
+                                .admit_asset(&token, "asset_import", &invalid, false)
+                                .err()
+                                .unwrap()
+                                .0,
+                            "invalid_arguments"
+                        );
+                        assert_eq!(editor.assets.as_ref().unwrap().revision(), 0);
+                        assert!(!directory.path().join(".ruster-assets.json").exists());
+                    }
+                    // Admission captures explicit roles without source I/O or
+                    // catalog publication; the shared asset worker owns decoding.
+                    for role in ["base_color_srgb", "roughness_linear"] {
+                        let mut texture = args.clone();
+                        texture["source"] = json!("color.png");
+                        texture["texture_role"] = json!(role);
+                        assert!(editor
+                            .admit_asset(&token, "asset_import", &texture, false)
+                            .is_ok());
+                    }
                     args["normal_policy"] = json!("flat");
                     assert!(editor
                         .admit_asset(&token, "asset_import", &args, false)
@@ -4213,12 +4278,13 @@ mod tests {
                     });
                     let texture = |red| {
                         Arc::new(Texture {
+                            role: ruster_assets::TextureRole::BaseColor,
                             width: 1,
                             height: 1,
                             mips: vec![ruster_assets::TextureMip {
                                 width: 1,
                                 height: 1,
-                                rgba: vec![red, 0, 0, 255],
+                                bytes: vec![red, 0, 0, 255],
                             }],
                         })
                     };

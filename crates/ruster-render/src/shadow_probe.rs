@@ -53,9 +53,11 @@ struct Probe {
 impl Probe {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let mut resources = Resources::new(device, queue, COLOR, 1);
-        resources
-            .materials
-            .prepare(device, queue, [(&BindingKey::default(), None)].into_iter());
+        resources.materials.prepare(
+            device,
+            queue,
+            [(&BindingKey::default(), None, None)].into_iter(),
+        );
         resources.instances = instance_buffer(device, 2);
         resources.capacity = 2;
         assert!(resources.resize(

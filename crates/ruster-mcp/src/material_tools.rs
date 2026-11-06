@@ -4,12 +4,12 @@ use serde_json::{json, Map, Value};
 const TOOLS: &[(&str, &str, &[&str])] = &[
     (
         "material_inspect",
-        "Read a bounded page of scene-owned opaque material definitions including authored response/roughness, shared-user counts and texture/UV status, plus authored scene display/exposure and separately labeled last-prepared viewport feedback. Prepared feedback may be stale and does not prove GPU completion or hidden rendering. Reports scene session/revision and asset_revision (string0 without a catalog); no image bytes, source bodies or filesystem access. Optional canonical-string offset and limit1..16; default limit16.",
+        "Read a bounded page of scene-owned opaque material definitions including authored response/roughness and both texture slots, shared-user counts and separate texture-role/readiness/UV diagnostics, plus authored scene display/exposure and separately labeled last-prepared viewport feedback. Prepared feedback may be stale and does not prove GPU completion or hidden rendering. Reports scene session/revision and asset_revision (string0 without a catalog); no image bytes, source bodies or filesystem access. Optional canonical-string offset and limit1..16; default limit16.",
         &[],
     ),
     (
         "scene_material_set",
-        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. Textures require accepted texture content and complete UVs for all users. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Source imports/refresh remain outside scene Undo.",
+        "Create or fully replace a scene-owned opaque material. Shared edits affect every assigned object; object tint remains multiplied into appearance. Optional assign_object_id atomically assigns only a newly created material. Both texture slots require matching accepted import roles and complete UVs for all users, including inactive roughness maps. Omitted or null roughness_texture clears that slot; assignment never changes the scalar or scene display. Requires inspected scene and asset identities and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Source imports/refresh remain outside scene Undo.",
         &["material_id", "material"],
     ),
     (
@@ -108,6 +108,10 @@ fn shape(tool: &str, field: &str) -> Value {
                 "name":name_schema(),
                 "tint":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Finite linear RGB tint; all three channels are required."},
                 "base_color_texture":id_schema(true),
+                "roughness_texture":{
+                    "type":["string","null"],"minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$",
+                    "description":"Optional linear roughness-map asset ID. Full replacement: omission or null clears this slot. Requires a ready roughness_linear import and complete UVs for all users, even while inactive. The scalar multiplies the map, clamped to0.08..1; assignment does not change the scalar or scene display."
+                },
                 "filter":{"enum":["nearest","linear"]},
                 "address":{"enum":["repeat","clamp"]},
                 "response":response_schema()
@@ -167,9 +171,12 @@ fn valid_material(value: &Value) -> bool {
     super::exact_keys(
         material,
         &["tint", "base_color_texture", "filter", "address"],
-        &["name", "response"],
+        &["name", "response", "roughness_texture"],
     ) && material.get("name").is_none_or(valid_name)
         && material.get("response").is_none_or(valid_response)
+        && material
+            .get("roughness_texture")
+            .is_none_or(|value| value.is_null() || valid_id(value))
         && material["tint"].as_array().is_some_and(|tint| {
             tint.len() == 3
                 && tint.iter().all(|channel| {
@@ -304,6 +311,26 @@ mod tests {
             advertised[2]["inputSchema"]["properties"]["material_id"]["type"],
             json!(["string", "null"])
         );
+        assert_eq!(
+            advertised[1]["inputSchema"]["properties"]["material"]["properties"]
+                ["roughness_texture"]["type"],
+            json!(["string", "null"])
+        );
+        for texture in [Value::Null, json!("roughness-map")] {
+            let mut args = set.clone();
+            args["material"]["roughness_texture"] = texture;
+            assert!(valid("scene_material_set", &args));
+        }
+        for texture in [
+            json!(false),
+            json!({"asset_id":"roughness-map"}),
+            json!("folder/map"),
+            json!(""),
+        ] {
+            let mut args = set.clone();
+            args["material"]["roughness_texture"] = texture;
+            assert!(!valid("scene_material_set", &args));
+        }
         for response in [
             json!({"type":"legacy_diffuse"}),
             json!({"type":"dielectric","roughness":0.08}),

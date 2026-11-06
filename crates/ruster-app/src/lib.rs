@@ -95,9 +95,25 @@ impl Content {
                 .as_ref()
                 .and_then(|id| self.scene.materials.get(id))
             {
-                if let Some(texture) = &material.base_color_texture {
-                    if !self.textures.contains_key(texture) {
-                        return Err(format!("object {} requires missing texture {texture}; load accepted texture content before starting", object.id));
+                for (texture, role) in [
+                    (
+                        &material.base_color_texture,
+                        ruster_assets::TextureRole::BaseColor,
+                    ),
+                    (
+                        &material.roughness_texture,
+                        ruster_assets::TextureRole::Roughness,
+                    ),
+                ] {
+                    let Some(texture) = texture else {
+                        continue;
+                    };
+                    let accepted = self.textures.get(texture).ok_or_else(|| format!("object {} requires missing texture {texture}; load accepted texture content before starting", object.id))?;
+                    if accepted.role != role {
+                        return Err(format!(
+                            "object {} texture {texture} has the wrong role for its material slot",
+                            object.id
+                        ));
                     }
                     if !object
                         .mesh

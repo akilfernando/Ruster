@@ -73,13 +73,7 @@ pub(crate) fn scene_dependencies(
         .iter()
         .filter_map(|o| o.mesh.clone())
         .collect();
-    let textures: BTreeSet<_> = scene
-        .objects
-        .iter()
-        .filter_map(|o| o.material.as_ref())
-        .filter_map(|id| scene.materials.get(id))
-        .filter_map(|material| material.base_color_texture.clone())
-        .collect();
+    let textures: BTreeSet<_> = scene_texture_roles(scene)?.into_keys().collect();
     if meshes.len() + textures.len() > ruster_assets::MAX_ASSETS {
         return Err("Export exceeds 64 combined mesh/texture assets.".into());
     }
@@ -87,6 +81,42 @@ pub(crate) fn scene_dependencies(
         return Err("Mesh and texture asset IDs must be distinct before export.".into());
     }
     Ok((meshes, textures))
+}
+
+fn scene_texture_roles(
+    scene: &ruster_scene::Scene,
+) -> Result<BTreeMap<String, ruster_assets::TextureRole>, String> {
+    let mut roles = BTreeMap::new();
+    for material in scene
+        .objects
+        .iter()
+        .filter_map(|object| object.material.as_ref())
+        .filter_map(|id| scene.materials.get(id))
+    {
+        // Inactive slots are still authored launch dependencies.
+        for (id, role) in [
+            (
+                &material.base_color_texture,
+                ruster_assets::TextureRole::BaseColor,
+            ),
+            (
+                &material.roughness_texture,
+                ruster_assets::TextureRole::Roughness,
+            ),
+        ] {
+            if let Some(id) = id {
+                if roles
+                    .insert(id.clone(), role)
+                    .is_some_and(|old| old != role)
+                {
+                    return Err(
+                        "One texture identity cannot serve conflicting material roles.".into(),
+                    );
+                }
+            }
+        }
+    }
+    Ok(roles)
 }
 
 pub(crate) fn camera_value(camera: ruster_render::CameraState) -> Value {
@@ -538,12 +568,29 @@ fn verify_helpers(
         "sun_shadows",
         "surface_materials"
     ]);
+    let mut roughness_profile = surface_profile.clone();
+    roughness_profile["descriptor_version"] = json!(4);
+    roughness_profile["capabilities"] = json!([
+        "initial_camera",
+        "opaque_materials",
+        "authored_lighting",
+        "sun_shadows",
+        "surface_materials",
+        "roughness_maps"
+    ]);
     let profile = &manifest["profile"];
-    if scene_version >= 9 && profile != &surface_profile {
+    if scene_version >= 10 && profile != &roughness_profile {
+        return Err("runtime kit does not support Scene10 roughness_maps; prepare a current Linux runtime kit".into());
+    }
+    if scene_version >= 9 && profile != &surface_profile && profile != &roughness_profile {
         return Err("runtime kit does not support Scene9 surface_materials; prepare a current Linux runtime kit".into());
     }
 
-    if scene_version >= 8 && profile != &shadow_profile && profile != &surface_profile {
+    if scene_version >= 8
+        && profile != &shadow_profile
+        && profile != &surface_profile
+        && profile != &roughness_profile
+    {
         return Err(
             "runtime kit does not support Scene8 sun_shadows; prepare a current Linux runtime kit"
                 .into(),
@@ -553,6 +600,7 @@ fn verify_helpers(
         && profile != &lighting_profile
         && profile != &shadow_profile
         && profile != &surface_profile
+        && profile != &roughness_profile
     {
         return Err("runtime kit does not support Scene7 authored_lighting; prepare a current Linux runtime kit".into());
     }
@@ -561,6 +609,7 @@ fn verify_helpers(
         && profile != &lighting_profile
         && profile != &shadow_profile
         && profile != &surface_profile
+        && profile != &roughness_profile
     {
         return Err("runtime kit does not support Scene6 opaque_materials; prepare a current Linux runtime kit".into());
     }
@@ -570,6 +619,7 @@ fn verify_helpers(
         && profile != &lighting_profile
         && profile != &shadow_profile
         && profile != &surface_profile
+        && profile != &roughness_profile
     {
         return Err(
             "unsupported runtime kit creation profile; prepare a current Linux runtime kit".into(),
@@ -581,6 +631,7 @@ fn verify_helpers(
         && profile != &lighting_profile
         && profile != &shadow_profile
         && profile != &surface_profile
+        && profile != &roughness_profile
     {
         return Err(
             "runtime kit does not support initial_camera; prepare a current runtime kit".into(),
@@ -685,6 +736,18 @@ fn prepare(
             "Accepted asset sources differ from the captured scene dependency closure.".into(),
         );
     }
+    for (id, expected) in scene_texture_roles(captured.scene())? {
+        let actual = request
+            .assets
+            .as_ref()
+            .and_then(|assets| assets.texture_role(&id))
+            .ok_or_else(|| format!("Accepted texture {id} is missing its import role"))?;
+        if actual != expected {
+            return Err(format!(
+                "Accepted texture {id} has the wrong role for its material slot"
+            ));
+        }
+    }
     cancelled(cancel)?;
     let (kit_hash, runtime_hash) = verify_helpers(
         &request.runtime_kit,
@@ -727,6 +790,13 @@ fn prepare(
                             )
                         })?);
                 }
+                if texture_ids.contains(id) && scene_version >= 10 {
+                    record["texture_role"] = json!(assets.texture_role(id).ok_or_else(|| {
+                        ruster_assets::AssetError(
+                            "Accepted texture is missing its import role".into(),
+                        )
+                    })?);
+                }
                 if mesh_ids.contains(id) {
                     meshes.insert(id.to_owned(), record);
                 } else {
@@ -743,7 +813,8 @@ fn prepare(
         7 => 3,
         8 => 4,
         9 => 5,
-        _ => return Err("export requires a supported Scene1–9 document".into()),
+        10 => 6,
+        _ => return Err("export requires a supported Scene1–10 document".into()),
     };
     let mut content_manifest = json!({"schema":schema, "title":request.title, "tick_millis":100,
         "scene_sha256":scene_hash, "meshes":meshes});
@@ -1152,6 +1223,7 @@ mod tests {
             "paint".into(),
             ruster_scene::OpaqueMaterial {
                 base_color_texture: Some("texture".into()),
+                roughness_texture: Some("roughness".into()),
                 ..Default::default()
             },
         );
@@ -1159,6 +1231,7 @@ mod tests {
             "unused".into(),
             ruster_scene::OpaqueMaterial {
                 base_color_texture: Some("unavailable-unused".into()),
+                roughness_texture: Some("unavailable-unused-map".into()),
                 ..Default::default()
             },
         );
@@ -1166,9 +1239,14 @@ mod tests {
             scene_dependencies(&scene).unwrap(),
             (
                 BTreeSet::from(["mesh".into()]),
-                BTreeSet::from(["texture".into()])
+                BTreeSet::from(["texture".into(), "roughness".into()])
             )
         );
+        scene.materials.get_mut("paint").unwrap().roughness_texture = Some("texture".into());
+        assert!(scene_dependencies(&scene)
+            .unwrap_err()
+            .contains("conflicting"));
+        scene.materials.get_mut("paint").unwrap().roughness_texture = Some("roughness".into());
         scene.materials.get_mut("paint").unwrap().base_color_texture = Some("mesh".into());
         assert!(scene_dependencies(&scene).unwrap_err().contains("distinct"));
         let root = tempfile::tempdir().unwrap();
@@ -1249,6 +1327,22 @@ mod tests {
         for version in [1, 5, 6, 7, 8, 9] {
             verify_helpers(root.path(), true, version).unwrap();
         }
+        assert!(verify_helpers(root.path(), false, 10)
+            .unwrap_err()
+            .contains("Scene10 roughness_maps"));
+        manifest["profile"]["descriptor_version"] = json!(4);
+        manifest["profile"]["capabilities"] = json!([
+            "initial_camera",
+            "opaque_materials",
+            "authored_lighting",
+            "sun_shadows",
+            "surface_materials",
+            "roughness_maps"
+        ]);
+        write(&manifest);
+        for version in 1..=10 {
+            verify_helpers(root.path(), true, version).unwrap();
+        }
         // Capability lists are exact: unknown features and reordered claims do
         // not establish support for the selected lighting/shader contract.
         manifest["profile"]["capabilities"] = json!([
@@ -1281,11 +1375,14 @@ args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
 content=pathlib.Path(args['--content'])
 kit=pathlib.Path(args['--runtime-kit'])
 value=json.loads((content/'content.json').read_bytes())
-assert value['schema']==5
+assert value['schema']==6
 assert value['meshes']['mesh']['normal_policy']=='flat'
-assert set(value['meshes'])=={'mesh'} and set(value['textures'])=={'texture'}
+assert set(value['meshes'])=={'mesh'} and set(value['textures'])=={'texture','roughness'}
 assert value['meshes']['mesh']['path']=='meshes/0000.obj'
-assert value['textures']['texture']['path']=='textures/0000.png'
+assert value['textures']['texture']['path']=='textures/0001.png'
+assert value['textures']['texture']['texture_role']=='base_color_srgb'
+assert value['textures']['roughness']['path']=='textures/0000.png'
+assert value['textures']['roughness']['texture_role']=='roughness_linear'
 for section in ('meshes','textures'):
     for record in value[section].values():
         assert hashlib.sha256((content/record['path']).read_bytes()).hexdigest()==record['sha256']
@@ -1312,8 +1409,8 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             "schema":1,"kind":"ruster-runtime-kit","executable":"runtime",
             "helper":"scripts/package_creation.py","files":records,
             "profile":{"format":"ruster-runtime","version":1,"descriptor_format":"ruster-application",
-                "descriptor_version":3,"os":"linux","arch":"x86_64",
-                "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials"]}})).unwrap()).unwrap();
+                "descriptor_version":4,"os":"linux","arch":"x86_64",
+                "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials","roughness_maps"]}})).unwrap()).unwrap();
         let mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
         fs::write(root.path().join("source.obj"), mesh).unwrap();
         fs::write(root.path().join("unused.obj"), mesh).unwrap();
@@ -1332,6 +1429,13 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         let mut store = ruster_assets::AssetStore::open(root.path()).unwrap();
         store.import("mesh", "source.obj").unwrap();
         store.import("texture", "source.png").unwrap();
+        store
+            .import_texture(
+                "roughness",
+                "source.png",
+                ruster_assets::TextureRole::Roughness,
+            )
+            .unwrap();
         store.import("unused", "unused.obj").unwrap();
         let mut scene = ruster_scene::Scene::demo();
         scene.objects[0].mesh = Some("mesh".into());
@@ -1340,6 +1444,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             "paint".into(),
             ruster_scene::OpaqueMaterial {
                 base_color_texture: Some("texture".into()),
+                roughness_texture: Some("roughness".into()),
                 ..Default::default()
             },
         );
@@ -1347,6 +1452,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             "unused".into(),
             ruster_scene::OpaqueMaterial {
                 base_color_texture: Some("not-exported".into()),
+                roughness_texture: Some("not-exported-map".into()),
                 ..Default::default()
             },
         );
@@ -1367,7 +1473,11 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         };
         let cancel = AtomicBool::new(false);
         let snapshot = store
-            .export_snapshot(&BTreeSet::from(["mesh".into(), "texture".into()]))
+            .export_snapshot(&BTreeSet::from([
+                "mesh".into(),
+                "texture".into(),
+                "roughness".into(),
+            ]))
             .unwrap();
         let prepared = prepare(
             request(snapshot),
@@ -1376,9 +1486,13 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         )
         .unwrap();
         let staged: Value = serde_json::from_slice(&fs::read(&prepared.archive).unwrap()).unwrap();
-        assert_eq!(staged["schema"], 5);
+        assert_eq!(staged["schema"], 6);
         assert_eq!(staged["meshes"]["mesh"]["normal_policy"], "flat");
         assert_eq!(staged["textures"]["texture"]["sha256"], digest(&png));
+        assert_eq!(
+            staged["textures"]["roughness"]["texture_role"],
+            "roughness_linear"
+        );
         assert!(
             !root.path().join("result.tar.gz").exists(),
             "worker does not publish"
@@ -1387,6 +1501,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             .export_snapshot(&BTreeSet::from([
                 "mesh".into(),
                 "texture".into(),
+                "roughness".into(),
                 "unused".into(),
             ]))
             .unwrap();

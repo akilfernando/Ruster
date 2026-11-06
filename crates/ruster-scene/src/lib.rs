@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 9;
+pub const FORMAT_VERSION: u32 = 10;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
@@ -93,6 +93,9 @@ pub struct OpaqueMaterial {
     pub tint: [f32; 3],
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub base_color_texture: Option<String>,
+    /// Linear roughness-data asset; retained when its surface response is inactive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub roughness_texture: Option<String>,
     pub filter: TextureFilter,
     pub address: TextureAddress,
     #[serde(default, skip_serializing_if = "MaterialResponse::is_legacy")]
@@ -104,6 +107,7 @@ impl Default for OpaqueMaterial {
             name: None,
             tint: [1.0; 3],
             base_color_texture: None,
+            roughness_texture: None,
             filter: TextureFilter::Linear,
             address: TextureAddress::Repeat,
             response: MaterialResponse::LegacyDiffuse,
@@ -123,6 +127,9 @@ impl OpaqueMaterial {
             ));
         }
         if let Some(id) = &self.base_color_texture {
+            validate_id(id)?;
+        }
+        if let Some(id) = &self.roughness_texture {
             validate_id(id)?;
         }
         self.response.validate()?;
@@ -836,7 +843,7 @@ impl Change {
                 .iter()
                 .flat_map(|d| [&d.before, &d.after])
                 .flatten()
-                .any(|m| m.base_color_texture.is_some())
+                .any(|m| m.base_color_texture.is_some() || m.roughness_texture.is_some())
             || self
                 .bindings
                 .iter()
@@ -1150,6 +1157,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..10).contains(&version) {
+            reject_pre_v10_roughness_fields(&value)?;
+        }
         if (3..=5).contains(&version) {
             reject_pre_v6_material_fields(&value, version)?;
         }
@@ -1166,7 +1176,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=9 => serde_json::from_value(value)?,
+            5..=10 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1233,6 +1243,31 @@ impl Document {
                 .persist(path)
                 .map_err(|e| SceneError::Io(e.error))?;
         }
+        Ok(())
+    }
+}
+
+// Only material definitions acquire the new slot, including reversible values.
+// Arbitrary behavior property names do not acquire texture semantics.
+fn reject_pre_v10_roughness_fields(value: &serde_json::Value) -> Result<(), SceneError> {
+    let has_map = |material: &serde_json::Value| material.get("roughness_texture").is_some();
+    let mut found = value["scene"]["materials"]
+        .as_object()
+        .is_some_and(|materials| materials.values().any(has_map));
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            if let Some(materials) = change["materials"].as_array() {
+                found |= materials
+                    .iter()
+                    .any(|delta| has_map(&delta["before"]) || has_map(&delta["after"]));
+            }
+        }
+    }
+    if found {
+        Err(SceneError::Invalid(
+            "roughness textures require scene v10".into(),
+        ))
+    } else {
         Ok(())
     }
 }
@@ -1844,7 +1879,7 @@ impl Session {
                 .scene()
                 .materials
                 .values()
-                .any(|m| m.base_color_texture.is_some())
+                .any(|m| m.base_color_texture.is_some() || m.roughness_texture.is_some())
             || self.document.authoring.has_asset_references()
             || self
                 .document
@@ -3864,9 +3899,38 @@ mod tests {
         let original_authoring = session.authoring().clone();
         let material = OpaqueMaterial {
             base_color_texture: Some("unavailable-texture".into()),
+            roughness_texture: Some("unavailable-roughness".into()),
             response: MaterialResponse::Dielectric { roughness: 0.08 },
             ..OpaqueMaterial::default()
         };
+        let mut references = Session::new(Scene::empty("unused-map")).unwrap();
+        references
+            .set_material(
+                0,
+                "unused",
+                OpaqueMaterial {
+                    base_color_texture: None,
+                    ..material.clone()
+                },
+            )
+            .unwrap();
+        assert!(
+            references.has_asset_references(),
+            "Unused current maps retain the root guard"
+        );
+        references.undo(1).unwrap();
+        assert!(
+            references.has_asset_references(),
+            "Redo-only maps retain the root guard"
+        );
+        references.redo(2).unwrap();
+        references
+            .set_material(3, "unused", OpaqueMaterial::default())
+            .unwrap();
+        assert!(
+            references.has_asset_references(),
+            "Undo-only maps retain the root guard"
+        );
         session
             .create_and_assign_material(0, "left", "left", material.clone())
             .unwrap();
@@ -3885,6 +3949,11 @@ mod tests {
         assert!(session.set_material(0, "new", material.clone()).is_err());
         let invalid = OpaqueMaterial {
             tint: [f32::NAN, 0.0, 1.0],
+            ..material.clone()
+        };
+        assert!(session.set_material(1, "left", invalid).is_err());
+        let invalid = OpaqueMaterial {
+            roughness_texture: Some("folder/roughness".into()),
             ..material.clone()
         };
         assert!(session.set_material(1, "left", invalid).is_err());
@@ -3909,10 +3978,12 @@ mod tests {
             .unwrap();
         let edited = OpaqueMaterial {
             tint: [0.25, 0.5, 1.0],
-            response: MaterialResponse::Dielectric { roughness: 1.0 },
+            response: MaterialResponse::LegacyDiffuse,
+            roughness_texture: Some("inactive-roughness".into()),
             ..material.clone()
         };
         session.set_material(4, "left", edited.clone()).unwrap();
+        assert_eq!(session.scene().materials["left"], edited);
         session.duplicate(5, "left", "copy", None).unwrap();
         assert_eq!(session.scene().objects[1].material.as_deref(), Some("left"));
         assert_eq!(session.scene().materials.len(), 1);
@@ -4141,6 +4212,7 @@ mod tests {
                     OpaqueMaterial {
                         name: Some("n".repeat(128)),
                         base_color_texture: Some("t".repeat(128)),
+                        roughness_texture: Some("r".repeat(128)),
                         ..OpaqueMaterial::default()
                     },
                 )
@@ -4203,6 +4275,19 @@ mod tests {
             .unwrap()
             .get("response")
             .is_none());
+        assert!(serde_json::to_value(OpaqueMaterial::default())
+            .unwrap()
+            .get("roughness_texture")
+            .is_none());
+        let current = session.snapshot_bytes().unwrap();
+        assert_eq!(
+            serde_json::from_slice::<Value>(&current).unwrap()["format_version"],
+            10
+        );
+        assert_eq!(
+            Session::from_snapshot_bytes(&current).unwrap().scene(),
+            session.scene()
+        );
         let before = session.document.clone();
         assert_eq!(
             session.set_display(0, DisplayProfile::LegacySdr).unwrap(),
@@ -4260,12 +4345,42 @@ mod tests {
         // Isolate actual current and material-history positions, including null
         // and explicit legacy values that would otherwise deserialize/default.
         let baseline = serde_json::to_value(Document::new(Scene::empty("old"))).unwrap();
-        for version in 1..9 {
+        for version in 1..=9 {
             let mut old = baseline.clone();
             old["format_version"] = json!(version);
             let loaded = Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
             assert_eq!(loaded.scene(), &Scene::empty("old"));
             assert_eq!(loaded.loaded_format_version(), version);
+            old["scene"]["materials"] = json!({"surface":{"tint":[1,1,1],"filter":"linear","address":"repeat","roughness_texture":null}});
+            assert!(
+                matches!(Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()), Err(SceneError::Invalid(message)) if message.contains("v10"))
+            );
+        }
+        // Both endpoints and both stacks are owning positions even when the
+        // future field is null. They must reject before history consistency.
+        for (stack, endpoint, texture) in [
+            ("undo", "before", Value::Null),
+            ("undo", "after", json!("roughness")),
+            ("redo", "before", json!("roughness")),
+            ("redo", "after", Value::Null),
+        ] {
+            let mut old = baseline.clone();
+            old["format_version"] = json!(9);
+            old[stack] = json!([{"materials":[{"id":"surface","before":null,"after":null}]}]);
+            old[stack][0]["materials"][0][endpoint] = json!({"tint":[1,1,1],"filter":"linear","address":"repeat","roughness_texture":texture});
+            assert!(
+                matches!(Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()), Err(SceneError::Invalid(message)) if message.contains("v10"))
+            );
+        }
+        // Genuine Scene9 display/response values retain their interpretation;
+        // an absent new slot is not required to be inserted on Open.
+        let mut v9_surface = serde_json::to_value(&reopened.document).unwrap();
+        v9_surface["format_version"] = json!(9);
+        let loaded =
+            Session::from_snapshot_bytes(&serde_json::to_vec(&v9_surface).unwrap()).unwrap();
+        assert_eq!(loaded.document.scene, reopened.document.scene);
+        assert_eq!(loaded.document.undo, reopened.document.undo);
+        for version in 1..9 {
             for field in [Value::Null, json!({"type":"legacy_sdr"})] {
                 let mut old = baseline.clone();
                 old["format_version"] = json!(version);
@@ -4315,9 +4430,13 @@ mod tests {
             .insert("display".into(), PropertyValue::Text("unrelated".into()));
         b.properties
             .insert("response".into(), PropertyValue::Text("unrelated".into()));
+        b.properties.insert(
+            "roughness_texture".into(),
+            PropertyValue::Text("unrelated".into()),
+        );
         behavior.set_binding(1, "binding", Some(b)).unwrap();
         behavior.undo(2).unwrap();
-        for version in 5..9 {
+        for version in 5..=9 {
             let mut old = serde_json::to_value(&behavior.document).unwrap();
             old["format_version"] = json!(version);
             let loaded = Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();

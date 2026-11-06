@@ -358,7 +358,7 @@ fn paths_and_registry_versions_fail_closed() {
     assert!(store.inspect().is_empty());
     fs::write(
         root.path().join(".ruster-assets.json"),
-        r#"{"format":"ruster-assets","version":4,"revision":0,"assets":{}}"#,
+        r#"{"format":"ruster-assets","version":5,"revision":0,"assets":{}}"#,
     )
     .unwrap();
     assert!(AssetStore::open(root.path())

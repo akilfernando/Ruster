@@ -87,8 +87,16 @@ impl ResourceRoot {
         &self,
         relative: impl AsRef<Path>,
     ) -> Result<Arc<ruster_assets::Texture>, String> {
+        self.texture_with_role(relative, ruster_assets::TextureRole::BaseColor)
+    }
+
+    pub fn texture_with_role(
+        &self,
+        relative: impl AsRef<Path>,
+        role: ruster_assets::TextureRole,
+    ) -> Result<Arc<ruster_assets::Texture>, String> {
         let bytes = self.read(relative, ruster_assets::MAX_TEXTURE_SOURCE_BYTES)?;
-        ruster_assets::decode_png(&bytes)
+        ruster_assets::decode_png_with_role(&bytes, role)
             .map(Arc::new)
             .map_err(|error| format!("texture resource: {error}"))
     }

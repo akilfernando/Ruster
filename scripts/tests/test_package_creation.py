@@ -341,6 +341,62 @@ class CreationDistributionTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError,"normal policy"):
                         package_creation.source_content(content_root,None)
                 (content_root/"content.json").write_bytes(package_creation.encoded(surface_content))
+                # Scene10 requires descriptor4/roles even without an assigned
+                # map. The first old-kit rejection must precede runtime calls.
+                mapped_scene = copy.deepcopy(surface_scene)
+                mapped_scene["format_version"] = 10
+                no_map_bytes = package_creation.encoded(mapped_scene)
+                mapped_content = {**surface_content, "schema":6,
+                    "scene_sha256":package_creation.sha256(no_map_bytes),
+                    "textures":{identity:{**record,"texture_role":"base_color_srgb"}
+                                for identity,record in surface_content["textures"].items()}}
+                (content_root/"scene.json").write_bytes(no_map_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(mapped_content))
+                with patch.object(package_creation,"run_runtime",side_effect=AssertionError("old-kit preflight")):
+                    with self.assertRaisesRegex(ValueError,"Scene10 roughness_maps"):
+                        package_creation.package(kit,content_root,failed)
+                self.assertFalse(failed.exists())
+                mapped_scene["scene"]["materials"]["paint"]["roughness_texture"] = "finish"
+                mapped_scene["scene"]["materials"]["paint"].pop("response")
+                mapped_scene["scene"]["materials"]["unused"]["roughness_texture"] = "unused-map"
+                mapped_scene["undo"] = [{"scene":[],"materials":[{"id":"history-only",
+                    "before":{"tint":[1,1,1],"filter":"linear","address":"repeat","roughness_texture":"history-map"},
+                    "after":None}]}]
+                mapped_bytes = package_creation.encoded(mapped_scene)
+                mapped_content["scene_sha256"] = package_creation.sha256(mapped_bytes)
+                mapped_content["textures"]["finish"] = {"path":"textures/0001.png",
+                    "sha256":package_creation.sha256(png),"texture_role":"roughness_linear"}
+                package_app.put(content_root,"textures/0001.png",png)
+                (content_root/"scene.json").write_bytes(mapped_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(mapped_content))
+                capable["profile"] = package_creation.ROUGHNESS_PROFILE
+                (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                self.assertEqual(package_creation.scene_dependencies(mapped_scene),({"triangle"},{"albedo","finish"}))
+                mapped_response={**framed_response,"authored_scene":package_creation.typed_scene(mapped_scene)}
+                mapped_output=base/"roughness.tar.gz"
+                with patch.object(package_creation,"run_runtime",return_value=mapped_response):
+                    package_creation.package(kit,content_root,mapped_output)
+                with tarfile.open(mapped_output) as archive:
+                    descriptor=json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"],4)
+                    self.assertEqual(descriptor["texture_roles"],{"albedo":"base_color_srgb","finish":"roughness_linear"})
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(),mapped_bytes)
+                for mutation in ("missing-role","null-role","wrong-role","unknown-role","extra-record-field","old-schema"):
+                    bad=copy.deepcopy(mapped_content)
+                    if mutation=="missing-role": bad["textures"]["finish"].pop("texture_role")
+                    elif mutation=="null-role": bad["textures"]["finish"]["texture_role"]=None
+                    elif mutation=="wrong-role": bad["textures"]["finish"]["texture_role"]="base_color_srgb"
+                    elif mutation=="unknown-role": bad["textures"]["finish"]["texture_role"]="normal"
+                    elif mutation=="extra-record-field": bad["textures"]["finish"]["channel"]="red"
+                    else: bad["schema"]=5
+                    (content_root/"content.json").write_bytes(package_creation.encoded(bad))
+                    with self.subTest(roughness_record=mutation),self.assertRaises(ValueError):
+                        package_creation.source_content(content_root,None)
+                # The new kit accepts the unchanged old descriptor3 route.
+                (content_root/"scene.json").write_bytes(surface_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(surface_content))
+                with patch.object(package_creation,"run_runtime",return_value=surface_response):
+                    package_creation.package(kit,content_root,base/"surface-with-roughness-kit.tar.gz")
                 # Current kit retains the Scene7/schema3 route as well.
                 (content_root / "scene.json").write_bytes(lit_bytes)
                 (content_root / "content.json").write_bytes(package_creation.encoded(lit_content))
@@ -395,6 +451,8 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.LIGHTING_PROFILE, "capabilities": ["authored_lighting", "initial_camera", "opaque_materials"]},
                         {**package_creation.SUN_SHADOW_PROFILE, "capabilities": ["initial_camera", "opaque_materials", "sun_shadows", "authored_lighting"]},
                         {**package_creation.SUN_SHADOW_PROFILE, "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "point_shadows"]},
+                        {**package_creation.ROUGHNESS_PROFILE, "descriptor_version":3},
+                        {**package_creation.ROUGHNESS_PROFILE, "capabilities": package_creation.ROUGHNESS_PROFILE["capabilities"][:-2]+["roughness_maps","surface_materials"]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
                         package_creation.check_profile(invalid_profile)
@@ -564,6 +622,25 @@ class CreationDistributionTests(unittest.TestCase):
             with self.subTest(history=key),self.assertRaises(ValueError):package_creation.validate_surface_fields(invalid)
         old=copy.deepcopy(doc);old["format_version"]=8;old["scene"].pop("display");old["scene"]["materials"].clear()
         old["authoring"]={"bindings":{"object":{"properties":{"display":1,"response":2}}}}
+        package_creation.validate_surface_fields(old)
+        mapped=copy.deepcopy(doc);mapped["format_version"]=10
+        mapped["scene"]["materials"]["finish"]["roughness_texture"]="finish-map"
+        package_creation.validate_surface_fields(mapped)
+        self.assertEqual(package_creation.typed_scene(mapped)["materials"]["finish"]["roughness_texture"],"finish-map")
+        mapped["scene"]["materials"]["finish"]["roughness_texture"]=None
+        self.assertNotIn("roughness_texture",package_creation.typed_scene(mapped)["materials"]["finish"])
+        for version in (1,9):
+            invalid=copy.deepcopy(mapped);invalid["format_version"]=version
+            invalid["scene"].pop("display");invalid["scene"]["materials"]["finish"].pop("response")
+            with self.subTest(map_version=version),self.assertRaisesRegex(ValueError,"Scene10"):
+                package_creation.validate_surface_fields(invalid)
+        for stack,endpoint in (("undo","before"),("redo","after")):
+            invalid=copy.deepcopy(old);invalid["format_version"]=9
+            invalid[stack]=[{"materials":[{"before":None,"after":None}]}]
+            invalid[stack][0]["materials"][0][endpoint]={"roughness_texture":None}
+            with self.subTest(map_history=(stack,endpoint)),self.assertRaisesRegex(ValueError,"Scene10"):
+                package_creation.validate_surface_fields(invalid)
+        old["authoring"]["bindings"]["object"]["properties"]["roughness_texture"]=None
         package_creation.validate_surface_fields(old)
 
     @unittest.skipUnless(sys.platform == "linux", "Linux process lifecycle required")

@@ -29,6 +29,11 @@ pub enum AssetMutation {
         source: String,
         normal_policy: MeshNormalPolicy,
     },
+    ImportTexture {
+        id: String,
+        source: String,
+        role: TextureRole,
+    },
     Refresh {
         id: String,
     },
@@ -42,6 +47,7 @@ impl AssetMutation {
         match self {
             Self::Import { id, .. }
             | Self::ImportMesh { id, .. }
+            | Self::ImportTexture { id, .. }
             | Self::Refresh { id }
             | Self::Rename { id, .. } => id,
         }
@@ -130,6 +136,7 @@ enum Plan {
     Content {
         kind: AssetKind,
         mesh_normal_policy: Option<MeshNormalPolicy>,
+        texture_role: Option<TextureRole>,
         source: String,
         hash: String,
         snapshot: Snapshot,
@@ -319,6 +326,31 @@ impl AssetStore {
             },
         )
     }
+    /// Import an immutable PNG interpretation. Existing import() remains BaseColor.
+    pub fn import_texture(
+        &mut self,
+        id: &str,
+        source: &str,
+        role: TextureRole,
+    ) -> Result<AssetInfo, AssetError> {
+        self.import_texture_at(self.revision(), id, source, role)
+    }
+    pub fn import_texture_at(
+        &mut self,
+        expected: u64,
+        id: &str,
+        source: &str,
+        role: TextureRole,
+    ) -> Result<AssetInfo, AssetError> {
+        self.apply_sync(
+            expected,
+            AssetMutation::ImportTexture {
+                id: id.into(),
+                source: source.into(),
+                role,
+            },
+        )
+    }
     pub fn refresh(&mut self, id: &str) -> Result<AssetInfo, AssetError> {
         self.refresh_at(self.revision(), id)
     }
@@ -390,7 +422,9 @@ fn revision_conflict(expected: u64, actual: u64) -> AssetError {
 fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(), AssetError> {
     let id = mutation.id();
     match mutation {
-        AssetMutation::Import { source, .. } | AssetMutation::ImportMesh { source, .. } => {
+        AssetMutation::Import { source, .. }
+        | AssetMutation::ImportMesh { source, .. }
+        | AssetMutation::ImportTexture { source, .. } => {
             let kind = AssetKind::from_source(source)?;
             let policy = match mutation {
                 AssetMutation::ImportMesh { normal_policy, .. } => {
@@ -401,19 +435,27 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
                 }
                 _ => (kind == AssetKind::Mesh).then_some(MeshNormalPolicy::Flat),
             };
+            let role = match mutation {
+                AssetMutation::ImportTexture { role, .. } => {
+                    if kind != AssetKind::Texture {
+                        return Err(error("ImportTexture requires a .png texture source"));
+                    }
+                    Some(*role)
+                }
+                _ => (kind == AssetKind::Texture).then_some(TextureRole::BaseColor),
+            };
             validate_id(id)?;
             validate_relative(source)?;
             if store.registry.assets.contains_key(id) {
                 return Err(error(format!("asset ID {id:?} already exists")));
             }
-            if store
-                .registry
-                .assets
-                .values()
-                .any(|record| record.source == *source && record.mesh_normal_policy == policy)
-            {
+            if store.registry.assets.values().any(|record| {
+                record.source == *source
+                    && record.mesh_normal_policy == policy
+                    && record.texture_role == role
+            }) {
                 return Err(error(format!(
-                    "source {source:?} is already registered with this normal policy; use its existing asset ID"
+                    "source {source:?} is already registered with this import interpretation; use its existing asset ID"
                 )));
             }
             if store.registry.assets.len() >= MAX_ASSETS {
@@ -439,7 +481,7 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
                     .iter()
                     .any(|(other, candidate)| other != id && candidate.source == record.source)
             {
-                return Err(error("source is shared by multiple mesh normal policies; rename is unavailable while another asset identity references it"));
+                return Err(error("source is shared by multiple import interpretations; rename is unavailable while another asset identity references it"));
             }
             if AssetKind::from_source(source)? != record.kind {
                 return Err(error("rename cannot change an asset's kind"));
@@ -448,6 +490,7 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
                 other != id
                     && candidate.source == *source
                     && candidate.mesh_normal_policy == record.mesh_normal_policy
+                    && candidate.texture_role == record.texture_role
             }) {
                 return Err(error("rename destination is registered to another asset"));
             }
@@ -456,7 +499,7 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
     Ok(())
 }
 fn encode_registry(mut registry: Registry) -> Result<PreparedRegistry, AssetError> {
-    registry.version = 3;
+    registry.version = 4;
     registry.revision = registry
         .revision
         .checked_add(1)
@@ -497,13 +540,26 @@ impl AssetRequest {
                 (AssetKind::from_source(source).map_err(PreparedFailure::plain)?
                     == AssetKind::Mesh)
                     .then_some(MeshNormalPolicy::Flat),
+                (AssetKind::from_source(source).map_err(PreparedFailure::plain)?
+                    == AssetKind::Texture)
+                    .then_some(TextureRole::BaseColor),
                 None,
             ),
             AssetMutation::ImportMesh {
                 id,
                 source,
                 normal_policy,
-            } => self.prepare_content(id, source, AssetKind::Mesh, Some(*normal_policy), None),
+            } => self.prepare_content(
+                id,
+                source,
+                AssetKind::Mesh,
+                Some(*normal_policy),
+                None,
+                None,
+            ),
+            AssetMutation::ImportTexture { id, source, role } => {
+                self.prepare_content(id, source, AssetKind::Texture, None, Some(*role), None)
+            }
             AssetMutation::Refresh { id } => {
                 let record = &self.store.registry.assets[id];
                 self.prepare_content(
@@ -511,6 +567,7 @@ impl AssetRequest {
                     &record.source,
                     record.kind,
                     record.mesh_normal_policy,
+                    record.texture_role,
                     Some(record),
                 )
             }
@@ -556,6 +613,7 @@ impl AssetRequest {
         source: &str,
         kind: AssetKind,
         mesh_normal_policy: Option<MeshNormalPolicy>,
+        texture_role: Option<TextureRole>,
         record: Option<&Record>,
     ) -> Result<Plan, PreparedFailure> {
         let refresh = record.is_some();
@@ -585,8 +643,8 @@ impl AssetRequest {
         {
             Snapshot::Texture(self.store.textures[id].clone())
         } else {
-            let payload =
-                parse_source(source, kind, mesh_normal_policy, &bytes).map_err(failure)?;
+            let payload = parse_source(source, kind, mesh_normal_policy, texture_role, &bytes)
+                .map_err(failure)?;
             self.store
                 .check_payload_budget(id, &payload)
                 .map_err(failure)?;
@@ -635,6 +693,7 @@ impl AssetRequest {
                 Record {
                     kind,
                     mesh_normal_policy,
+                    texture_role,
                     source: source.into(),
                     hash: Some(hash.clone()),
                 },
@@ -644,6 +703,7 @@ impl AssetRequest {
         Ok(Plan::Content {
             kind,
             mesh_normal_policy,
+            texture_role,
             source: source.into(),
             hash,
             snapshot,
@@ -755,6 +815,7 @@ fn publish_plan(
         Plan::Content {
             kind,
             mesh_normal_policy,
+            texture_role,
             source,
             hash,
             snapshot,
@@ -780,7 +841,9 @@ fn publish_plan(
                     AssetKind::Mesh => mesh_normal_policy
                         .expect("validated mesh policy")
                         .cache_version(),
-                    AssetKind::Texture => 1,
+                    AssetKind::Texture => texture_role
+                        .expect("validated texture role")
+                        .cache_version(),
                 };
                 atomic_write(
                     &directory,
@@ -1160,6 +1223,68 @@ mod tests {
             assert!(Arc::ptr_eq(&original, &store.mesh_snapshots()["flat"]));
             assert_eq!(store.mesh("smooth").is_some(), case == "success");
             if case != "catalog_changed" && case != "success" {
+                assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), catalog);
+            }
+            std::thread::spawn(move || drop(adoption.retired))
+                .join()
+                .unwrap();
+        }
+        // Role-aware import uses the same staged authority and retirement owner;
+        // only its decoded representation/cache identity is new.
+        for case in ["success", "source_changed", "cache_failure"] {
+            let root = tempfile::tempdir().unwrap();
+            let source = texture::tests::png(
+                1,
+                1,
+                png::ColorType::Rgb,
+                png::BitDepth::Eight,
+                &[128, 17, 241],
+            );
+            fs::write(root.path().join("shared.png"), &source).unwrap();
+            let mut store = AssetStore::open(root.path()).unwrap();
+            store.import("color", "shared.png").unwrap();
+            let color = store.texture_snapshots()["color"].clone();
+            let catalog = fs::read(root.path().join(REGISTRY)).unwrap();
+            let revision = store.revision();
+            let request = store
+                .request_at(
+                    revision,
+                    AssetMutation::ImportTexture {
+                        id: "roughness".into(),
+                        source: "shared.png".into(),
+                        role: TextureRole::Roughness,
+                    },
+                )
+                .unwrap();
+            let before = files(root.path());
+            let prepared = request.prepare();
+            assert_eq!(files(root.path()), before);
+            match case {
+                "source_changed" => {
+                    fs::write(root.path().join("shared.png"), b"changed after preparation").unwrap()
+                }
+                "cache_failure" => fs::create_dir(
+                    root.path()
+                        .join(".ruster-cache/textures")
+                        .join(format!("v2-{}.bin", digest(&source))),
+                )
+                .unwrap(),
+                _ => (),
+            }
+            let completion = prepared.publish();
+            assert_eq!(completion.catalog_published(), case == "success");
+            let adoption = store.adopt(completion).unwrap();
+            assert_eq!(adoption.result.is_ok(), case == "success");
+            assert_eq!(store.revision(), revision + u64::from(case == "success"));
+            assert!(Arc::ptr_eq(&color, &store.texture_snapshots()["color"]));
+            if case == "success" {
+                assert_eq!(
+                    adoption.result.as_ref().unwrap().texture_role,
+                    Some(TextureRole::Roughness)
+                );
+                assert_eq!(store.texture("roughness").unwrap().mips[0].bytes, [128]);
+            } else {
+                assert!(store.texture("roughness").is_none());
                 assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), catalog);
             }
             std::thread::spawn(move || drop(adoption.retired))

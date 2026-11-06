@@ -1,6 +1,6 @@
 //! Shared material transactions; neither human drafts nor preview are applied here.
 use super::SceneEditor;
-use ruster_assets::{AssetKind, AssetStatus};
+use ruster_assets::{AssetKind, AssetStatus, TextureRole};
 use ruster_scene::{OpaqueMaterial, SceneError};
 use serde_json::{json, Map, Value};
 
@@ -71,7 +71,7 @@ fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
             exact_keys(
                 map,
                 &["tint", "base_color_texture", "filter", "address"],
-                &["name", "response"],
+                &["name", "response", "roughness_texture"],
             )
         })
         .ok_or_else(|| {
@@ -112,6 +112,10 @@ fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
         } else {
             Some(id(&map["base_color_texture"])?.into())
         },
+        roughness_texture: match map.get("roughness_texture") {
+            None | Some(Value::Null) => None,
+            Some(value) => Some(id(value)?.into()),
+        },
         filter: serde_json::from_value(map["filter"].clone())
             .map_err(|_| error("invalid_arguments", "Filter must be nearest or linear"))?,
         address: serde_json::from_value(map["address"].clone())
@@ -134,7 +138,7 @@ fn scene_error(failure: SceneError) -> CommandError {
 }
 
 impl SceneEditor {
-    fn validate_ready_texture(&self, texture_id: &str) -> Result<(), String> {
+    fn validate_ready_texture(&self, texture_id: &str, role: TextureRole) -> Result<(), String> {
         let store = self
             .assets
             .as_ref()
@@ -146,6 +150,11 @@ impl SceneEditor {
             .ok_or_else(|| format!("Texture {texture_id} is not registered"))?;
         if info.kind != AssetKind::Texture {
             return Err(format!("Asset {texture_id} is not a texture"));
+        }
+        if info.texture_role != Some(role) {
+            return Err(format!(
+                "Texture {texture_id} has the wrong import interpretation for this material slot"
+            ));
         }
         if info.status != AssetStatus::Ready || store.texture(texture_id).is_none() {
             return Err(format!(
@@ -188,14 +197,29 @@ impl SceneEditor {
             .validate()
             .map_err(|failure| failure.to_string())?;
         let previous = self.session.scene().materials.get(material_id);
-        if previous.is_some_and(|value| value.base_color_texture == candidate.base_color_texture) {
-            return Ok(());
-        }
-        if let Some(texture) = &candidate.base_color_texture {
-            self.validate_ready_texture(texture)?;
-            for object in &self.session.scene().objects {
-                if object.material.as_deref() == Some(material_id) {
-                    self.validate_material_object_uvs(&object.id)?;
+        for (reference, old, role) in [
+            (
+                &candidate.base_color_texture,
+                previous.and_then(|value| value.base_color_texture.as_ref()),
+                TextureRole::BaseColor,
+            ),
+            (
+                &candidate.roughness_texture,
+                previous.and_then(|value| value.roughness_texture.as_ref()),
+                TextureRole::Roughness,
+            ),
+        ] {
+            // An unrelated edit may preserve a broken reference for repair;
+            // changing either slot must not hide behind the other slot's no-op.
+            if previous.is_some() && reference.as_ref() == old {
+                continue;
+            }
+            if let Some(texture) = reference {
+                self.validate_ready_texture(texture, role)?;
+                for object in &self.session.scene().objects {
+                    if object.material.as_deref() == Some(material_id) {
+                        self.validate_material_object_uvs(&object.id)?;
+                    }
                 }
             }
         }
@@ -228,9 +252,14 @@ impl SceneEditor {
             .materials
             .get(id)
             .ok_or_else(|| format!("Material {id} does not exist"))?;
-        if let Some(texture) = &candidate.base_color_texture {
-            self.validate_ready_texture(texture)?;
-            self.validate_material_object_uvs(object_id)?;
+        for (reference, role) in [
+            (&candidate.base_color_texture, TextureRole::BaseColor),
+            (&candidate.roughness_texture, TextureRole::Roughness),
+        ] {
+            if let Some(texture) = reference {
+                self.validate_ready_texture(texture, role)?;
+                self.validate_material_object_uvs(object_id)?;
+            }
         }
         Ok(())
     }
@@ -253,10 +282,10 @@ impl SceneEditor {
                 let users: Vec<_> = self.session.scene().objects.iter()
                     .filter(|object| object.material.as_deref() == Some(id.as_str())).collect();
                 let invalid_uv_users: Vec<_> = users.iter().filter(|object| {
-                    value.base_color_texture.is_some()
+                    (value.base_color_texture.is_some() || value.roughness_texture.is_some())
                         && self.validate_material_object_uvs(&object.id).is_err()
                 }).collect();
-                let texture = value.base_color_texture.as_ref().map(|texture_id| {
+                let observe_texture = |texture_id: &String, expected_role: TextureRole| {
                     let info = self.assets.as_ref().and_then(|store| {
                         store.infos().find(|info| &info.id == texture_id)
                     });
@@ -265,6 +294,9 @@ impl SceneEditor {
                     let (status, diagnostic) = match info {
                         Some(info) if info.kind != AssetKind::Texture => (
                             "wrong_kind", Some("Referenced asset is not a texture")
+                        ),
+                        Some(info) if info.texture_role != Some(expected_role) => (
+                            "wrong_role", Some("Texture import interpretation does not match this material slot")
                         ),
                         Some(info) => (
                             match info.status {
@@ -280,21 +312,25 @@ impl SceneEditor {
                         None => ("unregistered", Some("Texture is not registered in this project")),
                     };
                     json!({
-                        "asset_id":texture_id, "status":status,
+                        "asset_id":texture_id, "status":status, "expected_role":expected_role,
+                        "texture_role":info.and_then(|info|info.texture_role),
                         "hash":info.and_then(|info| info.hash.as_ref()), "accepted":accepted,
                         "diagnostic":diagnostic.map(|text|text.chars().take(256).collect::<String>())
                     })
-                });
+                };
+                let texture = value.base_color_texture.as_ref().map(|id| observe_texture(id, TextureRole::BaseColor));
+                let roughness_texture = value.roughness_texture.as_ref().map(|id| observe_texture(id, TextureRole::Roughness));
                 json!({
                     "material_id":id,
                     "material":{
                         "name":value.name, "tint":value.tint,
                         "base_color_texture":value.base_color_texture,
+                        "roughness_texture":value.roughness_texture,
                         "filter":value.filter, "address":value.address, "response":value.response
                     },
                     "assigned_count":users.len(),
                     "user_ids":users.iter().take(4).map(|object|&object.id).collect::<Vec<_>>(),
-                    "users_truncated":users.len()>4, "texture":texture,
+                    "users_truncated":users.len()>4, "texture":texture, "roughness_texture":roughness_texture,
                     "uv":{
                         "invalid_user_count":invalid_uv_users.len(),
                         "object_ids":invalid_uv_users.iter().take(4).map(|object|&object.id).collect::<Vec<_>>(),
@@ -400,7 +436,9 @@ impl SceneEditor {
                             "Atomic create-and-assign requires a fresh material ID",
                         ));
                     }
-                    if candidate.base_color_texture.is_some() {
+                    if candidate.base_color_texture.is_some()
+                        || candidate.roughness_texture.is_some()
+                    {
                         self.validate_material_object_uvs(assign)
                             .map_err(|message| error("material_unavailable", message))?;
                     }
@@ -509,6 +547,9 @@ mod tests {
         ] {
             store.import(id, source).unwrap();
         }
+        store
+            .import_texture("roughness", "texture.png", TextureRole::Roughness)
+            .unwrap();
         let mut scene = ruster_scene::Scene::demo();
         scene.objects.retain(|object| object.id != "center");
         scene
@@ -521,8 +562,16 @@ mod tests {
         let mut editor = SceneEditor::new(ruster_scene::Session::new(scene).unwrap());
         editor.resolved = store.mesh_snapshots();
         editor.assets = Some(store);
+        let catalog = editor.command("scene", "asset_inspect", json!({}));
+        let roughness = catalog["result"]["assets"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|asset| asset["id"] == "roughness")
+            .unwrap();
+        assert_eq!(roughness["texture_role"], "roughness_linear");
         let preview = editor.preview.clone();
-        let make_args = |revision: &str, texture: Value| json!({"expected_session_token":"scene","expected_revision":revision,"expected_asset_revision":"3","material_id":"shared","material":{"tint":[1,1,1],"base_color_texture":texture,"filter":"linear","address":"repeat"}});
+        let make_args = |revision: &str, texture: Value| json!({"expected_session_token":"scene","expected_revision":revision,"expected_asset_revision":"4","material_id":"shared","material":{"tint":[1,1,1],"base_color_texture":texture,"roughness_texture":"roughness","filter":"linear","address":"repeat"}});
         let before = editor.session.snapshot_bytes().unwrap();
         for texture in [json!("plain"), json!("texture")] {
             assert_eq!(
@@ -534,6 +583,17 @@ mod tests {
             );
             assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
         }
+        let mut create = make_args("0", Value::Null);
+        create["material_id"] = json!("new-map");
+        create["assign_object_id"] = json!("right");
+        assert_eq!(
+            editor
+                .material_command("scene", "scene_material_set", &create)
+                .unwrap_err()
+                .0,
+            "material_unavailable"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
         editor.draft.as_mut().unwrap().translation[0] = "-".into();
         assert_eq!(
             editor
@@ -570,6 +630,16 @@ mod tests {
         assert_eq!(no_op["changed"], false);
         assert_eq!(editor.session.undo_len(), 2);
         let before = editor.session.snapshot_bytes().unwrap();
+        let mut wrong_role = make_args("2", json!("texture"));
+        wrong_role["material"]["roughness_texture"] = json!("texture");
+        assert_eq!(
+            editor
+                .material_command("scene", "scene_material_set", &wrong_role)
+                .unwrap_err()
+                .0,
+            "material_unavailable"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
         for (field, value, code) in [
             ("expected_revision", json!("1"), "stale_revision"),
             (
@@ -627,6 +697,22 @@ mod tests {
         );
         assert_eq!(inspected["materials"][0]["texture"]["status"], "invalid");
         assert_eq!(inspected["materials"][0]["texture"]["accepted"], true);
+        assert_eq!(
+            inspected["materials"][0]["material"]["roughness_texture"],
+            "roughness"
+        );
+        assert_eq!(
+            inspected["materials"][0]["roughness_texture"]["texture_role"],
+            "roughness_linear"
+        );
+        assert_eq!(
+            inspected["materials"][0]["roughness_texture"]["status"],
+            "invalid"
+        );
+        assert_eq!(
+            inspected["materials"][0]["roughness_texture"]["accepted"],
+            true
+        );
         assert_eq!(inspected["materials"][0]["uv"]["invalid_user_count"], 0);
         editor
             .material_command("scene", "scene_material_set", &make_args("3", Value::Null))
@@ -643,7 +729,7 @@ mod tests {
             Some("texture")
         );
         let revision = editor.session.scene().revision.to_string();
-        editor.material_command("scene","scene_material_copy",&json!({"expected_session_token":"scene","expected_revision":revision,"expected_asset_revision":"3","source_id":"shared","new_material_id":"copy","name":null})).unwrap();
+        editor.material_command("scene","scene_material_copy",&json!({"expected_session_token":"scene","expected_revision":revision,"expected_asset_revision":"4","source_id":"shared","new_material_id":"copy","name":null})).unwrap();
         assert_eq!(
             editor.session.scene().materials["copy"],
             editor.session.scene().materials["shared"]
@@ -657,6 +743,48 @@ mod tests {
             .material_command("scene", "material_inspect", &json!({"limit":"1"}))
             .unwrap();
         assert_eq!(inspected["next_offset"], "1");
-        assert_eq!(inspected["asset_revision"], "3");
+        assert_eq!(inspected["asset_revision"], "4");
+        // A roughness-only inactive material still owns UV compatibility.
+        let revision = editor.session.scene().revision;
+        let mut only_map = editor.session.scene().materials["shared"].clone();
+        only_map.base_color_texture = None;
+        only_map.response = ruster_scene::MaterialResponse::LegacyDiffuse;
+        editor
+            .session
+            .set_material(revision, "shared", only_map)
+            .unwrap();
+        assert!(editor
+            .validate_mesh_material_compatibility("left", &Some("plain".into()))
+            .is_err());
+        // Full replacement omission and explicit null both clear the map, even
+        // while its broken accepted source remains available for unrelated edits.
+        for explicit_null in [false, true] {
+            let revision = editor.session.scene().revision.to_string();
+            let mut clear = make_args(&revision, Value::Null);
+            if explicit_null {
+                clear["material"]["roughness_texture"] = Value::Null;
+            } else {
+                clear["material"]
+                    .as_object_mut()
+                    .unwrap()
+                    .remove("roughness_texture");
+            }
+            editor
+                .material_command("scene", "scene_material_set", &clear)
+                .unwrap();
+            assert!(editor.session.scene().materials["shared"]
+                .roughness_texture
+                .is_none());
+            editor
+                .session
+                .undo(editor.session.scene().revision)
+                .unwrap();
+            assert_eq!(
+                editor.session.scene().materials["shared"]
+                    .roughness_texture
+                    .as_deref(),
+                Some("roughness")
+            );
+        }
     }
 }

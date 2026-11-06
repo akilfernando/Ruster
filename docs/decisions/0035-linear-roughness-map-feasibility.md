@@ -1,0 +1,29 @@
+# 0035: explicit linear roughness-map feasibility
+
+Date2026-11-06. Status: **selected experimental implementation for approved V3b; early visual/ownership/runtime/cost acceptance pending.** The user approves [Finish Patterns](../plans/V3B-FINISH-PATTERNS.md). Defaults below are root/Astra implementation choices, not new user requirements. [Evidence](../evidence/V3B-feasibility.md) owns actual observations and failures.
+
+## Context and alternatives
+
+V3a has a scalar direct-lit dielectric response and a color-only PNG pipeline. A roughness image adds spatial finish variation but must not pass through color transfer/mips/cache identity. Normal maps require tangents/handedness and separate filtering; environment/metals require another lighting pipeline. Neither belongs silently inside this finite outcome. A parallel roughness store/worker/retirement framework would duplicate existing ownership without evidence.
+
+## Selected experiment
+
+One existing texture store carries immutable `TextureRole::{BaseColor,Roughness}`, serialized `base_color_srgb`/`roughness_linear`. Base-color decode/import/cache1 bytes remain unchanged. Explicit data import produces R8Unorm gray/red byte/255 with complete area-weighted arithmetic perceptual-roughness mips, rounded to the nearest byte and covering odd/NPOT images; this is an approximation rather than BRDF-preserving filtering. Single-channel storage is an experiment subject to actual named-device/filtering/quality checks. Data cache2 never adopts color cache1; accepted role is carried in payload/catalog/export snapshot. Two interpretations of one source require different IDs, count as different accepted payloads and refresh independently. Existing same-source rename protection remains.
+
+Data PNG accepts bounded noninterlaced8-bit grayscale/RGB/RGBA, ignores other channels/alpha, and preserves structural/CRC/size checks. Valid sRGB(intent0..3/length1), gAMA(nonzero/length4) and cHRM(length32) tags do not change data interpretation. ICC/cICP/HDR/APNG, indexed/gray-alpha/16-bit/interlaced inputs reject. Existing stricter base-color rules remain unchanged. Decode scratch can require4bytes/pixel despite R8 accepted storage. Existing8MiB encoded/2048edge/64MiB aggregate accepted latest texture payload limits remain; candidates, decoder scratch and retained snapshots are additional live roles, not covered by an absolute64MiB peak claim.
+
+OpaqueMaterial gains optional top-level roughness_texture, independent of response/display. No map retains exact scalar arithmetic; mapped perceptual roughness is clamp(scalar*linearSample,0.08,1). White equivalence and byte128 interpretation require actual GPU evidence. Keep UV0/the existing single V flip and existing shared sampler. No display promotion on assignment. Missing roughness gets diagnosed scalar viewport fallback, independently of existing missing base-color magenta behavior. Runtime/export must reject missing/wrong-role/UV references even when inactive.
+
+Append only group1 binding2 for roughness, sharing sampler1/base-color0. Existing camera/vertex/instance prefixes remain; response.z can signal mapping without larger instance stride. Sampling must not silently impose an unconditional extra image fetch on old/no-map rendering: mechanism/derivative-uniformity and measured no-map cost determine the actual implementation. Reuse unique texture IDs/weak Arc identities and existing callback admission/retirement; invalidate every referring binding on replacement. Custom WGSL retains earlier prefix/output and explicitly does not support mapped response.
+
+## Persistence and authority closure
+
+Select Scene10/content6/descriptor4/catalog4/recovery8 and append exact roughness_maps runtime capability. Genuine old formats imply no map/base color and reject new fields at actual owning current/history/catalog/descriptor/recovery locations, including null/default presence. Descriptor4 requires a complete texture_roles map even if empty; old descriptors omit and reject it. Current recovery raw map selection requires explicit presence even null; genuine older draft migration injects None only after raw guards.
+
+Extend existing shared material/import/inspect operations, no new MCP tool or authority path. Full material replacement omitting an optional map means None; inspect-before-edit preserves intended settings. Both material slots independently validate role/accepted content/all-user UVs, including mesh changes. Editable SaveAs/history protects every current material and reversible endpoint reference. Runtime closure includes both slots of assigned current materials, even inactive, excluding unused/history-only resources. Freeze accepted source role/hash together.
+
+## Promotion, consequences and replan
+
+Root/Astra read-only source assessments agree this can reuse current owners; they do not prove implementation. Preserve exact old color/no-map/white images, unique source-role caches, source-hash/last-good/retirement invariants and real import→save→runtime before ordinary controls. Fine-pattern minification/consecutive moving-highlight checks determine whether the useful exhibit works. Replan explicitly if environment lighting, normal maps, broad temporal AA or another owner architecture becomes necessary. No accepted surface-map capability is claimed yet.
+
+Primary guidance checked2026-11-06 by Astra: [Khronos material contract](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#materials), [Filament materials](https://google.github.io/filament/main/materials.html), [Filament rendering](https://google.github.io/filament/main/filament.html), [Godot standard materials](https://docs.godotengine.org/en/stable/tutorials/3d/standard_material_3d.html). They inform color/data separation and future tangent/environment boundaries, not Ruster correctness/performance. Ruster's red-channel convention is not glTF packed-green support.

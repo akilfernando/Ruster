@@ -759,6 +759,10 @@ pub fn viewport_with_materials(
             .and_then(|id| scene.materials.get(id));
         let binding = BindingKey {
             texture: material.and_then(|material| material.base_color_texture.clone()),
+            roughness: material.and_then(|material| material.roughness_texture.clone()),
+            missing_roughness: material
+                .is_some_and(|material| material.roughness_texture.is_some())
+                && !mesh.is_some_and(|mesh| mesh.has_complete_uvs()),
             missing: material.is_some_and(|material| material.base_color_texture.is_some())
                 && !mesh.is_some_and(|mesh| mesh.has_complete_uvs()),
             sampling: material.map_or(1, |material| {
@@ -789,6 +793,14 @@ pub fn viewport_with_materials(
                             .and_then(|_| textures.get(id))
                     })
                     .cloned(),
+                roughness: binding
+                    .roughness
+                    .as_ref()
+                    .and_then(|id| {
+                        mesh.filter(|mesh| mesh.has_complete_uvs())
+                            .and_then(|_| textures.get(id))
+                    })
+                    .cloned(),
                 binding,
                 mesh: mesh.cloned(),
                 instances: Vec::new(),
@@ -808,9 +820,14 @@ pub fn viewport_with_materials(
             color,
             base_color,
             response: match material.map(|material| material.response) {
-                Some(ruster_scene::MaterialResponse::Dielectric { roughness }) => {
-                    [1., roughness, 0., 0.]
-                }
+                Some(ruster_scene::MaterialResponse::Dielectric { roughness }) => [
+                    1.,
+                    roughness,
+                    f32::from(u8::from(
+                        material.is_some_and(|m| m.roughness_texture.is_some()),
+                    )),
+                    0.,
+                ],
                 _ => [0.; 4],
             },
         });
@@ -1675,6 +1692,7 @@ struct DrawGroup {
     key: Option<String>,
     binding: BindingKey,
     texture: Option<Arc<ruster_assets::Texture>>,
+    roughness: Option<Arc<ruster_assets::Texture>>,
     mesh: Option<Arc<ruster_assets::Mesh>>,
     instances: Vec<Instance>,
     range: Range<u32>,
@@ -1794,9 +1812,13 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         let texture_uploads = r.materials.prepare(
             device,
             queue,
-            self.groups
-                .iter()
-                .map(|group| (&group.binding, group.texture.as_ref())),
+            self.groups.iter().map(|group| {
+                (
+                    &group.binding,
+                    group.texture.as_ref(),
+                    group.roughness.as_ref(),
+                )
+            }),
         );
         let instance_count = self
             .groups
@@ -2641,7 +2663,7 @@ mod tests {
             r.materials.prepare(
                 &device,
                 &queue,
-                std::iter::once((&BindingKey::default(), None)),
+                std::iter::once((&BindingKey::default(), None, None)),
             );
             r.pipeline = validated_pipeline(&device, &r.pipeline_layout, default_shader(), samples)
                 .expect("valid replacement");

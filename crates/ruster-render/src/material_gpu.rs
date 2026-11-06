@@ -5,6 +5,8 @@ use std::sync::{Arc, Weak};
 #[derive(Clone, Debug, Default, PartialEq, Eq, PartialOrd, Ord)]
 pub(super) struct BindingKey {
     pub texture: Option<String>,
+    pub roughness: Option<String>,
+    pub missing_roughness: bool,
     /// Missing UVs are a per-draw diagnostic, not global texture unavailability.
     pub missing: bool,
     // bit0: linear filtering; bit1: clamp addressing.
@@ -25,7 +27,7 @@ impl GpuTexture {
         source: &Arc<ruster_assets::Texture>,
     ) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("retained base-color texture"),
+            label: Some("retained role-aware material texture"),
             size: wgpu::Extent3d {
                 width: source.width,
                 height: source.height,
@@ -34,7 +36,10 @@ impl GpuTexture {
             mip_level_count: source.mips.len() as u32,
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            format: match source.role {
+                ruster_assets::TextureRole::BaseColor => wgpu::TextureFormat::Rgba8UnormSrgb,
+                ruster_assets::TextureRole::Roughness => wgpu::TextureFormat::R8Unorm,
+            },
             usage: wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
@@ -46,10 +51,17 @@ impl GpuTexture {
                     origin: wgpu::Origin3d::ZERO,
                     aspect: wgpu::TextureAspect::All,
                 },
-                &mip.rgba,
+                &mip.bytes,
                 wgpu::TexelCopyBufferLayout {
                     offset: 0,
-                    bytes_per_row: Some(mip.width * 4),
+                    bytes_per_row: Some(
+                        mip.width
+                            * if source.role == ruster_assets::TextureRole::BaseColor {
+                                4
+                            } else {
+                                1
+                            },
+                    ),
                     rows_per_image: Some(mip.height),
                 },
                 wgpu::Extent3d {
@@ -67,14 +79,20 @@ impl GpuTexture {
         }
     }
 
-    fn solid(device: &wgpu::Device, queue: &wgpu::Queue, rgba: [u8; 4]) -> Self {
+    fn solid(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        role: ruster_assets::TextureRole,
+        bytes: Vec<u8>,
+    ) -> Self {
         let source = Arc::new(ruster_assets::Texture {
+            role,
             width: 1,
             height: 1,
             mips: vec![ruster_assets::TextureMip {
                 width: 1,
                 height: 1,
-                rgba: rgba.to_vec(),
+                bytes,
             }],
         });
         let mut gpu = Self::new(device, queue, &source);
@@ -89,7 +107,8 @@ pub(super) struct MaterialGpu {
     bindings: BTreeMap<BindingKey, wgpu::BindGroup>,
     samplers: Vec<wgpu::Sampler>,
     white: GpuTexture,
-    _missing: GpuTexture,
+    missing: GpuTexture,
+    roughness_white: GpuTexture,
     missing_bind: wgpu::BindGroup,
     invalid: BTreeSet<String>,
 }
@@ -103,7 +122,7 @@ pub(super) struct Uploads {
 impl MaterialGpu {
     pub fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
         let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
-            label: Some("opaque base-color material ABI"),
+            label: Some("opaque material ABI; base-color prefix preserved"),
             entries: &[
                 wgpu::BindGroupLayoutEntry {
                     binding: 0,
@@ -119,6 +138,16 @@ impl MaterialGpu {
                     binding: 1,
                     visibility: wgpu::ShaderStages::FRAGMENT,
                     ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 2,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
                     count: None,
                 },
             ],
@@ -150,16 +179,39 @@ impl MaterialGpu {
                 })
             })
             .collect::<Vec<_>>();
-        let white = GpuTexture::solid(device, queue, [255; 4]);
-        let missing = GpuTexture::solid(device, queue, [255, 0, 255, 255]);
-        let missing_bind = Self::binding(device, &layout, &missing.view, &samplers[0]);
+        let white = GpuTexture::solid(
+            device,
+            queue,
+            ruster_assets::TextureRole::BaseColor,
+            vec![255; 4],
+        );
+        let missing = GpuTexture::solid(
+            device,
+            queue,
+            ruster_assets::TextureRole::BaseColor,
+            vec![255, 0, 255, 255],
+        );
+        let roughness_white = GpuTexture::solid(
+            device,
+            queue,
+            ruster_assets::TextureRole::Roughness,
+            vec![255],
+        );
+        let missing_bind = Self::binding(
+            device,
+            &layout,
+            &missing.view,
+            &roughness_white.view,
+            &samplers[0],
+        );
         Self {
             layout,
             textures: BTreeMap::new(),
             bindings: BTreeMap::new(),
             samplers,
             white,
-            _missing: missing,
+            missing,
+            roughness_white,
             missing_bind,
             invalid: BTreeSet::new(),
         }
@@ -169,6 +221,7 @@ impl MaterialGpu {
         device: &wgpu::Device,
         layout: &wgpu::BindGroupLayout,
         view: &wgpu::TextureView,
+        roughness: &wgpu::TextureView,
         sampler: &wgpu::Sampler,
     ) -> wgpu::BindGroup {
         device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -183,6 +236,10 @@ impl MaterialGpu {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(roughness),
+                },
             ],
         })
     }
@@ -191,76 +248,124 @@ impl MaterialGpu {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
-        requested: impl Iterator<Item = (&'a BindingKey, Option<&'a Arc<ruster_assets::Texture>>)>,
+        requested: impl Iterator<
+            Item = (
+                &'a BindingKey,
+                Option<&'a Arc<ruster_assets::Texture>>,
+                Option<&'a Arc<ruster_assets::Texture>>,
+            ),
+        >,
     ) -> Uploads {
-        let requested = requested.collect::<BTreeMap<_, _>>();
-        self.textures.retain(|id, _| {
-            requested.iter().any(|(key, source)| {
-                !key.missing && key.texture.as_ref() == Some(id) && source.is_some()
-            })
-        });
-        self.bindings.retain(|key, _| requested.contains_key(key));
-        self.invalid
-            .retain(|id| requested.keys().any(|key| key.texture.as_ref() == Some(id)));
-        let mut uploads = Uploads::default();
-        for (key, source) in requested {
-            if key.missing {
-                continue;
-            }
-            let mode = usize::from(key.sampling);
-            if mode >= self.samplers.len() {
-                continue;
-            }
-            if let Some(id) = &key.texture {
-                let Some(source) = source else {
-                    self.bindings
-                        .retain(|binding, _| binding.texture.as_ref() != Some(id));
-                    continue;
-                };
-                if !self
-                    .textures
-                    .get(id)
-                    .and_then(|gpu| gpu.source.as_ref())
-                    .is_some_and(|old| Weak::ptr_eq(old, &Arc::downgrade(source)))
-                {
-                    let retained = self
-                        .textures
-                        .iter()
-                        .filter(|(other, _)| *other != id)
-                        .map(|(_, gpu)| gpu.bytes)
-                        .sum::<u64>();
-                    let valid = ruster_assets::validate_texture(source).is_ok()
-                        && source.width <= device.limits().max_texture_dimension_2d
-                        && source.height <= device.limits().max_texture_dimension_2d
-                        && (self.textures.len() < ruster_assets::MAX_ASSETS
-                            || self.textures.contains_key(id))
-                        && retained + source.payload_bytes() as u64
-                            <= ruster_assets::MAX_TEXTURE_RESOLVED_BYTES as u64;
-                    if !valid {
-                        self.textures.remove(id);
-                        self.bindings
-                            .retain(|binding, _| binding.texture.as_ref() != Some(id));
-                        if self.invalid.insert(id.clone()) {
-                            eprintln!("Ruster texture {id} invalid or over renderer limits; diagnosed magenta fallback");
+        use ruster_assets::TextureRole;
+        let requested = requested
+            .map(|(key, color, roughness)| (key, (color, roughness)))
+            .collect::<BTreeMap<_, _>>();
+        // One ID/weak source owns one GPU image across all material slots/users.
+        // A wrong-role reference cannot replace another draw's valid owner.
+        let mut sources = BTreeMap::new();
+        for (key, (color, roughness)) in &requested {
+            for (id, source, missing, role) in [
+                (&key.texture, color, key.missing, TextureRole::BaseColor),
+                (
+                    &key.roughness,
+                    roughness,
+                    key.missing_roughness,
+                    TextureRole::Roughness,
+                ),
+            ] {
+                if !missing {
+                    if let (Some(id), Some(source)) = (id, source) {
+                        if source.role == role {
+                            sources.insert(id.as_str(), *source);
                         }
-                        continue;
                     }
-                    self.invalid.remove(id);
-                    let gpu = GpuTexture::new(device, queue, source);
-                    uploads.count += 1;
-                    uploads.bytes += gpu.bytes;
-                    self.textures.insert(id.clone(), gpu);
-                    self.bindings
-                        .retain(|binding, _| binding.texture.as_ref() != Some(id));
                 }
             }
-            if !self.bindings.contains_key(key) {
-                let view = match &key.texture {
-                    Some(id) => &self.textures[id].view,
-                    None => &self.white.view,
-                };
-                let bind = Self::binding(device, &self.layout, view, &self.samplers[mode]);
-                self.bindings.insert(key.clone(), bind);
+        }
+        let old_count = self.textures.len();
+        self.textures
+            .retain(|id, _| sources.contains_key(id.as_str()));
+        if self.textures.len() != old_count {
+            // Bind groups retain their texture views: dropping the map entry
+            // alone must not leave a stale accepted image alive/unaccounted.
+            self.bindings.clear();
+        }
+        self.bindings.retain(|key, _| requested.contains_key(key));
+        self.invalid.retain(|id| sources.contains_key(id.as_str()));
+        // Admission describes the final unique closure, not the ID-ordered
+        // mixture of old/new image sizes during a valid batch replacement.
+        // Queued old GPU owners still have their separate submission lifetime.
+        let final_bytes = sources.values().try_fold(0u64, |sum, source| {
+            sum.checked_add(source.payload_bytes() as u64)
+        });
+        let final_budget = sources.len() <= ruster_assets::MAX_ASSETS
+            && final_bytes
+                .is_some_and(|bytes| bytes <= ruster_assets::MAX_TEXTURE_RESOLVED_BYTES as u64);
+        let mut uploads = Uploads::default();
+        for (id, source) in sources {
+            if self
+                .textures
+                .get(id)
+                .and_then(|gpu| gpu.source.as_ref())
+                .is_some_and(|old| Weak::ptr_eq(old, &Arc::downgrade(source)))
+            {
+                continue;
+            }
+            let valid = ruster_assets::validate_texture(source).is_ok()
+                && source.width <= device.limits().max_texture_dimension_2d
+                && source.height <= device.limits().max_texture_dimension_2d
+                && final_budget;
+            // Every referring binding must observe a successful replacement or
+            // truthful fallback, including a texture shared by different keys.
+            self.bindings.retain(|key, _| {
+                key.texture.as_deref() != Some(id) && key.roughness.as_deref() != Some(id)
+            });
+            if !valid {
+                self.textures.remove(id);
+                if self.invalid.insert(id.to_owned()) {
+                    eprintln!("Ruster texture {id} invalid or over renderer limits; role-specific material fallback");
+                }
+                continue;
+            }
+            self.invalid.remove(id);
+            let gpu = GpuTexture::new(device, queue, source);
+            uploads.count += 1;
+            uploads.bytes += gpu.bytes;
+            self.textures.insert(id.to_owned(), gpu);
+        }
+        for (key, (color, roughness)) in requested {
+            if self.bindings.contains_key(key) {
+                continue;
+            }
+            let color = match &key.texture {
+                Some(id)
+                    if !key.missing
+                        && color.is_some_and(|source| source.role == TextureRole::BaseColor) =>
+                {
+                    self.textures
+                        .get(id)
+                        .map_or(&self.missing.view, |gpu| &gpu.view)
+                }
+                Some(_) => &self.missing.view,
+                None => &self.white.view,
+            };
+            let roughness = match &key.roughness {
+                Some(id)
+                    if !key.missing_roughness
+                        && roughness
+                            .is_some_and(|source| source.role == TextureRole::Roughness) =>
+                {
+                    self.textures
+                        .get(id)
+                        .map_or(&self.roughness_white.view, |gpu| &gpu.view)
+                }
+                _ => &self.roughness_white.view,
+            };
+            if let Some(sampler) = self.samplers.get(usize::from(key.sampling)) {
+                self.bindings.insert(
+                    key.clone(),
+                    Self::binding(device, &self.layout, color, roughness, sampler),
+                );
             }
         }
         uploads
@@ -271,6 +376,6 @@ impl MaterialGpu {
     }
 
     pub fn bytes(&self) -> u64 {
-        8 + self.textures.values().map(|gpu| gpu.bytes).sum::<u64>()
+        9 + self.textures.values().map(|gpu| gpu.bytes).sum::<u64>()
     }
 }

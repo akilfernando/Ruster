@@ -21,7 +21,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     let first = r.materials.prepare(
         device,
         queue,
-        [(&key, Some(&texture)), (&missing_uv, None)].into_iter(),
+        [(&key, Some(&texture), None), (&missing_uv, None, None)].into_iter(),
     );
     assert_eq!(
         first.count, 1,
@@ -32,7 +32,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
             .prepare(
                 device,
                 queue,
-                [(&key, Some(&texture)), (&missing_uv, None)].into_iter()
+                [(&key, Some(&texture), None), (&missing_uv, None, None)].into_iter()
             )
             .count,
         0,
@@ -82,19 +82,24 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     // the left half and a new one-pixel texture is green. Observe both changes.
     let replacement_mesh = Arc::new(ruster_assets::parse_obj(b"v -1 -1 0.5\nv 0 -1 0.5\nv 0 1 0.5\nv -1 1 0.5\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n").unwrap());
     let replacement_texture = Arc::new(ruster_assets::Texture {
+        role: ruster_assets::TextureRole::BaseColor,
         width: 1,
         height: 1,
         mips: vec![ruster_assets::TextureMip {
             width: 1,
             height: 1,
-            rgba: vec![0, 255, 0, 255],
+            bytes: vec![0, 255, 0, 255],
         }],
     });
     assert!(prepare_mesh(device, &mut r.meshes, "diagnostic", &replacement_mesh).is_some());
     let replaced = r.materials.prepare(
         device,
         queue,
-        [(&key, Some(&replacement_texture)), (&missing_uv, None)].into_iter(),
+        [
+            (&key, Some(&replacement_texture), None),
+            (&missing_uv, None, None),
+        ]
+        .into_iter(),
     );
     assert_eq!(
         replaced.count, 1,
@@ -107,7 +112,11 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
             .prepare(
                 device,
                 queue,
-                [(&key, Some(&replacement_texture)), (&missing_uv, None)].into_iter()
+                [
+                    (&key, Some(&replacement_texture), None),
+                    (&missing_uv, None, None)
+                ]
+                .into_iter()
             )
             .count,
         0
@@ -120,13 +129,115 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
     assert_pixel(&replaced, 48, 48, [0, 0, 0]);
     capture(&replaced, true);
     r.materials
-        .prepare(device, queue, std::iter::once((&key, None)));
+        .prepare(device, queue, std::iter::once((&key, None, None)));
     assert_eq!(
         r.materials.bytes(),
-        8,
+        9,
         "unresolved content must retire cached pixels/bindings"
     );
+    verify_role_budget_swap(device, queue, &mut r.materials);
     eprintln!("GPU probe: decoded PNG UV/sRGB pixels, per-draw missing UV isolation, unchanged zero uploads, same-ID mesh/texture replacement and rendering after worker CPU-source release passed");
+}
+
+// One existing GPU ownership case: valid final mixed-role closure must not be
+// rejected because a different old texture has not yet shrunk in ID order.
+fn verify_role_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut MaterialGpu) {
+    use ruster_assets::{Texture, TextureMip, TextureRole};
+    let solid = |mut width: u32, mut height: u32, role: TextureRole| {
+        let (original_width, original_height) = (width, height);
+        let mut mips = Vec::new();
+        loop {
+            mips.push(TextureMip {
+                width,
+                height,
+                bytes: vec![255; width as usize * height as usize * role.bytes_per_pixel()],
+            });
+            if width == 1 && height == 1 {
+                break;
+            }
+            width = (width / 2).max(1);
+            height = (height / 2).max(1);
+        }
+        Arc::new(Texture {
+            width: original_width,
+            height: original_height,
+            role,
+            mips,
+        })
+    };
+    let small = solid(2048, 1024, TextureRole::BaseColor);
+    let large_a = solid(2048, 2048, TextureRole::BaseColor);
+    let large_b = solid(2048, 2048, TextureRole::BaseColor);
+    let map = solid(2048, 2048, TextureRole::Roughness);
+    let keys = ["a", "b", "c"].map(|id| BindingKey {
+        texture: Some(id.into()),
+        roughness: Some("shared-map".into()),
+        ..Default::default()
+    });
+    let before = gpu.prepare(
+        device,
+        queue,
+        [
+            (&keys[0], Some(&small), Some(&map)),
+            (&keys[1], Some(&large_a), Some(&map)),
+            (&keys[2], Some(&large_b), Some(&map)),
+        ]
+        .into_iter(),
+    );
+    assert_eq!(
+        before.count, 4,
+        "shared R8 map must have one owner across three materials"
+    );
+    let bytes = 9
+        + small.payload_bytes()
+        + large_a.payload_bytes()
+        + large_b.payload_bytes()
+        + map.payload_bytes();
+    assert!(bytes < ruster_assets::MAX_TEXTURE_RESOLVED_BYTES + 9);
+    assert_eq!(gpu.bytes(), bytes as u64);
+    let replacement = gpu.prepare(
+        device,
+        queue,
+        [
+            (&keys[0], Some(&large_a), Some(&map)),
+            (&keys[1], Some(&small), Some(&map)),
+            (&keys[2], Some(&large_b), Some(&map)),
+        ]
+        .into_iter(),
+    );
+    assert_eq!(
+        replacement.count, 2,
+        "near-cap size swap must admit the valid final closure in one prepare"
+    );
+    assert_eq!(gpu.bytes(), bytes as u64);
+    assert_eq!(
+        gpu.prepare(
+            device,
+            queue,
+            [
+                (&keys[0], Some(&large_a), Some(&map)),
+                (&keys[1], Some(&small), Some(&map)),
+                (&keys[2], Some(&large_b), Some(&map))
+            ]
+            .into_iter()
+        )
+        .count,
+        0
+    );
+    let map_identity = Arc::downgrade(&map);
+    drop(map);
+    assert!(
+        map_identity.upgrade().is_none(),
+        "GPU identity must not retain the CPU R8 payload"
+    );
+    gpu.prepare(device, queue, std::iter::empty());
+    assert_eq!(
+        gpu.bytes(),
+        9,
+        "pruning must release every binding's retained views"
+    );
+    queue.submit(std::iter::empty());
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 }
 
 fn retire_sources(mesh: Arc<ruster_assets::Mesh>, texture: Arc<ruster_assets::Texture>) {
@@ -309,12 +420,13 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
     // inverse-transpose normal, rather than a normalized model-matrix normal.
     let tilted = Arc::new(ruster_assets::parse_obj(b"v -1 -1 0\nv 1 -1 0.6\nv 1 1 1\nv -1 1 0.4\nvt 0 0\nvt 1 0\nvt 1 1\nvt 0 1\nf 1/1 2/2 3/3\nf 1/1 3/3 4/4\n").unwrap());
     let texture = Arc::new(ruster_assets::Texture {
+        role: ruster_assets::TextureRole::BaseColor,
         width: 1,
         height: 1,
         mips: vec![ruster_assets::TextureMip {
             width: 1,
             height: 1,
-            rgba: vec![128, 128, 128, 255],
+            bytes: vec![128, 128, 128, 255],
         }],
     });
     let key = BindingKey {
@@ -524,6 +636,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
                 key: Some("lighting-plane".into()),
                 binding: key.clone(),
                 texture: Some(texture.clone()),
+                roughness: None,
                 mesh: Some(source.clone()),
                 instances: vec![Instance {
                     model: matrix.to_cols_array_2d(),
@@ -824,6 +937,40 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             size_in_pixels: [64, 64],
             pixels_per_point: 1.,
         };
+        let map = |width, bytes: Vec<u8>, tail: Option<u8>| {
+            let mut mips = vec![ruster_assets::TextureMip {
+                width,
+                height: 1,
+                bytes,
+            }];
+            if let Some(value) = tail {
+                mips.push(ruster_assets::TextureMip {
+                    width: 1,
+                    height: 1,
+                    bytes: vec![value],
+                });
+            }
+            Arc::new(ruster_assets::Texture {
+                role: ruster_assets::TextureRole::Roughness,
+                width,
+                height: 1,
+                mips,
+            })
+        };
+        let white = map(1, vec![255], None);
+        let middle = map(1, vec![128], None);
+        let black = map(1, vec![0], None);
+        let odd = map(3, vec![255; 3], Some(255));
+        let wrong_role = Arc::new(ruster_assets::Texture {
+            role: ruster_assets::TextureRole::BaseColor,
+            width: 1,
+            height: 1,
+            mips: vec![ruster_assets::TextureMip {
+                width: 1,
+                height: 1,
+                bytes: vec![0, 0, 0, 255],
+            }],
+        });
         let mut results = BTreeMap::new();
         for (name, roughness, exposure, intensity, perspective) in [
             ("legacy", 0.08, 0., 1., false),
@@ -835,6 +982,16 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             ("exposure-high", 0.5, 2., 1., false),
             ("bright-unclipped", 0.08, -8., 16., false),
             ("grazing-storage-limit", 0.08, -8., 16., false),
+            ("map-white", 0.5, 0., 1., false),
+            ("map-middle", 1., 0., 1., false),
+            ("map-middle-unchanged", 1., 0., 1., false),
+            ("map-missing", 0.5, 0., 1., false),
+            ("map-wrong-role", 0.5, 0., 1., false),
+            ("map-restored", 0.5, 0., 1., false),
+            ("map-black", 1., 0., 1., false),
+            ("map-odd", 0.5, 0., 1., false),
+            ("map-missing-uv", 1., 0., 1., false),
+            ("middle-scalar", 128. / 255., 0., 1., false),
             ("perspective", 0.5, 0., 1., true),
             ("custom", 0.5, 0., 1., false),
             ("restored", 0.5, 0., 1., false),
@@ -895,22 +1052,48 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                 target.color = color;
                 target.bind = bind;
             }
+            let mapped_case = name.starts_with("map-");
+            let map_source = match name {
+                "map-white" | "map-restored" => Some(white.clone()),
+                "map-middle" | "map-middle-unchanged" | "map-missing-uv" => Some(middle.clone()),
+                "map-black" => Some(black.clone()),
+                "map-odd" => Some(odd.clone()),
+                "map-wrong-role" => Some(wrong_role.clone()),
+                _ => None,
+            };
             let before = metrics.lock().unwrap().clone();
             let callback = SceneCallback {
-                groups: vec![DrawGroup {
-                    key: Some("surface-plane".into()),
-                    binding: BindingKey::default(),
-                    texture: None,
-                    mesh: Some(mesh.clone()),
-                    range: 0..1,
-                    instances: vec![Instance {
-                        model: Mat4::IDENTITY.to_cols_array_2d(),
-                        normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
-                        color: [0.05, 0.05, 0.05, 1.],
-                        base_color: [0.05, 0.05, 0.05, 0.],
-                        response: [1., roughness, 0., 0.],
-                    }],
-                }],
+                groups: (0..if mapped_case { 2 } else { 1 })
+                    .map(|index| DrawGroup {
+                        key: Some("surface-plane".into()),
+                        binding: BindingKey {
+                            roughness: mapped_case.then(|| "surface-map".into()),
+                            missing_roughness: name == "map-missing-uv" && index == 1,
+                            sampling: if index == 0 { 1 } else { 3 },
+                            ..Default::default()
+                        },
+                        texture: None,
+                        roughness: map_source.clone(),
+                        mesh: Some(mesh.clone()),
+                        range: index..index + 1,
+                        instances: vec![Instance {
+                            model: if mapped_case {
+                                Mat4::from_scale_rotation_translation(
+                                    Vec3::new(0.5, 1., 1.),
+                                    glam::Quat::IDENTITY,
+                                    Vec3::new(if index == 0 { -0.5 } else { 0.5 }, 0., 0.),
+                                )
+                                .to_cols_array_2d()
+                            } else {
+                                Mat4::IDENTITY.to_cols_array_2d()
+                            },
+                            normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+                            color: [0.05, 0.05, 0.05, 1.],
+                            base_color: [0.05, 0.05, 0.05, 0.],
+                            response: [1., roughness, if mapped_case { 1. } else { 0. }, 0.],
+                        }],
+                    })
+                    .collect(),
                 camera: Mat4::IDENTITY.to_cols_array(),
                 camera_eye_mode: if name == "grazing-storage-limit" {
                     [1., 0., 0.00001, 0.]
@@ -1022,7 +1205,21 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
             recv.recv().unwrap().unwrap();
             let mapped = read.slice(..).get_mapped_range().unwrap();
-            let actual = pixel(&mapped, 32, 32);
+            let actual = pixel(&mapped, if mapped_case { 16 } else { 32 }, 32);
+            if mapped_case {
+                let other = pixel(&mapped, 48, 32);
+                if name == "map-missing-uv" {
+                    assert_ne!(
+                        actual, other,
+                        "one missing-UV user must not poison the valid map draw"
+                    );
+                } else {
+                    assert_eq!(
+                        actual, other,
+                        "both shared map bindings must observe replacement/fallback: {name}"
+                    );
+                }
+            }
             drop(mapped);
             read.unmap();
             if name == "grazing-storage-limit" {
@@ -1073,7 +1270,21 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                     if hdr { HDR_COLOR } else { COLOR }
                 )
             );
-            if !matches!(name, "legacy") {
+            if mapped_case {
+                let expected = u64::from(!matches!(
+                    name,
+                    "map-middle-unchanged" | "map-missing" | "map-wrong-role"
+                ));
+                assert_eq!(
+                    after.texture_uploads - before.texture_uploads,
+                    expected,
+                    "unique mapped upload count: {name}"
+                );
+                assert_eq!(
+                    after.mesh_uploads, before.mesh_uploads,
+                    "map edits must reuse geometry"
+                );
+            } else if name != "legacy" {
                 assert_eq!(
                     after.mesh_uploads, before.mesh_uploads,
                     "scalar {name} mesh reuse"
@@ -1097,6 +1308,31 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             );
             results.insert(name, actual);
         }
+        for name in [
+            "map-white",
+            "map-missing",
+            "map-wrong-role",
+            "map-restored",
+            "map-odd",
+        ] {
+            assert_eq!(
+                results[name], results["exposure-zero"],
+                "white/fallback/NPOT must preserve scalar output: {name}"
+            );
+        }
+        assert_eq!(
+            results["map-black"], results["polished"],
+            "black map reaches existing roughness floor"
+        );
+        assert_eq!(results["map-middle"], results["map-middle-unchanged"]);
+        assert_eq!(results["map-middle"], results["map-missing-uv"]);
+        assert!(
+            results["map-middle"]
+                .iter()
+                .zip(results["middle-scalar"])
+                .all(|(&a, b)| a.abs_diff(b) <= 1),
+            "R8 byte128 must remain linear data, not sRGB-decoded"
+        );
         assert!(
             results["polished"][0] > results["satin"][0]
                 && results["satin"][0] > results["matte"][0]

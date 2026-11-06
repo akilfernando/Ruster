@@ -22,8 +22,8 @@ pub use mutations::{
     AssetAdoption, AssetCompletion, AssetMutation, AssetRequest, AssetStateIdentity, PreparedAsset,
 };
 pub use texture::{
-    decode_png, validate_texture, Texture, TextureMip, MAX_TEXTURE_BYTES, MAX_TEXTURE_EDGE,
-    MAX_TEXTURE_RESOLVED_BYTES, MAX_TEXTURE_SOURCE_BYTES,
+    decode_png, decode_png_with_role, validate_texture, Texture, TextureMip, TextureRole,
+    MAX_TEXTURE_BYTES, MAX_TEXTURE_EDGE, MAX_TEXTURE_RESOLVED_BYTES, MAX_TEXTURE_SOURCE_BYTES,
 };
 const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_REGISTRY_BYTES: usize = 64 * 1024;
@@ -120,6 +120,7 @@ pub enum AssetStatus {
 pub struct AssetInfo {
     pub kind: AssetKind,
     pub mesh_normal_policy: Option<MeshNormalPolicy>,
+    pub texture_role: Option<TextureRole>,
     pub id: String,
     pub source: String,
     pub hash: Option<String>,
@@ -155,6 +156,8 @@ struct Record {
     kind: AssetKind,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     mesh_normal_policy: Option<MeshNormalPolicy>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    texture_role: Option<TextureRole>,
     source: String,
     hash: Option<String>,
 }
@@ -170,7 +173,7 @@ impl Default for Registry {
     fn default() -> Self {
         Self {
             format: "ruster-assets".into(),
-            version: 3,
+            version: 4,
             revision: 0,
             assets: BTreeMap::new(),
         }
@@ -222,8 +225,43 @@ struct Version2Registry {
     revision: u64,
     assets: BTreeMap<String, Version2Record>,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Version3Record {
+    kind: AssetKind,
+    #[serde(default)]
+    mesh_normal_policy: Option<MeshNormalPolicy>,
+    source: String,
+    hash: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Version3Registry {
+    format: String,
+    version: u32,
+    revision: u64,
+    assets: BTreeMap<String, Version3Record>,
+}
 fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
+    let version = value.get("version").and_then(serde_json::Value::as_u64);
+    if let Some(assets) = value.get("assets").and_then(serde_json::Value::as_object) {
+        for record in assets.values() {
+            if matches!(version, Some(1..=3)) && record.get("texture_role").is_some() {
+                return Err(error("texture_role requires asset catalog version 4"));
+            }
+            if record.get("kind").and_then(serde_json::Value::as_str) == Some("texture")
+                && record.get("mesh_normal_policy").is_some()
+            {
+                return Err(error("texture assets must omit mesh_normal_policy"));
+            }
+            if record.get("kind").and_then(serde_json::Value::as_str) == Some("mesh")
+                && record.get("texture_role").is_some()
+            {
+                return Err(error("mesh assets must omit texture_role"));
+            }
+        }
+    }
     if value.get("version").and_then(serde_json::Value::as_u64) == Some(1) {
         let old: LegacyRegistry = serde_json::from_slice(bytes)?;
         Ok(Registry {
@@ -239,6 +277,7 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
                         Record {
                             kind: AssetKind::Mesh,
                             mesh_normal_policy: Some(MeshNormalPolicy::Flat),
+                            texture_role: None,
                             source: r.source,
                             hash: r.hash,
                         },
@@ -261,6 +300,8 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
                         Record {
                             mesh_normal_policy: (r.kind == AssetKind::Mesh)
                                 .then_some(MeshNormalPolicy::Flat),
+                            texture_role: (r.kind == AssetKind::Texture)
+                                .then_some(TextureRole::BaseColor),
                             kind: r.kind,
                             source: r.source,
                             hash: r.hash,
@@ -269,20 +310,31 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
                 })
                 .collect(),
         })
-    } else {
-        if value.get("version").and_then(serde_json::Value::as_u64) == Some(3)
-            && value
-                .get("assets")
-                .and_then(serde_json::Value::as_object)
-                .is_some_and(|assets| {
-                    assets.values().any(|record| {
-                        record.get("kind").and_then(serde_json::Value::as_str) == Some("texture")
-                            && record.get("mesh_normal_policy").is_some()
-                    })
+    } else if version == Some(3) {
+        let old: Version3Registry = serde_json::from_slice(bytes)?;
+        Ok(Registry {
+            format: old.format,
+            version: old.version,
+            revision: old.revision,
+            assets: old
+                .assets
+                .into_iter()
+                .map(|(id, r)| {
+                    (
+                        id,
+                        Record {
+                            kind: r.kind,
+                            mesh_normal_policy: r.mesh_normal_policy,
+                            texture_role: (r.kind == AssetKind::Texture)
+                                .then_some(TextureRole::BaseColor),
+                            source: r.source,
+                            hash: r.hash,
+                        },
+                    )
                 })
-        {
-            return Err(error("texture assets must omit mesh_normal_policy"));
-        }
+                .collect(),
+        })
+    } else {
         Ok(serde_json::from_slice(bytes)?)
     }
 }
@@ -320,6 +372,7 @@ pub struct ExportSnapshot {
 struct ExportSource {
     kind: AssetKind,
     mesh_normal_policy: Option<MeshNormalPolicy>,
+    texture_role: Option<TextureRole>,
     source: String,
     hash: String,
 }
@@ -339,6 +392,11 @@ impl ExportSnapshot {
         self.sources
             .get(id)
             .and_then(|source| source.mesh_normal_policy)
+    }
+
+    /// Frozen interpretation of an accepted texture; meshes/unknown IDs return None.
+    pub fn texture_role(&self, id: &str) -> Option<TextureRole> {
+        self.sources.get(id).and_then(|source| source.texture_role)
     }
 
     /// Read at most MAX_ASSETS sources, using the mesh/texture source-byte bounds. Catalog
@@ -422,7 +480,10 @@ impl AssetStore {
                         )
                         .map(|(mesh, current)| (Payload::Mesh(mesh), current)),
                     AssetKind::Texture => store
-                        .read_texture_cache(hash)
+                        .read_texture_cache(
+                            hash,
+                            record.texture_role.expect("validated texture role"),
+                        )
                         .map(|texture| (Payload::Texture(texture), true)),
                 };
                 if let Ok((payload, current)) = cached {
@@ -450,6 +511,7 @@ impl AssetStore {
                                     &record.source,
                                     record.kind,
                                     record.mesh_normal_policy,
+                                    record.texture_role,
                                     &bytes,
                                 ) {
                                     Ok(_) => "source changed; Refresh to accept new content".into(),
@@ -462,6 +524,7 @@ impl AssetStore {
                             &record.source,
                             record.kind,
                             record.mesh_normal_policy,
+                            record.texture_role,
                             &bytes,
                         ) {
                             Ok(payload) => match store.check_payload_budget(&id, &payload) {
@@ -556,6 +619,7 @@ impl AssetStore {
                 ExportSource {
                     kind: record.kind,
                     mesh_normal_policy: record.mesh_normal_policy,
+                    texture_role: record.texture_role,
                     source: record.source.clone(),
                     hash: hash.clone(),
                 },
@@ -582,6 +646,7 @@ impl AssetStore {
         AssetInfo {
             kind: record.kind,
             mesh_normal_policy: record.mesh_normal_policy,
+            texture_role: record.texture_role,
             id: id.into(),
             source: record.source.clone(),
             hash: record.hash.clone(),
@@ -677,18 +742,19 @@ impl AssetStore {
         let directory = self.kind_cache_directory("textures", true)?;
         atomic_write(
             &directory,
-            &directory.join(format!("v1-{hash}.bin")),
+            &directory.join(format!("v{}-{hash}.bin", texture.role.cache_version())),
             &texture::encode_cache(hash, texture)?,
         )
     }
-    fn read_texture_cache(&self, hash: &str) -> Result<Texture, AssetError> {
+    fn read_texture_cache(&self, hash: &str, role: TextureRole) -> Result<Texture, AssetError> {
         let directory = self.kind_cache_directory("textures", false)?;
-        texture::decode_cache(
+        texture::decode_cache_with_role(
             &read_bounded(
-                &directory.join(format!("v1-{hash}.bin")),
+                &directory.join(format!("v{}-{hash}.bin", role.cache_version())),
                 texture::MAX_TEXTURE_CACHE_BYTES,
             )?,
             hash,
+            role,
         )
     }
     fn cache_directory(&self, create: bool) -> Result<PathBuf, AssetError> {
@@ -903,6 +969,7 @@ fn parse_source(
     source: &str,
     kind: AssetKind,
     policy: Option<MeshNormalPolicy>,
+    role: Option<TextureRole>,
     bytes: &[u8],
 ) -> Result<Payload, AssetError> {
     match kind {
@@ -910,7 +977,9 @@ fn parse_source(
             parse_obj_with_normal_policy(bytes, policy.expect("validated mesh policy"))
                 .map(Payload::Mesh)
         }
-        AssetKind::Texture => decode_png(bytes).map(Payload::Texture),
+        AssetKind::Texture => {
+            decode_png_with_role(bytes, role.expect("validated texture role")).map(Payload::Texture)
+        }
     }
     .map_err(|e| error(format!("source {source:?}: {e}")))
 }
@@ -1073,9 +1142,9 @@ fn confined(root: &Path, source: &str, allow_missing_leaf: bool) -> Result<PathB
     Ok(path)
 }
 fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
-    if registry.format != "ruster-assets" || !matches!(registry.version, 1..=3) {
+    if registry.format != "ruster-assets" || !matches!(registry.version, 1..=4) {
         return Err(error(
-            "unsupported asset catalog format/version; expected ruster-assets version 1, 2 or 3",
+            "unsupported asset catalog format/version; expected ruster-assets version 1, 2, 3 or 4",
         ));
     }
     if registry.assets.len() > MAX_ASSETS {
@@ -1095,9 +1164,18 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
                 "mesh assets require mesh_normal_policy; textures must omit it",
             ));
         }
-        if !sources.insert((&record.source, record.mesh_normal_policy)) {
+        if (record.kind == AssetKind::Texture) != record.texture_role.is_some() {
+            return Err(error(
+                "texture assets require texture_role; meshes must omit it",
+            ));
+        }
+        if !sources.insert((
+            &record.source,
+            record.mesh_normal_policy,
+            record.texture_role,
+        )) {
             return Err(error(format!(
-                "duplicate registered source {:?}; one stable asset ID is required per source path and normal policy",
+                "duplicate registered source {:?}; one stable asset ID is required per source path and import interpretation",
                 record.source
             )));
         }
@@ -1607,7 +1685,7 @@ mod tests {
         let catalog = fs::read(root.path().join(REGISTRY)).unwrap();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&catalog).unwrap()["version"],
-            3
+            4
         );
         let directory = root.path().join(".ruster-cache/meshes");
         let v3 = fs::read(directory.join(format!("v3-{hash}.bin"))).unwrap();
@@ -1684,6 +1762,57 @@ mod tests {
                 v4
             );
         }
+        let mut legacy3: serde_json::Value = serde_json::from_slice(&catalog).unwrap();
+        legacy3["version"] = serde_json::json!(3);
+        let legacy3 = serde_json::to_vec(&legacy3).unwrap();
+        fs::write(root.path().join(REGISTRY), &legacy3).unwrap();
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().inspect()[0].mesh_normal_policy,
+            Some(MeshNormalPolicy::Flat)
+        );
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), legacy3);
+        for version in [1, 2, 3] {
+            for role in [
+                serde_json::Value::Null,
+                serde_json::json!("base_color_srgb"),
+                serde_json::json!("roughness_linear"),
+            ] {
+                let mut invalid: serde_json::Value = serde_json::from_slice(&catalog).unwrap();
+                invalid["version"] = serde_json::json!(version);
+                invalid["assets"]["flat"]["texture_role"] = role;
+                let failure = parse_registry(&serde_json::to_vec(&invalid).unwrap()).unwrap_err();
+                assert!(failure
+                    .to_string()
+                    .contains("texture_role requires asset catalog version 4"));
+            }
+        }
+        for role in [
+            serde_json::Value::Null,
+            serde_json::json!("base_color_srgb"),
+            serde_json::json!("roughness_linear"),
+        ] {
+            let mut invalid: serde_json::Value = serde_json::from_slice(&catalog).unwrap();
+            invalid["assets"]["flat"]["texture_role"] = role;
+            assert!(
+                parse_registry(&serde_json::to_vec(&invalid).unwrap()).is_err(),
+                "mesh must omit even null texture_role"
+            );
+        }
+        for role in [
+            None,
+            Some(serde_json::Value::Null),
+            Some(serde_json::json!("unknown")),
+        ] {
+            let mut invalid: serde_json::Value = serde_json::from_slice(&catalog).unwrap();
+            invalid["assets"]["color"] =
+                serde_json::json!({"kind":"texture", "source":"color.png", "hash":null});
+            if let Some(role) = role {
+                invalid["assets"]["color"]["texture_role"] = role;
+            }
+            assert!(parse_registry(&serde_json::to_vec(&invalid).unwrap())
+                .and_then(|registry| validate_registry(&registry))
+                .is_err());
+        }
     }
 
     // One mixed-source case protects typed catalog transactions, immutable
@@ -1716,7 +1845,7 @@ mod tests {
         let baseline = fs::read(root.path().join(REGISTRY)).unwrap();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&baseline).unwrap()["version"],
-            3
+            4
         );
         assert!(store.rename("color", "color.obj").is_err());
         assert!(!root.path().join("color.obj").exists());
@@ -1862,7 +1991,7 @@ mod tests {
             &changed_open.texture_snapshots()["color"]
         ));
         assert_eq!(
-            changed_open.texture("color").unwrap().mips[0].rgba,
+            changed_open.texture("color").unwrap().mips[0].bytes,
             [255, 0, 0, 255]
         );
         store = changed_open;
@@ -1949,6 +2078,171 @@ mod tests {
         assert_eq!(
             fs::metadata(root.path().join("moved.png")).unwrap().len(),
             (MAX_TEXTURE_SOURCE_BYTES + 1) as u64
+        );
+
+        // Genuine Catalog3 color/cache1 remains byte-identical on open and
+        // unchanged Refresh; a new ID explicitly selects the second role.
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("shared.png"), &first).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        store.import("color", "shared.png").unwrap();
+        let mut legacy: serde_json::Value =
+            serde_json::from_slice(&fs::read(root.path().join(REGISTRY)).unwrap()).unwrap();
+        legacy["version"] = serde_json::json!(3);
+        legacy["assets"]["color"]
+            .as_object_mut()
+            .unwrap()
+            .remove("texture_role");
+        let legacy = serde_json::to_vec(&legacy).unwrap();
+        fs::write(root.path().join(REGISTRY), &legacy).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        assert_eq!(
+            store.inspect()[0].texture_role,
+            Some(TextureRole::BaseColor)
+        );
+        let old = store.texture_snapshots()["color"].clone();
+        let revision = store.revision();
+        store.refresh("color").unwrap();
+        assert_eq!(store.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), legacy);
+        let caches = root.path().join(".ruster-cache/textures");
+        let old_color_cache = fs::read(caches.join(format!("v1-{}.bin", digest(&first)))).unwrap();
+        assert_eq!(old_color_cache, cache_bytes);
+        let info = store
+            .import_texture("roughness", "shared.png", TextureRole::Roughness)
+            .unwrap();
+        assert_eq!(info.texture_role, Some(TextureRole::Roughness));
+        assert!(Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
+        assert_eq!(store.texture("roughness").unwrap().mips[0].bytes, [12]);
+        assert_eq!(
+            store
+                .texture_snapshots()
+                .values()
+                .map(|texture| texture.payload_bytes())
+                .sum::<usize>(),
+            5
+        );
+        assert!(store.import("duplicate", "shared.png").is_err());
+        assert!(store
+            .import_texture("duplicate", "shared.png", TextureRole::Roughness)
+            .is_err());
+        assert!(store
+            .import_texture("wrong", "mesh.obj", TextureRole::Roughness)
+            .is_err());
+        assert!(store.rename("color", "renamed.png").is_err());
+        let ids = BTreeSet::from(["color".into(), "roughness".into()]);
+        let snapshot = store.export_snapshot(&ids).unwrap();
+        assert_eq!(snapshot.texture_role("color"), Some(TextureRole::BaseColor));
+        assert_eq!(
+            snapshot.texture_role("roughness"),
+            Some(TextureRole::Roughness)
+        );
+        assert_eq!(snapshot.texture_role("missing"), None);
+        assert_eq!(snapshot.read_sources().unwrap().len(), 2);
+        let catalog = fs::read(root.path().join(REGISTRY)).unwrap();
+        let data_path = caches.join(format!("v2-{}.bin", digest(&first)));
+        let data_cache = fs::read(&data_path).unwrap();
+        assert_eq!(
+            fs::read(caches.join(format!("v1-{}.bin", digest(&first)))).unwrap(),
+            old_color_cache
+        );
+        fs::remove_file(&data_path).unwrap();
+        fs::remove_file(root.path().join("shared.png")).unwrap();
+        let missing = AssetStore::open(root.path()).unwrap();
+        assert!(missing.texture("color").is_some());
+        assert!(
+            missing.texture("roughness").is_none(),
+            "color cache cannot supply data pixels"
+        );
+        fs::write(root.path().join("shared.png"), &first).unwrap();
+        let rebuilt = AssetStore::open(root.path()).unwrap();
+        assert_eq!(rebuilt.texture("roughness"), store.texture("roughness"));
+        assert_eq!(fs::read(&data_path).unwrap(), data_cache);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), catalog);
+        let old_data = store.texture_snapshots()["roughness"].clone();
+        fs::write(root.path().join("shared.png"), &changed).unwrap();
+        store.refresh("roughness").unwrap();
+        assert!(Arc::ptr_eq(&old, &store.texture_snapshots()["color"]));
+        assert!(!Arc::ptr_eq(
+            &old_data,
+            &store.texture_snapshots()["roughness"]
+        ));
+        assert_eq!(store.texture("roughness").unwrap().mips[0].bytes, [255]);
+        assert!(store.export_snapshot(&ids).unwrap().read_sources().is_err());
+        assert!(store
+            .export_snapshot(&BTreeSet::from(["roughness".into()]))
+            .unwrap()
+            .read_sources()
+            .is_ok());
+        let accepted = store.texture_snapshots()["roughness"].clone();
+        let revision = store.revision();
+        let catalog = fs::read(root.path().join(REGISTRY)).unwrap();
+        fs::write(root.path().join("shared.png"), b"corrupt").unwrap();
+        assert!(store.refresh("roughness").is_err());
+        assert_eq!(store.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), catalog);
+        assert!(Arc::ptr_eq(
+            &accepted,
+            &store.texture_snapshots()["roughness"]
+        ));
+
+        // The accepted aggregate counts actual bytes across all roles. Two
+        // RGBA8 plus four R8 2048-square chains fit exactly four bytes below64MiB.
+        // A tiny valid new data image crosses the cap and must publish nothing.
+        let root = tempfile::tempdir().unwrap();
+        let large = texture::tests::png(
+            2048,
+            2048,
+            png::ColorType::Rgb,
+            png::BitDepth::Eight,
+            &vec![128; 2048 * 2048 * 3],
+        );
+        let mut store = AssetStore::open(root.path()).unwrap();
+        for i in 0..4 {
+            let source = format!("large-{i}.png");
+            fs::write(root.path().join(&source), &large).unwrap();
+            store
+                .import_texture(&format!("data-{i}"), &source, TextureRole::Roughness)
+                .unwrap();
+            if i < 2 {
+                store.import(&format!("color-{i}"), &source).unwrap();
+            }
+        }
+        assert_eq!(
+            store
+                .texture_snapshots()
+                .values()
+                .map(|texture| texture.payload_bytes())
+                .sum::<usize>(),
+            MAX_TEXTURE_RESOLVED_BYTES - 4
+        );
+        let before = fs::read(root.path().join(REGISTRY)).unwrap();
+        let revision = store.revision();
+        let accepted = store.texture_snapshots()["data-0"].clone();
+        let tiny = texture::tests::png(
+            8,
+            1,
+            png::ColorType::Grayscale,
+            png::BitDepth::Eight,
+            &[128; 8],
+        );
+        fs::write(root.path().join("overflow.png"), tiny).unwrap();
+        assert!(store
+            .import_texture("overflow", "overflow.png", TextureRole::Roughness)
+            .unwrap_err()
+            .to_string()
+            .contains("64 MiB"));
+        assert_eq!(store.revision(), revision);
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), before);
+        assert!(Arc::ptr_eq(&accepted, &store.texture_snapshots()["data-0"]));
+        assert_eq!(
+            AssetStore::open(root.path())
+                .unwrap()
+                .texture_snapshots()
+                .values()
+                .map(|texture| texture.payload_bytes())
+                .sum::<usize>(),
+            MAX_TEXTURE_RESOLVED_BYTES - 4
         );
     }
 
