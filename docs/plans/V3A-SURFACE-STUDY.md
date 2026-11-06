@@ -1,6 +1,6 @@
 # V3a — Surface Study
 
-Planned2026-11-06 by Astra/root at the user's request after accepted V2b. **Approved2026-11-06 by the user: “Approved. Start work.” Active at baseline/early feasibility.** This is the first bounded material-depth slice, not the whole V3 stage. [Direction](../DIRECTION.md) owns confirmed requirements; [roadmap](../ROADMAP.md) owns the capability sequence. The user requires creator-first direct-editor/native-MCP parity, familiarity, recoverability and lean measured implementation. The technical scope/defaults below are agent proposals.
+Planned2026-11-06 by Astra/root at the user's request after accepted V2b. **Approved2026-11-06 by the user: “Approved. Start work.” **Completed and accepted2026-11-06: [requirement audit](../evidence/V3A-readiness.md) records implementation, verification, limits and handoff.**** This is the first bounded material-depth slice, not the whole V3 stage. [Direction](../DIRECTION.md) owns confirmed requirements; [roadmap](../ROADMAP.md) owns the capability sequence. The user requires creator-first direct-editor/native-MCP parity, familiarity, recoverability and lean measured implementation. The technical scope/defaults below are agent proposals.
 
 ## Creator outcome
 

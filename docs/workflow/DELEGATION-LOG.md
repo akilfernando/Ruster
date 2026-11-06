@@ -433,3 +433,8 @@ Root retains the exclusive Cargo/native/GPU lease. Sol bounded workers prepare t
 
 
 V3a closure: root runs prepared audit check-only and actual mode successfully (93inventoried handoff files/80prep copies/12original baseline pins), resolving the remaining integrity condition. Actual no-MCP launcher qualification and full requirement mapping resolve the other Astra conditions. Root accepts bounded V3a and stops; metadata/source archive are regenerated after the Markdown-only closure commit. No product/GPU/native cohort is repeated for documentary changes.
+
+
+## Post-V3a next-goal planning — 2026-11-06
+
+The user requests Astra planning. Root resumes the existing deep-reasoning specialist (`gpt-6-astra`, high; same session routing snapshot) for a bounded comparison of roughness maps, normal/detail maps, environment/metals and composition. Read-only source/primary-source assessment plus exclusive new plan document; no code, native/Cargo, goal-tool or publication actions. Astra recommends V3b Finish Patterns: one spatial roughness-map creator workflow, establishing explicit linear-data import/filter/cache/render/runtime ownership without bundling tangents/environment/layers. Root checks the existing material/data boundary, reviews the plan, reconciles stale completed-state wording and integrates proposal links/status. Defaults/investigation ceilings remain proposals; no implementation or goal activation follows from planning. Token/cost/worker elapsed metrics unavailable. Documentation-only verification recorded in STATUS.
