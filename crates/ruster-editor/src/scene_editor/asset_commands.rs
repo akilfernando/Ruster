@@ -37,7 +37,12 @@ struct Stamp {
     root: PathBuf,
     identity: AssetStateIdentity,
     drafts: (u64, u64, u64),
-    owned_form: Option<(String, String, bool)>,
+    owned_form: Option<(
+        String,
+        String,
+        bool,
+        Option<ruster_assets::MeshNormalPolicy>,
+    )>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -1855,6 +1860,7 @@ impl SceneEditor {
                     self.asset_id.clone(),
                     self.asset_source.clone(),
                     self.asset_rename_intent,
+                    self.import_normal_policy(),
                 )
             }),
         };
@@ -1902,11 +1908,12 @@ impl SceneEditor {
                 "Human draft ownership changed during preparation; retry explicitly.",
             ));
         }
-        if let Some((id, source, rename)) = &stamp.owned_form {
+        if let Some((id, source, rename, normals)) = &stamp.owned_form {
             if self.asset_dialog
                 || id != &self.asset_id
                 || source != &self.asset_source
                 || *rename != self.asset_rename_intent
+                || *normals != self.import_normal_policy()
             {
                 return Err(error(
                     "asset_cancelled",
@@ -2044,6 +2051,13 @@ impl SceneEditor {
         let mut args = json!({"expected_session_token":token,"expected_revision":self.session.scene().revision.to_string(),"expected_asset_revision":self.assets.as_ref().map_or(0,AssetStore::revision).to_string(),"asset_id":id});
         if op != "asset_refresh" {
             args["source"] = json!(source);
+        }
+        if op == "asset_import"
+            && std::path::Path::new(source)
+                .extension()
+                .is_some_and(|ext| ext == "obj")
+        {
+            args["normal_policy"] = json!(self.asset_normal_policy);
         }
         let mut controller = std::mem::take(&mut self.asset_ops);
         match controller.begin(
@@ -3851,6 +3865,7 @@ mod tests {
             "root_guard",
             "cancel",
             "new_modal",
+            "normal_policy_changed",
             "expired",
             "failed_import",
             "close_prepared",
@@ -4276,6 +4291,9 @@ mod tests {
                     }
                     "new_modal" => {
                         editor.dialog = Some(true);
+                    }
+                    "normal_policy_changed" => {
+                        editor.asset_normal_policy = ruster_assets::MeshNormalPolicy::Flat;
                     }
                     "close_prepared" => {
                         editor.request_close();

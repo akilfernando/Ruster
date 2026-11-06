@@ -44,3 +44,15 @@ Promote only after actual shared-renderer/saved-content/runtime quality and comp
 Astra confirms that finite BRDF algebra does not imply finite RGBA16F storage. Clamp only final attachment RGB to0..65504in both lighting branches; keepf32shading/exposure and explicitly qualify saturated radiance loss. Retain the useful roughness floor rather than increasing it to hide overflow. A real shared-function/half-storage/display GPU probe is required and now passes on the named NVIDIA adapter.
 
 When one retiring target blocks replacement, an accepted unique callback composites the last prepared target without modifying its camera/material/display packet, while requested state remainsPending and applied state remains old. Duplicates remain rejected. This preserves visible continuity and bounded ownership; no fake completion or additional target is admitted. The actual delayed-delivery pixel/lifecycle case passes. These are implemented correctness refinements, not final Surface Study quality/cost acceptance.
+
+
+## Bounded creator/default checkpoint — 2026-11-06
+
+Actual shared renderer→MCPauthoring→Scene9save→descriptor3runtime export is runnable, with native/headless appearance/resize/normal close. Sampled0.08/0.12camera/Sun motion, nonuniform/occluded/color/exposure checks support retaining the proposed default0.5/minimum0.08/F0.04and exposure0/−8..8for ordinary-control implementation. Matching dense-geometry costs/legacy pixels pass the frozen render/composite ceilings under their recorded timing scopes; final workflow/resource/real recovery acceptance remains pending.
+
+Astra's physical-scale review corrects root's thumbnail inference: coarse smooth-normal meshes show geometric shadow-terminator steps. A single unchanged-bias/lighting density A/B demonstrates much smaller residuals with5040triangle geometry. Final Surface Study chooses that higher-density source for all three finish forms, preserving original528triangle evidence and explicitly refreezing equal geometry before cost results. This is an asset-quality choice, not a shader fix, new geometry subsystem or claim that smoothing normals eliminate coarse shadow geometry. No environment/temporal filter/tangent scope is added.
+
+
+## Ordinary controls and recovery integration — 2026-11-06
+
+After accepted early quality/cost feasibility, current source adds explicit ordinary material/display/normal-import controls, recovery7 and shared human-facing fallback/pending feedback. Genuine pre7 material draft migration is guarded by exact field presence before defaults; current new raw fields are required. Global display is selection-independent and never enabled implicitly by material choice. Existing untrusted raw fields retain strict original-f64 bounds and atomic authored history. Astra's independent source review finds no consequential authority/migration blocker; affected default/inspection source gates pass in the chronological evidence. This is permission to perform focused native qualification, not final V3a promotion or proof of human usability.

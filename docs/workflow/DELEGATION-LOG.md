@@ -417,3 +417,8 @@ Astra catches genuine grazing half-storage overflow and blank pending-target pai
 
 
 V3a first actual creator/save/export checkpoint: Astra independently reviews current editor and both exact-runtime captures plus source-hidden/runtime integrity. It permits bounded continuation without a replan, but catches the manual material_inspect projection omitting response. Root fixes it with an existing-case0.08canonical red→green test; no premium implementation worker or repeated renderer suite is needed for that leaf repair. Astra prioritizes min-roughness motion, shadow-terminator diagnosis, nonuniform/occluded/color cases and matched legacy/composite cost before broad controls. Static thumbnails do not close those gates.
+
+
+## 2026-11-06 — V3a ordinary controls and recovery
+
+After accepting the dense quality/matched-cost early gate, root assigns bounded Sol workers (`gpt-6.1-sol`, high; existing session snapshot) disjoint material_ui.rs and new display_ui.rs implementations. Workers extend owning raw-field/keyboard cases, run scoped formatting only, and stop; root owns recovery7, global guards, normal-import UI/stamp, runtime warnings, integration and Cargo/native leases. Astra (`gpt-6-astra`, high) independently reviews consequential recovery/migration/authority/resource-feedback source, finds no blocker and recommends focused native verification after checks. Root retains compilation/test/Clippy failures and repairs, including a pointer-open popup test's two-step navigation and returned-control focus. Tests/native are not inferred from specialist confidence. Source/native acceptance still pending; worker total usage/elapsed unavailable.

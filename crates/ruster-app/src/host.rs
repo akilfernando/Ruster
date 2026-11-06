@@ -229,6 +229,13 @@ impl<A: Application> eframe::App for Host<A> {
                     format!("{error} · Correct the settings/content and Reset."),
                 );
             }
+            if let Some(message) = self.metrics.lock().ok().and_then(|metrics| {
+                (metrics.frames > 0)
+                    .then(|| metrics.display_status.warning())
+                    .flatten()
+            }) {
+                ui.colored_label(ui.visuals().warn_fg_color, message);
+            }
         });
         egui::Panel::right("application-controls")
             .default_size(280.0)

@@ -1,7 +1,7 @@
 //! One recoverable material form, using the same validated commands as agents.
 use super::SceneEditor;
 use eframe::egui;
-use ruster_scene::{OpaqueMaterial, Scene, TextureAddress, TextureFilter};
+use ruster_scene::{MaterialResponse, OpaqueMaterial, Scene, TextureAddress, TextureFilter};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -10,6 +10,13 @@ pub(super) enum MaterialIntent {
     EditShared,
     Create,
     MakeUnique,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(super) enum MaterialResponseMode {
+    Diffuse,
+    Dielectric,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -22,6 +29,8 @@ pub(super) struct MaterialDraft {
     pub intent: MaterialIntent,
     pub name: String,
     pub tint: [String; 3],
+    pub response_mode: MaterialResponseMode,
+    pub roughness: String,
     pub texture: Option<String>,
     pub filter: TextureFilter,
     pub address: TextureAddress,
@@ -63,6 +72,12 @@ impl MaterialDraft {
             intent,
             name,
             tint: value.tint.map(|channel| channel.to_string()),
+            response_mode: if value.response.is_legacy() {
+                MaterialResponseMode::Diffuse
+            } else {
+                MaterialResponseMode::Dielectric
+            },
+            roughness: value.response.roughness().unwrap_or(0.5).to_string(),
             texture: value.base_color_texture,
             filter: value.filter,
             address: value.address,
@@ -84,6 +99,8 @@ impl MaterialDraft {
                 .is_none_or(|id| ruster_scene::validate_id(id).is_ok())
             && self.name.len() <= 512
             && self.name.chars().count() <= 128
+            && self.roughness.len() <= 256
+            && self.roughness.chars().count() <= 64
             && self
                 .tint
                 .iter()
@@ -123,16 +140,24 @@ impl MaterialDraft {
         Ok(tint)
     }
     fn parse(&self) -> Result<OpaqueMaterial, String> {
+        let response = match self.response_mode {
+            MaterialResponseMode::Diffuse => MaterialResponse::LegacyDiffuse,
+            MaterialResponseMode::Dielectric => {
+                let original = self
+                    .roughness
+                    .trim()
+                    .parse::<f64>()
+                    .ok()
+                    .filter(|value| value.is_finite() && (0.08..=1.0).contains(value))
+                    .ok_or("Roughness requires a finite number from 0.08 to 1.")?;
+                MaterialResponse::Dielectric {
+                    roughness: original as f32,
+                }
+            }
+        };
         let value = OpaqueMaterial {
             name: (!self.name.is_empty()).then(|| self.name.clone()),
-            response: if self.intent == MaterialIntent::Create {
-                ruster_scene::MaterialResponse::LegacyDiffuse
-            } else {
-                self.original_material
-                    .as_ref()
-                    .map(|m| m.response)
-                    .unwrap_or_default()
-            },
+            response,
             tint: self.tint_value()?,
             base_color_texture: self.texture.clone(),
             filter: self.filter,
@@ -152,6 +177,7 @@ impl SceneEditor {
             && !self.asset_loading()
             && self.color_draft.is_none()
             && self.lighting_draft.is_none()
+            && self.display_draft.is_none()
             && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && !self.manipulation.offset_pending()
@@ -184,6 +210,12 @@ impl SceneEditor {
         let Some(draft) = self.material_draft.clone() else {
             return true;
         };
+        #[cfg(feature = "inspection")]
+        let observed = (
+            self.asset_ops
+                .timing_immediate_begin("scene_material_set", "human"),
+            self.session.scene().revision,
+        );
         let result = (|| {
             if !self.material_editable_for_save(true) {
                 return Err(
@@ -232,7 +264,7 @@ impl SceneEditor {
             }
             Ok::<_, String>(())
         })();
-        match result {
+        let success = match result {
             Ok(()) => {
                 self.material_draft = None;
                 self.draft_generation = self.draft_generation.wrapping_add(1);
@@ -246,7 +278,14 @@ impl SceneEditor {
                 self.error = error;
                 false
             }
-        }
+        };
+        #[cfg(feature = "inspection")]
+        self.asset_ops.timing_immediate_finished(
+            observed.0,
+            success,
+            self.session.scene().revision != observed.1,
+        );
+        success
     }
     fn cancel_material_draft(&mut self) {
         self.material_draft = None;
@@ -435,10 +474,17 @@ impl SceneEditor {
                         .unwrap_or("None"),
                 )
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut assigned, None, "None");
+                    if ui.selectable_value(&mut assigned, None, "None").clicked() {
+                        ui.close();
+                    }
                     for (id, name) in &choices {
-                        ui.selectable_value(&mut assigned, Some(id.clone()), name)
-                            .on_hover_text(id);
+                        if ui
+                            .selectable_value(&mut assigned, Some(id.clone()), name)
+                            .on_hover_text(id)
+                            .clicked()
+                        {
+                            ui.close();
+                        }
                     }
                 });
         });
@@ -527,6 +573,45 @@ impl SceneEditor {
                     fields.push(response);
                 }
             });
+            ui.horizontal(|ui| {
+                ui.label("Shading").on_hover_text("Diffuse preserves the legacy material response. Nonmetallic adds a neutral dielectric highlight controlled by roughness.");
+                let before = draft.response_mode;
+                let response = egui::ComboBox::from_id_salt("material_response_mode")
+                    .width(120.0)
+                    .selected_text(match draft.response_mode {
+                        MaterialResponseMode::Diffuse => "Diffuse",
+                        MaterialResponseMode::Dielectric => "Nonmetallic",
+                    })
+                    .show_ui(ui, |ui| {
+                        for (mode, label) in [(MaterialResponseMode::Diffuse, "Diffuse"), (MaterialResponseMode::Dielectric, "Nonmetallic")] {
+                            if ui.selectable_value(&mut draft.response_mode, mode, label).clicked() {
+                                ui.close();
+                            }
+                        }
+                    });
+                changed |= before != draft.response_mode;
+                if before != draft.response_mode {
+                    response.response.request_focus();
+                }
+                fields.push(response.response);
+            });
+            if draft.response_mode == MaterialResponseMode::Dielectric {
+                ui.horizontal(|ui| {
+                    ui.label("Roughness").on_hover_text("Perceptual roughness, 0.08 to 1: lower values give a tighter highlight; higher values spread it. This is a nonmetallic surface response, without environment reflections.");
+                    let response = ui.add(egui::TextEdit::singleline(&mut draft.roughness)
+                        .id(egui::Id::unique("material_roughness"))
+                        .char_limit(64).desired_width(82.0));
+                    ui.label("0.08–1");
+                    changed |= response.changed();
+                    fields.push(response);
+                });
+                if self.session.scene().display.is_legacy() {
+                    ui.label("Surface shading needs Surface HDR in Scene display.");
+                }
+                if !self.shader_builtin {
+                    ui.label("Custom shader controls appearance; surface shading is unsupported. Settings are retained.");
+                }
+            }
             let before_texture = draft.texture.clone();
             let textures = self
                 .assets
@@ -581,7 +666,7 @@ impl SceneEditor {
             let texture_response = egui::ComboBox::from_id_salt("material_texture")
                 .selected_text(texture_text)
                 .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut draft.texture, None, "None");
+                    if ui.selectable_value(&mut draft.texture, None, "None").clicked() { ui.close(); }
                     for info in &textures {
                         let ready = uv_ready
                             && info.status == ruster_assets::AssetStatus::Ready
@@ -590,12 +675,12 @@ impl SceneEditor {
                                 .as_ref()
                                 .is_some_and(|store| store.texture(&info.id).is_some());
                         ui.add_enabled_ui(ready, |ui| {
-                            ui.selectable_value(
+                            if ui.selectable_value(
                                 &mut draft.texture,
                                 Some(info.id.clone()),
                                 &info.source,
                             )
-                            .on_hover_text(&info.id);
+                            .on_hover_text(&info.id).clicked() { ui.close(); }
                         });
                     }
                 });
@@ -637,8 +722,8 @@ impl SceneEditor {
                         TextureFilter::Nearest => "Nearest",
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut draft.filter, TextureFilter::Linear, "Linear");
-                        ui.selectable_value(&mut draft.filter, TextureFilter::Nearest, "Nearest");
+                        if ui.selectable_value(&mut draft.filter, TextureFilter::Linear, "Linear").clicked() { ui.close(); }
+                        if ui.selectable_value(&mut draft.filter, TextureFilter::Nearest, "Nearest").clicked() { ui.close(); }
                     });
                 fields.push(filter_response.response);
             });
@@ -650,16 +735,16 @@ impl SceneEditor {
                         TextureAddress::Clamp => "Clamp",
                     })
                     .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut draft.address, TextureAddress::Repeat, "Repeat");
-                        ui.selectable_value(&mut draft.address, TextureAddress::Clamp, "Clamp");
+                        if ui.selectable_value(&mut draft.address, TextureAddress::Repeat, "Repeat").clicked() { ui.close(); }
+                        if ui.selectable_value(&mut draft.address, TextureAddress::Clamp, "Clamp").clicked() { ui.close(); }
                     });
                 fields.push(wrap_response.response);
             });
             changed |= filter != draft.filter || address != draft.address;
             for response in &fields {
-                let owned = response.has_focus()
+                let owned = editable && (response.has_focus()
                     || response.lost_focus()
-                    || ui.memory(|memory| memory.had_focus_last_frame(response.id));
+                    || ui.memory(|memory| memory.had_focus_last_frame(response.id)));
                 if owned && !started_draft && !popup_at_start && !egui::Popup::is_any_open(ui.ctx())
                 {
                     if ui.input_mut(|input| {
@@ -759,6 +844,7 @@ mod tests {
                 |ui| editor.inspector_contents(ui),
             );
             output.textures_delta.clear();
+            output.shapes
         };
         let key = |key| egui::Event::Key {
             key,
@@ -830,6 +916,199 @@ mod tests {
             editor.session.scene().objects[1].material.as_deref(),
             Some("shared")
         );
+        let label_point = |shapes: &[egui::epaint::ClippedShape], label: &str| {
+            let matches = shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text == label => {
+                        Some(text.pos + text.galley.size() * 0.5)
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(matches.len(), 1, "Expected one visible {label} widget");
+            matches[0]
+        };
+        let click = |point, pressed| egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let replace = |text: &str| {
+            vec![
+                egui::Event::Key {
+                    key: egui::Key::A,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers {
+                        ctrl: true,
+                        command: true,
+                        ..Default::default()
+                    },
+                },
+                egui::Event::Text(text.into()),
+            ]
+        };
+        let unchanged = editor.session.snapshot_bytes().unwrap();
+        // Selecting the new mode opens one raw form, never a separate commit.
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Diffuse");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Nonmetallic");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert_eq!(
+            editor.material_draft.as_ref().unwrap().response_mode,
+            MaterialResponseMode::Dielectric
+        );
+        let shapes = frame(&mut editor, vec![]);
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == "Surface shading needs Surface HDR in Scene display.")));
+        editor.shader_builtin = false;
+        let shapes = frame(&mut editor, vec![]);
+        assert!(shapes.iter().any(|shape| matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text.contains("Custom shader controls appearance; surface shading is unsupported"))));
+        editor.shader_builtin = true;
+        let roughness = egui::Id::unique("material_roughness");
+        let point = ctx.read_response(roughness).unwrap().rect.center();
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(point), click(point, true)],
+        );
+        frame(&mut editor, vec![click(point, false)]);
+        frame(&mut editor, replace("0.07999999821186066"));
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert_eq!(
+            editor.material_draft.as_ref().unwrap().roughness,
+            "0.07999999821186066"
+        );
+        assert!(editor.error.contains("0.08 to 1"));
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        frame(&mut editor, vec![key(egui::Key::Tab)]);
+        frame(&mut editor, vec![]);
+        assert!(ctx
+            .memory(|memory| memory.focused())
+            .is_some_and(|id| id != roughness));
+        // Inactive values remain raw while changing modes. Keyboard selection
+        // closes the popup without submitting the grouped material draft.
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Nonmetallic");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        let shapes = frame(&mut editor, vec![]);
+        let diffuse = label_point(&shapes, "Diffuse");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(diffuse), click(diffuse, true)],
+        );
+        frame(&mut editor, vec![click(diffuse, false)]);
+        let draft = editor.material_draft.as_ref().unwrap();
+        assert_eq!(draft.response_mode, MaterialResponseMode::Diffuse);
+        assert_eq!(draft.roughness, "0.07999999821186066");
+        assert_eq!(
+            draft.parse().unwrap().response,
+            MaterialResponse::LegacyDiffuse
+        );
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Diffuse");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        frame(&mut editor, vec![]);
+        // Opening by pointer leaves no menu entry focused. The first Down
+        // focuses Diffuse; the next moves to Nonmetallic.
+        frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+        frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(
+            !egui::Popup::is_any_open(&ctx),
+            "Keyboard selection closes the shading popup"
+        );
+        assert_eq!(
+            editor.material_draft.as_ref().unwrap().response_mode,
+            MaterialResponseMode::Dielectric
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Nonmetallic");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert!(
+            editor.material_draft.is_some(),
+            "First Escape belongs to the popup"
+        );
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(
+            editor.material_draft.is_none(),
+            "Next Escape cancels the raw form"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        // One valid Enter commits mode and minimum roughness together; shared
+        // users retain their identity, and one Undo restores the complete value.
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Diffuse");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Nonmetallic");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        frame(&mut editor, vec![]);
+        let point = ctx.read_response(roughness).unwrap().rect.center();
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(point), click(point, true)],
+        );
+        frame(&mut editor, vec![click(point, false)]);
+        frame(&mut editor, replace("0.08"));
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(editor.material_draft.is_none(), "{}", editor.error);
+        assert_eq!(
+            editor.session.scene().materials["shared"].response,
+            MaterialResponse::Dielectric { roughness: 0.08 }
+        );
+        assert_eq!(editor.session.undo_len(), 2);
+        assert!(
+            editor.session.scene().display.is_legacy(),
+            "Material edits never change scene display implicitly"
+        );
+        editor
+            .session
+            .undo(editor.session.scene().revision)
+            .unwrap();
+        assert!(editor.session.scene().materials["shared"]
+            .response
+            .is_legacy());
+        editor
+            .session
+            .redo(editor.session.scene().revision)
+            .unwrap();
+        editor.sync_draft();
         let count = editor.session.undo_len();
         editor.material_draft =
             MaterialDraft::new(editor.session.scene(), "left", MaterialIntent::MakeUnique);
@@ -840,6 +1119,10 @@ mod tests {
         assert_eq!(
             editor.session.scene().materials[&unique].tint,
             [0.25, 1.0, 1.0]
+        );
+        assert_eq!(
+            editor.session.scene().materials[&unique].response,
+            MaterialResponse::Dielectric { roughness: 0.08 }
         );
         assert_eq!(
             editor.session.scene().objects[1].material.as_deref(),
@@ -866,7 +1149,9 @@ mod tests {
         source.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
         let mut draft =
             MaterialDraft::new(source.session.scene(), "left", MaterialIntent::EditShared).unwrap();
-        draft.tint[1] = "unfinished green".into();
+        draft.tint[1] = "0.5".into();
+        draft.response_mode = MaterialResponseMode::Dielectric;
+        draft.roughness = "unfinished roughness".into();
         source.material_draft = Some(draft);
         source.draft_generation = 1;
         let exact = source.material_draft.clone();
@@ -901,8 +1186,51 @@ mod tests {
         let id = candidates[0].id.clone();
         let (_journal, snapshot) = store.claim(&id).unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 6);
-        assert_eq!(payload["material"]["tint"][1], "unfinished green");
+        assert_eq!(payload["version"], 7);
+        assert_eq!(payload["material"]["roughness"], "unfinished roughness");
+        assert_eq!(payload["material"]["response_mode"], "dielectric");
+        // Genuine Recovery6 has neither raw surface controls nor a response
+        // key in its typed baseline. Only that old shape gains defaults.
+        let mut old = payload.clone();
+        old["version"] = json!(6);
+        old["material"]
+            .as_object_mut()
+            .unwrap()
+            .remove("response_mode");
+        old["material"].as_object_mut().unwrap().remove("roughness");
+        old["material"]["original_material"]
+            .as_object_mut()
+            .unwrap()
+            .remove("response");
+        let mut migrated = SceneEditor::new(snapshot.restore().unwrap());
+        migrated.restore_recovery_drafts(old.clone()).unwrap();
+        let migrated = migrated.material_draft.unwrap();
+        assert_eq!(migrated.response_mode, MaterialResponseMode::Diffuse);
+        assert_eq!(migrated.roughness, "0.5");
+        assert_eq!(migrated.tint[1], "0.5");
+        for (pointer, value) in [
+            ("/material/response_mode", serde_json::Value::Null),
+            ("/material/roughness", json!("0.5")),
+            (
+                "/material/original_material/response",
+                serde_json::Value::Null,
+            ),
+            (
+                "/material/original_material/response",
+                json!({"type":"legacy_diffuse"}),
+            ),
+        ] {
+            let mut bad = old.clone();
+            let (parent, key) = pointer.rsplit_once('/').unwrap();
+            bad.pointer_mut(parent)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .insert(key.into(), value);
+            let mut target = SceneEditor::new(snapshot.restore().unwrap());
+            assert!(target.restore_recovery_drafts(bad).is_err(), "{pointer}");
+            assert!(target.material_draft.is_none());
+        }
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.material_draft, exact);
@@ -918,7 +1246,15 @@ mod tests {
                 .0,
             "drafts_pending"
         );
-        for case in ["old-label", "old-null", "stale", "compound", "oversized"] {
+        for case in [
+            "old-label",
+            "old-null",
+            "stale",
+            "compound",
+            "oversized",
+            "missing-mode",
+            "missing-roughness",
+        ] {
             let mut bad = payload.clone();
             match case {
                 "old-label" => bad["version"] = json!(3),
@@ -928,7 +1264,16 @@ mod tests {
                 }
                 "stale" => bad["material"]["revision"] = json!(1),
                 "compound" => bad["manipulation"]["delta"][0] = json!("1"),
-                _ => bad["material"]["tint"][0] = json!("x".repeat(257)),
+                "missing-mode" => {
+                    bad["material"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("response_mode");
+                }
+                "missing-roughness" => {
+                    bad["material"].as_object_mut().unwrap().remove("roughness");
+                }
+                _ => bad["material"]["roughness"] = json!("x".repeat(257)),
             }
             assert!(restored.restore_recovery_drafts(bad).is_err(), "{case}");
             assert_eq!(
@@ -938,7 +1283,7 @@ mod tests {
             );
             assert_eq!(restored.material_draft, exact, "{case}");
         }
-        restored.material_draft.as_mut().unwrap().tint[1] = "0.5".into();
+        restored.material_draft.as_mut().unwrap().roughness = "0.08".into();
         restored.request_close();
         assert!(restored.close_pending);
         assert!(
@@ -947,6 +1292,10 @@ mod tests {
             restored.error
         );
         assert_eq!(restored.session.scene().materials["shared"].tint[1], 0.5);
+        assert_eq!(
+            restored.session.scene().materials["shared"].response,
+            MaterialResponse::Dielectric { roughness: 0.08 }
+        );
         assert_eq!(restored.session.undo_len(), 1);
     }
 }

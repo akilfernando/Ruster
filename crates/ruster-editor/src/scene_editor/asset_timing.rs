@@ -91,6 +91,12 @@ struct Resources {
     texture_upload_bytes: u64,
     instance_capacity_bytes: u64,
     target_bytes: u64,
+    target_retiring_bytes: u64,
+    target_allocations: u64,
+    display_requested_hdr: bool,
+    display_applied_hdr: bool,
+    display_requested_exposure_stops: f32,
+    display_applied_exposure_stops: f32,
     target_size: [u32; 2],
     sample_count: u32,
     objects: usize,
@@ -114,6 +120,12 @@ impl Resources {
             texture_upload_bytes: m.texture_upload_bytes,
             instance_capacity_bytes: m.instance_capacity_bytes,
             target_bytes: m.target_bytes,
+            target_retiring_bytes: m.target_retiring_bytes,
+            target_allocations: m.target_allocations,
+            display_requested_hdr: m.display_requested_hdr,
+            display_applied_hdr: m.display_applied_hdr,
+            display_requested_exposure_stops: m.display_requested_exposure_stops,
+            display_applied_exposure_stops: m.display_applied_exposure_stops,
             target_size: m.target_size,
             sample_count: m.sample_count,
             objects: m.objects,
@@ -347,11 +359,13 @@ impl Probe {
                     && after.mesh_uploads >= before.mesh_uploads
                     && after.mesh_upload_bytes >= before.mesh_upload_bytes
                     && after.texture_uploads >= before.texture_uploads
-                    && after.texture_upload_bytes >= before.texture_upload_bytes;
+                    && after.texture_upload_bytes >= before.texture_upload_bytes
+                    && after.target_allocations >= before.target_allocations;
                 json!({"before":before,"after":after,"rendered_after_finish":rendered,
                     "complete":rendered && monotonic && !run.nonvisual && !run.overlap && !run.overflow,
                     "counter_monotonic":monotonic,
                     "delta":{"frames":after.frames.checked_sub(before.frames),
+                        "target_allocations":after.target_allocations.checked_sub(before.target_allocations),
                         "lighting_uploads":after.lighting_uploads.checked_sub(before.lighting_uploads),
                         "lighting_upload_bytes":after.lighting_upload_bytes.checked_sub(before.lighting_upload_bytes),
                         "mesh_uploads":after.mesh_uploads.checked_sub(before.mesh_uploads),

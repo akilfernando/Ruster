@@ -8,6 +8,16 @@ cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
 
 See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-content-and-shader-iteration-m6) below for their controls. The [editor experience baseline](../../docs/EDITOR-EXPERIENCE.md) records required usability still to deliver.
 
+## Surface materials and scene display (V3a)
+
+The current source adds **Shading → Nonmetallic** and **Roughness** to the Material inspector. Use the same base tint to compare matte (higher roughness) and polished (lower roughness) surfaces; the supported range is0.08–1. Existing **Diffuse** materials retain the earlier response. Editing a shared material affects its users; **Make unique** copies the complete response before independent edits.
+
+In **Scene display**, explicitly choose **Surface HDR** to enable this surface response and manual **Exposure (EV)**, from−8 to8 stops. Output remains SDR through one fixed display transform. **Legacy SDR** preserves the previous display treatment; it retains nonmetallic material parameters while their highlights/roughness are inactive. Material edits never switch the scene profile automatically. This is direct-lit opaque nonmetallic shading, without metals, environment reflections or material maps. Custom shaders use their existing SDR lane; unsupported/pending display states have visible feedback from the latest prepared viewport update.
+
+**Content → Assets / import…** offers **Normals** for new OBJ imports: **Authored normals** uses the source's complete vertex-normal stream for smooth surfaces; **Flat normals** keeps hard faces. No supplied normals falls back to flat; partial/invalid normals need repair. The normal policy is fixed per asset ID and shown in Content details. Reimport with a new ID to change it, then assign that mesh; assignment supports Undo. PNG texture imports have no normal setting. Existing accepted flat imports/Refresh retain their policy.
+
+Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to cancel. A dropdown owns its selection/dismissal key before the surrounding form. Invalid values retain focus/text and authored state. Recovery7 preserves unfinished shading/roughness/exposure drafts and restores an unsaved copy; it never grants overwrite authority over the original. Genuine old drafts migrate after strict field-presence validation. Save writes Scene9; older runtime kits reject this schema rather than silently losing surface data. Current implementation is under [V3a qualification](../../docs/evidence/V3A-feasibility.md), not a completed product-support claim.
+
 ## Legacy logistics mode
 
 The first authoring frontend supports the v1 logistics scenario. The editor uses

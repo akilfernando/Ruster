@@ -38,6 +38,25 @@ fn detail_advice(o: ShadowObservation) -> Option<&'static str> {
 }
 
 impl SceneEditor {
+    pub(super) fn surface_feedback_ui(&self, ui: &mut egui::Ui) {
+        if let Some(o) = self
+            .render
+            .as_ref()
+            .and_then(ruster_render::display_observation)
+        {
+            if let Some(message) = o.status.warning() {
+                ui.colored_label(ui.visuals().warn_fg_color, message)
+                    .on_hover_text("Status from the last viewport update; runtime preview changes take effect after Reset.");
+            }
+            if o.resolution_limited {
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    "Viewport resolution is reduced to fit the render-target limit.",
+                );
+            }
+        }
+    }
+
     fn last_shadow_observation(&self) -> Option<ShadowObservation> {
         ruster_render::shadow_observation(self.render.as_ref()?)
     }

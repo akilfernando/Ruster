@@ -62,6 +62,19 @@ pub enum DisplayStatus {
     Pending,
 }
 
+impl DisplayStatus {
+    /// Human-facing feedback for the last prepared callback, not completion.
+    pub fn warning(self) -> Option<&'static str> {
+        match self {
+            Self::LegacySdr | Self::SurfaceHdr => None,
+            Self::CustomShader => Some("Surface HDR needs the built-in shader. Surface settings are retained; this custom shader uses Legacy SDR."),
+            Self::UnsupportedDevice => Some("Surface HDR is unavailable on this GPU. Surface settings are retained; the viewport uses Legacy SDR."),
+            Self::InvalidSettings => Some("Surface display settings are invalid. Repair the scene display settings."),
+            Self::Pending => Some("Applying scene display settings. The viewport is still showing the previous image."),
+        }
+    }
+}
+
 /// Compile against the fixed camera/vertex ABI and replace only after validation succeeds.
 /// Call on the host UI thread between frames; this controlled operation can block on compilation.
 pub fn refresh_shader(render: &egui_wgpu::RenderState, source: &str) -> Result<(), String> {
