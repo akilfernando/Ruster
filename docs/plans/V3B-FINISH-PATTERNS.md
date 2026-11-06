@@ -81,7 +81,7 @@ Steady map/scalar edits must not upload unchanged meshes/color/data images, comp
 
 Exclude normal/height maps/tangents, metallic/environment/reflections, AO/emission/layers/transparency, painting, compressed/virtual/HDR textures, glTF/MTL import, UV authoring/transforms, hierarchy/prefabs and new platform guarantees. Preserve V3a density/shadow-terminator/direct-light qualifications.
 
-Early decisions remain R8 versus a bounded alternative, metadata acceptance, mip quality, additive-binding/custom compatibility, missing-map presentation and version progression. Red-channel multiplication is proposed, not user-selected. If source-map ergonomics require packing/inversion or another family, revise scope first.
+The early data-role decisions are frozen and accepted in [0035](../decisions/0035-linear-roughness-map-feasibility.md), including R8, metadata policy, approximate arithmetic mips, additive bindings/custom compatibility, missing-map presentation and version progression. These are agent-selected engineering decisions, not individually user-selected conventions. If source-map ergonomics require packing/inversion or another family, revise scope first.
 
 ## Primary guidance checked2026-11-06
 
@@ -90,3 +90,12 @@ Early decisions remain R8 versus a bounded alternative, metadata acceptance, mip
 - [Godot standard material guide](https://docs.godotengine.org/en/stable/tutorials/3d/standard_material_3d.html): illustrates separate/packed roughness workflows and normal-map coordinate conventions. Familiar labeled slots are useful guidance; copying its entire material catalog is unnecessary.
 
 Current code, accepted [0034](../decisions/0034-direct-lit-dielectric-surface-feasibility.md), [PERFORMANCE](../PERFORMANCE.md), [EDITOR-EXPERIENCE](../EDITOR-EXPERIENCE.md) and the actual new evidence remain authoritative for Ruster implementation and acceptance.
+
+
+## Late ownership replan opened — 2026-11-06
+
+Final independent review finds that the latest material-image cache limit does not bound queued displaced GPU images/upload staging when repeated surface acquisition fails: uploads prepare first and the queue guard still submits them. Existing ordinary measurements and source-retirement proof remain valid for their pinned inputs, but do not prove this missing aggregate admission bound. Full V3b acceptance is reopened; this is a consequential ownership correction under the existing all-owners requirement, not a new rendering capability or automatic next milestone.
+
+Root/Astra confirm the analogous mesh replacement gap and accept [0036](../decisions/0036-bounded-gpu-asset-submission.md) as the working repair design before implementation: one shared mesh/image completion-driven upload epoch and one fixed retired GPU asset generation; no list of intermediate requests, new worker, general collector or unconditional idle loop. Hidden owner-thread maintenance must make progress without fake paints. A capture must never label retained old pixels with current authored state. Logical GPU payload bounds must remain distinct from physical staging padding, allocator/driver peaks and CPU candidate/retirement owners.
+
+Acceptance of that repair requires actual adversarial upload-only submission/completion ordering, same-frame rejection before mutation, bounded latest/retired owners and admissions, truthful retained/pending capture, and maintenance that stops at completion. Reuse unchanged data/schema/authoring evidence; rerun affected renderer, native replacement/resource and exact runtime/application checks after source changes. Preserve all earlier failures and frozen investigation references. Final handoff remains blocked on this ownership gate and the original complete requirement audit.

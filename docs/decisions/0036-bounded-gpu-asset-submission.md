@@ -1,0 +1,31 @@
+# 0036 — Bound GPU asset replacement by submission completion
+
+Date: 2026-11-06. Status: accepted working design by root/Astra; implementation and verification pending. This refines the GPU owner assumption in [0035](0035-linear-roughness-map-feasibility.md), without changing its accepted roughness interpretation/schema decisions. It does not supersede [0032](0032-nonvisual-editor-progress-and-bounded-retirement.md)'s CPU final-owner contract.
+
+## Context
+
+V3b requires bounds for accepted, candidate and retiring owners during source replacement. Current requested material images are bounded to64MiB and meshes to48MiB; this alone does not bound displaced GPU resources or queued upload staging. In the pinned egui-wgpu0.37 path, callback preparation precedes surface acquisition and the queue guard submits pending writes even after acquisition failure. Normal swapchain semaphore reuse waits prior surface work, but upload-only submissions do not update that surface submission index. wgpu30's nonblocking submission polling and active-submission tracking impose no application admission cap.
+
+Mesh replacement has the analogous path: `GpuMesh::new` uses `create_buffer_init` for non-MAP_WRITE buffers; pinned wgpu-core stages mapped-at-creation initialization and queues copies on unmap. A texture-only repair would leave an equivalent accepted-asset ownership gap. This is source-proven missing backpressure, not an observed leak or use-after-free in the ordinary measured runs.
+
+## Decision
+
+Use one asset GPU completion epoch covering both images and mesh buffers, one active closure and at most one retired GPU generation. Keep GPU handles plus weak CPU identity stamps; never retain another CPU asset snapshot or callback/draw-group owner. Reuse unchanged GPU handles. Conservative logical payload bound is two times the existing48MiB mesh plus64MiB texture limits, plus permanent procedural/fallback resources. Count shared handles conservatively; logical payload is not physical staging, allocator or driver peak memory.
+
+Plan the requested effective closure without mutation. Only an actual image/buffer owner change starts an epoch; unchanged invalid references already represented by fallback must remain stable. While an epoch is unfinished, reject a different asset closure before resizing targets or writing scene, camera, display, lighting, instances or material state. Composite the previous complete target using its previous display packet and report pending. Do not retain intermediate requests: evaluate the latest callback inputs when admission becomes available. Scalar/sampler edits with an unchanged asset closure keep their normal path.
+
+Register completion only after the prior upload submission. In native hosts, the next owner-thread logic call follows eframe's normal submission or queue-guard upload-only submission. Public/headless callback callers must submit a preceding callback before beginning another frame. Reject same-frame duplicates before arming completion, retiring owners, allocating or writing. An extra layout pass is not submission evidence. Nonblocking owner-thread maintenance arms/polls/reaps; schedule delayed wakes only while work remains, then request the single repaint needed to apply the latest state. No new thread, queue, general collector, arbitrary timeout-as-completion or unconditional idle repaint loop. Actual device/poll errors remain truthful failures.
+
+Give each viewport callback a scalar-only receipt shared with its host. A fresh-scene receipt becomes FreshPainted only after that callback's composite draw in `paint`; `prepare` alone cannot certify pixels after failed acquisition. A requested screenshot checks that exact callback receipt before encoding/publishing under the authored pin. Retained, rejected or unprepared callbacks cannot publish old pixels as current. Preserve stale-pin, occlusion, deadline and single-readback-lease rules. Receipts must retain no source assets or callback objects.
+
+## Alternatives and consequences
+
+Relying on swapchain latency or current-cache counters fails for upload-only submissions. Separate mesh/image collectors duplicate synchronization and complicate ownership. Fencing before every replacement would avoid the retired bundle but stall every Refresh and still require maintenance and truthful captures. A general collector/new worker is unnecessary for this bounded renderer.
+
+The chosen fixed epoch can delay a newer replacement while prior work completes, preserving the last complete view rather than mixing revisions. Active/retired logical bytes, pending phase and admitted upload counts must be observable. Upload row alignment and backend initialization staging are additional physical costs; do not equate raw payload counters to driver peaks. CPU publication/recovery/history and immutable source-role authority remain unchanged.
+
+## Verification and sources
+
+Implementation must extend existing owning renderer/lifecycle cases: A→B admission, C/D withheld until real completion, upload-only submit without a surface/scene encoder, same-frame rejection before mutation, bounded active/retired ownership and uploads, exact retained pixels, eventual latest-state admission, unchanged zero uploads, truthful capture and hidden logic-only progress that stops at completion. Run Vulkan validation/synchronization diagnostics and affected native replacement/resource/cost checks; regenerate the exact runtime kit and both applications. Reuse unchanged data/schema/authoring evidence. Full V3b remains incomplete until the original audit/handoff.
+
+Primary implementation inspected2026-11-06: repository `crates/ruster-render/src/lib.rs` (`prepare_mesh`, `GpuMesh`, `SceneCallback`), `material_gpu.rs`, and editor `capture_commands.rs`; installed egui-wgpu0.37 `winit.rs` prepare/acquire/RendererQueueGuard ordering; wgpu-core30 `device/resource.rs` mapped-at-creation staging/unmap pending writes and queue/lifetime tracking; wgpu-hal30 Vulkan swapchain semaphore reuse and submission index update. These pinned source observations support the ordering diagnosis; final executable evidence must prove the repair. See [V3b evidence](../evidence/V3B-feasibility.md#late-resource-measurements-and-reopened-gpu-owner-gate--2026-11-06).
