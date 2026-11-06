@@ -562,8 +562,11 @@ impl SceneEditor {
                             ShadowQuality::High => "High",
                         })
                         .show_ui(ui, |ui| {
-                            ui.selectable_value(&mut shadow.quality, ShadowQuality::Standard, "Standard · 1024");
-                            ui.selectable_value(&mut shadow.quality, ShadowQuality::High, "High · 2048");
+                            for (quality, label) in [(ShadowQuality::Standard, "Standard · 1024"), (ShadowQuality::High, "High · 2048")] {
+                                if ui.selectable_value(&mut shadow.quality, quality, label).clicked() {
+                                    ui.close();
+                                }
+                            }
                         });
                     changed |= before != shadow.quality;
                     discrete_changed |= before != shadow.quality;
@@ -1047,6 +1050,29 @@ mod tests {
                 assert!(matches!(&editor.lighting_draft,
                     Some(LightingDraft::Light { shadow: Some(shadow), .. })
                         if shadow.enabled && shadow.quality == ShadowQuality::High
+                            && shadow.depth_bias_texels == "unfinished"));
+
+                // Enter activates a menu entry without a pointer click. It must
+                // dismiss the popup while preserving the surrounding raw draft.
+                let shapes = frame(&mut editor, vec![]);
+                assert!(!egui::Popup::is_any_open(&ctx));
+                let point = label_point(&shapes, "High");
+                frame(
+                    &mut editor,
+                    vec![egui::Event::PointerMoved(point), pointer(point, true)],
+                );
+                frame(&mut editor, vec![pointer(point, false)]);
+                frame(&mut editor, vec![]);
+                frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+                frame(&mut editor, vec![key(egui::Key::Enter)]);
+                assert!(
+                    !egui::Popup::is_any_open(&ctx),
+                    "keyboard quality selection must close its popup"
+                );
+                assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+                assert!(matches!(&editor.lighting_draft,
+                    Some(LightingDraft::Light { shadow: Some(shadow), .. })
+                        if shadow.enabled && shadow.quality == ShadowQuality::Standard
                             && shadow.depth_bias_texels == "unfinished"));
             }
         }
