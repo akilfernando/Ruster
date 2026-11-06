@@ -306,7 +306,12 @@ impl ContentSearch {
                             };
                             let kind = match info.kind {
                                 ruster_assets::AssetKind::Mesh => "Mesh",
-                                ruster_assets::AssetKind::Texture => "Texture",
+                                ruster_assets::AssetKind::Texture => match info.texture_role {
+                                    Some(ruster_assets::TextureRole::Roughness) => {
+                                        "Roughness (linear)"
+                                    }
+                                    _ => "Base color (sRGB)",
+                                },
                             };
                             let label =
                                 format!("{} · {kind} · {status} · {}", info.id, info.source);
@@ -442,6 +447,7 @@ pub struct SceneEditor {
     asset_id: String,
     asset_source: String,
     asset_normal_policy: ruster_assets::MeshNormalPolicy,
+    asset_texture_role: ruster_assets::TextureRole,
     render: Option<eframe::egui_wgpu::RenderState>,
     shader_revision: u64,
     shader_notice: String,
@@ -618,6 +624,7 @@ impl SceneEditor {
             asset_id: "pyramid".into(),
             asset_source: "meshes/pyramid.obj".into(),
             asset_normal_policy: ruster_assets::MeshNormalPolicy::AuthoredWhenComplete,
+            asset_texture_role: ruster_assets::TextureRole::BaseColor,
             render: None,
             shader_revision: 0,
             shader_notice: "Built-in scene shader".into(),
@@ -2089,6 +2096,28 @@ impl SceneEditor {
         })
     }
     fn accept_asset_drop(&mut self, target: &str, payload: &AssetDrag) -> Result<u64, String> {
+        self.check_asset_drag(payload)?;
+        let texture_role = self
+            .resolved_textures
+            .get(&payload.asset_id)
+            .map(|texture| texture.role);
+        if let Some(role) = texture_role {
+            if !self
+                .session
+                .scene()
+                .objects
+                .iter()
+                .any(|object| object.id == target)
+            {
+                return Err("Texture slots belong to geometry objects.".into());
+            }
+            if self.selected.as_deref() != Some(target) {
+                self.guard().map_err(|error| format!("{error}: finish this object's draft before choosing another material target."))?;
+                self.select_object(Some(target.to_owned()), false);
+            }
+            self.stage_material_texture(&payload.asset_id, role)?;
+            return Ok(self.session.scene().revision);
+        }
         self.guard()
             .map_err(|e| format!("{e}: finish drafts or dialogs before dropping content."))?;
         self.check_asset_drag(payload)?;
@@ -2190,7 +2219,9 @@ impl SceneEditor {
             match self.accept_asset_drop(&target, &payload) {
                 Ok(_) => {
                     self.error.clear();
-                    self.sync_draft();
+                    if self.material_draft.is_none() {
+                        self.sync_draft();
+                    }
                 }
                 Err(error) => self.error = error,
             }
@@ -3309,6 +3340,7 @@ impl SceneEditor {
                 self.asset_source_focus = false;
                 self.asset_rename_intent = false;
                 self.asset_normal_policy = ruster_assets::MeshNormalPolicy::AuthoredWhenComplete;
+                self.asset_texture_role = ruster_assets::TextureRole::BaseColor;
             }
             ui.menu_button("Tools", |ui| self.shader_tools_ui(ui));
             if ui.button("Hide Content").clicked() {
@@ -3431,11 +3463,19 @@ impl SceneEditor {
                             && ui
                                 .add_enabled(
                                     available && self.selected.is_some(),
-                                    egui::Button::new("Use in active material"),
+                                    egui::Button::new(match row.info.texture_role {
+                                        Some(ruster_assets::TextureRole::Roughness) => {
+                                            "Use as roughness map"
+                                        }
+                                        _ => "Use as base color",
+                                    }),
                                 )
                                 .clicked()
                         {
-                            use_texture = Some(row.info.id.clone());
+                            use_texture = row
+                                .info
+                                .texture_role
+                                .map(|role| (row.info.id.clone(), role));
                             ui.close();
                         }
                         if ui.button("Refresh source").clicked() {
@@ -3468,8 +3508,8 @@ impl SceneEditor {
                 }
             }
         }
-        if let Some(id) = use_texture {
-            if let Err(error) = self.stage_material_texture(&id) {
+        if let Some((id, role)) = use_texture {
+            if let Err(error) = self.stage_material_texture(&id, role) {
                 self.error = error;
             }
         }
@@ -3496,6 +3536,18 @@ impl SceneEditor {
             {
                 ui.separator();
                 ui.label(&row.label);
+                ui.add(egui::Label::new(format!("Source: {}", row.info.source)).wrap());
+                if let Some(role) = row.info.texture_role {
+                    ui.label(match role {
+                        ruster_assets::TextureRole::BaseColor => {
+                            "Interpretation: Base color (sRGB)"
+                        }
+                        ruster_assets::TextureRole::Roughness => {
+                            "Interpretation: Roughness map (linear)"
+                        }
+                    });
+                    ui.label("Interpretation is fixed. Import with a new ID to change it.");
+                }
                 if let Some(policy) = row.info.mesh_normal_policy {
                     ui.label(match policy {
                         ruster_assets::MeshNormalPolicy::Flat => "Normals: Flat",
@@ -3508,11 +3560,11 @@ impl SceneEditor {
                 if (self.resolved.contains_key(id) || self.resolved_textures.contains_key(id))
                     && row.info.status != ruster_assets::AssetStatus::Ready
                 {
-                    ui.small(
+                    ui.label(
                         "Last-good content remains available; fix and explicitly refresh the source.",
                     );
                 }
-                ui.small("Content source updates save separately from scene Undo and Save.");
+                ui.label("Content source updates save separately from scene Undo and Save.");
             } else {
                 ui.label(format!("Reference {id} is not registered in this catalog; import or repair its source."));
             }
@@ -3564,6 +3616,13 @@ impl SceneEditor {
                 .extension()
                 .is_some_and(|ext| ext == "obj"))
         .then_some(self.asset_normal_policy)
+    }
+    fn import_texture_role(&self) -> Option<ruster_assets::TextureRole> {
+        (!self.asset_rename_intent
+            && std::path::Path::new(&self.asset_source)
+                .extension()
+                .is_some_and(|extension| extension == "png"))
+        .then_some(self.asset_texture_role)
     }
     fn content_ui(&mut self, ctx: &egui::Context) {
         if !self.asset_dialog {
@@ -3627,6 +3686,28 @@ impl SceneEditor {
                     focus.restore(ui, &response.response, selected);
                 });
                 ui.label("Use authored normals for smooth surfaces, or Flat for hard faces.").on_hover_text("Authored normals use the complete normals in your OBJ. A mesh with no normals uses flat shading; incomplete normals need repair.");
+            }
+            if self.import_texture_role().is_some() {
+                ui.horizontal(|ui| {
+                    ui.label("PNG interpretation");
+                    let focus = combo_focus::ComboFocus::capture(ui, "asset_import_texture_role");
+                    let mut selected = false;
+                    let response = egui::ComboBox::from_id_salt("asset_import_texture_role")
+                        .selected_text(match self.asset_texture_role {
+                            ruster_assets::TextureRole::BaseColor => "Base color (sRGB)",
+                            ruster_assets::TextureRole::Roughness => "Roughness map (linear)",
+                        }).show_ui(ui, |ui| {
+                            for (role, label) in [
+                                (ruster_assets::TextureRole::BaseColor, "Base color (sRGB)"),
+                                (ruster_assets::TextureRole::Roughness, "Roughness map (linear)"),
+                            ] {
+                                if ui.selectable_value(&mut self.asset_texture_role, role, label).clicked() { selected = true; ui.close(); }
+                            }
+                        });
+                    focus.restore(ui, &response.response, selected);
+                });
+                ui.label("Roughness reads grayscale or the red channel as linear values. Import another ID for a different interpretation.");
+                ui.label("This choice applies to Import; Refresh keeps the asset's interpretation.");
             }
             if !self.asset_ops.busy() && !id_enter && !popup_at_start && !egui::Popup::is_any_open(ctx) && enter && (source.has_focus() || source.lost_focus()) {
                 operation = Some(if self.asset_rename_intent {"rename"} else {"import"});
@@ -4157,6 +4238,7 @@ impl SceneEditor {
                     self.asset_rename_intent = false;
                     self.asset_normal_policy =
                         ruster_assets::MeshNormalPolicy::AuthoredWhenComplete;
+                    self.asset_texture_role = ruster_assets::TextureRole::BaseColor;
                     self.asset_source_focus = false;
                     self.asset_focused = false;
                     ui.close();
@@ -6953,94 +7035,157 @@ mod tests {
     }
     #[test]
     fn asset_dialog_enter_advances_id_and_popup_owns_dismissal() {
-        let mut editor = SceneEditor::new(Session::new(Scene::empty("import-focus")).unwrap());
-        editor.asset_dialog = true;
-        let ctx = egui::Context::default();
-        let mut time = 0.0;
-        let mut frame = |editor: &mut SceneEditor, events| {
-            time += 0.1;
-            ctx.run_ui(
-                egui::RawInput {
-                    focused: true,
-                    time: Some(time),
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1100., 900.),
-                    )),
-                    events,
-                    ..Default::default()
-                },
-                |_ui| editor.content_ui(&ctx),
-            )
-            .drop_without_applying_deltas();
-        };
-        let key = |key| egui::Event::Key {
-            key,
-            physical_key: None,
-            pressed: true,
-            repeat: false,
-            modifiers: egui::Modifiers::NONE,
-        };
-        frame(&mut editor, vec![]);
-        frame(&mut editor, vec![]);
-        assert_eq!(
-            ctx.memory(|memory| memory.focused()),
-            Some(egui::Id::unique("asset_import_id"))
-        );
-        frame(&mut editor, vec![key(egui::Key::Enter)]);
-        assert!(editor.asset_dialog);
-        assert!(!editor.asset_ops.busy());
-        assert_eq!(
-            ctx.memory(|memory| memory.focused()),
-            Some(egui::Id::unique("asset_import_source"))
-        );
-        frame(&mut editor, vec![key(egui::Key::Tab)]);
-        frame(&mut editor, vec![]);
-        assert_ne!(
-            ctx.memory(|memory| memory.focused()),
-            Some(egui::Id::unique("asset_import_source"))
-        );
-        frame(&mut editor, vec![key(egui::Key::Enter)]);
-        assert!(egui::Popup::is_any_open(&ctx));
-        assert!(!editor.asset_ops.busy());
-        frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
-        frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
-        frame(&mut editor, vec![key(egui::Key::Enter)]);
-        frame(&mut editor, vec![]);
-        frame(&mut editor, vec![]);
-        assert_eq!(
-            editor.asset_normal_policy,
-            ruster_assets::MeshNormalPolicy::Flat
-        );
-        assert!(
-            ctx.memory(|memory| memory.focused()).is_some(),
-            "Closed selector must retain trigger focus after idle frames"
-        );
-        frame(&mut editor, vec![key(egui::Key::Tab)]);
-        assert!(
-            ![
-                Some(egui::Id::unique("asset_import_id")),
-                Some(egui::Id::unique("asset_import_source")),
-                None
-            ]
-            .contains(&ctx.memory(|memory| memory.focused())),
-            "Tab advances to Import, not the first field"
-        );
-        let mut previous = key(egui::Key::Tab);
-        if let egui::Event::Key { modifiers, .. } = &mut previous {
-            modifiers.shift = true;
+        for png in [false, true] {
+            let mut editor = SceneEditor::new(Session::new(Scene::empty("import-focus")).unwrap());
+            if png {
+                editor.asset_source = "pattern.png".into();
+            }
+            assert_eq!(
+                editor.asset_texture_role,
+                ruster_assets::TextureRole::BaseColor
+            );
+            editor.asset_dialog = true;
+            let ctx = egui::Context::default();
+            let mut time = 0.0;
+            let mut frame = |editor: &mut SceneEditor, events| {
+                time += 0.1;
+                ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        time: Some(time),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1100., 900.),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |_ui| editor.content_ui(&ctx),
+                )
+                .drop_without_applying_deltas();
+            };
+            let key = |key| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(&mut editor, vec![]);
+            frame(&mut editor, vec![]);
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                Some(egui::Id::unique("asset_import_id"))
+            );
+            frame(&mut editor, vec![key(egui::Key::Enter)]);
+            assert!(editor.asset_dialog);
+            assert!(!editor.asset_ops.busy());
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                Some(egui::Id::unique("asset_import_source"))
+            );
+            frame(&mut editor, vec![key(egui::Key::Tab)]);
+            frame(&mut editor, vec![]);
+            assert_ne!(
+                ctx.memory(|memory| memory.focused()),
+                Some(egui::Id::unique("asset_import_source"))
+            );
+            frame(&mut editor, vec![key(egui::Key::Enter)]);
+            assert!(egui::Popup::is_any_open(&ctx));
+            assert!(!editor.asset_ops.busy());
+            frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+            frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+            frame(&mut editor, vec![key(egui::Key::Enter)]);
+            frame(&mut editor, vec![]);
+            frame(&mut editor, vec![]);
+            if png {
+                assert_eq!(
+                    editor.asset_texture_role,
+                    ruster_assets::TextureRole::Roughness
+                );
+            } else {
+                assert_eq!(
+                    editor.asset_normal_policy,
+                    ruster_assets::MeshNormalPolicy::Flat
+                );
+            }
+            assert!(
+                ctx.memory(|memory| memory.focused()).is_some(),
+                "Closed selector must retain trigger focus after idle frames"
+            );
+            frame(&mut editor, vec![key(egui::Key::Tab)]);
+            assert!(
+                ![
+                    Some(egui::Id::unique("asset_import_id")),
+                    Some(egui::Id::unique("asset_import_source")),
+                    None
+                ]
+                .contains(&ctx.memory(|memory| memory.focused())),
+                "Tab advances to Import, not the first field"
+            );
+            let mut previous = key(egui::Key::Tab);
+            if let egui::Event::Key { modifiers, .. } = &mut previous {
+                modifiers.shift = true;
+            }
+            frame(&mut editor, vec![previous]);
+            frame(&mut editor, vec![key(egui::Key::Enter)]);
+            assert!(egui::Popup::is_any_open(&ctx));
+            frame(&mut editor, vec![key(egui::Key::Escape)]);
+            assert!(!egui::Popup::is_any_open(&ctx));
+            assert!(
+                editor.asset_dialog,
+                "First Escape dismisses only the dropdown"
+            );
+            frame(&mut editor, vec![]);
+            frame(&mut editor, vec![]);
+            frame(&mut editor, vec![key(egui::Key::Escape)]);
+            assert!(!editor.asset_dialog);
+            assert_eq!(editor.session.scene().revision, 0);
+            assert_eq!(
+                editor.asset_source,
+                if png {
+                    "pattern.png"
+                } else {
+                    "meshes/pyramid.obj"
+                }
+            );
+            if png {
+                // Source Enter still submits the valid BaseColor default, without
+                // requiring a trip through the role popup.
+                let directory = tempfile::tempdir().unwrap();
+                let mut bytes = Vec::new();
+                {
+                    let mut encoder = png::Encoder::new(&mut bytes, 1, 1);
+                    encoder.set_color(png::ColorType::Rgb);
+                    encoder.set_depth(png::BitDepth::Eight);
+                    encoder
+                        .write_header()
+                        .unwrap()
+                        .write_image_data(&[128, 0, 0])
+                        .unwrap();
+                }
+                std::fs::write(directory.path().join("pattern.png"), bytes).unwrap();
+                editor.assets = Some(AssetStore::open(directory.path()).unwrap());
+                editor.asset_texture_role = ruster_assets::TextureRole::BaseColor;
+                editor.asset_dialog = true;
+                editor.asset_focused = false;
+                editor.asset_source_focus = true;
+                frame(&mut editor, vec![]);
+                frame(&mut editor, vec![key(egui::Key::Enter)]);
+                editor.test_finish_asset_work();
+                assert!(!editor.asset_dialog, "{}", editor.error);
+                assert_eq!(
+                    editor
+                        .assets
+                        .as_ref()
+                        .unwrap()
+                        .texture(&editor.asset_id)
+                        .unwrap()
+                        .role,
+                    ruster_assets::TextureRole::BaseColor
+                );
+                assert_eq!(editor.asset_source, "pattern.png");
+            }
         }
-        frame(&mut editor, vec![previous]);
-        frame(&mut editor, vec![key(egui::Key::Enter)]);
-        assert!(egui::Popup::is_any_open(&ctx));
-        frame(&mut editor, vec![key(egui::Key::Escape)]);
-        assert!(!egui::Popup::is_any_open(&ctx));
-        assert!(
-            editor.asset_dialog,
-            "First Escape dismisses only the dropdown"
-        );
-        frame(&mut editor, vec![key(egui::Key::Escape)]);
-        assert!(!editor.asset_dialog);
-        assert_eq!(editor.session.scene().revision, 0);
     }
 }

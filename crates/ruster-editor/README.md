@@ -8,15 +8,17 @@ cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
 
 See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-content-and-shader-iteration-m6) below for their controls. The [editor experience baseline](../../docs/EDITOR-EXPERIENCE.md) records required usability still to deliver.
 
-## Surface materials and scene display (V3a)
+## Surface materials, finish maps and scene display (V3a/V3b)
 
 The current source adds **Shading → Nonmetallic** and **Roughness** to the Material inspector. Use the same base tint to compare matte (higher roughness) and polished (lower roughness) surfaces; the supported range is0.08–1. Existing **Diffuse** materials retain the earlier response. Editing a shared material affects its users; **Make unique** copies the complete response before independent edits.
 
-In **Scene display**, explicitly choose **Surface HDR** to enable this surface response and manual **Exposure (EV)**, from−8 to8 stops. Output remains SDR through one fixed display transform. **Legacy SDR** preserves the previous display treatment; it retains nonmetallic material parameters while their highlights/roughness are inactive. Material edits never switch the scene profile automatically. This is direct-lit opaque nonmetallic shading, without metals, environment reflections or material maps. Custom shaders use their existing SDR lane; unsupported/pending display states have visible feedback from the latest prepared viewport update.
+In **Scene display**, explicitly choose **Surface HDR** to enable this surface response and manual **Exposure (EV)**, from−8 to8 stops. Output remains SDR through one fixed display transform. **Legacy SDR** preserves the previous display treatment; it retains nonmetallic material parameters while their highlights/roughness are inactive. Material edits never switch the scene profile automatically. This is direct-lit opaque nonmetallic shading, without metals, environment reflections or normal maps. Custom shaders use their existing SDR lane; unsupported/pending display states have visible feedback from the latest prepared viewport update.
 
 **Content → Assets / import…** offers **Normals** for new OBJ imports: **Authored normals** uses the source's complete vertex-normal stream for smooth surfaces; **Flat normals** keeps hard faces. No supplied normals falls back to flat; partial/invalid normals need repair. The normal policy is fixed per asset ID and shown in Content details. Reimport with a new ID to change it, then assign that mesh; assignment supports Undo. PNG texture imports have no normal setting. Existing accepted flat imports/Refresh retain their policy.
 
-Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to cancel. In Assets, Enter in the ID advances to Source; Enter in Source submits the import. A dropdown owns its selection/dismissal key before the surrounding form. Invalid values retain focus/text and authored state. Recovery7 preserves unfinished shading/roughness/exposure drafts and restores an unsaved copy; it never grants overwrite authority over the original. Genuine old drafts migrate after strict field-presence validation. Save writes Scene9; older runtime kits reject this schema rather than silently losing surface data. Current implementation is under [V3a qualification](../../docs/evidence/V3A-feasibility.md), not a completed product-support claim.
+**PNG interpretation** defaults to **Base color (sRGB)**. Choose **Roughness map (linear)** for grayscale/red-channel finish data; the role is fixed per asset ID and Refresh preserves it. One source can be imported under separate IDs for both interpretations. In Material, choose the matching **Roughness map** slot or **None (clear)**. **Roughness multiplier** scales the map, with the effective result clamped to0.08–1; choose1 explicitly for its full range. Filter and Wrap affect both slots. Diffuse, Legacy SDR and custom shaders retain inactive references without enabling surface shading automatically. Missing maps show a provisional scalar viewport fallback; faithful export requires valid accepted dependencies.
+
+Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to cancel. In Assets, Enter in the ID advances to Source; Enter in Source submits the import. A dropdown owns its selection/dismissal key before the surrounding form. Invalid values retain focus/text and authored state. Recovery8 preserves unfinished shading/roughness/map/exposure drafts and restores an unsaved copy; it never grants overwrite authority over the original. Genuine old drafts migrate after strict field-presence validation. Save writes Scene10; older runtime kits reject this schema even without maps. The accepted [V3a checkpoint](../../docs/evidence/V3A-readiness.md) remains preserved. [V3b qualification](../../docs/evidence/V3B-feasibility.md) accepts the early rendering/save/runtime foundation; ordinary controls, recovery and full workflow/resource qualification are in progress.
 
 ## Legacy logistics mode
 
@@ -194,7 +196,7 @@ catalog and a v2 scene. Work on a disposable project copy when trying refresh
 or rename. The derived `.ruster-cache/` directory is ignored and rebuildable;
 keep `.ruster-assets.json`, scene files and original sources under version control.
 
-**Assets…** imports one project-relative triangle-only OBJ or opaque base-color PNG under a stable asset
+**Assets…** imports one project-relative triangle-only OBJ or an explicitly interpreted PNG under a stable asset
 ID. Choose **Assign mesh…** to use it on the selected object; choosing
 **Procedural cube** clears the reference. Mesh assignment shares transform
 Undo/Redo. Import/Refresh/Rename save the catalog immediately and have their own
@@ -214,16 +216,16 @@ Content import/refresh/rename prepares in the background, with visible progress 
 The footer uses one stable status row: progress replaces the ordinary notice during content work or Save. **Cancel** stops cancellable preparation; **Keep editing** lets Save finish without the requested Close/New transition. Actions stay outside scrolling diagnostics, and the full truncated status is available on hover. Normal progress does not resize the viewport. Error **Details** remains accessible at supported UI zoom.
 
 
-The inspector **Material** section creates shared opaque materials, assigns existing materials or makes a unique copy. Name, linear RGB tint, base-color texture, filtering and wrapping are an unapplied draft until **Apply** or Enter commits; Escape cancels. Assignment selection is an immediate undoable change. Shared edits affect every listed user; **Make unique** separates the active object. **Manage materials** deletes unused definitions. Object tint multiplies material tint and texture color.
+The inspector **Material** section creates shared opaque materials, assigns existing materials or makes a unique copy. Name, linear RGB tint, shading/roughness, base-color texture, roughness map, filtering and wrapping are an unapplied draft until **Apply** or Enter commits; Escape cancels. Assignment selection is an immediate undoable change. Shared edits affect every listed user; **Make unique** separates the active object. **Manage materials** deletes unused definitions. Object tint multiplies material tint and texture color.
 
-Use an accepted PNG from Content via **Use in active material**, drag it onto the material section, or choose it in the texture control. A textured assignment requires a mesh with complete UVs; the procedural cube has none. Missing content remains visible with a diagnostic. Material drafts participate in recovery and block conflicting edits. Window-local object copy/paste preserves sharing within the pasted group and remaps material IDs when crossing documents; it never copies source files or uses the system clipboard. The focused native direct-controls journey verifies Enter/Tab/Escape, invalid tint, sharing, save/reopen and export. Real unfinished-draft recovery, exact relocated native delivery and named cost checks also pass; see the [acceptance evaluation](../../docs/evidence/V1-readiness.md).
+Use an accepted PNG from Content via **Use as base color** or **Use as roughness map**, drag it onto the matching material slot or geometry object, or choose it in the matching texture control. Choosing an image preserves unfinished numeric/name text and waits for grouped Apply. The slots list only their matching import role. A textured assignment requires a mesh with complete UVs; the procedural cube has none. Missing content remains visible with a diagnostic. Material drafts participate in recovery and block conflicting edits. Window-local object copy/paste preserves sharing within the pasted group and remaps material IDs when crossing documents; it never copies source files or uses the system clipboard. The focused native direct-controls journey verifies Enter/Tab/Escape, invalid tint, sharing, save/reopen and export. Real unfinished-draft recovery, exact relocated native delivery and named cost checks also pass; see the [acceptance evaluation](../../docs/evidence/V1-readiness.md).
 
 The editor runtime freezes authored scene data, resolved geometry and textures on a successful
 **Reset**.
 Refreshing authored content leaves that snapshot intact and marks it stale.
 Missing references keep their IDs and display a diagnostic placeholder. Save As
 to another asset root is blocked when current state or undo/redo can restore mesh
-references; dependency export/relocation belongs to later packaging work.
+or either texture-slot reference. Use [creation export](#export-your-creation) for the assigned runtime dependency closure; inactive material references are included, unused/history-only definitions are excluded.
 
 **Create shader source** creates `scene.wgsl` beside the scene without overwriting
 an existing file. Edit it, then **Refresh scene shader** to validate a candidate

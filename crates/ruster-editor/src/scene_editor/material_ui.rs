@@ -1,6 +1,7 @@
 //! One recoverable material form, using the same validated commands as agents.
 use super::{combo_focus::ComboFocus, SceneEditor};
 use eframe::egui;
+use ruster_assets::{AssetKind, AssetStatus, TextureRole};
 use ruster_scene::{MaterialResponse, OpaqueMaterial, Scene, TextureAddress, TextureFilter};
 use serde::{Deserialize, Serialize};
 
@@ -321,7 +322,11 @@ impl SceneEditor {
         }
     }
     /// Choose content inside the existing form; importing pixels remains a catalog operation.
-    pub(super) fn stage_material_texture(&mut self, texture_id: &str) -> Result<(), String> {
+    pub(super) fn stage_material_texture(
+        &mut self,
+        texture_id: &str,
+        role: TextureRole,
+    ) -> Result<(), String> {
         if !self.material_editable() {
             return Err(
                 "Finish other edits or resolve dialogs before choosing a material texture.".into(),
@@ -356,14 +361,26 @@ impl SceneEditor {
                 && store.inspect().iter().any(|info| {
                     info.id == texture_id
                         && info.kind == ruster_assets::AssetKind::Texture
-                        && info.texture_role == Some(ruster_assets::TextureRole::BaseColor)
+                        && info.texture_role == Some(role)
                         && info.status == ruster_assets::AssetStatus::Ready
                 })
         });
         if !ready {
-            return Err("Choose an imported PNG texture with a ready accepted source.".into());
+            return Err(match role {
+                TextureRole::BaseColor => {
+                    "Choose a ready Base color (sRGB) PNG import for this slot."
+                }
+                TextureRole::Roughness => {
+                    "Choose a ready Roughness map (linear) PNG import for this slot."
+                }
+            }
+            .into());
         }
-        if draft.texture.as_deref() == Some(texture_id) {
+        let current = match role {
+            TextureRole::BaseColor => &draft.texture,
+            TextureRole::Roughness => &draft.roughness_texture,
+        };
+        if current.as_deref() == Some(texture_id) {
             return Ok(());
         }
         let id = if draft.intent == MaterialIntent::EditShared {
@@ -379,13 +396,17 @@ impl SceneEditor {
         };
         // Validate dependencies independently of unfinished numeric/name text;
         // choosing an image must not discard those text fields or apply them.
-        let candidate = OpaqueMaterial {
-            base_color_texture: Some(texture_id.into()),
+        let mut candidate = OpaqueMaterial {
+            base_color_texture: draft.texture.clone(),
             roughness_texture: draft.roughness_texture.clone(),
             filter: draft.filter,
             address: draft.address,
             ..Default::default()
         };
+        match role {
+            TextureRole::BaseColor => candidate.base_color_texture = Some(texture_id.into()),
+            TextureRole::Roughness => candidate.roughness_texture = Some(texture_id.into()),
+        }
         self.validate_material_candidate(&id, &candidate)?;
         if draft.intent != MaterialIntent::EditShared
             && !object
@@ -398,7 +419,10 @@ impl SceneEditor {
                 "Assign a mesh with complete UVs before choosing a material texture.".into(),
             );
         }
-        draft.texture = Some(texture_id.into());
+        match role {
+            TextureRole::BaseColor => draft.texture = Some(texture_id.into()),
+            TextureRole::Roughness => draft.roughness_texture = Some(texture_id.into()),
+        }
         self.material_draft = Some(draft);
         self.draft_generation = self.draft_generation.wrapping_add(1);
         self.error.clear();
@@ -612,7 +636,7 @@ impl SceneEditor {
             });
             if draft.response_mode == MaterialResponseMode::Dielectric {
                 ui.horizontal(|ui| {
-                    ui.label("Roughness").on_hover_text("Perceptual roughness, 0.08 to 1: lower values give a tighter highlight; higher values spread it. This is a nonmetallic surface response, without environment reflections.");
+                    ui.label(if draft.roughness_texture.is_some() { "Roughness multiplier" } else { "Roughness" }).on_hover_text("Perceptual roughness, 0.08 to 1: lower values give a tighter highlight; higher values spread it. This is a nonmetallic surface response, without environment reflections.");
                     let response = ui.add(egui::TextEdit::singleline(&mut draft.roughness)
                         .id(egui::Id::unique("material_roughness"))
                         .char_limit(64).desired_width(82.0));
@@ -627,33 +651,6 @@ impl SceneEditor {
                     ui.label("Custom shader controls appearance; surface shading is unsupported. Settings are retained.");
                 }
             }
-            let before_texture = draft.texture.clone();
-            let textures = self
-                .assets
-                .as_ref()
-                .map(|store| {
-                    store
-                        .infos()
-                        .filter(|info| info.kind == ruster_assets::AssetKind::Texture
-                            && info.texture_role == Some(ruster_assets::TextureRole::BaseColor))
-                        .collect::<Vec<_>>()
-                })
-                .unwrap_or_default();
-            let texture_text = match &draft.texture {
-                None => "None".to_string(),
-                Some(id) => textures
-                    .iter()
-                    .find(|info| &info.id == id)
-                    .map(|info| {
-                        std::path::Path::new(&info.source)
-                            .file_name()
-                            .unwrap_or_default()
-                            .to_string_lossy()
-                            .into_owned()
-                    })
-                    .unwrap_or_else(|| format!("Missing: {id}")),
-            };
-            ui.label("Base color texture");
             let uv_ready = if draft.intent == MaterialIntent::EditShared {
                 self.session
                     .scene()
@@ -679,57 +676,68 @@ impl SceneEditor {
                     "All shared users need UV-mapped meshes. Make unique to texture this object only."
                 } else { "Choose a UV-mapped mesh before adding a texture." });
             }
-            let focus = ComboFocus::capture(ui, "material_texture");
-            let mut selected = false;
-            let texture_response = egui::ComboBox::from_id_salt("material_texture")
-                .selected_text(texture_text)
-                .show_ui(ui, |ui| {
-                    if ui.selectable_value(&mut draft.texture, None, "None").clicked() { selected = true; ui.close(); }
-                    for info in &textures {
-                        let ready = uv_ready
-                            && info.status == ruster_assets::AssetStatus::Ready
-                            && self
-                                .assets
-                                .as_ref()
-                                .is_some_and(|store| store.texture(&info.id).is_some());
+            let roughness_active = draft.response_mode == MaterialResponseMode::Dielectric
+                && !self.session.scene().display.is_legacy() && self.shader_builtin;
+            let infos = self.assets.as_ref().map(|store| store.infos().collect::<Vec<_>>()).unwrap_or_default();
+            for (role, label, salt, reference) in [
+                (TextureRole::BaseColor, "Base color texture", "material_texture", &mut draft.texture),
+                (TextureRole::Roughness, "Roughness map", "material_roughness_texture", &mut draft.roughness_texture),
+            ] {
+                let before = reference.clone();
+                let selected_info = reference.as_ref().and_then(|id| infos.iter().find(|info| &info.id == id).copied());
+                let selected_text = match reference.as_ref() {
+                    None => "None".to_owned(),
+                    Some(id) => match selected_info {
+                        Some(info) if info.kind == AssetKind::Texture && info.texture_role == Some(role) => std::path::Path::new(&info.source).file_name().unwrap_or_default().to_string_lossy().into_owned(),
+                        Some(_) => format!("Wrong role: {id}"),
+                        None => format!("Missing: {id}"),
+                    },
+                };
+                ui.label(label);
+                let focus = ComboFocus::capture(ui, salt);
+                let mut selected = false;
+                let response = egui::ComboBox::from_id_salt(salt).selected_text(selected_text).show_ui(ui, |ui| {
+                    let clear = if role == TextureRole::Roughness { "None (clear)" } else { "None" };
+                    if ui.selectable_value(reference, None, clear).clicked() { selected = true; ui.close(); }
+                    for info in infos.iter().filter(|info| info.kind == AssetKind::Texture && info.texture_role == Some(role)) {
+                        let ready = uv_ready && info.status == AssetStatus::Ready && self.assets.as_ref().is_some_and(|store| store.texture(&info.id).is_some_and(|texture| texture.role == role));
                         ui.add_enabled_ui(ready, |ui| {
-                            if ui.selectable_value(
-                                &mut draft.texture,
-                                Some(info.id.clone()),
-                                &info.source,
-                            )
-                            .on_hover_text(&info.id).clicked() { selected = true; ui.close(); }
+                            if ui.selectable_value(reference, Some(info.id.clone()), &info.source).on_hover_text(&info.id).clicked() { selected = true; ui.close(); }
                         });
                     }
                 });
-            focus.restore(ui, &texture_response.response, selected);
-            let response = texture_response.response;
-            if response
-                .dnd_hover_payload::<super::AssetDrag>()
-                .is_some_and(|payload| self.resolved_textures.contains_key(&payload.asset_id))
-            {
-                ui.painter().rect_stroke(
-                    response.rect,
-                    3.0,
-                    egui::Stroke::new(2.0, ui.visuals().selection.bg_fill),
-                    egui::StrokeKind::Inside,
-                );
-            }
-            if editable {
-                if let Some(payload) = response.dnd_release_payload::<super::AssetDrag>() {
-                    dropped_texture = Some((*payload).clone());
+                focus.restore(ui, &response.response, selected);
+                let response = response.response;
+                if response.dnd_hover_payload::<super::AssetDrag>().is_some_and(|payload| self.resolved_textures.get(&payload.asset_id).is_some_and(|texture| texture.role == role)) {
+                    ui.painter().rect_stroke(response.rect, 3.0, egui::Stroke::new(2.0, ui.visuals().selection.bg_fill), egui::StrokeKind::Inside);
+                }
+                if editable {
+                    if let Some(payload) = response.dnd_release_payload::<super::AssetDrag>() { dropped_texture = Some(((*payload).clone(), role)); }
+                }
+                fields.push(response);
+                changed |= *reference != before;
+                if let Some(id) = reference.as_ref() {
+                    let info = infos.iter().find(|info| &info.id == id).copied();
+                    let accepted = self.assets.as_ref().is_some_and(|store| store.texture(id).is_some_and(|texture| texture.role == role));
+                    if let Some(info) = info { ui.add(egui::Label::new(format!("Source: {}", info.source)).wrap()); }
+                    if !info.is_some_and(|info| info.kind == AssetKind::Texture && info.texture_role == Some(role)) {
+                        ui.colored_label(ui.visuals().warn_fg_color, "Reference is missing or has the wrong import role. Repair it or choose None.");
+                    } else if !info.is_some_and(|info| info.status == AssetStatus::Ready) {
+                        ui.colored_label(ui.visuals().warn_fg_color, if accepted { "Source unavailable; last-good content is retained. Repair and Refresh." } else { "Texture unavailable. Repair and Refresh before faithful export." });
+                    }
+                    if role == TextureRole::Roughness && !accepted && roughness_active {
+                        ui.label("Scalar viewport fallback is provisional; export requires this map.");
+                    }
                 }
             }
-            fields.push(response);
-            changed |= draft.texture != before_texture;
-            if let Some(id) = &draft.texture {
-                let info = textures.iter().find(|info| &info.id == id);
-                if !info.is_some_and(|info| info.status == ruster_assets::AssetStatus::Ready) {
-                    let message = info.and_then(|info| info.diagnostic.as_deref()).unwrap_or(
-                        "Texture is missing. Import or repair its source, or choose None.",
-                    );
-                    ui.colored_label(ui.visuals().warn_fg_color, message);
+            if draft.roughness_texture.is_some() {
+                if draft.response_mode == MaterialResponseMode::Diffuse {
+                    ui.label("Roughness map is inactive with Diffuse shading. Settings are retained.");
+                    if !self.shader_builtin { ui.label("Custom shader controls appearance; roughness maps are unsupported."); }
+                } else {
+                    ui.label("Map × multiplier, clamped to 0.08–1. Use 1 for the full map range.");
                 }
+                ui.label("Filter and Wrap affect both texture slots.");
             }
             let filter = draft.filter;
             let address = draft.address;
@@ -788,10 +796,10 @@ impl SceneEditor {
             self.material_draft = Some(draft);
             self.draft_generation = self.draft_generation.wrapping_add(1);
         }
-        if let Some(payload) = dropped_texture {
+        if let Some((payload, role)) = dropped_texture {
             if let Err(error) = self
                 .check_asset_drag(&payload)
-                .and_then(|()| self.stage_material_texture(&payload.asset_id))
+                .and_then(|()| self.stage_material_texture(&payload.asset_id, role))
             {
                 self.error = error;
             }
@@ -850,8 +858,8 @@ mod tests {
     #[test]
     fn material_form_keyboard_and_shared_unique_transactions() {
         let mut editor = editor();
-        // The existing form must preserve a map authored through another path,
-        // without presenting new map controls at this early foundation stage.
+        // Retain a map authored through another path while editing other fields
+        // or making a unique copy.
         let mut mapped = editor.session.scene().clone();
         mapped
             .materials
@@ -1234,6 +1242,128 @@ mod tests {
         );
         assert!(!editor.session.scene().materials.contains_key(&unique));
         assert_eq!(editor.preview, preview);
+        // Ordinary texture drops stage the accepted role without applying raw
+        // fields or promoting shading/display. Repair and Apply remain grouped.
+        let directory = tempfile::tempdir().unwrap();
+        let mut png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut png, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[128, 0, 0])
+                .unwrap();
+        }
+        std::fs::write(directory.path().join("pattern.png"), png).unwrap();
+        let mut store = ruster_assets::AssetStore::open(directory.path()).unwrap();
+        store
+            .import_texture("pattern", "pattern.png", TextureRole::Roughness)
+            .unwrap();
+        let mesh = std::sync::Arc::new(
+            ruster_assets::parse_obj(
+                b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n",
+            )
+            .unwrap(),
+        );
+        let mut scene = Scene::demo();
+        scene
+            .materials
+            .insert("shared".into(), OpaqueMaterial::default());
+        for object in scene.objects.iter_mut().take(2) {
+            object.mesh = Some("mesh".into());
+            object.material = Some("shared".into());
+        }
+        let mut mapped = SceneEditor::new(ruster_scene::Session::new(scene).unwrap());
+        mapped.resolved.insert("mesh".into(), mesh);
+        mapped.resolved_textures = store.texture_snapshots();
+        mapped.assets = Some(store);
+        mapped.select_object(Some("left".into()), false);
+        let mut raw =
+            MaterialDraft::new(mapped.session.scene(), "left", MaterialIntent::EditShared).unwrap();
+        raw.roughness = "unfinished".into();
+        raw.name = "Patterned".into();
+        mapped.material_draft = Some(raw);
+        let before = mapped.session.snapshot_bytes().unwrap();
+        let payload = mapped.asset_payload("pattern").unwrap();
+        mapped.queued_drop = Some(("left".into(), payload));
+        mapped.process_content_intents();
+        let raw = mapped.material_draft.as_ref().unwrap();
+        assert_eq!(raw.roughness, "unfinished");
+        assert_eq!(raw.roughness_texture.as_deref(), Some("pattern"));
+        assert_eq!(raw.response_mode, MaterialResponseMode::Diffuse);
+        assert!(mapped.session.scene().display.is_legacy());
+        assert_eq!(mapped.session.snapshot_bytes().unwrap(), before);
+        mapped.material_draft.as_mut().unwrap().response_mode = MaterialResponseMode::Dielectric;
+        assert!(!mapped.apply_material_draft());
+        assert_eq!(
+            mapped.material_draft.as_ref().unwrap().roughness,
+            "unfinished"
+        );
+        mapped.material_draft.as_mut().unwrap().roughness = "0.5".into();
+        assert!(mapped.apply_material_draft(), "{}", mapped.error);
+        assert_eq!(mapped.session.undo_len(), 1);
+        assert_eq!(
+            mapped.session.scene().materials["shared"]
+                .roughness_texture
+                .as_deref(),
+            Some("pattern")
+        );
+        assert_eq!(
+            mapped.session.scene().objects[1].material.as_deref(),
+            Some("shared")
+        );
+        let shapes = frame(&mut mapped, vec![]);
+        let point = label_point(&shapes, "pattern.png");
+        frame(
+            &mut mapped,
+            vec![egui::Event::PointerMoved(point), click(point, true)],
+        );
+        frame(&mut mapped, vec![click(point, false)]);
+        let shapes = frame(&mut mapped, vec![]);
+        let clear = label_point(&shapes, "None (clear)");
+        frame(
+            &mut mapped,
+            vec![egui::Event::PointerMoved(clear), click(clear, true)],
+        );
+        frame(&mut mapped, vec![click(clear, false)]);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert!(mapped
+            .material_draft
+            .as_ref()
+            .unwrap()
+            .roughness_texture
+            .is_none());
+        assert_eq!(
+            mapped.session.undo_len(),
+            1,
+            "Clear waits for grouped Apply"
+        );
+        assert!(mapped.apply_material_draft(), "{}", mapped.error);
+        assert_eq!(mapped.session.undo_len(), 2);
+        mapped
+            .session
+            .undo(mapped.session.scene().revision)
+            .unwrap();
+        mapped.sync_draft();
+        assert_eq!(
+            mapped.session.scene().materials["shared"]
+                .roughness_texture
+                .as_deref(),
+            Some("pattern")
+        );
+        mapped.material_draft =
+            MaterialDraft::new(mapped.session.scene(), "left", MaterialIntent::MakeUnique);
+        assert!(mapped.apply_material_draft(), "{}", mapped.error);
+        let unique = mapped.session.scene().objects[0].material.as_ref().unwrap();
+        assert_ne!(unique, "shared");
+        assert_eq!(
+            mapped.session.scene().materials[unique]
+                .roughness_texture
+                .as_deref(),
+            Some("pattern")
+        );
     }
     // Exercise the production frame capture path, then restored text/authority
     // and pre-adoption rejection. Generic history/migration is covered by Scene.

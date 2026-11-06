@@ -1,8 +1,8 @@
 # V3b — Finish Patterns
 
-Proposed2026-11-06 by Astra after accepted [V3a](../evidence/V3A-readiness.md), source `ce5309b`. **Approved2026-11-06: the user says “Set goal and start work.” Active at baseline/early feasibility.** The outcome, ordering, defaults and numerical investigation references below are agent proposals for approval. The approved goal is now active; implementation choices remain subject to the early evidence gate. Preserve the immutable Surface Study handoff and earlier creations.
+Proposed2026-11-06 by Astra after accepted [V3a](../evidence/V3A-readiness.md), source `ce5309b`. **Approved2026-11-06: the user says “Set goal and start work.” Active: early foundation accepted, ordinary workflow qualification in progress.** The outcome and finite scope are approved. Root/Astra accepted the agent-selected foundation through the [early evidence gate](../evidence/V3B-feasibility.md#early-gate-accepted-after-one-phase-diagnosis--2026-11-06); full milestone acceptance remains pending. Preserve the immutable Surface Study handoff and earlier creations.
 
-## Proposed session objective
+## Approved session objective
 
 Deliver **Finish Patterns**, a small nonmetallic exhibit with a glossy glazed emblem on a matte ceramic surface and a worn finish on a coated panel. Through ordinary editor controls and native MCP, import an explicit roughness-data image, vary gloss across one material without changing its base color or geometry, share it and make it unique, refresh it safely, undo edits, recover an unfinished material draft, and save/reopen/export two faithful standalone results. Establish linear-data import/filtering/ownership and compatibility through an early shared-renderer feasibility gate; measure bounded costs and stop after the requirement audit and exact handoff.
 
@@ -51,7 +51,7 @@ Replan if useful detail needs normal maps, environment lighting, broad temporal 
 
 ## Frozen measurement proposal
 
-These **unmeasured agent-selected investigation ceilings** are not SLAs. Freeze them with baseline reasoning before candidate results; retain misses rather than loosening thresholds afterward.
+These **agent-selected investigation ceilings were frozen before candidate results**, and are not SLAs. Actual named measurements and limitations belong in the evidence record; retain misses rather than loosening thresholds afterward.
 
 Freeze a creator exhibit with two shared mapped users, one unique mapped user, scalar/color-textured controls and exact geometry/material counts; also one251-object shared-mesh stress case with a small fixed map set. Compare V3a/current-no-map/current-mapped at matching geometry/camera/lights/target/MSAA: three fresh serial runs, reverse middle round,12warmup/60measured frames. Shared-instance stress does not prove unique-heavy scale.
 

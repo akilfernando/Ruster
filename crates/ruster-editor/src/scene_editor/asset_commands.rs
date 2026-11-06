@@ -32,6 +32,14 @@ fn decimal(value: &Value, key: &str) -> Result<u64, Error> {
         .map_err(|_| error("invalid_arguments", format!("Invalid {key}")))
 }
 #[derive(Clone)]
+struct OwnedAssetForm {
+    id: String,
+    source: String,
+    rename: bool,
+    normal_policy: Option<ruster_assets::MeshNormalPolicy>,
+    texture_role: Option<ruster_assets::TextureRole>,
+}
+#[derive(Clone)]
 struct Stamp {
     generation: u64,
     scene_revision: u64,
@@ -39,12 +47,7 @@ struct Stamp {
     root: PathBuf,
     identity: AssetStateIdentity,
     drafts: (u64, u64, u64),
-    owned_form: Option<(
-        String,
-        String,
-        bool,
-        Option<ruster_assets::MeshNormalPolicy>,
-    )>,
+    owned_form: Option<OwnedAssetForm>,
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Phase {
@@ -1876,6 +1879,13 @@ impl SceneEditor {
                     .into(),
             },
         };
+        let semantic_texture_role = match &mutation {
+            AssetMutation::ImportTexture { role, .. } => Some(*role),
+            AssetMutation::Import { source, .. } if source.ends_with(".png") => {
+                Some(TextureRole::BaseColor)
+            }
+            _ => None,
+        };
         let stamp = Stamp {
             generation: self.generation,
             scene_revision: revision,
@@ -1887,13 +1897,12 @@ impl SceneEditor {
                 self.draft_generation,
                 self.behavior.generation(),
             ),
-            owned_form: own_dialog.then(|| {
-                (
-                    self.asset_id.clone(),
-                    self.asset_source.clone(),
-                    self.asset_rename_intent,
-                    self.import_normal_policy(),
-                )
+            owned_form: own_dialog.then(|| OwnedAssetForm {
+                id: self.asset_id.clone(),
+                source: self.asset_source.clone(),
+                rename: self.asset_rename_intent,
+                normal_policy: self.import_normal_policy(),
+                texture_role: semantic_texture_role,
             }),
         };
         let request = store
@@ -1940,12 +1949,15 @@ impl SceneEditor {
                 "Human draft ownership changed during preparation; retry explicitly.",
             ));
         }
-        if let Some((id, source, rename, normals)) = &stamp.owned_form {
+        if let Some(form) = &stamp.owned_form {
             if self.asset_dialog
-                || id != &self.asset_id
-                || source != &self.asset_source
-                || *rename != self.asset_rename_intent
-                || *normals != self.import_normal_policy()
+                || form.id != self.asset_id
+                || form.source != self.asset_source
+                || form.rename != self.asset_rename_intent
+                || form.normal_policy != self.import_normal_policy()
+                || form
+                    .texture_role
+                    .is_some_and(|role| Some(role) != self.import_texture_role())
             {
                 return Err(error(
                     "asset_cancelled",
@@ -2090,6 +2102,13 @@ impl SceneEditor {
                 .is_some_and(|ext| ext == "obj")
         {
             args["normal_policy"] = json!(self.asset_normal_policy);
+        }
+        if op == "asset_import"
+            && std::path::Path::new(source)
+                .extension()
+                .is_some_and(|extension| extension == "png")
+        {
+            args["texture_role"] = json!(self.asset_texture_role);
         }
         let mut controller = std::mem::take(&mut self.asset_ops);
         match controller.begin(
@@ -3898,6 +3917,7 @@ mod tests {
             "cancel",
             "new_modal",
             "normal_policy_changed",
+            "texture_role_changed",
             "expired",
             "failed_import",
             "close_prepared",
@@ -4194,10 +4214,27 @@ mod tests {
                 editor.asset_dialog = true;
                 editor.asset_id = "triangle".into();
                 editor.asset_source = "triangle.obj".into();
-                editor.start_human_asset(&ctx, "asset_import", "triangle", "triangle.obj", true);
+                if case == "texture_role_changed" {
+                    let mut bytes = Vec::new();
+                    {
+                        let mut encoder = png::Encoder::new(&mut bytes, 1, 1);
+                        encoder.set_color(png::ColorType::Rgb);
+                        encoder.set_depth(png::BitDepth::Eight);
+                        encoder
+                            .write_header()
+                            .unwrap()
+                            .write_image_data(&[128, 0, 0])
+                            .unwrap();
+                    }
+                    std::fs::write(directory.path().join("pattern.png"), bytes).unwrap();
+                    editor.asset_source = "pattern.png".into();
+                    editor.asset_texture_role = TextureRole::Roughness;
+                }
+                let source = editor.asset_source.clone();
+                editor.start_human_asset(&ctx, "asset_import", "triangle", &source, true);
                 assert!(!editor.asset_dialog);
                 assert_eq!(editor.asset_id, "triangle");
-                assert_eq!(editor.asset_source, "triangle.obj");
+                assert_eq!(editor.asset_source, source);
             }
             if case == "reset_submitting_cancel" {
                 let mesh = Arc::new(Mesh {
@@ -4361,6 +4398,7 @@ mod tests {
                     "normal_policy_changed" => {
                         editor.asset_normal_policy = ruster_assets::MeshNormalPolicy::Flat;
                     }
+                    "texture_role_changed" => editor.asset_texture_role = TextureRole::BaseColor,
                     "close_prepared" => {
                         editor.request_close();
                         assert!(!editor.close_approved);
@@ -4413,6 +4451,18 @@ mod tests {
             );
             assert_eq!(editor.session.scene().revision, scene_revision);
             assert_eq!(editor.preview.scene.fingerprint(), preview);
+            if case == "human" {
+                let token = format!("human:scene:{}", editor.generation);
+                let args = json!({"expected_session_token":token,"expected_revision":scene_revision.to_string(),"expected_asset_revision":"1","asset_id":"triangle"});
+                let (_, stamp) = editor
+                    .admit_asset(&token, "asset_refresh", &args, true)
+                    .unwrap();
+                editor.asset_texture_role = TextureRole::Roughness;
+                assert!(
+                    editor.validate_asset_stamp(&stamp).is_ok(),
+                    "PNG role is irrelevant to immutable Refresh and OBJ forms"
+                );
+            }
             if matches!(case, "reset_preparing" | "reset_retiring") {
                 assert!(editor.preview_assets.contains_key("new"));
             } else {
