@@ -1,6 +1,6 @@
 # 0035: explicit linear roughness-map feasibility
 
-Date2026-11-06. Status: **selected experimental implementation for approved V3b; early visual/ownership/runtime/cost acceptance pending.** The user approves [Finish Patterns](../plans/V3B-FINISH-PATTERNS.md). Defaults below are root/Astra implementation choices, not new user requirements. [Evidence](../evidence/V3B-feasibility.md) owns actual observations and failures.
+Date2026-11-06. Status: **accepted bounded foundation after the V3b early visual/ownership/runtime/cost gate; ordinary workflow and full milestone acceptance remain pending.** The user approves [Finish Patterns](../plans/V3B-FINISH-PATTERNS.md). Defaults below are root/Astra implementation choices, not new user requirements. [Evidence](../evidence/V3B-feasibility.md) owns actual observations and failures.
 
 ## Context and alternatives
 
@@ -27,3 +27,10 @@ Extend existing shared material/import/inspect operations, no new MCP tool or au
 Root/Astra read-only source assessments agree this can reuse current owners; they do not prove implementation. Preserve exact old color/no-map/white images, unique source-role caches, source-hash/last-good/retirement invariants and real import→save→runtime before ordinary controls. Fine-pattern minification/consecutive moving-highlight checks determine whether the useful exhibit works. Replan explicitly if environment lighting, normal maps, broad temporal AA or another owner architecture becomes necessary. No accepted surface-map capability is claimed yet.
 
 Primary guidance checked2026-11-06 by Astra: [Khronos material contract](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#materials), [Filament materials](https://google.github.io/filament/main/materials.html), [Filament rendering](https://google.github.io/filament/main/filament.html), [Godot standard materials](https://docs.godotengine.org/en/stable/tutorials/3d/standard_material_3d.html). They inform color/data separation and future tangent/environment boundaries, not Ruster correctness/performance. Ruster's red-channel convention is not glTF packed-green support.
+
+
+## Early qualification and limits — 2026-11-06
+
+Root/Astra accept the selected foundation after actual GPU numerical/ownership checks, exact old/current no-map image pairs, journaled default-MCP author/save/export, source-hidden headless/native runtime,18matched release processes and ten decode cases. One fixed-orientation subpixel-pan diagnosis resolves the initial fine-pattern ambiguity without changing production code or source pixels: distance64converges toward subdued gray, while32remains visibly sampling-sensitive. Preserve arithmetic perceptual-roughness mips as a bounded approximation; no alias-free/BRDF-preserving/continuous-motion claim. The useful exhibit is a planar glazed emblem plus stylized wear under selected direct lighting; arbitrary curved-emblem readability, photorealistic abrasion, environment/metals and broad AA remain outside this result. Exact evidence/failures and numerical limits live in [V3b feasibility](../evidence/V3B-feasibility.md).
+
+This decision acceptance permits ordinary controls/recovery qualification under the existing approved goal. It does not accept unfinished UX/native publication/resource/idle paths, final two-app delivery or the whole V3b milestone. No new asset owner, worker family, shader compilation per material or render target is introduced.
