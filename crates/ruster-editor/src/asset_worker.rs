@@ -708,9 +708,10 @@ mod tests {
         let obj = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n";
         std::fs::write(root.join("triangle.obj"), obj).unwrap();
         let mut store = AssetStore::open(root).unwrap();
-        let import = || AssetMutation::Import {
+        let import = || AssetMutation::ImportMesh {
             id: "triangle".into(),
             source: "triangle.obj".into(),
+            normal_policy: ruster_assets::MeshNormalPolicy::AuthoredWhenComplete,
         };
         let files_before = std::fs::read_dir(root).unwrap().count();
         let barrier = Arc::new(Barrier::new(2));
@@ -765,7 +766,10 @@ mod tests {
             other => panic!("unexpected publication: {other:?}"),
         };
         assert!(completion.catalog_published());
-        assert!(completion.result().is_ok());
+        assert_eq!(
+            completion.result().unwrap().mesh_normal_policy,
+            Some(ruster_assets::MeshNormalPolicy::AuthoredWhenComplete)
+        );
         let adoption = store.adopt(completion).unwrap();
         assert_eq!(store.revision(), 1);
         worker

@@ -58,7 +58,14 @@ impl Probe {
             .prepare(device, queue, [(&BindingKey::default(), None)].into_iter());
         resources.instances = instance_buffer(device, 2);
         resources.capacity = 2;
-        resources.resize(device, [SIZE, SIZE]);
+        assert!(resources.resize(
+            device,
+            queue,
+            [SIZE, SIZE],
+            COLOR,
+            1,
+            &egui::Context::default()
+        ));
         let uniform_entry = wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
@@ -237,6 +244,7 @@ impl Probe {
                 normal: normal.to_cols_array_2d().map(|v| [v[0], v[1], v[2], 0.]),
                 color: [1.; 4],
                 base_color: [1., 1., 1., 0.],
+                response: [0.; 4],
             }
         });
         queue.write_buffer(

@@ -301,6 +301,46 @@ class CreationDistributionTests(unittest.TestCase):
                     self.assertEqual(archive.extractfile("application/resources/scene.json").read(), shadow_bytes)
                     self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"],
                                      package_creation.SUN_SHADOW_PROFILE)
+                # Scene9 requires the exact Surface profile and descriptor3 normals,
+                # even when all new scene settings are omitted/default.
+                surface_scene = copy.deepcopy(shadow_scene)
+                surface_scene["format_version"] = 9
+                surface_bytes = package_creation.encoded(surface_scene)
+                surface_content = {**shadow_content, "schema":5,
+                    "scene_sha256":package_creation.sha256(surface_bytes),
+                    "meshes":{identity:{**record,"normal_policy":"authored_when_complete"}
+                              for identity,record in shadow_content["meshes"].items()}}
+                (content_root / "scene.json").write_bytes(surface_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(surface_content))
+                with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old-kit preflight")):
+                    with self.assertRaisesRegex(ValueError, "Scene9 surface_materials"):
+                        package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                capable["profile"] = package_creation.SURFACE_PROFILE
+                (kit / "runtime.json").write_bytes(package_creation.encoded(capable))
+                surface_scene["scene"]["display"]={"type":"surface_hdr","exposure_stops":1.0}
+                surface_scene["scene"]["materials"]["paint"]["response"]={"type":"dielectric","roughness":.08}
+                surface_bytes=package_creation.encoded(surface_scene)
+                surface_content["scene_sha256"]=package_creation.sha256(surface_bytes)
+                (content_root / "scene.json").write_bytes(surface_bytes)
+                (content_root / "content.json").write_bytes(package_creation.encoded(surface_content))
+                surface_response={**framed_response,"authored_scene":package_creation.typed_scene(surface_scene)}
+                with patch.object(package_creation,"run_runtime",return_value=surface_response):
+                    surface_output=base/"surface.tar.gz"
+                    package_creation.package(kit,content_root,surface_output)
+                with tarfile.open(surface_output) as archive:
+                    descriptor=json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"],3)
+                    self.assertEqual(descriptor["mesh_normal_policies"],
+                        {identity:"authored_when_complete" for identity in surface_content["meshes"]})
+                    self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"],package_creation.SURFACE_PROFILE)
+                for bad_policy in (None,True,"smooth",{}):
+                    bad_content=copy.deepcopy(surface_content)
+                    next(iter(bad_content["meshes"].values()))["normal_policy"]=bad_policy
+                    (content_root/"content.json").write_bytes(package_creation.encoded(bad_content))
+                    with self.assertRaisesRegex(ValueError,"normal policy"):
+                        package_creation.source_content(content_root,None)
+                (content_root/"content.json").write_bytes(package_creation.encoded(surface_content))
                 # Current kit retains the Scene7/schema3 route as well.
                 (content_root / "scene.json").write_bytes(lit_bytes)
                 (content_root / "content.json").write_bytes(package_creation.encoded(lit_content))
@@ -499,6 +539,32 @@ class CreationDistributionTests(unittest.TestCase):
         top_level["scene"]["lighting"]["lights"]["sun"]["shadow"] = shadow
         with self.assertRaisesRegex(ValueError, "kind.shadow"):
             package_creation.scene_dependencies(top_level)
+
+    def test_surface_admission_keeps_original_bounds_and_owning_history(self):
+        doc={"format":"ruster-scene","format_version":9,"scene":{"id":"surface","revision":0,"objects":[],
+            "display":{"type":"surface_hdr","exposure_stops":0},
+            "materials":{"finish":{"tint":[1,1,1],"filter":"linear","address":"repeat",
+                "response":{"type":"dielectric","roughness":.08}}}},"undo":[],"redo":[]}
+        package_creation.validate_surface_fields(doc)
+        self.assertEqual(package_creation.typed_scene(doc)["materials"]["finish"]["response"]["roughness"],.08)
+        rounded=copy.deepcopy(doc);rounded["scene"]["materials"]["finish"]["response"]["roughness"]=.0800000001
+        self.assertEqual(package_creation.typed_scene(rounded)["materials"]["finish"]["response"]["roughness"],.08)
+        for bad in (.079999999999,.07999999821186066,1.0000000001,True,None):
+            invalid=copy.deepcopy(doc);invalid["scene"]["materials"]["finish"]["response"]["roughness"]=bad
+            with self.subTest(roughness=bad),self.assertRaises(ValueError):package_creation.validate_surface_fields(invalid)
+        for bad in (-8.000000001,8.000000001,True,None):
+            invalid=copy.deepcopy(doc);invalid["scene"]["display"]["exposure_stops"]=bad
+            with self.subTest(exposure=bad),self.assertRaises(ValueError):package_creation.validate_surface_fields(invalid)
+        for version in range(1,9):
+            invalid=copy.deepcopy(doc);invalid["format_version"]=version
+            with self.subTest(version=version),self.assertRaises(ValueError):package_creation.validate_surface_fields(invalid)
+        for key in ("display","response"):
+            invalid=copy.deepcopy(doc);invalid["scene"].pop("display");invalid["scene"]["materials"].clear();invalid["format_version"]=8
+            invalid["undo"]=[{"scene":[{"kind":"display","before":{"type":"legacy_sdr"},"after":{"type":"surface_hdr","exposure_stops":0}}]}] if key=="display" else [{"materials":[{"before":{"response":None},"after":None}]}]
+            with self.subTest(history=key),self.assertRaises(ValueError):package_creation.validate_surface_fields(invalid)
+        old=copy.deepcopy(doc);old["format_version"]=8;old["scene"].pop("display");old["scene"]["materials"].clear()
+        old["authoring"]={"bindings":{"object":{"properties":{"display":1,"response":2}}}}
+        package_creation.validate_surface_fields(old)
 
     @unittest.skipUnless(sys.platform == "linux", "Linux process lifecycle required")
     def test_cancellation_reaps_the_owned_preflight_child(self):

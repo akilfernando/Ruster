@@ -37,3 +37,4 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0031](0031-authored-diffuse-lighting.md) | Accepted bounded V2a authored diffuse lighting |
 | [0032](0032-nonvisual-editor-progress-and-bounded-retirement.md) | Nonvisual model progress and bounded retirement; fenced hidden Close may await exposure |
 | [0033](0033-bounded-sun-shadow-feasibility.md) | Bounded Sun shadows, actual-displayed bounds, map ownership and creator/runtime closure (accepted bounded V2b) |
+| [0034](0034-direct-lit-dielectric-surface-feasibility.md) | V3a opt-in direct-lit dielectric/HDR/import-policy feasibility (experimental, acceptance pending) |

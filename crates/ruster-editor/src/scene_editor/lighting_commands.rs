@@ -13,7 +13,11 @@ fn error(code: &str, message: impl Into<String>) -> CommandError {
 pub(super) fn supported(op: &str) -> bool {
     matches!(
         op,
-        "lighting_inspect" | "scene_light_create" | "scene_light_set" | "scene_ambient_set"
+        "lighting_inspect"
+            | "scene_light_create"
+            | "scene_light_set"
+            | "scene_ambient_set"
+            | "scene_display_set"
     )
 }
 fn number(value: &Value) -> Result<u64, CommandError> {
@@ -135,6 +139,7 @@ impl SceneEditor {
                 "light",
             ],
             "scene_ambient_set" => &["expected_session_token", "expected_revision", "ambient"],
+            "scene_display_set" => &["expected_session_token", "expected_revision", "display"],
             _ => return Err(error("invalid_arguments", "Unknown lighting operation")),
         };
         args.as_object()
@@ -229,6 +234,14 @@ impl SceneEditor {
                         .map_err(scene_error)?
                 }
             }
+            "scene_display_set" => {
+                let candidate: ruster_scene::DisplayProfile =
+                    serde_json::from_value(args["display"].clone())
+                        .map_err(|e| error("invalid_arguments", e.to_string()))?;
+                self.session
+                    .set_display(revision, candidate)
+                    .map_err(scene_error)?
+            }
             "scene_ambient_set" => {
                 let candidate = ambient(&args["ambient"])?;
                 let edit = self
@@ -249,7 +262,7 @@ impl SceneEditor {
             self.notice = format!("Agent {op}: revision {result}. Authored lighting changed; preview unchanged. Created lights: {}.", created_ids.join(", "));
         }
         Ok(
-            json!({"session_token":token,"revision":result.to_string(),"changed":result!=revision,"light_id":light_id,"created_ids":created_ids,"lighting":self.session.scene().lighting,"dirty":self.session.is_dirty()}),
+            json!({"session_token":token,"revision":result.to_string(),"changed":result!=revision,"light_id":light_id,"created_ids":created_ids,"lighting":self.session.scene().lighting,"display":self.session.scene().display,"dirty":self.session.is_dirty()}),
         )
     }
 }

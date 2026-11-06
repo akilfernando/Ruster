@@ -14,13 +14,18 @@ const TOOLS: &[(&str, &str, &[&str])] = &[
     ),
     (
         "scene_light_set",
-        "Replace the full value of an existing authored light; directional/point kind is immutable while directional shadow settings remain editable. No upsert or implicit replacement at capacity. Requires current scene session/revision and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Bounded Sun shadows require the built-in pipeline; no point shadows/PBR/HDR contract.",
+        "Replace the full value of an existing authored light; directional/point kind is immutable while directional shadow settings remain editable. No upsert or implicit replacement at capacity. Requires current scene session/revision and clean human drafts. Unsaved, one shared Undo entry; preview unchanged until Reset. Bounded Sun shadows require the built-in pipeline; point shadows and complete PBR/environment reflections are outside this contract. Scene display is a separate authored profile.",
         &["light_id", "light"],
     ),
     (
         "scene_ambient_set",
         "Replace scene-global ambient fill, independent of selection. First Legacy edit preserves the previous key as an explicit allocated Sun and promotes in one Undo transaction; returns all created_ids. Zero ambient with no enabled lights is dark, without a fallback. Requires current scene session/revision and clean human drafts. Unsaved; preview unchanged until Reset.",
         &["ambient"],
+    ),
+    (
+        "scene_display_set",
+        "Replace the authored scene display profile globally, without an asset revision or filesystem authority. Legacy SDR preserves the legacy display route; Surface HDR selects internal linear HDR, a fixed SDR display transform and bounded manual exposure in stops, not HDR-monitor support. Requires current scene session/revision and clean human drafts. Unsaved, one shared Undo entry; runtime snapshot unchanged until Reset. Inspect material_inspect for authored display and separately labeled last-prepared feedback, which may be stale and is not GPU completion.",
+        &["display"],
     ),
 ];
 
@@ -50,6 +55,15 @@ fn ambient_schema() -> Value {
         }),
         vec!["color", "intensity"],
     )
+}
+
+fn display_schema() -> Value {
+    json!({"oneOf":[
+        super::object_schema(json!({"type":{"const":"legacy_sdr"}}), vec!["type"]),
+        super::object_schema(json!({"type":{"const":"surface_hdr"},
+            "exposure_stops":{"type":"number","minimum":-8,"maximum":8,
+                "description":"Finite manual exposure in stops;0 is the opt-in starting point. Required in a present Surface HDR value."}}), vec!["type","exposure_stops"])
+    ]})
 }
 
 fn sun_shadow_schema() -> Value {
@@ -118,6 +132,7 @@ fn shape(field: &str) -> Value {
         }
         "light" => light_schema(),
         "ambient" => ambient_schema(),
+        "display" => display_schema(),
         _ => unreachable!("fixed lighting tool field"),
     }
 }
@@ -151,6 +166,19 @@ fn valid_ambient(value: &Value) -> bool {
             && vector(&ambient["color"], 0.0, 1.0)
             && number(&ambient["intensity"], 0.0, 1.0)
     })
+}
+
+fn valid_display(value: &Value) -> bool {
+    value.as_object().is_some_and(
+        |display| match display.get("type").and_then(Value::as_str) {
+            Some("legacy_sdr") => super::exact_keys(display, &["type"], &[]),
+            Some("surface_hdr") => {
+                super::exact_keys(display, &["type", "exposure_stops"], &[])
+                    && number(&display["exposure_stops"], -8.0, 8.0)
+            }
+            _ => false,
+        },
+    )
 }
 
 fn valid_sun_shadow(value: &Value) -> bool {
@@ -235,6 +263,7 @@ pub fn valid(name: &str, arguments: &Value) -> bool {
             }),
             "light" => valid_light(value),
             "ambient" => valid_ambient(value),
+            "display" => valid_display(value),
             _ => false,
         })
 }
@@ -257,12 +286,16 @@ mod tests {
         let ambient = json!({"expected_session_token":"scene","expected_revision":"0",
             "ambient":{"color":[1,1,1],"intensity":0.28}});
         let advertised = list();
-        assert_eq!(advertised.len(), 4);
+        assert_eq!(advertised.len(), 5);
         for (name, args) in [
             ("lighting_inspect", json!({})),
             ("scene_light_create", point),
             ("scene_light_set", set.clone()),
             ("scene_ambient_set", ambient.clone()),
+            (
+                "scene_display_set",
+                json!({"expected_session_token":"scene","expected_revision":"0","display":{"type":"legacy_sdr"}}),
+            ),
         ] {
             assert!(supported(name) && valid(name, &args), "{name}: {args}");
             let tool = advertised.iter().find(|tool| tool["name"] == name).unwrap();
@@ -280,6 +313,28 @@ mod tests {
                 assert!(!valid(name, &missing));
             }
         }
+        let display = json!({"expected_session_token":"scene","expected_revision":"9007199254740993",
+            "display":{"type":"surface_hdr","exposure_stops":0}});
+        for exposure in [-8.0, 8.0] {
+            let mut args = display.clone();
+            args["display"]["exposure_stops"] = json!(exposure);
+            assert!(valid("scene_display_set", &args));
+        }
+        for rejected in [
+            Value::Null,
+            json!({"type":"legacy_sdr","exposure_stops":0}),
+            json!({"type":"surface_hdr"}),
+            json!({"type":"surface_hdr","exposure_stops":8.000000001}),
+            json!({"type":"surface_hdr","exposure_stops":-8.000000001}),
+            json!({"type":"surface_hdr","exposure_stops":0,"extra":0}),
+        ] {
+            let mut args = display.clone();
+            args["display"] = rejected;
+            assert!(!valid("scene_display_set", &args), "{args}");
+        }
+        let mut extra_authority = display;
+        extra_authority["expected_asset_revision"] = json!("0");
+        assert!(!valid("scene_display_set", &extra_authority));
         let shadow = json!({"enabled":true,"quality":"high","depth_bias_texels":0.15,"normal_bias_texels":0});
         let mut shadowed = set.clone();
         shadowed["light"]["kind"]["shadow"] = shadow.clone();

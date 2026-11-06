@@ -358,7 +358,7 @@ fn paths_and_registry_versions_fail_closed() {
     assert!(store.inspect().is_empty());
     fs::write(
         root.path().join(".ruster-assets.json"),
-        r#"{"format":"ruster-assets","version":3,"revision":0,"assets":{}}"#,
+        r#"{"format":"ruster-assets","version":4,"revision":0,"assets":{}}"#,
     )
     .unwrap();
     assert!(AssetStore::open(root.path())
@@ -413,6 +413,42 @@ fn obj_index_and_format_boundaries() {
         assert!(parse_obj(bad.as_bytes()).is_err(), "accepted {bad}");
     }
     assert!(parse_obj(&vec![b' '; MAX_SOURCE_BYTES + 1]).is_err());
+
+    // Policy is explicit: legacy callers retain flat normals, authored mode
+    // preserves per-corner seams and normalizes even subnormal supplied values.
+    use ruster_assets::{parse_obj_with_normal_policy, MeshNormalPolicy};
+    let authored =
+        "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 2 0\nvn 1e-40 0 0\nf 1//1 2//-1 3//1\nf 1//2 3//1 2//2\n";
+    let smooth =
+        parse_obj_with_normal_policy(authored.as_bytes(), MeshNormalPolicy::AuthoredWhenComplete)
+            .unwrap();
+    assert_eq!(smooth.vertices[0].normal, [0., 1., 0.]);
+    assert_eq!(smooth.vertices[1].normal, [1., 0., 0.]);
+    assert_eq!(smooth.vertices[3].position, smooth.vertices[0].position);
+    assert_ne!(smooth.vertices[3].normal, smooth.vertices[0].normal);
+    assert_eq!(
+        parse_obj(authored.as_bytes()).unwrap().vertices[0].normal,
+        [0., 0., 1.]
+    );
+    assert_eq!(
+        parse_obj_with_normal_policy(TRIANGLE.as_bytes(), MeshNormalPolicy::AuthoredWhenComplete)
+            .unwrap(),
+        parse_obj(TRIANGLE.as_bytes()).unwrap()
+    );
+    for bad in [
+        authored.replace("2//-1", "2"),
+        authored.replace("f 1//2 3//1 2//2", "f 1 3 2"),
+        authored.replace("vn 0 2 0", "vn 0 0 0"),
+        authored.replace("vn 0 2 0", "vn NaN 0 0"),
+        authored.replace("1//1", "1//3"),
+    ] {
+        assert!(
+            parse_obj_with_normal_policy(bad.as_bytes(), MeshNormalPolicy::AuthoredWhenComplete)
+                .is_err(),
+            "accepted {bad}"
+        );
+    }
+    assert!(parse_obj(authored.replace("vn 0 2 0", "vn 0 0 0").as_bytes()).is_ok());
 }
 
 // Both per-project asset count and aggregate resolved geometry are enforced

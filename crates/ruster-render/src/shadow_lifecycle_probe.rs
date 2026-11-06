@@ -27,6 +27,7 @@ impl Probe {
             normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
             color: [1.; 4],
             base_color: [1., 1., 1., 0.],
+            response: [0.; 4],
         };
         let instances = instance_buffer(device, 1);
         queue.write_buffer(&instances, 0, bytemuck::bytes_of(&instance));
@@ -452,6 +453,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
         color: [1.; 4],
         base_color: [1., 1., 1., 0.],
+        response: [0.; 4],
     };
     let first = SceneCallback {
         groups: vec![DrawGroup {
@@ -463,6 +465,8 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
             range: 0..1,
         }],
         camera: Mat4::IDENTITY.to_cols_array(),
+        camera_eye_mode: [0., 0., 2., 1.],
+        display: ruster_scene::DisplayProfile::LegacySdr,
         lighting: LightingPacket::try_pack(&ruster_scene::Lighting::authored_default("sun"))
             .unwrap(),
         size: egui::vec2(SIZE as f32, SIZE as f32),
@@ -477,6 +481,8 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     let second = SceneCallback {
         groups: Vec::new(),
         camera: Mat4::from_scale(Vec3::splat(0.5)).to_cols_array(),
+        camera_eye_mode: [0., 0., 2., 1.],
+        display: ruster_scene::DisplayProfile::LegacySdr,
         lighting: LightingPacket::authored_dark(),
         size: egui::vec2(17., 19.),
         cpu_us: 0.,
@@ -615,6 +621,130 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     }
     drop(bytes);
     read.unmap();
+    // Keep the preceding submitted64² target in the real retirement slot,
+    // delaying callback delivery by omitting submit/poll until after two more
+    // real egui frames. This does not assert that the device remains busy.
+    let retained = SceneCallback {
+        size: egui::vec2(63., 63.),
+        shadow: None,
+        prepared: AtomicBool::new(false),
+        ..first
+    };
+    let pending = SceneCallback {
+        display: ruster_scene::DisplayProfile::SurfaceHdr { exposure_stops: 4. },
+        prepared: AtomicBool::new(false),
+        ..second
+    };
+    {
+        let r = resources.get_mut::<Resources>().unwrap();
+        assert!(r.resize(device, queue, [63, 63], COLOR, 1, &context));
+        assert!(r.retiring_target.is_some());
+    }
+    let mut encoder = device.create_command_encoder(&Default::default());
+    context
+        .run_pass(egui::RawInput::default(), |_| {
+            retained.prepare(device, queue, &screen, &mut encoder, &mut resources);
+            assert!(retained.prepared.load(Ordering::Relaxed));
+        })
+        .drop_without_applying_deltas();
+    let before = metrics.lock().unwrap().clone();
+    context
+        .run_pass(egui::RawInput::default(), |_| {
+            pending.prepare(device, queue, &screen, &mut encoder, &mut resources);
+            assert!(
+                pending.prepared.load(Ordering::Relaxed),
+                "accepted pending callback must retain last prepared composite"
+            );
+            let after = metrics.lock().unwrap().clone();
+            assert_eq!(after.display_status, DisplayStatus::Pending);
+            assert!(after.display_requested_hdr);
+            assert_eq!(after.display_requested_exposure_stops, 4.);
+            assert!(!after.display_applied_hdr);
+            assert_eq!(after.display_applied_exposure_stops, 0.);
+            assert_eq!(after.target_requested_size, [17, 19]);
+            assert_eq!(after.target_size, [63, 63]);
+            assert_eq!(after.target_allocations, before.target_allocations);
+            assert_eq!(
+                callback_work(&after),
+                callback_work(&before),
+                "pending callback must not encode or upload new scene state"
+            );
+            // Rejected duplicates are still unable to paint, even in this pending
+            // frame; accepting a stale target cannot weaken the unique-frame guard.
+            retained.prepare(device, queue, &screen, &mut encoder, &mut resources);
+            assert!(!retained.prepared.load(Ordering::Relaxed));
+        })
+        .drop_without_applying_deltas();
+    {
+        let mut pass = encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("pending accepted callback must paint retained scene"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 1.,
+                            g: 0.,
+                            b: 1.,
+                            a: 1.,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            })
+            .forget_lifetime();
+        pending.paint(
+            egui::PaintCallbackInfo {
+                viewport: rect,
+                clip_rect: rect,
+                pixels_per_point: 1.,
+                screen_size_px: [SIZE, SIZE],
+            },
+            &mut pass,
+            &resources,
+        );
+    }
+    encoder.copy_texture_to_buffer(
+        wgpu::TexelCopyTextureInfo {
+            texture: &image,
+            mip_level: 0,
+            origin: wgpu::Origin3d::ZERO,
+            aspect: wgpu::TextureAspect::All,
+        },
+        wgpu::TexelCopyBufferInfo {
+            buffer: &read,
+            layout: wgpu::TexelCopyBufferLayout {
+                offset: 0,
+                bytes_per_row: Some(SIZE * 4),
+                rows_per_image: Some(SIZE),
+            },
+        },
+        wgpu::Extent3d {
+            width: SIZE,
+            height: SIZE,
+            depth_or_array_layers: 1,
+        },
+    );
+    queue.submit([encoder.finish()]);
+    let (send, recv) = std::sync::mpsc::channel();
+    read.slice(..)
+        .map_async(wgpu::MapMode::Read, move |result| {
+            let _ = send.send(result);
+        });
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    recv.recv().unwrap().unwrap();
+    let bytes = read.slice(..).get_mapped_range().unwrap();
+    let center = &bytes[((SIZE / 2 * SIZE + SIZE / 2) * 4) as usize..][..4];
+    assert!(
+        center[..3].iter().all(|&value| value.abs_diff(215) <= 2) && center[3] == 255,
+        "pending callback must composite last lit scene, not clear/pending dark pixels: {center:?}"
+    );
+    drop(bytes);
+    read.unmap();
+    eprintln!("SceneCallback pending retirement retains actual lit scene pixels and applied state; duplicates remain unpaintable");
     drop(resources);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 }

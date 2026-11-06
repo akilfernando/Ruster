@@ -307,6 +307,7 @@ impl Clipboard {
                     lights: self.lights.clone(),
                 }
             },
+            display: ruster_scene::DisplayProfile::LegacySdr,
             id: "clipboard".into(),
             revision: 0,
             objects: self.objects.clone(),

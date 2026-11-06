@@ -1,0 +1,7 @@
+Khronos PBR Neutral Tone Mapper
+Copyright 2024 The Khronos Group Inc.
+SPDX-License-Identifier: Apache-2.0
+
+Source: https://github.com/KhronosGroup/ToneMapping/blob/180b1a7bddec33f73fe41712a2963cc3ad8e5547/PBR_Neutral/pbrNeutral.glsl
+Attribution source: .reuse/dep5 in that repository/commit.
+Ruster modifies the source by translating the tone-mapping function from GLSL to WGSL and integrating exposure and framebuffer output transfer. The algorithm is used as one fixed display transform; it does not establish complete PBR support in Ruster.

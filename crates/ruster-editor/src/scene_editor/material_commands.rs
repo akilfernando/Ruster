@@ -71,7 +71,7 @@ fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
             exact_keys(
                 map,
                 &["tint", "base_color_texture", "filter", "address"],
-                &["name"],
+                &["name", "response"],
             )
         })
         .ok_or_else(|| {
@@ -95,6 +95,17 @@ fn material(value: &Value) -> Result<OpaqueMaterial, CommandError> {
     }
     let candidate = OpaqueMaterial {
         name: optional_name(map.get("name"))?,
+        response: map
+            .get("response")
+            .map(|v| serde_json::from_value(v.clone()))
+            .transpose()
+            .map_err(|e| {
+                error(
+                    "invalid_arguments",
+                    format!("Invalid material response: {e}"),
+                )
+            })?
+            .unwrap_or_default(),
         tint: channels,
         base_color_texture: if map["base_color_texture"].is_null() {
             None
@@ -298,7 +309,7 @@ impl SceneEditor {
                 .to_string()
         });
         Ok(
-            json!({"session_token":token,"scene_id":self.session.scene().id,"revision":self.session.scene().revision.to_string(),"asset_revision":asset_revision,"asset_operation":self.asset_observation(),"catalog_available":self.assets.is_some(),"materials":materials,"material_count":count,"next_offset":if offset+limit<count {Some((offset+limit).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending()}),
+            json!({"session_token":token,"scene_id":self.session.scene().id,"revision":self.session.scene().revision.to_string(),"asset_revision":asset_revision,"asset_operation":self.asset_observation(),"catalog_available":self.assets.is_some(),"display":self.session.scene().display,"viewport_display_report":self.surface_feedback(),"materials":materials,"material_count":count,"next_offset":if offset+limit<count {Some((offset+limit).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending()}),
         )
     }
 

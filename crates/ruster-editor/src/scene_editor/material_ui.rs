@@ -125,6 +125,14 @@ impl MaterialDraft {
     fn parse(&self) -> Result<OpaqueMaterial, String> {
         let value = OpaqueMaterial {
             name: (!self.name.is_empty()).then(|| self.name.clone()),
+            response: if self.intent == MaterialIntent::Create {
+                ruster_scene::MaterialResponse::LegacyDiffuse
+            } else {
+                self.original_material
+                    .as_ref()
+                    .map(|m| m.response)
+                    .unwrap_or_default()
+            },
             tint: self.tint_value()?,
             base_color_texture: self.texture.clone(),
             filter: self.filter,

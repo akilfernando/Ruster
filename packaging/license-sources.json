@@ -259,6 +259,22 @@
         }
       ],
       "notes": "Registry codegen package omits readable license files; .cargo_vcs_info.json names this commit with dirty=true. Exact upstream bytes retained. Cached Rhai1.27.0 at the same commit has matching license text with CRLF line endings. No clean codegen publication tree is inferred."
+    },
+    {
+      "path": "licenses/khronos-tone-mapping-LICENSE-APACHE.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "source": "https://raw.githubusercontent.com/KhronosGroup/ToneMapping/180b1a7bddec33f73fe41712a2963cc3ad8e5547/LICENSES/Apache-2.0.txt",
+      "accessed": "2026-11-06",
+      "packages": [],
+      "component": "Non-Cargo Khronos PBR Neutral GLSL-to-WGSL translation in ruster-render; included in all distributed supplemental notices"
+    },
+    {
+      "path": "licenses/khronos-tone-mapping-NOTICE.txt",
+      "sha256": "36c63e37e08a4260ef4d50d5f0b3406f0b1ece9977b7b7ed8e3fb8a7347b2dce",
+      "source": "https://raw.githubusercontent.com/KhronosGroup/ToneMapping/180b1a7bddec33f73fe41712a2963cc3ad8e5547/.reuse/dep5",
+      "accessed": "2026-11-06",
+      "packages": [],
+      "component": "Non-Cargo Khronos PBR Neutral GLSL-to-WGSL translation in ruster-render; included in all distributed supplemental notices"
     }
   ]
 }

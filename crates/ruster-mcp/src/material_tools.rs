@@ -4,7 +4,7 @@ use serde_json::{json, Map, Value};
 const TOOLS: &[(&str, &str, &[&str])] = &[
     (
         "material_inspect",
-        "Read a bounded page of scene-owned opaque material definitions, user counts with bounded example users/truncation, and missing/invalid texture or UV status. Reports scene session/revision and asset_revision (string0 without a catalog); no image bytes, source bodies or filesystem access. Optional canonical-string offset and limit1..16; default limit16.",
+        "Read a bounded page of scene-owned opaque material definitions including authored response/roughness, shared-user counts and texture/UV status, plus authored scene display/exposure and separately labeled last-prepared viewport feedback. Prepared feedback may be stale and does not prove GPU completion or hidden rendering. Reports scene session/revision and asset_revision (string0 without a catalog); no image bytes, source bodies or filesystem access. Optional canonical-string offset and limit1..16; default limit16.",
         &[],
     ),
     (
@@ -72,6 +72,16 @@ fn name_schema() -> Value {
     })
 }
 
+fn response_schema() -> Value {
+    json!({"description":"Optional whole response value. Omission selects legacy diffuse; explicit dielectric uses perceptual roughness0.08..1, with0.5 as the opt-in starting point. No metallic/environment-reflection contract.",
+    "oneOf":[
+        super::object_schema(json!({"type":{"const":"legacy_diffuse"}}), vec!["type"]),
+        super::object_schema(json!({"type":{"const":"dielectric"},
+            "roughness":{"type":"number","minimum":0.08,"maximum":1,
+                "description":"Finite perceptual roughness;0.08 is polished and1 is matte. Required for a present dielectric value."}}), vec!["type","roughness"])
+    ]})
+}
+
 fn shape(tool: &str, field: &str) -> Value {
     match field {
         "expected_revision" | "expected_asset_revision" | "offset" | "limit" => {
@@ -99,7 +109,8 @@ fn shape(tool: &str, field: &str) -> Value {
                 "tint":{"type":"array","minItems":3,"maxItems":3,"items":{"type":"number","minimum":0,"maximum":1},"description":"Finite linear RGB tint; all three channels are required."},
                 "base_color_texture":id_schema(true),
                 "filter":{"enum":["nearest","linear"]},
-                "address":{"enum":["repeat","clamp"]}
+                "address":{"enum":["repeat","clamp"]},
+                "response":response_schema()
             }),
             vec!["tint", "base_color_texture", "filter", "address"],
         ),
@@ -156,8 +167,9 @@ fn valid_material(value: &Value) -> bool {
     super::exact_keys(
         material,
         &["tint", "base_color_texture", "filter", "address"],
-        &["name"],
+        &["name", "response"],
     ) && material.get("name").is_none_or(valid_name)
+        && material.get("response").is_none_or(valid_response)
         && material["tint"].as_array().is_some_and(|tint| {
             tint.len() == 3
                 && tint.iter().all(|channel| {
@@ -173,6 +185,21 @@ fn valid_material(value: &Value) -> bool {
         && material["address"]
             .as_str()
             .is_some_and(|address| ["repeat", "clamp"].contains(&address))
+}
+
+fn valid_response(value: &Value) -> bool {
+    value.as_object().is_some_and(
+        |response| match response.get("type").and_then(Value::as_str) {
+            Some("legacy_diffuse") => super::exact_keys(response, &["type"], &[]),
+            Some("dielectric") => {
+                super::exact_keys(response, &["type", "roughness"], &[])
+                    && response["roughness"].as_f64().is_some_and(|roughness| {
+                        roughness.is_finite() && (0.08..=1.0).contains(&roughness)
+                    })
+            }
+            _ => false,
+        },
+    )
 }
 
 pub fn valid(name: &str, arguments: &Value) -> bool {
@@ -277,6 +304,29 @@ mod tests {
             advertised[2]["inputSchema"]["properties"]["material_id"]["type"],
             json!(["string", "null"])
         );
+        for response in [
+            json!({"type":"legacy_diffuse"}),
+            json!({"type":"dielectric","roughness":0.08}),
+            json!({"type":"dielectric","roughness":1}),
+        ] {
+            let mut args = set.clone();
+            args["material"]["response"] = response;
+            assert!(valid("scene_material_set", &args));
+        }
+        for response in [
+            Value::Null,
+            json!({"type":"legacy_diffuse","roughness":0.5}),
+            json!({"type":"dielectric"}),
+            json!({"type":"dielectric","roughness":0.07999999821186066}),
+            json!({"type":"dielectric","roughness":1.00000001}),
+            json!({"type":"dielectric","roughness":"0.5"}),
+            json!({"type":"dielectric","roughness":0.5,"extra":0}),
+            json!({"type":"metallic","roughness":0.5}),
+        ] {
+            let mut args = set.clone();
+            args["material"]["response"] = response;
+            assert!(!valid("scene_material_set", &args), "{args}");
+        }
 
         for (pointer, rejected) in [
             ("/expected_revision", json!(9007199254740993u64)),

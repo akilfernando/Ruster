@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, path::Path, time::Duration};
 
 pub const DESCRIPTOR_NAME: &str = "app.json";
 pub const FORMAT: &str = "ruster-application";
-pub const VERSION: u32 = 2;
+pub const VERSION: u32 = 3;
 pub const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
@@ -45,6 +45,13 @@ pub struct CreationManifest {
     pub scene: String,
     #[serde(deserialize_with = "unique_meshes")]
     pub meshes: BTreeMap<String, String>,
+    /// Descriptor3 preserves the immutable import interpretation per mesh.
+    #[serde(
+        default,
+        skip_serializing_if = "BTreeMap::is_empty",
+        deserialize_with = "unique_normal_policies"
+    )]
+    pub mesh_normal_policies: BTreeMap<String, ruster_assets::MeshNormalPolicy>,
     #[serde(
         default,
         skip_serializing_if = "BTreeMap::is_empty",
@@ -60,9 +67,26 @@ fn unique_meshes<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D:
 where
     D: serde::Deserializer<'de>,
 {
-    struct Unique;
-    impl<'de> serde::de::Visitor<'de> for Unique {
-        type Value = BTreeMap<String, String>;
+    unique_mapping(deserializer)
+}
+
+fn unique_normal_policies<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<String, ruster_assets::MeshNormalPolicy>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    unique_mapping(deserializer)
+}
+
+fn unique_mapping<'de, D, T>(deserializer: D) -> Result<BTreeMap<String, T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    struct Unique<T>(std::marker::PhantomData<T>);
+    impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Unique<T> {
+        type Value = BTreeMap<String, T>;
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
             formatter.write_str("at most 64 unique mesh IDs and relative resource paths")
         }
@@ -71,7 +95,7 @@ where
             mut map: M,
         ) -> Result<Self::Value, M::Error> {
             let mut values = BTreeMap::new();
-            while let Some((id, source)) = map.next_entry::<String, String>()? {
+            while let Some((id, source)) = map.next_entry::<String, T>()? {
                 if values.len() >= ruster_assets::MAX_ASSETS || values.insert(id, source).is_some()
                 {
                     return Err(serde::de::Error::custom("too many or duplicate mesh IDs"));
@@ -80,7 +104,7 @@ where
             Ok(values)
         }
     }
-    deserializer.deserialize_map(Unique)
+    deserializer.deserialize_map(Unique(std::marker::PhantomData))
 }
 
 fn resource_path(path: &str) -> Result<(), String> {
@@ -100,14 +124,20 @@ fn resource_path(path: &str) -> Result<(), String> {
 
 impl CreationManifest {
     pub fn validate(&self) -> Result<(), String> {
-        if self.format != FORMAT || !matches!(self.version, 1 | VERSION) {
+        if self.format != FORMAT || !(1..=VERSION).contains(&self.version) {
             return Err(
-                "Unsupported application descriptor; expected ruster-application version 1 or 2"
+                "Unsupported application descriptor; expected ruster-application version 1 through 3"
                     .into(),
             );
         }
         if self.version == 1 && !self.textures.is_empty() {
             return Err("Application textures require descriptor version 2".into());
+        }
+        if self.version < 3 && !self.mesh_normal_policies.is_empty() {
+            return Err("Mesh normal policies require descriptor version 3".into());
+        }
+        if self.version == 3 && !self.meshes.keys().eq(self.mesh_normal_policies.keys()) {
+            return Err("Descriptor3 requires one normal policy per mesh".into());
         }
         if self.title.trim().is_empty()
             || self.title.trim() != self.title
@@ -136,6 +166,13 @@ impl CreationManifest {
 
     pub fn load(root: &ResourceRoot) -> Result<Self, String> {
         let bytes = root.read(DESCRIPTOR_NAME, MAX_DESCRIPTOR_BYTES)?;
+        let raw: serde_json::Value = serde_json::from_slice(&bytes)
+            .map_err(|error| format!("Invalid {DESCRIPTOR_NAME}: {error}"))?;
+        if raw["version"].as_u64().is_some_and(|version| version < 3)
+            && raw.get("mesh_normal_policies").is_some()
+        {
+            return Err("Mesh normal policies require descriptor version 3".into());
+        }
         let manifest: Self = serde_json::from_slice(&bytes)
             .map_err(|error| format!("Invalid {DESCRIPTOR_NAME}: {error}"))?;
         manifest.validate()?;
@@ -164,7 +201,16 @@ impl CreationManifest {
         self.validate()?;
         self.meshes
             .iter()
-            .map(|(id, path)| root.mesh(path).map(|mesh| (id.clone(), mesh)))
+            .map(|(id, path)| {
+                root.mesh_with_normal_policy(
+                    path,
+                    self.mesh_normal_policies
+                        .get(id)
+                        .copied()
+                        .unwrap_or(ruster_assets::MeshNormalPolicy::Flat),
+                )
+                .map(|mesh| (id.clone(), mesh))
+            })
             .collect()
     }
 }
@@ -197,6 +243,7 @@ mod tests {
             title: "My creation 世界".into(),
             scene: "scene.json".into(),
             meshes: [("marker".into(), "marker.obj".into())].into(),
+            mesh_normal_policies: [("marker".into(), ruster_assets::MeshNormalPolicy::Flat)].into(),
             textures: BTreeMap::new(),
             tick_millis: 100,
             initial_camera: None,
@@ -238,6 +285,47 @@ mod tests {
         );
         Content::new(input.scene().clone(), loaded.load_meshes(&root).unwrap()).unwrap();
         assert_eq!(std::fs::read(&scene_path).unwrap(), original);
+        // The actual runtime resource path must preserve the frozen import policy.
+        std::fs::write(
+            directory.path().join("marker.obj"),
+            "v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 2 0\nf 1//1 2//1 3//1\n",
+        )
+        .unwrap();
+        let mut smooth = manifest.clone();
+        smooth.mesh_normal_policies.insert(
+            "marker".into(),
+            ruster_assets::MeshNormalPolicy::AuthoredWhenComplete,
+        );
+        assert_eq!(
+            smooth.load_meshes(&root).unwrap()["marker"].vertices[0].normal,
+            [0., 1., 0.]
+        );
+        let mut legacy = manifest.clone();
+        legacy.version = 2;
+        legacy.mesh_normal_policies.clear();
+        assert_eq!(
+            legacy.load_meshes(&root).unwrap()["marker"].vertices[0].normal,
+            [0., 0., 1.]
+        );
+        for bad in [
+            serde_json::json!(null),
+            serde_json::json!({}),
+            serde_json::json!({"marker":"flat"}),
+        ] {
+            let mut raw = serde_json::to_value(&legacy).unwrap();
+            raw["mesh_normal_policies"] = bad;
+            std::fs::write(
+                directory.path().join(DESCRIPTOR_NAME),
+                serde_json::to_vec(&raw).unwrap(),
+            )
+            .unwrap();
+            assert!(CreationManifest::load(&root)
+                .unwrap_err()
+                .contains("version 3"));
+        }
+        smooth.mesh_normal_policies.clear();
+        assert!(smooth.validate().is_err());
+
         for path in [
             "../outside.json",
             "/outside.json",
@@ -259,6 +347,7 @@ mod tests {
         assert!(invalid.validate().is_err());
         let mut legacy = manifest.clone();
         legacy.version = 1;
+        legacy.mesh_normal_policies.clear();
         legacy
             .validate()
             .expect("old descriptors still read without textures");
@@ -270,6 +359,7 @@ mod tests {
             "texture resources must not hide under descriptor1"
         );
         legacy.version = VERSION;
+        legacy.mesh_normal_policies = manifest.mesh_normal_policies.clone();
         legacy.validate().unwrap();
         let json = serde_json::to_string(&manifest).unwrap();
         let duplicate = json.replace(

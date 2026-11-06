@@ -67,10 +67,18 @@ impl ResourceRoot {
     }
 
     pub fn mesh(&self, relative: impl AsRef<Path>) -> Result<Arc<ruster_assets::Mesh>, String> {
+        self.mesh_with_normal_policy(relative, ruster_assets::MeshNormalPolicy::Flat)
+    }
+
+    pub fn mesh_with_normal_policy(
+        &self,
+        relative: impl AsRef<Path>,
+        policy: ruster_assets::MeshNormalPolicy,
+    ) -> Result<Arc<ruster_assets::Mesh>, String> {
         let path = self.resolve(relative)?;
         let bytes = ruster_assets::read_regular_file(&path, ruster_assets::MAX_SOURCE_BYTES)
             .map_err(|e| format!("mesh resource {}: {e}", path.display()))?;
-        ruster_assets::parse_obj(&bytes)
+        ruster_assets::parse_obj_with_normal_policy(&bytes, policy)
             .map(Arc::new)
             .map_err(|e| format!("mesh resource {}: {e}", path.display()))
     }

@@ -421,7 +421,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials"],
             })
         );
         return;

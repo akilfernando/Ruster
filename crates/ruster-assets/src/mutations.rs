@@ -20,14 +20,30 @@ impl Eq for AssetStateIdentity {}
 
 #[derive(Clone, Debug)]
 pub enum AssetMutation {
-    Import { id: String, source: String },
-    Refresh { id: String },
-    Rename { id: String, source: String },
+    Import {
+        id: String,
+        source: String,
+    },
+    ImportMesh {
+        id: String,
+        source: String,
+        normal_policy: MeshNormalPolicy,
+    },
+    Refresh {
+        id: String,
+    },
+    Rename {
+        id: String,
+        source: String,
+    },
 }
 impl AssetMutation {
     fn id(&self) -> &str {
         match self {
-            Self::Import { id, .. } | Self::Refresh { id } | Self::Rename { id, .. } => id,
+            Self::Import { id, .. }
+            | Self::ImportMesh { id, .. }
+            | Self::Refresh { id }
+            | Self::Rename { id, .. } => id,
         }
     }
     fn is_refresh(&self) -> bool {
@@ -95,9 +111,11 @@ enum Snapshot {
     Texture(Arc<Texture>),
 }
 impl Snapshot {
-    fn encode(&self, hash: &str) -> Result<Vec<u8>, AssetError> {
+    fn encode(&self, hash: &str, policy: Option<MeshNormalPolicy>) -> Result<Vec<u8>, AssetError> {
         match self {
-            Self::Mesh(mesh) => encode_cache(hash, mesh),
+            Self::Mesh(mesh) => {
+                encode_mesh_cache(hash, mesh, policy.expect("validated mesh policy"))
+            }
             Self::Texture(texture) => texture::encode_cache(hash, texture),
         }
     }
@@ -111,6 +129,7 @@ struct PreparedRegistry {
 enum Plan {
     Content {
         kind: AssetKind,
+        mesh_normal_policy: Option<MeshNormalPolicy>,
         source: String,
         hash: String,
         snapshot: Snapshot,
@@ -275,6 +294,31 @@ impl AssetStore {
             },
         )
     }
+    /// Import a distinct immutable mesh interpretation. Existing import() stays flat.
+    pub fn import_mesh(
+        &mut self,
+        id: &str,
+        source: &str,
+        normal_policy: MeshNormalPolicy,
+    ) -> Result<AssetInfo, AssetError> {
+        self.import_mesh_at(self.revision(), id, source, normal_policy)
+    }
+    pub fn import_mesh_at(
+        &mut self,
+        expected: u64,
+        id: &str,
+        source: &str,
+        normal_policy: MeshNormalPolicy,
+    ) -> Result<AssetInfo, AssetError> {
+        self.apply_sync(
+            expected,
+            AssetMutation::ImportMesh {
+                id: id.into(),
+                source: source.into(),
+                normal_policy,
+            },
+        )
+    }
     pub fn refresh(&mut self, id: &str) -> Result<AssetInfo, AssetError> {
         self.refresh_at(self.revision(), id)
     }
@@ -346,7 +390,17 @@ fn revision_conflict(expected: u64, actual: u64) -> AssetError {
 fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(), AssetError> {
     let id = mutation.id();
     match mutation {
-        AssetMutation::Import { source, .. } => {
+        AssetMutation::Import { source, .. } | AssetMutation::ImportMesh { source, .. } => {
+            let kind = AssetKind::from_source(source)?;
+            let policy = match mutation {
+                AssetMutation::ImportMesh { normal_policy, .. } => {
+                    if kind != AssetKind::Mesh {
+                        return Err(error("ImportMesh requires an .obj mesh source"));
+                    }
+                    Some(*normal_policy)
+                }
+                _ => (kind == AssetKind::Mesh).then_some(MeshNormalPolicy::Flat),
+            };
             validate_id(id)?;
             validate_relative(source)?;
             if store.registry.assets.contains_key(id) {
@@ -356,10 +410,10 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
                 .registry
                 .assets
                 .values()
-                .any(|record| record.source == *source)
+                .any(|record| record.source == *source && record.mesh_normal_policy == policy)
             {
                 return Err(error(format!(
-                    "source {source:?} is already registered; use its existing asset ID"
+                    "source {source:?} is already registered with this normal policy; use its existing asset ID"
                 )));
             }
             if store.registry.assets.len() >= MAX_ASSETS {
@@ -378,15 +432,23 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
                 .get(id)
                 .ok_or_else(|| error(format!("unknown asset ID {id:?}")))?;
             validate_relative(source)?;
+            if source != &record.source
+                && store
+                    .registry
+                    .assets
+                    .iter()
+                    .any(|(other, candidate)| other != id && candidate.source == record.source)
+            {
+                return Err(error("source is shared by multiple mesh normal policies; rename is unavailable while another asset identity references it"));
+            }
             if AssetKind::from_source(source)? != record.kind {
                 return Err(error("rename cannot change an asset's kind"));
             }
-            if store
-                .registry
-                .assets
-                .iter()
-                .any(|(other, record)| other != id && record.source == *source)
-            {
+            if store.registry.assets.iter().any(|(other, candidate)| {
+                other != id
+                    && candidate.source == *source
+                    && candidate.mesh_normal_policy == record.mesh_normal_policy
+            }) {
                 return Err(error("rename destination is registered to another asset"));
             }
         }
@@ -394,7 +456,7 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
     Ok(())
 }
 fn encode_registry(mut registry: Registry) -> Result<PreparedRegistry, AssetError> {
-    registry.version = 2;
+    registry.version = 3;
     registry.revision = registry
         .revision
         .checked_add(1)
@@ -432,11 +494,25 @@ impl AssetRequest {
                 id,
                 source,
                 AssetKind::from_source(source).map_err(PreparedFailure::plain)?,
+                (AssetKind::from_source(source).map_err(PreparedFailure::plain)?
+                    == AssetKind::Mesh)
+                    .then_some(MeshNormalPolicy::Flat),
                 None,
             ),
+            AssetMutation::ImportMesh {
+                id,
+                source,
+                normal_policy,
+            } => self.prepare_content(id, source, AssetKind::Mesh, Some(*normal_policy), None),
             AssetMutation::Refresh { id } => {
                 let record = &self.store.registry.assets[id];
-                self.prepare_content(id, &record.source, record.kind, Some(record))
+                self.prepare_content(
+                    id,
+                    &record.source,
+                    record.kind,
+                    record.mesh_normal_policy,
+                    Some(record),
+                )
             }
             AssetMutation::Rename { id, source } => {
                 let old_source = &self.store.registry.assets[id].source;
@@ -479,6 +555,7 @@ impl AssetRequest {
         id: &str,
         source: &str,
         kind: AssetKind,
+        mesh_normal_policy: Option<MeshNormalPolicy>,
         record: Option<&Record>,
     ) -> Result<Plan, PreparedFailure> {
         let refresh = record.is_some();
@@ -508,7 +585,8 @@ impl AssetRequest {
         {
             Snapshot::Texture(self.store.textures[id].clone())
         } else {
-            let payload = parse_source(source, kind, &bytes).map_err(failure)?;
+            let payload =
+                parse_source(source, kind, mesh_normal_policy, &bytes).map_err(failure)?;
             self.store
                 .check_payload_budget(id, &payload)
                 .map_err(failure)?;
@@ -539,7 +617,9 @@ impl AssetRequest {
                 }
             }
         };
-        let cache = snapshot.encode(&hash).map_err(failure)?;
+        let cache = snapshot
+            .encode(&hash, mesh_normal_policy)
+            .map_err(failure)?;
         let registry = if let Some(record) = record {
             if record.hash.as_ref() == Some(&hash) {
                 None
@@ -554,6 +634,7 @@ impl AssetRequest {
                 id.into(),
                 Record {
                     kind,
+                    mesh_normal_policy,
                     source: source.into(),
                     hash: Some(hash.clone()),
                 },
@@ -562,6 +643,7 @@ impl AssetRequest {
         };
         Ok(Plan::Content {
             kind,
+            mesh_normal_policy,
             source: source.into(),
             hash,
             snapshot,
@@ -672,6 +754,7 @@ fn publish_plan(
     match plan {
         Plan::Content {
             kind,
+            mesh_normal_policy,
             source,
             hash,
             snapshot,
@@ -694,7 +777,9 @@ fn publish_plan(
                     true,
                 )?;
                 let version = match kind {
-                    AssetKind::Mesh => 3,
+                    AssetKind::Mesh => mesh_normal_policy
+                        .expect("validated mesh policy")
+                        .cache_version(),
                     AssetKind::Texture => 1,
                 };
                 atomic_write(
@@ -1007,6 +1092,75 @@ mod tests {
                     b"source identity changed"
                 );
                 assert!(!project.join("moved.png").exists());
+            }
+            std::thread::spawn(move || drop(adoption.retired))
+                .join()
+                .unwrap();
+        }
+        // Importing the same source under another normal policy shares source
+        // authority, not derived cache identity. Exercise the staged import
+        // boundaries that the texture Refresh rows above cannot reach.
+        for case in [
+            "success",
+            "source_changed",
+            "catalog_changed",
+            "cache_failure",
+            "partial",
+        ] {
+            let root = tempfile::tempdir().unwrap();
+            let source = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 2 0\nf 1//1 2//1 3//1\n";
+            fs::write(root.path().join("mesh.obj"), source).unwrap();
+            let mut store = AssetStore::open(root.path()).unwrap();
+            store.import("flat", "mesh.obj").unwrap();
+            let original = store.mesh_snapshots()["flat"].clone();
+            let catalog = fs::read(root.path().join(REGISTRY)).unwrap();
+            let revision = store.revision();
+            if case == "partial" {
+                fs::write(
+                    root.path().join("mesh.obj"),
+                    String::from_utf8_lossy(source).replace("2//1", "2"),
+                )
+                .unwrap();
+            }
+            let request = store
+                .request_at(
+                    revision,
+                    AssetMutation::ImportMesh {
+                        id: "smooth".into(),
+                        source: "mesh.obj".into(),
+                        normal_policy: MeshNormalPolicy::AuthoredWhenComplete,
+                    },
+                )
+                .unwrap();
+            let before = files(root.path());
+            let prepared = request.prepare();
+            assert_eq!(files(root.path()), before);
+            match case {
+                "source_changed" => {
+                    fs::write(root.path().join("mesh.obj"), b"changed after preparation").unwrap()
+                }
+                "catalog_changed" => {
+                    let mut external = catalog.clone();
+                    external.push(b'\n');
+                    fs::write(root.path().join(REGISTRY), external).unwrap();
+                }
+                "cache_failure" => fs::create_dir(
+                    root.path()
+                        .join(".ruster-cache/meshes")
+                        .join(format!("v4-{}.bin", digest(source))),
+                )
+                .unwrap(),
+                _ => (),
+            }
+            let completion = prepared.publish();
+            assert_eq!(completion.catalog_published(), case == "success");
+            let adoption = store.adopt(completion).unwrap();
+            assert_eq!(adoption.result.is_ok(), case == "success");
+            assert_eq!(store.revision(), revision + u64::from(case == "success"));
+            assert!(Arc::ptr_eq(&original, &store.mesh_snapshots()["flat"]));
+            assert_eq!(store.mesh("smooth").is_some(), case == "success");
+            if case != "catalog_changed" && case != "success" {
+                assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), catalog);
             }
             std::thread::spawn(move || drop(adoption.retired))
                 .join()

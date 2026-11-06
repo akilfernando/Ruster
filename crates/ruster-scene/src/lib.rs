@@ -12,16 +12,18 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 8;
+pub const FORMAT_VERSION: u32 = 9;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
 mod lighting;
 mod lighting_authoring;
 mod strict_json;
+mod surface;
 pub use authoring::*;
 pub use lighting::*;
 pub use lighting_authoring::LightingEdit;
+pub use surface::{DisplayProfile, MaterialResponse};
 pub const MAX_OBJECTS: usize = 256;
 pub const MAX_FILE_BYTES: u64 = 1024 * 1024;
 pub const HISTORY_LIMIT: usize = 32;
@@ -93,6 +95,8 @@ pub struct OpaqueMaterial {
     pub base_color_texture: Option<String>,
     pub filter: TextureFilter,
     pub address: TextureAddress,
+    #[serde(default, skip_serializing_if = "MaterialResponse::is_legacy")]
+    pub response: MaterialResponse,
 }
 impl Default for OpaqueMaterial {
     fn default() -> Self {
@@ -102,6 +106,7 @@ impl Default for OpaqueMaterial {
             base_color_texture: None,
             filter: TextureFilter::Linear,
             address: TextureAddress::Repeat,
+            response: MaterialResponse::LegacyDiffuse,
         }
     }
 }
@@ -120,6 +125,7 @@ impl OpaqueMaterial {
         if let Some(id) = &self.base_color_texture {
             validate_id(id)?;
         }
+        self.response.validate()?;
         Ok(())
     }
     pub fn display_name<'a>(&'a self, id: &'a str) -> &'a str {
@@ -197,6 +203,8 @@ pub struct Scene {
     pub materials: BTreeMap<String, OpaqueMaterial>,
     #[serde(default, skip_serializing_if = "Lighting::is_legacy")]
     pub lighting: Lighting,
+    #[serde(default, skip_serializing_if = "DisplayProfile::is_legacy")]
+    pub display: DisplayProfile,
 }
 
 impl Scene {
@@ -207,6 +215,7 @@ impl Scene {
             objects: Vec::new(),
             materials: BTreeMap::new(),
             lighting: Lighting::Legacy,
+            display: DisplayProfile::LegacySdr,
         }
     }
 
@@ -224,6 +233,7 @@ impl Scene {
             revision: 0,
             materials: BTreeMap::new(),
             lighting: Lighting::Legacy,
+            display: DisplayProfile::LegacySdr,
             objects: [
                 ("left", [-2.0, 0.0, 0.0], [0.12, 0.58, 0.85, 1.0]),
                 ("center", [0.0, 0.0, 0.0], [0.9, 0.4, 0.16, 1.0]),
@@ -258,6 +268,7 @@ impl Scene {
             )));
         }
         self.lighting.validate()?;
+        self.display.validate()?;
         if self.objects.len() + self.lighting.light_count() > MAX_OBJECTS {
             return Err(SceneError::Invalid(format!(
                 "scene exceeds {MAX_OBJECTS} geometry and light targets"
@@ -516,6 +527,10 @@ enum SceneDelta {
         before: Lighting,
         after: Lighting,
     },
+    Display {
+        before: DisplayProfile,
+        after: DisplayProfile,
+    },
 }
 
 impl SceneDelta {
@@ -545,11 +560,25 @@ impl SceneDelta {
             Self::Lighting { before, after } => {
                 before.light(id).is_some() || after.light(id).is_some()
             }
+            Self::Display { .. } => false,
         }
     }
     fn apply(&self, scene: &mut Scene, undo: bool) -> Result<(), SceneError> {
         let inconsistent = || SceneError::Invalid("inconsistent authored history".into());
         match self {
+            Self::Display { before, after } => {
+                before.validate()?;
+                after.validate()?;
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &scene.display != expected {
+                    return Err(inconsistent());
+                }
+                scene.display = *replacement;
+            }
             Self::Lighting { before, after } => {
                 before.validate()?;
                 after.validate()?;
@@ -922,6 +951,7 @@ impl From<LegacyDocument> for Document {
                 revision: old.scene.revision,
                 materials: BTreeMap::new(),
                 lighting: Lighting::Legacy,
+                display: DisplayProfile::LegacySdr,
                 objects: old
                     .scene
                     .objects
@@ -1008,6 +1038,7 @@ impl From<V2Document> for Document {
                 revision: old.scene.revision,
                 materials: BTreeMap::new(),
                 lighting: Lighting::Legacy,
+                display: DisplayProfile::LegacySdr,
                 objects: old
                     .scene
                     .objects
@@ -1128,11 +1159,14 @@ impl Document {
         if (1..8).contains(&version) {
             reject_pre_v8_shadow_fields(&value, version)?;
         }
+        if (1..9).contains(&version) {
+            reject_pre_v9_surface_fields(&value, version)?;
+        }
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=8 => serde_json::from_value(value)?,
+            5..=9 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1199,6 +1233,39 @@ impl Document {
                 .persist(path)
                 .map_err(|e| SceneError::Io(e.error))?;
         }
+        Ok(())
+    }
+}
+
+// Only actual scene/material/history positions acquire surface semantics.
+// Behavior properties named display/response remain unrelated authored data.
+fn reject_pre_v9_surface_fields(value: &serde_json::Value, version: u64) -> Result<(), SceneError> {
+    let has_response = |material: &serde_json::Value| material.get("response").is_some();
+    let scene = &value["scene"];
+    let mut found = scene.get("display").is_some()
+        || scene["materials"]
+            .as_object()
+            .is_some_and(|materials| materials.values().any(has_response));
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            if let Some(materials) = change["materials"].as_array() {
+                found |= materials
+                    .iter()
+                    .any(|delta| has_response(&delta["before"]) || has_response(&delta["after"]));
+            }
+            let deltas = if version <= 4 {
+                std::slice::from_ref(change)
+            } else {
+                change["scene"].as_array().map(Vec::as_slice).unwrap_or(&[])
+            };
+            found |= deltas.iter().any(|delta| delta["kind"] == "display");
+        }
+    }
+    if found {
+        Err(SceneError::Invalid(
+            "display profiles and material responses require scene v9".into(),
+        ))
+    } else {
         Ok(())
     }
 }
@@ -1320,6 +1387,8 @@ fn check_serialized_size(
         materials: &'a BTreeMap<String, OpaqueMaterial>,
         #[serde(skip_serializing_if = "Lighting::is_legacy")]
         lighting: &'a Lighting,
+        #[serde(skip_serializing_if = "DisplayProfile::is_legacy")]
+        display: &'a DisplayProfile,
     }
     impl<'a> From<&'a Scene> for SceneView<'a> {
         fn from(scene: &'a Scene) -> Self {
@@ -1329,6 +1398,7 @@ fn check_serialized_size(
                 objects: &scene.objects,
                 materials: &scene.materials,
                 lighting: &scene.lighting,
+                display: &scene.display,
             }
         }
     }
@@ -1824,6 +1894,7 @@ impl Session {
                     SceneDelta::Lighting { before, after } => {
                         used.extend(before.lights().chain(after.lights()).map(|(id, _)| id));
                     }
+                    SceneDelta::Display { .. } => {}
                 }
             }
         }
@@ -3793,6 +3864,7 @@ mod tests {
         let original_authoring = session.authoring().clone();
         let material = OpaqueMaterial {
             base_color_texture: Some("unavailable-texture".into()),
+            response: MaterialResponse::Dielectric { roughness: 0.08 },
             ..OpaqueMaterial::default()
         };
         session
@@ -3837,6 +3909,7 @@ mod tests {
             .unwrap();
         let edited = OpaqueMaterial {
             tint: [0.25, 0.5, 1.0],
+            response: MaterialResponse::Dielectric { roughness: 1.0 },
             ..material.clone()
         };
         session.set_material(4, "left", edited.clone()).unwrap();
@@ -3982,7 +4055,7 @@ mod tests {
             assert!(migrated.scene.lighting.is_legacy());
             let saved: serde_json::Value =
                 serde_json::from_slice(&migrated.encode().unwrap()).unwrap();
-            assert_eq!(saved["format_version"], 8);
+            assert_eq!(saved["format_version"], FORMAT_VERSION);
         }
         let mut scene = Scene::demo();
         scene.lighting = Lighting::authored_default("sun");
@@ -4110,7 +4183,147 @@ mod tests {
             Err(SceneError::Capacity)
         ));
         assert_eq!(session.document, before);
+        assert!(matches!(
+            session.set_display(0, DisplayProfile::surface_hdr()),
+            Err(SceneError::Capacity)
+        ));
+        assert_eq!(session.document, before);
         assert_eq!(session.history_evictions(), 0);
+    }
+
+    // Unique risk: display deltas must share ordinary chronology/recovery and
+    // admission without granting future semantics to old current/history keys.
+    #[test]
+    fn display_history_and_surface_version_boundaries_are_atomic() {
+        use serde_json::{json, Value};
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let legacy_scene = serde_json::to_value(session.scene()).unwrap();
+        assert!(legacy_scene.get("display").is_none());
+        assert!(serde_json::to_value(OpaqueMaterial::default())
+            .unwrap()
+            .get("response")
+            .is_none());
+        let before = session.document.clone();
+        assert_eq!(
+            session.set_display(0, DisplayProfile::LegacySdr).unwrap(),
+            0
+        );
+        assert_eq!(session.document, before);
+        let display = DisplayProfile::SurfaceHdr {
+            exposure_stops: 2.0,
+        };
+        session.set_display(0, display).unwrap();
+        session
+            .set_material(
+                1,
+                "surface",
+                OpaqueMaterial {
+                    response: MaterialResponse::Dielectric { roughness: 0.08 },
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        session.undo(2).unwrap();
+        assert!(session.scene().materials.is_empty());
+        assert_eq!(session.scene().display, display);
+        session.undo(3).unwrap();
+        assert_eq!(session.scene().display, DisplayProfile::LegacySdr);
+        session.redo(4).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("surface.json");
+        session.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.document, session.document);
+        reopened.redo(5).unwrap();
+        let restored = Session::from_snapshot_bytes(&reopened.snapshot_bytes().unwrap()).unwrap();
+        assert_eq!(restored.document, reopened.document);
+        assert!(restored.path().is_none() && restored.is_dirty());
+        let before = reopened.document.clone();
+        for invalid in [f32::NAN, f32::INFINITY, -8.1, 8.1] {
+            assert!(reopened
+                .set_display(
+                    6,
+                    DisplayProfile::SurfaceHdr {
+                        exposure_stops: invalid
+                    }
+                )
+                .is_err());
+        }
+        assert!(matches!(
+            reopened.set_display(5, DisplayProfile::LegacySdr),
+            Err(SceneError::StaleRevision { .. })
+        ));
+        assert_eq!(reopened.document, before);
+        let mut corrupt = serde_json::to_value(&reopened.document).unwrap();
+        corrupt["undo"][0]["scene"][0]["after"]["exposure_stops"] = json!(8.0000000001);
+        assert!(Session::from_snapshot_bytes(&serde_json::to_vec(&corrupt).unwrap()).is_err());
+        // Isolate actual current and material-history positions, including null
+        // and explicit legacy values that would otherwise deserialize/default.
+        let baseline = serde_json::to_value(Document::new(Scene::empty("old"))).unwrap();
+        for version in 1..9 {
+            let mut old = baseline.clone();
+            old["format_version"] = json!(version);
+            let loaded = Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
+            assert_eq!(loaded.scene(), &Scene::empty("old"));
+            assert_eq!(loaded.loaded_format_version(), version);
+            for field in [Value::Null, json!({"type":"legacy_sdr"})] {
+                let mut old = baseline.clone();
+                old["format_version"] = json!(version);
+                old["scene"]["display"] = field;
+                assert!(
+                    matches!(Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()), Err(SceneError::Invalid(message)) if message.contains("v9"))
+                );
+            }
+            for stack in ["undo", "redo"] {
+                let mut old = baseline.clone();
+                old["format_version"] = json!(version);
+                let delta = json!({"kind":"display","before":{"type":"legacy_sdr"},"after":{"type":"surface_hdr","exposure_stops":0}});
+                old[stack] = if version <= 4 {
+                    json!([delta])
+                } else {
+                    json!([{"scene":[delta]}])
+                };
+                assert!(
+                    matches!(Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()), Err(SceneError::Invalid(message)) if message.contains("v9"))
+                );
+            }
+        }
+        for version in 6..9 {
+            for response in [Value::Null, json!({"type":"legacy_diffuse"})] {
+                let mut old = baseline.clone();
+                old["format_version"] = json!(version);
+                old["scene"]["materials"] = json!({"surface":{"tint":[1,1,1],"filter":"linear","address":"repeat","response":response}});
+                assert!(
+                    matches!(Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()), Err(SceneError::Invalid(message)) if message.contains("v9"))
+                );
+                for (stack, endpoint) in [("undo", "before"), ("redo", "after")] {
+                    let mut old = baseline.clone();
+                    old["format_version"] = json!(version);
+                    old[stack] =
+                        json!([{"materials":[{"id":"surface","before":null,"after":null}]}]);
+                    old[stack][0]["materials"][0][endpoint] = json!({"tint":[1,1,1],"filter":"linear","address":"repeat","response":response});
+                    assert!(
+                        matches!(Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()), Err(SceneError::Invalid(message)) if message.contains("v9"))
+                    );
+                }
+            }
+        }
+        let mut behavior = Session::new(Scene::demo()).unwrap();
+        behavior.set_source(0, "source", Some(source(""))).unwrap();
+        let mut b = binding("left", "source");
+        b.properties
+            .insert("display".into(), PropertyValue::Text("unrelated".into()));
+        b.properties
+            .insert("response".into(), PropertyValue::Text("unrelated".into()));
+        behavior.set_binding(1, "binding", Some(b)).unwrap();
+        behavior.undo(2).unwrap();
+        for version in 5..9 {
+            let mut old = serde_json::to_value(&behavior.document).unwrap();
+            old["format_version"] = json!(version);
+            let loaded = Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
+            assert_eq!(loaded.document.authoring, behavior.document.authoring);
+            assert_eq!((loaded.undo_len(), loaded.redo_len()), (1, 1));
+        }
     }
 
     // Unique risk: color deltas must retain reversible persisted history without

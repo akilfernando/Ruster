@@ -24,6 +24,7 @@ use ruster_scene::{Object, Scene};
 use wgpu::util::DeviceExt;
 
 const COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8UnormSrgb;
+const HDR_COLOR: wgpu::TextureFormat = wgpu::TextureFormat::Rgba16Float;
 const DEPTH: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 const MAX_SAMPLES: usize = 4096;
 const MAX_MESHES: usize = ruster_assets::MAX_ASSETS;
@@ -40,6 +41,27 @@ pub fn default_shader() -> &'static str {
     )
 }
 
+/// Fixed opt-in surface source. Custom WGSL always uses the legacy SDR lane.
+pub fn surface_shader() -> &'static str {
+    concat!(
+        include_str!("sun_shadow.wgsl"),
+        "\n",
+        include_str!("surface.wgsl")
+    )
+}
+
+/// Latest prepared display state; this is not GPU completion or HDR monitor output.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum DisplayStatus {
+    #[default]
+    LegacySdr,
+    SurfaceHdr,
+    CustomShader,
+    UnsupportedDevice,
+    InvalidSettings,
+    Pending,
+}
+
 /// Compile against the fixed camera/vertex ABI and replace only after validation succeeds.
 /// Call on the host UI thread between frames; this controlled operation can block on compilation.
 pub fn refresh_shader(render: &egui_wgpu::RenderState, source: &str) -> Result<(), String> {
@@ -51,8 +73,16 @@ pub fn refresh_shader(render: &egui_wgpu::RenderState, source: &str) -> Result<(
         .callback_resources
         .get_mut::<Resources>()
         .ok_or("scene renderer is not installed")?;
-    r.pipeline = validated_pipeline(&render.device, &r.pipeline_layout, source, r.sample_count)?;
-    r.builtin_appearance = source == default_shader();
+    // Validate before changing either pipeline or compatibility state. Restore is
+    // a retained pipeline switch and reuses the authored display on next prepare.
+    let builtin = source == default_shader();
+    let candidate = if builtin {
+        r.builtin_sdr.clone()
+    } else {
+        validated_pipeline(&render.device, &r.pipeline_layout, source, r.sample_count)?
+    };
+    r.pipeline = candidate;
+    r.builtin_appearance = builtin;
     Ok(())
 }
 
@@ -110,6 +140,18 @@ pub struct Metrics {
     pub instance_capacity_bytes: u64,
     pub target_bytes: u64,
     pub target_size: [u32; 2],
+    pub target_requested_size: [u32; 2],
+    pub target_requested_bytes: u64,
+    pub target_resolution_limited: bool,
+    pub target_retiring_bytes: u64,
+    pub target_allocations: u64,
+    pub display_status: DisplayStatus,
+    pub display_requested_hdr: bool,
+    pub display_applied_hdr: bool,
+    pub display_available_hdr: bool,
+    pub display_requested_exposure_stops: f32,
+    pub display_applied_exposure_stops: f32,
+    pub requested_sample_count: u32,
     pub sample_count: u32,
     pub objects: usize,
     pub timestamp_enabled: bool,
@@ -156,6 +198,51 @@ pub fn shadow_observation(render: &egui_wgpu::RenderState) -> Option<ShadowObser
     })
 }
 
+/// Bounded scalar copy of display settings versus the last prepared application.
+/// Pending callbacks may retain an earlier target. This never certifies GPU completion.
+#[derive(Clone, Copy, Debug)]
+pub struct DisplayObservation {
+    pub prepared_frames: u64,
+    pub status: DisplayStatus,
+    pub requested_hdr: bool,
+    pub applied_hdr: bool,
+    pub available_hdr: bool,
+    pub requested_exposure_stops: f32,
+    pub applied_exposure_stops: f32,
+    pub requested_samples: u32,
+    pub applied_samples: u32,
+    pub requested_target_size: [u32; 2],
+    pub requested_target_bytes: u64,
+    pub resolution_limited: bool,
+    pub applied_target_size: [u32; 2],
+    pub live_bytes: u64,
+    pub retiring_bytes: u64,
+    pub allocations: u64,
+}
+pub fn display_observation(render: &egui_wgpu::RenderState) -> Option<DisplayObservation> {
+    let renderer = render.renderer.read();
+    let resources = renderer.callback_resources.get::<Resources>()?;
+    let m = resources.metrics.lock().ok()?;
+    (m.frames > 0).then_some(DisplayObservation {
+        prepared_frames: m.frames,
+        status: m.display_status,
+        requested_hdr: m.display_requested_hdr,
+        applied_hdr: m.display_applied_hdr,
+        available_hdr: m.display_available_hdr,
+        requested_exposure_stops: m.display_requested_exposure_stops,
+        applied_exposure_stops: m.display_applied_exposure_stops,
+        requested_samples: m.requested_sample_count,
+        applied_samples: m.sample_count,
+        requested_target_size: m.target_requested_size,
+        requested_target_bytes: m.target_requested_bytes,
+        resolution_limited: m.target_resolution_limited,
+        applied_target_size: m.target_size,
+        live_bytes: m.target_bytes,
+        retiring_bytes: m.target_retiring_bytes,
+        allocations: m.target_allocations,
+    })
+}
+
 /// Install once on the eframe device; resources are dropped with that device/renderer.
 /// The current bounded integration supports one scene viewport per eframe renderer.
 pub fn install(render: &egui_wgpu::RenderState) -> MetricsHandle {
@@ -172,12 +259,16 @@ pub fn install(render: &egui_wgpu::RenderState) -> MetricsHandle {
         Err(_) => 4,
     };
     let sample_count = supported_samples(&render.adapter, &render.device, requested);
-    let resources = Resources::new(
+    let mut resources = Resources::new(
         &render.device,
         &render.queue,
         render.target_format,
         sample_count,
     );
+    resources.requested_samples = requested;
+    if let Some(samples) = supported_hdr_samples(&render.adapter, &render.device, requested) {
+        resources.enable_hdr(&render.device, samples);
+    }
     let metrics = resources.metrics.clone();
     eprintln!(
         "Ruster shared 3D: adapter={} backend={:?} timestamps={} msaa_requested={} msaa_effective={} target_payload_cap_bytes={}",
@@ -325,6 +416,15 @@ impl Camera {
             self.pitch.sin(),
             self.yaw.cos() * self.pitch.cos(),
         )
+    }
+    fn eye_mode(self) -> [f32; 4] {
+        if self.orthographic {
+            self.direction().extend(0.).to_array()
+        } else {
+            (self.target + self.direction() * self.distance)
+                .extend(1.)
+                .to_array()
+        }
     }
     fn up(self) -> Vec3 {
         if self.direction().y.abs() > 0.999 {
@@ -694,6 +794,12 @@ pub fn viewport_with_materials(
             normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.0]),
             color,
             base_color,
+            response: match material.map(|material| material.response) {
+                Some(ruster_scene::MaterialResponse::Dielectric { roughness }) => {
+                    [1., roughness, 0., 0.]
+                }
+                _ => [0.; 4],
+            },
         });
     }
     let mut offset = 0;
@@ -710,6 +816,8 @@ pub fn viewport_with_materials(
         SceneCallback {
             groups,
             camera: view_projection.to_cols_array(),
+            camera_eye_mode: camera.eye_mode(),
+            display: scene.display,
             lighting,
             size: rect.size(),
             cpu_us: start.elapsed().as_secs_f64() * 1.0e6,
@@ -849,6 +957,7 @@ struct Instance {
     normal: [[f32; 4]; 3],
     color: [f32; 4],
     base_color: [f32; 4],
+    response: [f32; 4],
 }
 fn cube() -> (Vec<Vertex>, Vec<u32>) {
     let mut vertices = Vec::new();
@@ -904,23 +1013,78 @@ fn supported_samples(adapter: &wgpu::Adapter, device: &wgpu::Device, requested: 
     };
     choose_samples(flags(COLOR), flags(DEPTH), requested)
 }
-fn target_bytes(size: [u32; 2], samples: u32) -> u64 {
-    let bytes_per_pixel = if samples == 1 { 8 } else { 4 + 8 * samples };
-    u64::from(size[0]) * u64::from(size[1]) * u64::from(bytes_per_pixel)
+fn supported_hdr_samples(
+    adapter: &wgpu::Adapter,
+    device: &wgpu::Device,
+    requested: u32,
+) -> Option<u32> {
+    let features = |format: wgpu::TextureFormat| {
+        let actual = adapter.get_texture_format_features(format);
+        let guaranteed = format.guaranteed_format_features(device.features());
+        if device
+            .features()
+            .contains(wgpu::Features::TEXTURE_ADAPTER_SPECIFIC_FORMAT_FEATURES)
+        {
+            actual
+        } else {
+            wgpu::TextureFormatFeatures {
+                allowed_usages: actual.allowed_usages & guaranteed.allowed_usages,
+                flags: actual.flags & guaranteed.flags,
+            }
+        }
+    };
+    let color = features(HDR_COLOR);
+    let depth = features(DEPTH);
+    let usage = wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING;
+    if !color.allowed_usages.contains(usage)
+        || !color
+            .flags
+            .contains(wgpu::TextureFormatFeatureFlags::FILTERABLE)
+        || !depth
+            .allowed_usages
+            .contains(wgpu::TextureUsages::RENDER_ATTACHMENT)
+    {
+        return None;
+    }
+    Some(choose_samples(color.flags, depth.flags, requested))
 }
+fn format_target_bytes(size: [u32; 2], samples: u32, format: wgpu::TextureFormat) -> u64 {
+    let color = if format == HDR_COLOR { 8 } else { 4 };
+    let bytes_per_pixel = if samples == 1 {
+        color + 4
+    } else {
+        color + (color + 4) * samples
+    };
+    u64::from(size[0])
+        .saturating_mul(u64::from(size[1]))
+        .saturating_mul(u64::from(bytes_per_pixel))
+}
+#[cfg(test)]
+fn target_bytes(size: [u32; 2], samples: u32) -> u64 {
+    format_target_bytes(size, samples, COLOR)
+}
+#[cfg(test)]
 fn target_size(size: egui::Vec2, pixels_per_point: f32, max: u32, samples: u32) -> [u32; 2] {
+    format_target_size(size, pixels_per_point, max, samples, COLOR)
+}
+fn format_target_size(
+    size: egui::Vec2,
+    pixels_per_point: f32,
+    max: u32,
+    samples: u32,
+    format: wgpu::TextureFormat,
+) -> [u32; 2] {
     let width = (f64::from(size.x) * f64::from(pixels_per_point))
         .round()
         .max(1.0);
     let height = (f64::from(size.y) * f64::from(pixels_per_point))
         .round()
         .max(1.0);
-    let pixels = MAX_TARGET_BYTES / target_bytes([1, 1], samples);
+    let pixels = MAX_TARGET_BYTES / format_target_bytes([1, 1], samples, format);
     let scale = 1.0_f64
         .min(f64::from(max) / width)
         .min(f64::from(max) / height)
         .min((pixels as f64 / (width * height)).sqrt());
-    // Uniform scaling retains the logical camera/picking aspect up to pixel rounding.
     let width = (width * scale).floor().max(1.0) as u32;
     let height = (height * scale).floor().max(1.0) as u32;
     [width.min((pixels / u64::from(height)) as u32), height]
@@ -932,6 +1096,12 @@ struct Target {
     depth: wgpu::TextureView,
     bind: wgpu::BindGroup,
     size: [u32; 2],
+    format: wgpu::TextureFormat,
+    samples: u32,
+}
+struct RetiringTarget {
+    target: Target,
+    completed: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Target {
     fn color_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
@@ -963,6 +1133,10 @@ struct Timestamps {
     pending: Arc<Mutex<bool>>,
 }
 struct Resources {
+    builtin_sdr: wgpu::RenderPipeline,
+    builtin_hdr: Option<wgpu::RenderPipeline>,
+    hdr_samples: Option<u32>,
+    requested_samples: u32,
     pipeline: wgpu::RenderPipeline,
     composite: wgpu::RenderPipeline,
     cube: GpuMesh,
@@ -977,6 +1151,10 @@ struct Resources {
     camera: wgpu::Buffer,
     camera_bind: wgpu::BindGroup,
     target: Option<Target>,
+    retiring_target: Option<RetiringTarget>,
+    target_allocations: u64,
+    display_uniform: wgpu::Buffer,
+    display_packet: [f32; 4],
     sample_count: u32,
     timestamps: Option<Timestamps>,
     metrics: MetricsHandle,
@@ -993,11 +1171,11 @@ impl Resources {
             label: Some("fixed scene camera ABI"),
             entries: &[wgpu::BindGroupLayoutEntry {
                 binding: 0,
-                visibility: wgpu::ShaderStages::VERTEX,
+                visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
                 ty: wgpu::BindingType::Buffer {
                     ty: wgpu::BufferBindingType::Uniform,
                     has_dynamic_offset: false,
-                    min_binding_size: wgpu::BufferSize::new(64),
+                    min_binding_size: wgpu::BufferSize::new(80),
                 },
                 count: None,
             }],
@@ -1027,7 +1205,11 @@ impl Resources {
             },
             fragment: Some(wgpu::FragmentState {
                 module: &composite_shader,
-                entry_point: Some(if output.is_srgb() { "fs" } else { "fs_gamma" }),
+                entry_point: Some(if output.is_srgb() {
+                    "fs_display"
+                } else {
+                    "fs_display_gamma"
+                }),
                 compilation_options: Default::default(),
                 targets: &[Some(output.into())],
             }),
@@ -1042,7 +1224,7 @@ impl Resources {
         let mesh_bytes = cube.bytes;
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene camera"),
-            size: 64,
+            size: 80,
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -1053,6 +1235,12 @@ impl Resources {
                 binding: 0,
                 resource: camera.as_entire_binding(),
             }],
+        });
+        let display_packet = [0.; 4];
+        let display_uniform = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("fixed display packet"),
+            contents: bytemuck::cast_slice(&display_packet),
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         });
         let instances = instance_buffer(device, 1);
         let timestamps = device
@@ -1090,6 +1278,10 @@ impl Resources {
             ..Default::default()
         }));
         Self {
+            builtin_sdr: pipeline.clone(),
+            builtin_hdr: None,
+            hdr_samples: None,
+            requested_samples: sample_count,
             pipeline,
             composite,
             cube,
@@ -1104,18 +1296,69 @@ impl Resources {
             camera,
             camera_bind,
             target: None,
+            retiring_target: None,
+            target_allocations: 0,
+            display_uniform,
+            display_packet,
             sample_count,
             timestamps,
             metrics,
         }
     }
-    fn resize(&mut self, device: &wgpu::Device, size: [u32; 2]) {
+    fn enable_hdr(&mut self, device: &wgpu::Device, samples: u32) {
+        self.builtin_hdr = Some(scene_pipeline_format(
+            device,
+            &self.pipeline_layout,
+            surface_shader(),
+            samples,
+            HDR_COLOR,
+        ));
+        self.hdr_samples = Some(samples);
+    }
+    fn resize(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        size: [u32; 2],
+        format: wgpu::TextureFormat,
+        samples: u32,
+        context: &egui::Context,
+    ) -> bool {
+        use std::sync::atomic::{AtomicBool, Ordering};
         if self
-            .target
+            .retiring_target
             .as_ref()
-            .is_some_and(|target| target.size == size)
+            .is_some_and(|old| old.completed.load(Ordering::Acquire))
         {
-            return;
+            self.retiring_target = None;
+        }
+        if self.retiring_target.is_some() {
+            context.request_repaint();
+        }
+        if self.target.as_ref().is_some_and(|target| {
+            target.size == size && target.format == format && target.samples == samples
+        }) {
+            return true;
+        }
+        // Latest request is re-evaluated on the next callback; never queue target
+        // candidates. A full retirement slot applies backpressure before allocation.
+        if self.retiring_target.is_some() {
+            context.request_repaint();
+            return false;
+        }
+        if let Some(target) = self.target.take() {
+            let completed = Arc::new(AtomicBool::new(false));
+            let flag = completed.clone();
+            let completion_context = context.clone();
+            // All references to this target were encoded by earlier claimed
+            // callbacks and submitted by eframe before this frame began. This
+            // fence covers that prior work, not this frame's unfinished encoder.
+            queue.on_submitted_work_done(move || {
+                flag.store(true, Ordering::Release);
+                completion_context.request_repaint();
+            });
+            self.retiring_target = Some(RetiringTarget { target, completed });
+            context.request_repaint();
         }
         let texture = |format, usage, sample_count| {
             device
@@ -1136,22 +1379,13 @@ impl Resources {
                 .create_view(&Default::default())
         };
         let color = texture(
-            COLOR,
+            format,
             wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
             1,
         );
-        let multisample = (self.sample_count > 1).then(|| {
-            texture(
-                COLOR,
-                wgpu::TextureUsages::RENDER_ATTACHMENT,
-                self.sample_count,
-            )
-        });
-        let depth = texture(
-            DEPTH,
-            wgpu::TextureUsages::RENDER_ATTACHMENT,
-            self.sample_count,
-        );
+        let multisample =
+            (samples > 1).then(|| texture(format, wgpu::TextureUsages::RENDER_ATTACHMENT, samples));
+        let depth = texture(DEPTH, wgpu::TextureUsages::RENDER_ATTACHMENT, samples);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("scene sampling"),
             mag_filter: wgpu::FilterMode::Linear,
@@ -1170,6 +1404,10 @@ impl Resources {
                     binding: 1,
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: self.display_uniform.as_entire_binding(),
+                },
             ],
         });
         self.target = Some(Target {
@@ -1178,7 +1416,11 @@ impl Resources {
             depth,
             bind,
             size,
+            format,
+            samples,
         });
+        self.target_allocations += 1;
+        true
     }
 }
 fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
@@ -1209,6 +1451,15 @@ fn scene_pipeline(
     layout: &wgpu::PipelineLayout,
     source: &str,
     sample_count: u32,
+) -> wgpu::RenderPipeline {
+    scene_pipeline_format(device, layout, source, sample_count, COLOR)
+}
+fn scene_pipeline_format(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    source: &str,
+    sample_count: u32,
+    format: wgpu::TextureFormat,
 ) -> wgpu::RenderPipeline {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Ruster refreshable scene shader"),
@@ -1256,7 +1507,7 @@ fn scene_pipeline(
     };
     let mesh_attributes = used(&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,10=>Float32x2]);
     let instance_attributes = used(
-        &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4],
+        &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4,12=>Float32x4],
     );
     let mesh_layout = wgpu::VertexBufferLayout {
         array_stride: size_of::<Vertex>() as u64,
@@ -1281,7 +1532,7 @@ fn scene_pipeline(
             module: &shader,
             entry_point: Some("fs"),
             compilation_options: Default::default(),
-            targets: &[Some(COLOR.into())],
+            targets: &[Some(format.into())],
         }),
         primitive: wgpu::PrimitiveState {
             cull_mode: Some(wgpu::Face::Back),
@@ -1418,6 +1669,8 @@ struct DrawGroup {
 struct SceneCallback {
     groups: Vec<DrawGroup>,
     camera: [f32; 16],
+    camera_eye_mode: [f32; 4],
+    display: ruster_scene::DisplayProfile,
     lighting: LightingPacket,
     size: egui::Vec2,
     cpu_us: f64,
@@ -1446,13 +1699,85 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             r.metrics.lock().expect("metrics lock").shadow_status = ShadowStatus::MultipleViewports;
             return Vec::new();
         }
-        let size = target_size(
+        let requested_hdr = matches!(
+            self.display,
+            ruster_scene::DisplayProfile::SurfaceHdr { .. }
+        );
+        let requested_exposure = match self.display {
+            ruster_scene::DisplayProfile::SurfaceHdr { exposure_stops } => exposure_stops,
+            _ => 0.,
+        };
+        let valid_display =
+            requested_exposure.is_finite() && (-8. ..=8.).contains(&requested_exposure);
+        let applied_hdr =
+            requested_hdr && valid_display && r.builtin_appearance && r.builtin_hdr.is_some();
+        let format = if applied_hdr { HDR_COLOR } else { COLOR };
+        let samples = if applied_hdr {
+            r.hdr_samples.unwrap()
+        } else {
+            r.sample_count
+        };
+        let status = if !valid_display {
+            DisplayStatus::InvalidSettings
+        } else if !r.builtin_appearance {
+            DisplayStatus::CustomShader
+        } else if requested_hdr && !applied_hdr {
+            DisplayStatus::UnsupportedDevice
+        } else if applied_hdr {
+            DisplayStatus::SurfaceHdr
+        } else {
+            DisplayStatus::LegacySdr
+        };
+        let requested_size = [self.size.x, self.size.y].map(|dimension| {
+            (f64::from(dimension) * f64::from(screen.pixels_per_point))
+                .round()
+                .max(1.) as u32
+        });
+        let size = format_target_size(
             self.size,
             screen.pixels_per_point,
             device.limits().max_texture_dimension_2d,
-            r.sample_count,
+            samples,
+            format,
         );
-        r.resize(device, size);
+        let ready = r.resize(device, queue, size, format, samples, &self.context);
+        {
+            let mut metrics = r.metrics.lock().expect("metrics lock");
+            metrics.display_requested_hdr = requested_hdr;
+            metrics.display_available_hdr = r.builtin_hdr.is_some();
+            metrics.display_requested_exposure_stops = requested_exposure;
+            metrics.requested_sample_count = r.requested_samples;
+            metrics.target_requested_size = requested_size;
+            metrics.target_requested_bytes = format_target_bytes(requested_size, samples, format);
+            metrics.target_resolution_limited = requested_size != size;
+            metrics.target_retiring_bytes = r.retiring_target.as_ref().map_or(0, |old| {
+                format_target_bytes(old.target.size, old.target.samples, old.target.format)
+            });
+            metrics.target_allocations = r.target_allocations;
+            metrics.display_status = if ready {
+                status
+            } else {
+                DisplayStatus::Pending
+            };
+        }
+        if !ready {
+            // This callback owns the unique frame claim, but allocation is
+            // backpressured. Composite the last prepared target with its old
+            // display packet; do not write new scene/camera/material state.
+            // Duplicate callbacks returned before this point remain unpaintable.
+            self.prepared
+                .store(r.target.is_some(), std::sync::atomic::Ordering::Relaxed);
+            return Vec::new();
+        }
+        let display_packet = if applied_hdr {
+            [1., requested_exposure, 0., 0.]
+        } else {
+            [0.; 4]
+        };
+        if display_packet != r.display_packet {
+            queue.write_buffer(&r.display_uniform, 0, bytemuck::cast_slice(&display_packet));
+            r.display_packet = display_packet;
+        }
         let texture_uploads = r.materials.prepare(
             device,
             queue,
@@ -1489,6 +1814,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             }
         }
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
+        queue.write_buffer(&r.camera, 64, bytemuck::cast_slice(&self.camera_eye_mode));
         let lighting_uploaded = r.lighting.prepare(queue, &self.lighting);
         let target = r.target.as_ref().expect("target just resized");
         let timing = r
@@ -1537,7 +1863,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(&r.pipeline);
+            pass.set_pipeline(if applied_hdr {
+                r.builtin_hdr.as_ref().expect("HDR capability checked")
+            } else {
+                &r.pipeline
+            });
             pass.set_bind_group(0, &r.camera_bind, &[]);
             pass.set_bind_group(2, &r.lighting.bind, &[]);
             pass.set_bind_group(3, r.shadows.bind(), &[]);
@@ -1631,7 +1961,10 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.objects = instance_count;
         metrics.mesh_bytes = r.cube.bytes + r.meshes.values().map(|mesh| mesh.bytes).sum::<u64>();
         metrics.instance_capacity_bytes = (r.capacity * size_of::<Instance>()) as u64;
-        metrics.target_bytes = target_bytes(size, r.sample_count);
+        metrics.target_bytes = format_target_bytes(size, samples, format);
+        metrics.sample_count = samples;
+        metrics.display_applied_hdr = applied_hdr;
+        metrics.display_applied_exposure_stops = if applied_hdr { requested_exposure } else { 0. };
         metrics.target_size = size;
         self.prepared
             .store(true, std::sync::atomic::Ordering::Relaxed);
@@ -1754,6 +2087,54 @@ mod tests {
                 .collect::<Vec<_>>(),
             offsets
         );
+
+        // Additive camera/instance ABI protects old custom shaders and verifies
+        // that opt-in fragment view data and scalar material data are present.
+        assert_eq!(size_of::<Instance>(), 160);
+        assert_eq!(offset_of!(Instance, base_color), 128);
+        assert_eq!(offset_of!(Instance, response), 144);
+        for source in [surface_shader(), include_str!("composite.wgsl")] {
+            let module =
+                wgpu::naga::front::wgsl::parse_str(source).expect("surface/display WGSL parses");
+            wgpu::naga::valid::Validator::new(
+                wgpu::naga::valid::ValidationFlags::all(),
+                wgpu::naga::valid::Capabilities::all(),
+            )
+            .validate(&module)
+            .expect("surface/display WGSL validates");
+        }
+        let module = wgpu::naga::front::wgsl::parse_str(surface_shader()).unwrap();
+        let uniform = module
+            .global_variables
+            .iter()
+            .map(|(_, var)| var)
+            .find(|var| {
+                var.binding
+                    .as_ref()
+                    .is_some_and(|b| b.group == 0 && b.binding == 0)
+            })
+            .unwrap();
+        let wgpu::naga::TypeInner::Struct { members, span } = &module.types[uniform.ty].inner
+        else {
+            panic!("surface camera is a struct")
+        };
+        assert_eq!(*span, 80);
+        assert_eq!(
+            members.iter().map(|m| m.offset).collect::<Vec<_>>(),
+            [0, 64]
+        );
+        let camera = Camera::fit(&Scene::demo(), &BTreeMap::new());
+        let eye = camera.eye_mode();
+        assert_eq!(eye[3], 1.);
+        assert!(Vec3::from_slice(&eye[..3])
+            .abs_diff_eq(camera.target + camera.direction() * camera.distance, 1e-6));
+        let orthographic = Camera {
+            orthographic: true,
+            ..camera
+        }
+        .eye_mode();
+        assert_eq!(orthographic[3], 0.);
+        assert!(Vec3::from_slice(&orthographic[..3]).abs_diff_eq(camera.direction(), 1e-6));
 
         let legacy = LightingPacket::try_pack(&Lighting::Legacy).unwrap();
         assert!(bytemuck::bytes_of(&legacy).iter().all(|byte| *byte == 0));
@@ -2160,6 +2541,16 @@ mod tests {
         ] {
             assert_eq!(choose_samples(color, depth, requested), expected);
         }
+        for (samples, bytes_per_pixel) in [(1, 12), (2, 32), (4, 56)] {
+            assert_eq!(
+                format_target_bytes([1, 1], samples, HDR_COLOR),
+                bytes_per_pixel
+            );
+            for dimensions in [egui::vec2(1100., 760.), egui::vec2(8000., 6000.)] {
+                let size = format_target_size(dimensions, 2., 16384, samples, HDR_COLOR);
+                assert!(format_target_bytes(size, samples, HDR_COLOR) <= MAX_TARGET_BYTES);
+            }
+        }
         for (samples, bytes_per_pixel) in [(1, 8), (2, 20), (4, 36)] {
             assert_eq!(target_bytes([1, 1], samples), bytes_per_pixel);
             for (width, height, scale, limit) in [
@@ -2263,11 +2654,19 @@ mod tests {
                 ],
                 color: [1.0; 4],
                 base_color: [1.0, 1.0, 1.0, 0.0],
+                response: [0.; 4],
             };
             queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&object));
             // The second submission replaces attachments while prior work may be pending.
             for size in [[32, 32], [67, 41]] {
-                r.resize(&device, size);
+                assert!(r.resize(
+                    &device,
+                    &queue,
+                    size,
+                    COLOR,
+                    samples,
+                    &egui::Context::default()
+                ));
                 let target = r.target.as_ref().unwrap();
                 let mut encoder = device.create_command_encoder(&Default::default());
                 {
@@ -2296,9 +2695,17 @@ mod tests {
                 }
                 queue.submit([encoder.finish()]);
             }
+            device
+                .poll(wgpu::PollType::wait_indefinitely())
+                .expect("prior target fence");
             if samples == 1 {
                 material_probe::verify(&device, &queue, &mut r);
                 material_probe::verify_lighting(&device, &queue, r);
+                if let Some(hdr_samples) = supported_hdr_samples(&adapter, &device, 1) {
+                    material_probe::verify_surface(&device, &queue, hdr_samples);
+                } else {
+                    eprintln!("GPU probe: HDR format unavailable; surface cases skipped");
+                }
             } else {
                 drop(r);
             }

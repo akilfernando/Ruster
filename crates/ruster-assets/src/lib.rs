@@ -29,7 +29,6 @@ const MAX_CACHE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_REGISTRY_BYTES: usize = 64 * 1024;
 const REGISTRY: &str = ".ruster-assets.json";
 const CACHE_MAGIC: &[u8; 8] = b"RUSTMESH";
-const CACHE_VERSION: u32 = 3;
 // magic, version, vertex/index counts, ASCII source SHA-256, binary SHA-256.
 const CACHE_SEMANTIC_BYTES: usize = 8 + 4 + 4 + 4 + 64;
 const CACHE_HEADER_BYTES: usize = CACHE_SEMANTIC_BYTES + 32;
@@ -68,6 +67,23 @@ impl Mesh {
     }
 }
 
+/// Immutable interpretation selected when a mesh asset identity is imported.
+/// Import another identity and use undoable mesh assignment to change appearance.
+#[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum MeshNormalPolicy {
+    Flat,
+    AuthoredWhenComplete,
+}
+impl MeshNormalPolicy {
+    fn cache_version(self) -> u32 {
+        match self {
+            Self::Flat => 3,
+            Self::AuthoredWhenComplete => 4,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum AssetKind {
@@ -103,6 +119,7 @@ pub enum AssetStatus {
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AssetInfo {
     pub kind: AssetKind,
+    pub mesh_normal_policy: Option<MeshNormalPolicy>,
     pub id: String,
     pub source: String,
     pub hash: Option<String>,
@@ -136,6 +153,8 @@ fn error(message: impl Into<String>) -> AssetError {
 #[serde(deny_unknown_fields)]
 struct Record {
     kind: AssetKind,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    mesh_normal_policy: Option<MeshNormalPolicy>,
     source: String,
     hash: Option<String>,
 }
@@ -151,7 +170,7 @@ impl Default for Registry {
     fn default() -> Self {
         Self {
             format: "ruster-assets".into(),
-            version: 2,
+            version: 3,
             revision: 0,
             assets: BTreeMap::new(),
         }
@@ -188,6 +207,21 @@ struct LegacyRegistry {
     revision: u64,
     assets: BTreeMap<String, LegacyRecord>,
 }
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Version2Record {
+    kind: AssetKind,
+    source: String,
+    hash: Option<String>,
+}
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Version2Registry {
+    format: String,
+    version: u32,
+    revision: u64,
+    assets: BTreeMap<String, Version2Record>,
+}
 fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     if value.get("version").and_then(serde_json::Value::as_u64) == Some(1) {
@@ -204,6 +238,30 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
                         id,
                         Record {
                             kind: AssetKind::Mesh,
+                            mesh_normal_policy: Some(MeshNormalPolicy::Flat),
+                            source: r.source,
+                            hash: r.hash,
+                        },
+                    )
+                })
+                .collect(),
+        })
+    } else if value.get("version").and_then(serde_json::Value::as_u64) == Some(2) {
+        let old: Version2Registry = serde_json::from_slice(bytes)?;
+        Ok(Registry {
+            format: old.format,
+            version: old.version,
+            revision: old.revision,
+            assets: old
+                .assets
+                .into_iter()
+                .map(|(id, r)| {
+                    (
+                        id,
+                        Record {
+                            mesh_normal_policy: (r.kind == AssetKind::Mesh)
+                                .then_some(MeshNormalPolicy::Flat),
+                            kind: r.kind,
                             source: r.source,
                             hash: r.hash,
                         },
@@ -212,6 +270,19 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
                 .collect(),
         })
     } else {
+        if value.get("version").and_then(serde_json::Value::as_u64) == Some(3)
+            && value
+                .get("assets")
+                .and_then(serde_json::Value::as_object)
+                .is_some_and(|assets| {
+                    assets.values().any(|record| {
+                        record.get("kind").and_then(serde_json::Value::as_str) == Some("texture")
+                            && record.get("mesh_normal_policy").is_some()
+                    })
+                })
+        {
+            return Err(error("texture assets must omit mesh_normal_policy"));
+        }
         Ok(serde_json::from_slice(bytes)?)
     }
 }
@@ -248,6 +319,7 @@ pub struct ExportSnapshot {
 #[derive(Clone, Debug)]
 struct ExportSource {
     kind: AssetKind,
+    mesh_normal_policy: Option<MeshNormalPolicy>,
     source: String,
     hash: String,
 }
@@ -260,6 +332,13 @@ impl ExportSnapshot {
     /// Metadata-only dependency identities; does not inspect the filesystem.
     pub fn source_ids(&self) -> impl Iterator<Item = &str> {
         self.sources.keys().map(String::as_str)
+    }
+
+    /// Frozen interpretation of an accepted mesh; textures/unknown IDs return None.
+    pub fn mesh_normal_policy(&self, id: &str) -> Option<MeshNormalPolicy> {
+        self.sources
+            .get(id)
+            .and_then(|source| source.mesh_normal_policy)
     }
 
     /// Read at most MAX_ASSETS sources, using the mesh/texture source-byte bounds. Catalog
@@ -337,7 +416,10 @@ impl AssetStore {
             if let Some(hash) = &record.hash {
                 let cached = match record.kind {
                     AssetKind::Mesh => store
-                        .read_cache(hash)
+                        .read_cache(
+                            hash,
+                            record.mesh_normal_policy.expect("validated mesh policy"),
+                        )
                         .map(|(mesh, current)| (Payload::Mesh(mesh), current)),
                     AssetKind::Texture => store
                         .read_texture_cache(hash)
@@ -364,17 +446,31 @@ impl AssetStore {
                             }
                             // Preserve the existing mesh-open format diagnostics.
                             AssetKind::Mesh => {
-                                match parse_source(&record.source, record.kind, &bytes) {
+                                match parse_source(
+                                    &record.source,
+                                    record.kind,
+                                    record.mesh_normal_policy,
+                                    &bytes,
+                                ) {
                                     Ok(_) => "source changed; Refresh to accept new content".into(),
                                     Err(e) => e.to_string(),
                                 }
                             }
                         });
                     } else if !current_cache {
-                        match parse_source(&record.source, record.kind, &bytes) {
+                        match parse_source(
+                            &record.source,
+                            record.kind,
+                            record.mesh_normal_policy,
+                            &bytes,
+                        ) {
                             Ok(payload) => match store.check_payload_budget(&id, &payload) {
                                 Ok(()) => {
-                                    if let Err(e) = store.write_payload_cache(&hash, &payload) {
+                                    if let Err(e) = store.write_payload_cache(
+                                        &hash,
+                                        record.mesh_normal_policy,
+                                        &payload,
+                                    ) {
                                         info.diagnostic =
                                             Some(format!("cache rebuild failed: {e}"));
                                     }
@@ -459,6 +555,7 @@ impl AssetStore {
                 id.clone(),
                 ExportSource {
                     kind: record.kind,
+                    mesh_normal_policy: record.mesh_normal_policy,
                     source: record.source.clone(),
                     hash: hash.clone(),
                 },
@@ -484,6 +581,7 @@ impl AssetStore {
         let record = &self.registry.assets[id];
         AssetInfo {
             kind: record.kind,
+            mesh_normal_policy: record.mesh_normal_policy,
             id: id.into(),
             source: record.source.clone(),
             hash: record.hash.clone(),
@@ -562,9 +660,16 @@ impl AssetStore {
             }
         }
     }
-    fn write_payload_cache(&self, hash: &str, payload: &Payload) -> Result<(), AssetError> {
+    fn write_payload_cache(
+        &self,
+        hash: &str,
+        policy: Option<MeshNormalPolicy>,
+        payload: &Payload,
+    ) -> Result<(), AssetError> {
         match payload {
-            Payload::Mesh(mesh) => self.write_cache(hash, mesh),
+            Payload::Mesh(mesh) => {
+                self.write_cache(hash, mesh, policy.expect("validated mesh policy"))
+            }
             Payload::Texture(texture) => self.write_texture_cache(hash, texture),
         }
     }
@@ -604,8 +709,13 @@ impl AssetStore {
         }
         Ok(meshes)
     }
-    fn read_cache(&self, hash: &str) -> Result<(Mesh, bool), AssetError> {
+    fn read_cache(&self, hash: &str, policy: MeshNormalPolicy) -> Result<(Mesh, bool), AssetError> {
         let directory = self.cache_directory(false)?;
+        if policy == MeshNormalPolicy::AuthoredWhenComplete {
+            return read_bounded(&directory.join(format!("v4-{hash}.bin")), MAX_CACHE_BYTES)
+                .and_then(|bytes| decode_cache(&bytes, hash, 4))
+                .map(|mesh| (mesh, true));
+        }
         read_bounded(&directory.join(format!("v3-{hash}.bin")), MAX_CACHE_BYTES)
             .and_then(|bytes| decode_cache(&bytes, hash, 3))
             .map(|mesh| (mesh, true))
@@ -637,10 +747,16 @@ impl AssetStore {
         validate_mesh(&mesh)?;
         Ok(mesh)
     }
-    fn write_cache(&self, hash: &str, mesh: &Mesh) -> Result<(), AssetError> {
+    fn write_cache(
+        &self,
+        hash: &str,
+        mesh: &Mesh,
+        policy: MeshNormalPolicy,
+    ) -> Result<(), AssetError> {
         let directory = self.cache_directory(true)?;
-        let bytes = encode_cache(hash, mesh)?;
-        let path = directory.join(format!("v3-{hash}.bin"));
+        let bytes = encode_mesh_cache(hash, mesh, policy)?;
+        let version = policy.cache_version();
+        let path = directory.join(format!("v{version}-{hash}.bin"));
         atomic_write(&directory, &path, &bytes)
     }
 }
@@ -668,7 +784,15 @@ fn cache_length(vertices: usize, indices: usize, uvs: bool) -> Result<usize, Ass
         .filter(|&bytes| bytes <= MAX_CACHE_BYTES)
         .ok_or_else(|| error("derived mesh exceeds cache byte limit"))
 }
+#[cfg(test)]
 fn encode_cache(hash: &str, mesh: &Mesh) -> Result<Vec<u8>, AssetError> {
+    encode_mesh_cache(hash, mesh, MeshNormalPolicy::Flat)
+}
+fn encode_mesh_cache(
+    hash: &str,
+    mesh: &Mesh,
+    policy: MeshNormalPolicy,
+) -> Result<Vec<u8>, AssetError> {
     if hash.len() != 64 {
         return Err(error("invalid source SHA-256 for mesh cache"));
     }
@@ -680,7 +804,7 @@ fn encode_cache(hash: &str, mesh: &Mesh) -> Result<Vec<u8>, AssetError> {
     )?;
     let mut bytes = Vec::with_capacity(length);
     bytes.extend_from_slice(CACHE_MAGIC);
-    bytes.extend_from_slice(&CACHE_VERSION.to_le_bytes());
+    bytes.extend_from_slice(&policy.cache_version().to_le_bytes());
     bytes.extend_from_slice(
         &((mesh.vertices.len() as u32) | if mesh.texcoords.is_some() { 1 << 31 } else { 0 })
             .to_le_bytes(),
@@ -717,8 +841,8 @@ fn decode_cache(bytes: &[u8], hash: &str, version: u32) -> Result<Mesh, AssetErr
     }
     let number = |field: &[u8]| u32::from_le_bytes(field.try_into().expect("four byte field"));
     let raw_count = number(&bytes[12..16]);
-    let uvs = version == 3 && raw_count & (1 << 31) != 0;
-    let vertex_count = (if version == 3 {
+    let uvs = version >= 3 && raw_count & (1 << 31) != 0;
+    let vertex_count = (if version >= 3 {
         raw_count & !(1 << 31)
     } else {
         raw_count
@@ -775,9 +899,17 @@ fn decode_cache(bytes: &[u8], hash: &str, version: u32) -> Result<Mesh, AssetErr
 fn digest(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
 }
-fn parse_source(source: &str, kind: AssetKind, bytes: &[u8]) -> Result<Payload, AssetError> {
+fn parse_source(
+    source: &str,
+    kind: AssetKind,
+    policy: Option<MeshNormalPolicy>,
+    bytes: &[u8],
+) -> Result<Payload, AssetError> {
     match kind {
-        AssetKind::Mesh => parse_obj(bytes).map(Payload::Mesh),
+        AssetKind::Mesh => {
+            parse_obj_with_normal_policy(bytes, policy.expect("validated mesh policy"))
+                .map(Payload::Mesh)
+        }
         AssetKind::Texture => decode_png(bytes).map(Payload::Texture),
     }
     .map_err(|e| error(format!("source {source:?}: {e}")))
@@ -941,9 +1073,9 @@ fn confined(root: &Path, source: &str, allow_missing_leaf: bool) -> Result<PathB
     Ok(path)
 }
 fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
-    if registry.format != "ruster-assets" || !matches!(registry.version, 1 | 2) {
+    if registry.format != "ruster-assets" || !matches!(registry.version, 1..=3) {
         return Err(error(
-            "unsupported asset catalog format/version; expected ruster-assets version 1 or 2",
+            "unsupported asset catalog format/version; expected ruster-assets version 1, 2 or 3",
         ));
     }
     if registry.assets.len() > MAX_ASSETS {
@@ -958,9 +1090,14 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
                 "catalog asset kind does not match its source extension",
             ));
         }
-        if !sources.insert(&record.source) {
+        if (record.kind == AssetKind::Mesh) != record.mesh_normal_policy.is_some() {
+            return Err(error(
+                "mesh assets require mesh_normal_policy; textures must omit it",
+            ));
+        }
+        if !sources.insert((&record.source, record.mesh_normal_policy)) {
             return Err(error(format!(
-                "duplicate registered source {:?}; one stable asset ID is required per source path",
+                "duplicate registered source {:?}; one stable asset ID is required per source path and normal policy",
                 record.source
             )));
         }
@@ -1012,6 +1149,15 @@ pub fn validate_mesh(mesh: &Mesh) -> Result<(), AssetError> {
 /// Materials/textures, curves, polygon triangulation and arbitrary directives
 /// are deliberately unsupported and return line-numbered errors.
 pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
+    parse_obj_with_normal_policy(bytes, MeshNormalPolicy::Flat)
+}
+
+/// Authored mode accepts either no face-corner normals (flat fallback) or a complete
+/// per-corner set. Partial/mixed sets reject rather than silently faceting a surface.
+pub fn parse_obj_with_normal_policy(
+    bytes: &[u8],
+    policy: MeshNormalPolicy,
+) -> Result<Mesh, AssetError> {
     if bytes.len() > MAX_SOURCE_BYTES {
         return Err(error("OBJ exceeds 1 MiB source limit"));
     }
@@ -1020,7 +1166,10 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
     let mut textures: Vec<[f32; 2]> = Vec::new();
     let mut complete_uvs = true;
     let mut expanded_uvs = Vec::new();
-    let mut normals = 0usize;
+    let mut normal_count = 0usize;
+    let mut normals: Vec<[f32; 3]> = Vec::new();
+    let mut authored_normals = Vec::new();
+    let mut corners_without_normals = false;
     let mut mesh = Mesh {
         vertices: Vec::new(),
         indices: Vec::new(),
@@ -1069,8 +1218,20 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
                         }
                     }
                     _ => {
-                        normals += 1;
-                        if normals > MAX_VERTICES {
+                        if policy == MeshNormalPolicy::AuthoredWhenComplete {
+                            let length = values
+                                .iter()
+                                .map(|v| f64::from(*v).powi(2))
+                                .sum::<f64>()
+                                .sqrt();
+                            if length == 0.0 || !length.is_finite() {
+                                return Err(fail("authored normals must be finite and nonzero"));
+                            }
+                            values = values.map(|v| (f64::from(v) / length) as f32);
+                            normals.push(values);
+                        }
+                        normal_count += 1;
+                        if normal_count > MAX_VERTICES {
                             return Err(fail("normal limit exceeded"));
                         }
                     }
@@ -1105,9 +1266,16 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
                         if parts[2].is_empty() {
                             return Err(fail("missing normal index"));
                         }
-                        obj_index(parts[2], normals).map_err(|e| fail(&e.0))?;
-                    } else if parts.len() == 2 && parts[1].is_empty() {
-                        return Err(fail("missing texture index"));
+                        let normal_index =
+                            obj_index(parts[2], normal_count).map_err(|e| fail(&e.0))?;
+                        if policy == MeshNormalPolicy::AuthoredWhenComplete {
+                            authored_normals.push(normals[normal_index]);
+                        }
+                    } else {
+                        corners_without_normals = true;
+                        if parts.len() == 2 && parts[1].is_empty() {
+                            return Err(fail("missing texture index"));
+                        }
                     }
                 }
                 let a = [
@@ -1143,6 +1311,14 @@ pub fn parse_obj(bytes: &[u8]) -> Result<Mesh, AssetError> {
                 ));
             }
             _ => return Err(fail(&format!("unsupported OBJ directive {directive:?}"))),
+        }
+    }
+    if policy == MeshNormalPolicy::AuthoredWhenComplete && !authored_normals.is_empty() {
+        if corners_without_normals {
+            return Err(error("OBJ authored normals must cover every face corner or be absent from all face corners"));
+        }
+        for (vertex, normal) in mesh.vertices.iter_mut().zip(authored_normals) {
+            vertex.normal = normal;
         }
     }
     if complete_uvs {
@@ -1365,6 +1541,149 @@ mod tests {
         )
         .unwrap();
         assert!(AssetStore::open(root.path()).is_err());
+
+        // Catalog policy is immutable per ID. Old catalog2 bytes mean Flat even
+        // when authored normals exist; a second ID can explicitly opt in.
+        let source = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 2 0\nf 1//1 2//1 3//1\n";
+        let hash = digest(source);
+        let root = tempfile::tempdir().unwrap();
+        fs::write(root.path().join("mesh.obj"), source).unwrap();
+        let old = serde_json::json!({"format":"ruster-assets", "version":2, "revision":4,
+            "assets":{"flat":{"kind":"mesh", "source":"mesh.obj", "hash":hash}}});
+        let old_bytes = serde_json::to_vec(&old).unwrap();
+        fs::write(root.path().join(REGISTRY), &old_bytes).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        assert_eq!(store.mesh("flat").unwrap().vertices[0].normal, [0., 0., 1.]);
+        assert_eq!(
+            store.inspect()[0].mesh_normal_policy,
+            Some(MeshNormalPolicy::Flat)
+        );
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), old_bytes);
+        let flat_arc = store.mesh_snapshots()["flat"].clone();
+        assert!(store
+            .import_mesh_at(
+                3,
+                "smooth",
+                "mesh.obj",
+                MeshNormalPolicy::AuthoredWhenComplete
+            )
+            .is_err());
+        let info = store
+            .import_mesh_at(
+                4,
+                "smooth",
+                "mesh.obj",
+                MeshNormalPolicy::AuthoredWhenComplete,
+            )
+            .unwrap();
+        assert_eq!(
+            info.mesh_normal_policy,
+            Some(MeshNormalPolicy::AuthoredWhenComplete)
+        );
+        assert_eq!(
+            store.mesh("smooth").unwrap().vertices[0].normal,
+            [0., 1., 0.]
+        );
+        assert!(Arc::ptr_eq(&flat_arc, &store.mesh_snapshots()["flat"]));
+        assert!(store
+            .import_mesh(
+                "duplicate",
+                "mesh.obj",
+                MeshNormalPolicy::AuthoredWhenComplete
+            )
+            .is_err());
+        assert!(store.rename("smooth", "renamed.obj").is_err());
+        let snapshot = store
+            .export_snapshot(&BTreeSet::from(["flat".into(), "smooth".into()]))
+            .unwrap();
+        assert_eq!(
+            snapshot.mesh_normal_policy("flat"),
+            Some(MeshNormalPolicy::Flat)
+        );
+        assert_eq!(
+            snapshot.mesh_normal_policy("smooth"),
+            Some(MeshNormalPolicy::AuthoredWhenComplete)
+        );
+        let catalog = fs::read(root.path().join(REGISTRY)).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&catalog).unwrap()["version"],
+            3
+        );
+        let directory = root.path().join(".ruster-cache/meshes");
+        let v3 = fs::read(directory.join(format!("v3-{hash}.bin"))).unwrap();
+        let v4 = fs::read(directory.join(format!("v4-{hash}.bin"))).unwrap();
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().mesh("smooth"),
+            store.mesh("smooth")
+        );
+        fs::remove_file(directory.join(format!("v4-{hash}.bin"))).unwrap();
+        fs::remove_file(root.path().join("mesh.obj")).unwrap();
+        let missing = AssetStore::open(root.path()).unwrap();
+        assert!(
+            missing.mesh("smooth").is_none(),
+            "flat cache cannot supply authored content"
+        );
+        assert!(missing.mesh("flat").is_some());
+        fs::write(root.path().join("mesh.obj"), source).unwrap();
+        let rebuilt = AssetStore::open(root.path()).unwrap();
+        assert_eq!(rebuilt.mesh("smooth"), store.mesh("smooth"));
+        assert_eq!(
+            fs::read(directory.join(format!("v4-{hash}.bin"))).unwrap(),
+            v4
+        );
+        assert_eq!(
+            fs::read(directory.join(format!("v3-{hash}.bin"))).unwrap(),
+            v3
+        );
+        let accepted = store.mesh_snapshots()["smooth"].clone();
+        fs::write(
+            root.path().join("mesh.obj"),
+            String::from_utf8_lossy(source).replace("2//1", "2"),
+        )
+        .unwrap();
+        let revision = store.revision();
+        assert!(store.refresh("smooth").is_err());
+        assert_eq!(store.revision(), revision);
+        assert!(Arc::ptr_eq(&accepted, &store.mesh_snapshots()["smooth"]));
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), catalog);
+        for version in [1, 2] {
+            let mut invalid = old.clone();
+            invalid["version"] = serde_json::json!(version);
+            invalid["assets"]["flat"]["mesh_normal_policy"] =
+                serde_json::json!("authored_when_complete");
+            assert!(parse_registry(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        }
+        let mut invalid: serde_json::Value = serde_json::from_slice(&catalog).unwrap();
+        invalid["assets"]["smooth"]
+            .as_object_mut()
+            .unwrap()
+            .remove("mesh_normal_policy");
+        assert!(validate_registry(
+            &parse_registry(&serde_json::to_vec(&invalid).unwrap()).unwrap()
+        )
+        .is_err());
+        invalid["assets"]["smooth"]["mesh_normal_policy"] = serde_json::json!("unknown");
+        assert!(parse_registry(&serde_json::to_vec(&invalid).unwrap()).is_err());
+        for policy in [
+            serde_json::Value::Null,
+            serde_json::json!("flat"),
+            serde_json::json!("authored_when_complete"),
+        ] {
+            let mut invalid: serde_json::Value = serde_json::from_slice(&catalog).unwrap();
+            invalid["assets"]["texture"] = serde_json::json!({"kind":"texture", "source":"image.png", "hash":null, "mesh_normal_policy":policy});
+            let bytes = serde_json::to_vec(&invalid).unwrap();
+            fs::write(root.path().join(REGISTRY), &bytes).unwrap();
+            assert!(AssetStore::open(root.path()).is_err());
+            assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), bytes);
+            assert_eq!(
+                fs::read(directory.join(format!("v3-{hash}.bin"))).unwrap(),
+                v3
+            );
+            assert_eq!(
+                fs::read(directory.join(format!("v4-{hash}.bin"))).unwrap(),
+                v4
+            );
+        }
     }
 
     // One mixed-source case protects typed catalog transactions, immutable
@@ -1397,7 +1716,7 @@ mod tests {
         let baseline = fs::read(root.path().join(REGISTRY)).unwrap();
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&baseline).unwrap()["version"],
-            2
+            3
         );
         assert!(store.rename("color", "color.obj").is_err());
         assert!(!root.path().join("color.obj").exists());

@@ -1,7 +1,7 @@
 //! One bounded asset controller shared by human Content actions and deferred MCP.
 use super::*;
 use crate::asset_worker::{AssetMaps, Event, RetiredAssets, Worker};
-use ruster_assets::{AssetMutation, AssetRequest, AssetStateIdentity};
+use ruster_assets::{AssetMutation, AssetRequest, AssetStateIdentity, MeshNormalPolicy};
 use std::sync::mpsc::{TryRecvError, TrySendError};
 
 type Error = (String, String);
@@ -1766,8 +1766,10 @@ impl SceneEditor {
             .as_object()
             .ok_or_else(|| error("invalid_arguments", "Expected object arguments"))?;
         if !supported(op)
-            || map.len() != fields.len()
             || fields.iter().any(|key| !map.contains_key(*key))
+            || map.keys().any(|key| {
+                !fields.contains(&key.as_str()) && !(op == "asset_import" && key == "normal_policy")
+            })
         {
             return Err(error("invalid_arguments", "Unknown or missing argument"));
         }
@@ -1796,13 +1798,39 @@ impl SceneEditor {
             .to_owned();
         let mutation = match op {
             "asset_refresh" => AssetMutation::Refresh { id },
-            "asset_import" => AssetMutation::Import {
-                id,
-                source: args["source"]
+            "asset_import" => {
+                let source = args["source"]
                     .as_str()
-                    .ok_or_else(|| error("invalid_arguments", "source required"))?
-                    .into(),
-            },
+                    .ok_or_else(|| error("invalid_arguments", "source required"))?;
+                if let Some(policy) = map.get("normal_policy") {
+                    if !source.ends_with(".obj") {
+                        return Err(error(
+                            "invalid_arguments",
+                            "normal_policy is available only for .obj mesh imports",
+                        ));
+                    }
+                    let normal_policy = match policy.as_str() {
+                        Some("flat") => MeshNormalPolicy::Flat,
+                        Some("authored_when_complete") => MeshNormalPolicy::AuthoredWhenComplete,
+                        _ => {
+                            return Err(error(
+                                "invalid_arguments",
+                                "normal_policy must be flat or authored_when_complete",
+                            ))
+                        }
+                    };
+                    AssetMutation::ImportMesh {
+                        id,
+                        source: source.into(),
+                        normal_policy,
+                    }
+                } else {
+                    AssetMutation::Import {
+                        id,
+                        source: source.into(),
+                    }
+                }
+            }
             _ => AssetMutation::Rename {
                 id,
                 source: args["source"]
@@ -3874,6 +3902,8 @@ mod tests {
                 directory.path().join("triangle.obj"),
                 if case == "failed_import" {
                     b"unsupported OBJ".as_slice()
+                } else if case == "agent" {
+                    b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvn 0 2 0\nf 1//1 2//1 3//1\n".as_slice()
                 } else {
                     b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n".as_slice()
                 },
@@ -4047,7 +4077,38 @@ mod tests {
                 };
                 let (lease, observe) = crate::bridge::preparing_test_lease(deadline);
                 reply = Some(Box::new(observe));
-                let args = json!({"expected_session_token":format!("test:scene:{}",editor.generation),"expected_revision":scene_revision.to_string(),"expected_asset_revision":"0","asset_id":"triangle","source":"triangle.obj"});
+                let mut args = json!({"expected_session_token":format!("test:scene:{}",editor.generation),"expected_revision":scene_revision.to_string(),"expected_asset_revision":"0","asset_id":"triangle","source":"triangle.obj"});
+                if case == "agent" {
+                    let token = args["expected_session_token"].as_str().unwrap().to_owned();
+                    // The optional field is a mesh-only exact enum. Admission
+                    // errors must not start work or publish catalog changes.
+                    for (source, policy) in [
+                        ("triangle.obj", json!("unknown")),
+                        ("triangle.obj", Value::Null),
+                        ("triangle.obj", json!(1)),
+                        ("color.png", json!("flat")),
+                        ("color.png", json!("authored_when_complete")),
+                    ] {
+                        let mut invalid = args.clone();
+                        invalid["source"] = json!(source);
+                        invalid["normal_policy"] = policy;
+                        assert_eq!(
+                            editor
+                                .admit_asset(&token, "asset_import", &invalid, false)
+                                .err()
+                                .unwrap()
+                                .0,
+                            "invalid_arguments"
+                        );
+                        assert_eq!(editor.assets.as_ref().unwrap().revision(), 0);
+                        assert!(!directory.path().join(".ruster-assets.json").exists());
+                    }
+                    args["normal_policy"] = json!("flat");
+                    assert!(editor
+                        .admit_asset(&token, "asset_import", &args, false)
+                        .is_ok());
+                    args["normal_policy"] = json!("authored_when_complete");
+                }
                 editor.dispatch_asset_request(&ctx, "test", "asset_import", args, lease);
             } else {
                 editor.asset_dialog = true;
@@ -4292,6 +4353,23 @@ mod tests {
                     if accepted {
                         assert_eq!(response["result"]["asset_revision"], "1");
                         assert_eq!(response["result"]["asset"]["id"], "triangle");
+                        if case == "agent" {
+                            assert_eq!(
+                                response["result"]["asset"]["mesh_normal_policy"],
+                                "authored_when_complete"
+                            );
+                            assert_eq!(
+                                editor
+                                    .assets
+                                    .as_ref()
+                                    .unwrap()
+                                    .mesh("triangle")
+                                    .unwrap()
+                                    .vertices[0]
+                                    .normal,
+                                [0., 1., 0.]
+                            );
+                        }
                     } else {
                         assert_eq!(response["error"]["code"], "asset_error");
                     }

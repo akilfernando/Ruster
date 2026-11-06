@@ -42,6 +42,22 @@ impl SceneEditor {
         ruster_render::shadow_observation(self.render.as_ref()?)
     }
 
+    pub(super) fn surface_feedback(&self) -> Value {
+        let observation = self
+            .render
+            .as_ref()
+            .and_then(ruster_render::display_observation);
+        let Some(o) = observation else {
+            return serde_json::json!({"status":"not_prepared","scope":"last_prepared_callback_not_gpu_completion","may_be_stale":true});
+        };
+        serde_json::json!({"status":format!("{:?}",o.status),"scope":"last_prepared_callback_not_gpu_completion","may_be_stale":true,"prepared_frames":o.prepared_frames,
+            "requested_hdr":o.requested_hdr,"applied_hdr":o.applied_hdr,"available_hdr":o.available_hdr,
+            "requested_exposure_stops":o.requested_exposure_stops,"applied_exposure_stops":o.applied_exposure_stops,
+            "requested_samples":o.requested_samples,"applied_samples":o.applied_samples,
+            "requested_target_size":o.requested_target_size,"applied_target_size":o.applied_target_size,
+            "resolution_limited":o.resolution_limited,"logical_live_bytes":o.live_bytes,"logical_retiring_bytes":o.retiring_bytes})
+    }
+
     pub(super) fn shadow_feedback(&self) -> Value {
         let Some(o) = self.last_shadow_observation() else {
             return json!({"available":false,"reason":"no_prepared_viewport"});

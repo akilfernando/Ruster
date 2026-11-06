@@ -2158,7 +2158,15 @@ impl SceneEditor {
         let err = |code: &str, message: String| (code.to_string(), message);
         let allowed: &[&str] = match op {
             "asset_inspect" => &["offset"],
-            "asset_import" | "asset_rename" => &[
+            "asset_import" => &[
+                "expected_session_token",
+                "expected_revision",
+                "expected_asset_revision",
+                "asset_id",
+                "source",
+                "normal_policy",
+            ],
+            "asset_rename" => &[
                 "expected_session_token",
                 "expected_revision",
                 "expected_asset_revision",

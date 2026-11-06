@@ -55,6 +55,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
         ],
         color: [1.0; 4],
         base_color: [1.0, 1.0, 1.0, 0.0],
+        response: [0.; 4],
     };
     queue.write_buffer(&r.instances, 0, bytemuck::bytes_of(&instance));
     retire_sources(mesh, texture);
@@ -196,7 +197,14 @@ fn render(
     r: &mut Resources,
     key: &BindingKey,
 ) -> Vec<u8> {
-    r.resize(device, [64, 64]);
+    assert!(r.resize(
+        device,
+        queue,
+        [64, 64],
+        COLOR,
+        r.sample_count,
+        &egui::Context::default()
+    ));
     let gpu = &r.meshes["diagnostic"];
     let image = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("material correctness readback"),
@@ -429,7 +437,14 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         ("legacy-custom-own-appearance", ambient([0.; 3], 0.)),
         ("builtin-restored-after-custom", Lighting::Legacy),
     ];
-    r.resize(device, [64, 64]);
+    assert!(r.resize(
+        device,
+        queue,
+        [64, 64],
+        COLOR,
+        r.sample_count,
+        &egui::Context::default()
+    ));
     let image = device.create_texture(&wgpu::TextureDescriptor {
         label: Some("copyable production scene-pass test target"),
         size: wgpu::Extent3d {
@@ -515,10 +530,13 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
                     normal: normal.to_cols_array_2d().map(|c| [c[0], c[1], c[2], 0.]),
                     color: [1.; 4],
                     base_color: [tint[0], tint[1], tint[2], 0.],
+                    response: [0.; 4],
                 }],
                 range: 0..1,
             }],
             camera: Mat4::IDENTITY.to_cols_array(),
+            camera_eye_mode: [0., 0., 2., 1.],
+            display: ruster_scene::DisplayProfile::LegacySdr,
             lighting: packet,
             size: egui::vec2(64., 64.),
             cpu_us: 0.,
@@ -736,4 +754,453 @@ fn reference_lighting(
         }) * 255.)
             .round() as u8
     })
+}
+
+/// Extend the existing owning GPU boundary probe: actual production HDR scene
+/// and composite, both output-transfer conventions, scalar reuse and restoration.
+/// These numerical checks do not replace the moving curved-surface quality gate.
+pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples: u32) {
+    use egui_wgpu::CallbackTrait;
+    use ruster_scene::DisplayProfile;
+    verify_unstored_grazing_radiance(device, queue);
+    let mut outputs = Vec::new();
+    for output in [COLOR, wgpu::TextureFormat::Rgba8Unorm] {
+        let mut r = Resources::new(device, queue, output, 1);
+        r.enable_hdr(device, samples);
+        let mesh = Arc::new(
+            ruster_assets::parse_obj(
+                b"v -1 -1 0.5\nv 1 -1 0.5\nv 1 1 0.5\nv -1 1 0.5\nf 1 2 3\nf 1 3 4\n",
+            )
+            .unwrap(),
+        );
+        let image = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("surface final display readback"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: output,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let view = image.create_view(&Default::default());
+        let read = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("surface display pixels"),
+            size: 64 * 64 * 4,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let grazing_image = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("copyable grazing HDR storage boundary"),
+            size: wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: HDR_COLOR,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
+            view_formats: &[],
+        });
+        let grazing_read = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("actual half-float grazing storage"),
+            size: 64 * 64 * 8,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let metrics = r.metrics.clone();
+        let mut resources = egui_wgpu::CallbackResources::default();
+        resources.insert(r);
+        let context = egui::Context::default();
+        let screen = egui_wgpu::ScreenDescriptor {
+            size_in_pixels: [64, 64],
+            pixels_per_point: 1.,
+        };
+        let mut results = BTreeMap::new();
+        for (name, roughness, exposure, intensity, perspective) in [
+            ("legacy", 0.08, 0., 1., false),
+            ("polished", 0.08, 0., 1., false),
+            ("satin", 0.25, 0., 1., false),
+            ("matte", 1., 0., 1., false),
+            ("exposure-low", 0.5, -2., 1., false),
+            ("exposure-zero", 0.5, 0., 1., false),
+            ("exposure-high", 0.5, 2., 1., false),
+            ("bright-unclipped", 0.08, -8., 16., false),
+            ("grazing-storage-limit", 0.08, -8., 16., false),
+            ("perspective", 0.5, 0., 1., true),
+            ("custom", 0.5, 0., 1., false),
+            ("restored", 0.5, 0., 1., false),
+        ] {
+            context
+                .run_pass(egui::RawInput::default(), |_| {})
+                .drop_without_applying_deltas();
+            if matches!(name, "custom" | "restored") {
+                let r = resources.get_mut::<Resources>().unwrap();
+                r.pipeline = if name == "custom" {
+                    validated_pipeline(
+                        device,
+                        &r.pipeline_layout,
+                        include_str!("../../../examples/content/scene.wgsl"),
+                        1,
+                    )
+                    .unwrap()
+                } else {
+                    r.builtin_sdr.clone()
+                };
+                r.builtin_appearance = name == "restored";
+            }
+            let mut lighting =
+                LightingPacket::try_pack(&ruster_scene::Lighting::authored_default("sun")).unwrap();
+            lighting.ambient = [0.; 4];
+            lighting.direction_to_light = [0., 0., 1., 0.];
+            lighting.directional_color_intensity = [intensity, intensity, intensity, 0.];
+            if name == "grazing-storage-limit" {
+                // Replace only this fixture's attachment with a COPY_SRC-capable
+                // image. Production scene/BRDF/storage/composite code is unchanged.
+                lighting.direction_to_light = [-1., 0., 0.00001, 0.];
+                let r = resources.get_mut::<Resources>().unwrap();
+                let color = grazing_image.create_view(&Default::default());
+                let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+                    mag_filter: wgpu::FilterMode::Linear,
+                    min_filter: wgpu::FilterMode::Linear,
+                    ..Default::default()
+                });
+                let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("grazing production composite binding"),
+                    layout: &r.composite.get_bind_group_layout(0),
+                    entries: &[
+                        wgpu::BindGroupEntry {
+                            binding: 0,
+                            resource: wgpu::BindingResource::TextureView(&color),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 1,
+                            resource: wgpu::BindingResource::Sampler(&sampler),
+                        },
+                        wgpu::BindGroupEntry {
+                            binding: 2,
+                            resource: r.display_uniform.as_entire_binding(),
+                        },
+                    ],
+                });
+                let target = r.target.as_mut().unwrap();
+                target.color = color;
+                target.bind = bind;
+            }
+            let before = metrics.lock().unwrap().clone();
+            let callback = SceneCallback {
+                groups: vec![DrawGroup {
+                    key: Some("surface-plane".into()),
+                    binding: BindingKey::default(),
+                    texture: None,
+                    mesh: Some(mesh.clone()),
+                    range: 0..1,
+                    instances: vec![Instance {
+                        model: Mat4::IDENTITY.to_cols_array_2d(),
+                        normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+                        color: [0.05, 0.05, 0.05, 1.],
+                        base_color: [0.05, 0.05, 0.05, 0.],
+                        response: [1., roughness, 0., 0.],
+                    }],
+                }],
+                camera: Mat4::IDENTITY.to_cols_array(),
+                camera_eye_mode: if name == "grazing-storage-limit" {
+                    [1., 0., 0.00001, 0.]
+                } else if perspective {
+                    [0., 0., 2., 1.]
+                } else {
+                    [0., 0., 1., 0.]
+                },
+                display: if name == "legacy" {
+                    DisplayProfile::LegacySdr
+                } else {
+                    DisplayProfile::SurfaceHdr {
+                        exposure_stops: exposure,
+                    }
+                },
+                lighting,
+                size: egui::vec2(64., 64.),
+                cpu_us: 0.,
+                shadow: None,
+                context: context.clone(),
+                prepared: std::sync::atomic::AtomicBool::new(false),
+            };
+            let mut encoder = device.create_command_encoder(&Default::default());
+            let extra = callback.prepare(device, queue, &screen, &mut encoder, &mut resources);
+            assert!(
+                callback.prepared.load(std::sync::atomic::Ordering::Relaxed),
+                "surface {name} prepared"
+            );
+            {
+                let mut pass = encoder
+                    .begin_render_pass(&wgpu::RenderPassDescriptor {
+                        label: Some("production display transform and output transfer"),
+                        color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            resolve_target: None,
+                            depth_slice: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })],
+                        ..Default::default()
+                    })
+                    .forget_lifetime();
+                callback.paint(
+                    egui::PaintCallbackInfo {
+                        viewport: egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(64., 64.)),
+                        clip_rect: egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(64., 64.),
+                        ),
+                        pixels_per_point: 1.,
+                        screen_size_px: [64, 64],
+                    },
+                    &mut pass,
+                    &resources,
+                );
+            }
+            if name == "grazing-storage-limit" {
+                encoder.copy_texture_to_buffer(
+                    wgpu::TexelCopyTextureInfo {
+                        texture: &grazing_image,
+                        mip_level: 0,
+                        origin: wgpu::Origin3d::ZERO,
+                        aspect: wgpu::TextureAspect::All,
+                    },
+                    wgpu::TexelCopyBufferInfo {
+                        buffer: &grazing_read,
+                        layout: wgpu::TexelCopyBufferLayout {
+                            offset: 0,
+                            bytes_per_row: Some(512),
+                            rows_per_image: Some(64),
+                        },
+                    },
+                    wgpu::Extent3d {
+                        width: 64,
+                        height: 64,
+                        depth_or_array_layers: 1,
+                    },
+                );
+            }
+            encoder.copy_texture_to_buffer(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &image,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d::ZERO,
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::TexelCopyBufferInfo {
+                    buffer: &read,
+                    layout: wgpu::TexelCopyBufferLayout {
+                        offset: 0,
+                        bytes_per_row: Some(256),
+                        rows_per_image: Some(64),
+                    },
+                },
+                wgpu::Extent3d {
+                    width: 64,
+                    height: 64,
+                    depth_or_array_layers: 1,
+                },
+            );
+            queue.submit(extra.into_iter().chain(std::iter::once(encoder.finish())));
+            let (send, recv) = std::sync::mpsc::channel();
+            read.slice(..)
+                .map_async(wgpu::MapMode::Read, move |result| {
+                    let _ = send.send(result);
+                });
+            device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+            recv.recv().unwrap().unwrap();
+            let mapped = read.slice(..).get_mapped_range().unwrap();
+            let actual = pixel(&mapped, 32, 32);
+            drop(mapped);
+            read.unmap();
+            if name == "grazing-storage-limit" {
+                let (send, recv) = std::sync::mpsc::channel();
+                grazing_read
+                    .slice(..)
+                    .map_async(wgpu::MapMode::Read, move |result| {
+                        let _ = send.send(result);
+                    });
+                device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+                recv.recv().unwrap().unwrap();
+                let mapped = grazing_read.slice(..).get_mapped_range().unwrap();
+                let offset = (32 * 64 + 32) * 8;
+                let values: [u16; 4] = std::array::from_fn(|i| {
+                    u16::from_le_bytes([mapped[offset + 2 * i], mapped[offset + 2 * i + 1]])
+                });
+                assert!(
+                    values.iter().all(|value| value & 0x7c00 != 0x7c00),
+                    "grazing stored HDR must contain no Inf/NaN: {values:?}"
+                );
+                assert_eq!(
+                    values,
+                    [0x7bff, 0x7bff, 0x7bff, 0x3c00],
+                    "RGB must saturate to finite65504, alpha1"
+                );
+                assert!(actual[..3].iter().all(|&value| value >= 250) && actual[3] == 255, "saturated grazing HDR must display white rather than a NaN artifact: {actual:?}");
+                drop(mapped);
+                grazing_read.unmap();
+            }
+            let after = metrics.lock().unwrap().clone();
+            let hdr = !matches!(name, "legacy" | "custom");
+            assert_eq!(after.display_applied_hdr, hdr, "surface {name} profile");
+            assert_eq!(
+                after.display_status,
+                if name == "custom" {
+                    DisplayStatus::CustomShader
+                } else if hdr {
+                    DisplayStatus::SurfaceHdr
+                } else {
+                    DisplayStatus::LegacySdr
+                }
+            );
+            assert_eq!(
+                after.target_bytes,
+                format_target_bytes(
+                    [64, 64],
+                    if hdr { samples } else { 1 },
+                    if hdr { HDR_COLOR } else { COLOR }
+                )
+            );
+            if !matches!(name, "legacy") {
+                assert_eq!(
+                    after.mesh_uploads, before.mesh_uploads,
+                    "scalar {name} mesh reuse"
+                );
+                assert_eq!(
+                    after.texture_uploads, before.texture_uploads,
+                    "scalar {name} texture reuse"
+                );
+            }
+            if !matches!(name, "legacy" | "polished" | "custom" | "restored") {
+                assert_eq!(
+                    after.target_allocations, before.target_allocations,
+                    "scalar {name} target reuse"
+                );
+            }
+            assert!(
+                actual[..3]
+                    .iter()
+                    .all(|&value| value.abs_diff(actual[0]) <= 1),
+                "neutral stays neutral: {name} {actual:?}"
+            );
+            results.insert(name, actual);
+        }
+        assert!(
+            results["polished"][0] > results["satin"][0]
+                && results["satin"][0] > results["matte"][0]
+        );
+        assert!(
+            results["exposure-low"][0] < results["exposure-zero"][0]
+                && results["exposure-zero"][0] < results["exposure-high"][0]
+        );
+        assert!(
+            results["bright-unclipped"][0] > 200,
+            "highlights must survive HDR before -8 stop display exposure"
+        );
+        assert_eq!(
+            results["restored"], results["exposure-zero"],
+            "restoring builtin reapplies preserved profile"
+        );
+        assert!(results["perspective"][0].abs_diff(results["exposure-zero"][0]) <= 2);
+        outputs.push(results);
+    }
+    for name in outputs[0].keys() {
+        assert!(
+            outputs[0][name]
+                .iter()
+                .zip(outputs[1][name])
+                .all(|(&a, b)| a.abs_diff(b) <= 1),
+            "surface output transfer applied exactly once: {name}"
+        );
+    }
+    eprintln!("GPU probe: production dielectric/HDR/exposure/custom restore and both output conventions passed");
+}
+
+/// Numerically establish the permitted grazing fixture crosses half-float range
+/// by evaluating the exact shared WGSL function into f32 storage before its final
+/// attachment conversion. No alternate BRDF or scene render target is introduced.
+fn verify_unstored_grazing_radiance(device: &wgpu::Device, queue: &wgpu::Queue) {
+    let source = format!(
+        "{}\n{}",
+        surface_shader(),
+        r#"
+@group(0) @binding(1) var<storage, read_write> unstored: array<vec4<f32>>;
+@compute @workgroup_size(1) fn grazing_probe() {
+    let view = safe_unit(vec3<f32>(1.0, 0.0, 0.00001));
+    let light = vec3<f32>(-1.0, 0.0, 0.00001);
+    unstored[0] = vec4<f32>(16.0 * direct_response(vec3<f32>(0.05), vec3<f32>(0.0, 0.0, 1.0), view, light, vec4<f32>(1.0, 0.08, 0.0, 0.0)), 1.0);
+}
+"#
+    );
+    let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+        label: Some("shared surface grazing f32 oracle"),
+        source: wgpu::ShaderSource::Wgsl(source.into()),
+    });
+    let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+        label: Some("production BRDF grazing range"),
+        layout: None,
+        module: &shader,
+        entry_point: Some("grazing_probe"),
+        compilation_options: Default::default(),
+        cache: None,
+    });
+    let output = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("unstored production BRDF radiance"),
+        size: 16,
+        usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+        mapped_at_creation: false,
+    });
+    let read = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("grazing f32 readback"),
+        size: 16,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let bind = device.create_bind_group(&wgpu::BindGroupDescriptor {
+        label: Some("unstored grazing result"),
+        layout: &pipeline.get_bind_group_layout(0),
+        entries: &[wgpu::BindGroupEntry {
+            binding: 1,
+            resource: output.as_entire_binding(),
+        }],
+    });
+    let mut encoder = device.create_command_encoder(&Default::default());
+    {
+        let mut pass = encoder.begin_compute_pass(&Default::default());
+        pass.set_pipeline(&pipeline);
+        pass.set_bind_group(0, &bind, &[]);
+        pass.dispatch_workgroups(1, 1, 1);
+    }
+    encoder.copy_buffer_to_buffer(&output, 0, &read, 0, 16);
+    queue.submit([encoder.finish()]);
+    let (send, recv) = std::sync::mpsc::channel();
+    read.slice(..)
+        .map_async(wgpu::MapMode::Read, move |result| {
+            let _ = send.send(result);
+        });
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    recv.recv().unwrap().unwrap();
+    let mapped = read.slice(..).get_mapped_range().unwrap();
+    let radiance: &[f32] = bytemuck::cast_slice(&mapped);
+    assert!(
+        radiance[..3]
+            .iter()
+            .all(|value| value.is_finite() && *value > 65504.),
+        "permitted actual shared grazing BRDF must exceed half storage range: {radiance:?}"
+    );
+    eprintln!("GPU probe: permitted unstored grazing production BRDF radiance={radiance:?}; final storage must saturate");
+    drop(mapped);
+    read.unmap();
 }
