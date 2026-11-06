@@ -3557,18 +3557,20 @@ impl SceneEditor {
             ui.add_enabled_ui(!self.asset_publishing() && !self.asset_loading(),|ui|{egui::ScrollArea::vertical().id_salt("asset_tools_body").max_height((ctx.content_rect().height() - 110.0).max(80.0)).show(ui, |ui| {
             ui.label("Content source updates save separately. Scene Undo reverses object and material edits.");
             ui.label("Stable asset ID");
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+            let mut id_enter = false;
             if self.asset_rename_intent {
                 ui.label(&self.asset_id);
             } else {
-                let field = ui.text_edit_singleline(&mut self.asset_id);
+                let field = ui.add(egui::TextEdit::singleline(&mut self.asset_id).id(egui::Id::unique("asset_import_id")));
+                id_enter = !popup_at_start && enter && (field.has_focus() || field.lost_focus());
                 if !self.asset_focused && !self.asset_source_focus {
                     field.request_focus(); self.asset_focused = true;
                 }
             }
-            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
             ui.label(if self.asset_rename_intent { "Project-relative rename destination (same extension)" } else { "Project-relative OBJ mesh or PNG texture source" });
-            let source = ui.text_edit_singleline(&mut self.asset_source);
-            if !self.asset_focused && self.asset_source_focus {
+            let source = ui.add(egui::TextEdit::singleline(&mut self.asset_source).id(egui::Id::unique("asset_import_source")));
+            if id_enter || (!self.asset_focused && self.asset_source_focus) {
                 source.request_focus(); source.scroll_to_me(Some(egui::Align::Center)); self.asset_focused = true;
             }
             let mut operation = None;
@@ -3592,7 +3594,7 @@ impl SceneEditor {
                 });
                 ui.label("Use authored normals for smooth surfaces, or Flat for hard faces.").on_hover_text("Authored normals use the complete normals in your OBJ. A mesh with no normals uses flat shading; incomplete normals need repair.");
             }
-            if !self.asset_ops.busy() && !popup_at_start && !egui::Popup::is_any_open(ctx) && enter && (source.has_focus() || source.lost_focus()) {
+            if !self.asset_ops.busy() && !id_enter && !popup_at_start && !egui::Popup::is_any_open(ctx) && enter && (source.has_focus() || source.lost_focus()) {
                 operation = Some(if self.asset_rename_intent {"rename"} else {"import"});
             }
             ui.add_enabled_ui(!self.asset_ops.busy(),|ui|{ui.horizontal_wrapped(|ui| {
@@ -6913,5 +6915,67 @@ mod tests {
             restored.session.scene()
         );
         assert_eq!(std::fs::read(original).unwrap(), original_bytes);
+    }
+    #[test]
+    fn asset_dialog_enter_advances_id_and_popup_owns_dismissal() {
+        let mut editor = SceneEditor::new(Session::new(Scene::empty("import-focus")).unwrap());
+        editor.asset_dialog = true;
+        let ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut frame = |editor: &mut SceneEditor, events| {
+            time += 0.1;
+            ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100., 900.),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |_ui| editor.content_ui(&ctx),
+            )
+            .drop_without_applying_deltas();
+        };
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![]);
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::unique("asset_import_id"))
+        );
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(editor.asset_dialog);
+        assert!(!editor.asset_ops.busy());
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::unique("asset_import_source"))
+        );
+        frame(&mut editor, vec![key(egui::Key::Tab)]);
+        frame(&mut editor, vec![]);
+        assert_ne!(
+            ctx.memory(|memory| memory.focused()),
+            Some(egui::Id::unique("asset_import_source"))
+        );
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(egui::Popup::is_any_open(&ctx));
+        assert!(!editor.asset_ops.busy());
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert!(
+            editor.asset_dialog,
+            "First Escape dismisses only the dropdown"
+        );
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(!editor.asset_dialog);
+        assert_eq!(editor.session.scene().revision, 0);
     }
 }
