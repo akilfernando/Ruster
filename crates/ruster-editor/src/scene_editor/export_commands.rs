@@ -427,7 +427,7 @@ impl SceneEditor {
                     egui::TextEdit::singleline(&mut self.export_destination)
                         .desired_width(ui.available_width()),
                 );
-                ui.checkbox(&mut self.export_use_current_view, "Use current view")
+                let current_view = ui.checkbox(&mut self.export_use_current_view, "Use current view")
                     .on_hover_text("Start the exported application with this camera and projection. Requires a current Linux export template.");
                 let blocked = self.export_ready(true).err();
                 if let Some(reason) = &blocked {
@@ -465,7 +465,8 @@ impl SceneEditor {
                     .inner;
                 if cancel.clicked() || escape || (enter && cancel.has_focus()) {
                     self.export_dialog = false;
-                } else if (submit.clicked() || (enter && !appearance_activated))
+                } else if (submit.clicked()
+                    || (enter && !appearance_activated && !current_view.has_focus()))
                     && blocked.is_none()
                 {
                     let runtime = PathBuf::from(self.export_runtime_kit.trim());
@@ -640,6 +641,73 @@ mod tests {
             editor.export_dialog && editor.export_error.contains("Choose"),
             "Enter in the title field must submit the form, then explain the missing template: {}",
             editor.export_error
+        );
+        assert!(!editor.creation_export.busy());
+        frame(
+            &mut editor,
+            &ctx,
+            Some(egui::Key::Escape),
+            egui::Modifiers::NONE,
+        );
+        assert!(!editor.export_dialog);
+        editor.open_export_dialog();
+        frame(&mut editor, &ctx, None, egui::Modifiers::NONE);
+        for _ in 0..3 {
+            frame(
+                &mut editor,
+                &ctx,
+                Some(egui::Key::Tab),
+                egui::Modifiers::NONE,
+            );
+        }
+        frame(
+            &mut editor,
+            &ctx,
+            Some(egui::Key::Space),
+            egui::Modifiers::NONE,
+        );
+        assert!(
+            editor.export_dialog
+                && editor.export_use_current_view
+                && editor.export_error.is_empty(),
+            "Space on Use current view toggles the checkbox without submitting"
+        );
+        frame(
+            &mut editor,
+            &ctx,
+            Some(egui::Key::Enter),
+            egui::Modifiers::NONE,
+        );
+        assert!(
+            editor.export_dialog
+                && !editor.export_use_current_view
+                && editor.export_error.is_empty(),
+            "Enter belongs to the focused checkbox and must not also submit the form"
+        );
+        frame(
+            &mut editor,
+            &ctx,
+            Some(egui::Key::Enter),
+            egui::Modifiers::NONE,
+        );
+        assert!(editor.export_use_current_view && editor.export_error.is_empty());
+        frame(
+            &mut editor,
+            &ctx,
+            Some(egui::Key::Tab),
+            egui::Modifiers::NONE,
+        );
+        frame(
+            &mut editor,
+            &ctx,
+            Some(egui::Key::Enter),
+            egui::Modifiers::NONE,
+        );
+        assert!(
+            editor.export_dialog
+                && editor.export_use_current_view
+                && editor.export_error.contains("Choose"),
+            "Enter on Export still submits and preserves the checked camera option"
         );
         assert!(!editor.creation_export.busy());
         frame(
