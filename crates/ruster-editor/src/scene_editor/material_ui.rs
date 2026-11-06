@@ -1,5 +1,5 @@
 //! One recoverable material form, using the same validated commands as agents.
-use super::SceneEditor;
+use super::{combo_focus::ComboFocus, SceneEditor};
 use eframe::egui;
 use ruster_scene::{MaterialResponse, OpaqueMaterial, Scene, TextureAddress, TextureFilter};
 use serde::{Deserialize, Serialize};
@@ -465,7 +465,9 @@ impl SceneEditor {
         }
         let mut assigned = object.material.clone();
         ui.add_enabled_ui(editable && self.material_draft.is_none(), |ui| {
-            egui::ComboBox::from_id_salt("object_material_assignment")
+            let focus = ComboFocus::capture(ui, "object_material_assignment");
+            let mut selected = false;
+            let response = egui::ComboBox::from_id_salt("object_material_assignment")
                 .selected_text(
                     choices
                         .iter()
@@ -475,6 +477,7 @@ impl SceneEditor {
                 )
                 .show_ui(ui, |ui| {
                     if ui.selectable_value(&mut assigned, None, "None").clicked() {
+                        selected = true;
                         ui.close();
                     }
                     for (id, name) in &choices {
@@ -483,10 +486,12 @@ impl SceneEditor {
                             .on_hover_text(id)
                             .clicked()
                         {
+                            selected = true;
                             ui.close();
                         }
                     }
                 });
+            focus.restore(ui, &response.response, selected);
         });
         if assigned != object.material {
             self.assign_material_ui(&object.id, assigned);
@@ -576,6 +581,8 @@ impl SceneEditor {
             ui.horizontal(|ui| {
                 ui.label("Shading").on_hover_text("Diffuse preserves the legacy material response. Nonmetallic adds a neutral dielectric highlight controlled by roughness.");
                 let before = draft.response_mode;
+                let focus = ComboFocus::capture(ui, "material_response_mode");
+                let mut selected = false;
                 let response = egui::ComboBox::from_id_salt("material_response_mode")
                     .width(120.0)
                     .selected_text(match draft.response_mode {
@@ -585,14 +592,13 @@ impl SceneEditor {
                     .show_ui(ui, |ui| {
                         for (mode, label) in [(MaterialResponseMode::Diffuse, "Diffuse"), (MaterialResponseMode::Dielectric, "Nonmetallic")] {
                             if ui.selectable_value(&mut draft.response_mode, mode, label).clicked() {
+                                selected = true;
                                 ui.close();
                             }
                         }
                     });
                 changed |= before != draft.response_mode;
-                if before != draft.response_mode {
-                    response.response.request_focus();
-                }
+                focus.restore(ui, &response.response, selected);
                 fields.push(response.response);
             });
             if draft.response_mode == MaterialResponseMode::Dielectric {
@@ -663,10 +669,12 @@ impl SceneEditor {
                     "All shared users need UV-mapped meshes. Make unique to texture this object only."
                 } else { "Choose a UV-mapped mesh before adding a texture." });
             }
+            let focus = ComboFocus::capture(ui, "material_texture");
+            let mut selected = false;
             let texture_response = egui::ComboBox::from_id_salt("material_texture")
                 .selected_text(texture_text)
                 .show_ui(ui, |ui| {
-                    if ui.selectable_value(&mut draft.texture, None, "None").clicked() { ui.close(); }
+                    if ui.selectable_value(&mut draft.texture, None, "None").clicked() { selected = true; ui.close(); }
                     for info in &textures {
                         let ready = uv_ready
                             && info.status == ruster_assets::AssetStatus::Ready
@@ -680,10 +688,11 @@ impl SceneEditor {
                                 Some(info.id.clone()),
                                 &info.source,
                             )
-                            .on_hover_text(&info.id).clicked() { ui.close(); }
+                            .on_hover_text(&info.id).clicked() { selected = true; ui.close(); }
                         });
                     }
                 });
+            focus.restore(ui, &texture_response.response, selected);
             let response = texture_response.response;
             if response
                 .dnd_hover_payload::<super::AssetDrag>()
@@ -716,28 +725,34 @@ impl SceneEditor {
             let address = draft.address;
             ui.horizontal(|ui| {
                 ui.label("Filter");
+                let focus = ComboFocus::capture(ui, "material_filter");
+                let mut selected = false;
                 let filter_response = egui::ComboBox::from_id_salt("material_filter")
                     .selected_text(match draft.filter {
                         TextureFilter::Linear => "Linear",
                         TextureFilter::Nearest => "Nearest",
                     })
                     .show_ui(ui, |ui| {
-                        if ui.selectable_value(&mut draft.filter, TextureFilter::Linear, "Linear").clicked() { ui.close(); }
-                        if ui.selectable_value(&mut draft.filter, TextureFilter::Nearest, "Nearest").clicked() { ui.close(); }
+                        if ui.selectable_value(&mut draft.filter, TextureFilter::Linear, "Linear").clicked() { selected = true; ui.close(); }
+                        if ui.selectable_value(&mut draft.filter, TextureFilter::Nearest, "Nearest").clicked() { selected = true; ui.close(); }
                     });
+                focus.restore(ui, &filter_response.response, selected);
                 fields.push(filter_response.response);
             });
             ui.horizontal(|ui| {
                 ui.label("Wrap");
+                let focus = ComboFocus::capture(ui, "material_wrap");
+                let mut selected = false;
                 let wrap_response = egui::ComboBox::from_id_salt("material_wrap")
                     .selected_text(match draft.address {
                         TextureAddress::Repeat => "Repeat",
                         TextureAddress::Clamp => "Clamp",
                     })
                     .show_ui(ui, |ui| {
-                        if ui.selectable_value(&mut draft.address, TextureAddress::Repeat, "Repeat").clicked() { ui.close(); }
-                        if ui.selectable_value(&mut draft.address, TextureAddress::Clamp, "Clamp").clicked() { ui.close(); }
+                        if ui.selectable_value(&mut draft.address, TextureAddress::Repeat, "Repeat").clicked() { selected = true; ui.close(); }
+                        if ui.selectable_value(&mut draft.address, TextureAddress::Clamp, "Clamp").clicked() { selected = true; ui.close(); }
                     });
+                focus.restore(ui, &wrap_response.response, selected);
                 fields.push(wrap_response.response);
             });
             changed |= filter != draft.filter || address != draft.address;
@@ -1043,6 +1058,52 @@ mod tests {
             MaterialResponseMode::Dielectric
         );
         assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        // Choosing the current entry still closes the popup and returns focus
+        // to its trigger, so Tab continues to Roughness after idle frames.
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Nonmetallic");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+        frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert_eq!(
+            editor.material_draft.as_ref().unwrap().response_mode,
+            MaterialResponseMode::Dielectric
+        );
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![]);
+        assert!(ctx.memory(|memory| memory.focused()).is_some());
+        frame(&mut editor, vec![key(egui::Key::Tab)]);
+        frame(&mut editor, vec![]);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(roughness));
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        // An outside click owns its new field; closing a dropdown must not
+        // request the trigger's focus over that explicit pointer choice.
+        let shapes = frame(&mut editor, vec![]);
+        let mode = label_point(&shapes, "Nonmetallic");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(mode), click(mode, true)],
+        );
+        frame(&mut editor, vec![click(mode, false)]);
+        let name = egui::Id::unique("material_name");
+        let point = ctx.read_response(name).unwrap().rect.center();
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(point), click(point, true)],
+        );
+        frame(&mut editor, vec![click(point, false)]);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![]);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(name));
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
         let shapes = frame(&mut editor, vec![]);
         let mode = label_point(&shapes, "Nonmetallic");
         frame(
@@ -1056,6 +1117,10 @@ mod tests {
             editor.material_draft.is_some(),
             "First Escape belongs to the popup"
         );
+        // Native frames can pass between keys: last-frame focus alone must
+        // not be the reason the raw form still owns the following Escape.
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![]);
         frame(&mut editor, vec![key(egui::Key::Escape)]);
         assert!(
             editor.material_draft.is_none(),

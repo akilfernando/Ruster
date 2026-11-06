@@ -6,6 +6,7 @@ mod asset_timing;
 mod behavior_commands;
 mod capture_commands;
 mod color_commands;
+mod combo_focus;
 mod display_ui;
 mod export_commands;
 mod lighting_commands;
@@ -3577,7 +3578,9 @@ impl SceneEditor {
             if self.import_normal_policy().is_some() {
                 ui.horizontal(|ui| {
                     ui.label("Normals");
-                    egui::ComboBox::from_id_salt("asset_import_normals")
+                    let focus = combo_focus::ComboFocus::capture(ui, "asset_import_normals");
+                    let mut selected = false;
+                    let response = egui::ComboBox::from_id_salt("asset_import_normals")
                         .selected_text(match self.asset_normal_policy {
                             ruster_assets::MeshNormalPolicy::Flat => "Flat normals",
                             ruster_assets::MeshNormalPolicy::AuthoredWhenComplete => "Authored normals",
@@ -3587,10 +3590,12 @@ impl SceneEditor {
                                 (ruster_assets::MeshNormalPolicy::Flat, "Flat normals"),
                             ] {
                                 if ui.selectable_value(&mut self.asset_normal_policy, value, label).clicked() {
+                                    selected = true;
                                     ui.close();
                                 }
                             }
                         });
+                    focus.restore(ui, &response.response, selected);
                 });
                 ui.label("Use authored normals for smooth surfaces, or Flat for hard faces.").on_hover_text("Authored normals use the complete normals in your OBJ. A mesh with no normals uses flat shading; incomplete normals need repair.");
             }
@@ -6968,6 +6973,36 @@ mod tests {
         frame(&mut editor, vec![key(egui::Key::Enter)]);
         assert!(egui::Popup::is_any_open(&ctx));
         assert!(!editor.asset_ops.busy());
+        frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+        frame(&mut editor, vec![key(egui::Key::ArrowDown)]);
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![]);
+        assert_eq!(
+            editor.asset_normal_policy,
+            ruster_assets::MeshNormalPolicy::Flat
+        );
+        assert!(
+            ctx.memory(|memory| memory.focused()).is_some(),
+            "Closed selector must retain trigger focus after idle frames"
+        );
+        frame(&mut editor, vec![key(egui::Key::Tab)]);
+        assert!(
+            ![
+                Some(egui::Id::unique("asset_import_id")),
+                Some(egui::Id::unique("asset_import_source")),
+                None
+            ]
+            .contains(&ctx.memory(|memory| memory.focused())),
+            "Tab advances to Import, not the first field"
+        );
+        let mut previous = key(egui::Key::Tab);
+        if let egui::Event::Key { modifiers, .. } = &mut previous {
+            modifiers.shift = true;
+        }
+        frame(&mut editor, vec![previous]);
+        frame(&mut editor, vec![key(egui::Key::Enter)]);
+        assert!(egui::Popup::is_any_open(&ctx));
         frame(&mut editor, vec![key(egui::Key::Escape)]);
         assert!(!egui::Popup::is_any_open(&ctx));
         assert!(

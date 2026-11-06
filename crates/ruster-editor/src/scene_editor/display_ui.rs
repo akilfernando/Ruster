@@ -182,7 +182,9 @@ impl SceneEditor {
             let before = draft.profile;
             let profile = ui.horizontal_wrapped(|ui| {
                 ui.label("Profile");
-                egui::ComboBox::from_id_salt("display_profile")
+                let focus = combo_focus::ComboFocus::capture(ui, "display_profile");
+                let mut selected = false;
+                let response = egui::ComboBox::from_id_salt("display_profile")
                     .width(142.0)
                     .selected_text(match draft.profile {
                         DisplayMode::Legacy => "Legacy SDR",
@@ -191,18 +193,18 @@ impl SceneEditor {
                     .show_ui(ui, |ui| {
                         for (mode, label) in [(DisplayMode::Legacy, "Legacy SDR"), (DisplayMode::Surface, "Surface HDR")] {
                             if ui.selectable_value(&mut draft.profile, mode, label).clicked() {
+                                selected = true;
                                 ui.close();
                             }
                         }
-                    }).response
+                    });
+                focus.restore(ui, &response.response, selected);
+                response.response
             }).inner;
             discrete_changed = before != draft.profile;
-            if discrete_changed {
-                profile.request_focus();
-            }
             let mut fields = vec![profile];
             if draft.profile == DisplayMode::Surface {
-                ui.label("Linear HDR lighting uses a fixed display transform for SDR output. Exposure is manual; lighting does not change automatically.");
+                ui.label("Adjust brightness with manual exposure. The display output is SDR.");
                 let response = ui.horizontal_wrapped(|ui| {
                     ui.label("Exposure (EV)");
                     ui.add(egui::TextEdit::singleline(&mut draft.exposure_stops)
@@ -428,6 +430,33 @@ mod tests {
         assert_eq!(pending.exposure_stops, "unfinished");
         assert_eq!(editor.session.snapshot_bytes().unwrap(), original);
         frame(&mut editor, vec![]);
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(editor.display_draft.is_none());
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), original);
+
+        // Dismiss without a selection, then idle as actual native rendering
+        // does between keys. Last-frame focus cannot stand in for ownership.
+        let mut draft = DisplayDraft::new(editor.session.scene());
+        draft.profile = DisplayMode::Surface;
+        draft.exposure_stops = "unfinished".into();
+        editor.display_draft = Some(draft);
+        let shapes = frame(&mut editor, vec![]);
+        let point = label_point(&shapes, "Surface HDR");
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(point), pointer(point, true)],
+        );
+        frame(&mut editor, vec![pointer(point, false)]);
+        assert!(egui::Popup::is_any_open(&ctx));
+        frame(&mut editor, vec![key(egui::Key::Escape)]);
+        frame(&mut editor, vec![]);
+        frame(&mut editor, vec![]);
+        assert!(!egui::Popup::is_any_open(&ctx));
+        assert!(editor.display_draft.is_some());
+        assert!(
+            ctx.memory(|memory| memory.focused()).is_some(),
+            "Dismissed selector must retain trigger focus after idle frames"
+        );
         frame(&mut editor, vec![key(egui::Key::Escape)]);
         assert!(editor.display_draft.is_none());
         assert_eq!(editor.session.snapshot_bytes().unwrap(), original);
