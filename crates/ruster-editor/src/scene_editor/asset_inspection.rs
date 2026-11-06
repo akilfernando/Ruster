@@ -30,6 +30,7 @@ pub(super) fn page(store: &AssetStore, offset: usize) -> Result<Value, &'static 
             json!({
                 "id": info.id, "kind": info.kind, "source": info.source,
                 "hash": info.hash, "status": info.status,
+                "mesh_normal_policy": info.mesh_normal_policy,
                 "diagnostic": diagnostic, "diagnostic_truncated": truncated,
             })
         })
@@ -61,6 +62,7 @@ mod tests {
         assert!(store.refresh("panel").is_err());
         let observation = page(&store, 0).unwrap();
         let record = &observation["assets"][0];
+        assert_eq!(record["mesh_normal_policy"], "flat");
         assert_eq!(record["status"], "invalid");
         assert_eq!(record["diagnostic_truncated"], true);
         assert_eq!(
