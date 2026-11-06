@@ -13,6 +13,7 @@ pub(super) struct BindingKey {
     pub sampling: u8,
 }
 
+#[derive(Clone)]
 struct GpuTexture {
     source: Option<Weak<ruster_assets::Texture>>,
     _texture: wgpu::Texture,
@@ -111,6 +112,36 @@ pub(super) struct MaterialGpu {
     roughness_white: GpuTexture,
     missing_bind: wgpu::BindGroup,
     invalid: BTreeSet<String>,
+    validation: BTreeMap<String, (Weak<ruster_assets::Texture>, bool)>,
+}
+
+/// A retired generation holds only GPU handles and Weak identity stamps.
+pub(super) struct Generation {
+    textures: BTreeMap<String, GpuTexture>,
+    _bindings: BTreeMap<BindingKey, wgpu::BindGroup>,
+}
+impl Generation {
+    pub fn bytes(&self) -> u64 {
+        self.textures.values().map(|gpu| gpu.bytes).sum()
+    }
+}
+type TextureInputs<'a> = (
+    Option<&'a Arc<ruster_assets::Texture>>,
+    Option<&'a Arc<ruster_assets::Texture>>,
+);
+pub(super) struct Plan<'a> {
+    requested: BTreeMap<&'a BindingKey, TextureInputs<'a>>,
+    sources: BTreeMap<&'a str, &'a Arc<ruster_assets::Texture>>,
+    invalid: BTreeSet<&'a str>,
+}
+impl Plan<'_> {
+    pub fn changed(&self, gpu: &MaterialGpu) -> bool {
+        gpu.textures.len() != self.sources.len()
+            || self
+                .sources
+                .iter()
+                .any(|(id, source)| !gpu.matches(id, source))
+    }
 }
 
 #[derive(Default)]
@@ -214,6 +245,7 @@ impl MaterialGpu {
             roughness_white,
             missing_bind,
             invalid: BTreeSet::new(),
+            validation: BTreeMap::new(),
         }
     }
 
@@ -244,10 +276,21 @@ impl MaterialGpu {
         })
     }
 
-    pub fn prepare<'a>(
+    pub fn generation(&self) -> Generation {
+        Generation {
+            textures: self.textures.clone(),
+            _bindings: self.bindings.clone(),
+        }
+    }
+    fn matches(&self, id: &str, source: &Arc<ruster_assets::Texture>) -> bool {
+        self.textures
+            .get(id)
+            .and_then(|gpu| gpu.source.as_ref())
+            .is_some_and(|old| Weak::ptr_eq(old, &Arc::downgrade(source)))
+    }
+    pub fn plan<'a>(
         &mut self,
         device: &wgpu::Device,
-        queue: &wgpu::Queue,
         requested: impl Iterator<
             Item = (
                 &'a BindingKey,
@@ -255,7 +298,7 @@ impl MaterialGpu {
                 Option<&'a Arc<ruster_assets::Texture>>,
             ),
         >,
-    ) -> Uploads {
+    ) -> Plan<'a> {
         use ruster_assets::TextureRole;
         let requested = requested
             .map(|(key, color, roughness)| (key, (color, roughness)))
@@ -282,52 +325,99 @@ impl MaterialGpu {
                 }
             }
         }
+        self.validation
+            .retain(|id, _| sources.contains_key(id.as_str()));
+        let mut invalid = BTreeSet::new();
+        if sources.len() > ruster_assets::MAX_ASSETS {
+            invalid.extend(sources.keys().copied());
+            sources.clear();
+        }
+        sources.retain(|id, source| {
+            let identity = Arc::downgrade(source);
+            let valid = if self.matches(id, source) {
+                true
+            } else if let Some((_, valid)) = self
+                .validation
+                .get(*id)
+                .filter(|(old, _)| Weak::ptr_eq(old, &identity))
+            {
+                *valid
+            } else {
+                let valid = ruster_assets::validate_texture(source).is_ok()
+                    && source.width <= device.limits().max_texture_dimension_2d
+                    && source.height <= device.limits().max_texture_dimension_2d;
+                self.validation.insert((*id).to_owned(), (identity, valid));
+                valid
+            };
+            if !valid {
+                invalid.insert(*id);
+            }
+            valid
+        });
+        let bytes = sources.values().try_fold(0u64, |sum, source| {
+            sum.checked_add(source.payload_bytes() as u64)
+        });
+        if sources.len() > ruster_assets::MAX_ASSETS
+            || bytes.is_none_or(|bytes| bytes > ruster_assets::MAX_TEXTURE_RESOLVED_BYTES as u64)
+        {
+            invalid.extend(sources.keys().copied());
+            sources.clear();
+        }
+        Plan {
+            requested,
+            sources,
+            invalid,
+        }
+    }
+    #[cfg(test)]
+    pub fn prepare<'a>(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        requested: impl Iterator<
+            Item = (
+                &'a BindingKey,
+                Option<&'a Arc<ruster_assets::Texture>>,
+                Option<&'a Arc<ruster_assets::Texture>>,
+            ),
+        >,
+    ) -> Uploads {
+        let plan = self.plan(device, requested);
+        self.prepare_plan(device, queue, plan)
+    }
+    pub fn prepare_plan(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        plan: Plan<'_>,
+    ) -> Uploads {
+        use ruster_assets::TextureRole;
+        let Plan {
+            requested,
+            sources,
+            invalid,
+        } = plan;
         let old_count = self.textures.len();
         self.textures
             .retain(|id, _| sources.contains_key(id.as_str()));
         if self.textures.len() != old_count {
-            // Bind groups retain their texture views: dropping the map entry
-            // alone must not leave a stale accepted image alive/unaccounted.
             self.bindings.clear();
         }
         self.bindings.retain(|key, _| requested.contains_key(key));
-        self.invalid.retain(|id| sources.contains_key(id.as_str()));
-        // Admission describes the final unique closure, not the ID-ordered
-        // mixture of old/new image sizes during a valid batch replacement.
-        // Queued old GPU owners still have their separate submission lifetime.
-        let final_bytes = sources.values().try_fold(0u64, |sum, source| {
-            sum.checked_add(source.payload_bytes() as u64)
-        });
-        let final_budget = sources.len() <= ruster_assets::MAX_ASSETS
-            && final_bytes
-                .is_some_and(|bytes| bytes <= ruster_assets::MAX_TEXTURE_RESOLVED_BYTES as u64);
+        self.invalid.retain(|id| invalid.contains(id.as_str()));
+        for id in invalid {
+            if self.invalid.insert(id.to_owned()) {
+                eprintln!("Ruster texture {id} invalid or over renderer limits; role-specific material fallback");
+            }
+        }
         let mut uploads = Uploads::default();
         for (id, source) in sources {
-            if self
-                .textures
-                .get(id)
-                .and_then(|gpu| gpu.source.as_ref())
-                .is_some_and(|old| Weak::ptr_eq(old, &Arc::downgrade(source)))
-            {
+            if self.matches(id, source) {
                 continue;
             }
-            let valid = ruster_assets::validate_texture(source).is_ok()
-                && source.width <= device.limits().max_texture_dimension_2d
-                && source.height <= device.limits().max_texture_dimension_2d
-                && final_budget;
-            // Every referring binding must observe a successful replacement or
-            // truthful fallback, including a texture shared by different keys.
             self.bindings.retain(|key, _| {
                 key.texture.as_deref() != Some(id) && key.roughness.as_deref() != Some(id)
             });
-            if !valid {
-                self.textures.remove(id);
-                if self.invalid.insert(id.to_owned()) {
-                    eprintln!("Ruster texture {id} invalid or over renderer limits; role-specific material fallback");
-                }
-                continue;
-            }
-            self.invalid.remove(id);
             let gpu = GpuTexture::new(device, queue, source);
             uploads.count += 1;
             uploads.bytes += gpu.bytes;

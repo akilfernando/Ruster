@@ -425,6 +425,14 @@ fn sun_shadow_gpu_retirement_lifecycle_probe() {
     drop(probe);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     verify_rejected_callback_paint(&device, &queue);
+    for change in [
+        AbandonedChange::Unchanged,
+        AbandonedChange::ExposureOnly,
+        AbandonedChange::TargetOnly,
+        AbandonedChange::TargetAndExposure,
+    ] {
+        verify_asset_submission_backpressure(&instance, &adapter, &device, &queue, change);
+    }
     assert!(
         pollster::block_on(scope.pop()).is_none(),
         "production shadow lifecycle validation"
@@ -478,6 +486,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
             ..SunShadow::default()
         }),
         context: context.clone(),
+        receipt: FrameReceipt::default(),
         prepared: AtomicBool::new(false),
     };
     let second = SceneCallback {
@@ -490,6 +499,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         cpu_us: 0.,
         shadow: None,
         context: context.clone(),
+        receipt: FrameReceipt::default(),
         prepared: AtomicBool::new(false),
     };
     let screen = egui_wgpu::ScreenDescriptor {
@@ -623,22 +633,25 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     }
     drop(bytes);
     read.unmap();
-    // Keep the preceding submitted64² target in the real retirement slot,
-    // delaying callback delivery by omitting submit/poll until after two more
-    // real egui frames. This does not assert that the device remains busy.
+    // Keep the preceding submitted64² target in the real retirement slot.
+    // Hold only observation of genuine completion: submit/poll can deliver its
+    // callback immediately, so omitting poll is not a deterministic barrier.
     let retained = SceneCallback {
         size: egui::vec2(63., 63.),
         shadow: None,
+        receipt: FrameReceipt::default(),
         prepared: AtomicBool::new(false),
         ..first
     };
     let pending = SceneCallback {
         display: ruster_scene::DisplayProfile::SurfaceHdr { exposure_stops: 4. },
+        receipt: FrameReceipt::default(),
         prepared: AtomicBool::new(false),
         ..second
     };
     {
         let r = resources.get_mut::<Resources>().unwrap();
+        r.hold_target_acknowledgement = true;
         assert!(r.resize(device, queue, [63, 63], COLOR, 1, &context));
         assert!(r.retiring_target.is_some());
     }
@@ -649,6 +662,48 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
             assert!(retained.prepared.load(Ordering::Relaxed));
         })
         .drop_without_applying_deltas();
+    {
+        let mut pass = encoder
+            .begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("establish exact fresh retained target eligibility"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    resolve_target: None,
+                    depth_slice: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                ..Default::default()
+            })
+            .forget_lifetime();
+        retained.paint(
+            egui::PaintCallbackInfo {
+                viewport: rect,
+                clip_rect: rect,
+                pixels_per_point: 1.,
+                screen_size_px: [SIZE, SIZE],
+            },
+            &mut pass,
+            &resources,
+        );
+    }
+    assert!(retained.receipt.is_fresh_painted());
+    queue.submit([encoder.finish()]);
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    assert!(
+        resources
+            .get::<Resources>()
+            .unwrap()
+            .retiring_target
+            .as_ref()
+            .unwrap()
+            .completed
+            .load(Ordering::Acquire),
+        "target retirement must receive genuine completion while only its observation is held"
+    );
+    let mut encoder = device.create_command_encoder(&Default::default());
     let before = metrics.lock().unwrap().clone();
     context
         .run_pass(egui::RawInput::default(), |_| {
@@ -746,8 +801,594 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
     );
     drop(bytes);
     read.unmap();
+    {
+        let r = resources.get_mut::<Resources>().unwrap();
+        assert!(
+            r.retiring_target.is_some(),
+            "the test hold keeps the fixed retirement slot occupied"
+        );
+        r.hold_target_acknowledgement = false;
+        let allocations = r.target_allocations;
+        assert!(r.resize(device, queue, [63, 63], COLOR, 1, &context));
+        assert!(
+            r.retiring_target.is_none(),
+            "release must reap the genuinely completed target"
+        );
+        assert_eq!(
+            r.target_allocations, allocations,
+            "reaping does not allocate another target"
+        );
+    }
     eprintln!("SceneCallback pending retirement retains actual lit scene pixels and applied state; duplicates remain unpaintable");
     drop(resources);
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum AbandonedChange {
+    Unchanged,
+    ExposureOnly,
+    TargetOnly,
+    TargetAndExposure,
+}
+
+/// Upload-only submission and real logic maintenance share the production
+/// RenderState API. No surface, fake completion, or synthetic paint witness.
+fn verify_asset_submission_backpressure(
+    instance: &wgpu::Instance,
+    adapter: &wgpu::Adapter,
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    change: AbandonedChange,
+) {
+    use egui_wgpu::CallbackTrait;
+    use std::sync::atomic::AtomicBool;
+
+    let context = egui::Context::default();
+    let wakes = Arc::new(AtomicUsize::new(0));
+    let delayed = Arc::new(AtomicUsize::new(0));
+    let observed = wakes.clone();
+    let delayed_observer = delayed.clone();
+    context.set_repaint_observer(move |request| {
+        observed.fetch_add(1, Ordering::Relaxed);
+        if request.delay == std::time::Duration::from_millis(16) {
+            delayed_observer.fetch_add(1, Ordering::Relaxed);
+        }
+    });
+    let mut renderer =
+        egui_wgpu::Renderer::new(device, COLOR, egui_wgpu::RendererOptions::default());
+    let mut r = Resources::new(device, queue, COLOR, 1);
+    let changes_configuration = change != AbandonedChange::Unchanged;
+    let changes_target = matches!(
+        change,
+        AbandonedChange::TargetOnly | AbandonedChange::TargetAndExposure
+    );
+    if matches!(
+        change,
+        AbandonedChange::ExposureOnly | AbandonedChange::TargetAndExposure
+    ) {
+        r.enable_hdr(device, 1);
+    }
+    let metrics = r.metrics.clone();
+    renderer.callback_resources.insert(r);
+    let render = egui_wgpu::RenderState {
+        adapter: adapter.clone(),
+        #[cfg(not(target_arch = "wasm32"))]
+        available_adapters: vec![adapter.clone()],
+        instance: instance.clone(),
+        device: device.clone(),
+        queue: queue.clone(),
+        target_format: COLOR,
+        renderer: Arc::new(egui::epaint::mutex::RwLock::new(renderer)),
+    };
+    let make_callback = |extent: f32, color: [u8; 4], size: f32| {
+        let mesh = Arc::new(ruster_assets::parse_obj(format!(
+            "v -{extent} -1 0.5\nv {extent} -1 0.5\nv 0 1 0.5\nvt 0 0\nvt 1 0\nvt 0.5 1\nf 1/1 2/2 3/3\n"
+        ).as_bytes()).unwrap());
+        let texture = Arc::new(ruster_assets::Texture {
+            role: ruster_assets::TextureRole::BaseColor,
+            width: 1,
+            height: 1,
+            mips: vec![ruster_assets::TextureMip {
+                width: 1,
+                height: 1,
+                bytes: color.to_vec(),
+            }],
+        });
+        SceneCallback {
+            groups: vec![DrawGroup {
+                key: Some("epoch-mesh".into()),
+                binding: BindingKey {
+                    texture: Some("epoch-image".into()),
+                    ..Default::default()
+                },
+                texture: Some(texture),
+                roughness: None,
+                mesh: Some(mesh),
+                instances: vec![Instance {
+                    model: Mat4::IDENTITY.to_cols_array_2d(),
+                    normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
+                    color: [1.; 4],
+                    base_color: [1., 1., 1., 0.],
+                    response: [0.; 4],
+                }],
+                range: 0..1,
+            }],
+            camera: Mat4::IDENTITY.to_cols_array(),
+            camera_eye_mode: [0., 0., 2., 1.],
+            display: ruster_scene::DisplayProfile::LegacySdr,
+            lighting: LightingPacket::try_pack(&ruster_scene::Lighting::authored_default("sun"))
+                .unwrap(),
+            size: egui::vec2(size, size),
+            cpu_us: 0.,
+            shadow: None,
+            context: context.clone(),
+            receipt: FrameReceipt::default(),
+            prepared: AtomicBool::new(false),
+        }
+    };
+    let mut a = make_callback(1., [255, 0, 0, 255], 64.);
+    if change == AbandonedChange::ExposureOnly {
+        a.display = ruster_scene::DisplayProfile::SurfaceHdr { exposure_stops: 0. };
+    }
+    let mut b = make_callback(
+        0.8,
+        [0, 255, 0, 255],
+        if changes_target { 63. } else { 64. },
+    );
+    if matches!(
+        change,
+        AbandonedChange::ExposureOnly | AbandonedChange::TargetAndExposure
+    ) {
+        b.display = ruster_scene::DisplayProfile::SurfaceHdr { exposure_stops: 3. };
+    }
+    let c = make_callback(0.6, [0, 0, 255, 255], 63.);
+    let mut d = make_callback(0.4, [255, 255, 0, 255], 62.);
+    d.display = ruster_scene::DisplayProfile::SurfaceHdr { exposure_stops: 4. };
+    let screen = egui_wgpu::ScreenDescriptor {
+        size_in_pixels: [64, 64],
+        pixels_per_point: 1.,
+    };
+    let frame = |callback: &SceneCallback| {
+        let mut encoder = device.create_command_encoder(&Default::default());
+        context
+            .run_pass(egui::RawInput::default(), |_| {
+                let mut renderer = render.renderer.write();
+                callback.prepare(
+                    device,
+                    queue,
+                    &screen,
+                    &mut encoder,
+                    &mut renderer.callback_resources,
+                );
+            })
+            .drop_without_applying_deltas();
+        encoder.finish()
+    };
+    let logic = || {
+        let before = (
+            context.cumulative_frame_nr(),
+            metrics.lock().unwrap().frames,
+        );
+        let mut pending = None;
+        let _ = context.run_logic(&egui::RawInput::default(), |ctx| {
+            pending = Some(maintain_assets(&render, ctx).unwrap());
+        });
+        assert_eq!(
+            (
+                context.cumulative_frame_nr(),
+                metrics.lock().unwrap().frames
+            ),
+            before,
+            "logic maintenance must not invent an egui/rendered frame"
+        );
+        pending.unwrap()
+    };
+    let drain = || {
+        let _ = logic();
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        assert!(
+            !logic(),
+            "genuine completion must release the sole retired generation"
+        );
+        let observation = display_observation(&render).unwrap();
+        assert_eq!(
+            (
+                observation.asset_retired_mesh_bytes,
+                observation.asset_retired_texture_bytes
+            ),
+            (0, 0)
+        );
+        assert_eq!(observation.asset_epoch_phase, "idle");
+    };
+    let image = device.create_texture(&wgpu::TextureDescriptor {
+        label: Some("asset epoch actual composite"),
+        size: wgpu::Extent3d {
+            width: 64,
+            height: 64,
+            depth_or_array_layers: 1,
+        },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: COLOR,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+    let view = image.create_view(&Default::default());
+    let read = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("asset epoch readback"),
+        size: 64 * 64 * 4,
+        usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+        mapped_at_creation: false,
+    });
+    let paint = |callback: &SceneCallback| {
+        let mut encoder = device.create_command_encoder(&Default::default());
+        {
+            let renderer = render.renderer.read();
+            let mut pass = encoder
+                .begin_render_pass(&wgpu::RenderPassDescriptor {
+                    label: Some("exact asset callback composite"),
+                    color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                        view: &view,
+                        resolve_target: None,
+                        depth_slice: None,
+                        ops: wgpu::Operations {
+                            load: wgpu::LoadOp::Clear(wgpu::Color::BLACK),
+                            store: wgpu::StoreOp::Store,
+                        },
+                    })],
+                    ..Default::default()
+                })
+                .forget_lifetime();
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(64., 64.));
+            callback.paint(
+                egui::PaintCallbackInfo {
+                    viewport: rect,
+                    clip_rect: rect,
+                    pixels_per_point: 1.,
+                    screen_size_px: [64, 64],
+                },
+                &mut pass,
+                &renderer.callback_resources,
+            );
+        }
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &image,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: &read,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(256),
+                    rows_per_image: Some(64),
+                },
+            },
+            wgpu::Extent3d {
+                width: 64,
+                height: 64,
+                depth_or_array_layers: 1,
+            },
+        );
+        queue.submit([encoder.finish()]);
+        let (send, recv) = std::sync::mpsc::channel();
+        read.slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = send.send(result);
+            });
+        device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+        recv.recv().unwrap().unwrap();
+        let bytes = read.slice(..).get_mapped_range().unwrap().to_vec();
+        read.unmap();
+        bytes
+    };
+
+    let delayed_before = delayed.load(Ordering::Relaxed);
+    let commands = frame(&a);
+    assert!(
+        !a.receipt.is_fresh_painted(),
+        "prepare cannot certify a painted frame"
+    );
+    assert!(
+        delayed.load(Ordering::Relaxed) > delayed_before,
+        "isolated first upload must schedule its own maintenance wake"
+    );
+    queue.submit([commands]);
+    let pixels_a = paint(&a);
+    assert!(a.receipt.is_fresh_painted());
+    drain();
+    let accepted_a = metrics.lock().unwrap().clone();
+    assert_eq!(
+        (accepted_a.texture_uploads, accepted_a.mesh_uploads),
+        (1, 2)
+    );
+
+    let delayed_before = delayed.load(Ordering::Relaxed);
+    drop(frame(&b)); // Failed surface acquisition: abandon the scene encoder.
+    assert!(!b.receipt.is_fresh_painted());
+    assert!(
+        delayed.load(Ordering::Relaxed) > delayed_before,
+        "final isolated replacement cannot rely on an unrelated UI event"
+    );
+    queue.submit(std::iter::empty()); // Actual pending upload-only submission.
+    {
+        let mut renderer = render.renderer.write();
+        renderer
+            .callback_resources
+            .get_mut::<Resources>()
+            .unwrap()
+            .assets
+            .hold_acknowledgement = true;
+    }
+    let accepted_b = metrics.lock().unwrap().clone();
+    assert_eq!(accepted_b.texture_uploads, accepted_a.texture_uploads + 1);
+    assert_eq!(accepted_b.mesh_uploads, accepted_a.mesh_uploads + 1);
+    assert_eq!(
+        accepted_b.asset_retired_mesh_bytes,
+        accepted_a.asset_live_mesh_bytes
+    );
+    assert_eq!(
+        accepted_b.asset_retired_texture_bytes,
+        accepted_a.asset_live_texture_bytes
+    );
+    assert!(logic()); // Arms/polls only; real completion remains held, not fabricated.
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    {
+        let renderer = render.renderer.read();
+        assert!(renderer
+            .callback_resources
+            .get::<Resources>()
+            .unwrap()
+            .assets
+            .genuinely_completed());
+    }
+    assert!(
+        logic(),
+        "test holds acknowledgement after genuine GPU completion"
+    );
+    assert!(
+        !b.receipt.is_fresh_painted(),
+        "logic completion is not a paint witness"
+    );
+
+    if change == AbandonedChange::ExposureOnly {
+        assert_eq!(
+            accepted_b.target_allocations, accepted_a.target_allocations,
+            "exposure-only fixture must isolate packet invalidation without target allocation"
+        );
+    }
+    if changes_target {
+        assert_eq!(
+            accepted_b.target_allocations,
+            accepted_a.target_allocations + 1,
+            "target fixture must install a distinct actual allocation"
+        );
+    }
+    if changes_configuration {
+        let stale_pixels = paint(&a);
+        assert!(
+            stale_pixels
+                .as_chunks::<4>()
+                .0
+                .iter()
+                .all(|pixel| *pixel == [0, 0, 0, 255]),
+            "a stale-generation callback must not composite the unproven current configuration"
+        );
+        let renderer = render.renderer.read();
+        assert!(
+            !renderer
+                .callback_resources
+                .get::<Resources>()
+                .unwrap()
+                .retained_image_eligible
+                .load(Ordering::Acquire),
+            "stale paint cannot re-enable retained-image eligibility"
+        );
+    }
+    for (name, callback) in [("C", &c), ("D", &d)] {
+        let mut encoder = device.create_command_encoder(&Default::default());
+        context
+            .run_pass(egui::RawInput::default(), |_| {
+                let mut renderer = render.renderer.write();
+                callback.prepare(
+                    device,
+                    queue,
+                    &screen,
+                    &mut encoder,
+                    &mut renderer.callback_resources,
+                );
+                let pending = metrics.lock().unwrap().clone();
+                assert_eq!(
+                    pending.target_allocations, accepted_b.target_allocations,
+                    "unfinished shared epoch must withhold {name} before target allocation"
+                );
+                assert_eq!(
+                    callback_work(&pending),
+                    callback_work(&accepted_b),
+                    "unfinished shared epoch must withhold {name} before scene writes/uploads"
+                );
+                assert!(pending.asset_pending);
+                assert_eq!(pending.asset_epoch_phase, "armed");
+                assert!(
+                    pending.asset_live_mesh_bytes + pending.asset_retired_mesh_bytes
+                        <= 2 * ruster_assets::MAX_RESOLVED_BYTES as u64
+                );
+                assert!(
+                    pending.asset_live_texture_bytes + pending.asset_retired_texture_bytes
+                        <= 2 * ruster_assets::MAX_TEXTURE_RESOLVED_BYTES as u64
+                );
+                assert_eq!(pending.display_status, if changes_configuration { DisplayStatus::PendingUnavailable } else { DisplayStatus::Pending },
+                    "pending image availability must match the actual painted configuration: {change:?}");
+                if changes_configuration {
+                    assert!(!callback.prepared.load(Ordering::Relaxed),
+                        "an abandoned resized/exposure target must be unavailable, never composited as last-good");
+                    assert_eq!(pending.display_status.warning(), Some("Waiting for the viewport to finish rendering."));
+                }
+                if name == "D" {
+                    assert!(pending.display_requested_hdr);
+                    assert_eq!(pending.display_requested_exposure_stops, 4.);
+                    assert_eq!(pending.target_requested_size, [62, 62]);
+                    assert_eq!(pending.display_applied_hdr, accepted_b.display_applied_hdr);
+                    assert_eq!(pending.display_applied_exposure_stops, accepted_b.display_applied_exposure_stops);
+                }
+                a.prepare(
+                    device,
+                    queue,
+                    &screen,
+                    &mut encoder,
+                    &mut renderer.callback_resources,
+                );
+                assert!(!a.prepared.load(Ordering::Relaxed));
+                let duplicate = metrics.lock().unwrap().clone();
+                assert_eq!(callback_work(&duplicate), callback_work(&pending));
+                assert_eq!(
+                    (
+                        duplicate.asset_epoch_phase,
+                        duplicate.asset_retired_mesh_bytes,
+                        duplicate.asset_retired_texture_bytes
+                    ),
+                    (
+                        pending.asset_epoch_phase,
+                        pending.asset_retired_mesh_bytes,
+                        pending.asset_retired_texture_bytes
+                    ),
+                    "same-frame rejection precedes epoch maintenance"
+                );
+            })
+            .drop_without_applying_deltas();
+        drop(encoder);
+        queue.submit(std::iter::empty());
+        let pending_pixels = paint(callback);
+        if changes_configuration {
+            assert!(pending_pixels.as_chunks::<4>().0.iter().all(|pixel| *pixel == [0, 0, 0, 255]),
+                "{name}/{change:?} must leave the actual cleared background untouched while no safe image exists");
+        } else {
+            assert_eq!(
+                pending_pixels, pixels_a,
+                "{name} must composite exactly the previous complete image"
+            );
+        }
+        assert!(
+            !callback.receipt.is_fresh_painted(),
+            "retained pixels must not certify {name}"
+        );
+    }
+    let mesh_a = Arc::downgrade(a.groups[0].mesh.as_ref().unwrap());
+    let texture_a = Arc::downgrade(a.groups[0].texture.as_ref().unwrap());
+    let mesh_b = Arc::downgrade(b.groups[0].mesh.as_ref().unwrap());
+    let texture_b = Arc::downgrade(b.groups[0].texture.as_ref().unwrap());
+    drop(a);
+    drop(b);
+    drop(c);
+    assert!(mesh_a.upgrade().is_none() && texture_a.upgrade().is_none());
+    assert!(
+        mesh_b.upgrade().is_none() && texture_b.upgrade().is_none(),
+        "active/retired GPU owners must retain no CPU snapshot"
+    );
+    {
+        let mut renderer = render.renderer.write();
+        renderer
+            .callback_resources
+            .get_mut::<Resources>()
+            .unwrap()
+            .assets
+            .hold_acknowledgement = false;
+    }
+    assert!(!logic());
+    let quiet_wakes = wakes.load(Ordering::Relaxed);
+    for _ in 0..4 {
+        assert!(!logic());
+    }
+    assert_eq!(
+        wakes.load(Ordering::Relaxed),
+        quiet_wakes,
+        "completed logic maintenance must stop scheduling wakes"
+    );
+    let commands = frame(&d); // Latest state only; C was never retained/adopted.
+    assert!(!d.receipt.is_fresh_painted());
+    let admitted_d = metrics.lock().unwrap().clone();
+    assert_eq!(admitted_d.mesh_uploads, accepted_b.mesh_uploads + 1);
+    assert_eq!(admitted_d.texture_uploads, accepted_b.texture_uploads + 1);
+    {
+        let renderer = render.renderer.read();
+        assert!(renderer
+            .callback_resources
+            .get::<Resources>()
+            .unwrap()
+            .meshes["epoch-mesh"]
+            .matches(d.groups[0].mesh.as_ref().unwrap()));
+    }
+    queue.submit([commands]);
+    assert_ne!(paint(&d), pixels_a);
+    assert!(
+        d.receipt.is_fresh_painted(),
+        "only fresh exact callback paint certifies pixels"
+    );
+    {
+        let renderer = render.renderer.read();
+        assert!(
+            renderer
+                .callback_resources
+                .get::<Resources>()
+                .unwrap()
+                .retained_image_eligible
+                .load(Ordering::Acquire),
+            "an exact fresh D paint must restore eligibility for its configuration"
+        );
+    }
+    drain();
+    queue.submit([frame(&d)]);
+    let unchanged = metrics.lock().unwrap().clone();
+    assert_eq!(
+        (unchanged.mesh_uploads, unchanged.texture_uploads),
+        (admitted_d.mesh_uploads, admitted_d.texture_uploads)
+    );
+    assert!(
+        !unchanged.asset_pending,
+        "unchanged identity does not create an epoch"
+    );
+    assert!(!d.receipt.is_fresh_painted());
+    let _ = paint(&d);
+    assert!(d.receipt.is_fresh_painted());
+    let receipt = d.receipt.clone();
+    let source = Arc::downgrade(d.groups[0].mesh.as_ref().unwrap());
+    drop(d);
+    assert!(
+        source.upgrade().is_none(),
+        "scalar receipt must not keep the callback/assets alive"
+    );
+    assert!(receipt.is_fresh_painted());
+    // Stable rejected identities are already represented by fallback; they
+    // cannot manufacture another generation/upload on every ordinary redraw.
+    let mut invalid = make_callback(0.5, [255; 4], 62.);
+    Arc::get_mut(invalid.groups[0].mesh.as_mut().unwrap())
+        .unwrap()
+        .vertices[0]
+        .position[0] = f32::NAN;
+    Arc::get_mut(invalid.groups[0].texture.as_mut().unwrap())
+        .unwrap()
+        .mips[0]
+        .bytes
+        .clear();
+    queue.submit([frame(&invalid)]);
+    drain();
+    let fallback = metrics.lock().unwrap().clone();
+    queue.submit([frame(&invalid)]);
+    let repeated = metrics.lock().unwrap().clone();
+    assert_eq!(
+        (repeated.mesh_uploads, repeated.texture_uploads),
+        (fallback.mesh_uploads, fallback.texture_uploads)
+    );
+    assert!(
+        !repeated.asset_pending,
+        "stable invalid fallback owns no new GPU generation"
+    );
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    drop(render);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
 }
 

@@ -1,4 +1,5 @@
 //! Shared bounded 3D viewport. No application behavior or editor state lives here.
+mod asset_gpu;
 mod lighting_gpu;
 mod material_gpu;
 #[cfg(test)]
@@ -60,6 +61,7 @@ pub enum DisplayStatus {
     UnsupportedDevice,
     InvalidSettings,
     Pending,
+    PendingUnavailable,
 }
 
 impl DisplayStatus {
@@ -70,7 +72,8 @@ impl DisplayStatus {
             Self::CustomShader => Some("Surface HDR needs the built-in shader. Surface settings are retained; this custom shader uses Legacy SDR."),
             Self::UnsupportedDevice => Some("Surface HDR is unavailable on this GPU. Surface settings are retained; the viewport uses Legacy SDR."),
             Self::InvalidSettings => Some("Surface display settings are invalid. Repair the scene display settings."),
-            Self::Pending => Some("Applying scene display settings. The viewport is still showing the previous image."),
+            Self::Pending => Some("Applying scene or resource changes. The viewport is still showing the previous image."),
+            Self::PendingUnavailable => Some("Waiting for the viewport to finish rendering."),
         }
     }
 }
@@ -115,6 +118,12 @@ pub fn configure_setup(setup: &mut egui_wgpu::WgpuSetupCreateNew) {
 /// excluding UI/composite/presentation; separate pass intervals stay available.
 #[derive(Clone, Debug, Default)]
 pub struct Metrics {
+    pub asset_pending: bool,
+    pub asset_live_mesh_bytes: u64,
+    pub asset_retired_mesh_bytes: u64,
+    pub asset_live_texture_bytes: u64,
+    pub asset_retired_texture_bytes: u64,
+    pub asset_epoch_phase: &'static str,
     pub frames: u64,
     pub cpu_prepare_us: Vec<f64>,
     pub gpu_scene_us: Vec<f64>,
@@ -215,6 +224,12 @@ pub fn shadow_observation(render: &egui_wgpu::RenderState) -> Option<ShadowObser
 /// Pending callbacks may retain an earlier target. This never certifies GPU completion.
 #[derive(Clone, Copy, Debug)]
 pub struct DisplayObservation {
+    pub asset_pending: bool,
+    pub asset_live_mesh_bytes: u64,
+    pub asset_retired_mesh_bytes: u64,
+    pub asset_live_texture_bytes: u64,
+    pub asset_retired_texture_bytes: u64,
+    pub asset_epoch_phase: &'static str,
     pub prepared_frames: u64,
     pub status: DisplayStatus,
     pub requested_hdr: bool,
@@ -237,6 +252,12 @@ pub fn display_observation(render: &egui_wgpu::RenderState) -> Option<DisplayObs
     let resources = renderer.callback_resources.get::<Resources>()?;
     let m = resources.metrics.lock().ok()?;
     (m.frames > 0).then_some(DisplayObservation {
+        asset_pending: m.asset_pending,
+        asset_live_mesh_bytes: m.asset_live_mesh_bytes,
+        asset_retired_mesh_bytes: m.asset_retired_mesh_bytes,
+        asset_live_texture_bytes: m.asset_live_texture_bytes,
+        asset_retired_texture_bytes: m.asset_retired_texture_bytes,
+        asset_epoch_phase: m.asset_epoch_phase,
         prepared_frames: m.frames,
         status: m.display_status,
         requested_hdr: m.display_requested_hdr,
@@ -254,6 +275,47 @@ pub fn display_observation(render: &egui_wgpu::RenderState) -> Option<DisplayObs
         retiring_bytes: m.target_retiring_bytes,
         allocations: m.target_allocations,
     })
+}
+
+/// Nonblocking owner-thread progress after the preceding native queue submission.
+/// Public/headless callers must likewise submit callback work (including queued
+/// uploads when surface acquisition failed) before invoking maintenance. A layout
+/// pass is not submission evidence. Idle calls do not poll or schedule wakeups.
+pub fn maintain_assets(
+    render: &egui_wgpu::RenderState,
+    ctx: &egui::Context,
+) -> Result<bool, String> {
+    let unfinished = {
+        let mut renderer = render.renderer.write();
+        let Some(resources) = renderer.callback_resources.get_mut::<Resources>() else {
+            return Ok(false);
+        };
+        resources.arm_assets(&render.queue, ctx)?
+    };
+    if !unfinished {
+        return Ok(false);
+    }
+    // Poll can deliver arbitrary registered callbacks. In particular, never
+    // hold egui-wgpu's renderer lock across callback delivery.
+    let progress = render
+        .device
+        .poll(wgpu::PollType::Poll)
+        .map_err(|error| format!("GPU asset submission maintenance failed: {error}"));
+    let mut renderer = render.renderer.write();
+    let Some(resources) = renderer.callback_resources.get_mut::<Resources>() else {
+        return Err("GPU scene resources disappeared during asset maintenance".into());
+    };
+    if let Err(error) = progress {
+        resources.assets.fail(error.clone());
+        resources.asset_metrics();
+        return Err(error);
+    }
+    let pending = resources.assets.reap();
+    resources.asset_metrics();
+    if pending {
+        ctx.request_repaint_after(std::time::Duration::from_millis(16));
+    }
+    Ok(pending)
 }
 
 /// Install once on the eframe device; resources are dropped with that device/renderer.
@@ -544,8 +606,57 @@ pub fn viewport_with_assets(
     viewport_interactive(ui, scene, selected.as_slice(), meshes, true).picked
 }
 
+#[derive(Debug, Default)]
+struct FrameEvidence {
+    state: std::sync::atomic::AtomicU8,
+    configuration: std::sync::atomic::AtomicU64,
+}
+/// Scalar-only evidence for one exact callback; no scene/asset/callback owner.
+/// Fresh means its newly encoded scene was composited in paint, not that GPU
+/// execution or presentation has completed. Hosts cannot mutate this receipt.
+#[derive(Clone, Debug, Default)]
+pub struct FrameReceipt(Arc<FrameEvidence>);
+impl FrameReceipt {
+    pub fn is_fresh_painted(&self) -> bool {
+        self.0.state.load(std::sync::atomic::Ordering::Acquire) == 3
+    }
+    fn reset(&self) {
+        self.0.state.store(0, std::sync::atomic::Ordering::Release);
+    }
+    fn encoded(&self, configuration: u64) {
+        self.0
+            .configuration
+            .store(configuration, std::sync::atomic::Ordering::Release);
+        self.0.state.store(1, std::sync::atomic::Ordering::Release);
+    }
+    fn retained(&self, configuration: u64) {
+        self.0
+            .configuration
+            .store(configuration, std::sync::atomic::Ordering::Release);
+        self.0.state.store(2, std::sync::atomic::Ordering::Release);
+    }
+    fn matches_configuration(&self, configuration: u64) -> bool {
+        self.0
+            .configuration
+            .load(std::sync::atomic::Ordering::Acquire)
+            == configuration
+    }
+    fn painted(&self) -> bool {
+        self.0
+            .state
+            .compare_exchange(
+                1,
+                3,
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+            )
+            .is_ok()
+    }
+}
+
 /// Scene viewport geometry and camera state for frontend-owned overlays.
 pub struct ViewportInteraction {
+    pub receipt: FrameReceipt,
     pub rect: egui::Rect,
     pub response: egui::Response,
     /// Newly clicked surface; the host decides whether an overlay consumes the click.
@@ -841,9 +952,11 @@ pub fn viewport_with_materials(
             group
         })
         .collect();
+    let receipt = FrameReceipt::default();
     ui.painter().add(egui_wgpu::Callback::new_paint_callback(
         rect,
         SceneCallback {
+            receipt: receipt.clone(),
             groups,
             camera: view_projection.to_cols_array(),
             camera_eye_mode: camera.eye_mode(),
@@ -880,6 +993,7 @@ pub fn viewport_with_materials(
         );
     }
     ViewportInteraction {
+        receipt,
         rect,
         response,
         picked,
@@ -1173,6 +1287,7 @@ struct Resources {
     meshes: BTreeMap<String, GpuMesh>,
     pipeline_layout: wgpu::PipelineLayout,
     materials: MaterialGpu,
+    assets: asset_gpu::AssetGpu,
     lighting: LightingGpu,
     shadows: shadow_gpu::ShadowGpu,
     builtin_appearance: bool,
@@ -1182,9 +1297,16 @@ struct Resources {
     camera_bind: wgpu::BindGroup,
     target: Option<Target>,
     retiring_target: Option<RetiringTarget>,
+    // Test holds observation only; the genuine completion flag is untouched.
+    #[cfg(test)]
+    hold_target_acknowledgement: bool,
     target_allocations: u64,
     display_uniform: wgpu::Buffer,
     display_packet: [f32; 4],
+    // Configuration includes actual target allocation and composite packet.
+    // Eligibility is set only by exact fresh paint, and survives receipt reuse.
+    image_configuration: u64,
+    retained_image_eligible: std::sync::atomic::AtomicBool,
     sample_count: u32,
     timestamps: Option<Timestamps>,
     metrics: MetricsHandle,
@@ -1318,6 +1440,7 @@ impl Resources {
             meshes: BTreeMap::new(),
             pipeline_layout,
             materials,
+            assets: Default::default(),
             lighting,
             shadows,
             builtin_appearance: true,
@@ -1327,9 +1450,13 @@ impl Resources {
             camera_bind,
             target: None,
             retiring_target: None,
+            #[cfg(test)]
+            hold_target_acknowledgement: false,
             target_allocations: 0,
             display_uniform,
             display_packet,
+            image_configuration: 0,
+            retained_image_eligible: std::sync::atomic::AtomicBool::new(false),
             sample_count,
             timestamps,
             metrics,
@@ -1345,6 +1472,39 @@ impl Resources {
         ));
         self.hdr_samples = Some(samples);
     }
+    fn asset_metrics(&self) {
+        let (mesh, texture) = self.assets.retired_bytes();
+        let mut metrics = self.metrics.lock().expect("metrics lock");
+        metrics.asset_pending = self.assets.pending();
+        metrics.asset_epoch_phase = self.assets.phase();
+        metrics.asset_live_mesh_bytes = self.meshes.values().map(|mesh| mesh.bytes).sum();
+        metrics.asset_retired_mesh_bytes = mesh;
+        metrics.asset_live_texture_bytes = self.materials.bytes() - 9;
+        metrics.asset_retired_texture_bytes = texture;
+    }
+    fn arm_assets(&mut self, queue: &wgpu::Queue, ctx: &egui::Context) -> Result<bool, String> {
+        let result = self.assets.arm(queue, ctx);
+        self.asset_metrics();
+        result
+    }
+    fn invalidate_image(&mut self) {
+        self.image_configuration += 1;
+        self.retained_image_eligible
+            .store(false, std::sync::atomic::Ordering::Release);
+    }
+    fn retain_image(&self, receipt: &FrameReceipt) -> bool {
+        let eligible = self.target.is_some()
+            && self
+                .retained_image_eligible
+                .load(std::sync::atomic::Ordering::Acquire);
+        self.metrics.lock().expect("metrics lock").display_status = if eligible {
+            DisplayStatus::Pending
+        } else {
+            DisplayStatus::PendingUnavailable
+        };
+        receipt.retained(self.image_configuration);
+        eligible
+    }
     fn resize(
         &mut self,
         device: &wgpu::Device,
@@ -1355,10 +1515,21 @@ impl Resources {
         context: &egui::Context,
     ) -> bool {
         use std::sync::atomic::{AtomicBool, Ordering};
-        if self
-            .retiring_target
-            .as_ref()
-            .is_some_and(|old| old.completed.load(Ordering::Acquire))
+        let may_reap = {
+            #[cfg(test)]
+            {
+                !self.hold_target_acknowledgement
+            }
+            #[cfg(not(test))]
+            {
+                true
+            }
+        };
+        if may_reap
+            && self
+                .retiring_target
+                .as_ref()
+                .is_some_and(|old| old.completed.load(Ordering::Acquire))
         {
             self.retiring_target = None;
         }
@@ -1376,6 +1547,9 @@ impl Resources {
             context.request_repaint();
             return false;
         }
+        // A new allocation (including same-size format/sample changes) is
+        // unproven until a matching fresh callback actually composites it.
+        self.invalidate_image();
         if let Some(target) = self.target.take() {
             let completed = Arc::new(AtomicBool::new(false));
             let flag = completed.clone();
@@ -1584,6 +1758,7 @@ fn scene_pipeline_format(
     })
 }
 
+#[derive(Clone)]
 struct GpuMesh {
     source: Option<Weak<ruster_assets::Mesh>>,
     vertices: wgpu::Buffer,
@@ -1593,6 +1768,11 @@ struct GpuMesh {
     bounds: [Vec3; 2],
 }
 impl GpuMesh {
+    fn matches(&self, mesh: &Arc<ruster_assets::Mesh>) -> bool {
+        self.source
+            .as_ref()
+            .is_some_and(|old| Weak::ptr_eq(old, &Arc::downgrade(mesh)))
+    }
     fn new(
         device: &wgpu::Device,
         source: Option<Weak<ruster_assets::Mesh>>,
@@ -1633,6 +1813,7 @@ impl GpuMesh {
 
 /// Retain only allocation identity after copying source bytes into GPU-owned
 /// buffers. DrawGroup keeps the strong input alive throughout preparation.
+#[cfg(test)]
 fn prepare_mesh(
     device: &wgpu::Device,
     meshes: &mut BTreeMap<String, GpuMesh>,
@@ -1698,6 +1879,7 @@ struct DrawGroup {
     range: Range<u32>,
 }
 struct SceneCallback {
+    receipt: FrameReceipt,
     groups: Vec<DrawGroup>,
     camera: [f32; 16],
     camera_eye_mode: [f32; 4],
@@ -1720,6 +1902,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         encoder: &mut wgpu::CommandEncoder,
         resources: &mut egui_wgpu::CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
+        self.receipt.reset();
         self.prepared
             .store(false, std::sync::atomic::Ordering::Relaxed);
         let start = Instant::now();
@@ -1730,6 +1913,21 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             r.metrics.lock().expect("metrics lock").shadow_status = ShadowStatus::MultipleViewports;
             return Vec::new();
         }
+        // The unique frame claim precedes maintenance: a duplicate callback
+        // cannot treat an extra layout pass as a queue-submission boundary.
+        let maintenance_failed = r.arm_assets(queue, &self.context).is_err();
+        let material_plan = r.materials.plan(
+            device,
+            self.groups.iter().map(|group| {
+                (
+                    &group.binding,
+                    group.texture.as_ref(),
+                    group.roughness.as_ref(),
+                )
+            }),
+        );
+        let mesh_plan = r.assets.plan_mesh(&r.meshes, &self.groups);
+        let assets_changed = material_plan.changed(&r.materials) || mesh_plan.changed(&r.meshes);
         let requested_hdr = matches!(
             self.display,
             ruster_scene::DisplayProfile::SurfaceHdr { .. }
@@ -1771,7 +1969,6 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             samples,
             format,
         );
-        let ready = r.resize(device, queue, size, format, samples, &self.context);
         {
             let mut metrics = r.metrics.lock().expect("metrics lock");
             metrics.display_requested_hdr = requested_hdr;
@@ -1781,6 +1978,17 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             metrics.target_requested_size = requested_size;
             metrics.target_requested_bytes = format_target_bytes(requested_size, samples, format);
             metrics.target_resolution_limited = requested_size != size;
+        }
+        if maintenance_failed || (assets_changed && r.assets.pending()) {
+            self.prepared.store(
+                r.retain_image(&self.receipt),
+                std::sync::atomic::Ordering::Relaxed,
+            );
+            return Vec::new();
+        }
+        let ready = r.resize(device, queue, size, format, samples, &self.context);
+        {
+            let mut metrics = r.metrics.lock().expect("metrics lock");
             metrics.target_retiring_bytes = r.retiring_target.as_ref().map_or(0, |old| {
                 format_target_bytes(old.target.size, old.target.samples, old.target.format)
             });
@@ -1793,11 +2001,13 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         }
         if !ready {
             // This callback owns the unique frame claim, but allocation is
-            // backpressured. Composite the last prepared target with its old
-            // display packet; do not write new scene/camera/material state.
+            // backpressured. Composite only an eligible painted configuration;
+            // do not write new scene/camera/material state.
             // Duplicate callbacks returned before this point remain unpaintable.
-            self.prepared
-                .store(r.target.is_some(), std::sync::atomic::Ordering::Relaxed);
+            self.prepared.store(
+                r.retain_image(&self.receipt),
+                std::sync::atomic::Ordering::Relaxed,
+            );
             return Vec::new();
         }
         let display_packet = if applied_hdr {
@@ -1806,20 +2016,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             [0.; 4]
         };
         if display_packet != r.display_packet {
+            r.invalidate_image();
             queue.write_buffer(&r.display_uniform, 0, bytemuck::cast_slice(&display_packet));
             r.display_packet = display_packet;
         }
-        let texture_uploads = r.materials.prepare(
-            device,
-            queue,
-            self.groups.iter().map(|group| {
-                (
-                    &group.binding,
-                    group.texture.as_ref(),
-                    group.roughness.as_ref(),
-                )
-            }),
-        );
+        if assets_changed {
+            r.assets.begin(&r.meshes, &r.materials, &self.context);
+        }
+        let texture_uploads = r.materials.prepare_plan(device, queue, material_plan);
+        let (mesh_uploads, mesh_upload_bytes) = mesh_plan.apply(device, &mut r.meshes);
+        r.asset_metrics();
         let instance_count = self
             .groups
             .iter()
@@ -1829,10 +2035,6 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             r.capacity = instance_count.next_power_of_two();
             r.instances = instance_buffer(device, r.capacity);
         }
-        let mut mesh_uploads = 0;
-        let mut mesh_upload_bytes = 0;
-        r.meshes
-            .retain(|id, _| self.groups.iter().any(|g| g.key.as_ref() == Some(id)));
         for group in &self.groups {
             if !group.instances.is_empty() {
                 queue.write_buffer(
@@ -1840,12 +2042,6 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     u64::from(group.range.start) * size_of::<Instance>() as u64,
                     bytemuck::cast_slice(&group.instances),
                 );
-            }
-            if let (Some(id), Some(mesh)) = (&group.key, &group.mesh) {
-                if let Some(bytes) = prepare_mesh(device, &mut r.meshes, id, mesh) {
-                    mesh_uploads += 1;
-                    mesh_upload_bytes += bytes;
-                }
             }
         }
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
@@ -2001,6 +2197,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.display_applied_hdr = applied_hdr;
         metrics.display_applied_exposure_stops = if applied_hdr { requested_exposure } else { 0. };
         metrics.target_size = size;
+        self.receipt.encoded(r.image_configuration);
         self.prepared
             .store(true, std::sync::atomic::Ordering::Relaxed);
         Vec::new()
@@ -2015,10 +2212,17 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             return;
         }
         if let Some(r) = resources.get::<Resources>() {
+            if !self.receipt.matches_configuration(r.image_configuration) {
+                return;
+            }
             if let Some(target) = r.target.as_ref() {
                 pass.set_pipeline(&r.composite);
                 pass.set_bind_group(0, &target.bind, &[]);
                 pass.draw(0..3, 0..1);
+                if self.receipt.painted() {
+                    r.retained_image_eligible
+                        .store(true, std::sync::atomic::Ordering::Release);
+                }
             }
         }
     }

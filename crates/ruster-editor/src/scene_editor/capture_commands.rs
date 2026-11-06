@@ -68,6 +68,8 @@ pub(super) struct Captures {
     pending: Option<Pending>,
     completed: Option<(u64, Pin, Value)>,
     pub rect: Option<egui::Rect>,
+    // Scalar receipt for this exact layout callback, never a source/callback owner.
+    pub receipt: Option<ruster_render::FrameReceipt>,
 }
 impl SceneEditor {
     /// Hidden logic can retire an expired request, but cannot certify a new
@@ -269,6 +271,7 @@ impl SceneEditor {
                 Err(mpsc::TryRecvError::Empty) => {}
             }
         } else if let Some(rect) = self.captures.rect {
+            let receipt = self.captures.receipt.clone();
             let (sender, receiver) = mpsc::sync_channel(1);
             let ppp = ctx.pixels_per_point();
             let wake = ctx.clone();
@@ -276,6 +279,17 @@ impl SceneEditor {
             let cancel = pending.cancel.0.clone();
             ctx.request_screenshot(move |image| {
                 if cancel.load(Ordering::Acquire) {
+                    return;
+                }
+                // Readback completion alone cannot identify the scene: a backpressured
+                // callback may have composited an older complete target this frame.
+                if !receipt
+                    .as_ref()
+                    .is_some_and(|receipt| receipt.is_fresh_painted())
+                {
+                    let _ = sender.send(Err("render_pending".into()));
+                    drop(permit);
+                    wake.request_repaint();
                     return;
                 }
                 // At most one on-demand encoder; compression never blocks editor layout.
@@ -409,6 +423,111 @@ mod tests {
         let canceled = b.captures.pending.as_ref().unwrap().cancel.0.clone();
         drop(b);
         assert!(canceled.load(Ordering::Acquire));
+        assert!(!READBACK_BUSY.load(Ordering::Acquire));
+
+        // Exercise the real editor viewport and emitted readback callback. A
+        // synthetic screenshot cannot certify this unpainted scene callback.
+        let mut editor = editor();
+        let ctx = egui::Context::default();
+        let input = || egui::RawInput {
+            screen_rect: Some(egui::Rect::from_min_size(
+                egui::Pos2::ZERO,
+                egui::vec2(1400., 850.),
+            )),
+            ..Default::default()
+        };
+        // Let real panel sizing settle before pinning the requested viewport.
+        // A layout change correctly rejects stale capture before readback.
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(input(), |ui| editor.ui(ui));
+            output.textures_delta.clear();
+        }
+        let pin = editor.capture_pin();
+        let started = editor
+            .capture_command(
+                "receipt",
+                "viewport_capture_start",
+                &json!({
+                    "expected_session_token":"receipt",
+                    "expected_revision":pin.revision.to_string(),
+                    "expected_view_revision":pin.view.to_string(),
+                }),
+            )
+            .unwrap();
+        let mut output = ctx.run_ui(input(), |ui| {
+            editor.ui(ui);
+            editor.poll_capture(ui.ctx());
+        });
+        output.textures_delta.clear();
+        let callbacks = output
+            .viewport_output
+            .values()
+            .flat_map(|viewport| {
+                viewport
+                    .commands
+                    .iter()
+                    .filter_map(|command| match command {
+                        egui::ViewportCommand::Screenshot(callback) => Some(callback.clone()),
+                        _ => None,
+                    })
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            callbacks.len(),
+            1,
+            "the actual capture requests one readback; outcome={:?}",
+            editor
+                .captures
+                .completed
+                .as_ref()
+                .map(|(_, _, value)| value)
+        );
+        assert!(!editor.captures.receipt.as_ref().unwrap().is_fresh_painted());
+        callbacks
+            .into_iter()
+            .next()
+            .unwrap()
+            .complete(Arc::new(egui::ColorImage::filled(
+                [1400, 850],
+                egui::Color32::RED,
+            )));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            let mut output = ctx.run_ui(input(), |ui| editor.poll_capture(ui.ctx()));
+            output.textures_delta.clear();
+            if editor.captures.completed.is_some() || Instant::now() >= deadline {
+                break;
+            }
+            std::thread::yield_now();
+        }
+        let result = editor
+            .capture_command(
+                "receipt",
+                "viewport_capture_inspect",
+                &json!({"capture_id":started["capture_id"]}),
+            )
+            .unwrap();
+        assert_eq!(result["status"], "failed");
+        assert_eq!(result["reason"], "render_pending");
+        assert!(result.get("image_base64").is_none());
+        assert!(
+            !READBACK_BUSY.load(Ordering::Acquire),
+            "nonfresh readback releases its sole lease"
+        );
+        let pin = editor.capture_pin();
+        editor
+            .capture_command(
+                "receipt",
+                "viewport_capture_start",
+                &json!({
+                    "expected_session_token":"receipt",
+                    "expected_revision":pin.revision.to_string(),
+                    "expected_view_revision":pin.view.to_string(),
+                }),
+            )
+            .unwrap();
+        assert!(READBACK_BUSY.load(Ordering::Acquire));
+        drop(editor);
         assert!(!READBACK_BUSY.load(Ordering::Acquire));
     }
 

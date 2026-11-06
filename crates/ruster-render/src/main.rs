@@ -97,6 +97,11 @@ struct Runtime {
     shader_status: String,
 }
 impl eframe::App for Runtime {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Err(error) = ruster_render::maintain_assets(&self.render, ctx) {
+            self.asset_status = format!("GPU asset maintenance failed: {error}");
+        }
+    }
     fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = root.ctx().clone();
         egui::Panel::top("runtime-status").show(root, |ui| {

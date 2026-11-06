@@ -1953,6 +1953,7 @@ mod tests {
                         outcome = m.draw(
                             ui,
                             &ruster_render::ViewportInteraction {
+                                receipt: Default::default(),
                                 rect,
                                 response,
                                 picked: None,

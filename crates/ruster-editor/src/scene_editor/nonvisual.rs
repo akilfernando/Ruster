@@ -151,6 +151,13 @@ impl InputGate {
 
 impl Host {
     pub(super) fn logic_tick(&mut self, ctx: &egui::Context) {
+        // The preceding eframe paint attempt has submitted its uploads, even
+        // when surface acquisition failed. Hidden logic can retire GPU owners.
+        if let Some(render) = &self.editor.render {
+            if let Err(error) = ruster_render::maintain_assets(render, ctx) {
+                self.editor.error = format!("GPU asset maintenance failed: {error}");
+            }
+        }
         if self.input.close_requested && !self.editor.close_ready_to_exit {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if !self.editor.close_approved {

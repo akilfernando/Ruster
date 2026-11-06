@@ -136,6 +136,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
         "unresolved content must retire cached pixels/bindings"
     );
     verify_role_budget_swap(device, queue, &mut r.materials);
+    verify_mesh_budget_swap(device, queue);
     eprintln!("GPU probe: decoded PNG UV/sRGB pixels, per-draw missing UV isolation, unchanged zero uploads, same-ID mesh/texture replacement and rendering after worker CPU-source release passed");
 }
 
@@ -238,6 +239,81 @@ fn verify_role_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue, gpu: &mut
     );
     queue.submit(std::iter::empty());
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+}
+
+// Source meshes without UVs use24-byte vertices, but the render layout uses32.
+// A valid final GPU closure must be budgeted before any ID-ordered replacement.
+fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
+    let mesh = |count: usize| {
+        Arc::new(ruster_assets::Mesh {
+            vertices: vec![
+                ruster_assets::Vertex {
+                    position: [0.; 3],
+                    normal: [0., 0., 1.]
+                };
+                count
+            ],
+            indices: (0..count).map(|index| (index % 3) as u32).collect(),
+            texcoords: None,
+        })
+    };
+    let large = mesh(ruster_assets::MAX_VERTICES);
+    let small = mesh(ruster_assets::MAX_VERTICES / 8);
+    let mut groups = (0..15)
+        .map(|index| DrawGroup {
+            key: Some(format!("mesh-{index:02}")),
+            binding: BindingKey::default(),
+            texture: None,
+            roughness: None,
+            mesh: Some(if index == 0 {
+                small.clone()
+            } else {
+                large.clone()
+            }),
+            instances: Vec::new(),
+            range: 0..0,
+        })
+        .collect::<Vec<_>>();
+    let mut assets = asset_gpu::AssetGpu::default();
+    let mut gpu = BTreeMap::new();
+    let before = assets.plan_mesh(&gpu, &groups).apply(device, &mut gpu);
+    assert_eq!(before.0, 15);
+    assert!(before.1 <= ruster_assets::MAX_RESOLVED_BYTES as u64);
+    queue.submit(std::iter::empty());
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    groups[0].mesh = Some(large.clone());
+    groups[1].mesh = Some(small.clone());
+    let swapped = assets.plan_mesh(&gpu, &groups).apply(device, &mut gpu);
+    assert_eq!(
+        swapped.0, 2,
+        "near-cap mesh size swap must admit both replacements from the valid final closure"
+    );
+    assert_eq!(gpu.values().map(|mesh| mesh.bytes).sum::<u64>(), before.1);
+    assert_eq!(
+        assets.plan_mesh(&gpu, &groups).apply(device, &mut gpu),
+        (0, 0)
+    );
+    queue.submit(std::iter::empty());
+    device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
+    groups[1].mesh = Some(large.clone());
+    let rejected = assets.plan_mesh(&gpu, &groups);
+    assert!(
+        rejected.changed(&gpu),
+        "over renderer limit must change to a truthful fallback closure"
+    );
+    assert_eq!(rejected.apply(device, &mut gpu), (0, 0));
+    assert!(gpu.is_empty());
+    assert!(
+        !assets.plan_mesh(&gpu, &groups).changed(&gpu),
+        "unchanged over-budget fallback cannot start another generation"
+    );
+    let identity = Arc::downgrade(&large);
+    drop(groups);
+    drop(large);
+    assert!(
+        identity.upgrade().is_none(),
+        "validation stamps must retain no source payload"
+    );
 }
 
 fn retire_sources(mesh: Arc<ruster_assets::Mesh>, texture: Arc<ruster_assets::Texture>) {
@@ -593,6 +669,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         context
             .run_pass(egui::RawInput::default(), |_| {})
             .drop_without_applying_deltas();
+        complete_submitted_assets(device, queue, &context, &mut resources);
         scene.lighting = lighting;
         let source = if name.starts_with("rotated-") && name != "rotated-sun" {
             scene.objects[0].transform = Transform {
@@ -655,6 +732,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
             cpu_us: 0.,
             shadow: None,
             context: context.clone(),
+            receipt: FrameReceipt::default(),
             prepared: std::sync::atomic::AtomicBool::new(false),
         };
         let mut encoder = device.create_command_encoder(&Default::default());
@@ -999,6 +1077,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             context
                 .run_pass(egui::RawInput::default(), |_| {})
                 .drop_without_applying_deltas();
+            complete_submitted_assets(device, queue, &context, &mut resources);
             if matches!(name, "custom" | "restored") {
                 let r = resources.get_mut::<Resources>().unwrap();
                 r.pipeline = if name == "custom" {
@@ -1114,6 +1193,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                 cpu_us: 0.,
                 shadow: None,
                 context: context.clone(),
+                receipt: FrameReceipt::default(),
                 prepared: std::sync::atomic::AtomicBool::new(false),
             };
             let mut encoder = device.create_command_encoder(&Default::default());
@@ -1439,4 +1519,29 @@ fn verify_unstored_grazing_radiance(device: &wgpu::Device, queue: &wgpu::Queue) 
     eprintln!("GPU probe: permitted unstored grazing production BRDF radiance={radiance:?}; final storage must saturate");
     drop(mapped);
     read.unmap();
+}
+
+// These headless pixel fixtures submit and wait after every callback. Match the
+// native host's subsequent owner-maintenance boundary before changing inputs;
+// no callback-resource borrow spans delivery of queue callbacks.
+fn complete_submitted_assets(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    context: &egui::Context,
+    resources: &mut egui_wgpu::CallbackResources,
+) {
+    let pending = resources
+        .get_mut::<Resources>()
+        .unwrap()
+        .arm_assets(queue, context)
+        .unwrap();
+    if pending {
+        device.poll(wgpu::PollType::Poll).unwrap();
+        let r = resources.get_mut::<Resources>().unwrap();
+        assert!(
+            !r.assets.reap(),
+            "preceding headless submission was already waited"
+        );
+        r.asset_metrics();
+    }
 }

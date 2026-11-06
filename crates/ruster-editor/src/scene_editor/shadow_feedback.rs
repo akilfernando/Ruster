@@ -74,7 +74,11 @@ impl SceneEditor {
             "requested_exposure_stops":o.requested_exposure_stops,"applied_exposure_stops":o.applied_exposure_stops,
             "requested_samples":o.requested_samples,"applied_samples":o.applied_samples,
             "requested_target_size":o.requested_target_size,"applied_target_size":o.applied_target_size,
-            "resolution_limited":o.resolution_limited,"logical_live_bytes":o.live_bytes,"logical_retiring_bytes":o.retiring_bytes})
+            "resolution_limited":o.resolution_limited,"logical_live_bytes":o.live_bytes,"logical_retiring_bytes":o.retiring_bytes,
+            "asset_pending":o.asset_pending,"asset_epoch_phase":o.asset_epoch_phase,
+            "asset_live_mesh_bytes":o.asset_live_mesh_bytes,"asset_retired_mesh_bytes":o.asset_retired_mesh_bytes,
+            "asset_live_texture_bytes":o.asset_live_texture_bytes,"asset_retired_texture_bytes":o.asset_retired_texture_bytes,
+            "asset_scope":"Logical active/retired GPU asset payload and submission-maintenance phase; excludes targets, shadows, staging padding and driver/allocator overhead. Prepared scene state is not presentation."})
     }
 
     pub(super) fn shadow_feedback(&self) -> Value {

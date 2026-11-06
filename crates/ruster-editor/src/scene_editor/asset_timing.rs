@@ -79,6 +79,12 @@ struct Point {
 // vectors, and release the metrics mutex before formatting observation output.
 #[derive(Clone, serde::Serialize)]
 struct Resources {
+    asset_pending: bool,
+    asset_epoch_phase: &'static str,
+    asset_live_mesh_bytes: u64,
+    asset_retired_mesh_bytes: u64,
+    asset_live_texture_bytes: u64,
+    asset_retired_texture_bytes: u64,
     frames: u64,
     lighting_bytes: u64,
     lighting_uploads: u64,
@@ -108,6 +114,12 @@ impl Resources {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         Self {
+            asset_pending: m.asset_pending,
+            asset_epoch_phase: m.asset_epoch_phase,
+            asset_live_mesh_bytes: m.asset_live_mesh_bytes,
+            asset_retired_mesh_bytes: m.asset_retired_mesh_bytes,
+            asset_live_texture_bytes: m.asset_live_texture_bytes,
+            asset_retired_texture_bytes: m.asset_retired_texture_bytes,
             frames: m.frames,
             lighting_bytes: m.lighting_bytes,
             lighting_uploads: m.lighting_uploads,
@@ -372,7 +384,8 @@ impl Probe {
                         "mesh_upload_bytes":after.mesh_upload_bytes.checked_sub(before.mesh_upload_bytes),
                         "texture_uploads":after.texture_uploads.checked_sub(before.texture_uploads),
                         "texture_upload_bytes":after.texture_upload_bytes.checked_sub(before.texture_upload_bytes)},
-                    "scope":"logical renderer payload/cumulative uploads; not CPU ownership, driver allocation or peak memory"})
+                    "asset_epoch_drained":!after.asset_pending && after.asset_epoch_phase=="idle" && after.asset_retired_mesh_bytes==0 && after.asset_retired_texture_bytes==0,
+                    "scope":"logical renderer payload/cumulative uploads; complete means attributed preparation, not GPU completion. Asset epoch drainage is separate; excludes CPU ownership, staging padding, driver allocation and peak memory"})
             }
             _ => json!({"complete":false,"reason":"renderer_metrics_unavailable"}),
         };

@@ -86,7 +86,7 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         let metrics = ruster_render::install(render);
         Ok(Box::new(Host {
             navigation: ruster_render::NavigationOptions { camera: options.initial_camera, ..Default::default() },
-            runtime, metrics, options, last_frame: Instant::now(), error: None,
+            runtime, metrics, render: Some(render.clone()), options, last_frame: Instant::now(), error: None,
             ui_frames: 0, exit_error: host_error,
         }))
     })).map_err(|e| format!("application desktop/Vulkan initialization failed: {e}; verify your desktop session and Vulkan driver"))?;
@@ -104,6 +104,7 @@ struct Host<A: Application> {
     options: HostOptions,
     last_frame: Instant,
     metrics: ruster_render::MetricsHandle,
+    render: Option<eframe::egui_wgpu::RenderState>,
     error: Option<String>,
     ui_frames: u64,
     exit_error: Arc<Mutex<Option<String>>>,
@@ -167,23 +168,10 @@ impl<A: Application> Host<A> {
             self.report(result);
         }
     }
-}
-
-impl<A: Application> eframe::App for Host<A> {
-    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    // Shared production layout also permits the GPU-free owner case to inspect
+    // real panel/callback bounds without constructing a native eframe::Frame.
+    fn scene_ui(&mut self, root: &mut egui::Ui) {
         let ctx = root.ctx().clone();
-        if ctx.input(|i| i.viewport().close_requested()) && !self.runtime.app_mut().request_close()
-        {
-            self.runtime.set_running(false);
-            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
-        }
-        self.ui_frames = self.ui_frames.saturating_add(1);
-        let now = Instant::now();
-        let elapsed = now.saturating_duration_since(self.last_frame);
-        self.last_frame = now;
-        let advanced = self.runtime.advance(elapsed).map(|_| ());
-        self.report(advanced);
-
         egui::Panel::top("application-lifecycle").show(root, |ui| {
             ui.horizontal(|ui| {
                 let running = self.runtime.is_running();
@@ -222,19 +210,25 @@ impl<A: Application> eframe::App for Host<A> {
                     "Paused"
                 });
                 ui.label(format!("Tick {}", self.runtime.tick()));
+                if let Some(message) = self.metrics.lock().ok().and_then(|metrics| {
+                    (metrics.frames > 0)
+                        .then(|| metrics.display_status.warning())
+                        .flatten()
+                }) {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(message).color(ui.visuals().warn_fg_color),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(message);
+                }
             });
             if let Some(error) = &self.error {
                 ui.colored_label(
                     ui.visuals().error_fg_color,
                     format!("{error} · Correct the settings/content and Reset."),
                 );
-            }
-            if let Some(message) = self.metrics.lock().ok().and_then(|metrics| {
-                (metrics.frames > 0)
-                    .then(|| metrics.display_status.warning())
-                    .flatten()
-            }) {
-                ui.colored_label(ui.visuals().warn_fg_color, message);
             }
         });
         egui::Panel::right("application-controls")
@@ -277,6 +271,31 @@ impl<A: Application> eframe::App for Host<A> {
                 );
             }
         });
+    }
+}
+
+impl<A: Application> eframe::App for Host<A> {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if let Some(render) = &self.render {
+            let result = ruster_render::maintain_assets(render, ctx).map(|_| ());
+            self.report(result);
+        }
+    }
+    fn ui(&mut self, root: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        let ctx = root.ctx().clone();
+        if ctx.input(|i| i.viewport().close_requested()) && !self.runtime.app_mut().request_close()
+        {
+            self.runtime.set_running(false);
+            ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
+        }
+        self.ui_frames = self.ui_frames.saturating_add(1);
+        let now = Instant::now();
+        let elapsed = now.saturating_duration_since(self.last_frame);
+        self.last_frame = now;
+        let advanced = self.runtime.advance(elapsed).map(|_| ());
+        self.report(advanced);
+
+        self.scene_ui(root);
         if self.runtime.is_running() {
             ctx.request_repaint_after(
                 self.options
@@ -386,6 +405,7 @@ mod tests {
             options,
             last_frame: Instant::now(),
             metrics: Arc::new(Mutex::new(ruster_render::Metrics::default())),
+            render: None,
             error: None,
             ui_frames: 0,
             exit_error: Arc::new(Mutex::new(None)),
@@ -469,5 +489,71 @@ mod tests {
             input.held.is_empty(),
             "text-widget focus releases application keys"
         );
+
+        // Transient renderer Pending must not resize the application's actual
+        // viewport or push ordinary lifecycle controls outside a narrow window.
+        let layout_ctx = egui::Context::default();
+        let mut time = 0.0;
+        let mut layout = |host: &mut Host<KeyboardApp>| {
+            time += 0.1;
+            let mut output = layout_ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800., 540.),
+                    )),
+                    ..Default::default()
+                },
+                |root| host.scene_ui(root),
+            );
+            output.textures_delta.clear();
+            for action in ["Run", "Step", "Reset"] {
+                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == action
+                    && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))),
+                    "lifecycle control must remain visible at800: {action}");
+            }
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Callback(callback) => {
+                        Some(callback.rect.intersect(shape.clip_rect))
+                    }
+                    _ => None,
+                })
+                .expect("production scene layout must emit its real viewport callback")
+        };
+        for _ in 0..3 {
+            layout(&mut host);
+        }
+        let ordinary = layout(&mut host);
+        for status in [
+            ruster_render::DisplayStatus::Pending,
+            ruster_render::DisplayStatus::PendingUnavailable,
+        ] {
+            {
+                let mut metrics = host.metrics.lock().unwrap();
+                metrics.frames = 1;
+                metrics.display_status = status;
+            }
+            for _ in 0..3 {
+                assert_eq!(
+                    layout(&mut host),
+                    ordinary,
+                    "resource waiting warning must share the ordinary header footprint"
+                );
+            }
+            host.metrics.lock().unwrap().display_status = ruster_render::DisplayStatus::LegacySdr;
+            for _ in 0..3 {
+                assert_eq!(
+                    layout(&mut host),
+                    ordinary,
+                    "clearing a waiting warning must preserve the same viewport bounds"
+                );
+            }
+        }
     }
 }

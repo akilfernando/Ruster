@@ -4488,6 +4488,7 @@ impl SceneEditor {
             }
             if self.asset_loading() {
                 self.captures.rect = None;
+                self.captures.receipt = None;
                 ui.heading("Loading project content…");
                 ui.label("The scene and your saved edits are retained while content loads.");
                 // Stop remains available for an older retained runtime while
@@ -4549,6 +4550,7 @@ impl SceneEditor {
                 &mut self.navigation,
             );
             self.captures.rect = Some(viewport.rect);
+            self.captures.receipt = Some(viewport.receipt.clone());
             self.view_state.input_active = ui.input(|input| input.pointer.any_down());
             let may_draw = !self.asset_publishing() && !self.asset_loading() && !self.runtime.visible
                 && !self.drafts()
