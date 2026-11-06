@@ -4053,57 +4053,93 @@ impl SceneEditor {
         }
         ui.label(&self.shader_notice);
     }
-    fn status_problem_ui(ui: &mut egui::Ui, error: &str, shader: Option<&str>) {
-        let primary = if error.is_empty() {
-            shader
-        } else {
-            Some(error)
-        };
-        let Some(primary) = primary else {
-            return;
-        };
-        let secondary = shader.filter(|message| *message != primary);
-        let summary = primary
-            .lines()
-            .find(|line| !line.trim().is_empty())
-            .unwrap_or("Operation failed")
-            .trim();
-        // Allocate the action first from the right so even a long summary
-        // cannot displace access to the retained diagnostic.
-        ui.allocate_ui_with_layout(
-            egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
-            egui::Layout::right_to_left(egui::Align::Center),
-            |ui| {
-                ui.menu_button("Details", |ui| {
-                    ui.set_max_width((ui.ctx().content_rect().width() - 48.0).clamp(160.0, 600.0));
-                    egui::ScrollArea::vertical()
-                        .id_salt("status_problem_details")
-                        .max_height((ui.ctx().content_rect().height() * 0.5).clamp(96.0, 320.0))
-                        .show(ui, |ui| {
-                            ui.add(egui::Label::new(primary).wrap());
-                            if let Some(secondary) = secondary {
-                                ui.separator();
-                                ui.add(egui::Label::new(secondary).wrap());
-                            }
-                        });
-                });
-                ui.add(
-                    egui::Label::new(egui::RichText::new(summary).color(egui::Color32::LIGHT_RED))
-                        .truncate(),
-                );
-            },
-        );
-        if let Some(secondary) = secondary {
-            let summary = secondary
-                .lines()
-                .find(|line| !line.trim().is_empty())
-                .unwrap_or("Operation failed")
-                .trim();
-            ui.add(
-                egui::Label::new(egui::RichText::new(summary).color(egui::Color32::YELLOW))
-                    .truncate(),
-            );
-        }
+    fn status_diagnostics(&self) -> bool {
+        !self.error.is_empty()
+            || !self.recovery.warning.is_empty()
+            || self.shader_problem().is_some()
+            || !self.workspace.error.is_empty()
+            || !self.runtime.status.is_empty()
+            || self.runtime.diagnostic.is_some()
+            || !self.external.status.is_empty()
+    }
+    fn shader_problem(&self) -> Option<&str> {
+        (self.shader_notice.contains("rejected") || self.shader_notice.contains("unavailable"))
+            .then_some(self.shader_notice.as_str())
+    }
+    fn status_details_ui(&mut self, ui: &mut egui::Ui) {
+        ui.set_max_width((ui.ctx().content_rect().width() - 48.0).clamp(160.0, 600.0));
+        egui::ScrollArea::vertical()
+            .id_salt("status_problem_details")
+            .max_height((ui.ctx().content_rect().height() * 0.5).clamp(96.0, 320.0))
+            .show(ui, |ui| {
+                if !self.error.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&self.error).color(egui::Color32::LIGHT_RED),
+                        )
+                        .wrap(),
+                    );
+                }
+                self.recovery.warning_ui(ui);
+                if let Some(shader) = self
+                    .shader_problem()
+                    .filter(|message| *message != self.error)
+                {
+                    ui.add(
+                        egui::Label::new(egui::RichText::new(shader).color(egui::Color32::YELLOW))
+                            .wrap(),
+                    );
+                }
+                if !self.workspace.error.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&self.workspace.error).color(egui::Color32::YELLOW),
+                        )
+                        .wrap(),
+                    );
+                    if ui.button("Recover workspace preferences…").clicked() {
+                        self.workspace.settings_open = true;
+                        ui.close();
+                    }
+                }
+                if !self.runtime.status.is_empty() {
+                    ui.add(egui::Label::new(&self.runtime.status).wrap());
+                }
+                if let Some(diagnostic) = &self.runtime.diagnostic {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(format!(
+                                "{}: {}",
+                                if self.runtime.stale {
+                                    "Stale runtime"
+                                } else {
+                                    "Runtime error"
+                                },
+                                diagnostic.message
+                            ))
+                            .color(egui::Color32::LIGHT_RED),
+                        )
+                        .wrap(),
+                    );
+                    if ui.button("Open location").clicked() {
+                        if let Err(error) = self.behavior.navigate_diagnostic(
+                            &self.session,
+                            diagnostic,
+                            self.runtime.captured.as_deref(),
+                        ) {
+                            self.error = error;
+                        }
+                        ui.close();
+                    }
+                }
+                if !self.external.status.is_empty() {
+                    ui.add(egui::Label::new(&self.external.status).wrap());
+                    if ui.button("Working-copy details").clicked() {
+                        self.external.open = true;
+                        ui.close();
+                    }
+                }
+            });
     }
     fn scene_menus(&mut self, ui: &mut egui::Ui) {
         ui.horizontal_wrapped(|ui| {
@@ -4401,46 +4437,7 @@ impl SceneEditor {
         }
         self.route_shortcuts(&ctx);
         egui::Panel::top("scene_top").show(ui, |ui| self.scene_menus(ui));
-        egui::Panel::bottom("scene_status").show(ui, |ui| {
-            egui::ScrollArea::vertical()
-                .id_salt("global_status_scroll")
-                .min_scrolled_height(0.0)
-                // Keep progress/actions outside scrolling diagnostics. Reserve
-                // most of a compact window for creation, while long errors
-                // remain available through scrolling and Details.
-                .max_height(
-                    ((ctx.content_rect().height() * 0.15).min(96.0)
-                        - ui.spacing().interact_size.y
-                        - ui.spacing().item_spacing.y)
-                        .max(ui.spacing().interact_size.y),
-                )
-                .show(ui, |ui| {
-                    let shader = (self.shader_notice.contains("rejected")
-                        || self.shader_notice.contains("unavailable"))
-                    .then_some(self.shader_notice.as_str());
-                    Self::status_problem_ui(ui, &self.error, shader);
-                    self.recovery.warning_ui(ui);
-                    if !self.workspace.error.is_empty() {
-                        ui.colored_label(egui::Color32::YELLOW, &self.workspace.error);
-                        if ui.button("Recover workspace preferences…").clicked() {
-                            self.workspace.settings_open = true;
-                        }
-                    }
-
-                    if !self.runtime.status.is_empty() {
-                        ui.add(egui::Label::new(&self.runtime.status).truncate())
-                            .on_hover_text(&self.runtime.status);
-                    }
-                    if !self.external.status.is_empty() {
-                        ui.add(egui::Label::new(&self.external.status).truncate())
-                            .on_hover_text(&self.external.status);
-                        if ui.button("Working-copy details").clicked() {
-                            self.external.open = true;
-                        }
-                    }
-                });
-            self.asset_status_ui(ui);
-        });
+        egui::Panel::bottom("scene_status").show(ui, |ui| self.asset_status_ui(ui));
         if self.workspace.prefs.content_visible {
             let remaining = ui.available_height();
             // Reserve 160 points for compact tools/runtime/view chrome and
@@ -4501,12 +4498,6 @@ impl SceneEditor {
             self.manipulation_tools_ui(ui);
             let blocked=self.guard().is_err() || self.manipulation.offset_pending() || self.asset_busy();
             if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.capture_reset_assets(key);}
-            if let Some(diagnostic)=&self.runtime.diagnostic {
-                ui.horizontal(|ui| {
-                    if ui.button("Open location").clicked() {if let Err(error)=self.behavior.navigate_diagnostic(&self.session,diagnostic,self.runtime.captured.as_deref()){self.error=error;}}
-                    ui.add(egui::Label::new(egui::RichText::new(format!("{}: {}",if self.runtime.stale {"Stale runtime"}else{"Runtime error"},diagnostic.message)).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&diagnostic.message);
-                });
-            }
             self.runtime.observe(self.generation,self.session.scene().revision,self.assets.as_ref().map(|store|store.revision()),self.shader_revision);
             self.asset_mark_callback_owners();
             let transient = if !self.runtime.visible {
@@ -4884,6 +4875,7 @@ mod tests {
             let details_center = std::cell::Cell::new(None);
             let details_visible = std::cell::Cell::new(false);
             let full_problem_count = std::cell::Cell::new(0);
+            let runtime_location_present = std::cell::Cell::new(false);
             let content_rect = std::cell::Cell::new(None);
             let asset_row_visible = std::cell::Cell::new(false);
             let mut time = 0.0;
@@ -4943,18 +4935,10 @@ mod tests {
                 details_visible.set(output.shapes.iter().any(|shape| matches!(&shape.shape,
                     egui::epaint::Shape::Text(text) if text.galley.job.text == "Details"
                     && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))));
-                if !editor.error.is_empty() && editor.shader_notice.contains("rejected") {
-                    for (index, message) in [&editor.error, &editor.shader_notice]
-                        .into_iter()
-                        .enumerate()
-                    {
-                        if index == 1 && editor.error == editor.shader_notice {
-                            continue;
-                        }
-                        let first_line = message.lines().next().unwrap();
-                        assert_eq!(output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==first_line)).count(),1,"each distinct problem must retain a concise visible summary");
-                    }
-                }
+                runtime_location_present.set(output.shapes.iter().any(|shape| {
+                    matches!(&shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == "Open location")
+                }));
                 if editor.error.contains('\n') && editor.error == editor.shader_notice {
                     let summary = editor.error.lines().next().unwrap();
                     let summary_count=output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==summary)).count();
@@ -4991,6 +4975,56 @@ mod tests {
             editor.notice = "Scene saved. ".repeat(80);
             frame(&mut editor, normal_size);
             assert_eq!(frame(&mut editor, normal_size), idle_viewport);
+            // A failed Refresh, retained warnings, and repair have the same
+            // callback bounds as idle/progress at both ordinary and minimum size.
+            for size in [normal_size, egui::vec2(640.0, 480.0)] {
+                frame(&mut editor, size);
+                let idle = frame(&mut editor, size);
+                editor.save_continuation = Some(save_commands::AfterSave {
+                    kind: save_commands::Continuation::ThenNew,
+                    generation: editor.generation.wrapping_add(1),
+                    sequence: 0,
+                    revision: editor.session.scene().revision,
+                });
+                assert_eq!(frame(&mut editor, size), idle, "busy footprint");
+                editor.save_continuation = None;
+                editor.error =
+                    "Malformed PNG; last good texture retained.\nRepair the source and Refresh."
+                        .into();
+                editor.recovery.warning = "Recovery checkpoint needs Retry.".into();
+                editor.shader_notice = "Shader unavailable; last good pipeline retained.".into();
+                editor.workspace.error = "Workspace preferences need recovery.".into();
+                editor.runtime.status = "Runtime stopped; authored scene preserved.".into();
+                editor.external.status = "Working file changed externally.".into();
+                assert_eq!(frame(&mut editor, size), idle, "failure footprint");
+                assert!(details_visible.get(), "failure Details remains visible");
+                editor.save_continuation = Some(save_commands::AfterSave {
+                    kind: save_commands::Continuation::ThenNew,
+                    generation: editor.generation.wrapping_add(1),
+                    sequence: 0,
+                    revision: editor.session.scene().revision,
+                });
+                assert_eq!(
+                    frame(&mut editor, size),
+                    idle,
+                    "busy with retained failures footprint"
+                );
+                assert!(
+                    !editor.error.is_empty(),
+                    "starting work must retain diagnostics"
+                );
+                editor.save_continuation = None;
+                editor.error.clear();
+                editor.recovery.warning.clear();
+                editor.shader_notice = "Built-in scene shader".into();
+                editor.workspace.error.clear();
+                editor.runtime.status.clear();
+                editor.external.status.clear();
+                editor.notice = "Both sources repaired and refreshed.".into();
+                assert_eq!(frame(&mut editor, size), idle, "repair footprint");
+            }
+            frame(&mut editor, normal_size);
+            frame(&mut editor, normal_size);
             let before = content_rect.get().expect("normal Content panel state");
             let divider = egui::pos2(before.center().x, before.top());
             let pointer = |pos, pressed| egui::Event::PointerButton {
@@ -5095,6 +5129,8 @@ mod tests {
                 frame(&mut editor, egui::vec2(640.0, 480.0));
                 std::thread::yield_now();
             }
+            frame(&mut editor, egui::vec2(640.0, 480.0));
+            let runtime_viewport = frame(&mut editor, egui::vec2(640.0, 480.0));
             editor.error =
                 "Repair or revert the unfinished value; entered text is preserved.".into();
             editor.shader_notice = "Shader rejected; last good pipeline retained.".into();
@@ -5113,6 +5149,10 @@ mod tests {
             editor.manipulation.snap = true;
             frame(&mut editor, egui::vec2(640.0, 480.0));
             let viewport = frame(&mut editor, egui::vec2(640.0, 480.0));
+            assert_eq!(
+                viewport, runtime_viewport,
+                "runtime diagnostics share the stable footer footprint"
+            );
             assert!(
                 viewport.height() >= 180.0,
                 "errors and stale status must not displace the viewport: {}",
@@ -5151,6 +5191,10 @@ mod tests {
                 full_problem_count.get(),
                 1,
                 "Details must expose the full retained message once"
+            );
+            assert!(
+                runtime_location_present.get(),
+                "Details must preserve the runtime location action"
             );
             assert_eq!(editor.error, retained);
             assert_eq!(editor.shader_notice, retained);
@@ -5197,23 +5241,179 @@ mod tests {
                 sequence: 0,
                 revision: editor.session.scene().revision,
             });
-            let mut output = ctx.run_ui(
-                egui::RawInput {
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(320.0, 240.0),
-                    )),
-                    ..Default::default()
-                },
-                |ui| editor.asset_status_ui(ui),
-            );
-            output.textures_delta.clear();
-            for action in ["Cancel", "Keep editing"] {
-                assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
-                    egui::epaint::Shape::Text(text) if text.galley.job.text == action
-                    && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))),
-                    "both progress actions must fit at maximum zoom: {action}");
+            editor.recovery.warning = "Recovery checkpoint needs Retry.".into();
+            editor.workspace.error = "Workspace preferences need recovery.".into();
+            editor.runtime.status = "Runtime stopped; authored scene preserved.".into();
+            editor.external.status = "Working file changed externally.".into();
+            let messages = [
+                editor.error.clone(),
+                editor.recovery.warning.clone(),
+                editor.workspace.error.clone(),
+                editor.runtime.status.clone(),
+                editor.external.status.clone(),
+                "Retry recovery checkpoint".into(),
+                "Recover workspace preferences…".into(),
+                "Working-copy details".into(),
+            ];
+            let status_ctx = egui::Context::default();
+            let mut footer_time = 0.0;
+            let mut footer = |events| {
+                footer_time += 0.1;
+                let mut output = status_ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        time: Some(footer_time),
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(320.0, 240.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| editor.asset_status_ui(ui),
+                );
+                output.textures_delta.clear();
+                output
+            };
+            let output = footer(Vec::new());
+            let key = |key| {
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }]
+            };
+            for action in ["Cancel", "Keep editing", "Details"] {
+                let center = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| match &shape.shape {
+                        egui::epaint::Shape::Text(text)
+                            if text.galley.job.text == action
+                                && shape.clip_rect.contains_rect(egui::Rect::from_min_size(
+                                    text.pos,
+                                    text.galley.size(),
+                                )) =>
+                        {
+                            Some(text.pos + text.galley.size() / 2.0)
+                        }
+                        _ => None,
+                    })
+                    .unwrap_or_else(|| panic!("footer action must fit at maximum zoom: {action}"));
+                footer(key(egui::Key::Tab));
+                let focused = status_ctx
+                    .memory(|memory| memory.focused())
+                    .expect("footer action must be keyboard reachable");
+                assert!(
+                    status_ctx
+                        .read_response(focused)
+                        .unwrap()
+                        .rect
+                        .contains(center),
+                    "Tab must reach {action}"
+                );
             }
+            footer(key(egui::Key::Enter));
+            // Popup sizing pass. Read the real bounded scroll clip, then
+            // observe every message from top to bottom using wheel events.
+            // A long first diagnostic deliberately prevents all messages and
+            // recovery actions from fitting in the same painted snapshot.
+            footer(Vec::new());
+            let mut output = footer(Vec::new());
+            let scroll_clip = output
+                .shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == messages[0] => {
+                        Some(shape.clip_rect)
+                    }
+                    _ => None,
+                })
+                .expect("keyboard Enter must open Details with the full first diagnostic");
+            assert!(
+                scroll_clip.height() <= 120.5,
+                "Details must remain height bounded"
+            );
+            let mut covered_to = [0.0_f32; 8];
+            let mut heights = [None; 8];
+            let mut actions_visible = [false; 3];
+            for _ in 0..64 {
+                assert!(
+                    output
+                        .shapes
+                        .iter()
+                        .filter(|shape| matches!(&shape.shape,
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == messages[0]))
+                        .count()
+                        <= 1,
+                    "identical ordinary/shader diagnostics must never be duplicated"
+                );
+                for shape in &output.shapes {
+                    let egui::epaint::Shape::Text(text) = &shape.shape else {
+                        continue;
+                    };
+                    let Some(index) = messages
+                        .iter()
+                        .position(|message| *message == text.galley.job.text)
+                    else {
+                        continue;
+                    };
+                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    let visible = rect.intersect(shape.clip_rect);
+                    if !visible.is_positive() {
+                        continue;
+                    }
+                    assert!(
+                        rect.left() >= shape.clip_rect.left() - 0.5
+                            && rect.right() <= shape.clip_rect.right() + 0.5,
+                        "Details must wrap the full width of {}: text={rect:?}, ink={:?}, clip={:?}",
+                        messages[index], text.visual_bounding_rect(), shape.clip_rect
+                    );
+                    let start = visible.top() - rect.top();
+                    assert!(
+                        start <= covered_to[index] + 1.0,
+                        "scroll samples must leave no unread interval in {}",
+                        messages[index]
+                    );
+                    covered_to[index] = covered_to[index].max(visible.bottom() - rect.top());
+                    heights[index] = Some(rect.height());
+                    if index >= 5 && shape.clip_rect.contains_rect(rect) {
+                        actions_visible[index - 5] = true;
+                    }
+                }
+                if heights.iter().enumerate().all(|(index, height)| {
+                    height.is_some_and(|height| covered_to[index] >= height - 0.5)
+                }) && actions_visible.iter().all(|visible| *visible)
+                {
+                    break;
+                }
+                footer(vec![
+                    egui::Event::PointerMoved(scroll_clip.center()),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -24.0),
+                        phase: egui::TouchPhase::Move,
+                        source: egui::MouseWheelSource::Unknown,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ]);
+                // Advance real input time so wheel smoothing settles before
+                // inspecting the next overlapping readable slice.
+                output = footer(Vec::new());
+            }
+            for (index, message) in messages.iter().enumerate() {
+                assert!(heights[index].is_some_and(|height| covered_to[index] >= height - 0.5),
+                    "bounded Details must expose the entire diagnostic/action through scrolling: {message}");
+            }
+            assert!(actions_visible.iter().all(|visible| *visible),
+                "each retained recovery/workspace/working-copy action must fit visibly at a scroll position");
+            assert_eq!(
+                editor.error, messages[0],
+                "Details must preserve the retained problem"
+            );
+            assert_eq!(editor.shader_notice, messages[0]);
         }
     }
     // Folding advanced controls must never hide recovered/invalid input, and

@@ -443,7 +443,7 @@ impl RecoveryUi {
         if !self.warning.is_empty() {
             ui.add(
                 egui::Label::new(egui::RichText::new(&self.warning).color(egui::Color32::YELLOW))
-                    .truncate(),
+                    .wrap(),
             )
             .on_hover_text(&self.warning);
             if ui.button("Retry recovery checkpoint").clicked() {

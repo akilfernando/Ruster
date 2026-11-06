@@ -1693,7 +1693,6 @@ impl SceneEditor {
             recovered: self.recovered_origin.is_some() || self.session.path().is_none(),
             recovery_shader: self.recovered_origin.is_some() || self.session.path().is_none(),
         });
-        self.error.clear();
         Ok(())
     }
     pub(super) fn cancel_asset_work(&mut self) {
@@ -2314,10 +2313,9 @@ impl SceneEditor {
     }
     pub(super) fn asset_status_ui(&mut self, ui: &mut egui::Ui) {
         let busy = self.asset_busy() || self.save_continuation.is_some();
-        // Progress replaces the idle message in one stable row. Adding a
-        // temporary wrapped row resizes the viewport (and its GPU targets)
-        // on every Save/Refresh. Allocate actions first so long summaries
-        // cannot push cancellation outside the window.
+        // Progress and every retained diagnostic share one stable row. Full
+        // messages/actions live in Details so failures never resize GPU targets.
+        // Allocate actions first: long summaries must not displace cancellation.
         ui.allocate_ui_with_layout(
             egui::vec2(ui.available_width(), ui.spacing().interact_size.y),
             egui::Layout::right_to_left(egui::Align::Center),
@@ -2343,22 +2341,62 @@ impl SceneEditor {
                 {
                     self.revoke_save_continuation();
                 }
+                if self.status_diagnostics() {
+                    let label = if busy {
+                        egui::RichText::new("Details").color(egui::Color32::YELLOW)
+                    } else {
+                        egui::RichText::new("Details")
+                    };
+                    ui.menu_button(label, |ui| self.status_details_ui(ui))
+                        .response
+                        .on_hover_text(if busy {
+                            "Retained diagnostics remain available while content work finishes."
+                        } else {
+                            "Read full diagnostics and recovery actions."
+                        });
+                }
                 if busy {
                     ui.add(egui::Spinner::new().size(ui.spacing().interact_size.y));
                 }
-                let message = if busy {
+                let (message, color) = if busy {
                     if self.pending_asset_open.is_some() {
-                        "Loading project content…"
+                        ("Loading project content…", ui.visuals().text_color())
                     } else {
-                        &self.asset_ops.status
+                        (
+                            if self.asset_ops.status.is_empty() {
+                                "Working…"
+                            } else {
+                                &self.asset_ops.status
+                            },
+                            ui.visuals().text_color(),
+                        )
                     }
+                } else if !self.error.is_empty() {
+                    (self.error.as_str(), egui::Color32::LIGHT_RED)
+                } else if !self.recovery.warning.is_empty() {
+                    (self.recovery.warning.as_str(), egui::Color32::YELLOW)
+                } else if let Some(shader) = self.shader_problem() {
+                    (shader, egui::Color32::YELLOW)
+                } else if !self.workspace.error.is_empty() {
+                    (self.workspace.error.as_str(), egui::Color32::YELLOW)
+                } else if let Some(diagnostic) = &self.runtime.diagnostic {
+                    (diagnostic.message.as_str(), egui::Color32::LIGHT_RED)
+                } else if !self.runtime.status.is_empty() {
+                    (self.runtime.status.as_str(), ui.visuals().text_color())
+                } else if !self.external.status.is_empty() {
+                    (self.external.status.as_str(), ui.visuals().text_color())
                 } else if self.notice.is_empty() {
-                    "Ready"
+                    ("Ready", ui.visuals().text_color())
                 } else {
-                    &self.notice
+                    (self.notice.as_str(), ui.visuals().text_color())
                 };
+                let summary = message
+                    .lines()
+                    .find(|line| !line.trim().is_empty())
+                    .unwrap_or("Ready")
+                    .trim();
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.add(egui::Label::new(message).truncate())
+                    ui.add(egui::Label::new(egui::RichText::new(summary).color(color)).truncate())
                         .on_hover_text(message);
                 });
             },
