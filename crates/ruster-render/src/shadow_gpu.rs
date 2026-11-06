@@ -27,15 +27,18 @@ pub enum ShadowStatus {
 pub(super) struct Frame {
     pub status: ShadowStatus,
     pub rendered: bool,
+    pub requested_size: u32,
     pub pending: bool,
     pub map_size: u32,
     pub live_bytes: u64,
     pub retiring_bytes: u64,
     pub allocations: u64,
     pub passes: u64,
+    pub uniform_uploads: u64,
     pub draw_calls: usize,
     pub units_per_texel: Option<f64>,
     pub detail_limited: bool,
+    pub precision_limited: bool,
 }
 struct Map {
     _texture: wgpu::Texture,
@@ -132,6 +135,7 @@ pub(super) struct ShadowGpu {
     enabled: bool,
     allocations: u64,
     passes: u64,
+    uniform_uploads: u64,
     last_frame: Option<u64>,
     frame: Frame,
 }
@@ -236,6 +240,7 @@ impl ShadowGpu {
             enabled: false,
             allocations: 0,
             passes: 0,
+            uniform_uploads: 1,
             last_frame: None,
             frame: Frame::default(),
         }
@@ -305,6 +310,7 @@ impl ShadowGpu {
         if packet != self.current {
             queue.write_buffer(&self.uniform, 0, bytemuck::bytes_of(&packet));
             self.current = packet;
+            self.uniform_uploads += 1;
         }
     }
     pub fn bind(&self) -> &wgpu::BindGroup {
@@ -344,6 +350,7 @@ impl ShadowGpu {
         self.enabled = false;
         let mut frame = Frame::default();
         let requested = request.settings.filter(|s| s.enabled);
+        frame.requested_size = requested.map_or(0, |s| s.quality.map_size());
         let settings = if request.builtin {
             requested
         } else {
@@ -383,9 +390,11 @@ impl ShadowGpu {
                             ShadowStatus::Pending
                         };
                         frame.units_per_texel = Some(fit.world_units_per_texel);
+                        frame.precision_limited =
+                            fit.numeric_padding_world > fit.world_units_per_texel * 0.5;
                         frame.detail_limited = fit.world_units_per_texel * 3.
                             > geometry.smallest_feature()
-                            || fit.numeric_padding_world > fit.world_units_per_texel * 0.5;
+                            || frame.precision_limited;
                         self.write(
                             queue,
                             Packet {
@@ -464,6 +473,7 @@ impl ShadowGpu {
         frame.retiring_bytes = self.retiring.as_ref().map_or(0, |r| r.map.bytes());
         frame.allocations = self.allocations;
         frame.passes = self.passes;
+        frame.uniform_uploads = self.uniform_uploads;
         frame.pending = self.retiring.is_some() || frame.status == ShadowStatus::Pending;
         // A queue callback itself cannot initiate the poll that delivers it.
         // Request only while genuine retirement/quality work remains pending.

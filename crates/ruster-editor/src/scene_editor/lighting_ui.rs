@@ -1,8 +1,39 @@
 //! Recoverable light/ambient text with one shared authored transaction.
 use super::SceneEditor;
 use eframe::egui;
-use ruster_scene::{Ambient, Light, LightKind, Lighting, Scene};
+use ruster_scene::{Ambient, Light, LightKind, Lighting, Scene, ShadowQuality, SunShadow};
 use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct ShadowDraft {
+    pub(super) enabled: bool,
+    pub(super) quality: ShadowQuality,
+    pub(super) depth_bias_texels: String,
+    pub(super) normal_bias_texels: String,
+}
+
+impl From<SunShadow> for ShadowDraft {
+    fn from(shadow: SunShadow) -> Self {
+        Self {
+            enabled: shadow.enabled,
+            quality: shadow.quality,
+            depth_bias_texels: shadow.depth_bias_texels.to_string(),
+            normal_bias_texels: shadow.normal_bias_texels.to_string(),
+        }
+    }
+}
+
+impl ShadowDraft {
+    fn value(&self) -> Result<SunShadow, String> {
+        Ok(SunShadow {
+            enabled: self.enabled,
+            quality: self.quality,
+            depth_bias_texels: scalar(&self.depth_bias_texels, 0.0, 4.0, "Shadow depth bias")?,
+            normal_bias_texels: scalar(&self.normal_bias_texels, 0.0, 4.0, "Shadow normal offset")?,
+        })
+    }
+}
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -15,6 +46,8 @@ pub(super) enum LightingDraft {
         color: [String; 3],
         intensity: String,
         range: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        shadow: Option<ShadowDraft>,
     },
     Ambient {
         revision: u64,
@@ -58,6 +91,10 @@ impl LightingDraft {
                 LightKind::Directional { .. } => None,
                 LightKind::Point { range } => Some(range.to_string()),
             },
+            shadow: match baseline.kind {
+                LightKind::Directional { shadow } => Some(shadow.into()),
+                LightKind::Point { .. } => None,
+            },
             baseline,
         })
     }
@@ -82,6 +119,20 @@ impl LightingDraft {
     pub(super) fn is_ambient(&self) -> bool {
         matches!(self, Self::Ambient { .. })
     }
+    /// Recovery owns the raw-version guard. Call only for a pre6 draft whose
+    /// format never carried shadow fields; a current missing field stays invalid.
+    pub(super) fn upgrade_legacy_shadow(&mut self) {
+        if let Self::Light {
+            baseline, shadow, ..
+        } = self
+        {
+            if shadow.is_none() {
+                if let LightKind::Directional { shadow: baseline } = baseline.kind {
+                    *shadow = Some(baseline.into());
+                }
+            }
+        }
+    }
     pub(super) fn storage_valid(&self) -> bool {
         let (color, intensity) = match self {
             Self::Light {
@@ -90,15 +141,20 @@ impl LightingDraft {
                 color,
                 intensity,
                 range,
+                shadow,
                 ..
             } => {
                 if ruster_scene::validate_id(id).is_err()
                     || baseline.validate().is_err()
                     || !matches!(
-                        (&baseline.kind, range),
-                        (LightKind::Directional { .. }, None) | (LightKind::Point { .. }, Some(_))
+                        (&baseline.kind, range, shadow),
+                        (LightKind::Directional { .. }, None, Some(_))
+                            | (LightKind::Point { .. }, Some(_), None)
                     )
                     || range.as_ref().is_some_and(|text| !bounded(text))
+                    || shadow.as_ref().is_some_and(|shadow| {
+                        !bounded(&shadow.depth_bias_texels) || !bounded(&shadow.normal_bias_texels)
+                    })
                 {
                     return false;
                 }
@@ -143,6 +199,7 @@ impl LightingDraft {
             color,
             intensity,
             range,
+            shadow,
             ..
         } = self
         else {
@@ -152,13 +209,27 @@ impl LightingDraft {
         value.enabled = *enabled;
         value.color = rgb(color)?;
         value.intensity = scalar(intensity, 0.0, 16.0, "Light intensity")?;
-        if let LightKind::Point { range: target } = &mut value.kind {
-            *target = scalar(
-                range.as_deref().ok_or("Point range is missing.")?,
-                0.1,
-                10_000.0,
-                "Point range",
-            )?;
+        match &mut value.kind {
+            LightKind::Directional { shadow: target } => {
+                if range.is_some() {
+                    return Err("Directional lights cannot have point range.".into());
+                }
+                *target = shadow
+                    .as_ref()
+                    .ok_or("Sun shadow settings are missing.")?
+                    .value()?;
+            }
+            LightKind::Point { range: target } => {
+                if shadow.is_some() {
+                    return Err("Point lights cannot have Sun shadow settings.".into());
+                }
+                *target = scalar(
+                    range.as_deref().ok_or("Point range is missing.")?,
+                    0.1,
+                    10_000.0,
+                    "Point range",
+                )?;
+            }
         }
         value.validate().map_err(|error| error.to_string())?;
         Ok(value)
@@ -374,6 +445,15 @@ impl SceneEditor {
             );
         }
         self.lighting_form(ui, draft, own);
+        if self
+            .session
+            .scene()
+            .lighting
+            .light(&id)
+            .is_some_and(|light| matches!(light.kind, LightKind::Directional { .. }))
+        {
+            self.shadow_feedback_ui(ui);
+        }
     }
     pub(super) fn ambient_inspector_ui(&mut self, ui: &mut egui::Ui) {
         let own = self
@@ -417,6 +497,7 @@ impl SceneEditor {
         let popup_at_start = egui::Popup::is_any_open(ui.ctx());
         ui.add_enabled_ui(editable, |ui| {
             let mut fields = Vec::new();
+            let mut foldout_owns_focus = false;
             let (color, intensity) = match &mut draft {
                 LightingDraft::Light { enabled, color, intensity, .. } => {
                     let response = ui.checkbox(enabled, "Enabled"); changed |= response.changed(); fields.push(response);
@@ -460,10 +541,60 @@ impl SceneEditor {
                     changed |= response.changed(); fields.push(response);
                 });
             }
+            if let LightingDraft::Light { shadow: Some(shadow), .. } = &mut draft {
+                ui.separator();
+                let response = ui.checkbox(&mut shadow.enabled, "Shadows")
+                    .on_hover_text("This Sun casts shadows from opaque scene geometry. Ambient and point lights remain independent.");
+                changed |= response.changed();
+                fields.push(response);
+                ui.horizontal(|ui| {
+                    ui.label("Quality");
+                    let before = shadow.quality;
+                    let response = egui::ComboBox::from_id_salt("lighting_shadow_quality")
+                        .width(110.0)
+                        .selected_text(match shadow.quality {
+                            ShadowQuality::Standard => "Standard",
+                            ShadowQuality::High => "High",
+                        })
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut shadow.quality, ShadowQuality::Standard, "Standard · 1024");
+                            ui.selectable_value(&mut shadow.quality, ShadowQuality::High, "High · 2048");
+                        });
+                    changed |= before != shadow.quality;
+                    fields.push(response.response.on_hover_text("One shadow map covering the scene. High resolves finer details and uses more GPU memory."));
+                });
+                // Expose an unfinished recovered bias instead of hiding its
+                // repair field. Valid settings remain behind the foldout.
+                let advanced = egui::CollapsingHeader::new("Advanced shadows")
+                    .id_salt("lighting_shadow_advanced")
+                    .open((own && shadow.value().is_err()).then_some(true))
+                    .show(ui, |ui| {
+                        for (text, label, id, hint) in [
+                            (&mut shadow.depth_bias_texels, "Depth bias", "lighting_shadow_depth_bias", "Depth offset in world shadow texels, 0 to 4. More bias reduces self-shadowing but can detach shadows from surfaces."),
+                            (&mut shadow.normal_bias_texels, "Normal offset", "lighting_shadow_normal_bias", "Surface-normal offset in world shadow texels, 0 to 4. More offset can reduce self-shadowing but lose thin details."),
+                        ] {
+                            ui.horizontal(|ui| {
+                                ui.label(label).on_hover_text(hint);
+                                let response = ui.add(egui::TextEdit::singleline(text)
+                                    .id(egui::Id::unique(id)).char_limit(64).desired_width(82.0))
+                                    .on_hover_text("One world shadow texel is the scene coverage width divided by the map resolution.");
+                                changed |= response.changed();
+                                fields.push(response);
+                            });
+                        }
+                    });
+                // Enter belongs to the foldout's own activation. Escape still
+                // cancels this draft when its header owns keyboard focus.
+                let response = advanced.header_response;
+                foldout_owns_focus = response.has_focus();
+                if editable && response.has_focus() && !popup_at_start && !egui::Popup::is_any_open(ui.ctx()) {
+                    escape |= ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                }
+            }
             for response in &fields {
                 let owned = editable && (response.has_focus() || response.lost_focus() || ui.memory(|memory| memory.had_focus_last_frame(response.id)));
                 if owned && !popup_at_start && !egui::Popup::is_any_open(ui.ctx()) {
-                    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) { enter = true; submitting = Some(response.id); }
+                    if !foldout_owns_focus && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) { enter = true; submitting = Some(response.id); }
                     escape |= ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                 }
             }
@@ -540,6 +671,68 @@ mod tests {
             color[0] = "é".repeat(65);
         }
         assert!(!draft.storage_valid());
+
+        // Shadow text remains recoverable while disabled or unfinished. Check
+        // original f64 bounds before narrowing so 4.0000000001 cannot round in.
+        let mut shadow_draft = LightingDraft::light(&scene, "light-1").unwrap();
+        if let LightingDraft::Light {
+            shadow: Some(shadow),
+            ..
+        } = &mut shadow_draft
+        {
+            shadow.quality = ShadowQuality::High;
+            shadow.depth_bias_texels = "unfinished".into();
+        }
+        assert!(shadow_draft.storage_valid());
+        assert!(shadow_draft.light_value().is_err());
+        let bytes = serde_json::to_vec(&shadow_draft).unwrap();
+        assert_eq!(
+            serde_json::from_slice::<LightingDraft>(&bytes).unwrap(),
+            shadow_draft
+        );
+        if let LightingDraft::Light {
+            shadow: Some(shadow),
+            ..
+        } = &mut shadow_draft
+        {
+            shadow.depth_bias_texels = "4.0000000001".into();
+        }
+        assert!(shadow_draft.light_value().is_err());
+        if let LightingDraft::Light {
+            shadow: Some(shadow),
+            ..
+        } = &mut shadow_draft
+        {
+            shadow.depth_bias_texels = "0.45".into();
+            shadow.normal_bias_texels = "-0.000000000000001".into();
+        }
+        assert!(shadow_draft.light_value().is_err());
+        if let LightingDraft::Light {
+            shadow: Some(shadow),
+            ..
+        } = &mut shadow_draft
+        {
+            shadow.normal_bias_texels = "0.25".into();
+        }
+        assert_eq!(
+            shadow_draft.light_value().unwrap().kind,
+            LightKind::Directional {
+                shadow: SunShadow {
+                    enabled: false,
+                    quality: ShadowQuality::High,
+                    depth_bias_texels: 0.45,
+                    normal_bias_texels: 0.25
+                }
+            }
+        );
+        if let LightingDraft::Light {
+            shadow: Some(shadow),
+            ..
+        } = &mut shadow_draft
+        {
+            shadow.normal_bias_texels = "é".repeat(65);
+        }
+        assert!(!shadow_draft.storage_valid());
         let legacy = Scene::empty("ambient");
         let mut ambient = LightingDraft::ambient(&legacy);
         assert!(ambient.validate_snapshot(&legacy, None));
@@ -580,7 +773,9 @@ mod tests {
 
     #[test]
     fn full_inspector_lighting_fields_own_enter_tab_and_escape() {
-        for ambient in [false, true] {
+        for mode in ["light", "ambient", "shadow"] {
+            let ambient = mode == "ambient";
+            let shadow = mode == "shadow";
             let mut editor = SceneEditor::new(
                 ruster_scene::Session::new(Scene::authored_empty("keyboard")).unwrap(),
             );
@@ -594,6 +789,18 @@ mod tests {
             );
             if ambient {
                 editor.lighting_draft = Some(LightingDraft::ambient(editor.session.scene()));
+            } else if shadow {
+                let mut draft = LightingDraft::light(editor.session.scene(), "light-1").unwrap();
+                if let LightingDraft::Light {
+                    shadow: Some(shadow),
+                    ..
+                } = &mut draft
+                {
+                    shadow.enabled = true;
+                    shadow.quality = ShadowQuality::High;
+                    shadow.depth_bias_texels.clear();
+                }
+                editor.lighting_draft = Some(draft);
             }
             let prefix = if ambient { "ambient" } else { "light" };
             let ctx = egui::Context::default();
@@ -629,7 +836,11 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             };
             frame(&mut editor, vec![]);
-            let red = egui::Id::unique(("lighting_color", prefix, 0_usize));
+            let red = if shadow {
+                egui::Id::unique("lighting_shadow_depth_bias")
+            } else {
+                egui::Id::unique(("lighting_color", prefix, 0_usize))
+            };
             let point = ctx
                 .read_response(red)
                 .expect("visible lighting field")
@@ -655,7 +866,11 @@ mod tests {
             frame(&mut editor, vec![]);
             assert_eq!(
                 ctx.memory(|memory| memory.focused()),
-                Some(egui::Id::unique(("lighting_color", prefix, 1_usize)))
+                Some(if shadow {
+                    egui::Id::unique("lighting_shadow_normal_bias")
+                } else {
+                    egui::Id::unique(("lighting_color", prefix, 1_usize))
+                })
             );
             frame(&mut editor, vec![key(egui::Key::Escape)]);
             assert!(editor.lighting_draft.is_none());
@@ -665,13 +880,30 @@ mod tests {
             } else {
                 LightingDraft::light(editor.session.scene(), "light-1").unwrap()
             };
-            match &mut draft {
-                LightingDraft::Light { intensity, .. }
-                | LightingDraft::Ambient { intensity, .. } => *intensity = "0.45".into(),
+            if shadow {
+                if let LightingDraft::Light {
+                    shadow: Some(shadow),
+                    ..
+                } = &mut draft
+                {
+                    shadow.enabled = true;
+                    shadow.quality = ShadowQuality::High;
+                    shadow.depth_bias_texels = "0.45".into();
+                    shadow.normal_bias_texels = "0.1".into();
+                }
+            } else {
+                match &mut draft {
+                    LightingDraft::Light { intensity, .. }
+                    | LightingDraft::Ambient { intensity, .. } => *intensity = "0.45".into(),
+                }
             }
             editor.lighting_draft = Some(draft);
             frame(&mut editor, vec![]);
-            let intensity = egui::Id::unique(("lighting_intensity", prefix));
+            let intensity = if shadow {
+                egui::Id::unique("lighting_shadow_depth_bias")
+            } else {
+                egui::Id::unique(("lighting_intensity", prefix))
+            };
             let point = ctx.read_response(intensity).unwrap().rect.center();
             frame(
                 &mut editor,
@@ -682,6 +914,25 @@ mod tests {
             assert!(editor.lighting_draft.is_none(), "{}", editor.error);
             assert_eq!(editor.session.scene().revision, 1);
             assert_eq!(editor.session.undo_len(), 1);
+            if shadow {
+                assert_eq!(
+                    editor
+                        .session
+                        .scene()
+                        .lighting
+                        .light("light-1")
+                        .unwrap()
+                        .kind,
+                    LightKind::Directional {
+                        shadow: SunShadow {
+                            enabled: true,
+                            quality: ShadowQuality::High,
+                            depth_bias_texels: 0.45,
+                            normal_bias_texels: 0.1
+                        }
+                    }
+                );
+            }
             editor.session.undo(1).unwrap();
             assert!(
                 matches!(&editor.session.scene().lighting, Lighting::Authored { ambient,lights } if ambient.intensity==0.28 && lights["light-1"].intensity==0.72)

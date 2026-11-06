@@ -18,6 +18,7 @@ mod nonvisual;
 mod persistence_commands;
 mod runtime_commands;
 mod save_commands;
+mod shadow_feedback;
 mod view_commands;
 use crate::workspace::{Action, Side, Workspace};
 use eframe::{
@@ -808,7 +809,7 @@ impl SceneEditor {
     #[cfg(test)]
     fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
         let drafts = RecoveryDrafts {
-            version: 5,
+            version: 6,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -834,6 +835,25 @@ impl SceneEditor {
         let material_field = value.get("material").is_some();
         let lighting_field = value.get("lighting").is_some();
         let version = value.get("version").and_then(Value::as_u64);
+        // Recovery5 predates shadow drafts. Reject new fields before defaults
+        // or f32 decoding can disguise a relabeled current payload as old.
+        let shadow_fields = value.get("lighting").is_some_and(|lighting| {
+            lighting.get("shadow").is_some()
+                || lighting.pointer("/baseline/kind/shadow").is_some()
+                || lighting
+                    .pointer("/baseline/lights")
+                    .and_then(Value::as_object)
+                    .is_some_and(|lights| {
+                        lights
+                            .values()
+                            .any(|light| light.pointer("/kind/shadow").is_some())
+                    })
+        });
+        if version.is_some_and(|version| version < 6) && shadow_fields {
+            return Err(
+                "Sun shadow recovery fields require draft version6; checkpoint preserved.".into(),
+            );
+        }
         let manipulation_unit = value.pointer("/manipulation/rotation_unit").is_some();
         let fields_unit = value
             .get("fields")
@@ -853,7 +873,7 @@ impl SceneEditor {
                     && fields_unit != Some(false)
             }
             Some(4) => !lighting_field && manipulation_unit && fields_unit != Some(false),
-            Some(5) => manipulation_unit && fields_unit != Some(false),
+            Some(5 | 6) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -861,11 +881,16 @@ impl SceneEditor {
                     .into(),
             );
         }
-        let draft: RecoveryDrafts = serde_json::from_value(value)
+        let mut draft: RecoveryDrafts = serde_json::from_value(value)
             .map_err(|e| format!("Unsupported recovery drafts: {e}; checkpoint preserved."))?;
+        if draft.version < 6 {
+            if let Some(lighting) = &mut draft.lighting {
+                lighting.upgrade_legacy_shadow();
+            }
+        }
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((2..=5).contains(&draft.version) && draft.behavior.is_some()))
+            || ((2..=6).contains(&draft.version) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -1117,7 +1142,7 @@ impl SceneEditor {
             let asset_origin = self.asset_origin.clone();
             let recovered_origin = self.recovered_origin.clone();
             let drafts = RecoveryDrafts {
-                version: 5,
+                version: 6,
                 revision: session.scene().revision,
                 selection: self.manipulation.ids.clone(),
                 fields: self.draft.clone(),
@@ -5317,7 +5342,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 5);
+        assert_eq!(payload["version"], 6);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -6523,7 +6548,7 @@ mod tests {
     #[test]
     fn lighting_production_checkpoint_preserves_invalid_light_and_global_ambient_drafts() {
         use lighting_ui::LightingDraft;
-        for ambient in [false, true] {
+        for (ambient, shadow) in [(false, false), (true, false), (false, true)] {
             let directory = tempfile::tempdir().unwrap();
             let store = crate::recovery::Store::open(directory.path().join("recovery")).unwrap();
             let mut scene = Scene::authored_empty("lighting-recovery");
@@ -6546,6 +6571,13 @@ mod tests {
                 LightingDraft::light(source.session.scene(), "light-1").unwrap()
             };
             match &mut draft {
+                LightingDraft::Light {
+                    shadow: Some(settings),
+                    ..
+                } if shadow => {
+                    settings.enabled = true;
+                    settings.depth_bias_texels = "unfinished shadow bias".into();
+                }
                 LightingDraft::Light { intensity, .. }
                 | LightingDraft::Ambient { intensity, .. } => {
                     *intensity = "unfinished brightness".into()
@@ -6578,28 +6610,77 @@ mod tests {
             assert_eq!(candidates.len(), 1);
             let (_journal, snapshot) = store.claim(&candidates[0].id).unwrap();
             let payload = snapshot.drafts().unwrap();
-            assert_eq!(payload["version"], 5);
-            assert_eq!(payload["lighting"]["intensity"], "unfinished brightness");
+            assert_eq!(payload["version"], 6);
+            if shadow {
+                assert_eq!(
+                    payload["lighting"]["shadow"]["depth_bias_texels"],
+                    "unfinished shadow bias"
+                );
+            } else {
+                assert_eq!(payload["lighting"]["intensity"], "unfinished brightness");
+                // Genuine pre-shadow recovery keeps its old raw values and
+                // gains only baseline/default shadow controls on migration.
+                let mut old = payload.clone();
+                old["version"] = json!(5);
+                old["lighting"].as_object_mut().unwrap().remove("shadow");
+                let mut migrated = SceneEditor::new(snapshot.restore().unwrap());
+                migrated.restore_recovery_drafts(old).unwrap();
+                assert_eq!(migrated.lighting_draft, exact);
+            }
             let mut restored = SceneEditor::new(snapshot.restore().unwrap());
             restored.restore_recovery_drafts(payload.clone()).unwrap();
             assert_eq!(restored.lighting_draft, exact);
             assert_eq!(restored.session.snapshot_bytes().unwrap(), authored);
             assert!(restored.session.path().is_none());
             assert!(!restored.apply());
-            for case in [
+            // Even a default-valued typed field cannot be smuggled into a
+            // pre-shadow baseline and normalized away by deserialization.
+            let mut old_baseline = payload.clone();
+            old_baseline["version"] = json!(5);
+            old_baseline["lighting"]
+                .as_object_mut()
+                .unwrap()
+                .remove("shadow");
+            let baseline_kind = if ambient {
+                &mut old_baseline["lighting"]["baseline"]["lights"]["light-1"]["kind"]
+            } else {
+                &mut old_baseline["lighting"]["baseline"]["kind"]
+            };
+            baseline_kind["shadow"] =
+                serde_json::to_value(ruster_scene::SunShadow::default()).unwrap();
+            assert!(restored.restore_recovery_drafts(old_baseline).is_err());
+            assert_eq!(restored.lighting_draft, exact);
+            assert_eq!(restored.session.snapshot_bytes().unwrap(), authored);
+            let mut cases = vec![
                 "old-label",
                 "old-null",
+                "old-shadow",
                 "stale",
                 "compound",
                 "oversized",
                 "target",
-            ] {
+            ];
+            if !ambient {
+                cases.extend(["missing-shadow", "point-shadow"]);
+            }
+            for case in cases {
                 let mut bad = payload.clone();
                 match case {
                     "old-label" => bad["version"] = json!(4),
                     "old-null" => {
                         bad["version"] = json!(4);
                         bad["lighting"] = Value::Null;
+                    }
+                    "old-shadow" => {
+                        bad["version"] = json!(5);
+                        bad["lighting"]["shadow"] = Value::Null;
+                    }
+                    "missing-shadow" => {
+                        bad["lighting"].as_object_mut().unwrap().remove("shadow");
+                    }
+                    "point-shadow" => {
+                        bad["lighting"]["baseline"]["kind"] = json!({"type":"point","range":4});
+                        bad["lighting"]["range"] = json!("4");
                     }
                     "stale" => bad["lighting"]["revision"] = json!(1),
                     "compound" => bad["manipulation"]["delta"][0] = json!("1"),
@@ -6612,6 +6693,10 @@ mod tests {
                 assert_eq!(restored.session.snapshot_bytes().unwrap(), authored);
             }
             match restored.lighting_draft.as_mut().unwrap() {
+                LightingDraft::Light {
+                    shadow: Some(settings),
+                    ..
+                } if shadow => settings.depth_bias_texels = "0.15".into(),
                 LightingDraft::Light { intensity, .. }
                 | LightingDraft::Ambient { intensity, .. } => *intensity = "0.45".into(),
             }

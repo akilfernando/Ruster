@@ -893,7 +893,7 @@ mod tests {
         let id = candidates[0].id.clone();
         let (_journal, snapshot) = store.claim(&id).unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 5);
+        assert_eq!(payload["version"], 6);
         assert_eq!(payload["material"]["tint"][1], "unfinished green");
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();

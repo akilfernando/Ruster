@@ -241,8 +241,23 @@ impl ShadowQuality {
 pub struct SunShadow {
     pub enabled: bool,
     pub quality: ShadowQuality,
+    #[serde(deserialize_with = "deserialize_shadow_bias")]
     pub depth_bias_texels: f32,
+    #[serde(deserialize_with = "deserialize_shadow_bias")]
     pub normal_bias_texels: f32,
+}
+
+fn deserialize_shadow_bias<'de, D>(deserializer: D) -> Result<f32, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = f64::deserialize(deserializer)?;
+    if !value.is_finite() || !(0.0..=4.0).contains(&value) {
+        return Err(serde::de::Error::custom(
+            "Sun shadow bias must be finite in 0..=4 texels",
+        ));
+    }
+    Ok(value as f32)
 }
 
 impl Default for SunShadow {
@@ -402,6 +417,18 @@ mod tests {
                 json!({"type": "directional", "shadow": shadow})
             )
             .is_err());
+        }
+        // Scene/history/recovery ingestion must agree with MCP and packaging:
+        // f32 narrowing cannot turn an out-of-range original into valid data.
+        for field in ["depth_bias_texels", "normal_bias_texels"] {
+            for bias in [-1e-50_f64, 4.0000000001] {
+                let mut invalid = value.clone();
+                invalid["shadow"][field] = json!(bias);
+                assert!(
+                    serde_json::from_value::<LightKind>(invalid).is_err(),
+                    "{field}: {bias}"
+                );
+            }
         }
         for bias in [0.0, 4.0, f32::NAN, f32::INFINITY, -0.1, 4.1] {
             let expected_valid = bias.is_finite() && (0.0..=4.0).contains(&bias);

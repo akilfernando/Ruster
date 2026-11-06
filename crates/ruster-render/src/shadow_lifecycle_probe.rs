@@ -106,7 +106,7 @@ impl Probe {
         let frame = frame.unwrap();
         assert!(frame.live_bytes <= HIGH_BYTES);
         assert!(frame.retiring_bytes <= HIGH_BYTES);
-        assert!(frame.live_bytes + frame.retiring_bytes <= STANDARD_BYTES + HIGH_BYTES);
+        assert!(frame.live_bytes + frame.retiring_bytes <= 2 * HIGH_BYTES);
         (frame, encoder.finish())
     }
 
@@ -194,6 +194,7 @@ fn sun_shadow_gpu_retirement_lifecycle_probe() {
     let (disabled, commands) = probe.frame(&device, &queue, None, true, direction);
     assert_eq!(disabled.status, ShadowStatus::Disabled);
     assert!(!disabled.rendered && !disabled.pending);
+    assert_eq!(disabled.requested_size, 0);
     assert_eq!(disabled.passes, 0);
     assert_eq!(
         (
@@ -239,6 +240,8 @@ fn sun_shadow_gpu_retirement_lifecycle_probe() {
     let (occupied, unsent) = probe.frame(&device, &queue, Some(standard), true, direction);
     drop(unsent);
     assert_eq!(occupied.status, ShadowStatus::Pending);
+    assert_eq!(occupied.requested_size, 1024);
+    assert_eq!(occupied.uniform_uploads, upgraded.uniform_uploads);
     assert_eq!(
         (
             occupied.map_size,
@@ -252,6 +255,10 @@ fn sun_shadow_gpu_retirement_lifecycle_probe() {
     drop(unsent);
     assert_eq!(disabled.status, ShadowStatus::Disabled);
     assert!(!disabled.rendered && disabled.pending);
+    assert_eq!(
+        disabled.requested_size, 0,
+        "retained payload is not an enabled request"
+    );
     assert_eq!(
         (
             disabled.live_bytes,
@@ -295,6 +302,7 @@ fn sun_shadow_gpu_retirement_lifecycle_probe() {
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();
     let (steady, commands) = probe.frame(&device, &queue, Some(standard), true, direction);
     assert_eq!(steady.status, ShadowStatus::Ready);
+    assert_eq!(steady.uniform_uploads, replaced.uniform_uploads);
     assert_eq!(
         (steady.live_bytes, steady.retiring_bytes, steady.allocations),
         (STANDARD_BYTES, 0, 3)
@@ -324,6 +332,7 @@ fn sun_shadow_gpu_retirement_lifecycle_probe() {
     );
     assert!(!invalid.rendered && invalid.pending);
     assert_eq!(invalid.passes, empty.passes);
+    assert_eq!(invalid.uniform_uploads, empty.uniform_uploads);
     probe.drain(&device);
     for (has_geometry, direction, expected) in [
         (false, direction, ShadowStatus::NoGeometry),
@@ -365,6 +374,37 @@ fn sun_shadow_gpu_retirement_lifecycle_probe() {
         (last_retirement.live_bytes, last_retirement.retiring_bytes),
         (0, HIGH_BYTES)
     );
+    // Same-quality re-enable before completion can own two High maps, unlike
+    // the Standard/High replacement above. Exercise the actual declared32MiB
+    // overlap bound, not merely the20MiB observed in alternating-quality work.
+    let (recreated, unsent) = probe.frame(&device, &queue, Some(high), true, direction);
+    drop(unsent);
+    assert_eq!(
+        (
+            recreated.live_bytes,
+            recreated.retiring_bytes,
+            recreated.allocations
+        ),
+        (HIGH_BYTES, HIGH_BYTES, 5)
+    );
+    let (repeat, unsent) = probe.frame(&device, &queue, Some(high), true, direction);
+    drop(unsent);
+    assert_eq!(repeat.allocations, recreated.allocations);
+    assert_eq!(repeat.uniform_uploads, recreated.uniform_uploads);
+    let (disabled, unsent) = probe.frame(&device, &queue, None, true, direction);
+    drop(unsent);
+    assert!(!disabled.rendered && disabled.pending);
+    assert_eq!(
+        (disabled.live_bytes, disabled.retiring_bytes),
+        (HIGH_BYTES, HIGH_BYTES)
+    );
+    probe.drain(&device);
+    let (cleanup, unsent) = probe.frame(&device, &queue, None, true, direction);
+    drop(unsent);
+    assert_eq!(
+        (cleanup.live_bytes, cleanup.retiring_bytes),
+        (0, HIGH_BYTES)
+    );
     probe.drain(&device);
     let (drained, commands) = probe.frame(&device, &queue, None, true, direction);
     assert_eq!(drained.status, ShadowStatus::Disabled);
@@ -376,7 +416,7 @@ fn sun_shadow_gpu_retirement_lifecycle_probe() {
             drained.retiring_bytes,
             drained.allocations
         ),
-        (0, 0, 0, 4)
+        (0, 0, 0, 5)
     );
     queue.submit([commands]);
     device.poll(wgpu::PollType::wait_indefinitely()).unwrap();

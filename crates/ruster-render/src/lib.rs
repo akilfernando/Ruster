@@ -80,14 +80,18 @@ pub struct Metrics {
     pub gpu_color_us: Vec<f64>,
     pub shadow_status: ShadowStatus,
     pub shadow_pending: bool,
+    pub shadow_requested_map_size: u32,
+    pub shadow_applied_map_size: u32,
     pub shadow_map_size: u32,
     pub shadow_map_bytes: u64,
     pub shadow_retiring_bytes: u64,
     pub shadow_allocations: u64,
     pub shadow_passes: u64,
+    pub shadow_uniform_uploads: u64,
     pub shadow_draw_calls: usize,
     pub shadow_units_per_texel: Option<f64>,
     pub shadow_detail_limited: bool,
+    pub shadow_precision_limited: bool,
     pub mesh_bytes: u64,
     /// Cumulative vertex/index payload creation, including the built-in cube.
     pub mesh_uploads: u64,
@@ -111,6 +115,46 @@ pub struct Metrics {
     pub timestamp_enabled: bool,
 }
 pub type MetricsHandle = Arc<Mutex<Metrics>>;
+
+/// Bounded scalar report of the latest prepared scene callback. It does not
+/// imply that a hidden command has painted or that GPU work has completed.
+#[derive(Clone, Copy, Debug)]
+pub struct ShadowObservation {
+    pub prepared_frames: u64,
+    pub status: ShadowStatus,
+    pub requested_map_size: u32,
+    pub applied_map_size: u32,
+    pub pending: bool,
+    pub live_bytes: u64,
+    pub retiring_bytes: u64,
+    pub units_per_texel: Option<f64>,
+    pub detail_limited: bool,
+    pub precision_limited: bool,
+    pub allocations: u64,
+    pub encoded_depth_passes: u64,
+    pub uniform_uploads: u64,
+}
+
+pub fn shadow_observation(render: &egui_wgpu::RenderState) -> Option<ShadowObservation> {
+    let renderer = render.renderer.read();
+    let resources = renderer.callback_resources.get::<Resources>()?;
+    let m = resources.metrics.lock().ok()?;
+    (m.frames > 0).then_some(ShadowObservation {
+        prepared_frames: m.frames,
+        status: m.shadow_status,
+        requested_map_size: m.shadow_requested_map_size,
+        applied_map_size: m.shadow_applied_map_size,
+        pending: m.shadow_pending,
+        live_bytes: m.shadow_map_bytes,
+        retiring_bytes: m.shadow_retiring_bytes,
+        units_per_texel: m.shadow_units_per_texel,
+        detail_limited: m.shadow_detail_limited,
+        precision_limited: m.shadow_precision_limited,
+        allocations: m.shadow_allocations,
+        encoded_depth_passes: m.shadow_passes,
+        uniform_uploads: m.shadow_uniform_uploads,
+    })
+}
 
 /// Install once on the eframe device; resources are dropped with that device/renderer.
 /// The current bounded integration supports one scene viewport per eframe renderer.
@@ -1570,14 +1614,18 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         }
         metrics.shadow_status = shadow.status;
         metrics.shadow_pending = shadow.pending;
+        metrics.shadow_requested_map_size = shadow.requested_size;
+        metrics.shadow_applied_map_size = if shadow.rendered { shadow.map_size } else { 0 };
         metrics.shadow_map_size = shadow.map_size;
         metrics.shadow_map_bytes = shadow.live_bytes;
         metrics.shadow_retiring_bytes = shadow.retiring_bytes;
         metrics.shadow_allocations = shadow.allocations;
         metrics.shadow_passes = shadow.passes;
+        metrics.shadow_uniform_uploads = shadow.uniform_uploads;
         metrics.shadow_draw_calls = shadow.draw_calls;
         metrics.shadow_units_per_texel = shadow.units_per_texel;
         metrics.shadow_detail_limited = shadow.detail_limited;
+        metrics.shadow_precision_limited = shadow.precision_limited;
         metrics.texture_bytes = r.materials.bytes();
         metrics.draw_calls = self.groups.len();
         metrics.objects = instance_count;

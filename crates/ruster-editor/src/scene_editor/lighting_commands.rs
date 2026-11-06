@@ -85,24 +85,12 @@ pub(super) fn validate_transform(
 fn light(value: &Value) -> Result<Light, CommandError> {
     // Check original f64 values before serde's f32 narrowing can hide an invalid
     // bound, especially unit scale, tiny negative colors and point range.
+    // SunShadow's shared deserializer already owns original-precision biases.
     vector(&value["color"], 0.0, 1.0)?;
     finite(&value["intensity"], 0.0, 16.0)?;
     light_transform(&value["transform"])?;
     if value["kind"]["type"] == "point" {
         finite(&value["kind"]["range"], 0.1, 10_000.0)?;
-    }
-    if let Some(shadow) = value["kind"].get("shadow") {
-        if value["kind"]["type"] != "directional" {
-            return Err(error(
-                "invalid_arguments",
-                "Only directional lights support Sun shadow settings",
-            ));
-        }
-        // Preserve original-f64 admission: values just outside0..4 must not
-        // become accepted by rounding to a valid f32. Typed Light decoding
-        // below owns the complete strict shape, bool and quality enum checks.
-        finite(&shadow["depth_bias_texels"], 0.0, 4.0)?;
-        finite(&shadow["normal_bias_texels"], 0.0, 4.0)?;
     }
     let candidate: Light = serde_json::from_value(value.clone())
         .map_err(|failure| error("invalid_arguments", failure.to_string()))?;
@@ -186,8 +174,9 @@ impl SceneEditor {
                     "bias_bounds_texels":[0,4],"bias_units":"World shadow texels, not normalized depth or screen pixels",
                     "omitted_shadow_default":SunShadow::default(),"present_shadow_requires_all_fields":true,
                     "shader_support":if self.shader_builtin {"builtin_pipeline"} else {"unsupported_custom_shader"},
-                    "point_shadows_supported":false,"observation":"Authored settings and pipeline support only; no last-rendered shadow status"},
+                    "point_shadows_supported":false,"observation":"Authored settings and pipeline support only; separate viewport_shadow_report describes the latest prepared callback"},
                 "units":"Relative artistic linear RGB diffuse, not photometric units; Sun biases use world shadow texels",
+                "viewport_shadow_report":self.shadow_feedback(),
                 "drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending()}),
             );
         }

@@ -4,7 +4,7 @@ use serde_json::{json, Map, Value};
 const TOOLS: &[(&str, &str, &[&str])] = &[
     (
         "lighting_inspect",
-        "Read all at-most-five authored lights, ambient, mode, session/revision, mutation guards and the bounded authored Sun-shadow contract without filesystem access. Legacy means fixed illumination with no synthesized scene light. Authored settings are not last-rendered status. Sun shadows require the built-in pipeline; custom-shader appearance is separate and shadow support is unavailable, regardless of successful compilation or bindings.",
+        "Read all at-most-five authored lights, ambient, mode, session/revision, mutation guards and the bounded authored Sun-shadow contract without filesystem access. Legacy means fixed illumination with no synthesized scene light. Authored settings are separate from the last-prepared viewport report, which may describe an earlier view and never implies GPU completion or hidden command rendering. Sun shadows require the built-in pipeline; custom-shader appearance is separate and shadow support is unavailable, regardless of successful compilation or bindings.",
         &[],
     ),
     (
