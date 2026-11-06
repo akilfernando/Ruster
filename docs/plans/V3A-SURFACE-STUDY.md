@@ -1,6 +1,6 @@
-# Proposed V3a — Surface Study
+# V3a — Surface Study
 
-Planned2026-11-06 by Astra/root at the user's request after accepted V2b. **Proposal for user approval; no new goal set and no implementation started.** This is the first bounded material-depth slice, not the whole V3 stage. [Direction](../DIRECTION.md) owns confirmed requirements; [roadmap](../ROADMAP.md) owns the capability sequence. The user requires creator-first direct-editor/native-MCP parity, familiarity, recoverability and lean measured implementation. The technical scope/defaults below are agent proposals.
+Planned2026-11-06 by Astra/root at the user's request after accepted V2b. **Approved2026-11-06 by the user: “Approved. Start work.” Active at baseline/early feasibility.** This is the first bounded material-depth slice, not the whole V3 stage. [Direction](../DIRECTION.md) owns confirmed requirements; [roadmap](../ROADMAP.md) owns the capability sequence. The user requires creator-first direct-editor/native-MCP parity, familiarity, recoverability and lean measured implementation. The technical scope/defaults below are agent proposals.
 
 ## Creator outcome
 
@@ -8,7 +8,7 @@ Make a small product display with curved ceramic/plastic forms, an existing text
 
 Name the original exhibit **Surface Study**. Work through supported imports/material/editor/MCP operations on disposable goal-owned projects, not generated scene JSON or a special showcase shader. Preserve Daylight Study, V1/V2a/PumpBench and human originals. Two complementary creation journeys and two exact exports, one per path, cover the new workflow; four exports are not required merely because V2b used four.
 
-## Proposed session objective
+## Approved session objective
 
 Deliver an original Surface Study through ordinary editor controls and native MCP: import curved geometry with preserved authored normals, create and compare matte and polished opaque dielectric materials under the existing lights and Sun shadows, edit roughness and scene exposure reversibly, recover an unfinished material draft, and save/reopen/export faithful standalone results. Establish useful defaults and compatibility through an early shared-renderer feasibility gate, measure quality and bounded costs, then stop after the requirement audit, Astra/root evaluation and exact handoff. This delivers a direct-lit material foundation, not complete PBR or environment reflections.
 
