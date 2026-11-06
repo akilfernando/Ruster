@@ -290,7 +290,7 @@ impl SceneEditor {
                     "material":{
                         "name":value.name, "tint":value.tint,
                         "base_color_texture":value.base_color_texture,
-                        "filter":value.filter, "address":value.address
+                        "filter":value.filter, "address":value.address, "response":value.response
                     },
                     "assigned_count":users.len(),
                     "user_ids":users.iter().take(4).map(|object|&object.id).collect::<Vec<_>>(),
@@ -611,6 +611,7 @@ mod tests {
         editor.assets = Some(ruster_assets::AssetStore::open(root).unwrap());
         let mut tinted = make_args("2", json!("texture"));
         tinted["material"]["tint"] = json!([0.5, 1, 1]);
+        tinted["material"]["response"] = json!({"type":"dielectric","roughness":0.08});
         editor
             .material_command("scene", "scene_material_set", &tinted)
             .unwrap();
@@ -620,6 +621,10 @@ mod tests {
         let inspected = editor
             .material_command("scene", "material_inspect", &json!({"limit":"1"}))
             .unwrap();
+        assert_eq!(
+            inspected["materials"][0]["material"]["response"],
+            json!({"type":"dielectric","roughness":0.08})
+        );
         assert_eq!(inspected["materials"][0]["texture"]["status"], "invalid");
         assert_eq!(inspected["materials"][0]["texture"]["accepted"], true);
         assert_eq!(inspected["materials"][0]["uv"]["invalid_user_count"], 0);
