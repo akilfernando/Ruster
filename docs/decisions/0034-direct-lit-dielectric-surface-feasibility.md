@@ -1,6 +1,6 @@
 # 0034: direct-lit dielectric surface feasibility
 
-Date2026-11-06. Status: **selected experimental implementation direction for approved V3a; visual/default/cost acceptance pending.** The user approved [Surface Study](../plans/V3A-SURFACE-STUDY.md), not a complete PBR/material stage. Root/Astra select these reversible details to test the defined creator outcome. [V3a evidence](../evidence/V3A-feasibility.md) owns actual verification and failures.
+Date2026-11-06. Status: **implemented and substantively qualified for approved V3a; final handoff integrity pending.** The user approved [Surface Study](../plans/V3A-SURFACE-STUDY.md), not a complete PBR/material stage. Root/Astra select these reversible details to test the defined creator outcome. [V3a evidence](../evidence/V3A-feasibility.md) owns actual verification and failures.
 
 ## Context and alternatives
 
@@ -56,3 +56,8 @@ Astra's physical-scale review corrects root's thumbnail inference: coarse smooth
 ## Ordinary controls and recovery integration — 2026-11-06
 
 After accepted early quality/cost feasibility, current source adds explicit ordinary material/display/normal-import controls, recovery7 and shared human-facing fallback/pending feedback. Genuine pre7 material draft migration is guarded by exact field presence before defaults; current new raw fields are required. Global display is selection-independent and never enabled implicitly by material choice. Existing untrusted raw fields retain strict original-f64 bounds and atomic authored history. Astra's independent source review finds no consequential authority/migration blocker; affected default/inspection source gates pass in the chronological evidence. This is permission to perform focused native qualification, not final V3a promotion or proof of human usability.
+
+
+## Final bounded qualification — 2026-11-06
+
+Root/Astra accept the implemented defaults and ownership/compatibility tradeoffs for this direct-lit nonmetallic outcome after both creator paths, real raw-material recovery, exact source-hidden runtime, native keyboard/resize, matched quality/cost and retained resource checks. [Requirement audit](../evidence/V3A-readiness.md) owns the mapping; prior experimental/pending wording above records chronology and is superseded for these verified boundaries. Exact handoff integrity remains the final closure condition. Roughness floor0.08/default0.5/F0.04, manual EV−8..8/default0, fixed PBR Neutral output, independent Legacy lane, immutable import policy and bounded target roles remain agent-selected defaults. No metals/environment/maps, photometric equivalence, arbitrary shader compatibility or all-device/peak-memory/physical-human claim is accepted.
