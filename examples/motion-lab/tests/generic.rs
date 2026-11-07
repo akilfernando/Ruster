@@ -204,7 +204,10 @@ fn generic_cli_replays_read_only_scene_and_explicit_mesh_resources() {
     assert_eq!(first.stdout, second.stdout);
     let output: serde_json::Value = serde_json::from_slice(&first.stdout).unwrap();
     assert_eq!(output["tick"], "10");
-    assert_eq!(output["fixed_dt"], 0.1);
+    assert_eq!(
+        output["fixed_dt"],
+        ruster_behavior::DEFAULT_FIXED_TICK.as_secs_f64()
+    );
     assert_eq!(output["runtime_speed_override"], 3.0);
     assert_eq!(
         output["authored_scene"]["objects"][0]["transform"]["translation"][0],
@@ -214,13 +217,38 @@ fn generic_cli_replays_read_only_scene_and_explicit_mesh_resources() {
         (output["runtime_scene"]["objects"][0]["transform"]["translation"][0]
             .as_f64()
             .unwrap()
-            - 1.0)
-            .abs()
+            - (-2.0 + 30.0 * ruster_behavior::DEFAULT_FIXED_TICK.as_secs_f64()))
+        .abs()
             < 1e-5
     );
     assert_eq!(output["runtime_scene"]["objects"][2]["mesh"], "marker");
     assert_eq!(fs::read(&path).unwrap(), authored);
     assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 2);
+    let mut old_document: serde_json::Value = serde_json::from_slice(&authored).unwrap();
+    old_document["format_version"] = serde_json::json!(10);
+    fs::write(
+        directory.path().join("legacy.scene.json"),
+        serde_json::to_vec(&old_document).unwrap(),
+    )
+    .unwrap();
+    let mut legacy_args = args;
+    legacy_args[1] = "legacy.scene.json";
+    let legacy = cli(&legacy_args);
+    assert!(
+        legacy.status.success(),
+        "{}",
+        String::from_utf8_lossy(&legacy.stderr)
+    );
+    let legacy: serde_json::Value = serde_json::from_slice(&legacy.stdout).unwrap();
+    assert_eq!(legacy["fixed_dt"], 0.1);
+    assert!(
+        (legacy["runtime_scene"]["objects"][0]["transform"]["translation"][0]
+            .as_f64()
+            .unwrap()
+            - 1.0)
+            .abs()
+            < 1e-5
+    );
     let demo = cli(&["--generic-demo", "--headless", "--ticks", "0"]);
     assert!(demo.status.success());
     assert!(!cli(&["--generic-demo", "--project", "legacy.json"])

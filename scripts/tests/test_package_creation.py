@@ -393,7 +393,7 @@ class CreationDistributionTests(unittest.TestCase):
                     with self.subTest(roughness_record=mutation),self.assertRaises(ValueError):
                         package_creation.source_content(content_root,None)
                 # Scene11 retains actions-only authoring, both immutable roles,
-                # Descriptor4 and exact scene bytes. Old kits reject before staging.
+                # Descriptor5 nanosecond timing and exact scene bytes. Old kits reject before staging.
                 input_scene = copy.deepcopy(mapped_scene)
                 input_scene["format_version"] = 11
                 input_scene["authoring"]["actions"] = {
@@ -402,6 +402,34 @@ class CreationDistributionTests(unittest.TestCase):
                 input_bytes = package_creation.encoded(input_scene)
                 input_content = {**mapped_content, "schema": 7,
                                  "scene_sha256": package_creation.sha256(input_bytes)}
+                input_content.pop("tick_millis")
+                input_content["tick_nanos"] = 16_666_667
+                (content_root/"scene.json").write_bytes(input_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(input_content))
+                for invalid_tick in (None, True, 16_666_667.0, "16666667", [], {}, 999_999, 1_000_000_001):
+                    bad = {**input_content, "tick_nanos": invalid_tick}
+                    (content_root/"content.json").write_bytes(package_creation.encoded(bad))
+                    with self.subTest(input_tick=invalid_tick), self.assertRaises(ValueError):
+                        package_creation.source_content(content_root, None)
+                for shape in ("missing", "millis-only", "both"):
+                    bad = copy.deepcopy(input_content)
+                    if shape != "both": bad.pop("tick_nanos")
+                    if shape != "missing": bad["tick_millis"] = 100
+                    (content_root/"content.json").write_bytes(package_creation.encoded(bad))
+                    with self.subTest(input_tick_shape=shape), self.assertRaises(ValueError):
+                        package_creation.source_content(content_root, None)
+                for tick in (1_000_000, 16_666_667, 1_000_000_000):
+                    (content_root/"content.json").write_bytes(package_creation.encoded({**input_content, "tick_nanos": tick}))
+                    self.assertEqual(package_creation.source_content(content_root, None)[0]["tick_nanos"], tick)
+                for old_content, old_scene in ((content, scene_bytes), (textured, textured_bytes),
+                        (lit_content, lit_bytes), (shadow_content, shadow_bytes),
+                        (surface_content, surface_bytes), (mapped_content, mapped_bytes)):
+                    (content_root/"scene.json").write_bytes(old_scene)
+                    (content_root/"content.json").write_bytes(package_creation.encoded(old_content))
+                    self.assertEqual(package_creation.source_content(content_root, None)[0]["tick_millis"], 100)
+                    (content_root/"content.json").write_bytes(package_creation.encoded({**old_content, "tick_nanos": None}))
+                    with self.subTest(old_tick_schema=old_content["schema"]), self.assertRaises(ValueError):
+                        package_creation.source_content(content_root, None)
                 (content_root/"scene.json").write_bytes(input_bytes)
                 (content_root/"content.json").write_bytes(package_creation.encoded(input_content))
                 with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old-kit preflight")), \
@@ -409,20 +437,39 @@ class CreationDistributionTests(unittest.TestCase):
                     with self.assertRaisesRegex(ValueError, "Scene11 input_actions"):
                         package_creation.package(kit, content_root, failed)
                 self.assertFalse(failed.exists())
+                # The earlier working input profile advertised descriptor4 and
+                # cannot establish the new unit contract, even with all capabilities.
+                capable["profile"] = {**package_creation.INPUT_PROFILE, "descriptor_version": 4}
+                (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old-input-kit preflight")), \
+                        patch.object(package_creation.tempfile, "TemporaryDirectory", side_effect=AssertionError("old-input-kit staging")):
+                    with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
+                        package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
                 capable["profile"] = package_creation.INPUT_PROFILE
                 (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
                 input_response = {**mapped_response, "authored_scene": package_creation.typed_scene(input_scene),
-                                  "authored_actions": package_creation.authored_actions(input_scene)}
+                                  "authored_actions": package_creation.authored_actions(input_scene),
+                                  "fixed_dt": input_content["tick_nanos"] / 1_000_000_000}
                 with patch.object(package_creation, "run_runtime", return_value={**input_response, "authored_actions": {}}):
                     with self.assertRaisesRegex(ValueError, "retain authored input actions"):
                         package_creation.package(kit, content_root, failed)
                 self.assertFalse(failed.exists())
+                with patch.object(package_creation, "run_runtime", return_value={**input_response, "fixed_dt": 0.1}):
+                    with self.assertRaisesRegex(ValueError, "identity, tick or authored scene"):
+                        package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
                 input_output = base/"input.tar.gz"
-                with patch.object(package_creation, "run_runtime", return_value=input_response):
+                def input_preflight(binary, _arguments, _cancel=None):
+                    descriptor = json.loads((binary.parent / "app.json").read_bytes())
+                    return {**input_response, "fixed_dt": descriptor["tick_nanos"] / 1_000_000_000}
+                with patch.object(package_creation, "run_runtime", side_effect=input_preflight):
                     package_creation.package(kit, content_root, input_output)
                 with tarfile.open(input_output) as archive:
                     descriptor = json.load(archive.extractfile("application/app.json"))
-                    self.assertEqual(descriptor["version"], 4)
+                    self.assertEqual(descriptor["version"], 5)
+                    self.assertEqual(descriptor["tick_nanos"], 16_666_667)
+                    self.assertNotIn("tick_millis", descriptor)
                     self.assertEqual(descriptor["texture_roles"], {"albedo":"base_color_srgb", "finish":"roughness_linear"})
                     self.assertEqual(archive.extractfile("application/resources/scene.json").read(), input_bytes)
                 bad = copy.deepcopy(input_content)
@@ -435,6 +482,11 @@ class CreationDistributionTests(unittest.TestCase):
                 (content_root/"content.json").write_bytes(package_creation.encoded(mapped_content))
                 with patch.object(package_creation, "run_runtime", return_value=mapped_response):
                     package_creation.package(kit, content_root, base/"roughness-with-input-kit.tar.gz")
+                with tarfile.open(base/"roughness-with-input-kit.tar.gz") as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"], 4)
+                    self.assertEqual(descriptor["tick_millis"], 100)
+                    self.assertNotIn("tick_nanos", descriptor)
                 # The new kit accepts the unchanged old descriptor3 route.
                 (content_root/"scene.json").write_bytes(surface_bytes)
                 (content_root/"content.json").write_bytes(package_creation.encoded(surface_content))
@@ -496,7 +548,7 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.SUN_SHADOW_PROFILE, "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "point_shadows"]},
                         {**package_creation.ROUGHNESS_PROFILE, "descriptor_version":3},
                         {**package_creation.ROUGHNESS_PROFILE, "capabilities": package_creation.ROUGHNESS_PROFILE["capabilities"][:-2]+["roughness_maps","surface_materials"]},
-                        {**package_creation.INPUT_PROFILE, "descriptor_version":5},
+                        {**package_creation.INPUT_PROFILE, "descriptor_version":4},
                         {**package_creation.INPUT_PROFILE, "capabilities": ["input_actions", *package_creation.ROUGHNESS_PROFILE["capabilities"]]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):

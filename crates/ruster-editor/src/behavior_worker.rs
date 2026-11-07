@@ -379,7 +379,13 @@ pub(super) struct Worker {
 }
 impl Worker {
     pub fn start(repaint: Option<Repaint>) -> Result<Self, String> {
-        Self::start_with_limits(Limits::default(), repaint)
+        Self::start_with_limits(
+            Limits {
+                fixed_dt: ruster_behavior::DEFAULT_FIXED_TICK.as_secs_f64(),
+                ..Limits::default()
+            },
+            repaint,
+        )
     }
     fn start_with_limits(limits: Limits, repaint: Option<Repaint>) -> Result<Self, String> {
         let (commands, ordinary) = mpsc::sync_channel(COMMAND_CAPACITY);
@@ -1604,6 +1610,32 @@ mod tests {
             matches!(wait_event(worker,pulses),Event::Reset{key:accepted,run:RunInfo{tick:0,..}} if accepted==key)
         );
         key
+    }
+
+    // Observe the actual constructor/VM boundary, not only a duration constant:
+    // the library's historical default is distinct from the current editor quantum.
+    #[test]
+    fn default_worker_uses_export_quantum_without_changing_library_defaults() {
+        assert_eq!(Limits::default().fixed_dt, 1.0 / 60.0);
+        let (notify, pulses) = mpsc::sync_channel(1);
+        let repaint: Repaint = Arc::new(move || {
+            let _ = notify.try_send(());
+        });
+        let mut worker = Worker::start(Some(repaint)).unwrap();
+        let (scene, authoring) = fixture(false);
+        let mut authoring = (*authoring).clone();
+        authoring.sources.get_mut("source").unwrap().text =
+            "return {update=function(o,p,dt) o.translation[1]=dt*100000; return o end}".into();
+        let key = reset(&mut worker, &pulses, 31, scene, Arc::new(authoring));
+        worker.try_request(Command::Step { key }).unwrap();
+        assert!(matches!(wait_event(&worker, &pulses), Event::Step { .. }));
+        let frame = worker.last_good_frame().unwrap();
+        let expected = (ruster_behavior::DEFAULT_FIXED_TICK.as_secs_f64() * 100000.0) as f32;
+        assert_ne!(expected, ((1.0 / 60.0) * 100000.0) as f32);
+        for object in &frame.scene.objects {
+            assert_eq!(object.transform.translation[0], expected);
+        }
+        close(&mut worker);
     }
 
     fn input_fixture() -> (Arc<Scene>, Arc<Authoring>) {

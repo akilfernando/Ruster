@@ -464,6 +464,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
             ruster_scene::Session::from_snapshot_bytes(generic::DEMO).map_err(|e| e.to_string())?
         }
     };
+    let tick_duration = generic::session_tick_duration(&session);
     let mut meshes = MeshMap::new();
     if let Some(root) = options.resources {
         let root = ResourceRoot::new(root)?;
@@ -471,12 +472,12 @@ fn execute_generic(options: Options) -> Result<(), String> {
             meshes.insert(id, root.mesh(path)?);
         }
     }
-    let mut app = GenericMotionLab::new(session, meshes, generic::FIXED_DT)?;
+    let mut app = GenericMotionLab::new(session, meshes, tick_duration)?;
     app.set_speed_override(options.speed)?;
     if options.headless {
         let (runtime, input) = headless_runtime(
             app,
-            generic::FIXED_DT,
+            tick_duration,
             options.ticks.unwrap_or(10),
             options.input_frames.as_deref(),
         )?;
@@ -488,7 +489,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
                 "scene_id": app.session().scene().id,
                 "authored_revision": app.session().scene().revision.to_string(),
                 "tick": runtime.tick().to_string(),
-                "fixed_dt": generic::FIXED_DT.as_secs_f64(),
+                "fixed_dt": tick_duration.as_secs_f64(),
                 "runtime_speed_override": options.speed,
                 "authored_scene": app.session().scene(),
                 "authored_actions": app.session().authoring().actions,
@@ -504,7 +505,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
             HostOptions {
                 title: "Motion Lab — Shared behavior comparison".into(),
                 app_id: "ruster-motion-lab".into(),
-                tick_duration: generic::FIXED_DT,
+                tick_duration,
                 max_frames: options.frames,
                 start_running: false,
                 initial_camera: None,

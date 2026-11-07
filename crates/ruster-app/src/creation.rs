@@ -6,7 +6,7 @@ use std::{collections::BTreeMap, path::Path, time::Duration};
 
 pub const DESCRIPTOR_NAME: &str = "app.json";
 pub const FORMAT: &str = "ruster-application";
-pub const VERSION: u32 = 4;
+pub const VERSION: u32 = 5;
 pub const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
@@ -66,9 +66,29 @@ pub struct CreationManifest {
         deserialize_with = "unique_texture_roles"
     )]
     pub texture_roles: Option<BTreeMap<String, ruster_assets::TextureRole>>,
-    pub tick_millis: u64,
+    /// Descriptors1–4 keep their original integer-millisecond contract.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_tick"
+    )]
+    pub tick_millis: Option<u64>,
+    /// Descriptor5 carries the exact editor/export fixed quantum.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present_tick"
+    )]
+    pub tick_nanos: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub initial_camera: Option<InitialCamera>,
+}
+
+// A present null is invalid, rather than becoming an omitted time unit.
+fn present_tick<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<u64>, D::Error> {
+    u64::deserialize(deserializer).map(Some)
 }
 
 fn unique_meshes<'de, D>(deserializer: D) -> Result<BTreeMap<String, String>, D::Error>
@@ -144,7 +164,7 @@ impl CreationManifest {
     pub fn validate(&self) -> Result<(), String> {
         if self.format != FORMAT || !(1..=VERSION).contains(&self.version) {
             return Err(
-                "Unsupported application descriptor; expected ruster-application version 1 through 4"
+                "Unsupported application descriptor; expected ruster-application version 1 through 5"
                     .into(),
             );
         }
@@ -160,13 +180,13 @@ impl CreationManifest {
         if self.version < 4 && self.texture_roles.is_some() {
             return Err("Texture roles require descriptor version 4".into());
         }
-        if self.version == 4 {
+        if self.version >= 4 {
             let roles = self
                 .texture_roles
                 .as_ref()
-                .ok_or("Descriptor4 requires texture_roles, including an empty map")?;
+                .ok_or("Descriptor4 and later require texture_roles, including an empty map")?;
             if !self.textures.keys().eq(roles.keys()) {
-                return Err("Descriptor4 requires exactly one role per texture".into());
+                return Err("Descriptor4 and later require exactly one role per texture".into());
             }
         }
         if self.title.trim().is_empty()
@@ -176,8 +196,10 @@ impl CreationManifest {
         {
             return Err("Application title must be 1–128 UTF-8 bytes without controls or surrounding whitespace".into());
         }
-        if !(1..=1000).contains(&self.tick_millis) {
-            return Err("Application tick_millis must be 1–1000".into());
+        match (self.version, self.tick_millis, self.tick_nanos) {
+            (1..=4, Some(millis), None) if (1..=1000).contains(&millis) => {},
+            (5, None, Some(nanos)) if (1_000_000..=1_000_000_000).contains(&nanos) => {},
+            _ => return Err("Descriptors1–4 require only tick_millis (1–1000); Descriptor5 requires only tick_nanos (1000000–1000000000).".into()),
         }
         if let Some(camera) = self.initial_camera {
             camera.camera_state()?;
@@ -208,6 +230,14 @@ impl CreationManifest {
         {
             return Err("Mesh normal policies require descriptor version 3".into());
         }
+        if raw["version"].as_u64().is_some_and(|version| version < 5)
+            && raw.get("tick_nanos").is_some()
+        {
+            return Err("Nanosecond ticks require descriptor version 5".into());
+        }
+        if raw["version"].as_u64() == Some(5) && raw.get("tick_millis").is_some() {
+            return Err("Descriptor5 uses tick_nanos; tick_millis must be absent".into());
+        }
         let manifest: Self = serde_json::from_slice(&bytes)
             .map_err(|error| format!("Invalid {DESCRIPTOR_NAME}: {error}"))?;
         manifest.validate()?;
@@ -215,7 +245,13 @@ impl CreationManifest {
     }
 
     pub fn tick_duration(&self) -> Duration {
-        Duration::from_millis(self.tick_millis)
+        match (self.version, self.tick_millis, self.tick_nanos) {
+            (1..=4, Some(millis), None) => Duration::from_millis(millis),
+            (5, None, Some(nanos)) => Duration::from_nanos(nanos),
+            // Invalid caller-constructed DTOs cannot select a fallback unit;
+            // load/validate rejects them, and runtime scheduling rejects zero.
+            _ => Duration::ZERO,
+        }
     }
 
     pub fn load_session(&self, root: &ResourceRoot) -> Result<ruster_scene::Session, String> {
@@ -223,6 +259,9 @@ impl CreationManifest {
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
         let session = ruster_scene::Session::from_snapshot_bytes(&bytes)
             .map_err(|error| error.to_string())?;
+        if session.loaded_format_version() >= 11 && self.version < 5 {
+            return Err("Scene11 input_actions requires descriptor version 5".into());
+        }
         if session.loaded_format_version() >= 10 && self.version < 4 {
             return Err("Scene10 roughness_maps requires descriptor version 4".into());
         }
@@ -295,7 +334,8 @@ mod tests {
             mesh_normal_policies: [("marker".into(), ruster_assets::MeshNormalPolicy::Flat)].into(),
             textures: BTreeMap::new(),
             texture_roles: Some(BTreeMap::new()),
-            tick_millis: 100,
+            tick_millis: None,
+            tick_nanos: Some(16_666_667),
             initial_camera: None,
         };
         std::fs::write(
@@ -311,6 +351,71 @@ mod tests {
             .unwrap()
             .get("initial_camera")
             .is_none());
+        assert_eq!(loaded.tick_duration(), Duration::from_nanos(16_666_667));
+        for version in 1..=4 {
+            let mut old = manifest.clone();
+            old.version = version;
+            old.tick_millis = Some(100);
+            old.tick_nanos = None;
+            if version < 4 {
+                old.texture_roles = None;
+            }
+            if version < 3 {
+                old.mesh_normal_policies.clear();
+            }
+            old.validate().unwrap();
+            assert_eq!(old.tick_duration(), Duration::from_millis(100));
+            let mut old_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
+            old_scene["format_version"] = serde_json::json!(if version == 4 { 10 } else { 9 });
+            std::fs::write(&scene_path, serde_json::to_vec(&old_scene).unwrap()).unwrap();
+            old.load_session(&root).unwrap();
+            std::fs::write(&scene_path, &original).unwrap();
+            for value in [serde_json::json!(null), serde_json::json!(16_666_667)] {
+                let mut raw = serde_json::to_value(&old).unwrap();
+                raw["tick_nanos"] = value;
+                std::fs::write(
+                    directory.path().join(DESCRIPTOR_NAME),
+                    serde_json::to_vec(&raw).unwrap(),
+                )
+                .unwrap();
+                assert!(CreationManifest::load(&root).is_err());
+            }
+        }
+        for bad in [
+            "millis-null",
+            "millis",
+            "both",
+            "missing",
+            "null",
+            "fractional",
+            "negative",
+            "low",
+            "high",
+        ] {
+            let mut raw = serde_json::to_value(&manifest).unwrap();
+            match bad {
+                "millis-null" => raw["tick_millis"] = serde_json::Value::Null,
+                "millis" => {
+                    raw.as_object_mut().unwrap().remove("tick_nanos");
+                    raw["tick_millis"] = serde_json::json!(100);
+                }
+                "both" => raw["tick_millis"] = serde_json::json!(100),
+                "missing" => {
+                    raw.as_object_mut().unwrap().remove("tick_nanos");
+                }
+                "null" => raw["tick_nanos"] = serde_json::Value::Null,
+                "fractional" => raw["tick_nanos"] = serde_json::json!(16_666_667.5),
+                "negative" => raw["tick_nanos"] = serde_json::json!(-1),
+                "low" => raw["tick_nanos"] = serde_json::json!(999_999),
+                _ => raw["tick_nanos"] = serde_json::json!(1_000_000_001),
+            }
+            std::fs::write(
+                directory.path().join(DESCRIPTOR_NAME),
+                serde_json::to_vec(&raw).unwrap(),
+            )
+            .unwrap();
+            assert!(CreationManifest::load(&root).is_err(), "{bad}");
+        }
         let mut framed = manifest.clone();
         framed.initial_camera = Some(InitialCamera {
             target: [1.0, 2.0, 3.0],
@@ -352,6 +457,8 @@ mod tests {
         );
         let mut legacy = manifest.clone();
         legacy.version = 2;
+        legacy.tick_millis = Some(100);
+        legacy.tick_nanos = None;
         legacy.mesh_normal_policies.clear();
         legacy.texture_roles = None;
         assert_eq!(
@@ -380,6 +487,8 @@ mod tests {
         for version in 1..=3 {
             let mut old = manifest.clone();
             old.version = version;
+            old.tick_millis = Some(100);
+            old.tick_nanos = None;
             old.texture_roles = None;
             if version < 3 {
                 old.mesh_normal_policies.clear();
@@ -388,7 +497,7 @@ mod tests {
             assert!(old
                 .load_session(&root)
                 .unwrap_err()
-                .contains("Scene10 roughness_maps"));
+                .contains("Scene11 input_actions"));
             // Genuine old documents still load through old descriptors.
             let mut old_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
             old_scene["format_version"] = serde_json::json!(9);
@@ -441,6 +550,8 @@ mod tests {
         assert_eq!(textures["roughness"].mips[0].bytes, [128]);
         let mut old_color = textured.clone();
         old_color.version = 3;
+        old_color.tick_millis = Some(100);
+        old_color.tick_nanos = None;
         old_color.texture_roles = None;
         assert_eq!(
             old_color.load_textures(&root).unwrap()["roughness"].role,
@@ -464,9 +575,9 @@ mod tests {
             invalid.scene = path.into();
             assert!(invalid.validate().is_err(), "{path}");
         }
-        for tick in [0, 1001] {
+        for tick in [0, 999_999, 1_000_000_001] {
             let mut invalid = manifest.clone();
-            invalid.tick_millis = tick;
+            invalid.tick_nanos = Some(tick);
             assert!(invalid.validate().is_err());
         }
         let mut invalid = manifest.clone();
@@ -474,6 +585,8 @@ mod tests {
         assert!(invalid.validate().is_err());
         let mut legacy = manifest.clone();
         legacy.version = 1;
+        legacy.tick_millis = Some(100);
+        legacy.tick_nanos = None;
         legacy.mesh_normal_policies.clear();
         legacy.texture_roles = None;
         legacy
@@ -487,6 +600,8 @@ mod tests {
             "texture resources must not hide under descriptor1"
         );
         legacy.version = VERSION;
+        legacy.tick_millis = None;
+        legacy.tick_nanos = manifest.tick_nanos;
         legacy.mesh_normal_policies = manifest.mesh_normal_policies.clone();
         legacy.texture_roles =
             Some([("base-color".into(), ruster_assets::TextureRole::BaseColor)].into());

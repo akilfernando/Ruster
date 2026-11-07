@@ -47,7 +47,7 @@ SURFACE_PROFILE = {**PROFILE, "descriptor_version": 3,
                    "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials"]}
 ROUGHNESS_PROFILE = {**PROFILE, "descriptor_version": 4,
                      "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps"]}
-INPUT_PROFILE = {**ROUGHNESS_PROFILE,
+INPUT_PROFILE = {**ROUGHNESS_PROFILE, "descriptor_version": 5,
                  "capabilities": [*ROUGHNESS_PROFILE["capabilities"], "input_actions"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
@@ -558,16 +558,18 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     schema = content.get("schema")
     if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7):
         raise ValueError("invalid content schema")
-    fields = {"schema", "title", "tick_millis", "scene_sha256", "meshes"}
+    tick_field = "tick_nanos" if schema == 7 else "tick_millis"
+    fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
     exact_fields(content, fields | ({"initial_camera"} if "initial_camera" in content else set()), "content")
     if "initial_camera" in content:
         content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
+    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema == 7 else (1, 1000)
     if (not isinstance(title, str) or not title or title != title.strip()
             or len(title.encode()) > 128 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in title)
-            or type(content["tick_millis"]) is not int or not 1 <= content["tick_millis"] <= 1000):
+            or type(content[tick_field]) is not int or not tick_minimum <= content[tick_field] <= tick_maximum):
         raise ValueError("invalid content title or fixed tick")
     scene_data = read_bounded(root, "scene.json", MIB)
     if (not isinstance(content["scene_sha256"], str) or not HASH.fullmatch(content["scene_sha256"])
@@ -701,9 +703,11 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
     if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 4}[content["schema"]]
+    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5}[content["schema"]]
+    tick_field = "tick_nanos" if content["schema"] == 7 else "tick_millis"
+    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] == 7 else 1000)
     descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
-                  "scene": "resources/scene.json", "tick_millis": content["tick_millis"],
+                  "scene": "resources/scene.json", tick_field: content[tick_field],
                   "meshes": {identity: "resources/" + record["path"]
                              for identity, record in content["meshes"].items()}}
     if content["schema"] >= 5:
@@ -738,7 +742,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
         package_app.put(stage, "README.txt", readme.encode())
         result = run_runtime(stage / "application", ["--headless", "--ticks", "0"], cancel_file)
         if (result.get("mode") != "creation" or result.get("title") != content["title"]
-                or result.get("tick") != "0" or result.get("fixed_dt") != content["tick_millis"] / 1000
+                or result.get("tick") != "0" or result.get("fixed_dt") != fixed_dt
                 or result.get("authored_scene") != typed_scene(document)):
             raise ValueError("runtime preflight did not retain creation identity, tick or authored scene")
         if camera is not None and result.get("initial_camera") != camera:

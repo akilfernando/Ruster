@@ -579,6 +579,7 @@ fn verify_helpers(
         "roughness_maps"
     ]);
     let mut input_profile = roughness_profile.clone();
+    input_profile["descriptor_version"] = json!(5);
     input_profile["capabilities"] = json!([
         "initial_camera",
         "opaque_materials",
@@ -839,8 +840,15 @@ fn prepare(
         11 => 7,
         _ => return Err("export requires a supported Scene1–11 document".into()),
     };
-    let mut content_manifest = json!({"schema":schema, "title":request.title, "tick_millis":100,
+    let tick_nanos = u64::try_from(ruster_behavior::DEFAULT_FIXED_TICK.as_nanos())
+        .map_err(|_| "Default fixed tick exceeds the descriptor nanosecond range")?;
+    let mut content_manifest = json!({"schema":schema, "title":request.title,
         "scene_sha256":scene_hash, "meshes":meshes});
+    if schema == 7 {
+        content_manifest["tick_nanos"] = json!(tick_nanos);
+    } else {
+        content_manifest["tick_millis"] = json!(100);
+    }
     if schema >= 2 {
         content_manifest["textures"] = json!(textures);
     }
@@ -1379,6 +1387,11 @@ mod tests {
             "input_actions"
         ]);
         write(&manifest);
+        assert!(verify_helpers(root.path(), false, 11)
+            .unwrap_err()
+            .contains("Scene11 input_actions"));
+        manifest["profile"]["descriptor_version"] = json!(5);
+        write(&manifest);
         for version in 1..=11 {
             verify_helpers(root.path(), true, version).unwrap();
         }
@@ -1415,6 +1428,7 @@ content=pathlib.Path(args['--content'])
 kit=pathlib.Path(args['--runtime-kit'])
 value=json.loads((content/'content.json').read_bytes())
 assert value['schema']==7
+assert value['tick_nanos']==16666667 and 'tick_millis' not in value
 scene=json.loads((content/'scene.json').read_bytes())
 assert scene['format_version']==11
 assert scene['authoring']['actions']=={'home':{'kind':{'type':'button','keys':[]}}}
@@ -1451,7 +1465,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             "schema":1,"kind":"ruster-runtime-kit","executable":"runtime",
             "helper":"scripts/package_creation.py","files":records,
             "profile":{"format":"ruster-runtime","version":1,"descriptor_format":"ruster-application",
-                "descriptor_version":4,"os":"linux","arch":"x86_64",
+                "descriptor_version":5,"os":"linux","arch":"x86_64",
                 "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials","roughness_maps","input_actions"]}})).unwrap()).unwrap();
         let mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
         fs::write(root.path().join("source.obj"), mesh).unwrap();
@@ -1532,6 +1546,8 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         .unwrap();
         let staged: Value = serde_json::from_slice(&fs::read(&prepared.archive).unwrap()).unwrap();
         assert_eq!(staged["schema"], 7);
+        assert_eq!(staged["tick_nanos"], 16_666_667);
+        assert!(staged.get("tick_millis").is_none());
         assert_eq!(staged["meshes"]["mesh"]["normal_policy"], "flat");
         assert_eq!(staged["textures"]["texture"]["sha256"], digest(&png));
         assert_eq!(

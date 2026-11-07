@@ -546,3 +546,6 @@ The current development slice adds **Edit → Input actions…**. Define a stabl
 Opt an embedded Lua source into host API2, query `host.axis("traverse")` or `host.button("home").pressed`, then return the owner's complete TRS as usual. Reset captures the authored map. Play and choose **Control runtime** to give the actual viewport keyboard control; Escape releases it. Pause/Stop/Reset, edits, focus/UI ownership or debugger suspension clear old latches. After continuing a debugger stop, choose Control again to request fresh ownership. Runtime poses/live keys never enter Save. The action form participates in unsaved raw-draft recovery and never restores live capture.
 
 This source integration is undergoing the [I1a feasibility gate](../../docs/evidence/I1A-foundation.md); native keyboard/recovery/export acceptance is not yet complete. Use disposable projects until that gate qualifies the complete workflow.
+
+
+Current preview and Scene11 exports share an exact16666667ns fixed quantum. Schema7 carries `tick_nanos` into Descriptor5; old content1–6/descriptor1–4 routes retain milliseconds. This is the working I1a timing-parity repair; no tick-settings UI or interpolation system is introduced.

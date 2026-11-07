@@ -18,6 +18,9 @@ use sha2::{Digest, Sha256};
 
 pub mod debug;
 
+/// Exact current editor/Scene11 export quantum (~60Hz). The public Engine
+/// Limits default retains its original numerical dt for API1 callers.
+pub const DEFAULT_FIXED_TICK: std::time::Duration = std::time::Duration::from_nanos(16_666_667);
 pub const LANGUAGE_ID: &str = "lua54";
 pub const HOST_API_VERSION: u32 = 1;
 /// Explicit opt-in logical-action queries; API1 environments remain unchanged.

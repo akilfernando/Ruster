@@ -11,6 +11,15 @@ use ruster_scene::{PropertyValue, Session};
 
 pub const DEMO: &[u8] = include_bytes!("../resources/generic.scene.json");
 pub const FIXED_DT: Duration = Duration::from_millis(100);
+/// Old snapshots keep the original viewer quantum. Current authored content
+/// shares the editor/export duration instead of a sample-specific default.
+pub fn session_tick_duration(session: &Session) -> Duration {
+    if session.loaded_format_version() >= 11 {
+        ruster_behavior::DEFAULT_FIXED_TICK
+    } else {
+        FIXED_DT
+    }
+}
 
 /// No lock, registry, cache or authored-file writes on this resource path.
 pub fn read_session(path: &Path) -> Result<Session, String> {
