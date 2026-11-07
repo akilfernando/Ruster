@@ -278,19 +278,23 @@ impl InputUi {
         }
     }
 
-    fn capture_event(&mut self, ui: &egui::Ui, editable: bool) -> bool {
+    fn capture_event(
+        &mut self,
+        ui: &egui::Ui,
+        editable: bool,
+    ) -> (bool, Option<(egui::Key, egui::Modifiers)>) {
         let Some(capture) = self.capture else {
-            return false;
+            return (false, None);
         };
         if !editable || !ui.input(|input| input.focused) || egui::Popup::is_any_open(ui.ctx()) {
             self.capture = None;
             self.claim_frame(ui.ctx());
-            return true;
+            return (true, None);
         }
         // A keyboard Enter which activated Capture belongs to that button,
         // including additional egui layout passes in the same frame.
         if ui.ctx().cumulative_frame_nr() <= capture.frame {
-            return true;
+            return (true, None);
         }
         // Capture is owned by the enabled Cancel capture button, not the
         // disabled source button. Never reclaim focus after the user moves it.
@@ -300,10 +304,10 @@ impl InputUi {
         {
             self.capture = None;
             self.claim_frame(ui.ctx());
-            return true;
+            return (true, None);
         }
         if self.interaction_frame == Some(ui.ctx().cumulative_frame_nr()) {
-            return true;
+            return (true, None);
         }
         let pressed = ui.input_mut(|input| {
             let pressed = input.events.iter().find_map(|event| match event {
@@ -324,14 +328,26 @@ impl InputUi {
             });
             pressed
         });
-        let Some((key, modifiers)) = pressed else {
-            return true;
+        // Consume before building buttons, but accept only after the current
+        // enabled, focused and unclipped owner has been built.
+        (true, pressed)
+    }
+
+    fn accept_capture(
+        &mut self,
+        ui: &egui::Ui,
+        draft: &mut Draft,
+        key: egui::Key,
+        modifiers: egui::Modifiers,
+    ) {
+        let Some(capture) = self.capture else {
+            return;
         };
         self.claim_frame(ui.ctx());
         if key == egui::Key::Escape {
             self.capture = None;
             ui.memory_mut(|memory| memory.request_focus(capture.focus));
-            return true;
+            return;
         }
         let key = InputKey::from_logical_name(key.name());
         if modifiers.ctrl
@@ -342,13 +358,9 @@ impl InputUi {
             || matches!(key, Some(InputKey::Escape | InputKey::Tab))
         {
             self.message = "Choose a supported logical key without Ctrl/Alt/Super. Tab and Escape belong to the editor.".into();
-            return true;
+            return;
         }
         let key = key.expect("checked supported key");
-        let Some(draft) = &mut self.draft else {
-            self.capture = None;
-            return true;
-        };
         let current = match (&draft.kind, capture.side) {
             (ActionKind::Button { keys }, Side::Button) => keys.get(capture.index),
             (ActionKind::Axis1d { negative, .. }, Side::Negative) => negative.get(capture.index),
@@ -358,7 +370,7 @@ impl InputUi {
         .copied();
         if current != Some(key) && keys(&draft.kind).any(|existing| existing == key) {
             self.message = "This action already uses that key; choose another key.".into();
-            return true;
+            return;
         }
         let slot = match (&mut draft.kind, capture.side) {
             (ActionKind::Button { keys }, Side::Button) => keys.get_mut(capture.index),
@@ -380,7 +392,36 @@ impl InputUi {
         self.capture = None;
         self.message.clear();
         ui.memory_mut(|memory| memory.request_focus(capture.focus));
-        true
+    }
+
+    pub(super) fn window(
+        &mut self,
+        ctx: &egui::Context,
+        session: &Session,
+        editable: bool,
+        opened: &mut bool,
+    ) -> Option<Edit> {
+        let mut edit = None;
+        let window = egui::Window::new("Input actions")
+            .open(opened)
+            .default_size(egui::vec2(520.0, 680.0))
+            .max_width((ctx.content_rect().width() - 32.0).clamp(240.0, 520.0))
+            .max_height((ctx.content_rect().height() - 48.0).max(200.0))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical()
+                    .id_salt("input-actions-window")
+                    .animated(false)
+                    .show(ui, |ui| {
+                        edit = self.show(ui, session, editable);
+                    });
+            });
+        if !*opened
+            || !ctx.input(|input| input.focused)
+            || window.is_none_or(|window| window.inner.is_none())
+        {
+            self.cancel_capture();
+        }
+        edit
     }
 
     pub(super) fn show(
@@ -395,36 +436,41 @@ impl InputUi {
         }) {
             self.capture = None;
         }
-        let capture_owned = self.capture_event(ui, editable);
+        let (capture_owned, candidate) = self.capture_event(ui, editable);
         let mut edit = None;
+        let mut form_drawn = false;
         egui::CollapsingHeader::new("Input actions")
             .id_salt("input_actions")
             .default_open(true)
             .open(self.pending().then_some(true))
             .show(ui, |ui| {
                 ui.label("Named keyboard controls. Shared keys drive every matching action.");
-                ui.add_enabled_ui(editable && !self.pending(), |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        if ui.button("Add Button").clicked() && self.claim_frame(ui.ctx()) {
-                            self.begin(session, None, ActionKind::default(), Intent::Set, false);
-                        }
-                        if ui.button("Add Axis").clicked() && self.claim_frame(ui.ctx()) {
-                            self.begin(
-                                session,
-                                None,
-                                ActionKind::Axis1d {
-                                    negative: Vec::new(),
-                                    positive: Vec::new(),
-                                },
-                                Intent::Set,
-                                false,
-                            );
-                        }
-                    });
-                    egui::ScrollArea::vertical()
-                        .id_salt("action_list")
-                        .max_height(180.0)
-                        .show(ui, |ui| {
+                if !self.pending() {
+                    ui.add_enabled_ui(editable, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            if ui.button("Add Button").clicked() && self.claim_frame(ui.ctx()) {
+                                self.begin(
+                                    session,
+                                    None,
+                                    ActionKind::default(),
+                                    Intent::Set,
+                                    false,
+                                );
+                            }
+                            if ui.button("Add Axis").clicked() && self.claim_frame(ui.ctx()) {
+                                self.begin(
+                                    session,
+                                    None,
+                                    ActionKind::Axis1d {
+                                        negative: Vec::new(),
+                                        positive: Vec::new(),
+                                    },
+                                    Intent::Set,
+                                    false,
+                                );
+                            }
+                        });
+                        {
                             if session.authoring().actions.is_empty() {
                                 ui.label("No actions defined.");
                             }
@@ -470,16 +516,27 @@ impl InputUi {
                                     }
                                 });
                             }
-                        });
-                });
+                        }
+                    });
+                }
                 if self.pending() {
                     // Enter which opened a form belongs to its list button.
-                    edit = self.form(ui, session, editable, capture_owned || !pending_at_start);
+                    form_drawn = true;
+                    edit = self.form(
+                        ui,
+                        session,
+                        editable,
+                        capture_owned || !pending_at_start,
+                        candidate,
+                    );
                 }
                 if !self.message.is_empty() {
                     ui.colored_label(egui::Color32::LIGHT_RED, &self.message);
                 }
             });
+        if !form_drawn {
+            self.cancel_capture();
+        }
         edit
     }
 
@@ -489,6 +546,7 @@ impl InputUi {
         session: &Session,
         editable: bool,
         capture_owned: bool,
+        candidate: Option<(egui::Key, egui::Modifiers)>,
     ) -> Option<Edit> {
         let mut draft = self.draft.take()?;
         let mut changed = false;
@@ -507,174 +565,192 @@ impl InputUi {
         } else {
             "Action draft · Apply commits one Undo step."
         });
-        egui::ScrollArea::vertical()
-            .id_salt("action_form")
-            .max_height(340.0)
-            .show(ui, |ui| {
-                ui.add_enabled_ui(editable && !capturing, |ui| {
-                    ui.label("Stable ID");
-                    let id = ui.add(
-                        egui::TextEdit::singleline(&mut draft.id)
-                            .id_salt("action_id")
-                            .char_limit(1024)
-                            .interactive(draft.edited_id.is_none() && draft.intent == Intent::Set),
-                    );
-                    ui.label("Label (optional)");
-                    let label = ui.add(
-                        egui::TextEdit::singleline(&mut draft.label)
-                            .id_salt("action_label")
-                            .char_limit(1024)
-                            .interactive(draft.intent == Intent::Set),
-                    );
-                    changed |= id.changed() || label.changed();
-                    if self.focus_first && editable && !capturing && draft.intent == Intent::Set {
-                        if draft.edited_id.is_none() {
-                            id.request_focus();
-                        } else {
-                            label.request_focus();
-                        }
-                        self.focus_first = false;
+        {
+            ui.spacing_mut().text_edit_width = ui.available_width().min(440.0);
+            ui.add_enabled_ui(editable && !capturing, |ui| {
+                ui.label("Stable ID");
+                let id = ui.add(
+                    egui::TextEdit::singleline(&mut draft.id)
+                        .id_salt("action_id")
+                        .char_limit(1024)
+                        .interactive(draft.edited_id.is_none() && draft.intent == Intent::Set),
+                );
+                ui.label("Label (optional)");
+                let label = ui.add(
+                    egui::TextEdit::singleline(&mut draft.label)
+                        .id_salt("action_label")
+                        .char_limit(1024)
+                        .interactive(draft.intent == Intent::Set),
+                );
+                changed |= id.changed() || label.changed();
+                if self.focus_first && editable && !capturing && draft.intent == Intent::Set {
+                    if draft.edited_id.is_none() {
+                        id.request_focus();
+                        id.scroll_to_me(Some(egui::Align::Center));
+                    } else {
+                        label.request_focus();
+                        label.scroll_to_me(Some(egui::Align::Center));
                     }
-                    text_owned = [&id, &label].iter().any(|response| {
-                        response.has_focus()
-                            || response.lost_focus()
-                            || ui.memory(|memory| {
-                                memory.focused().is_none()
-                                    && memory.had_focus_last_frame(response.id)
-                            })
-                    });
-                    owned_ids.extend([id.id, label.id]);
-                    if draft.intent == Intent::Set {
-                        let mut axis = matches!(draft.kind, ActionKind::Axis1d { .. });
-                        let before = axis;
-                        let trigger = ui.make_persistent_id(egui::IdSalt::new("action_kind"));
-                        let closing = closing_key(ui, trigger);
-                        let response = egui::ComboBox::from_id_salt("action_kind")
-                            .selected_text(if axis {
-                                "Axis (−1 / 0 / +1)"
-                            } else {
-                                "Button"
-                            })
-                            .show_ui(ui, |ui| {
-                                for (value, name) in
-                                    [(false, "Button"), (true, "Axis (−1 / 0 / +1)")]
-                                {
-                                    if ui.selectable_label(axis == value, name).clicked() && admit {
-                                        axis = value;
-                                        selected = true;
-                                        ui.close();
-                                    }
-                                }
-                            });
-                        restore_combo(ui, &response.response, selected || closing);
-                        owned_ids.push(response.response.id);
-                        if axis != before {
-                            let all = keys(&draft.kind).collect();
-                            draft.kind = if axis {
-                                ActionKind::Axis1d {
-                                    negative: Vec::new(),
-                                    positive: all,
-                                }
-                            } else {
-                                ActionKind::Button { keys: all }
-                            };
-                            changed = true;
-                        }
-                        let mut rows = Vec::new();
-                        match &mut draft.kind {
-                            ActionKind::Button { keys } => {
-                                ui.label("Button keys");
-                                let used = keys.clone();
-                                rows.push(key_rows(ui, Side::Button, keys, &used, admit));
-                            }
-                            ActionKind::Axis1d { negative, positive } => {
-                                ui.label("Negative keys (−1)");
-                                let used: Vec<_> =
-                                    negative.iter().chain(positive.iter()).copied().collect();
-                                rows.push(key_rows(ui, Side::Negative, negative, &used, admit));
-                                ui.label("Positive keys (+1)");
-                                let used: Vec<_> =
-                                    negative.iter().chain(positive.iter()).copied().collect();
-                                rows.push(key_rows(ui, Side::Positive, positive, &used, admit));
-                            }
-                        }
-                        for row in rows {
-                            owned_ids.extend(row.ids);
-                            selected |= row.selected;
-                            changed |= row.changed;
-                            if row.capture.is_some() {
-                                next_capture = row.capture;
-                            }
-                        }
-                        ui.label("Up to four total keys. Empty bindings keep the action neutral.");
-                        for conflict in conflicts(session, &draft.id, &draft.kind) {
-                            ui.colored_label(egui::Color32::YELLOW, conflict);
-                        }
-                    }
-                    let keys_available = admit
-                        && !capture_owned
-                        && next_capture.is_none()
-                        && !popup_at_start
-                        && !selected
-                        && !egui::Popup::is_any_open(ui.ctx());
-                    if keys_available && text_owned {
-                        apply = ui.input_mut(|input| {
-                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                        });
-                    }
-                    ui.horizontal_wrapped(|ui| {
-                        let submit = ui.button(if draft.intent == Intent::Remove {
-                            "Delete action"
-                        } else {
-                            "Apply action"
-                        });
-                        let revert = ui.button("Cancel");
-                        if self.focus_first
-                            && editable
-                            && !capturing
-                            && draft.intent == Intent::Remove
-                        {
-                            submit.request_focus();
-                            self.focus_first = false;
-                        }
-                        owned_ids.extend([submit.id, revert.id]);
-                        if keys_available {
-                            apply |= submit.clicked();
-                            cancel = revert.clicked();
-                        }
-                    });
-                    if keys_available
-                        && ui.memory(|memory| {
-                            owned_ids.iter().any(|id| {
-                                memory.focused() == Some(*id)
-                                    || (memory.focused().is_none()
-                                        && memory.had_focus_last_frame(*id))
-                            })
-                        })
-                    {
-                        cancel |= ui.input_mut(|input| {
-                            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                        });
-                    }
-                });
-                if capturing || next_capture.is_some() {
-                    ui.label("Press a logical key. Escape cancels capture; the draft stays open.");
-                    let response =
-                        ui.add_enabled(editable, egui::Button::new("Cancel key capture"));
-                    if let Some(capture) = &mut next_capture {
-                        capture.owner = Some(response.id);
-                        // Only a genuine activation may hand focus to capture.
-                        response.request_focus();
-                    } else if let Some(capture) = &mut self.capture {
-                        capture.owner = Some(response.id);
-                    }
-                    if response.clicked() && admit {
-                        self.capture = None;
-                        next_capture = None;
-                        self.claim_frame(ui.ctx());
+                    self.focus_first = false;
+                }
+                for response in [&id, &label] {
+                    if response.gained_focus() {
+                        response.scroll_to_me(None);
                     }
                 }
+                text_owned = [&id, &label].iter().any(|response| {
+                    response.has_focus()
+                        || response.lost_focus()
+                        || ui.memory(|memory| {
+                            memory.focused().is_none() && memory.had_focus_last_frame(response.id)
+                        })
+                });
+                owned_ids.extend([id.id, label.id]);
+                if draft.intent == Intent::Set {
+                    let mut axis = matches!(draft.kind, ActionKind::Axis1d { .. });
+                    let before = axis;
+                    let trigger = ui.make_persistent_id(egui::IdSalt::new("action_kind"));
+                    let closing = closing_key(ui, trigger);
+                    let response = egui::ComboBox::from_id_salt("action_kind")
+                        .selected_text(if axis {
+                            "Axis (−1 / 0 / +1)"
+                        } else {
+                            "Button"
+                        })
+                        .show_ui(ui, |ui| {
+                            for (value, name) in [(false, "Button"), (true, "Axis (−1 / 0 / +1)")]
+                            {
+                                if ui.selectable_label(axis == value, name).clicked() && admit {
+                                    axis = value;
+                                    selected = true;
+                                    ui.close();
+                                }
+                            }
+                        });
+                    restore_combo(ui, &response.response, selected || closing);
+                    if response.response.gained_focus() {
+                        response.response.scroll_to_me(None);
+                    }
+                    owned_ids.push(response.response.id);
+                    if axis != before {
+                        let all = keys(&draft.kind).collect();
+                        draft.kind = if axis {
+                            ActionKind::Axis1d {
+                                negative: Vec::new(),
+                                positive: all,
+                            }
+                        } else {
+                            ActionKind::Button { keys: all }
+                        };
+                        changed = true;
+                    }
+                    let mut rows = Vec::new();
+                    match &mut draft.kind {
+                        ActionKind::Button { keys } => {
+                            ui.label("Button keys");
+                            let used = keys.clone();
+                            rows.push(key_rows(ui, Side::Button, keys, &used, admit));
+                        }
+                        ActionKind::Axis1d { negative, positive } => {
+                            ui.label("Negative keys (−1)");
+                            let used: Vec<_> =
+                                negative.iter().chain(positive.iter()).copied().collect();
+                            rows.push(key_rows(ui, Side::Negative, negative, &used, admit));
+                            ui.label("Positive keys (+1)");
+                            let used: Vec<_> =
+                                negative.iter().chain(positive.iter()).copied().collect();
+                            rows.push(key_rows(ui, Side::Positive, positive, &used, admit));
+                        }
+                    }
+                    for row in rows {
+                        owned_ids.extend(row.ids);
+                        selected |= row.selected;
+                        changed |= row.changed;
+                        if row.capture.is_some() {
+                            next_capture = row.capture;
+                        }
+                    }
+                    ui.label("Up to four total keys. Empty bindings keep the action neutral.");
+                    for conflict in conflicts(session, &draft.id, &draft.kind) {
+                        ui.colored_label(egui::Color32::YELLOW, conflict);
+                    }
+                }
+                let keys_available = admit
+                    && !capture_owned
+                    && next_capture.is_none()
+                    && !popup_at_start
+                    && !selected
+                    && !egui::Popup::is_any_open(ui.ctx());
+                if keys_available && text_owned {
+                    apply = ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                    });
+                }
+                ui.horizontal_wrapped(|ui| {
+                    let submit = ui.button(if draft.intent == Intent::Remove {
+                        "Delete action"
+                    } else {
+                        "Apply action"
+                    });
+                    let revert = ui.button("Cancel");
+                    if self.focus_first && editable && !capturing && draft.intent == Intent::Remove
+                    {
+                        submit.request_focus();
+                        submit.scroll_to_me(Some(egui::Align::Center));
+                        self.focus_first = false;
+                    }
+                    owned_ids.extend([submit.id, revert.id]);
+                    for response in [&submit, &revert] {
+                        if response.gained_focus() {
+                            response.scroll_to_me(None);
+                        }
+                    }
+                    if keys_available {
+                        apply |= submit.clicked();
+                        cancel = revert.clicked();
+                    }
+                });
+                if keys_available
+                    && ui.memory(|memory| {
+                        owned_ids.iter().any(|id| {
+                            memory.focused() == Some(*id)
+                                || (memory.focused().is_none() && memory.had_focus_last_frame(*id))
+                        })
+                    })
+                {
+                    cancel |= ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    });
+                }
             });
+            if capturing || next_capture.is_some() {
+                ui.label("Press a logical key. Escape cancels capture; the draft stays open.");
+                let response = ui.add_enabled(editable, egui::Button::new("Cancel key capture"));
+                if let Some(capture) = &mut next_capture {
+                    capture.owner = Some(response.id);
+                    // Only a genuine activation may hand focus to capture.
+                    response.request_focus();
+                    response.scroll_to_me(Some(egui::Align::Center));
+                } else if let Some(capture) = &mut self.capture {
+                    capture.owner = Some(response.id);
+                    if !response.enabled()
+                        || !response.has_focus()
+                        || !ui.clip_rect().contains_rect(response.rect)
+                        || !response.interact_rect.contains_rect(response.rect)
+                    {
+                        self.capture = None;
+                        self.claim_frame(ui.ctx());
+                    } else if let Some((key, modifiers)) = candidate {
+                        self.accept_capture(ui, &mut draft, key, modifiers);
+                    }
+                }
+                if response.clicked() && admit {
+                    self.capture = None;
+                    next_capture = None;
+                    self.claim_frame(ui.ctx());
+                }
+            }
+        }
         if changed {
             self.changed();
             self.claim_frame(ui.ctx());
@@ -817,6 +893,11 @@ fn key_rows(
                     result.selected |= selected;
                     let capture = ui.button("Capture");
                     let unbind = ui.button("Remove key");
+                    for response in [&response.response, &capture, &unbind] {
+                        if response.gained_focus() {
+                            response.scroll_to_me(None);
+                        }
+                    }
                     result
                         .ids
                         .extend([response.response.id, capture.id, unbind.id]);
@@ -837,6 +918,9 @@ fn key_rows(
         }
         let add = ui.add_enabled(occupied.len() < 4, egui::Button::new("Add key"));
         result.ids.push(add.id);
+        if add.gained_focus() {
+            add.scroll_to_me(None);
+        }
         if add.clicked() && admit {
             if let Some(key) = InputKey::ALL.iter().find(|key| {
                 !matches!(key, InputKey::Escape | InputKey::Tab) && !occupied.contains(key)
@@ -856,6 +940,201 @@ fn key_rows(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn action_window_retained_list_geometry_keeps_draft_and_capture_visible() {
+        fn frame(
+            ctx: &egui::Context,
+            editor: &mut InputUi,
+            session: &Session,
+            size: egui::Vec2,
+            events: Vec<egui::Event>,
+        ) -> Vec<egui::epaint::ClippedShape> {
+            let mut opened = true;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                },
+                |_ui| {
+                    assert!(editor.window(ctx, session, true, &mut opened).is_none());
+                },
+            );
+            assert!(opened);
+            output.textures_delta.clear();
+            output.shapes
+        }
+        fn visible_text(shapes: &[egui::epaint::ClippedShape], label: &str) -> Option<egui::Pos2> {
+            fn find(
+                shape: &egui::epaint::Shape,
+                clip: egui::Rect,
+                label: &str,
+            ) -> Option<egui::Pos2> {
+                match shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                        let rect = text.galley.rect.translate(text.pos.to_vec2());
+                        clip.contains_rect(rect).then_some(rect.center())
+                    }
+                    egui::epaint::Shape::Vec(shapes) => {
+                        shapes.iter().find_map(|shape| find(shape, clip, label))
+                    }
+                    _ => None,
+                }
+            }
+            shapes
+                .iter()
+                .find_map(|shape| find(&shape.shape, shape.clip_rect, label))
+        }
+        fn click(pos: egui::Pos2, pressed: bool) -> Vec<egui::Event> {
+            vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        }
+        fn key(key: egui::Key) -> Vec<egui::Event> {
+            [true, false]
+                .into_iter()
+                .map(|pressed| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect()
+        }
+        for size in [egui::vec2(1280.0, 800.0), egui::vec2(640.0, 480.0)] {
+            let ctx = egui::Context::default();
+            let mut session = Session::new(ruster_scene::Scene::demo()).unwrap();
+            for (id, kind) in [
+                (
+                    "home",
+                    ActionKind::Button {
+                        keys: vec![InputKey::Space, InputKey::Home],
+                    },
+                ),
+                (
+                    "traverse",
+                    ActionKind::Axis1d {
+                        negative: vec![InputKey::ArrowLeft],
+                        positive: vec![InputKey::ArrowRight],
+                    },
+                ),
+            ] {
+                session
+                    .set_action(
+                        session.scene().revision,
+                        id,
+                        Some(ActionDefinition {
+                            label: Some(id.into()),
+                            kind,
+                        }),
+                    )
+                    .unwrap();
+            }
+            let original = session.snapshot_bytes().unwrap();
+            let mut editor = InputUi::default();
+            let mut shapes = Vec::new();
+            // Retain the actual list window's small geometry before opening Edit.
+            for _ in 0..3 {
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            let edit = visible_text(&shapes, "Edit").expect("list Edit is visible");
+            frame(&ctx, &mut editor, &session, size, click(edit, true));
+            frame(&ctx, &mut editor, &session, size, click(edit, false));
+            for _ in 0..3 {
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            let focused = ctx
+                .memory(|memory| memory.focused())
+                .and_then(|id| ctx.read_response(id))
+                .unwrap();
+            assert!(focused.enabled() && focused.has_focus());
+            assert!(
+                focused.interact_rect.contains_rect(focused.rect),
+                "autofocused draft field must be fully inside the current window clip at {size:?}"
+            );
+            // Reach Capture by genuine keyboard traversal, allowing the scroll
+            // owner to reveal each newly focused control.
+            for _ in 0..16 {
+                let focused = ctx
+                    .memory(|memory| memory.focused())
+                    .and_then(|id| ctx.read_response(id))
+                    .unwrap();
+                if visible_text(&shapes, "Capture")
+                    .is_some_and(|point| focused.rect.contains(point))
+                {
+                    break;
+                }
+                frame(&ctx, &mut editor, &session, size, key(egui::Key::Tab));
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            let capture = visible_text(&shapes, "Capture")
+                .expect("Capture is revealed in the retained window");
+            let focused = ctx
+                .memory(|memory| memory.focused())
+                .and_then(|id| ctx.read_response(id))
+                .unwrap();
+            assert!(focused.rect.contains(capture));
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Enter));
+            for _ in 0..3 {
+                frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            let owner = ctx
+                .read_response(editor.capture.expect("capture armed").owner.unwrap())
+                .unwrap();
+            assert!(
+                owner.enabled()
+                    && owner.has_focus()
+                    && owner.interact_rect.contains_rect(owner.rect),
+                "current Cancel capture must be visible before accepting a key"
+            );
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::F2));
+            assert!(!editor.capturing());
+            assert_eq!(
+                keys(&editor.draft.as_ref().unwrap().kind).next(),
+                Some(InputKey::F2)
+            );
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Enter));
+            for _ in 0..3 {
+                frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            assert!(editor.capturing());
+            let retained = editor.drafts();
+            let owner = ctx
+                .read_response(editor.capture.unwrap().owner.unwrap())
+                .unwrap();
+            // Constrain the real Window further, then scroll away from its
+            // capture owner. The candidate must see that frame's current clip.
+            let constrained = egui::vec2(size.x, 320.0);
+            let events = vec![
+                egui::Event::PointerMoved(egui::pos2(owner.rect.center().x, 180.0)),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, 10000.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Unknown,
+                },
+            ];
+            frame(&ctx, &mut editor, &session, constrained, events);
+            frame(&ctx, &mut editor, &session, constrained, key(egui::Key::F3));
+            assert!(!editor.capturing(), "clipped capture owner cancels capture");
+            assert_eq!(
+                editor.drafts(),
+                retained,
+                "clipped owner cannot accept the staged key"
+            );
+            assert_eq!(session.snapshot_bytes().unwrap(), original);
+        }
+    }
 
     #[test]
     fn action_form_capture_owns_real_focus_and_does_not_replay_discarded_passes() {

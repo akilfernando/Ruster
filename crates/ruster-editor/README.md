@@ -549,3 +549,6 @@ This source integration is undergoing the [I1a feasibility gate](../../docs/evid
 
 
 Current preview and Scene11 exports share an exact16666667ns fixed quantum. Schema7 carries `tick_nanos` into Descriptor5; old content1–6/descriptor1–4 routes retain milliseconds. This is the working I1a timing-parity repair; no tick-settings UI or interpolation system is introduced.
+
+
+The action dialog uses one vertical scrolling region and shows the active form separately from its list. Newly focused fields and key-capture controls scroll into view. A capture candidate is accepted only while its current Cancel capture control is enabled, focused and fully visible; hiding, closing or moving focus away cancels capture while preserving the raw draft. This source repair is under native normal/compact I1a qualification; successful standalone checks do not substitute for editor interaction.

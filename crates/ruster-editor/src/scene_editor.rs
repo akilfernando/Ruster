@@ -4755,23 +4755,10 @@ impl SceneEditor {
             self.runtime.release_input(&ctx);
             let editable = self.input_action_editable();
             let mut opened = true;
-            let mut edit = None;
-            let action_window = egui::Window::new("Input actions")
-                .open(&mut opened)
-                .default_width(420.0)
-                .max_width((ctx.content_rect().width() - 32.0).max(240.0))
-                .max_height((ctx.content_rect().height() - 48.0).max(200.0))
-                .show(&ctx, |ui| {
-                    egui::ScrollArea::vertical()
-                        .id_salt("input-actions-window")
-                        .show(ui, |ui| {
-                            edit = self.input_actions.show(ui, &self.session, editable);
-                        });
-                });
+            let edit = self
+                .input_actions
+                .window(&ctx, &self.session, editable, &mut opened);
             self.input_actions_open = opened;
-            if !opened || action_window.is_none_or(|window| window.inner.is_none()) {
-                self.input_actions.cancel_capture();
-            }
             if let Some(edit) = edit {
                 let result = match edit {
                     crate::input_ui::Edit::Set {
