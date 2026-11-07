@@ -767,7 +767,7 @@ impl Worker {
                 });
             }
             frame
-                .validate_against(slot.keys.map())
+                .validate_only_against(slot.keys.map())
                 .map_err(|_| RequestError {
                     key,
                     kind: RequestErrorKind::InvalidInput,
@@ -1903,17 +1903,27 @@ mod tests {
             .iter()
             .all(|object| object.transform.translation == [1.0, 1.0, 0.0]));
         let current = worker.current_input_meta(key).unwrap();
-        let mut malformed = program(key, current, 2);
-        if let Command::ProgramStep { frame, .. } = &mut malformed {
-            frame.0.insert(
-                "unknown".into(),
-                ruster_scene::input::ActionValue::Axis1d { value: 0 },
+        for id in ["unknown", "fire"] {
+            let mut malformed = program(key, current, 2);
+            if let Command::ProgramStep { frame, .. } = &mut malformed {
+                frame.0.insert(
+                    id.into(),
+                    ruster_scene::input::ActionValue::Axis1d { value: 0 },
+                );
+            }
+            assert_eq!(
+                worker.try_request(malformed).unwrap_err().kind,
+                RequestErrorKind::InvalidInput
             );
+            assert_eq!(
+                worker.current_input_meta(key).unwrap(),
+                current,
+                "validation-only rejection cannot change input authority"
+            );
+            let retained = worker.last_good_frame().unwrap();
+            assert_eq!(retained.tick, neutral.tick);
+            assert_eq!(retained.scene, neutral.scene);
         }
-        assert_eq!(
-            worker.try_request(malformed).unwrap_err().kind,
-            RequestErrorKind::InvalidInput
-        );
         let (parked, release) = gate(&worker.shared.park_gate);
         worker.wake();
         parked.recv_timeout(Duration::from_secs(5)).unwrap();

@@ -234,12 +234,9 @@ impl<'de> Deserialize<'de> for ActionFrame {
 }
 
 impl ActionFrame {
-    /// Validate the map and every supplied value before producing any frame.
-    /// Omitted actions become neutral. Supplied values never update held keys.
-    pub fn validate_against(
-        &self,
-        actions: &ActionMap,
-    ) -> Result<ValidatedActionFrame, SceneError> {
+    /// Validate the complete map and supplied values without constructing a
+    /// normalized frame. This carries no execution or ownership authority.
+    pub fn validate_only_against(&self, actions: &ActionMap) -> Result<(), SceneError> {
         validate_action_map(actions)?;
         if self.0.len() > MAX_ACTIONS {
             return Err(SceneError::Invalid(format!(
@@ -267,6 +264,16 @@ impl ActionFrame {
                 }
             }
         }
+        Ok(())
+    }
+
+    /// Validate the map and every supplied value before producing any frame.
+    /// Omitted actions become neutral. Supplied values never update held keys.
+    pub fn validate_against(
+        &self,
+        actions: &ActionMap,
+    ) -> Result<ValidatedActionFrame, SceneError> {
+        self.validate_only_against(actions)?;
         Ok(ValidatedActionFrame {
             values: actions
                 .iter()
@@ -333,6 +340,8 @@ struct ButtonEdges {
 pub struct KeyEventAccumulator {
     actions: ActionMap,
     held: BTreeSet<InputKey>,
+    // Exactly the Button IDs from the immutable actions map, in the same
+    // BTreeMap order. Both traversals below assert this private invariant.
     edges: BTreeMap<String, ButtonEdges>,
 }
 
@@ -368,10 +377,17 @@ impl KeyEventAccumulator {
         {
             return;
         }
-        for (id, action) in &self.actions {
-            let ActionKind::Button { keys } = &action.kind else {
-                continue;
-            };
+        let mut edge_entries = self.edges.iter_mut();
+        for (id, keys) in self
+            .actions
+            .iter()
+            .filter_map(|(id, action)| match &action.kind {
+                ActionKind::Button { keys } => Some((id, keys)),
+                ActionKind::Axis1d { .. } => None,
+            })
+        {
+            let (edge_id, edges) = edge_entries.next().expect("every Button has an edge entry");
+            assert_eq!(id, edge_id, "Button/edge maps preserve identical ID order");
             if !keys.contains(&key) {
                 continue;
             }
@@ -383,11 +399,13 @@ impl KeyEventAccumulator {
                     self.held.contains(bound)
                 }
             });
-            if let Some(edges) = self.edges.get_mut(id) {
-                edges.pressed |= !before && after;
-                edges.released |= before && !after;
-            }
+            edges.pressed |= !before && after;
+            edges.released |= before && !after;
         }
+        assert!(
+            edge_entries.next().is_none(),
+            "only Buttons have edge entries"
+        );
         if pressed {
             self.held.insert(key);
         } else {
@@ -398,17 +416,17 @@ impl KeyEventAccumulator {
     /// Admit one immutable snapshot, clearing only pending edges. Held keys
     /// survive catch-up ticks; any later event belongs to the next snapshot.
     pub fn take_snapshot(&mut self) -> ValidatedActionFrame {
+        let mut edge_entries = self.edges.iter_mut();
         let values = self
             .actions
             .iter()
             .map(|(id, action)| {
                 let value = match &action.kind {
                     ActionKind::Button { keys } => {
-                        let edges = self
-                            .edges
-                            .get_mut(id)
-                            .map(std::mem::take)
-                            .unwrap_or_default();
+                        let (edge_id, edges) =
+                            edge_entries.next().expect("every Button has an edge entry");
+                        assert_eq!(id, edge_id, "Button/edge maps preserve identical ID order");
+                        let edges = std::mem::take(edges);
                         ActionValue::Button(ButtonState {
                             held: keys.iter().any(|key| self.held.contains(key)),
                             pressed: edges.pressed,
@@ -426,6 +444,10 @@ impl KeyEventAccumulator {
                 (id.clone(), value)
             })
             .collect();
+        assert!(
+            edge_entries.next().is_none(),
+            "only Buttons have edge entries"
+        );
         ValidatedActionFrame { values }
     }
 
@@ -557,7 +579,8 @@ mod tests {
             .map(|n| (format!("a{n}"), ActionValue::Axis1d { value: 0 }))
             .collect();
         assert!(
-            serde_json::from_value::<ActionFrame>(serde_json::to_value(too_many).unwrap()).is_err(),
+            serde_json::from_value::<ActionFrame>(serde_json::to_value(&too_many).unwrap())
+                .is_err(),
             "reject oversized frames during decode"
         );
         let actions = map();
@@ -566,6 +589,7 @@ mod tests {
             "move":{"type":"axis1d","value":-1}
         }))
         .unwrap();
+        assert!(raw.validate_only_against(&actions).is_ok());
         let frame = raw.validate_against(&actions).unwrap();
         assert_eq!(frame.len(), 3);
         assert_eq!(
@@ -588,7 +612,25 @@ mod tests {
             json!({"move":{"type":"axis1d","value":2}}),
         ] {
             let raw: ActionFrame = serde_json::from_value(invalid).unwrap();
-            assert!(raw.validate_against(&actions).is_err());
+            let error = raw.validate_only_against(&actions).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                raw.validate_against(&actions).unwrap_err().to_string()
+            );
+        }
+        // Public callers can construct values that the wire decoder rejects.
+        for raw in [
+            ActionFrame(too_many),
+            ActionFrame(BTreeMap::from([(
+                "bad id".into(),
+                ActionValue::Button(ButtonState::default()),
+            )])),
+        ] {
+            let error = raw.validate_only_against(&actions).unwrap_err();
+            assert_eq!(
+                error.to_string(),
+                raw.validate_against(&actions).unwrap_err().to_string()
+            );
         }
         for invalid in [
             json!({"move":{"type":"axis1d","value":0,"extra":null}}),
@@ -598,9 +640,12 @@ mod tests {
             assert!(serde_json::from_value::<ActionFrame>(invalid).is_err());
         }
         let invalid_map = BTreeMap::from([("reserved".into(), button(vec![InputKey::Tab]))]);
-        assert!(ActionFrame::default()
-            .validate_against(&invalid_map)
-            .is_err());
+        let raw = ActionFrame::default();
+        let error = raw.validate_only_against(&invalid_map).unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            raw.validate_against(&invalid_map).unwrap_err().to_string()
+        );
         assert_eq!(
             ValidatedActionFrame::neutral(&actions).unwrap().get("move"),
             Some(&ActionValue::Axis1d { value: 0 })
@@ -609,7 +654,22 @@ mod tests {
 
     #[test]
     fn event_admission_coalesces_or_edges_and_cancels_without_release() {
-        let mut input = KeyEventAccumulator::new(map()).unwrap();
+        let mut actions = map();
+        actions.insert(
+            "a-axis".into(),
+            ActionDefinition {
+                label: None,
+                kind: ActionKind::Axis1d {
+                    negative: vec![InputKey::Z],
+                    positive: vec![InputKey::C],
+                },
+            },
+        );
+        actions.insert("idle".into(), button(vec![InputKey::C]));
+        actions.insert("z-button".into(), button(vec![InputKey::C]));
+        // Axis IDs precede and interleave Buttons. The unaffected middle
+        // Button must still advance the ordered edge traversal for shared A.
+        let mut input = KeyEventAccumulator::new(actions).unwrap();
         input.key_event(InputKey::A, true);
         input.key_event(InputKey::A, true); // Autorepeat.
         let first = input.take_snapshot();
@@ -663,6 +723,24 @@ mod tests {
                 released: true
             }))
         );
+        assert_eq!(
+            input.take_snapshot(),
+            ValidatedActionFrame::neutral(input.map()).unwrap()
+        );
+        input.key_event(InputKey::C, true);
+        input.key_event(InputKey::C, false);
+        let tap = input.take_snapshot();
+        for id in ["idle", "z-button"] {
+            assert_eq!(
+                tap.get(id),
+                Some(&ActionValue::Button(ButtonState {
+                    held: false,
+                    pressed: true,
+                    released: true,
+                }))
+            );
+        }
+        assert_eq!(tap.get("a-axis"), Some(&ActionValue::Axis1d { value: 0 }));
         assert_eq!(
             input.take_snapshot(),
             ValidatedActionFrame::neutral(input.map()).unwrap()
