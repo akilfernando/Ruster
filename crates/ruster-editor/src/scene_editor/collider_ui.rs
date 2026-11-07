@@ -490,15 +490,17 @@ fn collider_field(
         })
         .inner;
     *changed |= response.changed();
-    if response.gained_focus() {
-        response.scroll_to_me(Some(egui::Align::Center));
-    }
     if let Some((_, message)) = validation.as_ref().filter(|(invalid, _)| *invalid == field) {
         let error = ui.colored_label(ui.visuals().error_fg_color, message);
         error_rect = Some(response.rect.union(error.rect));
-        if response.gained_focus() {
-            ui.scroll_to_rect(response.rect.union(error.rect), Some(egui::Align::Center));
-        }
+    }
+    let reveal_rect = error_rect.unwrap_or(response.rect);
+    // Add requests focus before the field first exists, so that first genuine
+    // focused response can be clipped without reporting gained_focus.
+    if response.has_focus()
+        && (response.gained_focus() || !ui.clip_rect().contains_rect(reveal_rect))
+    {
+        ui.scroll_to_rect(reveal_rect, Some(egui::Align::Center));
     }
     fields.push(response);
     error_rect
@@ -527,22 +529,25 @@ mod tests {
             egui::Event::ModifiersChanged(egui::Modifiers::NONE),
         ]
     }
-    fn visible_text(shapes: &[egui::epaint::ClippedShape], label: &str) -> bool {
-        fn find(shape: &egui::epaint::Shape, clip: egui::Rect, label: &str) -> bool {
+    fn visible_text_rect(shapes: &[egui::epaint::ClippedShape], label: &str) -> Option<egui::Rect> {
+        fn find(shape: &egui::epaint::Shape, clip: egui::Rect, label: &str) -> Option<egui::Rect> {
             match shape {
                 egui::epaint::Shape::Text(text) if text.galley.text() == label => {
                     let rect = text.galley.rect.translate(text.pos.to_vec2());
-                    clip.contains_rect(rect)
+                    clip.contains_rect(rect).then_some(rect)
                 }
                 egui::epaint::Shape::Vec(shapes) => {
-                    shapes.iter().any(|shape| find(shape, clip, label))
+                    shapes.iter().find_map(|shape| find(shape, clip, label))
                 }
-                _ => false,
+                _ => None,
             }
         }
         shapes
             .iter()
-            .any(|shape| find(&shape.shape, shape.clip_rect, label))
+            .find_map(|shape| find(&shape.shape, shape.clip_rect, label))
+    }
+    fn visible_text(shapes: &[egui::epaint::ClippedShape], label: &str) -> bool {
+        visible_text_rect(shapes, label).is_some()
     }
 
     // Real production inspector/scroll/theme protects field focus and clipped
@@ -563,6 +568,7 @@ mod tests {
             let ctx = egui::Context::default();
             crate::editor_theme::configure(&ctx);
             let mut time = 0.0;
+            let current_offset_response = std::cell::RefCell::new(None);
             let mut frame = |editor: &mut SceneEditor, events| {
                 time += 0.1;
                 let mut output = ctx.run_ui(
@@ -576,6 +582,9 @@ mod tests {
                     |ui| {
                         ui.set_max_width(240.0);
                         editor.inspector_scroll_ui(ui);
+                        // Read during this pass. After run_ui, egui's swapped
+                        // widget maps can return the prior clipped rectangle.
+                        current_offset_response.replace(ctx.read_response(Field::Offset(0).id()));
                     },
                 );
                 output.textures_delta.clear();
@@ -737,6 +746,105 @@ mod tests {
             editor.collider_draft = Some(remove);
             assert!(editor.apply_collider_draft());
             assert!(editor.session.scene().objects[0].collider.is_none());
+            let removed = editor.session.snapshot_bytes().unwrap();
+            let mut shapes;
+            {
+                let mut scroll = |editor: &mut SceneEditor, delta| {
+                    let point = egui::pos2(100.0, size.y * 0.5);
+                    frame(
+                        editor,
+                        vec![
+                            egui::Event::PointerMoved(point),
+                            egui::Event::MouseWheel {
+                                unit: egui::MouseWheelUnit::Point,
+                                delta: egui::vec2(0.0, delta),
+                                modifiers: egui::Modifiers::NONE,
+                                phase: egui::TouchPhase::Move,
+                                source: egui::MouseWheelSource::Unknown,
+                            },
+                        ],
+                    );
+                    frame(
+                        editor,
+                        vec![egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::Vec2::ZERO,
+                            modifiers: egui::Modifiers::NONE,
+                            phase: egui::TouchPhase::End,
+                            source: egui::MouseWheelSource::Unknown,
+                        }],
+                    );
+                    let mut shapes = frame(editor, vec![]);
+                    for _ in 0..24 {
+                        shapes = frame(editor, vec![]);
+                        if ctx.input(|input| input.smooth_scroll_delta == egui::Vec2::ZERO) {
+                            break;
+                        }
+                    }
+                    shapes
+                };
+                // Return through the real scroll owner, then locate the actual
+                // Add button. Focus is obtained only by clicking that button.
+                shapes = scroll(&mut editor, 10_000.0);
+                for _ in 0..16 {
+                    if visible_text_rect(&shapes, "Add collider").is_some() {
+                        break;
+                    }
+                    shapes = scroll(&mut editor, -size.y * 0.25);
+                }
+            }
+            let mut previous = None;
+            let mut stable = false;
+            for _ in 0..24 {
+                shapes = frame(&mut editor, vec![]);
+                let current = visible_text_rect(&shapes, "Add collider");
+                if current.is_some()
+                    && current == previous
+                    && ctx.input(|input| input.smooth_scroll_delta == egui::Vec2::ZERO)
+                {
+                    stable = true;
+                    break;
+                }
+                previous = current;
+            }
+            assert!(
+                stable,
+                "Add collider must be visible and stationary before clicking"
+            );
+            let point = visible_text_rect(&shapes, "Add collider").unwrap().center();
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(
+                &mut editor,
+                vec![egui::Event::PointerMoved(point), pointer(true)],
+            );
+            frame(&mut editor, vec![pointer(false)]);
+            frame(&mut editor, vec![]);
+            frame(&mut editor, vec![]);
+            let first = Field::Offset(0).id();
+            assert!(editor.collider_draft.is_some());
+            assert!(
+                ctx.memory(|memory| memory.has_focus(first)),
+                "Add collider must focus the actual first Offset field"
+            );
+            let response = current_offset_response
+                .borrow()
+                .clone()
+                .expect("Focused first Offset must be visible after Add collider");
+            assert!(
+                response.interact_rect.contains_rect(response.rect),
+                "Focused first Offset must be fully inside the current inspector clip: rect={:?}, interaction={:?}", response.rect, response.interact_rect
+            );
+            frame(
+                &mut editor,
+                stroke(egui::Key::Escape, egui::Modifiers::NONE),
+            );
+            assert!(editor.collider_draft.is_none());
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), removed);
             editor.history(false);
             assert!(editor.session.scene().objects[0].collider.is_some());
         }
