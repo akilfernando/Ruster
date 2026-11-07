@@ -37,3 +37,6 @@ Alternative direct Reset/Play hotkeys introduce additional runtime command admis
 
 
 A navigational remap such as a bare arrow consumes its own already-queued egui navigation. Any separate unconsumed navigation event, including Escape, takes precedence over the focus jump in that input batch. This preserves ordinary traversal without adding deferred focus state. The existing real-toolbar owner checks actual post-end-pass Reset focus and a separate mixed-input traversal, with explicit key releases.
+
+
+Native follow-up identifies a second blocker. Reset succeeds while transient asset retirement disables its button and egui removes focus; pending Play/Pause/Step can lose it similarly. Root/Astra accept one optional UI continuation associated with a genuinely focused activated response, accepted run and operation. Existing command/disabled guards remain. Restore genuine enabled focus once after matching completion, only while focus stays vacant/original. Cancel on new activating input, pointer press, another focus owner, OS blur, modal/capture, supersession or failure. Key release alone preserves the request. This selected remedy awaits regression and native verification; no worker queue or runtime API is introduced.

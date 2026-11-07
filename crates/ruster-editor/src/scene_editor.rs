@@ -4641,6 +4641,7 @@ impl SceneEditor {
                 if ui.button("Workspace settings…").clicked(){self.workspace.settings_open=true;}});
             }
             if self.asset_loading() {
+                self.runtime.cancel_control_focus();
                 self.captures.rect = None;
                 self.captures.receipt = None;
                 ui.heading("Loading project content…");
@@ -4652,7 +4653,11 @@ impl SceneEditor {
                 return;
             }
             self.manipulation_tools_ui(ui);
-            let blocked=self.guard().is_err() || self.manipulation.offset_pending() || self.asset_busy();
+            let document_blocked=self.guard().is_err() || self.manipulation.offset_pending();
+            if document_blocked || self.input_actions_open {
+                self.runtime.cancel_control_focus();
+            }
+            let blocked=document_blocked || self.asset_busy();
             let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
             if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked,&shortcut) {self.capture_reset_assets(key);}
             self.runtime.observe(self.generation,self.session.scene().revision,self.assets.as_ref().map(|store|store.revision()),self.shader_revision);
@@ -4979,6 +4984,7 @@ impl eframe::App for Host {
                 .any(|event| matches!(event, egui::Event::WindowFocused(false)))
         {
             self.editor.runtime.release_input(ctx);
+            self.editor.runtime.cancel_control_focus();
         }
     }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {

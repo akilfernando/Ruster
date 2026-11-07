@@ -12,6 +12,87 @@ pub(super) struct InputGate {
 mod tests {
     use super::*;
 
+    // The host sees every genuine blur even when egui receives a coalesced
+    // blur/regain batch with focused=true. No late toolbar focus may survive it.
+    #[test]
+    fn coalesced_blur_cancels_pending_toolbar_focus() {
+        let ctx = egui::Context::default();
+        let mut host = Host {
+            editor: SceneEditor::new(Session::new(Scene::authored_empty("focus-blur")).unwrap()),
+            input: Default::default(),
+            bridge: None,
+        };
+        let authored = host.editor.session.snapshot_bytes().unwrap();
+        let draw = |host: &mut Host, events, blocked| {
+            let mut raw = egui::RawInput {
+                focused: true,
+                events,
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(host, &ctx, &mut raw);
+            let mut reset = None;
+            let mut output = ctx.run_ui(raw, |ui| {
+                reset = host.editor.runtime.controls(
+                    ui,
+                    &host.editor.session,
+                    host.editor.generation,
+                    blocked,
+                    "Ctrl+Shift+P",
+                );
+            });
+            output.textures_delta.clear();
+            reset
+        };
+        host.editor.runtime.focus_controls = true;
+        draw(&mut host, vec![], false);
+        let owner = ctx
+            .memory(|memory| memory.focused())
+            .expect("genuine Reset focus");
+        let enter = |pressed| egui::Event::Key {
+            key: egui::Key::Enter,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let key = draw(&mut host, vec![enter(true)], false).expect("one actual Reset");
+        draw(
+            &mut host,
+            vec![
+                egui::Event::WindowFocused(false),
+                egui::Event::WindowFocused(true),
+                enter(false),
+            ],
+            true,
+        );
+        assert!(ctx.input(|input| input.focused), "batch ends focused");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !host
+            .editor
+            .runtime
+            .frame
+            .as_ref()
+            .is_some_and(|frame| frame.key == key)
+        {
+            assert!(Instant::now() < deadline, "real Reset acknowledgement");
+            host.editor.runtime.poll(&ctx);
+            std::thread::yield_now();
+        }
+        draw(&mut host, vec![], false);
+        draw(&mut host, vec![], false);
+        assert_ne!(
+            ctx.memory(|memory| memory.focused()),
+            Some(owner),
+            "returning OS focus cannot revive a cancelled toolbar request"
+        );
+        assert_eq!(host.editor.session.snapshot_bytes().unwrap(), authored);
+        host.editor.runtime.shutdown();
+        while !host.editor.runtime.finished() {
+            assert!(Instant::now() < deadline, "worker shutdown");
+            std::thread::yield_now();
+        }
+    }
+
     fn tick(host: &mut Host, ctx: &egui::Context, events: Vec<egui::Event>) {
         let raw = egui::RawInput {
             events,

@@ -1151,9 +1151,16 @@ impl Request {
         }
     }
 }
+#[derive(Clone, Copy)]
+struct ControlFocus {
+    id: egui::Id,
+    key: RunKey,
+    operation: Operation,
+}
 #[derive(Default)]
 pub(super) struct RuntimeUi {
     pub focus_controls: bool,
+    control_focus: Option<ControlFocus>,
     debug: runtime_debug::DebugUi,
     input_control: runtime_input::InputControl,
     spatial_feedback_index: usize,
@@ -1177,6 +1184,74 @@ pub(super) struct RuntimeUi {
     pub reset_succeeded: Option<RunKey>,
 }
 impl RuntimeUi {
+    pub fn cancel_control_focus(&mut self) {
+        self.control_focus = None;
+    }
+    fn arm_control_focus(&mut self, response: &egui::Response, key: RunKey, operation: Operation) {
+        self.control_focus = response.has_focus().then_some(ControlFocus {
+            id: response.id,
+            key,
+            operation,
+        });
+    }
+    fn maintain_control_focus(&mut self, ctx: &egui::Context) {
+        let Some(request) = self.control_focus else {
+            return;
+        };
+        let new_intent = ctx.input(|input| {
+            !input.focused
+                || input.pointer.any_pressed()
+                || input.events.iter().any(|event| {
+                    matches!(
+                        event,
+                        egui::Event::Key { pressed: true, .. }
+                            | egui::Event::Text(_)
+                            | egui::Event::Paste(_)
+                    )
+                })
+        });
+        if new_intent
+            || ctx.text_edit_focused()
+            || egui::Popup::is_any_open(ctx)
+            || ctx.memory(|memory| {
+                memory.top_modal_layer().is_some()
+                    || memory.focused().is_some_and(|id| id != request.id)
+            })
+            || self.input_owned()
+            || self.shutdown
+            || self.current_run() != Some(request.key)
+            || self.debug_snapshot().is_some()
+        {
+            self.cancel_control_focus();
+        }
+    }
+    fn restore_control_focus(&mut self, response: &egui::Response) {
+        let Some(request) = self.control_focus else {
+            return;
+        };
+        if request.id != response.id
+            || !response.enabled()
+            || self.pending.is_some()
+            || self.awaiting.is_some()
+        {
+            return;
+        }
+        let frame_ready = self.ready
+            && self
+                .frame
+                .as_ref()
+                .is_some_and(|frame| frame.key == request.key);
+        let complete = match request.operation {
+            Operation::Reset | Operation::Pause | Operation::Step => frame_ready && !self.playing,
+            Operation::Play => frame_ready && self.playing,
+            Operation::Stop => !self.ready && !self.playing,
+            Operation::Invalidate => false,
+        };
+        if complete {
+            response.request_focus();
+            self.cancel_control_focus();
+        }
+    }
     pub fn is_playing(&self) -> bool {
         self.playing
     }
@@ -1530,6 +1605,7 @@ impl RuntimeUi {
     ) -> Option<RunKey> {
         let mut reset = None;
         let focus_controls = std::mem::take(&mut self.focus_controls);
+        self.maintain_control_focus(ui.ctx());
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x=4.0;
             ui.spacing_mut().button_padding.x=6.0;
@@ -1538,13 +1614,17 @@ impl RuntimeUi {
                     !blocked && !self.shutdown,
                     egui::Button::new("Reset"),
                 ).on_hover_text(format!("Reset behavior runtime from the current scene. Runtime changes never edit the scene.\nFocus runtime controls ({focus_shortcut})."));
+            self.restore_control_focus(&reset_button);
             if focus_controls && reset_button.enabled() {
                 reset_button.request_focus();
                 reset_button.scroll_to_me(Some(egui::Align::Center));
             }
             if reset_button.clicked() {
                 match self.reset(ui.ctx(), session, generation) {
-                    Ok(key) => reset = Some(key),
+                    Ok(key) => {
+                        reset = Some(key);
+                        self.arm_control_focus(&reset_button, key, Operation::Reset);
+                    }
                     Err(error) => self.status = error,
                 }
             }
@@ -1555,34 +1635,48 @@ impl RuntimeUi {
                 && self.awaiting.is_none()
                 && !stopped
                 && !self.shutdown;
-            if ui
+            let play_button = ui
                 .add_enabled(
                     ready,
                     egui::Button::new(if self.playing { "Pause" } else { "Play" }),
-                )
-                .clicked()
-            {
+                );
+            self.restore_control_focus(&play_button);
+            if play_button.clicked() {
                 let key = self.worker.as_ref().unwrap().current_key();
+                let operation = if self.playing { Operation::Pause } else { Operation::Play };
                 self.pending = Some(if self.playing {
                     Request::Pause(key)
                 } else {
                     Request::Play(key)
                 });
+                self.arm_control_focus(&play_button, key, operation);
             }
-            if ui
+            let step_button = ui
                 .add_enabled(ready && !self.playing, egui::Button::new("Step"))
-                .clicked()
-            {
-                self.pending = Some(Request::Step(self.worker.as_ref().unwrap().current_key()));
+                ;
+            self.restore_control_focus(&step_button);
+            if step_button.clicked() {
+                let key = self.worker.as_ref().unwrap().current_key();
+                self.pending = Some(Request::Step(key));
+                self.arm_control_focus(&step_button, key, Operation::Step);
             }
-            if ui
+            let stop_button = ui
                 .add_enabled(
                     self.worker.is_some() && !self.shutdown,
                     egui::Button::new("Stop"),
-                )
-                .clicked()
-            {
+                );
+            self.restore_control_focus(&stop_button);
+            if stop_button.clicked() {
                 self.stop(generation, session.scene().revision);
+                let key = self.awaiting.filter(|(_, operation)| *operation == Operation::Stop)
+                    .map(|(key, _)| key)
+                    .or(match &self.pending {
+                        Some(Request::Stop(key)) => Some(*key),
+                        _ => None,
+                    });
+                if let Some(key) = key {
+                    self.arm_control_focus(&stop_button, key, Operation::Stop);
+                }
             }
             let runtime_menu = ui.menu_button("Runtime",|ui| {
                 if ui.button("Behavior debugger…").clicked(){self.debug.open=true;ui.close();}

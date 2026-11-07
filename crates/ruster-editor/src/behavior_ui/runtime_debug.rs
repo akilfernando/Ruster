@@ -108,6 +108,7 @@ impl RuntimeUi {
         };
     }
     pub(super) fn fail_operation(&mut self) {
+        self.cancel_control_focus();
         self.awaiting = None;
         if let Some(mut receipt) = self.debug.active.take() {
             receipt.state = "failed";
@@ -130,6 +131,7 @@ impl RuntimeUi {
         worker.debug_stop(worker.current_key()).ok().flatten()
     }
     pub(super) fn supersede_operation(&mut self) {
+        self.cancel_control_focus();
         self.awaiting = None;
         if let Some(mut receipt) = self.debug.active.take() {
             receipt.state = "superseded";
@@ -143,6 +145,9 @@ impl RuntimeUi {
         self.debug.recent.push_back(receipt);
     }
     pub(super) fn accept_operation(&mut self, event: &VmEvent) {
+        if matches!(event, VmEvent::Error { .. } | VmEvent::Rejected { .. }) {
+            self.cancel_control_focus();
+        }
         let operation = match event {
             VmEvent::Reset { .. } => Operation::Reset,
             VmEvent::Step { .. } => Operation::Step,
@@ -625,6 +630,7 @@ impl RuntimeUi {
                     },
                 )
                 .map_err(|error| error.to_string())?;
+            self.cancel_control_focus();
             return Ok(json!({"accepted":true,"resumed_stop_id":stop.stop.get().to_string()}));
         }
         if self.debug.active.is_some()
@@ -681,6 +687,7 @@ impl RuntimeUi {
         };
         let value = receipt.value();
         self.debug.active = Some(receipt);
+        self.cancel_control_focus();
         Ok(value)
     }
 }

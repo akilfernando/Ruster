@@ -707,6 +707,8 @@ mod tests {
         let width = std::cell::Cell::new(1000.0);
         let height = std::cell::Cell::new(800.0);
         let rendered = std::cell::RefCell::new(Vec::new());
+        let controls_blocked = std::cell::Cell::new(false);
+        let reset_admissions = std::cell::RefCell::new(Vec::new());
         let mut draw = |runtime: &mut RuntimeUi, events, discard: bool| {
             time += 0.1;
             let mut output = ctx.run_ui(
@@ -728,7 +730,11 @@ mod tests {
                             ui.button("Inspector control").clicked();
                         });
                     runtime.input_begin(&ctx, false);
-                    runtime.controls(ui, &session, 1, false, "Ctrl+Shift+P");
+                    if let Some(key) =
+                        runtime.controls(ui, &session, 1, controls_blocked.get(), "Ctrl+Shift+P")
+                    {
+                        reset_admissions.borrow_mut().push(key);
+                    }
                     ui.text_edit_singleline(&mut text);
                     let (_, surface) = ui
                         .allocate_exact_size(egui::vec2(900., 500.), egui::Sense::click_and_drag());
@@ -1015,6 +1021,179 @@ mod tests {
                 );
             }
         }
+        // Exercise the actual toolbar/worker boundary. The blocked argument
+        // models component-level asset retirement without a GPU fixture. Real
+        // acknowledgements are polled separately, while disabled frames are
+        // rendered first so fast worker completion cannot hide focus loss.
+        let authored = session.snapshot_bytes().unwrap();
+        let key_event = |key, pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let focused_control = |label: &str| {
+            assert!(visible_label(&rendered.borrow(), label));
+            let point = label_point(&rendered.borrow(), label);
+            let response = ctx
+                .memory(|memory| memory.focused())
+                .and_then(|id| ctx.read_response(id))
+                .unwrap_or_else(|| panic!("{label} must retain actual widget focus"));
+            assert!(
+                response.enabled() && response.has_focus() && response.rect.contains(point),
+                "{label} must own its enabled, visible Response after acknowledgement"
+            );
+            assert!(response.interact_rect.contains_rect(response.rect));
+            response.id
+        };
+        runtime.focus_controls = true;
+        draw(&mut runtime, vec![], false);
+        let reset_id = focused_control("Reset");
+        draw(&mut runtime, vec![key_event(egui::Key::Enter, true)], true);
+        assert_eq!(reset_admissions.borrow().len(), 1);
+        let reset_key = runtime.worker.as_ref().unwrap().current_key();
+        controls_blocked.set(true);
+        draw(
+            &mut runtime,
+            vec![key_event(egui::Key::Enter, false)],
+            false,
+        );
+        for _ in 0..2 {
+            draw(&mut runtime, vec![], false);
+        }
+        wait(&mut runtime, false);
+        assert_eq!(runtime.frame.as_ref().unwrap().tick, 0);
+        controls_blocked.set(false);
+        for _ in 0..2 {
+            draw(&mut runtime, vec![], false);
+        }
+        assert_eq!(
+            focused_control("Reset"),
+            reset_id,
+            "Reset completion must restore its genuine activation owner after blocking"
+        );
+        assert_eq!(
+            reset_admissions.borrow().len(),
+            1,
+            "Enter release/idle cannot admit another Reset"
+        );
+        assert_eq!(runtime.worker.as_ref().unwrap().current_key(), reset_key);
+
+        draw(&mut runtime, vec![key_event(egui::Key::Tab, true)], false);
+        draw(&mut runtime, vec![key_event(egui::Key::Tab, false)], false);
+        let play_id = focused_control("Play");
+        for playing in [true, false] {
+            draw(&mut runtime, vec![key_event(egui::Key::Enter, true)], false);
+            assert!(runtime.awaiting.is_some() || runtime.pending.is_some());
+            controls_blocked.set(true);
+            draw(
+                &mut runtime,
+                vec![key_event(egui::Key::Enter, false)],
+                false,
+            );
+            for _ in 0..2 {
+                draw(&mut runtime, vec![], false);
+            }
+            wait(&mut runtime, playing);
+            controls_blocked.set(false);
+            for _ in 0..2 {
+                draw(&mut runtime, vec![], false);
+            }
+            assert_eq!(
+                focused_control(if playing { "Pause" } else { "Play" }),
+                play_id,
+                "Play/Pause acknowledgement must preserve the activated button identity"
+            );
+            assert_eq!(runtime.worker.as_ref().unwrap().current_key(), reset_key);
+            assert_eq!(
+                runtime.playing, playing,
+                "Enter release cannot toggle again"
+            );
+            assert_eq!(reset_admissions.borrow().len(), 1);
+        }
+        draw(&mut runtime, vec![key_event(egui::Key::Tab, true)], false);
+        draw(&mut runtime, vec![key_event(egui::Key::Tab, false)], false);
+        let step_id = focused_control("Step");
+        let tick = runtime.frame.as_ref().unwrap().tick;
+        draw(&mut runtime, vec![key_event(egui::Key::Enter, true)], false);
+        controls_blocked.set(true);
+        draw(
+            &mut runtime,
+            vec![key_event(egui::Key::Enter, false)],
+            false,
+        );
+        draw(&mut runtime, vec![], false);
+        wait(&mut runtime, false);
+        controls_blocked.set(false);
+        for _ in 0..2 {
+            draw(&mut runtime, vec![], false);
+        }
+        assert_eq!(focused_control("Step"), step_id);
+        assert_eq!(
+            runtime.frame.as_ref().unwrap().tick,
+            tick + 1,
+            "one genuine Enter admits exactly one paused Step"
+        );
+        assert_eq!(runtime.worker.as_ref().unwrap().current_key(), reset_key);
+        draw(&mut runtime, vec![key_event(egui::Key::Tab, true)], false);
+        draw(&mut runtime, vec![key_event(egui::Key::Tab, false)], false);
+        let stop_id = focused_control("Stop");
+        draw(&mut runtime, vec![key_event(egui::Key::Enter, true)], false);
+        controls_blocked.set(true);
+        draw(
+            &mut runtime,
+            vec![key_event(egui::Key::Enter, false)],
+            false,
+        );
+        let until = Instant::now() + Duration::from_secs(5);
+        while runtime.ready || runtime.pending.is_some() || runtime.awaiting.is_some() {
+            assert!(
+                Instant::now() < until,
+                "Stop acknowledgement deadline: {}",
+                runtime.status
+            );
+            runtime.poll(&ctx);
+            std::thread::yield_now();
+        }
+        let stop_key = runtime.worker.as_ref().unwrap().current_key();
+        controls_blocked.set(false);
+        for _ in 0..2 {
+            draw(&mut runtime, vec![], false);
+        }
+        assert_eq!(focused_control("Stop"), stop_id);
+        assert_eq!(runtime.worker.as_ref().unwrap().current_key(), stop_key);
+        assert_eq!(runtime.frame.as_ref().unwrap().tick, tick + 1);
+        assert!(!runtime.playing);
+        assert_eq!(session.snapshot_bytes().unwrap(), authored);
+
+        // Genuine Tab traversal to the Inspector cancels the outstanding
+        // continuity request. Completion must not reclaim the old focus.
+        runtime.focus_controls = true;
+        draw(&mut runtime, vec![], false);
+        focused_control("Reset");
+        draw(&mut runtime, vec![key_event(egui::Key::Enter, true)], false);
+        controls_blocked.set(true);
+        draw(
+            &mut runtime,
+            vec![key_event(egui::Key::Enter, false)],
+            false,
+        );
+        draw(&mut runtime, vec![key_event(egui::Key::Tab, true)], false);
+        draw(&mut runtime, vec![key_event(egui::Key::Tab, false)], false);
+        let inspector_id = focused_control("Inspector control");
+        wait(&mut runtime, false);
+        controls_blocked.set(false);
+        for _ in 0..2 {
+            draw(&mut runtime, vec![], false);
+        }
+        assert_eq!(
+            focused_control("Inspector control"),
+            inspector_id,
+            "a completed operation cannot restore stale focus over a genuine new owner"
+        );
+        assert_eq!(reset_admissions.borrow().len(), 2);
+        assert_eq!(session.snapshot_bytes().unwrap(), authored);
         runtime.shutdown();
         let until = Instant::now() + Duration::from_secs(5);
         while !runtime.finished() {
