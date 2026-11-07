@@ -98,6 +98,11 @@ The current integrity audit verifies118inventoried files,103immutable source-equ
 **Stopping point:** no bounded V3b obligation remains after final source/inventory verification. No further capability work, unchanged test replay or automatic next goal is selected.
 
 
+## Proposed next goal — C1a Assembly Study
+
+2026-11-07: at the user’s planning request, Astra/root recommend [nested assembly Groups](plans/C1A-ASSEMBLY-STUDY.md). Build a task-light/workbench through ordinary controls and MCP, group its base/arms/head/point light, move/duplicate the assembly, animate a local hinge, recover/save/reopen and export two faithful apps. Proposed Groups are the only parents and use positive uniform scale; mesh leaves retain existing nonuniform scale. This finite boundary is not unrestricted object hierarchy or prefabs. An early shared-transform/render/runtime gate must prove usefulness and preserve-world semantics before broad controls/schema. Baselines, keyboard/history/raw recovery, atomic runtime staging, bounded resource/cost references and exact handoff are part of the written proposal. **Approval and goal activation are pending; no implementation started.** [Rationale](ROADMAP-REVIEW.md#post-v3b-next-goal-recommendation--2026-11-07).
+
+
 ## Retained industry workflow — PumpBench
 
 2026-11-05: The user cleared the **PumpBench** goal after its engineering handoff; its separately retained focused keyboard acceptance now passes within the limits below. Guarded camera/selection, actual MCP viewport images, shared undoable color with keyboard/recovery, saved headings and explicit export framing are implemented. Full source gate198Rust/24Python/strict checks passes; subsequent editor keyboard fixes have red→green widget evidence and84affected checks. Actual MCP blank construction, visual revision, save/reopen/framed export, native editor color/source-occlusion/stale-image checks and real checkpoint restore/repair/fresh save pass. Original Blender assets and the project-owned Rust/Lua viewer deliver a9.21MB standalone; headless three-pose/invalid-input, native pointer/selection/navigation and relocated read-only execution pass with unchanged resources. No Blender MCP was connected or used. [Exact paths, evidence, measurements and limitations](creations/PUMPBENCH.md).

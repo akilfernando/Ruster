@@ -1,6 +1,6 @@
 # Engine capability gaps
 
-Updated2026-11-06. Root/Astra strategic assessment after the user reviewed PumpBench. This is a product gap inventory and proposed dependency order, not an approved implementation schedule, feature-parity promise or evidence of support. [STATUS](STATUS.md) owns verified deliveries; [ROADMAP](ROADMAP.md) owns milestones.
+Updated2026-11-07. Root/Astra strategic assessment after the user reviewed PumpBench. This is a product gap inventory and proposed dependency order, not an approved implementation schedule, feature-parity promise or evidence of support. [STATUS](STATUS.md) owns verified deliveries; [ROADMAP](ROADMAP.md) owns milestones.
 
 ## Confirmed direction versus proposed scope
 
@@ -12,7 +12,7 @@ Inspected owning sources: `crates/ruster-scene/src/lib.rs` and `authoring.rs`, `
 
 | Area | Current boundary | Missing product workflow to plan |
 | --- | --- | --- |
-| Visual authoring | V1 shared opaque materials, complete OBJ UVs, bounded opaque PNGs/samplers/linear-light mips, safe refresh and direct/MCP/recovery/standalone workflows; V2a accepted one Sun/four points/ambient with diffuse authoring; V2b accepted optional bounded builtin Sun shadows; V3a adds authored normals/scalar nonmetallic roughness/linear HDR/manual exposure/fixed SDR output through qualified editor/MCP/recovery/apps; last-good WGSL replacement remains separately bounded | Metallic/environment lighting, material maps/tangents, transparency, broader color management and shadows through equally complete workflows |
+| Visual authoring | V1 shared opaque materials, complete OBJ UVs, bounded opaque PNGs/samplers/linear-light mips, safe refresh and direct/MCP/recovery/standalone workflows; V2a accepted one Sun/four points/ambient with diffuse authoring; V2b accepted optional bounded builtin Sun shadows; V3a adds authored normals/scalar nonmetallic roughness/linear HDR/manual exposure/fixed SDR output through qualified editor/MCP/recovery/apps; V3b adds explicit linear roughness images, bounded shared replacement and exact creator/runtime delivery; last-good WGSL replacement remains separately bounded | Metallic/environment lighting, normal maps/tangents, transparency, broader color management and shadows through equally complete workflows |
 | Scene composition | Flat stable-ID objects with transforms/meshes, shared history and save/recovery | Parent-child transforms, reusable prefabs/instances with clear overrides, scene composition/loading and runtime lifecycle |
 | Content pipeline | Bounded UV OBJ/opaque PNG import, stable IDs, source-preserving caches and accepted material/texture export closure | Rich scene/material/animation import, dependency tracking, reimport, compression and runtime asset loading/unloading; select formats from actual creator needs |
 | Interaction and player UI | Code-first egui application UI, keyboard state and picking | Authorable application/game UI, input actions/remapping, pointer/gamepad support and focus/accessibility suitable for exported creations |
@@ -42,3 +42,8 @@ The working sequence is root/Astra-selected under the user’s realignment autho
 ## Post-V2b planning baseline — 2026-11-06
 
 Actual code d163569 retains relative diffuse output clamped into an Rgba8UnormSrgb scene target (`crates/ruster-render/src/scene.wgsl`, `lib.rs`); there is no specular/material roughness/metalness or environment/exposure contract. The camera uniform contains only view-projection. `crates/ruster-assets/src/lib.rs::parse_obj` validates supplied normal indexes but emits geometric flat normals; it does not preserve authored normals or supply tangents. These are relevant dependencies to investigate for the next material slice, not delivered support or automatic approval of an HDR/PBR/import rewrite. V2b's accepted shared shadow map and bounds can be reused under unchanged inputs, with material/camera/color/lifetime changes requalified where they actually affect behavior.
+
+
+## Post-V3b next-goal planning — 2026-11-07
+
+Accepted V3b adds scalar×linear roughness-data images under the0035/0036 boundaries; it does not add normals/tangents, metallic/environment reflections or richer scene composition. Actual source still has flat mesh objects with positive Euler TRS, separately stored light transforms and object-only Lua transform resolution. Root/Astra recommend [C1a Assembly Study](plans/C1A-ASSEMBLY-STUDY.md): nested transform-only Group parents, unchanged nonuniform mesh leaves, attached point lights and local hinge behavior through both editor and MCP. This is planning only, not delivered hierarchy or an activated goal. The bounded Group/uniform-scale rule is an explicit proposed product constraint; general affine object parenting/prefabs remain separate, and the early gate must replan if it cannot serve the creator naturally.
