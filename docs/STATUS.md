@@ -98,9 +98,9 @@ The current integrity audit verifies118inventoried files,103immutable source-equ
 **Stopping point:** no bounded V3b obligation remains after final source/inventory verification. No further capability work, unchanged test replay or automatic next goal is selected.
 
 
-## Proposed next goal — C1a Assembly Study
+## Next-goal priority under review
 
-2026-11-07: at the user’s planning request, Astra/root recommend [nested assembly Groups](plans/C1A-ASSEMBLY-STUDY.md). Build a task-light/workbench through ordinary controls and MCP, group its base/arms/head/point light, move/duplicate the assembly, animate a local hinge, recover/save/reopen and export two faithful apps. Proposed Groups are the only parents and use positive uniform scale; mesh leaves retain existing nonuniform scale. This finite boundary is not unrestricted object hierarchy or prefabs. An early shared-transform/render/runtime gate must prove usefulness and preserve-world semantics before broad controls/schema. Baselines, keyboard/history/raw recovery, atomic runtime staging, bounded resource/cost references and exact handoff are part of the written proposal. **Approval and goal activation are pending; no implementation started.** [Rationale](ROADMAP-REVIEW.md#post-v3b-next-goal-recommendation--2026-11-07).
+2026-11-07: the user challenges whether [C1a Assembly Study](plans/C1A-ASSEMBLY-STUDY.md) is the most valuable next feature. Root/Astra reassess: grouping was a conservative foundation choice, not proven optimal priority. Actual Rust host input/UI exists, but creator-authored named input actions/Lua interaction remain missing. For broad interactive creation, the revised default is to define one operable creation and scope a direct-editor/MCP/script/runtime input workflow with minimum necessary feedback; no automatic UI-designer/physics/framework expansion. C1a remains an alternative for multipart assembly; environment/metals or richer import may take priority for visual presentation/content bottlenecks. [Priority analysis](ROADMAP-REVIEW.md#c1a-priority-challenged-and-reassessed--2026-11-07). **No next goal is selected or active; no implementation started.**
 
 
 ## Retained industry workflow — PumpBench

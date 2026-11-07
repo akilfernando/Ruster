@@ -2,6 +2,10 @@
 
 Proposed2026-11-07 after accepted [V3b](../evidence/V3B-readiness.md), source `2c914a5` (product code `c297b9d`). **Planning only: user approval, goal activation and implementation are pending.** The user requested planning the next goal, not automatic execution. Root/Astra recommend a concrete assembly workflow; all representation choices below remain agent proposals until the early gate.
 
+## Priority review supersedes the initial recommendation
+
+2026-11-07: after the user challenges priority, root/Astra retain this document as a **candidate**, not the selected highest-priority next goal. The [reassessment](../ROADMAP-REVIEW.md#c1a-priority-challenged-and-reassessed--2026-11-07) favors investigating a creator-authored interactive application/input-action workflow for the broad product ambition. Grouping remains valuable when assembly manipulation is the next creation’s bottleneck. The scope below is unchanged as an alternative; no approval, goal activation or implementation is inferred.
+
 ## Proposed creator outcome
 
 Build an articulated task-light/workbench exhibit through ordinary keyboard-oriented editor controls and, independently, native MCP. Organize its base, lower arm, upper arm, lamp head and attached point light into nested transform-only Groups. Move/rotate the complete assembly, adjust a hinge without disassembling it, duplicate the complete lamp, animate one hinge using the existing Lua path, undo/repair/recover the work, and save/reopen/export two faithful standalone applications.
