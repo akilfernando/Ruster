@@ -475,6 +475,19 @@ impl<A: Application> Host<A> {
 }
 
 impl<A: Application> eframe::App for Host<A> {
+    fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if self.runtime.app().keyboard_actions().is_some()
+            && (!raw.focused
+                || raw
+                    .events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::WindowFocused(false))))
+        {
+            // A coalesced blur/regain batch can end focused while the
+            // application's separate held-key latch still needs cancellation.
+            self.release_action_control(ctx);
+        }
+    }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if let Some(render) = &self.render {
             let result = ruster_render::maintain_assets(render, ctx).map(|_| ());
@@ -551,6 +564,8 @@ mod tests {
         actions: Option<ruster_scene::input::ActionMap>,
         action_events: Vec<Vec<(ruster_scene::input::InputKey, bool)>>,
         action_owned: bool,
+        action_keys: Option<ruster_scene::input::KeyEventAccumulator>,
+        action_cancels: usize,
         text: String,
     }
 
@@ -578,10 +593,25 @@ mod tests {
         ) -> Result<(), String> {
             self.action_owned = owned;
             self.action_events.push(events.to_vec());
+            if let (None, Some(actions)) = (&self.action_keys, &self.actions) {
+                self.action_keys = Some(
+                    ruster_scene::input::KeyEventAccumulator::new(actions.clone())
+                        .map_err(|error| error.to_string())?,
+                );
+            }
+            if let Some(keys) = &mut self.action_keys {
+                for (key, pressed) in events {
+                    keys.key_event(*key, *pressed);
+                }
+            }
             Ok(())
         }
         fn cancel_action_input(&mut self) {
             self.action_owned = false;
+            self.action_cancels += 1;
+            if let Some(keys) = &mut self.action_keys {
+                keys.cancel();
+            }
         }
         fn ui(&mut self, ui: &mut egui::Ui) -> Result<(), String> {
             if self.actions.is_some() {
@@ -660,6 +690,8 @@ mod tests {
             ])),
             action_events: Vec::new(),
             action_owned: false,
+            action_keys: None,
+            action_cancels: 0,
             text: String::new(),
         };
         let options = HostOptions::default();
@@ -688,24 +720,39 @@ mod tests {
                         focused: bool,
                         discard: bool| {
             time += 0.1;
-            let mut output = ctx.run_ui(
-                egui::RawInput {
-                    focused,
-                    events,
-                    time: Some(time),
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1200., 800.),
-                    )),
-                    ..Default::default()
-                },
-                |ui| {
-                    host.scene_ui(ui);
-                    if discard && ctx.current_pass_index() == 0 {
-                        ctx.request_discard("input pass replay guard");
-                    }
-                },
+            let crossed_focus = focused
+                && events
+                    .iter()
+                    .any(|event| matches!(event, egui::Event::WindowFocused(false)));
+            let events_before = events.clone();
+            let cancels_before = host.runtime.app().action_cancels;
+            let mut raw = egui::RawInput {
+                focused,
+                events,
+                time: Some(time),
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200., 800.),
+                )),
+                ..Default::default()
+            };
+            eframe::App::raw_input_hook(host, &ctx, &mut raw);
+            assert_eq!(
+                raw.events, events_before,
+                "raw focus observation preserves every event"
             );
+            assert_eq!(raw.focused, focused);
+            if crossed_focus {
+                assert!(host.runtime.app().action_cancels > cancels_before,
+                    "raw hook must cancel the application's separate latch before egui/UI processing");
+                assert!(!host.action_control_owned && !host.runtime.app().action_owned);
+            }
+            let mut output = ctx.run_ui(raw, |ui| {
+                host.scene_ui(ui);
+                if discard && ctx.current_pass_index() == 0 {
+                    ctx.request_discard("input pass replay guard");
+                }
+            });
             output.textures_delta.clear();
             output.shapes.iter().find_map(|shape| match &shape.shape {
                 egui::epaint::Shape::Text(text) if text.galley.job.text == "Control runtime" => {
@@ -873,6 +920,58 @@ mod tests {
         let control = draw(&mut host, vec![], true, false).unwrap();
         draw(&mut host, click(control), true, true);
         assert!(host.action_control_owned);
+        draw(
+            &mut host,
+            vec![key(egui::Key::Space, egui::Modifiers::NONE)],
+            true,
+            false,
+        );
+        let held = host
+            .runtime
+            .app_mut()
+            .action_keys
+            .as_mut()
+            .unwrap()
+            .take_snapshot();
+        assert_eq!(
+            held.get("fire"),
+            Some(&ruster_scene::input::ActionValue::Button(
+                ruster_scene::input::ButtonState {
+                    held: true,
+                    pressed: true,
+                    released: false
+                }
+            ))
+        );
+        draw(
+            &mut host,
+            vec![
+                egui::Event::WindowFocused(false),
+                egui::Event::WindowFocused(true),
+            ],
+            true,
+            false,
+        );
+        let neutral = host
+            .runtime
+            .app_mut()
+            .action_keys
+            .as_mut()
+            .unwrap()
+            .take_snapshot();
+        assert_eq!(
+            neutral.get("fire"),
+            Some(&ruster_scene::input::ActionValue::Button(Default::default()))
+        );
+        assert!(!host.action_control_owned && !host.runtime.app().action_owned);
+        draw(&mut host, vec![], true, false);
+        assert!(
+            !host.action_control_owned,
+            "focus regain needs a fresh explicit control claim"
+        );
+        let control = draw(&mut host, vec![], true, false).unwrap();
+        draw(&mut host, click(control), true, true);
+        assert!(host.action_control_owned);
         draw(&mut host, vec![], false, false);
         assert!(!host.action_control_owned);
         assert!(
@@ -942,6 +1041,8 @@ mod tests {
             actions: None,
             action_events: Vec::new(),
             action_owned: false,
+            action_keys: None,
+            action_cancels: 0,
             text: String::new(),
         };
         let options = HostOptions::default();
