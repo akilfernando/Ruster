@@ -75,3 +75,6 @@ This is a launch description rather than an editable project manager. The creati
 
 
 Descriptor5 (working I1a contract) uses only integer `tick_nanos` in1000000–1000000000. Descriptors1–4 retain only integer `tick_millis` in1–1000. Missing/both/wrong-version/null/fractional/negative duration fields reject; there is no fallback unit. Scene11 requires descriptor5 and the exact `input_actions` profile. Current editor exports carry16666667ns (approximately60Hz), matching preview scheduling and Lua dt; old content/descriptor routes retain their original millisecond semantics. The manifest stays independent of the behavior crate. Validate caller-constructed manifests before using their duration.
+
+
+Authored-input applications expose **Control runtime** while Running. It gives the real scene surface keyboard ownership; arrow bindings operate the creation rather than navigating host widgets. Escape releases control. Tab/Shift+Tab release gameplay and retain ordinary host-widget traversal. Pause/Reset, window blur, popups and outside controls cancel held keys; control must be claimed again. Mapped Space belongs to gameplay only while that surface owns control; after release, the existing Space lifecycle shortcut remains available. These input paths are under the active I1a qualification, not complete physical-human acceptance.

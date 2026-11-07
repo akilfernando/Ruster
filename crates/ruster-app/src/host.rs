@@ -184,22 +184,19 @@ impl<A: Application> Host<A> {
             self.report(result);
         }
     }
-    fn release_action_control(&mut self, ctx: &egui::Context) {
+    fn revoke_action_control(&mut self) {
         self.action_control_owned = false;
+        self.action_claim_frame = None;
         self.runtime.app_mut().cancel_action_input();
+    }
+    fn release_action_control(&mut self, ctx: &egui::Context) {
+        self.revoke_action_control();
         if let Some(surface) = self.action_surface {
             ctx.memory_mut(|memory| memory.surrender_focus(surface));
         }
     }
     fn route_action_keyboard(&mut self, ctx: &egui::Context) {
         let frame = ctx.cumulative_frame_nr();
-        // A genuine UI activation requests the surface focus, but must not
-        // also admit the Enter/key that activated its button in this frame.
-        if self.action_claim_frame == Some(ctx.cumulative_frame_nr()) {
-            self.last_action_frame = Some(frame);
-            self.runtime.app_mut().cancel_action_input();
-            return;
-        }
         let focused = ctx.input(|i| i.focused);
         if self.error.is_some() || !focused {
             self.release_action_control(ctx);
@@ -213,6 +210,13 @@ impl<A: Application> Host<A> {
             {
                 self.runtime.set_running(true);
             }
+            self.last_action_frame = Some(frame);
+            return;
+        }
+        if self.action_control_owned && ctx.input(|input| input.key_pressed(egui::Key::Tab)) {
+            // Leave egui's actual focus and traversal intent intact. Surrendering
+            // here would restart traversal instead of leaving the viewport.
+            self.revoke_action_control();
             self.last_action_frame = Some(frame);
             return;
         }
@@ -231,6 +235,27 @@ impl<A: Application> Host<A> {
             self.last_action_frame = Some(frame);
             return;
         }
+        let forbidden_modifier = ctx.input(|i| {
+            let chord = |m: egui::Modifiers| m.ctrl || m.alt || m.mac_cmd;
+            chord(i.modifiers)
+                || i.events.iter().any(|event| match event {
+                    egui::Event::Key { modifiers, .. }
+                    | egui::Event::ModifiersChanged(modifiers) => chord(*modifiers),
+                    _ => false,
+                })
+        });
+        if forbidden_modifier || egui::Popup::is_any_open(ctx) {
+            self.release_action_control(ctx);
+            self.last_action_frame = Some(frame);
+            return;
+        }
+        // Activation admits no gameplay events, including on a discarded pass.
+        // Tab/Escape, blur, popups and modifiers take priority over its focus claim.
+        if self.action_claim_frame == Some(frame) {
+            self.last_action_frame = Some(frame);
+            self.runtime.app_mut().cancel_action_input();
+            return;
+        }
         // The current viewport Response is built after routing. Egui will
         // surrender its focus on outside clicks then, so reject that interaction
         // now, before a held key could advance a same-frame tick.
@@ -242,7 +267,7 @@ impl<A: Application> Host<A> {
                     self.action_surface_rect
                         .is_none_or(|rect| !rect.contains(position))
                 });
-        if outside_pointer || egui::Popup::is_any_open(ctx) {
+        if outside_pointer {
             self.release_action_control(ctx);
             self.last_action_frame = Some(frame);
             return;
@@ -251,16 +276,7 @@ impl<A: Application> Host<A> {
             self.action_surface
                 .is_some_and(|surface| memory.focused() == Some(surface))
         });
-        let forbidden_modifier = ctx.input(|i| {
-            let chord = |m: egui::Modifiers| m.ctrl || m.alt || m.mac_cmd;
-            chord(i.modifiers)
-                || i.events.iter().any(|e| match e {
-                    egui::Event::Key { modifiers, .. } => chord(*modifiers),
-                    egui::Event::ModifiersChanged(modifiers) => chord(*modifiers),
-                    _ => false,
-                })
-        });
-        if !owns_focus || forbidden_modifier {
+        if !owns_focus {
             self.release_action_control(ctx);
             self.last_action_frame = Some(frame);
             return;
@@ -355,9 +371,6 @@ impl<A: Application> Host<A> {
                         } else {
                             self.action_control_owned = true;
                             self.action_claim_frame = Some(ctx.cumulative_frame_nr());
-                            if let Some(surface) = self.action_surface {
-                                ctx.memory_mut(|memory| memory.request_focus(surface));
-                            }
                         }
                     }
                 }
@@ -426,6 +439,27 @@ impl<A: Application> Host<A> {
                         && self.action_control_owned
                     {
                         viewport.response.request_focus();
+                    }
+                    if self.action_control_owned && viewport.response.has_focus() {
+                        let arrow_navigation = ctx.input(|input| {
+                            !input.key_pressed(egui::Key::Tab)
+                                && !input.key_pressed(egui::Key::Escape)
+                                && input.events.iter().any(|event| matches!(event,
+                                    egui::Event::Key { key, pressed: true, modifiers, .. }
+                                    if *modifiers == egui::Modifiers::NONE
+                                        && matches!(*key, egui::Key::ArrowLeft | egui::Key::ArrowRight
+                                            | egui::Key::ArrowUp | egui::Key::ArrowDown)))
+                        });
+                        ctx.memory_mut(|memory| {
+                            memory.set_focus_lock_filter(viewport.response.id, egui::EventFilter {
+                                horizontal_arrows: true,
+                                vertical_arrows: true,
+                                ..Default::default()
+                            });
+                            // On the first owned frame the previous filter was
+                            // empty when begin_pass queued directional navigation.
+                            if arrow_navigation { memory.move_focus(egui::FocusDirection::None); }
+                        });
                     }
                 }
                 if let Some(id) = viewport.picked {
@@ -593,15 +627,37 @@ mod tests {
         let app = KeyboardApp {
             content: Content::new(ruster_scene::Scene::demo(), MeshMap::new()).unwrap(),
             inputs: Vec::new(),
-            actions: Some(std::collections::BTreeMap::from([(
-                "fire".into(),
-                ActionDefinition {
-                    label: None,
-                    kind: ActionKind::Button {
-                        keys: vec![InputKey::Space],
+            actions: Some(std::collections::BTreeMap::from([
+                (
+                    "fire".into(),
+                    ActionDefinition {
+                        label: None,
+                        kind: ActionKind::Button {
+                            keys: vec![InputKey::Space],
+                        },
                     },
-                },
-            )])),
+                ),
+                (
+                    "traverse".into(),
+                    ActionDefinition {
+                        label: None,
+                        kind: ActionKind::Axis1d {
+                            negative: vec![InputKey::ArrowLeft],
+                            positive: vec![InputKey::ArrowRight],
+                        },
+                    },
+                ),
+                (
+                    "lift".into(),
+                    ActionDefinition {
+                        label: None,
+                        kind: ActionKind::Axis1d {
+                            negative: vec![InputKey::ArrowDown],
+                            positive: vec![InputKey::ArrowUp],
+                        },
+                    },
+                ),
+            ])),
             action_events: Vec::new(),
             action_owned: false,
             text: String::new(),
@@ -680,7 +736,7 @@ mod tests {
                 },
             ]
         };
-        draw(&mut host, click(position), true, true);
+        draw(&mut host, click(position), true, false);
         assert!(
             host.action_control_owned,
             "actual button must claim control"
@@ -689,6 +745,41 @@ mod tests {
             !host.runtime.app().action_owned,
             "activation frame admits no gameplay input"
         );
+        // No idle frame intervenes. The first arrow arrives before the newly
+        // focused widget could install egui's previous-frame focus filter.
+        for (arrow, logical) in [
+            (egui::Key::ArrowRight, InputKey::ArrowRight),
+            (egui::Key::ArrowLeft, InputKey::ArrowLeft),
+            (egui::Key::ArrowUp, InputKey::ArrowUp),
+            (egui::Key::ArrowDown, InputKey::ArrowDown),
+        ] {
+            draw(
+                &mut host,
+                vec![key(arrow, egui::Modifiers::NONE)],
+                true,
+                false,
+            );
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                host.action_surface,
+                "owned arrow must retain the real viewport focus after the whole pass"
+            );
+            assert!(host.action_control_owned && host.runtime.app().action_owned);
+            assert_eq!(
+                host.runtime.app().action_events.last().unwrap(),
+                &vec![(logical, true)]
+            );
+            let mut release = key(arrow, egui::Modifiers::NONE);
+            if let egui::Event::Key { pressed, .. } = &mut release {
+                *pressed = false;
+            }
+            draw(&mut host, vec![release], true, false);
+            assert_eq!(ctx.memory(|memory| memory.focused()), host.action_surface);
+            assert_eq!(
+                host.runtime.app().action_events.last().unwrap(),
+                &vec![(logical, false)]
+            );
+        }
         let before = host.runtime.app().action_events.len();
         let mut release = key(egui::Key::Space, egui::Modifiers::NONE);
         if let egui::Event::Key { pressed, .. } = &mut release {
@@ -714,6 +805,74 @@ mod tests {
             &vec![(InputKey::Space, true), (InputKey::Space, false)]
         );
         assert!(host.runtime.app().action_owned);
+        let before_tab = host.runtime.app().action_events.len();
+        draw(
+            &mut host,
+            vec![key(egui::Key::Tab, egui::Modifiers::NONE)],
+            true,
+            false,
+        );
+        assert!(
+            !host.action_control_owned && !host.runtime.app().action_owned,
+            "Tab cancels gameplay ownership before admitting another key"
+        );
+        let mut tab_up = key(egui::Key::Tab, egui::Modifiers::NONE);
+        if let egui::Event::Key { pressed, .. } = &mut tab_up {
+            *pressed = false;
+        }
+        let control = draw(&mut host, vec![tab_up], true, false).unwrap();
+        assert_eq!(host.runtime.app().action_events.len(), before_tab);
+        assert!(ctx.memory(|memory| memory.focused()).is_some());
+        assert_ne!(
+            ctx.memory(|memory| memory.focused()),
+            host.action_surface,
+            "Tab traverses to a real host control"
+        );
+        // Exercise activation's discarded-pass replay independently as well.
+        draw(&mut host, click(control), true, true);
+        assert!(host.action_control_owned);
+        draw(
+            &mut host,
+            vec![key(egui::Key::Tab, egui::Modifiers::SHIFT)],
+            true,
+            false,
+        );
+        assert!(!host.action_control_owned && !host.runtime.app().action_owned);
+        let mut tab_up = key(egui::Key::Tab, egui::Modifiers::SHIFT);
+        if let egui::Event::Key { pressed, .. } = &mut tab_up {
+            *pressed = false;
+        }
+        draw(&mut host, vec![tab_up], true, false);
+        assert!(ctx.memory(|memory| memory.focused()).is_some());
+        assert_ne!(
+            ctx.memory(|memory| memory.focused()),
+            host.action_surface,
+            "Shift+Tab leaves the viewport through native previous-widget traversal"
+        );
+        for reserved in [egui::Key::Tab, egui::Key::Escape] {
+            let control = draw(&mut host, vec![], true, false).unwrap();
+            let before = host.runtime.app().action_events.len();
+            let mut activation = click(control);
+            activation.push(key(reserved, egui::Modifiers::NONE));
+            draw(&mut host, activation, true, false);
+            assert!(
+                !host.action_control_owned && !host.runtime.app().action_owned,
+                "reserved control key wins over same-frame activation"
+            );
+            assert!(host.action_claim_frame.is_none());
+            if reserved == egui::Key::Escape {
+                assert_ne!(ctx.memory(|memory| memory.focused()), host.action_surface);
+            }
+            let mut release = key(reserved, egui::Modifiers::NONE);
+            if let egui::Event::Key { pressed, .. } = &mut release {
+                *pressed = false;
+            }
+            draw(&mut host, vec![release], true, false);
+            assert_eq!(host.runtime.app().action_events.len(), before);
+        }
+        let control = draw(&mut host, vec![], true, false).unwrap();
+        draw(&mut host, click(control), true, true);
+        assert!(host.action_control_owned);
         draw(&mut host, vec![], false, false);
         assert!(!host.action_control_owned);
         assert!(

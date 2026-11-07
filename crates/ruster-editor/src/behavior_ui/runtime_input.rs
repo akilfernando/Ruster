@@ -18,14 +18,17 @@ impl RuntimeUi {
         self.input_control.lease.is_some() || self.input_control.intent.is_some()
     }
     pub(crate) fn release_input(&mut self, ctx: &egui::Context) {
+        self.revoke_input_control();
+        if let Some((id, _)) = self.input_control.surface {
+            ctx.memory_mut(|memory| memory.surrender_focus(id));
+        }
+    }
+    fn revoke_input_control(&mut self) {
         if self.input_control.lease.take().is_some() || self.input_control.intent.take().is_some() {
             self.input_control.intent = None;
             if let Some(worker) = &self.worker {
                 let _ = worker.revoke_input(worker.current_key());
             }
-        }
-        if let Some((id, _)) = self.input_control.surface {
-            ctx.memory_mut(|memory| memory.surrender_focus(id));
         }
     }
     // Called before editor shortcuts. Cancellation precedes publication; the
@@ -78,6 +81,10 @@ impl RuntimeUi {
                 self.input_control.release_pointer_gesture = true;
             }
             self.release_input(ctx);
+        } else if ctx.input(|input| input.key_pressed(egui::Key::Tab)) {
+            // Keep the real widget as the traversal origin. Surrendering its
+            // focus here would restart Tab navigation at the first control.
+            self.revoke_input_control();
         }
     }
     pub(super) fn input_control_button(&mut self, ui: &mut egui::Ui, blocked: bool) {
@@ -179,6 +186,31 @@ impl RuntimeUi {
         if self.input_control.activation_frame == Some(frame) {
             // A discarded activation pass can rebuild the same actual surface.
             response.request_focus();
+        }
+        if response.has_focus() {
+            let arrow_navigation = ctx.input(|input| {
+                !input.key_pressed(egui::Key::Tab)
+                    && !input.key_pressed(egui::Key::Escape)
+                    && input.events.iter().any(|event| matches!(event,
+                        egui::Event::Key { key: egui::Key::ArrowLeft | egui::Key::ArrowRight | egui::Key::ArrowUp | egui::Key::ArrowDown, pressed: true, modifiers, .. } if modifiers.is_none()))
+            });
+            ctx.memory_mut(|memory| {
+                memory.set_focus_lock_filter(
+                    response.id,
+                    egui::EventFilter {
+                        horizontal_arrows: true,
+                        vertical_arrows: true,
+                        ..Default::default()
+                    },
+                );
+                // The first frame after activation began with the old filter.
+                // Cancel only its queued arrow navigation, never Tab/Escape.
+                if arrow_navigation {
+                    memory.move_focus(egui::FocusDirection::None);
+                }
+            });
+        }
+        if self.input_control.activation_frame == Some(frame) {
             self.input_control.last_frame = Some(frame);
             return;
         }
@@ -304,6 +336,12 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
+                    egui::Panel::right("input-test-inspector")
+                        .default_size(100.)
+                        .resizable(true)
+                        .show(ui, |ui| {
+                            ui.button("Inspector control").clicked();
+                        });
                     runtime.input_begin(&ctx, false);
                     runtime.controls(ui, &session, 1, false);
                     ui.text_edit_singleline(&mut text);
@@ -364,6 +402,76 @@ mod tests {
                 .unwrap()
                 .claimed
         );
+        for arrow in [egui::Key::ArrowRight, egui::Key::ArrowUp] {
+            draw(
+                &mut runtime,
+                vec![egui::Event::Key {
+                    key: arrow,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                false,
+            );
+            assert!(
+                runtime.input_owned(),
+                "gameplay arrows must not navigate to the actual inspector splitter"
+            );
+            draw(
+                &mut runtime,
+                vec![egui::Event::Key {
+                    key: arrow,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                false,
+            );
+        }
+        for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+            button = draw(
+                &mut runtime,
+                vec![egui::Event::Key {
+                    key: egui::Key::Tab,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers,
+                }],
+                false,
+            );
+            assert!(
+                !runtime.input_owned(),
+                "Tab must release gameplay ownership"
+            );
+            draw(
+                &mut runtime,
+                vec![egui::Event::Key {
+                    key: egui::Key::Tab,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers,
+                }],
+                false,
+            );
+            assert!(
+                ctx.memory(|memory| memory.focused()).is_some(),
+                "Tab retains ordinary widget traversal after the next pass"
+            );
+            draw(
+                &mut runtime,
+                vec![
+                    egui::Event::PointerMoved(button),
+                    pointer(button, true),
+                    pointer(button, false),
+                ],
+                true,
+            );
+            assert!(runtime.input_owned());
+        }
         button = draw(&mut runtime, vec![], false);
         draw(
             &mut runtime,
