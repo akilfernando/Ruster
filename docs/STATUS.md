@@ -98,9 +98,11 @@ The current integrity audit verifies118inventoried files,103immutable source-equ
 **Stopping point:** no bounded V3b obligation remains after final source/inventory verification. No further capability work, unchanged test replay or automatic next goal is selected.
 
 
-## Next-goal priority under review
+## Proposed next goal — I1a Creator Input Actions
 
-2026-11-07: the user challenges whether [C1a Assembly Study](plans/C1A-ASSEMBLY-STUDY.md) is the most valuable next feature. Root/Astra reassess: grouping was a conservative foundation choice, not proven optimal priority. Actual Rust host input/UI exists, but creator-authored named input actions/Lua interaction remain missing. For broad interactive creation, the revised default is to define one operable creation and scope a direct-editor/MCP/script/runtime input workflow with minimum necessary feedback; no automatic UI-designer/physics/framework expansion. C1a remains an alternative for multipart assembly; environment/metals or richer import may take priority for visual presentation/content bottlenecks. [Priority analysis](ROADMAP-REVIEW.md#c1a-priority-challenged-and-reassessed--2026-11-07). **No next goal is selected or active; no implementation started.**
+2026-11-07: at the user’s request to choose the highest-contribution next goal, root/Astra recommend [I1a / Jog Bench](plans/I1A-CREATOR-INPUT.md). Define/remap named keyboard actions through ordinary editor and MCP, read them in Lua and operate a tool head with Traverse/Lift/Fine/Home, then recover/save/reopen/export two faithful applications. This crosses the missing scene-author→operable-runtime boundary without a custom Rust host. A complementary MCP rotary/lift creation tests generic reuse. [Prioritization](ROADMAP-REVIEW.md#i1a-selected-recommendation--2026-11-07) compares composition, collision and visual work; C1a remains an alternative, not a dependency.
+
+The proposed first slice is keyboard Buttons/digital1D Axes, at most32actions, not complete player UI or all devices. It requires shared fixed-tick edge/held semantics, real focus/capture ownership, no sticky/replayed keys, API1 compatibility, raw recovery and bounded worker transport. A tick/run/map-pinned programmatic action frame is permitted only for paused Step/headless verification and is explicitly labeled; it does not impersonate physical focus. Actual native keyboard/remapping remains separate acceptance. Freeze versions/key policy and costs at the first author→preview→Save→exact-runtime gate; no sample-specific Rust logic or extra physics/state/UI framework. **User approval and goal activation remain pending; no implementation started.**
 
 
 ## Retained industry workflow — PumpBench
