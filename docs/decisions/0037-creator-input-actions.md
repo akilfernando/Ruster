@@ -1,6 +1,6 @@
 # 0037 — Creator action definitions and fixed-tick input admission
 
-Date2026-11-07. **Status: working design under implementation/qualification, not final architecture or feature acceptance.** User approves the [I1a outcome](../plans/I1A-CREATOR-INPUT.md) with “Set it and go ahead.” Root/Astra select the following provisional engineering defaults; the first actual author→preview→Save→exact-runtime gate must confirm or supersede them.
+Date2026-11-07. **Status: early feasibility contract accepted by root/Astra2026-11-07; full I1a implementation/qualification remains open.** User approves the [I1a outcome](../plans/I1A-CREATOR-INPUT.md) with “Set it and go ahead.” Root/Astra initially selected the following provisional defaults; the completed early author→preview→Save→exact-runtime gate now freezes the bounded contract below.
 
 ## Context and alternatives
 
@@ -54,3 +54,12 @@ Compared alternatives: retaining100ms everywhere harms the intended manipulation
 One behavior-owned `DEFAULT_FIXED_TICK` Duration is16666667ns (approximately60Hz, not exactly1/60). The editor's ordinary Worker constructor derives both its VM `dt` and schedule from it; export emits it; direct Scene11 generic launches select it. Public `Limits::default()` retains its historical numerical1/60 and explicitly configured/test runtimes remain unchanged. Old direct Scene1–10 generic launches keep100ms. The behavior-independent application manifest decodes its versioned integer duration. No user tick-setting UI, interpolation, new worker, renderer or state framework follows.
 
 Astra's pre90-minute reassessment accepts bounded continuation, explicitly leaves the runnable gate open and notes that ordinary forms advanced beyond the intended first-gate order. Freeze further feature expansion; only checkpoint-discovered failures may be repaired until actual author→keyboard preview→Save/reopen→exact-runtime qualification. Frozen cost references remain unchanged; final cost work must use the settled path and label hidden versus focused execution. This timing repair is such a failure, not a new milestone.
+
+
+## Early feasibility decision freeze — 2026-11-07
+
+Root/Astra accept the five bounded early requirements after actual authored API2 axis/Button, saved/reopened project, exact default runtime4 headless/native evidence and current native6 normal/compact text/capture/focus qualification. Astra independently inspects the current SDK/observations/screenshots and runtime records; source checks alone are not the basis. [Evidence](../evidence/I1A-foundation.md#native6-editor-priority-qualification--2026-11-07) retains failures, repairs and exact artifacts.
+
+Freeze logical keyboard keys (layout-dependent),32stable-ID actions/four total keys per action, explicit actual-Response control ownership, immutable per-fixed-tick snapshots/bounded latches, cancellation generations and guarded one-tick programmatic input. Freeze opt-in host API2 with API1 compatibility, Scene11/content7/recovery9/Descriptor5 and16666667ns current-host/export quantum with old owning-version units/defaults preserved. Catalog4/mesh/image caches and GPU ownership remain unchanged. Keep the pre-result investigation references/protocol; no candidate cost pass is inferred.
+
+This is early feasibility acceptance, not full feature acceptance. Required ordinary follow-ups include visible compact validation feedback, stable Control-row viewport footprint and binding/action/pose help, complete Traverse/Lift/Fine/Home creation/remap/history and real raw-draft crash recovery. Complementary MCP creation, two exact final apps, measured costs/resource qualification and final requirement/integrity handoff remain open. No physics, hierarchy, general state framework or broader input devices are added.
