@@ -98,7 +98,7 @@ The current integrity audit verifies118inventoried files,103immutable source-equ
 **Stopping point:** no bounded V3b obligation remains after final source/inventory verification. No further capability work, unchanged test replay or automatic next goal is selected.
 
 
-## I1a Creator Input Actions — product accepted
+## I1a Creator Input Actions — complete
 
 Approved2026-11-07. Root/Astra accept the bounded [I1a / Jog Bench contract](plans/I1A-CREATOR-INPUT.md) after the complete creator/runtime/cost checks and95payload handoff audit. Creators can author/remap up to32stable-ID keyboard Buttons/digital1D Axes, query opt-in Lua API2 and deliver operable applications through ordinary editor controls and actual native MCP. [0037](decisions/0037-creator-input-actions.md) owns accepted engineering choices. The [requirement audit](evidence/I1A-readiness.md) and [chronology](evidence/I1A-foundation.md) retain proofs, failures and remaining gates. Physics, hierarchy, player-UI authoring, broader input devices, M9 and publication remain outside this goal.
 
@@ -114,7 +114,7 @@ Default10completes23equal-history cycles/882SDKcalls, preserving31Undo/1Redo and
 
 A fresh local `Review-03617ea` copy contains77selected files plus generated guide/launcher/provenance, including exact editable projects, default binaries, kit5, both applications/archives and evidence. Its shell syntax/help and actual copied-launcher native checks pass, including removal of inherited MCP/inspection/timing opt-ins, zero owned listeners, immutable payloads, normal Close0/scanner0 and exact restoration. Named actual API2Jog stopped/paused idle is0.30/0.40%of one core atN=1/state, with committed paused tick116unchanged. Preparation remains partial handoff evidence. `Source/SOURCE.tar.gz` now verifies all806tracked source files at documentary commit676142d, with only Markdown changes after product03617ea. `source-archive-review-10.json` pins archive SHA74d7b428…. All118immutable V3b review files recheck unchanged in `v3b-preservation-check-10.json`.
 
-**Handoff closure:** `Review-03617ea/integrity-audit.json` owns the final delivered inventory and documentary sealing. The [final evaluation](ROADMAP-REVIEW.md#i1a-creator-input-evaluation--2026-11-07) records product quality, measured limits and stopping scope. Stop at I1a after that seal. No owned editor/native process remains. No subsequent goal or publication is activated.
+**Completed2026-11-07.** Root/Astra close the complete approved scope after the sealed99payload handoff and final condition review. `Review-03617ea/integrity-audit.json` owns the delivered inventory,806file source archive and final documentary sealing. The [final evaluation](ROADMAP-REVIEW.md#i1a-creator-input-evaluation--2026-11-07) records product quality, measured limits and stopping scope. Stop at I1a. No owned editor/native process remains. No subsequent goal or publication is activated.
 
 ## Retained industry workflow — PumpBench
 
