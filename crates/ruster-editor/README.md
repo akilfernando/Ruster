@@ -8,6 +8,8 @@ cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
 
 See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-content-and-shader-iteration-m6) below for their controls. The [editor experience baseline](../../docs/EDITOR-EXPERIENCE.md) records required usability still to deliver.
 
+Current source saves Scene12 and raw drafts in Recovery10. Opt-in Lua API3 adds spatial queries while preserving API1/API2. Current exact delivery uses content8 and Descriptor5. The [P2a controls](#primitive-collider-authoring--p2a) and [live requirement audit](../../docs/evidence/P2a-readiness.md) describe this active slice. Dated milestone notes retain their original pinned contracts. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
+
 ## Surface materials, finish maps and scene display (V3a/V3b)
 
 Pending GPU asset replacement retains an eligible earlier viewport image. If an abandoned surface attempt changed the render target or display packet, the editor shows a waiting state until a fresh image is available. On-demand MCP capture checks its exact freshly painted callback; a retained/unprepared callback returns `render_pending` without publishing an image. Hosts maintain unfinished GPU ownership on the owner thread, including while hidden. [0036](../../docs/decisions/0036-bounded-gpu-asset-submission.md) records the bounds and qualified source/GPU evidence; final native/release qualification remains pending.
@@ -20,7 +22,7 @@ In **Scene display**, explicitly choose **Surface HDR** to enable this surface r
 
 **PNG interpretation** defaults to **Base color (sRGB)**. Choose **Roughness map (linear)** for grayscale/red-channel finish data; the role is fixed per asset ID and Refresh preserves it. One source can be imported under separate IDs for both interpretations. In Material, choose the matching **Roughness map** slot or **None (clear)**. **Roughness multiplier** scales the map, with the effective result clamped to0.08–1; choose1 explicitly for its full range. Filter and Wrap affect both slots. Diffuse, Legacy SDR and custom shaders retain inactive references without enabling surface shading automatically. Missing maps show a provisional scalar viewport fallback; faithful export requires valid accepted dependencies.
 
-Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to cancel. In Assets, Enter in the ID advances to Source; Enter in Source submits the import. A dropdown owns its selection/dismissal key before the surrounding form. Invalid values retain focus/text and authored state. Recovery8 preserves unfinished shading/roughness/map/exposure drafts and restores an unsaved copy; it never grants overwrite authority over the original. Genuine old drafts migrate after strict field-presence validation. Save writes Scene10; older runtime kits reject this schema even without maps. The accepted [V3a checkpoint](../../docs/evidence/V3A-readiness.md) remains preserved. [V3b qualification](../../docs/evidence/V3B-feasibility.md) accepts the early rendering/save/runtime foundation; ordinary controls, recovery and full workflow/resource qualification are in progress.
+Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to cancel. In Assets, Enter in the ID advances to Source; Enter in Source submits the import. A dropdown owns its selection/dismissal key before the surrounding form. Invalid values retain focus/text and authored state. Recovery10 preserves unfinished surface and collider drafts and restores an unsaved copy. The creator chooses a fresh Save destination while the original remains preserved. Genuine older drafts migrate after strict field-presence validation. Save writes Scene12 and requires a matching current runtime kit. The accepted [V3a](../../docs/evidence/V3A-readiness.md) and [V3b](../../docs/evidence/V3B-readiness.md) checkpoints retain their original contracts.
 
 ## Legacy logistics mode
 
@@ -137,8 +139,9 @@ undoes its edit through shared history. Use the default example configuration
 Agent edits appear as authored unsaved changes with a before/after notice.
 Inspector drafts or recovery dialogs block mutations; the client must inspect
 again after the human resolves them. Isolated replay uses authored values and
-never changes the live preview. No remote Save/Open/shell tools exist; ordinary
-human editing, runtime controls and saving remain available offline. A paused
+never changes the live preview. The legacy scenario adapter has no remote
+Save/Open/shell tools. Generic scene mode provides separately guarded Save and
+export commands. Ordinary editing and saving remain available offline. A paused
 or hidden UI that cannot process commands yields an expired bridge request,
 not silent fallback to file editing. See [M4 evidence](../../docs/evidence/M4.md)
 for the tested desktop conditions and limitations.
@@ -240,7 +243,7 @@ modes; it does not rewrite authored data or roll back runtime ticks. Open/restar
 uses the built-in pipeline until an explicit refresh (or standalone `--shader`).
 
 Scene-v1 files still load with their existing transform history. The inspector
-shows the loaded version and that Save writes v3, preserving supported v1/v2 history on migration. V1-labelled files containing
+shows the loaded version and that Save writes Scene12, preserving supported older history under strict owning-version admission. V1-labelled files containing
 v2 mesh fields are rejected. Logistics-v1 scenarios remain a separate format.
 
 Native MCP adds `asset_inspect`, `asset_import`, `asset_refresh`, `asset_rename`,
@@ -572,4 +575,4 @@ The geometry Inspector includes a Collider component with Sphere/Box shape, Enab
 
 The viewport shows a passive xray outline for the active object's collider. Amber identifies blockers, cyan sensors and gray disabled definitions. A disabled sphere with nonuniform scale reports an unavailable guide. Runtime view displays contact markers only from the current committed query snapshot. Runtime → Spatial feedback exposes captured names, queried tick/revision and contact details through keyboard paging. The script chooses its returned transform.
 
-Raw collider drafts belong to Recovery10with object/revision/component/transform baselines. Older recovery labels reject a collider field, including null. Scene12save and API3/content8/Descriptor5delivery follow the accepted [query architecture](../../docs/decisions/0038-spatial-query-feasibility.md). Full native authoring, crash recovery, two-project delivery and final cost/resource acceptance remain in progress under the [P2a contract](../../docs/plans/P2A-SPATIAL-QUERIES.md).
+Raw collider drafts belong to Recovery10with object/revision/component/transform baselines. Older recovery labels reject a collider field, including null. Scene12save and API3/content8/Descriptor5delivery follow the accepted [query architecture](../../docs/decisions/0038-spatial-query-feasibility.md). Ordinary and independent native MCP authoring, raw collider crash/recovery and both exports have recorded evidence. Direct/MCP isolated application parity, native standalone operation and final cost/resource acceptance are tracked separately in the [P2a audit](../../docs/evidence/P2a-readiness.md). The [P2a contract](../../docs/plans/P2A-SPATIAL-QUERIES.md) remains active.
