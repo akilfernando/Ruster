@@ -102,12 +102,16 @@ pub struct Authoring {
     pub sources: BTreeMap<String, BehaviorSource>,
     /// Map keys are stable binding IDs; currently at most one binding owns each object.
     pub bindings: BTreeMap<String, BehaviorBinding>,
+    /// Scene-owned keyboard actions; live key state is never authored.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub actions: crate::input::ActionMap,
 }
 impl Authoring {
     pub fn is_empty(&self) -> bool {
-        self.sources.is_empty() && self.bindings.is_empty()
+        self.sources.is_empty() && self.bindings.is_empty() && self.actions.is_empty()
     }
     pub fn validate(&self, scene: &Scene) -> Result<(), SceneError> {
+        crate::input::validate_action_map(&self.actions)?;
         if self.sources.len() > MAX_SOURCES || self.bindings.len() > MAX_BINDINGS {
             return Err(SceneError::Invalid(
                 "authoring exceeds256 sources or bindings".into(),

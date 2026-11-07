@@ -1,6 +1,6 @@
 # I1a — Creator Input Actions / Jog Bench
 
-Proposed2026-11-07 by root/Astra after the [priority reassessment](../ROADMAP-REVIEW.md#c1a-priority-challenged-and-reassessed--2026-11-07). Baseline: accepted [V3b](../evidence/V3B-readiness.md), product code `c297b9d`; current planning source `ee5a0eb`. **This is a proposed goal for user approval. No goal activation or implementation has begun.** The user requests a decisive highest-contribution goal and a proper contract before starting. All new defaults below are agent proposals, not user-selected architecture.
+Proposed2026-11-07 by root/Astra after the [priority reassessment](../ROADMAP-REVIEW.md#c1a-priority-challenged-and-reassessed--2026-11-07). Baseline: accepted [V3b](../evidence/V3B-readiness.md), product code `c297b9d`; current planning source `ee5a0eb`. **Approved2026-11-07: the user says “Set it and go ahead”; I1a is now the active goal.** The outcome/scope are approved. New engineering defaults remain agent-selected and subject to the early gate; approval is not evidence of implementation. [Working decision0037](../decisions/0037-creator-input-actions.md) records current choices.
 
 ## Proposed session objective
 

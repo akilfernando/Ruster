@@ -1719,6 +1719,7 @@ mod tests {
                 ("source-b".into(), source("invalid(")),
             ]),
             bindings: BTreeMap::new(),
+            ..Authoring::default()
         };
         let properties = BTreeMap::from([
             ("end".into(), PropertyValue::Bool(true)),

@@ -1,6 +1,6 @@
 # Provisional generic Lua behavior backend
 
-This library is the first generic `lua54` host API1 candidate. It does not select a permanent language, replace the Rhai/Motion Lab experiment, add an editor/scheduler/MCP/DAP service or establish C# suitability. Generic scene format5 remains language-neutral: unknown backends and invalid code are saveable in `ruster-scene`, while this runtime reports structured rejection. There is no mandatory application dependency on an interpreter.
+This provisional `lua54` library preserves default host API1 and now includes opt-in API2 named-input foundation under [I1a](../../docs/plans/I1A-CREATOR-INPUT.md). Native input routing/editor controls and exact new runtime delivery remain in progress. It does not select a permanent language, replace the Rhai/Motion Lab experiment, add an editor/scheduler/MCP/DAP service or establish C# suitability. Generic scene format5 remains language-neutral: unknown backends and invalid code are saveable in `ruster-scene`, while this runtime reports structured rejection. There is no mandatory application dependency on an interpreter.
 
 The optional headless consumer uses the same saved document:
 
@@ -29,3 +29,14 @@ mlua0.12.2 is pinned and uses bundled Lua5.4 through `lua54+vendored`, without `
 ## Owned debugging
 
 `debug::DebugSession::new` returns an owner-thread session and a single client handle. Attach through `Engine::set_debugger` only at an idle owner boundary, sharing the exact `Engine::cancellation()` Arc. The client inspects immutable bounded stops and resumes their exact `StopId` with Next/Continue; it never owns Lua values. Publish external cancellation then call `wake_cancelled` to unblock a paused hook. Dropping either side retires current references without cancelling a later session's external token. `take_debug_pause_requested` asks a scheduler to pause after a successful complete tick when Next reaches its root return. Reset validation suppresses stops; all instruction charging remains count-event-only. An unavailable instruction hook prevents evaluation until setup is repaired. See [decision0024](../../docs/decisions/0024-owned-behavior-debug-stops.md) for bounds, tradeoffs and evidence.
+
+
+## Opt-in API2 input foundation
+
+Set a source’s `host_api_version` to `INPUT_HOST_API_VERSION` (2) to expose read-only `host.axis(id)` and `host.button(id)` in addition to `host.resolve`. API1 remains `HOST_API_VERSION` (1); its environment has no input query functions. Source API selection occurs on every evaluation, including a same-text compilation-cache hit. Unknown APIs remain authored data and reject at Reset.
+
+Definitions live in `Authoring.actions`, separate from rendered Scene and live keys. Each action has a stable ID and Button or digital Axis type. An API2 source might read `host.axis("travel")` for−1/0/+1 and `host.button("home").pressed` for a one-tick event. Button tables contain copied `held`, `pressed`, `released` booleans; modifying a returned table cannot alter another query/binding. Wrong-kind/unknown queries produce contextual runtime errors, not silent neutral values.
+
+Rust callers use `Engine::step_with_input(&mut Runtime, &ruster_scene::input::ActionFrame)`. A sparse supplied frame is validated against the runtime’s immutable authored map before VM work; omitted actions are neutral. One normalized frame serves every binding for that atomic operation. Ordinary `step` and Reset trials use neutral input; supplied held/edges do not persist into a later call. Invalid frames use `InvalidInput`/Setup diagnostics; evaluation failures keep the entire old scene/tick. Existing instruction, cancellation, VM memory and authored/runtime separation remain in force.
+
+This is the library boundary, not a completed physical-input or MCP injection interface. Native adapters still need explicit real focus ownership, repeat filtering, bounded edge admission and run/map cancellation. Editor/programmatic Step guards, supplied-frame CLI/profile support and actual two-application qualification remain I1a work. See [foundation evidence](../../docs/evidence/I1A-foundation.md); do not infer feature readiness from this API alone.

@@ -12,10 +12,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 10;
+pub const FORMAT_VERSION: u32 = 11;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
+pub mod input;
 mod lighting;
 mod lighting_authoring;
 mod strict_json;
@@ -794,6 +795,8 @@ struct Change {
     sources: Vec<ValueDelta<BehaviorSource>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     bindings: Vec<ValueDelta<BehaviorBinding>>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    actions: Vec<ValueDelta<input::ActionDefinition>>,
 }
 impl From<SceneDelta> for Change {
     fn from(delta: SceneDelta) -> Self {
@@ -834,7 +837,7 @@ fn apply_values<T: Clone + PartialEq>(
 }
 impl Change {
     fn has_authoring(&self) -> bool {
-        !self.sources.is_empty() || !self.bindings.is_empty()
+        !self.sources.is_empty() || !self.bindings.is_empty() || !self.actions.is_empty()
     }
     fn references_asset(&self) -> bool {
         self.scene.iter().any(SceneDelta::references_asset)
@@ -883,6 +886,7 @@ impl Change {
             || self.materials.len() > MAX_MATERIALS
             || self.sources.len() > MAX_SOURCES
             || self.bindings.len() > MAX_BINDINGS
+            || self.actions.len() > input::MAX_ACTIONS
         {
             return Err(SceneError::Invalid(
                 "empty or oversized authored history change".into(),
@@ -906,6 +910,7 @@ impl Change {
         // All sections form one atomic authored state. Validate only after all apply.
         apply_values(&self.sources, &mut authoring.sources, undo)?;
         apply_values(&self.bindings, &mut authoring.bindings, undo)?;
+        apply_values(&self.actions, &mut authoring.actions, undo)?;
         scene.validate()?;
         authoring.validate(scene)
     }
@@ -1157,6 +1162,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..11).contains(&version) {
+            reject_pre_v11_input_fields(&value)?;
+        }
         if (1..10).contains(&version) {
             reject_pre_v10_roughness_fields(&value)?;
         }
@@ -1176,7 +1184,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=10 => serde_json::from_value(value)?,
+            5..=11 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1266,6 +1274,26 @@ fn reject_pre_v10_roughness_fields(value: &serde_json::Value) -> Result<(), Scen
     if found {
         Err(SceneError::Invalid(
             "roughness textures require scene v10".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+// Only authored definition/history fields acquire action semantics; Lua source
+// text and labels may contain arbitrary JSON-shaped strings without reinterpretation.
+fn reject_pre_v11_input_fields(value: &serde_json::Value) -> Result<(), SceneError> {
+    let has_actions = value["authoring"].get("actions").is_some()
+        || ["undo", "redo"].into_iter().any(|stack| {
+            value[stack]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|change| change.get("actions").is_some())
+        });
+    if has_actions {
+        Err(SceneError::Invalid(
+            "input actions require scene v11".into(),
         ))
     } else {
         Ok(())
@@ -1658,6 +1686,71 @@ impl Session {
         }
         authoring::page(diagnostics.into_iter(), offset, limit)
     }
+    pub fn action(&self, id: &str) -> Option<&input::ActionDefinition> {
+        self.authoring().actions.get(id)
+    }
+    /// Shared, undoable action edit. A deleted reversible identity is restored
+    /// through Undo, not silently reused for a different action.
+    pub fn set_action(
+        &mut self,
+        expected_revision: u64,
+        id: &str,
+        action: Option<input::ActionDefinition>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(id)?;
+        let before = self.action(id).cloned();
+        if before == action {
+            return Ok(self.scene().revision);
+        }
+        if before.is_none() && action.is_some() && self.contains_action_id(id) {
+            return Err(SceneError::Invalid(
+                "action identity is reserved by reversible history; Undo or choose a fresh ID"
+                    .into(),
+            ));
+        }
+        self.commit_change(Change {
+            actions: vec![ValueDelta {
+                id: id.into(),
+                before,
+                after: action,
+            }],
+            ..Change::default()
+        })
+    }
+    pub fn contains_action_id(&self, id: &str) -> bool {
+        self.authoring().actions.contains_key(id)
+            || self
+                .document
+                .undo
+                .iter()
+                .chain(&self.document.redo)
+                .any(|c| c.actions.iter().any(|d| d.id == id))
+    }
+    pub fn allocate_action_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        let mut used: HashSet<_> = self
+            .authoring()
+            .actions
+            .keys()
+            .map(String::as_str)
+            .collect();
+        used.extend(
+            self.document
+                .undo
+                .iter()
+                .chain(&self.document.redo)
+                .flat_map(|c| c.actions.iter().map(|d| d.id.as_str())),
+        );
+        // A monotonic revision prefix also avoids normal UI allocation reusing
+        // old raw Lua identifiers after their structural history has aged out.
+        let next = self
+            .scene()
+            .revision
+            .checked_add(1)
+            .ok_or_else(|| SceneError::Invalid("revision exhausted".into()))?;
+        allocate_ids(&format!("action-{next}"), count, input::MAX_ACTIONS, used)
+    }
+
     /// Explicit upsert of a stable source identity; broken/unknown-language text is saveable.
     pub fn set_source(
         &mut self,
@@ -3271,6 +3364,94 @@ mod tests {
         assert_eq!(reopened.history_evictions(), 0);
     }
 
+    // Unique risk: actions-only content and structural history must not disappear
+    // through geometry-only loading, old schemas, or deleted-ID reuse.
+    #[test]
+    fn action_authoring_roundtrip_history_and_owning_version_guards() {
+        use input::{ActionDefinition, ActionKind, InputKey};
+        let action = ActionDefinition {
+            label: Some("Traverse".into()),
+            kind: ActionKind::Axis1d {
+                negative: vec![InputKey::ArrowLeft],
+                positive: vec![InputKey::ArrowRight],
+            },
+        };
+        let mut session = Session::new(Scene::demo()).unwrap();
+        session
+            .set_action(0, "travel", Some(action.clone()))
+            .unwrap();
+        assert!(!session.authoring().is_empty());
+        session.set_action(1, "travel", None).unwrap();
+        let before = session.document.clone();
+        assert!(session
+            .set_action(2, "travel", Some(action.clone()))
+            .is_err());
+        assert_eq!(session.document, before);
+        assert!(session.contains_action_id("travel"));
+        session.undo(2).unwrap();
+        assert_eq!(session.action("travel"), Some(&action));
+        session.redo(3).unwrap();
+        assert!(session.action("travel").is_none());
+        session.undo(4).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("actions.json");
+        session.save(&path).unwrap();
+        assert!(Scene::load(&path).is_err());
+        let loaded = Session::open(&path).unwrap();
+        assert_eq!(loaded.authoring(), session.authoring());
+        assert_eq!(
+            (loaded.undo_len(), loaded.redo_len()),
+            (session.undo_len(), session.redo_len())
+        );
+        assert_eq!(
+            loaded.allocate_action_ids(1).unwrap(),
+            session.allocate_action_ids(1).unwrap()
+        );
+        // JSON-looking source text is not a schema-owning action location.
+        let mut old = Session::new(Scene::demo()).unwrap();
+        old.set_source(0, "source", Some(source("-- {\"actions\":null}")))
+            .unwrap();
+        let mut legacy = serde_json::to_value(&old.document).unwrap();
+        legacy["format_version"] = 10.into();
+        assert!(Document::decode(&serde_json::to_vec(&legacy).unwrap()).is_ok());
+        for version in 1..=10 {
+            for location in ["authoring", "undo", "redo"] {
+                for payload in [
+                    serde_json::Value::Null,
+                    serde_json::json!([]),
+                    serde_json::json!({}),
+                ] {
+                    let mut bad = legacy.clone();
+                    bad["format_version"] = version.into();
+                    if location == "authoring" {
+                        bad["authoring"]["actions"] = payload;
+                    } else {
+                        bad[location] = serde_json::json!([{ "actions": payload }]);
+                    }
+                    let error = Document::decode(&serde_json::to_vec(&bad).unwrap()).unwrap_err();
+                    assert!(
+                        error
+                            .to_string()
+                            .contains("input actions require scene v11"),
+                        "{version}/{location}: {error}"
+                    );
+                }
+            }
+        }
+        let mut invalid = action;
+        invalid.kind = ActionKind::Button {
+            keys: vec![InputKey::Escape],
+        };
+        let before = session.document.clone();
+        assert!(session
+            .set_action(session.scene().revision, "invalid", Some(invalid))
+            .is_err());
+        assert!(session
+            .set_action(session.scene().revision - 1, "stale", None)
+            .is_err());
+        assert_eq!(session.document, before);
+    }
+
     // Unique risk: source deletion can shrink current state while Undo grows it;
     // admission must reserve all reachable authored payloads plus retained history once.
     #[test]
@@ -3278,6 +3459,20 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bounded.json");
         let mut session = Session::new(Scene::empty("bounded")).unwrap();
+        // Reuse this reachable-payload byte oracle with the new authoring field,
+        // rather than adding a second near-cap suite for action history.
+        for n in 0..input::MAX_ACTIONS {
+            session
+                .set_action(
+                    session.scene().revision,
+                    &format!("action-{n}"),
+                    Some(input::ActionDefinition {
+                        label: Some("a".repeat(128)),
+                        ..input::ActionDefinition::default()
+                    }),
+                )
+                .unwrap();
+        }
         for n in 0..50 {
             let text = format!("{}{n:03}", "\u{0001}".repeat(MAX_SOURCE_BYTES - 3));
             session
@@ -4282,7 +4477,7 @@ mod tests {
         let current = session.snapshot_bytes().unwrap();
         assert_eq!(
             serde_json::from_slice::<Value>(&current).unwrap()["format_version"],
-            10
+            FORMAT_VERSION
         );
         assert_eq!(
             Session::from_snapshot_bytes(&current).unwrap().scene(),
