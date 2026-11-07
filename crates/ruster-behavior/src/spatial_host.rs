@@ -5,9 +5,17 @@ use spatial::{OverlapResult, SpatialWorld, SweepOutcome, SweepResult};
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct QueryObservation {
     pub binding_id: String,
+    #[serde(serialize_with = "counter_string")]
     pub snapshot_tick: u64,
+    #[serde(serialize_with = "counter_string")]
     pub scene_revision: u64,
     pub query: QueryResult,
+}
+
+// Match existing runtime/MCP identity counters, including values beyond the
+// exact-integer range of JavaScript JSON clients. Rust consumers keep u64.
+fn counter_string<S: serde::Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+    serializer.serialize_str(&value.to_string())
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]

@@ -1,6 +1,7 @@
 //! Bounded embedded source/property working copies. Session owns authored data.
 mod runtime_debug;
 mod runtime_input;
+mod spatial_feedback;
 use eframe::egui;
 use ruster_scene::{BehaviorBinding, BehaviorSource, PropertyValue, Session};
 use serde::{Deserialize, Serialize};
@@ -1144,6 +1145,7 @@ impl Request {
 pub(super) struct RuntimeUi {
     debug: runtime_debug::DebugUi,
     input_control: runtime_input::InputControl,
+    spatial_feedback_index: usize,
     context: Option<egui::Context>,
     awaiting: Option<(RunKey, Operation)>,
     worker: Option<VmWorker>,
@@ -1248,6 +1250,7 @@ impl RuntimeUi {
         self.reset_succeeded = None;
     }
     fn begin_reset(&mut self, key: RunKey) {
+        self.spatial_feedback_index = 0;
         self.clear_reset();
         self.reset_key = Some(key);
         self.ready = false;
@@ -1564,6 +1567,7 @@ impl RuntimeUi {
                 if ui.button("Behavior debugger…").clicked(){self.debug.open=true;ui.close();}
                 if ui.button("Runtime input help…").clicked(){self.open_input_help(ui.ctx());ui.close();}
                 ui.add_enabled(self.frame.is_some(),egui::Checkbox::new(&mut self.visible,if self.stale {"View retained runtime (stale)"}else{"View runtime"}));
+                self.spatial_feedback_menu(ui);
                 if let Some(frame)=&self.frame {ui.label(format!("Committed tick {}",frame.tick));}
                 if !self.status.is_empty(){ui.label(&self.status);}
                 if let Some(diagnostic)=&self.diagnostic {ui.collapsing("Diagnostic details",|ui| {
@@ -1588,6 +1592,8 @@ impl RuntimeUi {
                 ui.add_sized(egui::vec2(ui.available_width().max(0.0), ui.spacing().interact_size.y),
                     egui::Label::new(egui::RichText::new(label).color(egui::Color32::YELLOW)).truncate())
                     .on_hover_text(detail);
+            } else {
+                self.spatial_feedback_summary(ui);
             }
         });
         self.flush();

@@ -542,13 +542,69 @@ mod tests {
         // An action-map edit must not consume another row of the ordinary
         // toolbar and therefore resize the real remaining viewport Response.
         // This layout check needs no worker or GPU resources.
-        fn remaining_viewport(session: &Session, stale: bool, size: egui::Vec2) -> egui::Rect {
+        fn remaining_viewport(
+            session: &Session,
+            stale: bool,
+            size: egui::Vec2,
+            queries: bool,
+        ) -> egui::Rect {
             let ctx = egui::Context::default();
             crate::editor_theme::configure(&ctx);
             let mut runtime = RuntimeUi {
                 stale,
                 ..Default::default()
             };
+            if queries {
+                use ruster_behavior::{
+                    spatial::{OverlapResult, SweepOutcome, SweepResult},
+                    QueryObservation, QueryResult,
+                };
+                let mut snapshot = session.scene().clone();
+                snapshot.objects = ["probe", "wall", "sensor"]
+                    .map(|id| ruster_scene::Object::cube(id, Some("n".repeat(128))))
+                    .into();
+                runtime.visible = true;
+                runtime.frame = Some(Frame {
+                    key: RunKey::default(),
+                    tick: 1,
+                    scene: Arc::new(snapshot),
+                    input: None,
+                    query_observations: Some(Arc::from([
+                        QueryObservation {
+                            binding_id: "motion".into(),
+                            snapshot_tick: 0,
+                            scene_revision: 0,
+                            query: QueryResult::Sweep {
+                                probe_id: "probe".into(),
+                                delta: [1.0, 0.0, 0.0],
+                                result: SweepResult {
+                                    outcome: SweepOutcome::Blocked,
+                                    suggested_translation: Some([0.0; 3]),
+                                    fraction: 0.0,
+                                    target_id: Some("wall".into()),
+                                    point: None,
+                                    normal: None,
+                                    clearance: 0.0001,
+                                },
+                            },
+                        },
+                        QueryObservation {
+                            binding_id: "motion".into(),
+                            snapshot_tick: 0,
+                            scene_revision: 0,
+                            query: QueryResult::Overlap {
+                                result: OverlapResult {
+                                    probe_id: "probe".into(),
+                                    sensor_id: "sensor".into(),
+                                    position: [0.0; 3],
+                                    overlapping: true,
+                                    signed_distance: Some(0.0),
+                                },
+                            },
+                        },
+                    ])),
+                });
+            }
             let mut viewport = None;
             let mut output = ctx.run_ui(
                 egui::RawInput {
@@ -568,14 +624,24 @@ mod tests {
         }
         for size in [egui::vec2(1000., 800.), egui::vec2(640., 480.)] {
             let mut layout = Session::new(ruster_scene::Scene::empty("input-layout")).unwrap();
-            let empty = remaining_viewport(&layout, false, size);
+            let empty = remaining_viewport(&layout, false, size, false);
             layout
                 .set_action(0, "home", Some(ActionDefinition::default()))
                 .unwrap();
-            let first = remaining_viewport(&layout, false, size);
-            let stale = remaining_viewport(&layout, true, size);
+            let first = remaining_viewport(&layout, false, size, false);
+            let stale = remaining_viewport(&layout, true, size, false);
             layout.set_action(1, "home", None).unwrap();
-            let last = remaining_viewport(&layout, false, size);
+            let last = remaining_viewport(&layout, false, size, false);
+            assert_eq!(
+                remaining_viewport(&layout, false, size, true),
+                empty,
+                "long movement/occupancy feedback preserves the viewport footprint"
+            );
+            assert_eq!(
+                remaining_viewport(&layout, true, size, true),
+                empty,
+                "stale query feedback preserves the viewport footprint"
+            );
             assert_eq!(
                 first, empty,
                 "first action must preserve the viewport footprint"

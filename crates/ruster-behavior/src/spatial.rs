@@ -219,29 +219,53 @@ impl SpatialWorld {
         // A finite TOI is insufficient. Re-resolve the actual f32 owner pose,
         // check its endpoint and certify its full rounded path against ALL
         // blockers. There is no shrinking/search loop or unchecked fallback.
+        let has_rounded_motion = rounded_path != Vector::ZERO;
         for (target, start) in blockers.iter().zip(&starts) {
-            if let Some(value) = contact(&rounded, &target.resolved, 0.0, cancel)? {
-                if !finite_contact(&value) || value.dist < 0.0 {
-                    return Ok(result.precision_limited_at(&target.id));
-                }
+            let prediction = if has_rounded_motion {
+                endpoint_prediction(&rounded, &target.resolved)
+            } else {
+                Some(0.0)
+            };
+            let Some(prediction) = prediction else {
+                return Ok(result.precision_limited_at(&target.id));
+            };
+            let endpoint_contact = contact(&rounded, &target.resolved, prediction, cancel)?;
+            if let Some(rejected) = reject_segment_evidence(
+                &result,
+                &probe.resolved,
+                &rounded,
+                target,
+                SegmentEvidence {
+                    initial_contact: start.as_ref(),
+                    endpoint_contact: endpoint_contact.as_ref(),
+                    path_hit: None,
+                },
+            ) {
+                return Ok(rejected);
             }
-            if rounded_path != Vector::ZERO {
-                if let Some(hit) =
-                    cast(&probe.resolved, rounded_path, &target.resolved, 0.0, cancel)?
-                {
-                    if !finite_hit(&hit)
-                        || (hit.time_of_impact < 1.0
-                            && !supporting_plane(
-                                start.as_ref(),
-                                &probe.resolved,
-                                &rounded,
-                                &target.resolved,
-                                clearance,
-                            ))
-                    {
-                        return Ok(result.precision_limited_at(&target.id));
-                    }
-                }
+            // Even a separated endpoint supplies a candidate normal. A common
+            // support half-space containing BOTH actual centers certifies the
+            // entire affine segment against this uninflated convex obstacle.
+            if !has_rounded_motion
+                || endpoint_contact.as_ref().is_some_and(|contact| {
+                    separates_segment(contact.normal2, &probe.resolved, &rounded, &target.resolved)
+                })
+            {
+                continue;
+            }
+            let path_hit = cast(&probe.resolved, rounded_path, &target.resolved, 0.0, cancel)?;
+            if let Some(rejected) = reject_segment_evidence(
+                &result,
+                &probe.resolved,
+                &rounded,
+                target,
+                SegmentEvidence {
+                    initial_contact: start.as_ref(),
+                    endpoint_contact: None,
+                    path_hit: path_hit.as_ref(),
+                },
+            ) {
+                return Ok(rejected);
             }
         }
         if result
@@ -293,6 +317,42 @@ impl SpatialWorld {
             overlapping: value.is_some_and(|contact| contact.dist <= 0.0),
             signed_distance: value.map(|contact| contact.dist),
         })
+    }
+}
+
+struct SegmentEvidence<'a> {
+    initial_contact: Option<&'a Contact>,
+    endpoint_contact: Option<&'a Contact>,
+    path_hit: Option<&'a ShapeCastHit>,
+}
+
+// Evaluate each completed native observation without collecting later evidence
+// after a rejected endpoint. Failed cast statuses remain errors in cast().
+fn reject_segment_evidence(
+    result: &SweepResult,
+    start: &ResolvedCollider,
+    end: &ResolvedCollider,
+    target: &Entry,
+    evidence: SegmentEvidence<'_>,
+) -> Option<SweepResult> {
+    let invalid_endpoint = evidence
+        .endpoint_contact
+        .is_some_and(|contact| !finite_contact(contact) || contact.dist < 0.0);
+    let invalid_path = evidence.path_hit.is_some_and(|hit| {
+        !finite_hit(hit)
+            || (hit.time_of_impact < 1.0
+                && !supporting_plane(
+                    evidence.initial_contact,
+                    start,
+                    end,
+                    &target.resolved,
+                    result.clearance,
+                ))
+    });
+    if invalid_endpoint || invalid_path {
+        Some(result.clone().precision_limited_at(&target.id))
+    } else {
+        None
     }
 }
 
@@ -360,10 +420,35 @@ fn supporting_plane(
     else {
         return false;
     };
+    separates_segment(contact.normal2, start, end, target)
+        && contact
+            .normal2
+            .dot(Vector::from_array(end.center) - Vector::from_array(start.center))
+            >= 0.0
+}
+
+fn endpoint_prediction(sphere: &ResolvedCollider, target: &ResolvedCollider) -> Option<f64> {
+    let ResolvedShape::Sphere { radius } = sphere.shape else {
+        return None;
+    };
+    let target_radius = match target.shape {
+        ResolvedShape::Sphere { radius } => radius,
+        ResolvedShape::Box { half_extents } => Vector::from_array(half_extents).length(),
+    };
+    let centers = Vector::from_array(sphere.center) - Vector::from_array(target.center);
+    let prediction = centers.length() + radius + target_radius;
+    prediction.is_finite().then_some(prediction)
+}
+
+fn separates_segment(
+    normal: Vector,
+    start: &ResolvedCollider,
+    end: &ResolvedCollider,
+    target: &ResolvedCollider,
+) -> bool {
     // Treat the reported normal only as a candidate separating direction.
     // Nonnegative support gaps at both actual sphere centers certify the entire
     // linear segment for these convex primitives, independently of cast TOI.
-    let normal = contact.normal2;
     let length = normal.length();
     let ResolvedShape::Sphere { radius } = start.shape else {
         return false;
@@ -387,7 +472,6 @@ fn supporting_plane(
         && end_gap.is_finite()
         && start_gap >= 0.0
         && end_gap >= 0.0
-        && normal.dot(end_center - start_center) >= 0.0
 }
 
 enum Primitive {
@@ -566,7 +650,8 @@ mod tests {
             .is_err());
         let mut rotated = target;
         rotated.transform.rotation[2] = std::f32::consts::FRAC_PI_4;
-        let rotated_hit = world(vec![probe, rotated])
+        let rotated_world = world(vec![probe, rotated]);
+        let rotated_hit = rotated_world
             .sweep("probe", [4.0, 0.0, 0.0], &|| false)
             .unwrap();
         assert_eq!(rotated_hit.outcome, SweepOutcome::Blocked);
@@ -584,6 +669,39 @@ mod tests {
         assert!((sphere_hit.fraction - sphere_toi).abs() <= TOI_TOLERANCE);
         assert!(sphere_hit.suggested_translation.unwrap()[0] < -0.75);
         assert!((sphere_hit.point.unwrap()[0] + 0.5).abs() <= TOI_TOLERANCE);
+
+        // A true positive-clearance endpoint can certify approach to either
+        // primitive, including a rotated face, without requiring outward travel.
+        for (tested, hit, target_id) in [
+            (&initial, &blocked, "a-wall"),
+            (&sphere_target, &sphere_hit, "target"),
+            (&rotated_world, &rotated_hit, "a-wall"),
+        ] {
+            let probe = tested.probe("probe").unwrap();
+            let target = &tested
+                .entries
+                .iter()
+                .find(|entry| entry.id == target_id)
+                .unwrap()
+                .resolved;
+            let endpoint = probe.at(hit.suggested_translation.unwrap()).unwrap();
+            let prediction = endpoint_prediction(&endpoint, target).unwrap();
+            let value = super::contact(&endpoint, target, prediction, &|| false)
+                .unwrap()
+                .unwrap();
+            assert!(finite_contact(&value) && value.dist > 0.0);
+            assert!(separates_segment(
+                value.normal2,
+                &probe.resolved,
+                &endpoint,
+                target
+            ));
+            assert!(
+                value.normal2.dot(
+                    Vector::from_array(endpoint.center) - Vector::from_array(probe.resolved.center)
+                ) < 0.0
+            );
+        }
 
         // In the XY cross-section, the top-left box corner has radius .25
         // after sphere expansion. Binary-exact heights bracket true grazing
@@ -625,6 +743,25 @@ mod tests {
                 SweepOutcome::Clear,
                 "delta={delta:?}, result={result:?}"
             );
+            let probe = contact.probe("probe").unwrap();
+            let target = &contact
+                .entries
+                .iter()
+                .find(|entry| entry.id == "wall")
+                .unwrap()
+                .resolved;
+            let endpoint = probe.at(result.suggested_translation.unwrap()).unwrap();
+            let prediction = endpoint_prediction(&endpoint, target).unwrap();
+            let value = super::contact(&endpoint, target, prediction, &|| false)
+                .unwrap()
+                .unwrap();
+            assert!(finite_contact(&value) && value.dist >= 0.0);
+            assert!(separates_segment(
+                value.normal2,
+                &probe.resolved,
+                &endpoint,
+                target
+            ));
         }
         assert_eq!(
             contact
@@ -667,6 +804,12 @@ mod tests {
         ));
         let mut adversarial = native_contact;
         adversarial.normal2 = Vector::Y;
+        assert!(!separates_segment(
+            adversarial.normal2,
+            &start,
+            &tangent,
+            &target
+        ));
         assert!(!supporting_plane(
             Some(&adversarial),
             &start,
@@ -674,6 +817,159 @@ mod tests {
             &target,
             0.0001
         ));
+
+        // Deterministic numeric-admission seam evidence, not a claim that
+        // valid public geometry naturally produced this unsafe rounded pose.
+        // The crossing hit and negative endpoint below come from real fixed
+        // primitive queries. The prior accepted contact belongs to a-wall.
+        let failed_target = initial
+            .entries
+            .iter()
+            .find(|entry| entry.id == "z-wall")
+            .unwrap();
+        let crossing_start = initial.probe("probe").unwrap().resolved;
+        let mut crossing_end = crossing_start;
+        crossing_end.center[0] += 4.0;
+        let early_hit = super::cast(
+            &crossing_start,
+            Vector::new(4.0, 0.0, 0.0),
+            &failed_target.resolved,
+            0.0,
+            &|| false,
+        )
+        .unwrap()
+        .unwrap();
+        assert_eq!(early_hit.status, ShapeCastStatus::Converged);
+        assert!(finite_hit(&early_hit) && early_hit.time_of_impact < 1.0);
+        let rejected = reject_segment_evidence(
+            &blocked,
+            &crossing_start,
+            &crossing_end,
+            failed_target,
+            SegmentEvidence {
+                initial_contact: None,
+                endpoint_contact: None,
+                path_hit: Some(&early_hit),
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            rejected,
+            SweepResult {
+                outcome: SweepOutcome::PrecisionLimited,
+                suggested_translation: None,
+                fraction: blocked.fraction,
+                target_id: Some("z-wall".into()),
+                point: None,
+                normal: None,
+                clearance: blocked.clearance,
+            }
+        );
+        // A separated destination across the obstacle has an outward endpoint
+        // normal, but its start support gap is negative. It must use the cast.
+        let prediction = endpoint_prediction(&crossing_end, &failed_target.resolved).unwrap();
+        let separated_endpoint =
+            super::contact(&crossing_end, &failed_target.resolved, prediction, &|| {
+                false
+            })
+            .unwrap()
+            .unwrap();
+        assert!(finite_contact(&separated_endpoint) && separated_endpoint.dist > 0.0);
+        assert!(!separates_segment(
+            separated_endpoint.normal2,
+            &crossing_start,
+            &crossing_end,
+            &failed_target.resolved
+        ));
+        assert_eq!(
+            reject_segment_evidence(
+                &blocked,
+                &crossing_start,
+                &crossing_end,
+                failed_target,
+                SegmentEvidence {
+                    initial_contact: None,
+                    endpoint_contact: Some(&separated_endpoint),
+                    path_hit: Some(&early_hit)
+                },
+            ),
+            Some(rejected.clone())
+        );
+        let mut penetrated = crossing_start;
+        penetrated.center = failed_target.resolved.center;
+        let negative_contact = super::contact(&penetrated, &failed_target.resolved, 0.0, &|| false)
+            .unwrap()
+            .unwrap();
+        assert!(finite_contact(&negative_contact) && negative_contact.dist < 0.0);
+        assert_eq!(
+            reject_segment_evidence(
+                &blocked,
+                &crossing_start,
+                &penetrated,
+                failed_target,
+                SegmentEvidence {
+                    initial_contact: None,
+                    endpoint_contact: Some(&negative_contact),
+                    path_hit: None
+                },
+            ),
+            Some(rejected.clone())
+        );
+        let mut nonfinite_endpoint = separated_endpoint;
+        nonfinite_endpoint.normal2.x = f64::NAN;
+        assert_eq!(
+            reject_segment_evidence(
+                &blocked,
+                &crossing_start,
+                &crossing_end,
+                failed_target,
+                SegmentEvidence {
+                    initial_contact: None,
+                    endpoint_contact: Some(&nonfinite_endpoint),
+                    path_hit: None
+                },
+            ),
+            Some(rejected.clone())
+        );
+        let mut nonfinite_hit = early_hit;
+        nonfinite_hit.witness2.x = f64::NAN;
+        assert_eq!(
+            reject_segment_evidence(
+                &blocked,
+                &crossing_start,
+                &crossing_end,
+                failed_target,
+                SegmentEvidence {
+                    initial_contact: None,
+                    endpoint_contact: None,
+                    path_hit: Some(&nonfinite_hit)
+                },
+            ),
+            Some(rejected)
+        );
+
+        // Inject the same finite early-hit report into the genuine tangent
+        // geometry. Its independent support gaps alone justify the override.
+        let tangent_target = contact
+            .entries
+            .iter()
+            .find(|entry| entry.id == "wall")
+            .unwrap();
+        let tangent_result = contact.sweep("probe", [0.0, 0.25, 0.0], &|| false).unwrap();
+        assert_eq!(
+            reject_segment_evidence(
+                &tangent_result,
+                &start,
+                &tangent,
+                tangent_target,
+                SegmentEvidence {
+                    initial_contact: Some(&native_contact),
+                    endpoint_contact: None,
+                    path_hit: Some(&early_hit)
+                },
+            ),
+            None
+        );
         let inside = world(vec![
             sphere("probe", [0.0; 3], 0.25),
             wall("wall", [0.0; 3], [0.5; 3]),

@@ -1,6 +1,6 @@
 # P2a — Spatial Queries / Clearance Bench
 
-Proposed2026-11-07 by root/Astra after accepted [I1a](../evidence/I1A-readiness.md), product `03617eac6b64edd2c9fbe83aa17f4c0ff2bbb764`, documentary baseline `8d796c7`. **Approved2026-11-07. The user says “Set the goal and proceed”; P2a is now the active bounded goal.** Shape/API/library/version/budget choices below are agent proposals until the runnable gate.
+Proposed2026-11-07 by root/Astra after accepted [I1a](../evidence/I1A-readiness.md), product `03617eac6b64edd2c9fbe83aa17f4c0ff2bbb764`, documentary baseline `8d796c7`. **Approved2026-11-07. The user says “Set the goal and proceed”; P2a is now the active bounded goal.** The early runnable gate now accepts the bounded choices in [0038](../decisions/0038-spatial-query-feasibility.md#accepted-early-gate-and-consequences), including the explicit dense-cost qualification. Full milestone acceptance remains open.
 
 ## Proposed goal
 
@@ -95,3 +95,7 @@ Accessed2026-11-07. Parry documents shape casting with fixed initial orientation
 Godot's stable API documents distinct motion and overlap queries, including that its motion cast ignores already-overlapping shapes. Ruster must choose and verify its own initial-overlap policy rather than inherit an assumption through an example. [Godot PhysicsDirectSpaceState3D](https://docs.godotengine.org/en/stable/classes/class_physicsdirectspacestate3d.html).
 
 Resolve collider scale/offset semantics, query/API/version shapes, result caps/tie tolerances, initial penetration usability, diagnostic ownership and dependency footprint at the early gate. None is promoted to an accepted architecture choice by this proposal.
+
+## Early gate outcome —2026-11-07
+
+Root/Astra accept the finite query foundation under0038after actual shared-authoring/save/reopen/Lua/current-kit/native parity, numerical admission, atomicity, dependency/footprint and measured cost evidence. Final compact native contact feedback and endpoint keyboard navigation pass. Preserve the original dense-cost miss and finite workload qualification. Proceed to component authoring, native MCP mutation, visible primitive diagnostics and raw-draft recovery. This decision completes the early checkpoint alone. All finite final acceptance requirements above remain active.

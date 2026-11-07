@@ -111,6 +111,12 @@ fn spatial_lua_persists_stops_withdraws_and_commits_only_successful_observations
     assert_eq!(runtime.query_observations().len(), 2);
     assert_eq!(runtime.query_observations()[0].snapshot_tick, 0);
     assert_eq!(runtime.query_observations()[0].binding_id, "a-probe");
+    let mut identity = runtime.query_observations()[0].clone();
+    identity.snapshot_tick = 9_007_199_254_740_993;
+    identity.scene_revision = u64::MAX;
+    let wire = serde_json::to_value(identity).unwrap();
+    assert_eq!(wire["snapshot_tick"], "9007199254740993");
+    assert_eq!(wire["scene_revision"], "18446744073709551615");
     let QueryResult::Sweep { result, .. } = &runtime.query_observations()[0].query else {
         panic!("sweep")
     };
