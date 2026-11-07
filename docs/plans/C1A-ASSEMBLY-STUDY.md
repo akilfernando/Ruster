@@ -87,3 +87,8 @@ Stop after the complete requirement/evidence matrix, root/Astra outcome evaluati
 - [Godot Node3D](https://docs.godotengine.org/en/stable/classes/class_node3d.html) describes parent-relative affine transforms and explicit global values. [Node.reparent](https://docs.godotengine.org/en/stable/classes/class_node.html#class-node-method-reparent) makes keep-global behavior explicit for Node3D. These inform familiarity; Ruster's proposed Group boundary is narrower than Godot's general node tree.
 - [Khronos glTF transformations](https://registry.khronos.org/glTF/specs/2.0/glTF-2.0.html#transformations) distinguishes local TRS from accumulated parent/global matrices and constrains local matrix decomposition. Composed global transforms may still shear; the proposed uniform-parent restriction is Ruster's own finite choice, not a glTF requirement or glTF importer support.
 - Unity's legacy SetParent documentation URL redirected to an endpoint unavailable to the browser tool during this check; no full current Unity-document review is claimed.
+
+
+## Position after completed I1a — 2026-11-07
+
+I1a now completes the creator-input boundary selected in the priority reassessment. Root/Astra's next planning review recommends [P2a Spatial Queries / Clearance Bench](P2A-SPATIAL-QUERIES.md) to connect that input to authored surroundings. C1a remains the alternative for a connected-assembly bottleneck. This historical proposal retains its pre-I1a source/version assumptions and must be rebased before selection. No C1a implementation is approved by the new recommendation.

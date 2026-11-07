@@ -557,3 +557,10 @@ Astra maps compatibility/owning-version, immutable/atomic API, authority/debug, 
 
 
 Final Astra condition discharge2026-11-07 accepts the sealed99payload handoff and full bounded I1a scope, with no concrete unproven requirement. It checks source/documentary attribution, both application/kit/archive closures,118file preservation, actual copied launcher and desktop/process boundaries. Root updates acceptance status and reseals only documentary changes, preserving the preceding seal and acceptance record. No further product changes, source/GPU/measurement replay or automatic next goal follows.
+
+
+### Post-I1a next-goal planning — 2026-11-07
+
+Root reuses the same-session model snapshot and asks the existing Astra reviewer for a read-only strategic assessment. Astra compares composition, spatial interaction, player UI, audio/animation, content/visual improvements and retained debt. It recommends a bounded primitive-query creator workflow after completed input. Root inspects actual Scene/behavior/manipulation/dependency source, opens primary Parry/Godot documentation and writes P2a with explicit initial-overlap/snapshot/feedback/budget/library gates. C1a stays an alternative. Only proposal/roadmap/status documentation changes. No new goal, dependency, source implementation, build, native session or measurement starts. Agent elapsed/token/cost metrics remain unavailable.
+
+Astra accepts the P2a draft for user review after two precise clarifications. Root makes sphere-to-sphere/rotated-box query pairs explicit and bounds the complete Reset trial as well as each fixed tick. Initial penetration is a valid result, separate from execution failure. Non-Lua library work needs bounded scanning and cancellation/deadline checks. Documentation-only gate `python3 scripts/check.py` passes in0.15seconds before these amendments, and the amended gate passes in0.17seconds. No source test/build or implementation is claimed.
