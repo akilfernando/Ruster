@@ -12,10 +12,11 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 11;
+pub const FORMAT_VERSION: u32 = 12;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
+mod collider;
 pub mod input;
 mod lighting;
 mod lighting_authoring;
@@ -23,6 +24,7 @@ mod lighting_authoring;
 mod strict_json;
 mod surface;
 pub use authoring::*;
+pub use collider::{Collider, ColliderRole, ColliderShape, ResolvedCollider, ResolvedShape};
 pub use lighting::*;
 pub use lighting_authoring::LightingEdit;
 pub use surface::{DisplayProfile, MaterialResponse};
@@ -159,6 +161,9 @@ pub struct Object {
     /// Scene-owned material identity; None preserves legacy object color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
+    /// Explicit primitive query component, independent of the visible mesh.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub collider: Option<Collider>,
 }
 
 impl Object {
@@ -170,6 +175,7 @@ impl Object {
             color: [0.6, 0.6, 0.6, 1.0],
             mesh: None,
             material: None,
+            collider: None,
         }
     }
     pub fn display_name(&self) -> &str {
@@ -178,7 +184,11 @@ impl Object {
     pub fn validate(&self) -> Result<(), SceneError> {
         validate_id(&self.id)?;
         validate_name(self.name.as_deref())?;
-        self.transform.validate()?;
+        if let Some(collider) = self.collider {
+            collider.resolve(&self.transform)?;
+        } else {
+            self.transform.validate()?;
+        }
         if let Some(mesh) = &self.mesh {
             validate_id(mesh)?;
         }
@@ -259,6 +269,7 @@ impl Scene {
                 color,
                 mesh: None,
                 material: None,
+                collider: None,
             })
             .collect(),
         }
@@ -527,6 +538,11 @@ enum SceneDelta {
         before: Option<String>,
         after: Option<String>,
     },
+    Collider {
+        id: String,
+        before: Option<Collider>,
+        after: Option<Collider>,
+    },
     Color {
         id: String,
         before: [f32; 4],
@@ -561,7 +577,8 @@ impl SceneDelta {
             | Self::Transform { id: old, .. }
             | Self::Color { id: old, .. }
             | Self::Mesh { id: old, .. }
-            | Self::Material { id: old, .. } => old == id,
+            | Self::Material { id: old, .. }
+            | Self::Collider { id: old, .. } => old == id,
             Self::Transforms { changes } => changes.iter().any(|e| e.id == id),
             Self::Objects { created, deleted } => {
                 created.iter().chain(deleted).any(|e| e.object.id == id)
@@ -575,6 +592,28 @@ impl SceneDelta {
     fn apply(&self, scene: &mut Scene, undo: bool) -> Result<(), SceneError> {
         let inconsistent = || SceneError::Invalid("inconsistent authored history".into());
         match self {
+            Self::Collider { id, before, after } => {
+                validate_id(id)?;
+                for collider in [before, after].into_iter().flatten() {
+                    collider.validate()?;
+                }
+                let object = scene
+                    .objects
+                    .iter_mut()
+                    .find(|object| &object.id == id)
+                    .ok_or_else(inconsistent)?;
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &object.collider != expected {
+                    return Err(inconsistent());
+                }
+                // Coupled transform/component edits validate the complete state
+                // in Change::apply, preserving atomic grouped history.
+                object.collider = *replacement;
+            }
             Self::Display { before, after } => {
                 before.validate()?;
                 after.validate()?;
@@ -976,6 +1015,7 @@ impl From<LegacyDocument> for Document {
                         color: o.color,
                         mesh: None,
                         material: None,
+                        collider: None,
                     })
                     .collect(),
             },
@@ -1063,6 +1103,7 @@ impl From<V2Document> for Document {
                         color: o.color,
                         mesh: o.mesh,
                         material: None,
+                        collider: None,
                     })
                     .collect(),
             },
@@ -1163,6 +1204,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..12).contains(&version) {
+            reject_pre_v12_collider_fields(&value, version)?;
+        }
         if (1..11).contains(&version) {
             reject_pre_v11_input_fields(&value)?;
         }
@@ -1185,7 +1229,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=11 => serde_json::from_value(value)?,
+            5..=12 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1252,6 +1296,46 @@ impl Document {
                 .persist(path)
                 .map_err(|e| SceneError::Io(e.error))?;
         }
+        Ok(())
+    }
+}
+
+// Inspect actual Object owners and collider deltas only. Behavior properties
+// and JSON-looking source strings named collider retain their existing meaning.
+fn reject_pre_v12_collider_fields(
+    value: &serde_json::Value,
+    version: u64,
+) -> Result<(), SceneError> {
+    let has_collider = |object: &serde_json::Value| object.get("collider").is_some();
+    let mut found = value["scene"]["objects"]
+        .as_array()
+        .is_some_and(|objects| objects.iter().any(has_collider));
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            let deltas = if version <= 4 {
+                std::slice::from_ref(change)
+            } else {
+                change["scene"].as_array().map(Vec::as_slice).unwrap_or(&[])
+            };
+            for delta in deltas {
+                found |= match delta["kind"].as_str() {
+                    Some("collider") => true,
+                    Some("create" | "delete") => has_collider(&delta["object"]),
+                    Some("objects") => ["created", "deleted"].into_iter().any(|section| {
+                        delta[section].as_array().is_some_and(|entries| {
+                            entries.iter().any(|entry| has_collider(&entry["object"]))
+                        })
+                    }),
+                    _ => false,
+                };
+            }
+        }
+    }
+    if found {
+        Err(SceneError::Invalid(
+            "primitive colliders require scene v12".into(),
+        ))
+    } else {
         Ok(())
     }
 }
@@ -2011,7 +2095,8 @@ impl Session {
                     | SceneDelta::Transform { id, .. }
                     | SceneDelta::Color { id, .. }
                     | SceneDelta::Mesh { id, .. }
-                    | SceneDelta::Material { id, .. } => {
+                    | SceneDelta::Material { id, .. }
+                    | SceneDelta::Collider { id, .. } => {
                         used.insert(id);
                     }
                     SceneDelta::Transforms { changes } => {
@@ -2740,6 +2825,34 @@ impl Session {
                 after: Some(id.into()),
             }],
             ..Change::default()
+        })
+    }
+
+    /// Replace or remove one primitive component through shared authored history.
+    /// Invalid, stale and unchanged edits preserve revision, history and save state.
+    pub fn set_collider(
+        &mut self,
+        expected_revision: u64,
+        object_id: &str,
+        collider: Option<Collider>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        let object = self
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == object_id)
+            .ok_or_else(|| SceneError::ObjectNotFound(object_id.into()))?;
+        if let Some(value) = collider {
+            value.resolve(&object.transform)?;
+        }
+        if object.collider == collider {
+            return Ok(self.scene().revision);
+        }
+        self.commit_change(SceneDelta::Collider {
+            id: object_id.into(),
+            before: object.collider,
+            after: collider,
         })
     }
 
@@ -3661,6 +3774,11 @@ mod tests {
                             Some("n".repeat(128)),
                         )
                     })
+                    .map(|mut object| {
+                        // Retained components share this reachable-state byte oracle.
+                        object.collider = Some(Collider::default());
+                        object
+                    })
                     .collect(),
             )
             .unwrap();
@@ -3799,6 +3917,11 @@ mod tests {
         let mut session = Session::new(Scene::empty("owned")).unwrap();
         let mut cube = Object::cube("stable-a", Some("First object".into()));
         cube.mesh = Some("owned-mesh".into());
+        cube.collider = Some(Collider {
+            enabled: true,
+            role: ColliderRole::Sensor,
+            ..Collider::default()
+        });
         session.create(0, cube.clone()).unwrap();
         session.duplicate(1, "stable-a", "stable-b", None).unwrap();
         session
@@ -3806,6 +3929,7 @@ mod tests {
             .unwrap();
         assert_eq!(session.scene().objects[0].id, "stable-a");
         assert_eq!(session.scene().objects[1].display_name(), "First object");
+        assert_eq!(session.scene().objects[1].collider, cube.collider);
         session.delete(3, "stable-a").unwrap();
         session.delete(4, "stable-b").unwrap();
         assert!(session.scene().objects.is_empty());
@@ -3833,6 +3957,11 @@ mod tests {
             ["stable-a", "stable-b"]
         );
         assert_eq!(session.scene().objects[0].display_name(), "Renamed ✨");
+        assert!(session
+            .scene()
+            .objects
+            .iter()
+            .all(|object| object.collider == cube.collider));
         let before = session.document.clone();
         assert_eq!(
             session
@@ -4620,7 +4749,9 @@ mod tests {
             }
         }
         let mut behavior = Session::new(Scene::demo()).unwrap();
-        behavior.set_source(0, "source", Some(source(""))).unwrap();
+        behavior
+            .set_source(0, "source", Some(source("-- {\"collider\":null}")))
+            .unwrap();
         let mut b = binding("left", "source");
         b.properties
             .insert("display".into(), PropertyValue::Text("unrelated".into()));
@@ -4630,9 +4761,11 @@ mod tests {
             "roughness_texture".into(),
             PropertyValue::Text("unrelated".into()),
         );
+        b.properties
+            .insert("collider".into(), PropertyValue::Text("unrelated".into()));
         behavior.set_binding(1, "binding", Some(b)).unwrap();
         behavior.undo(2).unwrap();
-        for version in 5..=9 {
+        for version in 5..=11 {
             let mut old = serde_json::to_value(&behavior.document).unwrap();
             old["format_version"] = json!(version);
             let loaded = Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
@@ -4687,6 +4820,168 @@ mod tests {
             let mut value = legacy_value(&reopened.document);
             value["format_version"] = serde_json::json!(version);
             assert!(Session::from_snapshot_bytes(&serde_json::to_vec(&value).unwrap()).is_err());
+        }
+    }
+
+    // Unique risk: component and transform history must preserve valid sphere
+    // scaling atomically, while old labels reject only actual collider owners.
+    #[test]
+    fn collider_history_scale_and_version_guards_are_atomic() {
+        use serde_json::{json, Value};
+        let sphere = Collider {
+            enabled: true,
+            shape: ColliderShape::Sphere { radius: 0.25 },
+            ..Collider::default()
+        };
+        let mut session = Session::new(Scene::demo()).unwrap();
+        session.set_collider(0, "left", Some(sphere)).unwrap();
+        session.set_collider(1, "left", None).unwrap();
+        session.undo(2).unwrap();
+        let before = session.document.clone();
+        assert_eq!(session.set_collider(3, "left", Some(sphere)).unwrap(), 3);
+        assert!(matches!(
+            session.set_collider(2, "left", None),
+            Err(SceneError::StaleRevision { .. })
+        ));
+        assert!(matches!(
+            session.set_collider(3, "absent", None),
+            Err(SceneError::ObjectNotFound(_))
+        ));
+        assert!(session
+            .set_collider(
+                3,
+                "left",
+                Some(Collider {
+                    offset: [f32::NAN, 0.0, 0.0],
+                    ..sphere
+                })
+            )
+            .is_err());
+        let mut nonuniform = session.scene().objects[0].transform.clone();
+        nonuniform.scale = [1.0, 2.0, 1.0];
+        let mut moved = session.scene().objects[2].transform.clone();
+        moved.translation[1] = 2.0;
+        assert!(session
+            .edit_transforms(
+                3,
+                &[("right".into(), moved), ("left".into(), nonuniform.clone())]
+            )
+            .is_err());
+        assert_eq!(session.document, before);
+        assert_eq!(session.redo_len(), 1);
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("collider.json");
+        session.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.document, session.document);
+        assert_eq!(
+            Session::from_snapshot_bytes(&reopened.snapshot_bytes().unwrap())
+                .unwrap()
+                .document,
+            reopened.document
+        );
+        reopened.redo(3).unwrap();
+        assert!(reopened.scene().objects[0].collider.is_none());
+        reopened.undo(4).unwrap();
+        let mut scaled = reopened.scene().objects[0].transform.clone();
+        scaled.scale = [2.0; 3];
+        reopened.edit(5, "left", &scaled).unwrap();
+        assert_eq!(
+            reopened.scene().objects[0]
+                .collider
+                .unwrap()
+                .resolve(&scaled)
+                .unwrap()
+                .unwrap()
+                .shape,
+            ResolvedShape::Sphere { radius: 0.5 }
+        );
+        reopened
+            .set_collider(
+                6,
+                "left",
+                Some(Collider {
+                    enabled: false,
+                    ..sphere
+                }),
+            )
+            .unwrap();
+        reopened.edit(7, "left", &nonuniform).unwrap();
+        let before = reopened.document.clone();
+        assert!(reopened.set_collider(8, "left", Some(sphere)).is_err());
+        assert_eq!(reopened.document, before);
+        reopened.document.validate().unwrap();
+        let mut corrupt = serde_json::to_value(&session.document).unwrap();
+        corrupt["undo"][0]["scene"][0]["after"]["shape"]["radius"] = json!(0.5);
+        assert!(Session::from_snapshot_bytes(&serde_json::to_vec(&corrupt).unwrap()).is_err());
+
+        let baseline = serde_json::to_value(Document::new(Scene::demo())).unwrap();
+        for version in 1..=11 {
+            let mut old = baseline.clone();
+            old["format_version"] = json!(version);
+            let loaded = Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
+            assert_eq!(loaded.scene(), &Scene::demo());
+            assert_eq!(loaded.loaded_format_version(), version);
+            for payload in [
+                Value::Null,
+                serde_json::to_value(Collider::default()).unwrap(),
+            ] {
+                let mut bad = old.clone();
+                bad["scene"]["objects"][0]["collider"] = payload;
+                assert!(
+                    matches!(Document::decode(&serde_json::to_vec(&bad).unwrap()),
+                    Err(SceneError::Invalid(message)) if message.contains("colliders require scene v12"))
+                );
+            }
+        }
+        // Representative scalar/grouped envelopes cover both stacks and both
+        // lifecycle payload lists. Null remains a field-presence violation.
+        let mut object = serde_json::to_value(Object::cube("held", None)).unwrap();
+        object["collider"] = Value::Null;
+        for (version, stack, delta) in [
+            (
+                3,
+                "undo",
+                json!({"kind":"create","object":object,"index":0}),
+            ),
+            (
+                4,
+                "redo",
+                json!({"kind":"delete","object":object,"index":0}),
+            ),
+            (
+                4,
+                "undo",
+                json!({"kind":"objects","created":[{"object":object,"index":0}],"deleted":[]}),
+            ),
+            (
+                5,
+                "redo",
+                json!({"kind":"objects","created":[],"deleted":[{"object":object,"index":0}]}),
+            ),
+            (
+                11,
+                "undo",
+                json!({"kind":"collider","id":"left","before":null,"after":null}),
+            ),
+            (
+                11,
+                "redo",
+                json!({"kind":"collider","id":"left","before":null,"after":null}),
+            ),
+        ] {
+            let mut bad = baseline.clone();
+            bad["format_version"] = json!(version);
+            bad[stack] = if version <= 4 {
+                json!([delta])
+            } else {
+                json!([{"scene":[delta]}])
+            };
+            assert!(
+                matches!(Document::decode(&serde_json::to_vec(&bad).unwrap()),
+                Err(SceneError::Invalid(message)) if message.contains("colliders require scene v12")),
+                "{version}/{stack}"
+            );
         }
     }
 

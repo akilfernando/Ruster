@@ -5837,6 +5837,7 @@ mod tests {
             BTreeMap::from([("texture".into(), new_texture.clone())]),
         ));
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            query_observations: None,
             key: first,
             tick: 0,
             scene: Arc::new(Scene::demo()),
@@ -5864,6 +5865,7 @@ mod tests {
             &old_texture
         ));
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            query_observations: None,
             key: second,
             tick: 0,
             scene: Arc::new(Scene::demo()),

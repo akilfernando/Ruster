@@ -49,6 +49,8 @@ ROUGHNESS_PROFILE = {**PROFILE, "descriptor_version": 4,
                      "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps"]}
 INPUT_PROFILE = {**ROUGHNESS_PROFILE, "descriptor_version": 5,
                  "capabilities": [*ROUGHNESS_PROFILE["capabilities"], "input_actions"]}
+SPATIAL_PROFILE = {**INPUT_PROFILE,
+                   "capabilities": [*INPUT_PROFILE["capabilities"], "spatial_queries"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -162,7 +164,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -477,6 +479,70 @@ def validate_input_fields(document: dict) -> None:
                         definition(delta[endpoint])
 
 
+def validate_collider_fields(document: dict) -> None:
+    """Admit actual collider wire owners; typed runtime owns transforms/history."""
+    version = document["format_version"]
+
+    def vector(value: object, minimum: float, maximum: float, label: str) -> None:
+        if (not isinstance(value, list) or len(value) != 3 or any(
+                type(component) not in (int, float) or not minimum <= component <= maximum
+                or not math.isfinite(component) for component in value)):
+            raise ValueError(f"invalid collider {label}")
+
+    def component(value: object) -> None:
+        if value is None:
+            return  # Optional whole component; old-version presence rejects below.
+        exact_fields(value, {"enabled", "role", "offset", "shape"}, "collider")
+        if type(value["enabled"]) is not bool or value["role"] not in ("blocker", "sensor"):
+            raise ValueError("invalid collider enabled flag or role")
+        vector(value["offset"], -10000, 10000, "offset")
+        shape = value["shape"]
+        if not isinstance(shape, dict) or shape.get("type") not in ("sphere", "box"):
+            raise ValueError("invalid collider shape")
+        if shape["type"] == "sphere":
+            exact_fields(shape, {"type", "radius"}, "collider sphere")
+            radius = shape["radius"]
+            if type(radius) not in (int, float) or not .001 <= radius <= 1000 or not math.isfinite(radius):
+                raise ValueError("collider radius must be finite in .001..1000")
+        else:
+            exact_fields(shape, {"type", "half_extents"}, "collider box")
+            vector(shape["half_extents"], .001, 1000, "half extents")
+
+    def object_fields(value: object) -> None:
+        if isinstance(value, dict) and "collider" in value:
+            if version < 12:
+                raise ValueError("collider fields require Scene12 spatial_queries")
+            component(value["collider"])
+
+    scene = document.get("scene", {})
+    objects = scene.get("objects", []) if isinstance(scene, dict) else []
+    for obj in objects if isinstance(objects, list) else []:
+        object_fields(obj)
+    for stack in ("undo", "redo"):
+        changes = document.get(stack, [])
+        for change in changes if isinstance(changes, list) else []:
+            if not isinstance(change, dict):
+                continue
+            deltas = [change] if version <= 4 else change.get("scene", [])
+            for delta in deltas if isinstance(deltas, list) else []:
+                if not isinstance(delta, dict):
+                    continue
+                kind = delta.get("kind")
+                if kind == "collider":
+                    if version < 12:
+                        raise ValueError("collider history requires Scene12 spatial_queries")
+                    for endpoint in ("before", "after"):
+                        component(delta.get(endpoint))
+                elif kind in ("create", "delete"):
+                    object_fields(delta.get("object"))
+                elif kind == "objects":
+                    for section in ("created", "deleted"):
+                        entries = delta.get(section, [])
+                        for entry in entries if isinstance(entries, list) else []:
+                            if isinstance(entry, dict):
+                                object_fields(entry.get("object"))
+
+
 def authored_actions(document: dict) -> dict:
     """Expected typed current map; only optional null labels omit on serialization."""
     validate_input_fields(document)
@@ -496,8 +562,9 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     version = document.get("format_version")
     scene = document.get("scene")
     if (document.get("format") != "ruster-scene" or type(version) is not int
-            or not 1 <= version <= 11 or not isinstance(scene, dict)):
-        raise ValueError("content requires a supported Scene1–11 document")
+            or not 1 <= version <= 12 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–12 document")
+    validate_collider_fields(document)
     validate_input_fields(document)
     validate_sun_shadows(document)
     validate_surface_fields(document)
@@ -556,9 +623,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
-    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7):
+    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7, 8):
         raise ValueError("invalid content schema")
-    tick_field = "tick_nanos" if schema == 7 else "tick_millis"
+    tick_field = "tick_nanos" if schema in (7, 8) else "tick_millis"
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
@@ -566,7 +633,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     if "initial_camera" in content:
         content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
-    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema == 7 else (1, 1000)
+    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema in (7, 8) else (1, 1000)
     if (not isinstance(title, str) or not title or title != title.strip()
             or len(title.encode()) > 128 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in title)
             or type(content[tick_field]) is not int or not tick_minimum <= content[tick_field] <= tick_maximum):
@@ -583,8 +650,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
             or schema == 4 and document["format_version"] != 8
             or schema == 5 and document["format_version"] != 9
             or schema == 6 and document["format_version"] != 10
-            or schema == 7 and document["format_version"] != 11):
-        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11")
+            or schema == 7 and document["format_version"] != 11
+            or schema == 8 and document["format_version"] != 12):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12")
     meshes, textures = content["meshes"], content.get("textures", {})
     if (not isinstance(meshes, dict) or not isinstance(textures, dict)
             or len(meshes) + len(textures) > MAX_MESHES):
@@ -621,6 +689,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
 
 def typed_scene(document: dict) -> dict:
     """Scene fields are f32; serde_json::Value exposes their exact f64 promotions."""
+    validate_collider_fields(document)
     validate_input_fields(document)
     validate_sun_shadows(document)
     validate_surface_fields(document)
@@ -672,9 +741,17 @@ def typed_scene(document: dict) -> dict:
                 if material.get(field) is None:
                     material.pop(field, None)
         for obj in scene["objects"]:
-            for field in ("name", "mesh", "material"):
+            for field in ("name", "mesh", "material", "collider"):
                 if obj.get(field) is None:
                     obj.pop(field, None)
+            if obj.get("collider") is not None:
+                collider = obj["collider"]
+                collider["offset"] = [struct.unpack("f", struct.pack("f", value))[0] for value in collider["offset"]]
+                shape = collider["shape"]
+                if shape["type"] == "sphere":
+                    shape["radius"] = struct.unpack("f", struct.pack("f", shape["radius"]))[0]
+                else:
+                    shape["half_extents"] = [struct.unpack("f", struct.pack("f", value))[0] for value in shape["half_extents"]]
             obj["color"] = [struct.unpack("f", struct.pack("f", value))[0] for value in obj["color"]]
             for field in ("translation", "rotation", "scale"):
                 obj["transform"][field] = [struct.unpack("f", struct.pack("f", value))[0]
@@ -689,23 +766,25 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
     content, scene_data, document, source_specs = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
-    if content["schema"] == 7 and kit["profile"] != INPUT_PROFILE:
+    if content["schema"] == 8 and kit["profile"] != SPATIAL_PROFILE:
+        raise ValueError("runtime kit does not support Scene12 spatial_queries; prepare a current runtime kit")
+    if content["schema"] == 7 and kit["profile"] not in (INPUT_PROFILE, SPATIAL_PROFILE):
         raise ValueError("runtime kit does not support Scene11 input_actions; prepare a current runtime kit")
-    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE):
+    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
         raise ValueError("runtime kit does not support Scene10 roughness_maps; prepare a current runtime kit")
-    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE):
+    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
         raise ValueError("runtime kit does not support Scene9 surface_materials; prepare a current runtime kit")
-    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE):
+    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
         raise ValueError("runtime kit does not support Scene8 sun_shadows; prepare a current runtime kit")
-    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE):
+    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
         raise ValueError("runtime kit does not support Scene7 authored_lighting; prepare a current runtime kit")
-    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE):
+    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
-    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE):
+    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5}[content["schema"]]
-    tick_field = "tick_nanos" if content["schema"] == 7 else "tick_millis"
-    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] == 7 else 1000)
+    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5}[content["schema"]]
+    tick_field = "tick_nanos" if content["schema"] in (7, 8) else "tick_millis"
+    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] in (7, 8) else 1000)
     descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
                   "scene": "resources/scene.json", tick_field: content[tick_field],
                   "meshes": {identity: "resources/" + record["path"]
@@ -747,7 +826,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             raise ValueError("runtime preflight did not retain creation identity, tick or authored scene")
         if camera is not None and result.get("initial_camera") != camera:
             raise ValueError("runtime preflight did not retain explicit initial camera")
-        if content["schema"] == 7 and result.get("authored_actions") != authored_actions(document):
+        if content["schema"] in (7, 8) and result.get("authored_actions") != authored_actions(document):
             raise ValueError("runtime preflight did not retain authored input actions")
         cancelled(cancel_file)
         manifest = {"schema": 1, "kind": "ruster-creation-package", "application": "application",

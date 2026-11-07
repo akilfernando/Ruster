@@ -36,6 +36,7 @@ pub(super) struct Frame {
     pub tick: u64,
     pub scene: Arc<Scene>,
     pub input: Option<Arc<LastConsumedInput>>,
+    pub query_observations: Option<Arc<[ruster_behavior::QueryObservation]>>,
 }
 pub(super) type InputMapIdentity = [u8; 32];
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
@@ -943,6 +944,12 @@ fn frame(shared: &Shared, execution: &Execution, repaint: &Option<Repaint>) {
             .scene()
             .clone(),
     );
+    let observations = execution
+        .runtime
+        .as_ref()
+        .expect("run info includes runtime")
+        .query_observations();
+    let query_observations = (!observations.is_empty()).then(|| Arc::from(observations));
     let mut latest = shared.latest.lock().unwrap_or_else(|p| p.into_inner());
     if active(shared, info.key) && !shared.cancel.load(Ordering::SeqCst) {
         *latest = Some(Frame {
@@ -950,6 +957,7 @@ fn frame(shared: &Shared, execution: &Execution, repaint: &Option<Repaint>) {
             tick: info.tick,
             scene,
             input: execution.last_input.clone(),
+            query_observations,
         });
     }
     drop(latest);

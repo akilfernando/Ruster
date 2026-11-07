@@ -93,6 +93,11 @@ impl GenericMotionLab {
     pub fn runtime_tick(&self) -> Option<u64> {
         self.runtime.as_ref().map(Runtime::tick)
     }
+    pub fn query_observations(&self) -> &[ruster_behavior::QueryObservation] {
+        self.runtime
+            .as_ref()
+            .map_or(&[], Runtime::query_observations)
+    }
     pub fn fixed_dt(&self) -> Duration {
         self.fixed_dt
     }

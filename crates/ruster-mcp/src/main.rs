@@ -1471,5 +1471,38 @@ mod tests {
             )
             .unwrap();
         assert_eq!(response["result"]["isError"], false);
+
+        // Unique relay risk observed with spatial f64 contact coordinates. Decode
+        // the actual editor decimal as exchange() does, then preserve its bits in
+        // both MCP result representations and across JSON transport serialization.
+        let coordinate = 4.0543599477693704e-7_f64;
+        let response = server
+            .handle(
+                br#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"inspect"}}"#,
+                |_, _| {
+                    serde_json::from_slice(
+                        br#"{"ok":true,"result":{"point":[4.0543599477693704e-7]}}"#,
+                    )
+                    .unwrap()
+                },
+            )
+            .unwrap();
+        let transported: Value =
+            serde_json::from_slice(&serde_json::to_vec(&response).unwrap()).unwrap();
+        let structured = &transported["result"]["structuredContent"];
+        assert_eq!(
+            structured["result"]["point"][0].as_f64().unwrap().to_bits(),
+            coordinate.to_bits()
+        );
+        let text: Value = serde_json::from_str(
+            transported["result"]["content"][0]["text"]
+                .as_str()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            text["result"]["point"][0].as_f64().unwrap().to_bits(),
+            coordinate.to_bits()
+        );
     }
 }

@@ -10,6 +10,7 @@ repository.workspace = true
 [dependencies]
 ruster-scene = { path = "../ruster-scene" }
 mlua = { version = "=0.12.2", path = "../../third_party/mlua", features = ["lua54", "vendored"] }
+parry3d = { package = "parry3d-f64", version = "=0.31.1", default-features = false, features = ["required-features", "std", "alloc"] }
 sha2 = "0.10.9"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

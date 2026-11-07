@@ -531,6 +531,14 @@ impl RuntimeUi {
                 }
                 None => json!({"status":"unavailable"}),
             };
+            // Observations travel with the immutable committed frame. Preserve
+            // stale/run metadata rather than presenting them as live geometry.
+            let queries = self
+                .frame
+                .as_ref()
+                .and_then(|frame| frame.query_observations.as_deref())
+                .unwrap_or(&[]);
+            let query_page: Vec<_> = queries.iter().skip(offset).take(16).collect();
             let objects: Vec<_> = self
                 .frame
                 .iter()
@@ -544,7 +552,7 @@ impl RuntimeUi {
                 .as_ref()
                 .map_or(0, |frame| frame.scene.objects.len());
             return Ok(
-                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"input_observation":"Committed tick snapshots do not report current physical key state.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string())}),
+                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Committed tick snapshots do not report current physical key state.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string())}),
             );
         }
         if op == "behavior_breakpoints" {

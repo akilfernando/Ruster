@@ -275,6 +275,45 @@
       "accessed": "2026-11-06",
       "packages": [],
       "component": "Non-Cargo Khronos PBR Neutral GLSL-to-WGSL translation in ruster-render; included in all distributed supplemental notices"
+    },
+    {
+      "path": "licenses/parry3d-f64-LICENSE-APACHE.txt",
+      "sha256": "ceacfa4d7fa67df64ab09a56fe248c50a3bfc9bc00374d69bd74ad763b14b89c",
+      "source": "https://raw.githubusercontent.com/dimforge/parry/3383f51cbbe9af70565427e7a66c605e1557c1fc/LICENSE",
+      "accessed": "2026-11-07",
+      "packages": [
+        {
+          "name": "parry3d-f64",
+          "version": "0.31.1"
+        }
+      ],
+      "notes": "Published crate omits readable license files. Its .cargo_vcs_info.json records commit3383f51cbbe9af70565427e7a66c605e1557c1fc, path crates/parry3d-f64 and dirty=true. That upstream crate inherits workspace version0.31.1 and Apache-2.0. Exact root LICENSE bytes match Git blob97f4383a35a48ddd50566a879e836491d2fe9b75. The complete commit tree has no NOTICE file. No clean publication tree is inferred."
+    },
+    {
+      "path": "licenses/rstar-LICENSE-APACHE.txt",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "source": "https://raw.githubusercontent.com/georust/rstar/72ca121d1c0f835e1a3bb975d45fd1b115da1b95/LICENSE-APACHE",
+      "accessed": "2026-11-07",
+      "packages": [
+        {
+          "name": "rstar",
+          "version": "0.13.1"
+        }
+      ],
+      "notes": "Published crate omits readable license files. Its .cargo_vcs_info.json records commit72ca121d1c0f835e1a3bb975d45fd1b115da1b95 and path rstar. The upstream crate manifest matches version0.13.1 and MIT OR Apache-2.0. Exact root LICENSE-APACHE bytes match Git blob16fe87b06e802f094b3fbb0894b137bca2b16ef1. The complete commit tree has no NOTICE file."
+    },
+    {
+      "path": "licenses/rstar-LICENSE-MIT.txt",
+      "sha256": "9b3a76c27bac8f3e0ff2d1f64f65941c50310ae3ff69318cea230bd4a36822c5",
+      "source": "https://raw.githubusercontent.com/georust/rstar/72ca121d1c0f835e1a3bb975d45fd1b115da1b95/LICENSE-MIT",
+      "accessed": "2026-11-07",
+      "packages": [
+        {
+          "name": "rstar",
+          "version": "0.13.1"
+        }
+      ],
+      "notes": "Published crate omits readable license files. Its .cargo_vcs_info.json records commit72ca121d1c0f835e1a3bb975d45fd1b115da1b95 and path rstar. The upstream crate manifest matches version0.13.1 and MIT OR Apache-2.0. Exact root LICENSE-MIT bytes match Git blobc2ddafbb7dbb8d8d667ef6acb0c38cda8f03fbd4. The complete commit tree has no NOTICE file."
     }
   ]
 }

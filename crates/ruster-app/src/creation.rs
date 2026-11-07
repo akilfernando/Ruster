@@ -259,6 +259,9 @@ impl CreationManifest {
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
         let session = ruster_scene::Session::from_snapshot_bytes(&bytes)
             .map_err(|error| error.to_string())?;
+        if session.loaded_format_version() >= 12 && self.version < 5 {
+            return Err("Scene12 spatial_queries requires descriptor version 5".into());
+        }
         if session.loaded_format_version() >= 11 && self.version < 5 {
             return Err("Scene11 input_actions requires descriptor version 5".into());
         }
@@ -352,6 +355,33 @@ mod tests {
             .get("initial_camera")
             .is_none());
         assert_eq!(loaded.tick_duration(), Duration::from_nanos(16_666_667));
+        // Descriptor5 remains the nanos carrier for Scene12, including disabled
+        // components. Earlier descriptor versions cannot relabel this content.
+        let mut spatial: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        spatial["scene"]["objects"][0]["collider"] =
+            serde_json::to_value(ruster_scene::Collider::default()).unwrap();
+        std::fs::write(&scene_path, serde_json::to_vec(&spatial).unwrap()).unwrap();
+        assert_eq!(
+            loaded.load_session(&root).unwrap().scene().objects[0].collider,
+            Some(ruster_scene::Collider::default())
+        );
+        let mut old_spatial = manifest.clone();
+        old_spatial.version = 4;
+        old_spatial.tick_millis = Some(100);
+        old_spatial.tick_nanos = None;
+        assert!(old_spatial
+            .load_session(&root)
+            .unwrap_err()
+            .contains("Scene12 spatial_queries"));
+        let mut input_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        input_scene["format_version"] = serde_json::json!(11);
+        std::fs::write(&scene_path, serde_json::to_vec(&input_scene).unwrap()).unwrap();
+        loaded.load_session(&root).unwrap();
+        assert!(old_spatial
+            .load_session(&root)
+            .unwrap_err()
+            .contains("Scene11 input_actions"));
+        std::fs::write(&scene_path, &original).unwrap();
         for version in 1..=4 {
             let mut old = manifest.clone();
             old.version = version;
@@ -497,7 +527,7 @@ mod tests {
             assert!(old
                 .load_session(&root)
                 .unwrap_err()
-                .contains("Scene11 input_actions"));
+                .contains("Scene12 spatial_queries"));
             // Genuine old documents still load through old descriptors.
             let mut old_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
             old_scene["format_version"] = serde_json::json!(9);

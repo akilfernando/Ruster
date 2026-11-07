@@ -3778,6 +3778,7 @@ mod tests {
                 editor.resolved.clear();
                 editor.reset_assets = Some((key, BTreeMap::new(), BTreeMap::new()));
                 editor.runtime.frame = Some(crate::behavior_worker::Frame {
+                    query_observations: None,
                     input: None,
                     key,
                     tick: 0,
@@ -4299,6 +4300,7 @@ mod tests {
                         });
                         editor.reset_assets = Some((key, BTreeMap::new(), BTreeMap::new()));
                         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+                            query_observations: None,
                             input: None,
                             key,
                             tick: 0,
@@ -4402,6 +4404,7 @@ mod tests {
                         // RuntimeUi::complete_reset publishes these together before
                         // SceneEditor polls the matching resource snapshot.
                         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+                            query_observations: None,
                             input: None,
                             key,
                             tick: 0,

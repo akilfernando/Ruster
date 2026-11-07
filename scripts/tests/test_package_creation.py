@@ -477,7 +477,61 @@ class CreationDistributionTests(unittest.TestCase):
                 (content_root/"content.json").write_bytes(package_creation.encoded(bad))
                 with self.assertRaises(ValueError):
                     package_creation.source_content(content_root, None)
-                # The input-capable kit still accepts the unchanged Scene10 route.
+                # Scene12/schema8 keeps Descriptor5 nanos and requires the new
+                # exact capability even when its only collider is disabled.
+                spatial_scene = copy.deepcopy(input_scene)
+                spatial_scene["format_version"] = 12
+                spatial_scene["scene"]["objects"][0]["collider"] = {
+                    "enabled": False, "role": "blocker", "offset": [0.1, 0, 0],
+                    "shape": {"type": "sphere", "radius": .001}}
+                spatial_scene["authoring"]["sources"]["query-source"] = {
+                    "language_id": "lua54", "host_api_version": 3, "text": "return {}"}
+                spatial_bytes = package_creation.encoded(spatial_scene)
+                spatial_content = {**input_content, "schema": 8,
+                                   "scene_sha256": package_creation.sha256(spatial_bytes)}
+                (content_root/"scene.json").write_bytes(spatial_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(spatial_content))
+                with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old spatial preflight")), \
+                        patch.object(package_creation.tempfile, "TemporaryDirectory", side_effect=AssertionError("old spatial staging")):
+                    with self.assertRaisesRegex(ValueError, "Scene12 spatial_queries"):
+                        package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                for change in ({"tick_nanos": None}, {"tick_nanos": True}, {"tick_millis": 100}):
+                    (content_root/"content.json").write_bytes(package_creation.encoded({**spatial_content, **change}))
+                    with self.subTest(spatial_tick=change), self.assertRaises(ValueError):
+                        package_creation.source_content(content_root, None)
+                (content_root/"content.json").write_bytes(package_creation.encoded(spatial_content))
+                capable["profile"] = package_creation.SPATIAL_PROFILE
+                (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                spatial_response = {**input_response, "authored_scene": package_creation.typed_scene(spatial_scene)}
+                with patch.object(package_creation, "run_runtime", return_value={**spatial_response, "authored_actions": {}}):
+                    with self.assertRaisesRegex(ValueError, "retain authored input actions"):
+                        package_creation.package(kit, content_root, failed)
+                wrong_collider = copy.deepcopy(spatial_response)
+                wrong_collider["authored_scene"]["objects"][0].pop("collider")
+                with patch.object(package_creation, "run_runtime", return_value=wrong_collider):
+                    with self.assertRaisesRegex(ValueError, "identity, tick or authored scene"):
+                        package_creation.package(kit, content_root, failed)
+                spatial_output = base/"spatial.tar.gz"
+                with patch.object(package_creation, "run_runtime", return_value=spatial_response):
+                    package_creation.package(kit, content_root, spatial_output)
+                with tarfile.open(spatial_output) as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"], 5)
+                    self.assertEqual(descriptor["tick_nanos"], 16_666_667)
+                    self.assertNotIn("tick_millis", descriptor)
+                    self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"], package_creation.SPATIAL_PROFILE)
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), spatial_bytes)
+                # Keep historical fixtures intact and reuse the existing older
+                # content branches under the newest cumulative runtime profile.
+                for old_content, old_scene, old_response, name in (
+                        (input_content, input_bytes, input_response, "input-with-spatial-kit"),
+                        (shadow_content, shadow_bytes, shadow_response, "shadow-with-spatial-kit")):
+                    (content_root/"scene.json").write_bytes(old_scene)
+                    (content_root/"content.json").write_bytes(package_creation.encoded(old_content))
+                    with patch.object(package_creation, "run_runtime", return_value=old_response):
+                        package_creation.package(kit, content_root, base/(name+".tar.gz"))
+                # The spatial-capable kit still accepts the unchanged Scene10 route.
                 (content_root/"scene.json").write_bytes(mapped_bytes)
                 (content_root/"content.json").write_bytes(package_creation.encoded(mapped_content))
                 with patch.object(package_creation, "run_runtime", return_value=mapped_response):
@@ -550,6 +604,7 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.ROUGHNESS_PROFILE, "capabilities": package_creation.ROUGHNESS_PROFILE["capabilities"][:-2]+["roughness_maps","surface_materials"]},
                         {**package_creation.INPUT_PROFILE, "descriptor_version":4},
                         {**package_creation.INPUT_PROFILE, "capabilities": ["input_actions", *package_creation.ROUGHNESS_PROFILE["capabilities"]]},
+                        {**package_creation.SPATIAL_PROFILE, "capabilities": ["spatial_queries", *package_creation.INPUT_PROFILE["capabilities"]]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
                         package_creation.check_profile(invalid_profile)
@@ -774,6 +829,51 @@ class CreationDistributionTests(unittest.TestCase):
         package_creation.validate_input_fields(unrelated)
         with self.assertRaisesRegex(ValueError, "duplicate JSON field"):
             package_creation.decode(b'{"authoring":{"actions":{"a":{},"a":{}}}}', "duplicate action IDs")
+        # Packaging must independently admit exact component owners before any
+        # runtime staging, while leaving transform/history semantics to Session.
+        collider = {"enabled": False, "role": "sensor", "offset": [.1, 0, 0],
+                    "shape": {"type": "box", "half_extents": [.001, .2, 1000]}}
+        spatial = {"format_version": 12, "scene": {"id": "spatial", "revision": 0, "objects": [{
+            "id": "probe", "transform": {"translation": [0,0,0], "rotation": [0,0,0], "scale": [1,1,1]},
+            "color": [1,1,1,1], "collider": collider}]}, "undo": [], "redo": []}
+        package_creation.validate_collider_fields(spatial)
+        typed = package_creation.typed_scene(spatial)["objects"][0]["collider"]
+        self.assertEqual(typed["offset"][0], struct.unpack("f",struct.pack("f",.1))[0])
+        self.assertEqual(typed["shape"]["half_extents"][0], struct.unpack("f",struct.pack("f",.001))[0])
+        empty = copy.deepcopy(spatial)
+        empty["scene"]["objects"][0]["collider"] = None
+        self.assertNotIn("collider", package_creation.typed_scene(empty)["objects"][0])
+        for component in (
+                {**collider, "extra": 0}, {**collider, "shape": None}, {**collider, "role": "other"},
+                {**collider, "offset": [float("inf"), 0, 0]},
+                {**collider, "shape": {"type": "box", "half_extents": [1,1000.00000001,1]}},
+                {**collider, "shape": {"type": "sphere"}},
+                {**collider, "shape": {"type": "sphere", "radius": .000999999999}},
+                {**collider, "shape": {"type": "sphere", "radius": True}}):
+            invalid = copy.deepcopy(spatial)
+            invalid["scene"]["objects"][0]["collider"] = component
+            with self.subTest(collider=component), self.assertRaises(ValueError):
+                package_creation.validate_collider_fields(invalid)
+        for version, stack, delta in (
+                (3, "undo", {"kind":"create","object":{"collider":None}}),
+                (4, "redo", {"kind":"objects","created":[],"deleted":[{"object":{"collider":None}}]}),
+                (11, "undo", {"kind":"collider","before":None,"after":None})):
+            invalid = {"format_version": version, "scene": {"objects": []}, stack:
+                [delta] if version <= 4 else [{"scene": [delta]}]}
+            with self.subTest(collider_history=(version,stack)), self.assertRaisesRegex(ValueError,"Scene12 spatial_queries"):
+                package_creation.validate_collider_fields(invalid)
+        for payload in (None, collider):
+            invalid = copy.deepcopy(spatial)
+            invalid["format_version"] = 11
+            invalid["scene"]["objects"][0]["collider"] = payload
+            with self.assertRaisesRegex(ValueError,"Scene12 spatial_queries"):
+                package_creation.validate_collider_fields(invalid)
+        invalid = {"format_version":12,"scene":{"objects":[]},"redo":[{"scene":[{
+            "kind":"collider","before":None,"after":{**collider,"enabled":None}}]}]}
+        with self.assertRaises(ValueError): package_creation.validate_collider_fields(invalid)
+        unrelated["authoring"]["sources"]["source"]["text"] = '{"collider":null}'
+        unrelated["authoring"]["bindings"]["object"]["properties"]["collider"] = None
+        package_creation.validate_collider_fields(unrelated)
 
     @unittest.skipUnless(sys.platform == "linux", "Linux process lifecycle required")
     def test_cancellation_reaps_the_owned_preflight_child(self):

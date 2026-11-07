@@ -17,6 +17,10 @@ use ruster_scene::{Authoring, BehaviorBinding, BehaviorSource, PropertyValue, Sc
 use sha2::{Digest, Sha256};
 
 pub mod debug;
+pub mod spatial;
+mod spatial_host;
+use spatial_host::{install_spatial, QueryInvocation};
+pub use spatial_host::{QueryObservation, QueryResult};
 
 /// Exact current editor/Scene11 export quantum (~60Hz). The public Engine
 /// Limits default retains its original numerical dt for API1 callers.
@@ -25,6 +29,9 @@ pub const LANGUAGE_ID: &str = "lua54";
 pub const HOST_API_VERSION: u32 = 1;
 /// Explicit opt-in logical-action queries; API1 environments remain unchanged.
 pub const INPUT_HOST_API_VERSION: u32 = 2;
+/// Explicit opt-in primitive spatial queries, retaining API2 action queries.
+pub const SPATIAL_HOST_API_VERSION: u32 = 3;
+pub const MAX_SPATIAL_QUERIES: u32 = 32;
 pub const FOLLOWER_TEMPLATE: &str = include_str!("../templates/follower.lua");
 const MAX_MESSAGE_BYTES: usize = 2048;
 
@@ -98,6 +105,7 @@ pub enum DiagnosticCode {
     Cancelled,
     InvalidOutput,
     TickExhausted,
+    QueryLimit,
 }
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Diagnostic {
@@ -180,6 +188,7 @@ pub struct Runtime {
     scene: Scene,
     authoring: Authoring,
     tick: u64,
+    query_observations: Vec<QueryObservation>,
 }
 impl Runtime {
     pub fn scene(&self) -> &Scene {
@@ -187,6 +196,10 @@ impl Runtime {
     }
     pub fn tick(&self) -> u64 {
         self.tick
+    }
+    /// Only successful fixed ticks publish observations. Reset trials publish none.
+    pub fn query_observations(&self) -> &[QueryObservation] {
+        &self.query_observations
     }
 }
 struct CachedMain {
@@ -197,6 +210,13 @@ struct CachedMain {
 struct HostInput<'a> {
     api_version: u32,
     frame: &'a ValidatedActionFrame,
+    spatial: Option<&'a QueryInvocation>,
+    binding_id: &'a str,
+}
+#[derive(Clone, Copy)]
+struct TickInput<'a> {
+    frame: &'a ValidatedActionFrame,
+    spatial: Option<&'a QueryInvocation>,
 }
 /// Owned by one thread; Lua/Rc intentionally prevent Send/Sync. No scheduler is included.
 pub struct Engine {
@@ -408,13 +428,13 @@ impl Engine {
         if source.language_id != LANGUAGE_ID
             || !matches!(
                 source.host_api_version,
-                HOST_API_VERSION | INPUT_HOST_API_VERSION
+                HOST_API_VERSION | INPUT_HOST_API_VERSION | SPATIAL_HOST_API_VERSION
             )
         {
             return Err(Diagnostic::plain(
                 DiagnosticCode::UnsupportedBackend,
                 Phase::Compile,
-                "this provisional backend supports lua54 host API1 or opt-in API2; authored data is preserved",
+                "this provisional backend supports lua54 host API1, API2 input or API3 spatial queries; authored data is preserved",
             ));
         }
         let hash = source_hash(&source.text);
@@ -466,17 +486,29 @@ impl Engine {
         self.begin()?;
         self.begin_debug(0, true);
         let snapshot = Arc::new(scene.clone());
+        let queries = self.query_invocation(scene, authoring, 0)?;
         for (id, binding) in &authoring.bindings {
             if !binding.enabled {
                 continue;
             }
-            self.evaluate_binding(id, binding, authoring, &snapshot, 0.0, &input)?;
+            self.evaluate_binding(
+                id,
+                binding,
+                authoring,
+                &snapshot,
+                0.0,
+                TickInput {
+                    frame: &input,
+                    spatial: queries.as_ref(),
+                },
+            )?;
         }
         self.check_cancelled()?;
         Ok(Runtime {
             scene: scene.clone(),
             authoring: authoring.clone(),
             tick: 0,
+            query_observations: Vec::new(),
         })
     }
     /// Atomic fixed-dt update in stable binding-ID order against one tick-start snapshot.
@@ -507,6 +539,7 @@ impl Engine {
         self.begin_debug(runtime.tick, false);
         let snapshot = Arc::new(runtime.scene.clone());
         let mut staged = runtime.scene.clone();
+        let queries = self.query_invocation(&runtime.scene, &runtime.authoring, runtime.tick)?;
         for (id, binding) in &runtime.authoring.bindings {
             if !binding.enabled {
                 continue;
@@ -517,7 +550,10 @@ impl Engine {
                 &runtime.authoring,
                 &snapshot,
                 self.limits.fixed_dt,
-                &input,
+                TickInput {
+                    frame: &input,
+                    spatial: queries.as_ref(),
+                },
             )?;
             staged
                 .objects
@@ -526,9 +562,26 @@ impl Engine {
                 .expect("validated runtime owner")
                 .transform = transform;
         }
+        // Returned TRS can invalidate enabled sphere scale even without a query.
+        // Definitions are immutable during a Runtime. Existing objects without
+        // enabled colliders skip collider resolution.
+        for object in &staged.objects {
+            if let Some(collider) = object.collider.filter(|collider| collider.enabled) {
+                collider.resolve(&object.transform).map_err(|error| {
+                    Diagnostic::plain(
+                        DiagnosticCode::InvalidOutput,
+                        Phase::Commit,
+                        &error.to_string(),
+                    )
+                })?;
+            }
+        }
         self.check_cancelled()?;
+        let observations =
+            queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());
         runtime.scene = staged;
         runtime.tick = next;
+        runtime.query_observations = observations;
         Ok(())
     }
     fn evaluate_binding(
@@ -538,7 +591,7 @@ impl Engine {
         authoring: &Authoring,
         snapshot: &Arc<Scene>,
         dt: f64,
-        actions: &ValidatedActionFrame,
+        tick_input: TickInput<'_>,
     ) -> Result<Transform, Diagnostic> {
         let source = authoring.sources.get(&binding.source_id);
         let result = (|| {
@@ -592,7 +645,9 @@ impl Engine {
                 dt,
                 HostInput {
                     api_version: source.host_api_version,
-                    frame: actions,
+                    frame: tick_input.frame,
+                    spatial: tick_input.spatial,
+                    binding_id: id,
                 },
             );
             // Clear even after module/update/output errors; cached chunks must not retain
@@ -643,6 +698,8 @@ impl Engine {
             HostInput {
                 api_version: HOST_API_VERSION,
                 frame: &neutral,
+                spatial: None,
+                binding_id: "",
             },
         )
     }
@@ -739,7 +796,10 @@ fn environment<'scope, 'env: 'scope>(
     )?;
     // Select from the current validated source on every evaluation, including
     // same-text cache hits. Scoped captures expire before returning to the host.
-    if input.api_version == INPUT_HOST_API_VERSION {
+    if matches!(
+        input.api_version,
+        INPUT_HOST_API_VERSION | SPATIAL_HOST_API_VERSION
+    ) {
         host.raw_set(
             "button",
             scope.create_function(move |lua, id: mlua::LuaString| {
@@ -778,6 +838,9 @@ fn environment<'scope, 'env: 'scope>(
                 }
             })?,
         )?;
+    }
+    if input.api_version == SPATIAL_HOST_API_VERSION {
+        install_spatial(scope, &host, input)?;
     }
     Ok((environment, host))
 }
@@ -845,6 +908,8 @@ fn read_transform(table: &Table) -> mlua::Result<Transform> {
     Ok(transform)
 }
 
+#[cfg(test)]
+mod spatial_tests;
 #[cfg(test)]
 mod tests;
 
@@ -1044,6 +1109,7 @@ mod input_tests {
         for (version, expected) in [
             (HOST_API_VERSION, 1.0),
             (INPUT_HOST_API_VERSION, 103.0),
+            (SPATIAL_HOST_API_VERSION, 103.0),
             (HOST_API_VERSION, 1.0),
         ] {
             authoring
@@ -1073,7 +1139,7 @@ mod input_tests {
             .sources
             .get_mut("source")
             .unwrap()
-            .host_api_version = 3;
+            .host_api_version = 4;
         let error = engine.reset(&scene, &authoring).unwrap_err();
         assert_eq!(error.code, DiagnosticCode::UnsupportedBackend);
         assert_eq!(error.binding_id.as_deref(), Some("binding-a"));

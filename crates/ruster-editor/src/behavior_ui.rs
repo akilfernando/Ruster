@@ -802,7 +802,7 @@ impl BehaviorUi {
                 });
                 if let Some(source)=session.source(&binding.source_id) {
 
-                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
                 } else {ui.colored_label(egui::Color32::YELLOW,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
                 ui.label("Properties");
                 for (name,summary) in &self.property_rows {
@@ -2037,6 +2037,7 @@ mod tests {
         let old_scene = Arc::new(ruster_scene::Scene::empty("old-assets"));
         let mut runtime = RuntimeUi {
             frame: Some(Frame {
+                query_observations: None,
                 key: old,
                 tick: 7,
                 scene: old_scene.clone(),
@@ -2058,6 +2059,7 @@ mod tests {
         runtime.begin_reset(second);
         runtime.acknowledge_reset(first, 0);
         runtime.accept_frame(Frame {
+            query_observations: None,
             key: first,
             tick: 0,
             scene: Arc::new(ruster_scene::Scene::empty("obsolete-assets")),
@@ -2071,6 +2073,7 @@ mod tests {
         runtime.acknowledge_reset(second, 0);
         assert!(runtime.reset_succeeded.is_none());
         runtime.accept_frame(Frame {
+            query_observations: None,
             key: second,
             tick: 0,
             scene: Arc::new(ruster_scene::Scene::empty("new-assets")),

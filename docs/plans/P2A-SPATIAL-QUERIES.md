@@ -1,6 +1,6 @@
 # P2a — Spatial Queries / Clearance Bench
 
-Proposed2026-11-07 by root/Astra after accepted [I1a](../evidence/I1A-readiness.md), product `03617eac6b64edd2c9fbe83aa17f4c0ff2bbb764`, documentary baseline `8d796c7`. **Planning only. User approval and goal activation are pending.** This is the selected next-goal recommendation. Shape/API/library/version/budget choices below are agent proposals until the runnable gate.
+Proposed2026-11-07 by root/Astra after accepted [I1a](../evidence/I1A-readiness.md), product `03617eac6b64edd2c9fbe83aa17f4c0ff2bbb764`, documentary baseline `8d796c7`. **Approved2026-11-07. The user says “Set the goal and proceed”; P2a is now the active bounded goal.** Shape/API/library/version/budget choices below are agent proposals until the runnable gate.
 
 ## Proposed goal
 
