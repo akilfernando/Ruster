@@ -37,9 +37,10 @@ pub(super) enum Action {
     FindContent,
     Rename,
     SelectAll,
+    FocusRuntime,
 }
 impl Action {
-    pub const ALL: [Self; 29] = [
+    pub const ALL: [Self; 30] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -69,6 +70,7 @@ impl Action {
         Self::FindContent,
         Self::Rename,
         Self::SelectAll,
+        Self::FocusRuntime,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -101,6 +103,7 @@ impl Action {
             Self::FindContent => "Search Content",
             Self::Rename => "Rename active object",
             Self::SelectAll => "Select all scene objects",
+            Self::FocusRuntime => "Focus runtime controls",
         }
     }
 }
@@ -195,6 +198,7 @@ impl Default for Preferences {
             (Action::FindContent, Key::F, true, true),
             (Action::Rename, Key::F2, false, false),
             (Action::SelectAll, Key::A, true, false),
+            (Action::FocusRuntime, Key::P, true, true),
         ];
         Self {
             hierarchy_width: 180.0,
@@ -801,24 +805,92 @@ impl Workspace {
             }
             return None;
         }
+        let widget_focused = ctx.egui_wants_keyboard_input();
         if blocked
             || self.settings_open
-            || ctx.egui_wants_keyboard_input()
+            || (widget_focused && ctx.text_edit_focused())
             || !ctx.input(|i| i.focused)
         {
             return None;
         }
         // Exact modifiers prevent Ctrl+Shift+S being consumed as Ctrl+S.
         self.prefs.bindings.iter().find_map(|binding| {
+            // Focus navigation remains reachable from ordinary focused controls.
+            if widget_focused && binding.action != Action::FocusRuntime {
+                return None;
+            }
             let key = binding.key?;
-            ctx.input_mut(|i| {
+            let action = ctx.input_mut(|i| {
                 let m = i.modifiers;
                 (m.ctrl == binding.ctrl
                     && m.shift == binding.shift
                     && m.alt == binding.alt
                     && i.consume_key(binding.modifiers(), key))
                 .then_some(binding.action)
-            })
+            });
+            if action == Some(Action::FocusRuntime) {
+                // A separate navigation event wins over a focus jump in the
+                // same batch, including when it follows the default shortcut.
+                let direction = ctx.input(|input| {
+                    input.events.iter().rev().find_map(|event| {
+                        let egui::Event::Key {
+                            key,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } = event
+                        else {
+                            return None;
+                        };
+                        match key {
+                            egui::Key::ArrowUp if modifiers.is_none() => {
+                                Some(egui::FocusDirection::Up)
+                            }
+                            egui::Key::ArrowDown if modifiers.is_none() => {
+                                Some(egui::FocusDirection::Down)
+                            }
+                            egui::Key::ArrowLeft if modifiers.is_none() => {
+                                Some(egui::FocusDirection::Left)
+                            }
+                            egui::Key::ArrowRight if modifiers.is_none() => {
+                                Some(egui::FocusDirection::Right)
+                            }
+                            egui::Key::Tab if modifiers.is_none() => {
+                                Some(egui::FocusDirection::Next)
+                            }
+                            egui::Key::Tab if modifiers.shift_only() => {
+                                Some(egui::FocusDirection::Previous)
+                            }
+                            egui::Key::Escape if modifiers.is_none() => {
+                                Some(egui::FocusDirection::None)
+                            }
+                            _ => None,
+                        }
+                    })
+                });
+                if !binding.ctrl
+                    && !binding.alt
+                    && matches!(
+                        key,
+                        egui::Key::Tab
+                            | egui::Key::ArrowUp
+                            | egui::Key::ArrowDown
+                            | egui::Key::ArrowLeft
+                            | egui::Key::ArrowRight
+                    )
+                    && (!binding.shift || key == egui::Key::Tab)
+                {
+                    // begin_pass queued navigation before the shortcut consumed
+                    // its event. Retain only the remaining event's direction.
+                    ctx.memory_mut(|memory| {
+                        memory.move_focus(direction.unwrap_or(egui::FocusDirection::None))
+                    });
+                }
+                if direction.is_some() {
+                    return None;
+                }
+            }
+            action
         })
     }
     pub fn settings_ui(&mut self, ctx: &egui::Context) {
@@ -1243,6 +1315,11 @@ mod tests {
     fn shortcut_capture_conflicts_reset_and_focus_ownership() {
         let ctx = egui::Context::default();
         let mut w = Workspace::detached();
+        let runtime_modifiers = egui::Modifiers {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
         let frame = |w: &mut Workspace, focused, events: Vec<egui::Event>, blocked| {
             let mut action = None;
             let mut output = ctx.run_ui(
@@ -1266,8 +1343,44 @@ mod tests {
                     repeat: false,
                     modifiers,
                 },
+                egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers,
+                },
             ]
         };
+        assert_eq!(w.shortcut_text(Action::FocusRuntime), "Ctrl+Shift+P");
+        assert_eq!(
+            frame(&mut w, true, key(egui::Key::P, runtime_modifiers), false),
+            Some(Action::FocusRuntime)
+        );
+        for (focused, blocked) in [(false, false), (true, true)] {
+            assert_eq!(
+                frame(
+                    &mut w,
+                    focused,
+                    key(egui::Key::P, runtime_modifiers),
+                    blocked
+                ),
+                None
+            );
+        }
+        w.settings_open = true;
+        assert_eq!(
+            frame(&mut w, true, key(egui::Key::P, runtime_modifiers), false),
+            None
+        );
+        w.settings_open = false;
+        w.capture = Some(Action::FocusRuntime);
+        assert_eq!(
+            frame(&mut w, true, key(egui::Key::P, runtime_modifiers), false),
+            None,
+            "Shortcut capture owns the key before runtime focus dispatch"
+        );
+        assert!(w.capture.is_none());
         assert_eq!(
             frame(
                 &mut w,
@@ -1346,6 +1459,7 @@ mod tests {
                     Action::FindContent,
                     Action::Rename,
                     Action::SelectAll,
+                    Action::FocusRuntime,
                 ]
                 .iter()
                 .any(|action| binding["action"] == action.name())
@@ -1357,6 +1471,16 @@ mod tests {
             Preferences::default().external_editor
         );
         assert_eq!(upgraded.bindings.len(), Action::ALL.len());
+        assert_eq!(
+            upgraded
+                .bindings
+                .iter()
+                .find(|binding| binding.action == Action::FocusRuntime),
+            Preferences::default()
+                .bindings
+                .iter()
+                .find(|binding| binding.action == Action::FocusRuntime)
+        );
         assert_eq!(
             upgraded
                 .bindings
@@ -1427,23 +1551,106 @@ mod tests {
             ),
             Some(Action::FindObjects)
         );
+        // An older custom shortcut keeps CtrlShiftP. Only the newly added
+        // runtime-focus default becomes Unbound, then supports normal remapping.
+        let mut runtime_conflict = previous.clone();
+        let custom = runtime_conflict["bindings"]
+            .as_array_mut()
+            .unwrap()
+            .iter_mut()
+            .find(|binding| binding["action"] == Action::Frame.name())
+            .unwrap();
+        custom["key"] = "P".into();
+        custom["ctrl"] = true.into();
+        custom["shift"] = true.into();
+        let migrated_runtime =
+            Preferences::parse(&serde_json::to_vec(&runtime_conflict).unwrap()).unwrap();
+        assert_eq!(
+            migrated_runtime
+                .bindings
+                .iter()
+                .find(|binding| binding.action == Action::FocusRuntime)
+                .unwrap()
+                .key,
+            None
+        );
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("runtime-shortcut.json");
+        let mut remapped = Workspace::at(Some(path.clone()));
+        remapped.prefs = migrated_runtime;
+        assert_eq!(remapped.shortcut_text(Action::FocusRuntime), "Unbound");
+        assert_eq!(
+            frame(
+                &mut remapped,
+                true,
+                key(egui::Key::P, runtime_modifiers),
+                false
+            ),
+            Some(Action::Frame)
+        );
+        remapped.capture = Some(Action::FocusRuntime);
+        assert_eq!(
+            frame(
+                &mut remapped,
+                true,
+                key(egui::Key::R, runtime_modifiers),
+                false
+            ),
+            None
+        );
+        assert!(remapped.capture.is_none());
+        assert_eq!(
+            frame(
+                &mut remapped,
+                true,
+                key(egui::Key::R, runtime_modifiers),
+                false
+            ),
+            Some(Action::FocusRuntime)
+        );
+        remapped.flush();
+        assert!(remapped.error.is_empty());
+        assert_eq!(Workspace::at(Some(path)).prefs, remapped.prefs);
         let mut duplicate = w.prefs.json();
         duplicate["bindings"][13]["key"] = "S".into();
         duplicate["bindings"][13]["ctrl"] = true.into();
         assert!(Preferences::parse(&serde_json::to_vec(&duplicate).unwrap()).is_err());
+        for (pressed, modifiers, expected) in [
+            (egui::Key::P, runtime_modifiers, Some(Action::FocusRuntime)),
+            (egui::Key::G, egui::Modifiers::NONE, None),
+        ] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: key(pressed, modifiers),
+                    ..Default::default()
+                },
+                |ui| {
+                    let button = ui.button("Unrelated focused control");
+                    button.request_focus();
+                    assert_eq!(w.shortcuts(&ctx, false), expected);
+                },
+            );
+            output.textures_delta.clear();
+        }
         let mut text = String::new();
-        let mut output = ctx.run_ui(
-            egui::RawInput {
-                focused: true,
-                events: key(egui::Key::G, egui::Modifiers::NONE),
-                ..Default::default()
-            },
-            |ui| {
-                let edit = ui.text_edit_singleline(&mut text);
-                edit.request_focus();
-                assert_eq!(w.shortcuts(&ctx, false), None);
-            },
-        );
-        output.textures_delta.clear();
+        for (pressed, modifiers) in [
+            (egui::Key::G, egui::Modifiers::NONE),
+            (egui::Key::P, runtime_modifiers),
+        ] {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: key(pressed, modifiers),
+                    ..Default::default()
+                },
+                |ui| {
+                    let edit = ui.text_edit_singleline(&mut text);
+                    edit.request_focus();
+                    assert_eq!(w.shortcuts(&ctx, false), None);
+                },
+            );
+            output.textures_delta.clear();
+        }
     }
 }

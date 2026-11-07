@@ -1153,6 +1153,7 @@ impl Request {
 }
 #[derive(Default)]
 pub(super) struct RuntimeUi {
+    pub focus_controls: bool,
     debug: runtime_debug::DebugUi,
     input_control: runtime_input::InputControl,
     spatial_feedback_index: usize,
@@ -1525,18 +1526,23 @@ impl RuntimeUi {
         session: &Session,
         generation: u64,
         blocked: bool,
+        focus_shortcut: &str,
     ) -> Option<RunKey> {
         let mut reset = None;
+        let focus_controls = std::mem::take(&mut self.focus_controls);
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x=4.0;
             ui.spacing_mut().button_padding.x=6.0;
-            if ui
+            let reset_button = ui
                 .add_enabled(
                     !blocked && !self.shutdown,
                     egui::Button::new("Reset"),
-                ).on_hover_text("Reset behavior runtime from the current scene; runtime changes never edit the scene.")
-                .clicked()
-            {
+                ).on_hover_text(format!("Reset behavior runtime from the current scene. Runtime changes never edit the scene.\nFocus runtime controls ({focus_shortcut})."));
+            if focus_controls && reset_button.enabled() {
+                reset_button.request_focus();
+                reset_button.scroll_to_me(Some(egui::Align::Center));
+            }
+            if reset_button.clicked() {
                 match self.reset(ui.ctx(), session, generation) {
                     Ok(key) => reset = Some(key),
                     Err(error) => self.status = error,

@@ -613,7 +613,7 @@ mod tests {
                     ..Default::default()
                 },
                 |ui| {
-                    runtime.controls(ui, session, 1, false);
+                    runtime.controls(ui, session, 1, false, "Ctrl+Shift+P");
                     let (_, response) =
                         ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
                     viewport = Some(response.rect);
@@ -728,7 +728,7 @@ mod tests {
                             ui.button("Inspector control").clicked();
                         });
                     runtime.input_begin(&ctx, false);
-                    runtime.controls(ui, &session, 1, false);
+                    runtime.controls(ui, &session, 1, false, "Ctrl+Shift+P");
                     ui.text_edit_singleline(&mut text);
                     let (_, surface) = ui
                         .allocate_exact_size(egui::vec2(900., 500.), egui::Sense::click_and_drag());

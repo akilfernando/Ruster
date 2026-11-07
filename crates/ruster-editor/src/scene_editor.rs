@@ -3982,6 +3982,7 @@ impl SceneEditor {
     }
     fn route_shortcuts(&mut self, ctx: &egui::Context) {
         let blocked = self.runtime.input_owned()
+            || egui::Popup::is_any_open(ctx)
             || self.input_actions_open
             || self.manipulation.active()
             || self.dialog.is_some()
@@ -4074,6 +4075,13 @@ impl SceneEditor {
                 self.workspace.prefs.content_visible = true;
                 self.workspace.changed();
                 self.content_focus = true;
+            }
+            Action::FocusRuntime => {
+                if self.runtime.input_owned() {
+                    self.notice = "Release runtime controls before using editor shortcuts.".into();
+                } else {
+                    self.runtime.focus_controls = true;
+                }
             }
             Action::Rename => {
                 if self.guard().is_ok() && self.selected.is_some() {
@@ -4386,6 +4394,7 @@ impl SceneEditor {
                     Action::Projection,
                     Action::FindObjects,
                     Action::FindContent,
+                    Action::FocusRuntime,
                 ] {
                     self.command_menu_item(ui, action.name(), action);
                 }
@@ -4638,12 +4647,14 @@ impl SceneEditor {
                 ui.label("The scene and your saved edits are retained while content loads.");
                 // Stop remains available for an older retained runtime while
                 // Reset and playback edits wait for content authority.
-                let _ = self.runtime.controls(ui, &self.session, self.generation, true);
+                let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
+                let _ = self.runtime.controls(ui, &self.session, self.generation, true, &shortcut);
                 return;
             }
             self.manipulation_tools_ui(ui);
             let blocked=self.guard().is_err() || self.manipulation.offset_pending() || self.asset_busy();
-            if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked) {self.capture_reset_assets(key);}
+            let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
+            if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked,&shortcut) {self.capture_reset_assets(key);}
             self.runtime.observe(self.generation,self.session.scene().revision,self.assets.as_ref().map(|store|store.revision()),self.shader_revision);
             self.asset_mark_callback_owners();
             let transient = if !self.runtime.visible {
@@ -5097,6 +5108,8 @@ mod tests {
             let runtime_location_present = std::cell::Cell::new(false);
             let content_rect = std::cell::Cell::new(None);
             let asset_row_visible = std::cell::Cell::new(false);
+            let focused_response = std::cell::Cell::new(None);
+            let reset_label = std::cell::Cell::new(None);
             let mut time = 0.0;
             let mut frame = |editor: &mut SceneEditor, size| {
                 time += 0.1;
@@ -5111,6 +5124,18 @@ mod tests {
                     },
                     |ui| {
                         editor.ui(ui);
+                        focused_response.set(
+                            ctx.memory(|memory| memory.focused())
+                                .and_then(|id| ctx.read_response(id))
+                                .map(|response| {
+                                    (
+                                        response.id,
+                                        response.rect,
+                                        response.enabled(),
+                                        response.has_focus(),
+                                    )
+                                }),
+                        );
                         content_rect.set(
                             egui::containers::panel::PanelState::load(
                                 ui.ctx(),
@@ -5121,6 +5146,13 @@ mod tests {
                     },
                 );
                 output.textures_delta.clear();
+                reset_label.set(output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == "Reset" => Some((
+                        egui::Rect::from_min_size(text.pos, text.galley.size()),
+                        shape.clip_rect,
+                    )),
+                    _ => None,
+                }));
                 if progress_action {
                     assert!(output.shapes.iter().any(|shape| matches!(&shape.shape,
                         egui::epaint::Shape::Text(text)
@@ -5175,6 +5207,92 @@ mod tests {
                 "real asset row must be visible before the resize journey"
             );
             let idle_viewport = frame(&mut editor, normal_size);
+            let focus_modifiers = egui::Modifiers {
+                ctrl: true,
+                shift: true,
+                ..Default::default()
+            };
+            for (size, key, modifiers) in [
+                (normal_size, egui::Key::P, focus_modifiers),
+                (egui::vec2(640.0, 480.0), egui::Key::P, focus_modifiers),
+                (normal_size, egui::Key::ArrowRight, egui::Modifiers::NONE),
+            ] {
+                let binding = editor
+                    .workspace
+                    .prefs
+                    .bindings
+                    .iter_mut()
+                    .find(|binding| binding.action == Action::FocusRuntime)
+                    .unwrap();
+                binding.key = Some(key);
+                binding.ctrl = modifiers.ctrl;
+                binding.shift = modifiers.shift;
+                binding.alt = modifiers.alt;
+                frame(&mut editor, size);
+                frame(&mut editor, size);
+                let before = editor.session.scene().clone();
+                *events.borrow_mut() = vec![
+                    egui::Event::ModifiersChanged(modifiers),
+                    egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    },
+                    egui::Event::Key {
+                        key,
+                        physical_key: None,
+                        pressed: false,
+                        repeat: false,
+                        modifiers,
+                    },
+                ];
+                frame(&mut editor, size);
+                let (label, clip) = reset_label.get().expect("visible Reset label");
+                let (id, focused, enabled, has_focus) = focused_response
+                    .get()
+                    .expect("runtime shortcut must focus Reset");
+                assert!(enabled && has_focus && focused.contains_rect(label));
+                assert_eq!(
+                    ctx.memory(|memory| memory.focused()),
+                    Some(id),
+                    "consumed navigation shortcut must retain Reset focus after end_pass"
+                );
+                assert!(
+                    clip.contains_rect(label),
+                    "focused Reset must be fully visible"
+                );
+                assert!(
+                    !editor.runtime.focus_controls,
+                    "focus request is consumed once"
+                );
+                assert!(
+                    editor.runtime.frame.is_none(),
+                    "focusing must not Reset or Play"
+                );
+                assert_eq!(editor.session.scene(), &before);
+            }
+            // The remapped arrow consumes only its own navigation. A separate
+            // Tab in the same input batch must still advance ordinary focus.
+            let reset_id = focused_response.get().expect("Reset requested focus").0;
+            *events.borrow_mut() = [egui::Key::ArrowRight, egui::Key::Tab]
+                .into_iter()
+                .map(|key| egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                })
+                .collect();
+            frame(&mut editor, normal_size);
+            assert_ne!(
+                ctx.memory(|memory| memory.focused()),
+                Some(reset_id),
+                "an unconsumed Tab must retain its own navigation"
+            );
+            frame(&mut editor, normal_size);
             editor.asset_ops.status = "Preparing Save… ".repeat(80);
             for _ in 0..2 {
                 editor.save_continuation = Some(save_commands::AfterSave {
