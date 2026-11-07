@@ -552,3 +552,6 @@ Current preview and Scene11 exports share an exact16666667ns fixed quantum. Sche
 
 
 The action dialog uses one vertical scrolling region and shows the active form separately from its list. Newly focused fields and key-capture controls scroll into view. A capture candidate is accepted only while its current Cancel capture control is enabled, focused and fully visible; hiding, closing or moving focus away cancels capture while preserving the raw draft. This source repair is under native normal/compact I1a qualification; successful standalone checks do not substitute for editor interaction.
+
+
+Escape during key capture returns focus to its original Capture button; a second Escape cancels the draft. Ignored arrow repeats cannot navigate away from the active capture control. These transitions require the genuine current/prior owner and preserve raw drafts when ownership is lost.

@@ -189,6 +189,12 @@ struct Capture {
     owner: Option<egui::Id>,
 }
 
+#[derive(Clone, Copy, Default)]
+struct CaptureInput {
+    key: Option<(egui::Key, egui::Modifiers)>,
+    arrow_navigation: bool,
+}
+
 #[derive(Default)]
 pub(super) struct InputUi {
     draft: Option<Draft>,
@@ -278,23 +284,41 @@ impl InputUi {
         }
     }
 
-    fn capture_event(
-        &mut self,
-        ui: &egui::Ui,
-        editable: bool,
-    ) -> (bool, Option<(egui::Key, egui::Modifiers)>) {
+    fn capture_event(&mut self, ui: &egui::Ui, editable: bool) -> (bool, CaptureInput) {
         let Some(capture) = self.capture else {
-            return (false, None);
+            return (false, CaptureInput::default());
         };
         if !editable || !ui.input(|input| input.focused) || egui::Popup::is_any_open(ui.ctx()) {
             self.capture = None;
             self.claim_frame(ui.ctx());
-            return (true, None);
+            return (true, CaptureInput::default());
         }
         // A keyboard Enter which activated Capture belongs to that button,
         // including additional egui layout passes in the same frame.
         if ui.ctx().cumulative_frame_nr() <= capture.frame {
-            return (true, None);
+            return (true, CaptureInput::default());
+        }
+        // egui clears focus for Escape in begin_pass, including immediately
+        // after Capture activation. This is cancellation by the prior real
+        // owner, so return to its trigger without admitting a binding key.
+        if self.interaction_frame != Some(ui.ctx().cumulative_frame_nr())
+            && capture.owner.is_some_and(|owner| {
+                ui.memory(|memory| {
+                    memory.focused().is_none() && memory.had_focus_last_frame(owner)
+                })
+            })
+            && !ui.input(|input| input.pointer.any_pressed())
+            && ui.input_mut(|input| {
+                input.events.iter().any(|event| matches!(event,
+                    egui::Event::Key { key: egui::Key::Escape, pressed: true, repeat: false, modifiers, .. }
+                        if !modifiers.any()
+                )) && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+            })
+        {
+            self.capture = None;
+            self.claim_frame(ui.ctx());
+            ui.memory_mut(|memory| memory.request_focus(capture.focus));
+            return (true, CaptureInput::default());
         }
         // Capture is owned by the enabled Cancel capture button, not the
         // disabled source button. Never reclaim focus after the user moves it.
@@ -304,12 +328,12 @@ impl InputUi {
         {
             self.capture = None;
             self.claim_frame(ui.ctx());
-            return (true, None);
+            return (true, CaptureInput::default());
         }
         if self.interaction_frame == Some(ui.ctx().cumulative_frame_nr()) {
-            return (true, None);
+            return (true, CaptureInput::default());
         }
-        let pressed = ui.input_mut(|input| {
+        let input = ui.input_mut(|input| {
             let pressed = input.events.iter().find_map(|event| match event {
                 egui::Event::Key {
                     key,
@@ -320,17 +344,22 @@ impl InputUi {
                 } => Some((*key, *modifiers)),
                 _ => None,
             });
+            let arrow_navigation = input.events.iter().any(|event| matches!(event,
+                egui::Event::Key { key: egui::Key::ArrowLeft | egui::Key::ArrowRight | egui::Key::ArrowUp | egui::Key::ArrowDown, pressed: true, modifiers, .. } if !modifiers.any()
+            )) && !input.events.iter().any(|event| matches!(event,
+                egui::Event::Key { key: egui::Key::Tab | egui::Key::Escape, pressed: true, .. }
+            ));
             input.events.retain(|event| {
                 !matches!(
                     event,
                     egui::Event::Key { .. } | egui::Event::Text(_) | egui::Event::Paste(_)
                 )
             });
-            pressed
+            CaptureInput { key: pressed, arrow_navigation }
         });
         // Consume before building buttons, but accept only after the current
         // enabled, focused and unclipped owner has been built.
-        (true, pressed)
+        (true, input)
     }
 
     fn accept_capture(
@@ -546,7 +575,7 @@ impl InputUi {
         session: &Session,
         editable: bool,
         capture_owned: bool,
-        candidate: Option<(egui::Key, egui::Modifiers)>,
+        candidate: CaptureInput,
     ) -> Option<Edit> {
         let mut draft = self.draft.take()?;
         let mut changed = false;
@@ -740,8 +769,15 @@ impl InputUi {
                     {
                         self.capture = None;
                         self.claim_frame(ui.ctx());
-                    } else if let Some((key, modifiers)) = candidate {
-                        self.accept_capture(ui, &mut draft, key, modifiers);
+                    } else {
+                        // Raw key removal cannot undo navigation queued by
+                        // egui begin_pass, including ignored arrow repeats.
+                        if candidate.arrow_navigation {
+                            ui.memory_mut(|memory| memory.move_focus(egui::FocusDirection::None));
+                        }
+                        if let Some((key, modifiers)) = candidate.key {
+                            self.accept_capture(ui, &mut draft, key, modifiers);
+                        }
                     }
                 }
                 if response.clicked() && admit {
@@ -958,7 +994,12 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |_ui| {
+                |ui| {
+                    egui::Panel::right("capture-competing-inspector")
+                        .default_size(120.0)
+                        .show(ui, |ui| {
+                            let _ = ui.button("Other control");
+                        });
                     assert!(editor.window(ctx, session, true, &mut opened).is_none());
                 },
             );
@@ -1083,6 +1124,14 @@ mod tests {
                 .and_then(|id| ctx.read_response(id))
                 .unwrap();
             assert!(focused.rect.contains(capture));
+            // A key held before capture must not become a fresh binding or
+            // navigate to another editor control when the platform repeats it.
+            let mut held_arrow = key(egui::Key::ArrowRight);
+            held_arrow.truncate(1);
+            if let egui::Event::Key { modifiers, .. } = &mut held_arrow[0] {
+                *modifiers = egui::Modifiers::CTRL;
+            }
+            frame(&ctx, &mut editor, &session, size, held_arrow);
             frame(&ctx, &mut editor, &session, size, key(egui::Key::Enter));
             for _ in 0..3 {
                 frame(&ctx, &mut editor, &session, size, vec![]);
@@ -1096,12 +1145,77 @@ mod tests {
                     && owner.interact_rect.contains_rect(owner.rect),
                 "current Cancel capture must be visible before accepting a key"
             );
-            frame(&ctx, &mut editor, &session, size, key(egui::Key::F2));
+            let before_repeat = editor.drafts();
+            let mut repeated_arrow = key(egui::Key::ArrowRight);
+            repeated_arrow.truncate(1);
+            if let egui::Event::Key { repeat, .. } = &mut repeated_arrow[0] {
+                *repeat = true;
+            }
+            frame(&ctx, &mut editor, &session, size, repeated_arrow);
+            assert_eq!(editor.drafts(), before_repeat);
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                Some(owner.id),
+                "ignored arrow repeat must not navigate out of capture"
+            );
+            let mut released_arrow = key(egui::Key::ArrowRight);
+            released_arrow.remove(0);
+            frame(&ctx, &mut editor, &session, size, released_arrow);
+            let trigger = editor.capture.unwrap().focus;
+            frame(
+                &ctx,
+                &mut editor,
+                &session,
+                size,
+                key(egui::Key::ArrowRight),
+            );
             assert!(!editor.capturing());
             assert_eq!(
                 keys(&editor.draft.as_ref().unwrap().kind).next(),
-                Some(InputKey::F2)
+                Some(InputKey::ArrowRight)
             );
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                Some(trigger),
+                "a captured arrow must not also navigate to another control"
+            );
+            let retained = editor.drafts();
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Enter));
+            assert!(editor.capturing());
+            // No eventless frame between activation and Escape. egui clears
+            // ordinary keyboard focus during begin_pass for this Escape.
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Escape));
+            assert!(!editor.capturing());
+            assert_eq!(editor.drafts(), retained);
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                Some(trigger),
+                "capture Escape returns focus to its genuine trigger"
+            );
+            frame(&ctx, &mut editor, &session, size, vec![]);
+            let returned = ctx.read_response(trigger).unwrap();
+            assert!(
+                returned.enabled()
+                    && returned.has_focus()
+                    && returned.interact_rect.contains_rect(returned.rect)
+            );
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Escape));
+            assert!(!editor.pending(), "the next Escape cancels the raw form");
+            assert_eq!(session.snapshot_bytes().unwrap(), original);
+
+            // Reopen through the actual list to retain the existing clipped
+            // owner/candidate regression after exercising form cancellation.
+            shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            let edit = visible_text(&shapes, "Edit").expect("list returns after cancellation");
+            frame(&ctx, &mut editor, &session, size, click(edit, true));
+            frame(&ctx, &mut editor, &session, size, click(edit, false));
+            for _ in 0..3 {
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            let capture = visible_text(&shapes, "Capture").expect("reopened Capture is visible");
+            frame(&ctx, &mut editor, &session, size, click(capture, true));
+            frame(&ctx, &mut editor, &session, size, click(capture, false));
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::F2));
             frame(&ctx, &mut editor, &session, size, key(egui::Key::Enter));
             for _ in 0..3 {
                 frame(&ctx, &mut editor, &session, size, vec![]);
