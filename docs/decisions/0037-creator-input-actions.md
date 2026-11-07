@@ -1,6 +1,6 @@
 # 0037 — Creator action definitions and fixed-tick input admission
 
-Date2026-11-07. **Status: early feasibility contract accepted by root/Astra2026-11-07; full I1a implementation/qualification remains open.** User approves the [I1a outcome](../plans/I1A-CREATOR-INPUT.md) with “Set it and go ahead.” Root/Astra initially selected the following provisional defaults; the completed early author→preview→Save→exact-runtime gate now freezes the bounded contract below.
+Date2026-11-07. **Status — bounded contract accepted by root/Astra2026-11-07 after early feasibility and final product/evidence qualification.** User approves the [I1a outcome](../plans/I1A-CREATOR-INPUT.md) with “Set it and go ahead.” Root/Astra initially selected the following provisional defaults; the completed early author→preview→Save→exact-runtime gate now freezes the bounded contract below.
 
 ## Context and alternatives
 
@@ -63,3 +63,10 @@ Root/Astra accept the five bounded early requirements after actual authored API2
 Freeze logical keyboard keys (layout-dependent),32stable-ID actions/four total keys per action, explicit actual-Response control ownership, immutable per-fixed-tick snapshots/bounded latches, cancellation generations and guarded one-tick programmatic input. Freeze opt-in host API2 with API1 compatibility, Scene11/content7/recovery9/Descriptor5 and16666667ns current-host/export quantum with old owning-version units/defaults preserved. Catalog4/mesh/image caches and GPU ownership remain unchanged. Keep the pre-result investigation references/protocol; no candidate cost pass is inferred.
 
 This is early feasibility acceptance, not full feature acceptance. Required ordinary follow-ups include visible compact validation feedback, stable Control-row viewport footprint and binding/action/pose help, complete Traverse/Lift/Fine/Home creation/remap/history and real raw-draft crash recovery. Complementary MCP creation, two exact final apps, measured costs/resource qualification and final requirement/integrity handoff remain open. No physics, hierarchy, general state framework or broader input devices are added.
+
+
+## Final qualification and consequences — 2026-11-07
+
+The [final requirement audit](../evidence/I1A-readiness.md) supersedes the historical pending qualification notes above. Ordinary editor and actual native MCP author/remap/save/recover/reopen the same finite action contract, and two exact current-kit applications qualify headlessly and under real OS focus with injected keys. The schema/key/API/quantum freeze is unchanged. Agent-selected engineering defaults remain distinct from the user's approved creator outcome.
+
+Measured evidence supports retaining the existing immutable maps, bounded latest publication/edge transport and single worker. Validation-only preflight removes a discarded normalized frame, and checked common Button/edge iteration removes redundant ID lookups without retained storage. Native processing improves in the frozen comparison. Three ProgramStep samples exceed the100µs investigation reference and remain a qualified accepted result. No new queue, event framework, rendering mechanism or per-frame retained list is justified by these observations. Final evidence retains all failures, source compatibility, exact delivery and resource/idle limits. Logical-layout dependence, broader input devices and the recorded initial-camera behavior remain consequences or separate future work.

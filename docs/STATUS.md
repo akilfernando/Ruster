@@ -98,9 +98,9 @@ The current integrity audit verifies118inventoried files,103immutable source-equ
 **Stopping point:** no bounded V3b obligation remains after final source/inventory verification. No further capability work, unchanged test replay or automatic next goal is selected.
 
 
-## Active goal — I1a Creator Input Actions
+## I1a Creator Input Actions — product accepted
 
-Approved2026-11-07. The [I1a / Jog Bench contract](plans/I1A-CREATOR-INPUT.md) remains active. Creators can author/remap up to32stable-ID keyboard Buttons/digital1D Axes, query opt-in Lua API2 and deliver operable applications through ordinary editor controls and actual native MCP. [0037](decisions/0037-creator-input-actions.md) owns accepted engineering choices. The [requirement audit](evidence/I1A-readiness.md) and [chronology](evidence/I1A-foundation.md) retain proofs, failures and remaining gates. Physics, hierarchy, player-UI authoring, broader input devices, M9 and publication remain outside this goal.
+Approved2026-11-07. Root/Astra accept the bounded [I1a / Jog Bench contract](plans/I1A-CREATOR-INPUT.md) after the complete creator/runtime/cost checks and95payload handoff audit. Creators can author/remap up to32stable-ID keyboard Buttons/digital1D Axes, query opt-in Lua API2 and deliver operable applications through ordinary editor controls and actual native MCP. [0037](decisions/0037-creator-input-actions.md) owns accepted engineering choices. The [requirement audit](evidence/I1A-readiness.md) and [chronology](evidence/I1A-foundation.md) retain proofs, failures and remaining gates. Physics, hierarchy, player-UI authoring, broader input devices, M9 and publication remain outside this goal.
 
 Current product source `03617eac6b64edd2c9fbe83aa17f4c0ff2bbb764` implements bounded maps/history, API1/API2 coexistence, immutable all-binding fixed-tick input, bounded short edges/held-state transport, real focus/UI ownership and guarded programmatic Step receipts. Current owners are Scene11/content7/recovery9/Descriptor5 and16666667ns, preserving earlier supported units/defaults and strict old-version admission. Source feasibility/compatibility gates pass272Rust/26Python cases. The final bounded processing correction passes216affected Rust cases/strict default checks in83.51seconds, plus inspection lint4.27seconds. Three existing device probes remain ignored with unchanged GPU evidence reused. Later source differences are Markdown-only.
 
@@ -114,7 +114,7 @@ Default10completes23equal-history cycles/882SDKcalls, preserving31Undo/1Redo and
 
 A fresh local `Review-03617ea` copy contains77selected files plus generated guide/launcher/provenance, including exact editable projects, default binaries, kit5, both applications/archives and evidence. Its shell syntax/help and actual copied-launcher native checks pass, including removal of inherited MCP/inspection/timing opt-ins, zero owned listeners, immutable payloads, normal Close0/scanner0 and exact restoration. Named actual API2Jog stopped/paused idle is0.30/0.40%of one core atN=1/state, with committed paused tick116unchanged. Preparation remains partial handoff evidence. `Source/SOURCE.tar.gz` now verifies all806tracked source files at documentary commit676142d, with only Markdown changes after product03617ea. `source-archive-review-10.json` pins archive SHA74d7b428…. All118immutable V3b review files recheck unchanged in `v3b-preservation-check-10.json`.
 
-**Next/stopping conditions:** finish final guide/readiness/evaluation/documentary consistency and complete package inventory/archive integrity, then finish the full root/Astra requirement and product-quality evaluation. Overall I1a acceptance remains open. No owned editor/native process remains at this checkpoint.
+**Handoff closure:** `Review-03617ea/integrity-audit.json` owns the final delivered inventory and documentary sealing. The [final evaluation](ROADMAP-REVIEW.md#i1a-creator-input-evaluation--2026-11-07) records product quality, measured limits and stopping scope. Stop at I1a after that seal. No owned editor/native process remains. No subsequent goal or publication is activated.
 
 ## Retained industry workflow — PumpBench
 
