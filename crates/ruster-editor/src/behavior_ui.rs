@@ -1560,8 +1560,9 @@ impl RuntimeUi {
             {
                 self.stop(generation, session.scene().revision);
             }
-            ui.menu_button("Runtime",|ui| {
+            let runtime_menu = ui.menu_button("Runtime",|ui| {
                 if ui.button("Behavior debugger…").clicked(){self.debug.open=true;ui.close();}
+                if ui.button("Runtime input help…").clicked(){self.open_input_help(ui.ctx());ui.close();}
                 ui.add_enabled(self.frame.is_some(),egui::Checkbox::new(&mut self.visible,if self.stale {"View retained runtime (stale)"}else{"View runtime"}));
                 if let Some(frame)=&self.frame {ui.label(format!("Committed tick {}",frame.tick));}
                 if !self.status.is_empty(){ui.label(&self.status);}
@@ -1573,10 +1574,10 @@ impl RuntimeUi {
                     });
                 });}
             });
+            self.input_help_menu_response(&runtime_menu.response);
         });
-        if !session.authoring().actions.is_empty() {
-            self.input_control_button(ui, blocked);
-        }
+        // Always reserve the same ordinary row, including an empty action map.
+        self.input_control_button(ui, blocked, !session.authoring().actions.is_empty());
         if let Some(stop) = self.debug_snapshot() {
             ui.colored_label(
                 egui::Color32::YELLOW,
@@ -1594,6 +1595,7 @@ impl RuntimeUi {
             ui.colored_label(egui::Color32::YELLOW, "Runtime stale · Reset required");
         }
         self.flush();
+        self.input_help_window(ui.ctx(), session, generation);
         reset
     }
 }

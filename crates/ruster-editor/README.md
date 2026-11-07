@@ -545,13 +545,18 @@ The current development slice adds **Edit → Input actions…**. Define a stabl
 
 Opt an embedded Lua source into host API2, query `host.axis("traverse")` or `host.button("home").pressed`, then return the owner's complete TRS as usual. Reset captures the authored map. Play and choose **Control runtime** to give the actual viewport keyboard control. Arrows operate the creation; Escape releases control, and Tab/Shift+Tab release it while traversing the editor controls. Pause/Stop/Reset, edits, focus/UI ownership or debugger suspension clear old latches. After continuing a debugger stop, choose Control again to request fresh ownership. Runtime poses/live keys never enter Save. The action form participates in unsaved raw-draft recovery and never restores live capture.
 
-This source integration is undergoing the [I1a feasibility gate](../../docs/evidence/I1A-foundation.md); native keyboard/recovery/export acceptance is not yet complete. Use disposable projects until that gate qualifies the complete workflow.
+The bounded [I1a early feasibility gate](../../docs/evidence/I1A-foundation.md) now qualifies minimal authored input through editor/API2/save/exact runtime. The full ordinary/remapping/recovery/two-application/cost workflow remains under qualification; use disposable projects until that complete acceptance.
 
 
 Current preview and Scene11 exports share an exact16666667ns fixed quantum. Schema7 carries `tick_nanos` into Descriptor5; old content1–6/descriptor1–4 routes retain milliseconds. This is the working I1a timing-parity repair; no tick-settings UI or interpolation system is introduced.
 
 
-The action dialog uses one vertical scrolling region and shows the active form separately from its list. Newly focused fields and key-capture controls scroll into view. A capture candidate is accepted only while its current Cancel capture control is enabled, focused and fully visible; hiding, closing or moving focus away cancels capture while preserving the raw draft. This source repair is under native normal/compact I1a qualification; successful standalone checks do not substitute for editor interaction.
+The action dialog uses one vertical scrolling region and shows the active form separately from its list. Newly focused fields and key-capture controls scroll into view. A capture candidate is accepted only while its current Cancel capture control is enabled, focused and fully visible; hiding, closing or moving focus away cancels capture while preserving the raw draft. Native6 qualifies the original normal/compact capture priority. Later validation-feedback and fast-rearm improvements have owning source checks; their full ordinary native qualification remains pending. Successful standalone checks do not substitute for editor interaction.
 
 
 Escape during key capture returns focus to its original Capture button; a second Escape cancels the draft. Ignored arrow repeats cannot navigate away from the active capture control. These transitions require the genuine current/prior owner and preserve raw drafts when ownership is lost.
+
+
+Invalid action names keep their raw text and the actual Enter-submitting field focused; feedback appears beside the names. Rejected capture feedback appears beside its current owner. Capture buttons have stable identities across feedback changes, so Enter can rearm immediately after accepting a key.
+
+**Runtime → Runtime input help…** opens generated current bindings and read-only committed input/behavior poses. Values describe the named committed tick and origin, not current physical keys; stale or mismatched maps/runs hide old values and explain Reset. Opening releases scene control; Escape or the focused Close button closes help and returns to Runtime. The Control runtime row retains its size with an empty map and explains why control is disabled. These ordinary-workflow changes await native normal/compact qualification.

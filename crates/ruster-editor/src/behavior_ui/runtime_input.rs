@@ -1,7 +1,7 @@
 //! Native ownership only. Worker leases own the map and per-tick latch.
 use super::*;
-use crate::behavior_worker::{InputLease, InputMeta};
-use ruster_scene::input::InputKey;
+use crate::behavior_worker::{InputLease, InputMeta, InputOrigin};
+use ruster_scene::input::{ActionKind, ActionValue, InputKey};
 
 #[derive(Default)]
 pub(super) struct InputControl {
@@ -12,6 +12,10 @@ pub(super) struct InputControl {
     last_button_frame: Option<u64>,
     last_frame: Option<u64>,
     release_pointer_gesture: bool,
+    help_open: bool,
+    help_focus: bool,
+    help_activation_frame: Option<u64>,
+    help_return_focus: Option<egui::Id>,
 }
 impl RuntimeUi {
     pub(crate) fn input_owned(&self) -> bool {
@@ -87,7 +91,12 @@ impl RuntimeUi {
             self.revoke_input_control();
         }
     }
-    pub(super) fn input_control_button(&mut self, ui: &mut egui::Ui, blocked: bool) {
+    pub(super) fn input_control_button(
+        &mut self,
+        ui: &mut egui::Ui,
+        blocked: bool,
+        has_actions: bool,
+    ) {
         // Keep the release gesture through pointer-up, including when the
         // press and release arrive in separate UI frames. It cannot reacquire.
         if self.input_control.release_pointer_gesture
@@ -100,7 +109,8 @@ impl RuntimeUi {
             self.input_control.release_pointer_gesture = false;
         }
         let release_gesture = self.input_control.release_pointer_gesture;
-        let enabled = !blocked
+        let enabled = has_actions
+            && !blocked
             && self.ready
             && self.visible
             && self.playing
@@ -110,12 +120,20 @@ impl RuntimeUi {
             && self.debug_snapshot().is_none()
             && self.input_control.surface.is_some();
         let owned = self.input_owned();
-        if ui.add_enabled(enabled || owned, egui::Button::new(if owned || release_gesture { "Release controls (Esc)" } else { "Control runtime" }))
+        let button = ui.add_enabled(enabled || owned, egui::Button::new(if owned || release_gesture { "Release controls (Esc)" } else { "Control runtime" }))
             .on_hover_text("Give the scene keyboard control. Escape releases it; Pause and Stop remain available.")
-            .clicked() && self.input_control.last_button_frame != Some(ui.ctx().cumulative_frame_nr()) {
+            .on_disabled_hover_text(if has_actions { "Reset, view and play the current runtime before claiming controls." } else { "Define an input action to enable scene keyboard controls." });
+        if button.clicked()
+            && self.input_control.last_button_frame != Some(ui.ctx().cumulative_frame_nr())
+        {
             self.input_control.last_button_frame = Some(ui.ctx().cumulative_frame_nr());
-            if owned || release_gesture { self.release_input(ui.ctx()); return; }
-            let Some(worker) = &self.worker else { return; };
+            if owned || release_gesture {
+                self.release_input(ui.ctx());
+                return;
+            }
+            let Some(worker) = &self.worker else {
+                return;
+            };
             match worker.current_input_meta(worker.current_key()) {
                 Ok(meta) => {
                     // This exact epoch also guards an explicit post-debugger
@@ -132,6 +150,160 @@ impl RuntimeUi {
                 Err(error) => self.status = format!("Controls unavailable: {error:?}. Try again."),
             }
         }
+    }
+
+    pub(super) fn open_input_help(&mut self, ctx: &egui::Context) {
+        self.release_input(ctx);
+        self.input_control.help_open = true;
+        self.input_control.help_focus = true;
+        self.input_control.help_return_focus = None;
+        self.input_control.help_activation_frame = Some(ctx.cumulative_frame_nr());
+    }
+
+    pub(super) fn input_help_menu_response(&mut self, response: &egui::Response) {
+        if self.input_control.help_activation_frame == Some(response.ctx.cumulative_frame_nr()) {
+            self.input_control.help_return_focus = Some(response.id);
+        }
+    }
+
+    fn input_help_snapshot_current(&self, session: &Session, generation: u64) -> bool {
+        let (Some(frame), Some(captured)) = (&self.frame, &self.captured) else {
+            return false;
+        };
+        self.ready
+            && !self.stale
+            && !self.shutdown
+            && self.current_run() == Some(frame.key)
+            && frame.key.generation == generation
+            && frame.key.authored_revision == session.scene().revision
+            && captured.actions == session.authoring().actions
+            && captured.bindings == session.authoring().bindings
+    }
+
+    pub(super) fn input_help_window(
+        &mut self,
+        ctx: &egui::Context,
+        session: &Session,
+        generation: u64,
+    ) {
+        if !self.input_control.help_open {
+            return;
+        }
+        let current = self.input_help_snapshot_current(session, generation);
+        let popup_at_start = egui::Popup::is_any_open(ctx);
+        let activation =
+            self.input_control.help_activation_frame == Some(ctx.cumulative_frame_nr());
+        let mut opened = true;
+        let mut close = false;
+        let mut focus = self.input_control.help_focus;
+        egui::Window::new("Runtime input help")
+            .id(egui::Id::unique("runtime_input_help"))
+            .open(&mut opened).collapsible(false).default_width(420.0)
+            .min_width(180.0).max_width((ctx.content_rect().width() - 32.0).max(180.0))
+            .show(ctx, |ui| {
+                egui::ScrollArea::vertical().id_salt("runtime_input_help_scroll")
+                    .max_height((ctx.content_rect().height() - 160.0).clamp(100.0, 480.0))
+                    .show(ui, |ui| {
+                        ui.heading("Current authored controls");
+                        if session.authoring().actions.is_empty() {
+                            ui.label("No actions defined. Add actions in Input actions.");
+                        }
+                        ui.label("Shared keys drive every matching action. Escape releases scene control.");
+                        for (id, definition) in &session.authoring().actions {
+                            ui.separator();
+                            ui.strong(format!("{} · {id}", definition.label.as_deref().unwrap_or(id)));
+                            ui.label(action_hint(&definition.kind));
+                        }
+                        ui.separator();
+                        ui.heading("Runtime observation");
+                        if !current {
+                            ui.label(if self.stale {
+                                "Runtime snapshot stale. Reset to inspect the current scene and action map."
+                            } else {
+                                "Runtime snapshot unavailable for the current scene, map or run. Reset preview."
+                            });
+                            if let Some(frame) = &self.frame {
+                                ui.label(format!("Retained snapshot tick {} · run {}:{}:{}", frame.tick,
+                                    frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision));
+                            }
+                            return;
+                        }
+                        ui.label(if self.input_owned() {
+                            "Scene controls active. Escape releases ownership."
+                        } else if self.playing {
+                            "Preview playing with neutral input until Control runtime claims it."
+                        } else {
+                            "Preview paused. Ordinary Step uses a neutral input frame."
+                        });
+                        let frame = self.frame.as_ref().expect("current snapshot checked");
+                        ui.label(format!("Committed runtime tick {} · run {}:{}:{}", frame.tick,
+                            frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision));
+                        if let Some(input) = frame.input.as_deref().filter(|input| {
+                            input.receipt.tick == frame.tick
+                                && input.frame.0.keys().eq(session.authoring().actions.keys())
+                        }) {
+                            let origin = match input.receipt.origin {
+                                InputOrigin::Neutral => "neutral",
+                                InputOrigin::Native => "native controls",
+                                InputOrigin::Programmatic => "programmatic step",
+                            };
+                            ui.strong(format!("Last committed input · tick {} · {origin}", input.receipt.tick));
+                            ui.label(format!("Input epoch {}. Values describe this committed tick.", input.receipt.input_epoch));
+                            for (id, value) in &input.frame.0 {
+                                ui.label(match value {
+                                    ActionValue::Button(value) => format!("{id} · Held {} · Pressed {} · Released {}", value.held, value.pressed, value.released),
+                                    ActionValue::Axis1d { value } => format!("{id} · Axis {value}"),
+                                });
+                            }
+                        } else {
+                            ui.label(if frame.tick == 0 { "Reset complete. No input tick committed." }
+                                else { "Last committed input is unavailable for this snapshot." });
+                        }
+                        ui.separator();
+                        ui.heading("Committed behavior poses");
+                        let bindings = &session.authoring().bindings;
+                        let count = bindings.values().filter(|binding| binding.enabled).count();
+                        if count == 0 { ui.label("No enabled behavior bindings."); }
+                        if count > 16 { ui.label(format!("Showing the first 16 of {count} enabled bindings.")); }
+                        for (id, binding) in bindings.iter().filter(|(_, binding)| binding.enabled).take(16) {
+                            if let Some(object) = frame.scene.objects.iter().find(|object| object.id == binding.object_id) {
+                                ui.strong(format!("{} · {id}", object.display_name()));
+                                ui.label(format!("Position {:.3?}", object.transform.translation));
+                                ui.label(format!("Rotation {:.3?}", object.transform.rotation));
+                            } else {
+                                ui.label(format!("{id} · Object {} unavailable in this snapshot.", binding.object_id));
+                            }
+                        }
+                    });
+                let button = ui.button("Close input help");
+                // Closing the opening menu can surrender focus later in the
+                // activation pass. Hand it to Close once the popup is gone.
+                let pointer_gesture = ui.input(|input| input.pointer.any_pressed()
+                    || input.pointer.any_released() || input.pointer.any_click());
+                if focus && !activation && !popup_at_start && !egui::Popup::is_any_open(ctx) {
+                    let available = ui.memory(|memory| memory.focused().is_none_or(|id|
+                        id == button.id || Some(id) == self.input_control.help_return_focus));
+                    if available && !pointer_gesture && ui.input(|input| input.focused) {
+                        button.request_focus();
+                    }
+                    focus = false;
+                }
+                // Escape clears ordinary focus at begin_pass. Only the real
+                // Close owner from the preceding frame may bridge that clear.
+                let owns = button.has_focus() || ui.memory(|memory|
+                    memory.focused().is_none() && memory.had_focus_last_frame(button.id));
+                if !activation && !popup_at_start && !egui::Popup::is_any_open(ctx) {
+                    close = button.clicked() || (owns && !pointer_gesture && ui.input_mut(|input|
+                        input.focused && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)));
+                    if close {
+                        if let Some(id) = self.input_control.help_return_focus {
+                            ui.memory_mut(|memory| memory.request_focus(id));
+                        }
+                    }
+                }
+            });
+        self.input_control.help_focus = focus;
+        self.input_control.help_open = opened && !close;
     }
     pub(crate) fn input_finish(
         &mut self,
@@ -274,6 +446,25 @@ impl RuntimeUi {
     }
 }
 
+fn action_hint(kind: &ActionKind) -> String {
+    fn names(keys: &[InputKey]) -> String {
+        if keys.is_empty() {
+            "Unbound".into()
+        } else {
+            keys.iter()
+                .map(|key| key.logical_name())
+                .collect::<Vec<_>>()
+                .join(" / ")
+        }
+    }
+    match kind {
+        ActionKind::Button { keys } => format!("Button · {}", names(keys)),
+        ActionKind::Axis1d { negative, positive } => {
+            format!("Axis · − {} · + {}", names(negative), names(positive))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,6 +475,49 @@ mod tests {
     // early outside cancellation must not turn a Release click into a new claim.
     #[test]
     fn real_control_gesture_releases_across_frames_and_survives_layout_replay() {
+        // An action-map edit must not consume another row of the ordinary
+        // toolbar and therefore resize the real remaining viewport Response.
+        // This layout check needs no worker or GPU resources.
+        fn remaining_viewport(session: &Session) -> egui::Rect {
+            let ctx = egui::Context::default();
+            let mut runtime = RuntimeUi::default();
+            let mut viewport = None;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000., 800.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    runtime.controls(ui, session, 1, false);
+                    let (_, response) =
+                        ui.allocate_exact_size(ui.available_size(), egui::Sense::click_and_drag());
+                    viewport = Some(response.rect);
+                },
+            );
+            output.textures_delta.clear();
+            viewport.unwrap()
+        }
+        let mut layout = Session::new(ruster_scene::Scene::empty("input-layout")).unwrap();
+        let empty = remaining_viewport(&layout);
+        layout
+            .set_action(0, "home", Some(ActionDefinition::default()))
+            .unwrap();
+        let first = remaining_viewport(&layout);
+        layout.set_action(1, "home", None).unwrap();
+        let last = remaining_viewport(&layout);
+        assert_eq!(
+            first, empty,
+            "first action must preserve the viewport footprint"
+        );
+        assert_eq!(
+            last, empty,
+            "last action removal must preserve the viewport footprint"
+        );
+
         let mut session = Session::new(ruster_scene::Scene::empty("input-focus")).unwrap();
         session
             .set_action(
@@ -322,6 +556,9 @@ mod tests {
         wait(&mut runtime, true);
         let mut text = String::new();
         let mut time = 0.;
+        let width = std::cell::Cell::new(1000.0);
+        let height = std::cell::Cell::new(800.0);
+        let rendered = std::cell::RefCell::new(Vec::new());
         let mut draw = |runtime: &mut RuntimeUi, events, discard: bool| {
             time += 0.1;
             let mut output = ctx.run_ui(
@@ -331,7 +568,7 @@ mod tests {
                     time: Some(time),
                     screen_rect: Some(egui::Rect::from_min_size(
                         egui::Pos2::ZERO,
-                        egui::vec2(1000., 800.),
+                        egui::vec2(width.get(), height.get()),
                     )),
                     ..Default::default()
                 },
@@ -354,7 +591,7 @@ mod tests {
                 },
             );
             output.textures_delta.clear();
-            output
+            let button = output
                 .shapes
                 .iter()
                 .find_map(|shape| match &shape.shape {
@@ -368,7 +605,9 @@ mod tests {
                     }
                     _ => None,
                 })
-                .unwrap()
+                .unwrap();
+            *rendered.borrow_mut() = output.shapes;
+            button
         };
         let mut button = egui::Pos2::ZERO;
         for _ in 0..3 {
@@ -493,6 +732,78 @@ mod tests {
                 .unwrap()
                 .claimed
         );
+        // The actual floating help must consume Escape after egui clears
+        // focused() at begin_pass, including the compact window footprint.
+        fn label_point(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {
+            fn find(shape: &egui::epaint::Shape, label: &str) -> Option<egui::Pos2> {
+                match shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                        Some(text.pos + text.galley.rect.center().to_vec2())
+                    }
+                    egui::epaint::Shape::Vec(shapes) => {
+                        shapes.iter().find_map(|shape| find(shape, label))
+                    }
+                    _ => None,
+                }
+            }
+            shapes
+                .iter()
+                .find_map(|shape| find(&shape.shape, label))
+                .unwrap_or_else(|| panic!("visible input help control {label:?}"))
+        }
+        for size in [egui::vec2(1000.0, 800.0), egui::vec2(640.0, 480.0)] {
+            width.set(size.x);
+            height.set(size.y);
+            for _ in 0..3 {
+                draw(&mut runtime, vec![], false);
+            }
+            for close_key in [egui::Key::Escape, egui::Key::Enter] {
+                let menu = label_point(&rendered.borrow(), "Runtime");
+                draw(&mut runtime, vec![egui::Event::PointerMoved(menu)], false);
+                draw(&mut runtime, vec![pointer(menu, true)], false);
+                draw(&mut runtime, vec![pointer(menu, false)], false);
+                draw(&mut runtime, vec![], false);
+                let item = label_point(&rendered.borrow(), "Runtime input help…");
+                draw(&mut runtime, vec![egui::Event::PointerMoved(item)], false);
+                draw(&mut runtime, vec![pointer(item, true)], false);
+                draw(&mut runtime, vec![pointer(item, false)], false);
+                draw(&mut runtime, vec![], false);
+                let close = label_point(&rendered.borrow(), "Close input help");
+                let focused = ctx.memory(|memory| memory.focused()).and_then(|id| ctx.read_response(id))
+                    .expect("opening the actual Runtime menu help must hand keyboard focus to Close after the popup settles");
+                assert!(
+                    focused.has_focus() && focused.rect.contains(close),
+                    "genuine opening focuses the visible Close button"
+                );
+                assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains(close));
+                draw(
+                    &mut runtime,
+                    vec![egui::Event::Key {
+                        key: close_key,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    false,
+                );
+                assert!(
+                    !runtime.input_control.help_open,
+                    "{close_key:?} closes actual owned help at {size:?}"
+                );
+                draw(
+                    &mut runtime,
+                    vec![egui::Event::Key {
+                        key: close_key,
+                        physical_key: None,
+                        pressed: false,
+                        repeat: false,
+                        modifiers: egui::Modifiers::NONE,
+                    }],
+                    false,
+                );
+            }
+        }
         runtime.shutdown();
         let until = Instant::now() + Duration::from_secs(5);
         while !runtime.finished() {

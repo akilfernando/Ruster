@@ -202,6 +202,7 @@ pub(super) struct InputUi {
     // Deliberately outside the serializable Draft: recovery never re-arms keys.
     capture: Option<Capture>,
     focus_first: bool,
+    validation_focus: Option<egui::Id>,
     message: String,
     interaction_frame: Option<u64>,
 }
@@ -245,6 +246,7 @@ impl InputUi {
         }
         self.capture = None;
         self.focus_first = false;
+        self.validation_focus = None;
         self.message.clear();
     }
     pub(super) fn restore_drafts(
@@ -258,6 +260,7 @@ impl InputUi {
         }
         self.replace_draft(draft);
         self.focus_first = self.pending();
+        self.validation_focus = None;
         self.message.clear();
         Ok(())
     }
@@ -278,6 +281,7 @@ impl InputUi {
                 }
                 self.replace_draft(Some(draft));
                 self.focus_first = true;
+                self.validation_focus = None;
                 self.message.clear();
             }
             Err(error) => self.message = error,
@@ -559,7 +563,7 @@ impl InputUi {
                         candidate,
                     );
                 }
-                if !self.message.is_empty() {
+                if !form_drawn && !self.message.is_empty() {
                     ui.colored_label(egui::Color32::LIGHT_RED, &self.message);
                 }
             });
@@ -581,6 +585,7 @@ impl InputUi {
         let mut changed = false;
         let popup_at_start = egui::Popup::is_any_open(ui.ctx());
         let mut text_owned = false;
+        let mut text_focus = None;
         let mut owned_ids = Vec::new();
         let mut selected = false;
         let mut next_capture = None;
@@ -612,19 +617,47 @@ impl InputUi {
                         .interactive(draft.intent == Intent::Set),
                 );
                 changed |= id.changed() || label.changed();
+                let feedback = (!capturing && !self.message.is_empty()).then(|| {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&self.message).color(egui::Color32::LIGHT_RED),
+                        )
+                        .wrap(),
+                    )
+                });
                 if self.focus_first && editable && !capturing && draft.intent == Intent::Set {
-                    if draft.edited_id.is_none() {
-                        id.request_focus();
-                        id.scroll_to_me(Some(egui::Align::Center));
+                    let field = if self.validation_focus == Some(label.id) {
+                        &label
+                    } else if self.validation_focus == Some(id.id) || draft.edited_id.is_none() {
+                        &id
                     } else {
-                        label.request_focus();
-                        label.scroll_to_me(Some(egui::Align::Center));
-                    }
+                        &label
+                    };
+                    field.request_focus();
+                    ui.scroll_to_rect(
+                        feedback
+                            .as_ref()
+                            .map_or(field.rect, |feedback| field.rect.union(feedback.rect)),
+                        Some(egui::Align::Center),
+                    );
                     self.focus_first = false;
                 }
                 for response in [&id, &label] {
                     if response.gained_focus() {
-                        response.scroll_to_me(None);
+                        ui.scroll_to_rect(
+                            feedback.as_ref().map_or(response.rect, |feedback| {
+                                response.rect.union(feedback.rect)
+                            }),
+                            None,
+                        );
+                    }
+                    if response.has_focus()
+                        || response.lost_focus()
+                        || ui.memory(|memory| {
+                            memory.focused().is_none() && memory.had_focus_last_frame(response.id)
+                        })
+                    {
+                        text_focus = Some(response.id);
                     }
                 }
                 text_owned = [&id, &label].iter().any(|response| {
@@ -785,6 +818,17 @@ impl InputUi {
                     next_capture = None;
                     self.claim_frame(ui.ctx());
                 }
+                if self.capture.is_some() && !self.message.is_empty() {
+                    let feedback = ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&self.message).color(egui::Color32::LIGHT_RED),
+                        )
+                        .wrap(),
+                    );
+                    if response.enabled() && response.has_focus() {
+                        ui.scroll_to_rect(response.rect.union(feedback.rect), None);
+                    }
+                }
             }
         }
         if changed {
@@ -815,6 +859,7 @@ impl InputUi {
                 }
                 Err(error) => {
                     self.message = error;
+                    self.validation_focus = text_focus;
                     self.focus_first = true;
                 }
             }
@@ -891,7 +936,10 @@ fn key_rows(
     let mut result = KeyRows::default();
     let mut remove = None;
     let mut occupied = used.to_vec();
-    ui.push_id(format!("{side:?}"), |ui| {
+    // Capture returns to a real button across conditional validation feedback.
+    // A child salt alone leaves auto IDs dependent on preceding widget count.
+    let scope = ui.make_persistent_id(egui::IdSalt::new(format!("action-key-rows-{side:?}")));
+    ui.scope_builder(egui::UiBuilder::new().scope_id(scope), |ui| {
         for (index, key) in values.iter_mut().enumerate() {
             ui.push_id(index, |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -1053,6 +1101,7 @@ mod tests {
         }
         for size in [egui::vec2(1280.0, 800.0), egui::vec2(640.0, 480.0)] {
             let ctx = egui::Context::default();
+            crate::editor_theme::configure(&ctx);
             let mut session = Session::new(ruster_scene::Scene::demo()).unwrap();
             for (id, kind) in [
                 (
@@ -1102,6 +1151,47 @@ mod tests {
                 focused.interact_rect.contains_rect(focused.rect),
                 "autofocused draft field must be fully inside the current window clip at {size:?}"
             );
+            let label_focus = focused.id;
+            let replace_label = |value: &str| {
+                vec![
+                    egui::Event::Key {
+                        key: egui::Key::A,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers: egui::Modifiers {
+                            ctrl: true,
+                            command: true,
+                            ..Default::default()
+                        },
+                    },
+                    egui::Event::Text(value.into()),
+                ]
+            };
+            frame(&ctx, &mut editor, &session, size, replace_label(" home "));
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Enter));
+            for _ in 0..3 {
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            assert_eq!(editor.draft.as_ref().unwrap().label, " home ");
+            assert!(
+                !editor.message.is_empty(),
+                "invalid label produces validation feedback"
+            );
+            let focused = ctx.read_response(label_focus).unwrap();
+            assert!(
+                focused.enabled()
+                    && focused.has_focus()
+                    && focused.interact_rect.contains_rect(focused.rect),
+                "invalid label keeps its real editable field visibly focused at {size:?}"
+            );
+            assert!(visible_text(&shapes, &editor.message).is_some(),
+                "the entire validation feedback must be visible together with the focused invalid label at {size:?}");
+            assert_eq!(session.snapshot_bytes().unwrap(), original);
+            frame(&ctx, &mut editor, &session, size, replace_label("home"));
+            assert_eq!(editor.draft.as_ref().unwrap().label, "home");
+            assert!(editor.draft.as_ref().unwrap().edit(&session).is_ok());
+            shapes = frame(&ctx, &mut editor, &session, size, vec![]);
             // Reach Capture by genuine keyboard traversal, allowing the scroll
             // owner to reveal each newly focused control.
             for _ in 0..16 {
@@ -1161,6 +1251,41 @@ mod tests {
             let mut released_arrow = key(egui::Key::ArrowRight);
             released_arrow.remove(0);
             frame(&ctx, &mut editor, &session, size, released_arrow);
+            let mut modified_key = key(egui::Key::K);
+            for event in &mut modified_key {
+                if let egui::Event::Key { modifiers, .. } = event {
+                    *modifiers = egui::Modifiers::CTRL;
+                }
+            }
+            frame(&ctx, &mut editor, &session, size, modified_key);
+            for _ in 0..3 {
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            assert_eq!(
+                editor.drafts(),
+                before_repeat,
+                "unsupported modified key preserves raw bindings"
+            );
+            let capture_owner = ctx
+                .read_response(
+                    editor
+                        .capture
+                        .expect("rejected key leaves capture active")
+                        .owner
+                        .unwrap(),
+                )
+                .unwrap();
+            assert_eq!(capture_owner.id, owner.id);
+            assert!(
+                capture_owner.enabled()
+                    && capture_owner.has_focus()
+                    && capture_owner
+                        .interact_rect
+                        .contains_rect(capture_owner.rect)
+            );
+            assert!(!editor.message.is_empty() && visible_text(&shapes, &editor.message).is_some(),
+                "capture feedback must remain fully visible beside its genuine focused owner at {size:?}");
+            assert_eq!(session.snapshot_bytes().unwrap(), original);
             let trigger = editor.capture.unwrap().focus;
             frame(
                 &ctx,
@@ -1202,6 +1327,47 @@ mod tests {
             frame(&ctx, &mut editor, &session, size, key(egui::Key::Escape));
             assert!(!editor.pending(), "the next Escape cancels the raw form");
             assert_eq!(session.snapshot_bytes().unwrap(), original);
+
+            // The same failed Enter must retain the actual Label owner in a
+            // new action, where initial autofocus legitimately starts at ID.
+            for _ in 0..3 {
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            let add = visible_text(&shapes, "Add Button").expect("Add Button is visible");
+            frame(&ctx, &mut editor, &session, size, click(add, true));
+            frame(&ctx, &mut editor, &session, size, click(add, false));
+            for _ in 0..2 {
+                frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Tab));
+            frame(&ctx, &mut editor, &session, size, vec![]);
+            let label_focus = ctx.memory(|memory| memory.focused()).unwrap();
+            frame(
+                &ctx,
+                &mut editor,
+                &session,
+                size,
+                replace_label(" new label "),
+            );
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Enter));
+            for _ in 0..3 {
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            assert!(editor.draft.as_ref().unwrap().edited_id.is_none());
+            assert_eq!(editor.draft.as_ref().unwrap().label, " new label ");
+            let label = ctx.read_response(label_focus).unwrap();
+            assert!(label.enabled() && label.has_focus() && label.interact_rect.contains_rect(label.rect),
+                "new-action invalid Label retains its actual visible field instead of returning to ID");
+            assert!(
+                !editor.message.is_empty() && visible_text(&shapes, &editor.message).is_some(),
+                "new-action feedback is fully visible beside its submitting field at {size:?}"
+            );
+            assert_eq!(session.snapshot_bytes().unwrap(), original);
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Escape));
+            assert!(
+                !editor.pending(),
+                "Escape cancels the invalid new-action draft"
+            );
 
             // Reopen through the actual list to retain the existing clipped
             // owner/candidate regression after exercising form cancellation.
