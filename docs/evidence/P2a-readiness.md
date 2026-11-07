@@ -1,0 +1,34 @@
+# P2a requirement and evidence audit
+
+Updated 2026-11-07. **Acceptance remains open.** This tracks the approved [Spatial Queries / Clearance Bench goal](../plans/P2A-SPATIAL-QUERIES.md). It preserves the complete goal while creator qualification continues.
+
+## Current evidence
+
+The exact editor source checkpoint is `d01c8cc`. The new-property Name Enter source repair now passes its red→green owner case and the 124-case affected gate. Rebuilt native acceptance remains pending. Earlier post-d01c8cc commits change documentation only. Default and inspection editors have separate build9 pins. Their runtime is byte-identical to build8 and the vertical8 runtime kit. The adapter has its own adapter2 pin. The [current status](../STATUS.md) records source checks and retained failures. [Decision 0038](../decisions/0038-spatial-query-feasibility.md) owns accepted semantics and the qualified early gate.
+
+External evidence is retained under `/home/akilf/Projects/Ruster-Creations/p2a-clearance-bench-20261107`. Paths in the table are relative to that directory. Test counts establish the recorded check scope. Final requirement-by-requirement acceptance still needs source and artifact review.
+
+| Requirement | Evidence and current result | Remaining work |
+| --- | --- | --- |
+| Early feasibility and preserved baseline | Sealed I1a pins, primitive dependency probes, exact vertical traces, old-kit rejection and root/Astra early-gate review are recorded in decision 0038. | Recheck the final application/source identities during final audit. |
+| Typed authoring and compatibility | Scene12 component/history, original-f64 admission, API1/API2 preservation and Recovery10 ownership are integrated. The full gate records 282 Rust and 26 Python cases. The final focus repair records 124 affected editor cases. | Review final ownership and supported-version requirements against the actual checked inputs. |
+| Bounded coherent queries | Immutable tick-start geometry, complete Reset/tick budget, cancellation, atomic publication and numeric/contact semantics have recorded owning tests and vertical traces. | Complete the final semantics/evidence audit. No general dynamic-body capability is claimed. |
+| Ordinary editor creation | `ordinary-9` proves visible Add focus, keyboard shape selection, invalid Enter/Save, protected human drafts, invalid Save-and-Close, repair and fresh Save. `ordinary-course-1` now saves all eight named/transformed objects, the imported sphere assigned to two objects, two sphere blockers, a rotated Box blocker and the offset Box sensor through actual widgets. Two actions, the API3 source and a complete probe attachment are saved. New-property Name Enter has a retained native failure and a source repair under verification. | Finish the flag attachment and Name-Enter repair qualification, then manipulation/Undo, operation, recovery, delivery and independent reopen. |
+| Independent native MCP creation | `mcp-course-1/build-docking-course.json` records 212 calls, eight objects, the imported sphere, two actions, one API3 source and two complete bindings. Negative requests preserve complete state. First motion, sensor geometry/Undo and fast rotated-barrier/withdrawal/moved-obstacle trials pass. | Complete native standalone operation and final creation acceptance. |
+| Hidden editing and Save | `mcp-course-1/hidden-save.json` passes collider edit/readback/Undo/Save while the exact editor is on a hidden workspace. Initial saved bytes are preserved. | Include these exact receipts in final integrity inventory. |
+| Reopen and exact MCP delivery | `mcp-reopen-1/reopen-inspection.json` verifies a fresh private-cache process against disk. `mcp-course-1/export-docking-course.json` records the committed 11-file archive. `docking-headless-1/report.json` verifies all payloads/notices/mesh and four relocated read-only headless prefixes against complete native Scenes and exact query observations. | Native application controls/focus/resize/Reset/Close remain open. The direct-editor application remains outstanding. |
+| Real raw-draft recovery | Raw invalid editing and Recovery10 owner checks pass their recorded scopes. | Perform the actual invalid raw collider-draft crash, unsaved Restore, repair and fresh Save with originals preserved. |
+| Query and Session costs | Frozen creator/dense query cohorts and matched complete-history Session cohorts are recorded in status and decision 0038. | Final small-creator foreground/Host gaps, equal-history resources, GPU counters, true default idle and latest footprint remain open. |
+| Final delivery and review | Exact development artifacts and evidence exist in the external work directory. | Finish both projects/apps, source/default binaries/runtime, archives, guide, integrity inventory and root/Astra product-quality evaluation. |
+
+## Retained qualifications
+
+- The optimized dense 256-object, 16-sweep/16-overlap workload takes a median 5.618190 ms per complete Step and misses the unchanged 2 ms added-cost reference. The accepted early gate retains this limitation. Its result does not establish other query mixes or general scalability.
+- Native editor interaction uses actual OS focus with app-scoped injected events. It is separate from a physical-human walkthrough.
+- Relocated headless execution hides source/home/cache/tools and preserves read-only payloads. It uses the same host/kernel and spatial implementation. Native GPU presentation remains a separate requirement.
+- The original Blender sphere uses Blender's background Python API. Blender MCP was not used.
+- Prior protocol, harness, parser, contact and focus failures remain in their original evidence. Successful later checks retain their exact source and binary identities.
+
+## Stopping condition
+
+Keep P2a active until every row's remaining work is discharged by appropriate current evidence and the full approved goal survives root/Astra review. M9, publication and any subsequent capability goal require their own selection.

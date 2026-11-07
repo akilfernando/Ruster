@@ -817,11 +817,21 @@ impl BehaviorUi {
                     });
                 }
                 egui::CollapsingHeader::new("Add property").id_salt(("add_behavior_property",id)).show(ui,|ui| {
-                ui.label("Name");text(ui,&mut self.new_property,128);
+                let popup_at_start = egui::Popup::is_any_open(ui.ctx());
+                ui.label("Name");
+                let name = text(ui,&mut self.new_property,128);
                 egui::ComboBox::from_label("Property type").selected_text(["Number","Bool","Text","Vec3","Object reference","Asset reference"][self.new_type]).show_ui(ui,|ui| {
                     for (index,label) in ["Number","Bool","Text","Vec3","Object reference","Asset reference"].into_iter().enumerate() {ui.selectable_value(&mut self.new_type,index,label);}
                 });
-                if ui.button("Add typed property").clicked() {
+                let enter = ui.is_enabled()
+                    && !popup_at_start
+                    && !egui::Popup::is_any_open(ui.ctx())
+                    && (name.has_focus()
+                        || (name.lost_focus() && ui.memory(|memory| memory.focused().is_none())))
+                    && ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                    });
+                if ui.button("Add typed property").clicked() || enter {
                     let value=match self.new_type {0=>PropertyValue::Number(0.0),1=>PropertyValue::Bool(false),2=>PropertyValue::Text(String::new()),3=>PropertyValue::Vec3([0.0;3]),4=>PropertyValue::ObjectRef(None),_=>PropertyValue::AssetRef(None)};
                     action=Some(Action::AddProperty(id.clone(),self.new_property.clone(),value));
                 }
@@ -1931,6 +1941,7 @@ mod tests {
             .unwrap();
         let binding = session.authoring().bindings.keys().next().unwrap().clone();
         let ctx = egui::Context::default();
+        let shapes = std::cell::RefCell::new(Vec::new());
         let frame =
             |editor: &mut BehaviorUi, session: &Session, editable, events: Vec<egui::Event>| {
                 let mut action = None;
@@ -1947,8 +1958,150 @@ mod tests {
                     |ui| action = editor.inspector(ui, session, Some("left"), None, 5, editable),
                 );
                 output.textures_delta.clear();
+                *shapes.borrow_mut() = output.shapes;
                 action
             };
+        let visible_text = |label: &str| {
+            shapes
+                .borrow()
+                .iter()
+                .find_map(|shape: &egui::epaint::ClippedShape| {
+                    let egui::epaint::Shape::Text(text) = &shape.shape else {
+                        return None;
+                    };
+                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    (text.galley.job.text == label && shape.clip_rect.contains_rect(rect))
+                        .then_some(rect.center())
+                })
+                .unwrap_or_else(|| panic!("Expected visible production inspector text {label:?}"))
+        };
+        let click = |editor: &mut BehaviorUi, session: &Session, position| {
+            let mut action = None;
+            for pressed in [true, false] {
+                let current = frame(
+                    editor,
+                    session,
+                    true,
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+                if current.is_some() {
+                    assert!(action.is_none(), "One click admits at most one action");
+                    action = current;
+                }
+            }
+            action
+        };
+        // Exercise the actual Add property controls, including a real click
+        // into the Name field. No requested/fabricated text focus is used.
+        editor.new_property = "indicator_floor".into();
+        editor.new_type = 0;
+        frame(&mut editor, &session, true, vec![]);
+        assert!(click(&mut editor, &session, visible_text("Add property")).is_none());
+        // Let the real collapsing-header animation finish before requiring a
+        // fully visible click target. This bounded settle precedes the Name
+        // interaction and does not repair or delay Enter admission.
+        for _ in 0..12 {
+            frame(&mut editor, &session, true, vec![]);
+        }
+        assert!(click(&mut editor, &session, visible_text("indicator_floor")).is_none());
+        let unchanged = session.snapshot_bytes().unwrap();
+        assert!(click(&mut editor, &session, visible_text("Number")).is_none());
+        assert!(egui::Popup::is_any_open(&ctx));
+        assert!(
+            frame(
+                &mut editor,
+                &session,
+                true,
+                key(egui::Key::Enter, egui::Modifiers::NONE),
+            )
+            .is_none(),
+            "Enter in the property-type popup must not add a property"
+        );
+        assert_eq!(session.snapshot_bytes().unwrap(), unchanged);
+        for key in [egui::Key::Enter, egui::Key::Escape] {
+            if key == egui::Key::Escape && egui::Popup::is_any_open(&ctx) {
+                frame(
+                    &mut editor,
+                    &session,
+                    true,
+                    self::key(key, egui::Modifiers::NONE),
+                );
+            }
+            frame(
+                &mut editor,
+                &session,
+                true,
+                vec![egui::Event::Key {
+                    key,
+                    physical_key: None,
+                    pressed: false,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+            );
+        }
+        assert!(click(&mut editor, &session, visible_text("indicator_floor")).is_none());
+        let before_add = session.binding(&binding).unwrap().clone();
+        let revision = session.scene().revision;
+        let action = frame(
+            &mut editor,
+            &session,
+            true,
+            key(egui::Key::Enter, egui::Modifiers::NONE),
+        )
+        .expect("Enter in the focused Add property Name must submit the typed property");
+        assert!(
+            matches!(&action, Action::AddProperty(id, name, PropertyValue::Number(value))
+            if id == &binding && name == "indicator_floor" && *value == 0.0)
+        );
+        editor.execute(action, &mut session).unwrap();
+        assert_eq!(session.scene().revision, revision + 1);
+        assert_eq!(
+            session.binding(&binding).unwrap().properties["indicator_floor"],
+            PropertyValue::Number(0.0)
+        );
+        assert!(editor.new_property.is_empty());
+        frame(
+            &mut editor,
+            &session,
+            true,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        session.undo(session.scene().revision).unwrap();
+        assert_eq!(session.binding(&binding), Some(&before_add));
+        session.redo(session.scene().revision).unwrap();
+        assert_eq!(
+            session.binding(&binding).unwrap().properties["indicator_floor"],
+            PropertyValue::Number(0.0)
+        );
+
+        // The existing visible button remains an independent single admission.
+        editor.new_property = "button_property".into();
+        frame(&mut editor, &session, true, vec![]);
+        let revision = session.scene().revision;
+        let action = click(&mut editor, &session, visible_text("Add typed property"))
+            .expect("The existing Add typed property button still submits");
+        editor.execute(action, &mut session).unwrap();
+        assert_eq!(session.scene().revision, revision + 1);
+        assert_eq!(
+            session.binding(&binding).unwrap().properties["button_property"],
+            PropertyValue::Number(0.0)
+        );
+
         editor
             .execute(
                 Action::EditProperty(binding.clone(), "speed".into()),

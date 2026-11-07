@@ -599,3 +599,11 @@ Root retains the same model snapshot and sole native/build/SDK ownership. Sol re
 
 
 Sol's prepared export helper passes root source/owner/AST review and actual one-shot SDK export. Its prepared relocated qualifier reuses the pinned I1apure extraction/inventory/namespace helpers, preserving the mutable launcher-ready exception and explicit X0native evidence. Root reviews all source and actual namespace/report/output, then executes four frozen prefixes once. All11payloads, complete Scenes, exact f64query observations, controls/timestep/camera and unchanged read-only inventory checks pass. No final P2aacceptance follows.
+
+
+Sol's subsequent read-only ordinary workflow map identifies exact production import/mesh context-menu, input-action, API3source and property controls, including Enter/apply and draft ownership. Root independently performs the eight-object widget construction, import, assignments and offset sensor authoring. Source-derived action/source/property routes remain qualified until actual native completion. No agent sends input or owns the native process.
+
+
+### P2a new-property Name submission — 2026-11-07
+
+Root's ordinary native creation exposes a missing Name-field Enter route in Add property. Existing button fallback preserves the creator checkpoint. Sol extends the existing real-inspector property keyboard case, then stops for root's red execution. The intended Name-Enter assertion fails after9.17seconds compilation. Sol then makes the bounded common-admission repair without new state/schema/helpers. Root reviews ownership/popup/disabled guards, formats, and runs the same case green after5.45seconds compilation, with0.17seconds case time. Strict visible text clicks and bounded header-animation settlement retain the actual focus oracle. The affected integration gate passes124cases and strict checks in7.62seconds. Rebuilt native proof remains pending. Root retains sole native/build/docs ownership. Agent usage/elapsed/cost remains unknown.
