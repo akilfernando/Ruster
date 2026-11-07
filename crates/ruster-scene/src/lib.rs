@@ -4828,6 +4828,34 @@ mod tests {
     #[test]
     fn collider_history_scale_and_version_guards_are_atomic() {
         use serde_json::{json, Value};
+        // Raw JSON must preserve the next representable f64 above the maximum
+        // until collider validation, before any Scene-f32 narrowing.
+        for shape in [
+            ColliderShape::Sphere { radius: 1000.0 },
+            ColliderShape::Box {
+                half_extents: [1.0, 1000.0, 1.0],
+            },
+        ] {
+            let mut scene = Scene::demo();
+            scene.objects[0].collider = Some(Collider {
+                shape,
+                ..Default::default()
+            });
+            let session = Session::new(scene).unwrap();
+            let raw = String::from_utf8(session.snapshot_bytes().unwrap()).unwrap();
+            assert_eq!(raw.matches("1000.0").count(), 1);
+            assert_eq!(
+                Session::from_snapshot_bytes(raw.as_bytes())
+                    .unwrap()
+                    .scene(),
+                session.scene()
+            );
+            let outside = raw.replacen("1000.0", "1000.0000000000001", 1);
+            assert!(
+                Session::from_snapshot_bytes(outside.as_bytes()).is_err(),
+                "{shape:?}"
+            );
+        }
         let sphere = Collider {
             enabled: true,
             shape: ColliderShape::Sphere { radius: 0.25 },

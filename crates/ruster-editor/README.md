@@ -563,3 +563,11 @@ Invalid action names keep their raw text and the actual Enter-submitting field f
 
 
 Help focuses its Close button on genuine opening. While that help owns focus, Page Up/Down scroll and Home/End jump; Escape/Enter close. Its measured footer remains outside the scroll body, including retained compact sizes. The Control row also contains concise Reset/debug status so those transitions do not add another viewport row. Source checks cover these paths; native8 and zero-unnecessary-resource-cost qualification remain pending.
+
+## Primitive collider authoring — P2a
+
+The geometry Inspector includes a Collider component with Sphere/Box shape, Enabled, Blocker/Sensor role, local offset and bounded dimensions. Box fields show full local Size. The saved/MCP representation uses half extents. Enter applies one shared authored transaction, Escape cancels the draft and Tab traverses its controls. Shape switching retains the inactive draft dimensions. Invalid input stays available for repair. Enabled spheres require exactly uniform positive object scale. Offset follows owner scale and rotation.
+
+The viewport shows a passive xray outline for the active object's collider. Amber identifies blockers, cyan sensors and gray disabled definitions. A disabled sphere with nonuniform scale reports an unavailable guide. Runtime view displays contact markers only from the current committed query snapshot. Runtime → Spatial feedback exposes captured names, queried tick/revision and contact details through keyboard paging. The script chooses its returned transform.
+
+Raw collider drafts belong to Recovery10with object/revision/component/transform baselines. Older recovery labels reject a collider field, including null. Scene12save and API3/content8/Descriptor5delivery follow the accepted [query architecture](../../docs/decisions/0038-spatial-query-feasibility.md). Full native authoring, crash recovery, two-project delivery and final cost/resource acceptance remain in progress under the [P2a contract](../../docs/plans/P2A-SPATIAL-QUERIES.md).

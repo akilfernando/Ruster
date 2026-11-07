@@ -61,6 +61,7 @@ impl SceneEditor {
             && self.material_draft.is_none()
             && self.lighting_draft.is_none()
             && self.display_draft.is_none()
+            && self.collider_draft.is_none()
             && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && !self.manipulation.offset_pending()

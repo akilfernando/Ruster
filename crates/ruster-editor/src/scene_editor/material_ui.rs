@@ -186,6 +186,7 @@ impl SceneEditor {
             && self.color_draft.is_none()
             && self.lighting_draft.is_none()
             && self.display_draft.is_none()
+            && self.collider_draft.is_none()
             && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && !self.manipulation.offset_pending()
@@ -1465,7 +1466,7 @@ mod tests {
         let id = candidates[0].id.clone();
         let (_journal, snapshot) = store.claim(&id).unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 9);
+        assert_eq!(payload["version"], 10);
         assert_eq!(payload["material"]["roughness"], "unfinished roughness");
         assert_eq!(payload["material"]["response_mode"], "dielectric");
         assert_eq!(payload["material"]["roughness_texture"], "pending-map");

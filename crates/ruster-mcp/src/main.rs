@@ -1,6 +1,7 @@
 //! Narrow MCP 2025-06-18 stdio profile. See the crate README for limits.
 mod behavior_tools;
 mod capture_tools;
+mod collider_tools;
 mod color_tools;
 mod export_tools;
 mod lighting_tools;
@@ -113,6 +114,9 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     }
     if material_tools::supported(name) {
         return material_tools::valid(name, arguments);
+    }
+    if collider_tools::supported(name) {
+        return collider_tools::valid(name, arguments);
     }
     if color_tools::supported(name) {
         return color_tools::valid(name, arguments);
@@ -436,6 +440,7 @@ fn tools() -> Value {
             "inputSchema":input_schema,
             "annotations":{"readOnlyHint":matches!(name, "inspect" | "replay" | "scene_inspect" | "scene_replay" | "asset_inspect"), "openWorldHint":false}}));
     }
+    tools.extend(collider_tools::list());
     tools.extend(color_tools::list());
     tools.extend(material_tools::list());
     tools.extend(lighting_tools::list());
@@ -567,6 +572,7 @@ impl Server {
                         "shader_refresh",
                     ]
                     .contains(&name)
+                        && !collider_tools::supported(name)
                         && !color_tools::supported(name)
                         && !material_tools::supported(name)
                         && !lighting_tools::supported(name)
@@ -883,7 +889,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 68);
+        assert_eq!(tools.len(), 69);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -914,6 +920,7 @@ mod tests {
                 "scene_undo",
                 "scene_redo",
                 "scene_replay",
+                "scene_collider_set",
                 "scene_color",
                 "material_inspect",
                 "scene_material_set",
@@ -1038,6 +1045,43 @@ mod tests {
 
     #[test]
     fn scene_shapes_are_strict_and_semantic_validation_stays_with_owner() {
+        // Collider wire admission protects strict variants and original f64
+        // bounds. Scale compatibility remains with the owning Scene transaction.
+        let base = json!({"expected_session_token":"s","expected_revision":"9007199254740993","object_id":"probe"});
+        for collider in [
+            Value::Null,
+            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"sphere","radius":0.5}}),
+            json!({"enabled":false,"role":"sensor","offset":[-10000,0,10000],"shape":{"type":"box","half_extents":[0.001,1,1000]}}),
+        ] {
+            let mut args = base.clone();
+            args["collider"] = collider;
+            assert!(valid_arguments("scene_collider_set", &args));
+            let mut server = ready();
+            let response = server.handle(
+                &serde_json::to_vec(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"scene_collider_set","arguments":args}})).unwrap(),
+                |name, actual| {
+                    assert_eq!(name, "scene_collider_set");
+                    assert_eq!(actual, &args);
+                    json!({"ok":true,"result":{}})
+                },
+            ).unwrap();
+            assert_eq!(response["result"]["isError"], false);
+        }
+        assert!(!valid_arguments("scene_collider_set", &base));
+        for collider in [
+            json!({}),
+            json!({"enabled":false,"role":"sensor","offset":[0,0,0],"shape":{"type":"sphere","radius":0.00099999999}}),
+            json!({"enabled":true,"role":"blocker","offset":[0,0,10000.00001],"shape":{"type":"sphere","radius":0.5}}),
+            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"box","half_extents":[1,1,1000.00001]}}),
+            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"box","half_extents":[1,1]}}),
+            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"sphere","radius":0.5,"half_extents":[1,1,1]}}),
+            json!({"enabled":true,"role":"trigger","offset":[0,0,0],"shape":{"type":"sphere","radius":0.5}}),
+            json!({"enabled":true,"role":"blocker","offset":[0,0,0],"shape":{"type":"sphere","radius":0.5},"extra":null}),
+        ] {
+            let mut args = base.clone();
+            args["collider"] = collider;
+            assert!(!valid_arguments("scene_collider_set", &args), "{args}");
+        }
         for (name, field, item) in [
             (
                 "scene_transform_many",

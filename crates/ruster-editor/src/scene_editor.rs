@@ -5,6 +5,9 @@ mod asset_inspection;
 mod asset_timing;
 mod behavior_commands;
 mod capture_commands;
+mod collider_commands;
+mod collider_ui;
+mod collider_viewport;
 mod color_commands;
 mod combo_focus;
 mod display_ui;
@@ -57,6 +60,7 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "scene_material_copy",
     "scene_material_remove",
     "scene_color",
+    "scene_collider_set",
     "viewport_inspect",
     "viewport_camera",
     "scene_select",
@@ -147,6 +151,8 @@ struct RecoveryDrafts {
     lighting: Option<lighting_ui::LightingDraft>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     display: Option<display_ui::DisplayDraft>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    collider: Option<collider_ui::ColliderDraft>,
 }
 impl From<&Transform> for Fields {
     fn from(t: &Transform) -> Self {
@@ -397,6 +403,7 @@ pub struct SceneEditor {
     material_draft: Option<material_ui::MaterialDraft>,
     lighting_draft: Option<lighting_ui::LightingDraft>,
     display_draft: Option<display_ui::DisplayDraft>,
+    collider_draft: Option<collider_ui::ColliderDraft>,
     baseline_fields: Option<Fields>,
     workspace: Workspace,
     recovery: crate::recovery_ui::RecoveryUi,
@@ -571,6 +578,7 @@ impl SceneEditor {
             material_draft: None,
             lighting_draft: None,
             display_draft: None,
+            collider_draft: None,
             baseline_fields: draft.clone(),
             workspace,
             recovery: crate::recovery_ui::RecoveryUi::disabled(),
@@ -645,6 +653,7 @@ impl SceneEditor {
             || self.material_draft.is_some()
             || self.lighting_draft.is_some()
             || self.display_draft.is_some()
+            || self.collider_draft.is_some()
             || self.manipulation.precision_pending()
             || self.draft != self.baseline_fields
             || self.behavior.pending()
@@ -665,7 +674,8 @@ impl SceneEditor {
             && (self.color_draft.is_none()
                 && self.material_draft.is_none()
                 && self.lighting_draft.is_none()
-                && self.display_draft.is_none())
+                && self.display_draft.is_none()
+                && self.collider_draft.is_none())
             && !self.manipulation.active()
             && !self.manipulation.precision_pending()
             && self.draft == self.baseline_fields
@@ -843,7 +853,7 @@ impl SceneEditor {
     #[cfg(test)]
     fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
         let drafts = RecoveryDrafts {
-            version: 9,
+            version: 10,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -855,6 +865,7 @@ impl SceneEditor {
             material: self.material_draft.clone(),
             lighting: self.lighting_draft.clone(),
             display: self.display_draft.clone(),
+            collider: self.collider_draft.clone(),
         };
         let mut snapshot = crate::recovery::Snapshot::capture(
             &self.session,
@@ -871,6 +882,11 @@ impl SceneEditor {
         let material_field = value.get("material").is_some();
         let lighting_field = value.get("lighting").is_some();
         let version = value.get("version").and_then(Value::as_u64);
+        if version.is_some_and(|version| version < 10) && value.get("collider").is_some() {
+            return Err(
+                "Collider recovery fields require draft version10; checkpoint preserved.".into(),
+            );
+        }
         if version.is_some_and(|version| version < 9) && value.get("input_actions").is_some() {
             return Err(
                 "Input action recovery fields require draft version9; checkpoint preserved.".into(),
@@ -949,7 +965,7 @@ impl SceneEditor {
                     && fields_unit != Some(false)
             }
             Some(4) => !lighting_field && manipulation_unit && fields_unit != Some(false),
-            Some(5..=9) => manipulation_unit && fields_unit != Some(false),
+            Some(5..=10) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -977,7 +993,7 @@ impl SceneEditor {
         }
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((2..=9).contains(&draft.version) && draft.behavior.is_some()))
+            || ((2..=10).contains(&draft.version) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -998,6 +1014,28 @@ impl SceneEditor {
                 .is_some_and(|text| text.chars().count() > 128 || draft.selection.is_empty())
         {
             return Err("Recovery drafts have unsupported version, selection, revision or text bounds; checkpoint preserved.".into());
+        }
+        if let Some(collider) = &draft.collider {
+            if !collider.validate_snapshot(scene, draft.selection.last().map(String::as_str))
+                || draft.color.is_some()
+                || draft.material.is_some()
+                || draft.lighting.is_some()
+                || draft.display.is_some()
+                || draft.input_actions.is_some()
+                || draft.pending_name.is_some()
+                || draft
+                    .behavior
+                    .as_ref()
+                    .is_some_and(|behavior| behavior.pending())
+                || draft.fields.as_ref().is_some_and(|fields| {
+                    *fields != Fields::with_unit(&collider.baseline_transform, fields.rotation_unit)
+                })
+            {
+                return Err(
+                    "Unsupported compound or stale collider recovery draft; checkpoint preserved."
+                        .into(),
+                );
+            }
         }
         if let Some(color) = &draft.color {
             if !color.validate_snapshot(scene, draft.selection.last().map(String::as_str))
@@ -1129,6 +1167,7 @@ impl SceneEditor {
             || draft.lighting.is_some()
             || draft.display.is_some()
             || draft.input_actions.is_some()
+            || draft.collider.is_some()
         {
             let mut checked = crate::manipulation::Manipulation::default();
             checked.ids = draft.selection.clone();
@@ -1146,6 +1185,7 @@ impl SceneEditor {
         let material = draft.material;
         let lighting = draft.lighting;
         let display = draft.display;
+        let collider = draft.collider;
         self.manipulation.ids = draft.selection;
         self.selected = self.manipulation.selected();
         self.sync_draft();
@@ -1155,6 +1195,7 @@ impl SceneEditor {
         self.material_draft = material;
         self.lighting_draft = lighting;
         self.display_draft = display;
+        self.collider_draft = collider;
         if let (Some(fields), Some(id)) = (&draft.fields, &self.selected) {
             let transform = self
                 .session
@@ -1292,7 +1333,7 @@ impl SceneEditor {
             let asset_origin = self.asset_origin.clone();
             let recovered_origin = self.recovered_origin.clone();
             let drafts = RecoveryDrafts {
-                version: 9,
+                version: 10,
                 revision: session.scene().revision,
                 selection: self.manipulation.ids.clone(),
                 fields: self.draft.clone(),
@@ -1304,6 +1345,7 @@ impl SceneEditor {
                 material: self.material_draft.clone(),
                 lighting: self.lighting_draft.clone(),
                 display: self.display_draft.clone(),
+                collider: self.collider_draft.clone(),
             };
             let capture = Box::new(move || {
                 let mut snapshot = crate::recovery::Snapshot::capture(
@@ -1649,6 +1691,9 @@ impl SceneEditor {
         if self.asset_publishing() || self.asset_loading() {
             self.error="Asset publication is finishing; authored edits are reserved until acknowledgement.".into();
             return false;
+        }
+        if self.collider_draft.is_some() {
+            return self.apply_collider_draft();
         }
         if self.display_draft.is_some() {
             return self.apply_display_draft();
@@ -2014,7 +2059,7 @@ impl SceneEditor {
         }
         egui::CollapsingHeader::new("Adjust selection").id_salt("selection_adjustments").open(pending.then_some(true)).show(ui,|ui| {
             ui.label("World translation offset");
-            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none()) && !self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
+            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
                 let mut enter=false;
                 let mut escape=false;
                 let group_width=crate::manipulation::component_group_width(ui);
@@ -2559,6 +2604,7 @@ impl SceneEditor {
             op,
             "scene_light_create"
                 | "scene_light_set"
+                | "scene_collider_set"
                 | "scene_ambient_set"
                 | "scene_material_set"
                 | "scene_display_set"
@@ -2631,6 +2677,9 @@ impl SceneEditor {
         }
         if lighting_commands::supported(op) {
             return self.lighting_command(token, op, args);
+        }
+        if op == "scene_collider_set" {
+            return self.collider_command(token, args);
         }
         if op == "scene_color" {
             return self.color_command(token, args);
@@ -3156,6 +3205,11 @@ impl SceneEditor {
             self.inspector_contents_inner(ui)
         });
     }
+    fn inspector_scroll_ui(&mut self, ui: &mut egui::Ui) {
+        egui::ScrollArea::vertical()
+            .animated(false)
+            .show(ui, |ui| self.inspector_contents(ui));
+    }
     fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
         let title = if self.manipulation.ids.len() > 1 {
             format!("{} selected", self.manipulation.ids.len())
@@ -3205,6 +3259,7 @@ impl SceneEditor {
                         && self.material_draft.is_none()
                         && self.lighting_draft.is_none()
                         && self.display_draft.is_none()
+                        && self.collider_draft.is_none()
                         && !self.behavior.pending()
                         && !self.input_actions.pending(),
                     |ui| self.manipulation_ui(ui),
@@ -3228,7 +3283,7 @@ impl SceneEditor {
         ui.separator();
         ui.strong("Transform");
         if self.draft != self.baseline_fields {
-            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none()) && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
                     ui.label("Recovered transform fields — repair or revert before other precision edits");
                     let mut enter=false;
                     let mut escape=false;
@@ -3248,7 +3303,7 @@ impl SceneEditor {
                     if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
                 });
         }
-        ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.ids.is_empty(), |ui| {
+        ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.ids.is_empty(), |ui| {
                 match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                     Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                     Ok(false)=>{},Err(error)=>self.error=error,
@@ -3259,6 +3314,7 @@ impl SceneEditor {
                 && self.material_draft.is_none()
                 && self.lighting_draft.is_none()
                 && self.display_draft.is_none()
+                && self.collider_draft.is_none()
                 && !self.behavior.pending()
                 && !self.input_actions.pending(),
             |ui| self.manipulation_ui(ui),
@@ -3286,6 +3342,7 @@ impl SceneEditor {
         {
             ui.strong("Mesh");
             self.mesh_reference_ui(ui);
+            self.collider_inspector_ui(ui);
             self.material_inspector_ui(ui);
             self.color_inspector_ui(ui);
             let editable = self.behavior_editable();
@@ -4455,7 +4512,7 @@ impl SceneEditor {
                     .size_range(240.0..=1000.0)
             };
             let output = panel.show(ui, |ui| {
-                egui::ScrollArea::vertical().show(ui, |ui| self.inspector_contents(ui));
+                self.inspector_scroll_ui(ui);
             });
             let width = output.response.rect.width().clamp(240.0, 1000.0);
             if !constrained && (width - self.workspace.prefs.inspector_width).abs() > 0.5 {
@@ -4634,6 +4691,18 @@ impl SceneEditor {
                 && !self.new_scene_pending
                 && !self.rename_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none();
             let can_pick = self.navigation.enabled && !self.manipulation.active();
+            if !self.runtime.visible {
+                let active = self.selected.as_slice();
+                collider_viewport::paint(ui, &viewport, authored_view, active);
+            } else if !self.runtime.stale {
+                if let Some(frame) = self.runtime.frame.as_ref()
+                    .filter(|frame| Some(frame.key) == self.runtime.current_run())
+                {
+                    if let Some(observations) = &frame.query_observations {
+                        collider_viewport::paint_contacts(ui, &viewport, frame.scene.as_ref(), frame.tick, observations);
+                    }
+                }
+            }
             // Passive xray icons precede transform handles in paint order;
             // handles retain first refusal on a click, then icons, then surfaces.
             let light_pick = if !self.runtime.visible {
@@ -5920,7 +5989,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 9);
+        assert_eq!(payload["version"], 10);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -6095,6 +6164,7 @@ mod tests {
             material: None,
             lighting: None,
             display: None,
+            collider: None,
         })
         .unwrap();
         draft["manipulation"]
@@ -6254,6 +6324,7 @@ mod tests {
             material: None,
             lighting: None,
             display: None,
+            collider: None,
         })
         .unwrap();
         drafts["version"] = 99.into();
@@ -6301,6 +6372,68 @@ mod tests {
             1,
             "unsupported drafts preserve the checkpoint and release its temporary claim"
         );
+        // The new component's raw owner uses the same checkpoint admission.
+        let mut component = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        component.select_object(Some("left".into()), false);
+        component.select_object(Some("right".into()), true);
+        assert_eq!(component.manipulation.ids, ["left", "right"]);
+        let mut raw = collider_ui::ColliderDraft::new(component.session.scene(), "right").unwrap();
+        raw.mode = collider_ui::ColliderMode::Sphere;
+        raw.enabled = true;
+        raw.radius = "unfinished radius".into();
+        component.collider_draft = Some(raw.clone());
+        let snapshot = component.recovery_snapshot().unwrap();
+        let payload = snapshot.drafts().unwrap();
+        assert_eq!(payload["version"], 10);
+        let mut restored = SceneEditor::new(snapshot.restore().unwrap());
+        restored.restore_recovery_drafts(payload.clone()).unwrap();
+        assert_eq!(restored.collider_draft, Some(raw.clone()));
+        assert!(!restored.apply_collider_draft());
+        let document = restored.session.snapshot_bytes().unwrap();
+        for kind in [
+            "old-present",
+            "old-null",
+            "missing-baseline",
+            "stale-scale",
+            "compound",
+        ] {
+            let mut invalid = payload.clone();
+            match kind {
+                "old-present" => invalid["version"] = json!(9),
+                "old-null" => {
+                    invalid["version"] = json!(9);
+                    invalid["collider"] = Value::Null;
+                }
+                "missing-baseline" => {
+                    invalid["collider"]
+                        .as_object_mut()
+                        .unwrap()
+                        .remove("baseline");
+                }
+                "stale-scale" => invalid["collider"]["baseline_transform"]["scale"][0] = json!(2),
+                _ => invalid["manipulation"]["delta"][0] = json!("1"),
+            }
+            assert!(restored.restore_recovery_drafts(invalid).is_err(), "{kind}");
+            assert_eq!(restored.collider_draft, Some(raw.clone()), "{kind}");
+            assert_eq!(
+                restored.session.snapshot_bytes().unwrap(),
+                document,
+                "{kind}"
+            );
+        }
+        restored.collider_draft.as_mut().unwrap().radius = "0.25".into();
+        assert!(restored.apply_collider_draft(), "{}", restored.error);
+        assert!(restored.collider_draft.is_none());
+        assert!(restored
+            .session
+            .scene()
+            .objects
+            .iter()
+            .find(|object| object.id == "right")
+            .unwrap()
+            .collider
+            .is_some());
+        assert!(restored.session.scene().objects[0].collider.is_none());
     }
     #[test]
     fn close_cleanup_conflict_keeps_window_visible_and_escape_cancels() {
@@ -7076,6 +7209,51 @@ mod tests {
         assert!(editor.session.is_dirty());
         editor.history(false);
         assert_eq!(editor.session.scene().objects, preview.objects);
+        let state = editor.command("host", "scene_inspect", json!({}))["result"].clone();
+        let collider = ruster_scene::Collider {
+            enabled: true,
+            shape: ruster_scene::ColliderShape::Sphere { radius: 0.25 },
+            ..Default::default()
+        };
+        let set = json!({"expected_session_token":state["session_token"],"expected_revision":state["revision"],
+            "object_id":"left","collider":collider});
+        assert_eq!(
+            editor.command("host", "scene_collider_set", set.clone())["ok"],
+            true
+        );
+        assert_eq!(editor.session.scene().objects[0].collider, Some(collider));
+        assert_eq!(
+            editor.command("host", "scene_collider_set", set.clone())["error"]["code"],
+            "stale_revision"
+        );
+        let unchanged = editor.session.snapshot_bytes().unwrap();
+        let mut invalid = set.clone();
+        invalid["expected_revision"] = json!(editor.session.scene().revision.to_string());
+        invalid["collider"]["shape"]["radius"] = json!(0.000999999999);
+        assert_eq!(
+            editor.command("host", "scene_collider_set", invalid)["error"]["code"],
+            "invalid_arguments"
+        );
+        editor.collider_draft = collider_ui::ColliderDraft::new(editor.session.scene(), "left");
+        editor.collider_draft.as_mut().unwrap().radius = "unfinished".into();
+        let clear = json!({"expected_session_token":state["session_token"],
+            "expected_revision":editor.session.scene().revision.to_string(),"object_id":"left","collider":null});
+        assert_eq!(
+            editor.command("host", "scene_collider_set", clear.clone())["error"]["code"],
+            "drafts_pending"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        assert_eq!(editor.preview.scene, preview);
+        editor.collider_draft = None;
+        assert_eq!(
+            editor.command("host", "scene_collider_set", clear)["ok"],
+            true
+        );
+        assert!(editor.session.scene().objects[0].collider.is_none());
+        editor.history(false);
+        assert_eq!(editor.session.scene().objects[0].collider, Some(collider));
+        editor.history(false);
+        assert!(editor.session.scene().objects[0].collider.is_none());
         let old = editor.command("host", "scene_inspect", json!({}))["result"].clone();
         editor = SceneEditor::new(Session::new(ruster_scene::Scene::demo()).unwrap());
         assert_eq!(editor.command("host","scene_undo",json!({"expected_session_token":old["session_token"],"expected_revision":old["revision"]}))["error"]["code"],"stale_session");
@@ -7192,7 +7370,7 @@ mod tests {
             assert_eq!(candidates.len(), 1);
             let (_journal, snapshot) = store.claim(&candidates[0].id).unwrap();
             let payload = snapshot.drafts().unwrap();
-            assert_eq!(payload["version"], 9);
+            assert_eq!(payload["version"], 10);
             if shadow {
                 assert_eq!(
                     payload["lighting"]["shadow"]["depth_bias_texels"],
@@ -7310,7 +7488,7 @@ mod tests {
         let exact = source.display_draft.clone();
         let snapshot = source.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 9);
+        assert_eq!(payload["version"], 10);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.display_draft, exact);

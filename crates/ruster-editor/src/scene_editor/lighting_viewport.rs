@@ -24,7 +24,7 @@ fn position(light: &Light) -> DVec3 {
     DVec3::from_array(light.transform.translation.map(f64::from))
 }
 
-fn view_projection(viewport: &ruster_render::ViewportInteraction) -> DMat4 {
+pub(super) fn view_projection(viewport: &ruster_render::ViewportInteraction) -> DMat4 {
     DMat4::from_cols_array_2d(&viewport.projection.map(|column| column.map(f64::from)))
         * DMat4::from_cols_array_2d(&viewport.view.map(|column| column.map(f64::from)))
 }
@@ -39,7 +39,7 @@ fn screen(rect: egui::Rect, clip: DVec4) -> egui::Pos2 {
 
 /// Camera clipping uses the shared wgpu0..1 projection. Never project an anchor
 /// behind the camera or allow an offscreen icon's hit radius to leak inward.
-fn project(rect: egui::Rect, vp: DMat4, point: DVec3) -> Option<(egui::Pos2, f32)> {
+pub(super) fn project(rect: egui::Rect, vp: DMat4, point: DVec3) -> Option<(egui::Pos2, f32)> {
     if !rect.is_positive() {
         return None;
     }
@@ -70,7 +70,7 @@ fn planes(point: DVec4) -> [f64; 7] {
 
 /// Clip each bounded world-space guide segment before division. A circle can
 /// cross near/side planes without giant screen coordinates or joining gaps.
-fn segment(rect: egui::Rect, vp: DMat4, a: DVec3, b: DVec3) -> Option<[egui::Pos2; 2]> {
+pub(super) fn segment(rect: egui::Rect, vp: DMat4, a: DVec3, b: DVec3) -> Option<[egui::Pos2; 2]> {
     let a = vp * a.extend(1.0);
     let b = vp * b.extend(1.0);
     if !rect.is_positive() || !a.is_finite() || !b.is_finite() {
