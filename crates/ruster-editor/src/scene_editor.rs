@@ -2562,6 +2562,8 @@ impl SceneEditor {
                 | "scene_ambient_set"
                 | "scene_material_set"
                 | "scene_display_set"
+                | "behavior_action_set"
+                | "behavior_action_remove"
         ) {
             Some((
                 self.asset_ops.timing_immediate_begin(op, "mcp"),
@@ -4760,6 +4762,17 @@ impl SceneEditor {
                 .window(&ctx, &self.session, editable, &mut opened);
             self.input_actions_open = opened;
             if let Some(edit) = edit {
+                #[cfg(feature = "inspection")]
+                let observed = (
+                    self.asset_ops.timing_immediate_begin(
+                        match &edit {
+                            crate::input_ui::Edit::Set { .. } => "behavior_action_set",
+                            crate::input_ui::Edit::Remove { .. } => "behavior_action_remove",
+                        },
+                        "ui",
+                    ),
+                    self.session.scene().revision,
+                );
                 let result = match edit {
                     crate::input_ui::Edit::Set {
                         revision,
@@ -4770,6 +4783,8 @@ impl SceneEditor {
                         self.session.set_action(revision, &id, None)
                     }
                 };
+                #[cfg(feature = "inspection")]
+                let succeeded = result.is_ok();
                 match result {
                     Ok(_) => {
                         self.input_actions.clear();
@@ -4781,6 +4796,12 @@ impl SceneEditor {
                     }
                     Err(error) => self.error = error.to_string(),
                 }
+                #[cfg(feature = "inspection")]
+                self.asset_ops.timing_immediate_finished(
+                    observed.0,
+                    succeeded,
+                    self.session.scene().revision != observed.1,
+                );
             }
         }
         let editable = self.behavior_editable();
