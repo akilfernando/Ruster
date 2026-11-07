@@ -813,7 +813,8 @@ impl Workspace {
         {
             return None;
         }
-        // Exact modifiers prevent Ctrl+Shift+S being consumed as Ctrl+S.
+        // Match each press exactly, even if its modifiers were released later
+        // in this frame. Preserve Ctrl+Shift+S independently from Ctrl+S.
         self.prefs.bindings.iter().find_map(|binding| {
             // Focus navigation remains reachable from ordinary focused controls.
             if widget_focused && binding.action != Action::FocusRuntime {
@@ -821,12 +822,25 @@ impl Workspace {
             }
             let key = binding.key?;
             let action = ctx.input_mut(|i| {
-                let m = i.modifiers;
-                (m.ctrl == binding.ctrl
-                    && m.shift == binding.shift
-                    && m.alt == binding.alt
-                    && i.consume_key(binding.modifiers(), key))
-                .then_some(binding.action)
+                let mut consumed = false;
+                i.events.retain(|event| {
+                    let matches = matches!(
+                        event,
+                        egui::Event::Key {
+                            key: pressed_key,
+                            pressed: true,
+                            modifiers,
+                            ..
+                        } if *pressed_key == key
+                            && modifiers.ctrl == binding.ctrl
+                            && modifiers.shift == binding.shift
+                            && modifiers.alt == binding.alt
+                            && modifiers.matches_logically(binding.modifiers())
+                    );
+                    consumed |= matches;
+                    !matches
+                });
+                consumed.then_some(binding.action)
             });
             if action == Some(Action::FocusRuntime) {
                 // A separate navigation event wins over a focus jump in the
@@ -1357,6 +1371,36 @@ mod tests {
             frame(&mut w, true, key(egui::Key::P, runtime_modifiers), false),
             Some(Action::FocusRuntime)
         );
+        let mut released_shortcut = key(egui::Key::P, runtime_modifiers);
+        released_shortcut.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        assert_eq!(
+            frame(&mut w, true, released_shortcut, false),
+            Some(Action::FocusRuntime),
+            "A modifier release in the same frame preserves the shortcut press"
+        );
+        let mut shifted_save = key(egui::Key::S, runtime_modifiers);
+        shifted_save.push(egui::Event::ModifiersChanged(egui::Modifiers::CTRL));
+        assert_eq!(
+            frame(&mut w, true, shifted_save, false),
+            Some(Action::SaveAs),
+            "Releasing Shift cannot reinterpret Save As as Save"
+        );
+        let mut mixed_saves = key(egui::Key::S, runtime_modifiers);
+        mixed_saves.extend(key(egui::Key::S, egui::Modifiers::CTRL));
+        mixed_saves.push(egui::Event::ModifiersChanged(egui::Modifiers::NONE));
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                events: mixed_saves,
+                ..Default::default()
+            },
+            |_| {
+                assert_eq!(w.shortcuts(&ctx, false), Some(Action::Save));
+                assert_eq!(w.shortcuts(&ctx, false), Some(Action::SaveAs));
+                assert_eq!(w.shortcuts(&ctx, false), None);
+            },
+        );
+        output.textures_delta.clear();
         for (focused, blocked) in [(false, false), (true, true)] {
             assert_eq!(
                 frame(
