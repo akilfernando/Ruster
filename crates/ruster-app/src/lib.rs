@@ -168,6 +168,22 @@ pub trait Application: 'static {
     fn input(&mut self, _input: &InputFrame) -> Result<(), String> {
         Ok(())
     }
+    /// Opt-in authored logical actions. None preserves legacy keyboard routing.
+    fn keyboard_actions(&self) -> Option<&ruster_scene::input::ActionMap> {
+        None
+    }
+    /// Admitted transitions only, after actual focused input-surface ownership.
+    /// Hosts discard repeat/modifier/UI events; false cancels without key releases.
+    fn action_input(
+        &mut self,
+        _owned: bool,
+        _events: &[(ruster_scene::input::InputKey, bool)],
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    /// Must not evaluate scripts or block. Pause/error/reset revoke pending input.
+    fn cancel_action_input(&mut self) {}
+
     /// Return false to veto native close and present application-owned recovery UI.
     fn request_close(&mut self) -> bool {
         true
@@ -222,6 +238,9 @@ impl<A: Application> Runtime<A> {
         self.running
     }
     pub fn set_running(&mut self, running: bool) {
+        if !running {
+            self.app.cancel_action_input();
+        }
         self.running = running;
         self.accumulator = Duration::ZERO;
     }

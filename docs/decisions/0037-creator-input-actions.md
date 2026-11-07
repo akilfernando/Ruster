@@ -34,3 +34,12 @@ Accessed2026-11-07: [Godot InputMap examples](https://docs.godotengine.org/en/st
 ## First foundation qualification — 2026-11-07
 
 Pure action/edge types and workingScene11 Authoring/history integration now have targeted owning checks/strict scene lint and independent review. Review catches raw BTreeMap duplicate-ID overwrite; the existing frame case demonstrates failure, and the repaired bounded unique decoder passes. [Evidence](../evidence/I1A-foundation.md) records commands, baseline and fixture failures. This qualifies neither API2 nor native/worker/Step/runtime delivery. The working status remains until the complete early gate.
+
+
+## Integration defaults under qualification — 2026-11-07
+
+Working version progression is Scene11/content7/recovery drafts9, with Descriptor4/catalog4/cache identities unchanged. The exact cumulative runtime profile adds `input_actions`; preflight echoes the authored map. These are implementation choices pending the first native save/export gate, not final acceptance. One shared recursive unique-key source parser is compiled by Scene, the editor bridge and MCP, preventing raw duplicate-key normalization before input validation without making the thin adapter depend on engine model crates.
+
+Native preview and the shared app host use their actual viewport Response for explicit Control/Release ownership. Activation/gameplay input is handled once per genuine egui frame; discarded layout passes cannot toggle or replay it. Outside pointer gestures, UI/modifier/focus ownership and debugger suspension revoke leases. A deliberate post-debugger Control request may submit existing Play, then claim only the unchanged epoch after acknowledgement; no old lease re-arms. Eventless read-only contention keeps authority, whereas failed event publication revokes to prevent a dropped key-up retaining held state. Poisoned state pauses/rejects until a successful Reset installs a validated replacement.
+
+Action forms keep bounded recoverable raw ID/label and typed bindings. Capture is transient, owns an enabled actual widget, and must cancel on hidden/collapsed/closed UI or focus transfer while preserving the form. Only serialized draft changes advance recovery generation; an idle form neither clones the full raw draft nor hashes the document. API1 remains the default source template; API2 is explicit. Ordinary and actual native qualification are still open.

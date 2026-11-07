@@ -7,15 +7,17 @@ use ruster_app::creation::{CreationManifest, DESCRIPTOR_NAME};
 use ruster_app::{Application, HostOptions, MeshMap, ResourceRoot, Runtime};
 use ruster_motion_lab::generic::{self, GenericMotionLab};
 use ruster_motion_lab::{read_source, MotionLab, DEFAULT_SOURCE};
+use ruster_scene::input::{ActionFrame, ActionMap};
 
 const HELP: &str = "Ruster Motion Lab — compare authored motion or open a legacy Rhai project
 
 Usage: ruster-motion-lab [OPTIONS]
   --headless       Attach the behavior to left, Reset, run fixed ticks, print transforms
   --ticks N        Headless ticks, 0–10000 (default 10)
+  --input-frames PATH Headless generic/creation JSON array, at most 1 MiB and N frames
   --speed N        Legacy: left property; generic: runtime-only numeric speed override
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
-  --scene PATH     Read a generic Scene5 snapshot (sources, bindings and history retained)
+  --scene PATH     Read a generic Scene11 snapshot (sources, bindings and history retained)
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
   --creation-info Print the runtime/descriptor compatibility profile and exit
   --creation PATH Read an app.json creation descriptor and its relative resources
@@ -36,6 +38,8 @@ Generic mode consumes Scene5/Lua through the shared behavior backend. Native mod
 loads authored data without compiling it; Reset validates at dt0, Run/Step uses
 fixed dt0.1. Author/edit/save in ruster-editor, then reopen this read-only viewer.
 Headless generic mode Resets and prints JSON with separate authored/runtime scenes.
+--input-frames supplies one programmatic action frame per initial tick; the whole
+file validates before Reset. Remaining ticks are neutral; no native input is claimed.
 --speed changes only the runtime snapshot of enabled numeric speed properties.
 Mesh references require explicit --resources ROOT --mesh ID=relative.obj mappings;
 missing meshes are errors. No scene, script, catalog, lock or cache file is written.
@@ -61,6 +65,7 @@ struct Options {
     creation: Option<PathBuf>,
     resources: Option<PathBuf>,
     meshes: Vec<(String, PathBuf)>,
+    input_frames: Option<PathBuf>,
 }
 
 fn parse() -> Result<Option<Options>, String> {
@@ -76,13 +81,18 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
             "--headless" => options.headless = true,
             "--generic-demo" => options.generic_demo = true,
             "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project"
-            | "--scene" | "--resources" | "--mesh" | "--creation" => {
+            | "--scene" | "--resources" | "--mesh" | "--creation" | "--input-frames" => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{arg} requires a value. See --help."))?;
                 match arg.as_str() {
                     "--scene" => options.scene = Some(value.into()),
                     "--creation" => options.creation = Some(value.into()),
+                    "--input-frames" => {
+                        if options.input_frames.replace(value.into()).is_some() {
+                            return Err("Use one --input-frames file".into());
+                        }
+                    }
                     "--resources" => options.resources = Some(value.into()),
                     "--mesh" => {
                         let (id, path) =
@@ -141,6 +151,9 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
     {
         return Err("--ticks requires --headless; --frames requires native mode.".into());
     }
+    if options.input_frames.is_some() && !options.headless {
+        return Err("--input-frames requires --headless generic or creation mode".into());
+    }
     if options.project.is_some() && options.script.is_some() {
         return Err("Use either --project or --script.".into());
     }
@@ -162,6 +175,15 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
     if !options.meshes.is_empty() && options.resources.is_none() {
         return Err("--mesh requires an explicit --resources directory".into());
     }
+    if options.input_frames.is_some()
+        && !generic
+        && (options.project.is_some() || options.script.is_some() || options.save_project.is_some())
+    {
+        return Err(
+            "--input-frames is unavailable in legacy Rhai mode; use generic or creation mode"
+                .into(),
+        );
+    }
     Ok(Some(options))
 }
 
@@ -178,6 +200,12 @@ fn execute(options: Options) -> Result<(), String> {
     }
     if options.scene.is_some() || options.generic_demo {
         return execute_generic(options);
+    }
+    if options.input_frames.is_some() {
+        return Err(
+            "--input-frames requires headless generic or creation mode, not legacy Rhai mode"
+                .into(),
+        );
     }
     let source = match &options.script {
         Some(path) => read_source(path)?,
@@ -247,6 +275,9 @@ fn has_explicit_content(options: &Options) -> bool {
 }
 
 fn validate_creation_options(options: &Options) -> Result<(), String> {
+    if options.input_frames.is_some() && !options.headless {
+        return Err("--input-frames requires --headless generic or creation mode".into());
+    }
     if has_explicit_content(options)
         || options.resources.is_some()
         || !options.meshes.is_empty()
@@ -255,6 +286,70 @@ fn validate_creation_options(options: &Options) -> Result<(), String> {
         return Err("Creation mode uses its app.json content and tick settings; omit --scene, --generic-demo, --project, --script, --save-project, --resources, --mesh and --speed".into());
     }
     Ok(())
+}
+
+/// Read/validate every supplied tick before Reset or simulation side effects.
+/// The shared regular-file reader rejects symlinks/special files and bounds bytes.
+fn read_input_frames(
+    path: Option<&Path>,
+    ticks: u64,
+    actions: &ActionMap,
+) -> Result<Vec<ActionFrame>, String> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    let bytes = ruster_assets::read_regular_file(path, 1024 * 1024)
+        .map_err(|error| format!("Input frames {}: {error}", path.display()))?;
+    let frames: Vec<ActionFrame> = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("Input frames require a JSON array of action frames: {error}"))?;
+    if frames.len() as u64 > ticks {
+        return Err("Input frame count exceeds requested headless ticks".into());
+    }
+    for (index, frame) in frames.iter().enumerate() {
+        frame
+            .validate_against(actions)
+            .map_err(|error| format!("Input frame {}: {error}", index + 1))?;
+    }
+    Ok(frames)
+}
+
+fn input_observation(app: &GenericMotionLab) -> serde_json::Value {
+    app.input_observation()
+        .map(|(tick, frame, origin)| {
+            serde_json::json!({"tick":tick.to_string(), "frame":frame, "origin":origin})
+        })
+        .unwrap_or(serde_json::Value::Null)
+}
+
+fn headless_runtime(
+    app: GenericMotionLab,
+    dt: Duration,
+    ticks: u64,
+    path: Option<&Path>,
+) -> Result<(Runtime<GenericMotionLab>, serde_json::Value), String> {
+    let frames = read_input_frames(path, ticks, &app.session().authoring().actions)?;
+    let supplied = frames.len();
+    let mut frames = frames.into_iter();
+    let mut runtime = Runtime::new(app, dt)?;
+    runtime.reset()?;
+    let mut last_supplied = serde_json::Value::Null;
+    for _ in 0..ticks {
+        if let Some(frame) = frames.next() {
+            let expected_tick = runtime.tick();
+            generic::step_with_input(&mut runtime, expected_tick, frame)?;
+            last_supplied = input_observation(runtime.app());
+        } else {
+            runtime.step()?;
+        }
+    }
+    let input = serde_json::json!({
+        "origin": if supplied == 0 { "neutral" } else { "programmatic" },
+        "supplied_frames": supplied,
+        "neutral_tail_ticks": ticks - supplied as u64,
+        "last_committed_input": input_observation(runtime.app()),
+        "last_committed_supplied_input": last_supplied,
+    });
+    Ok((runtime, input))
 }
 
 /// Only an absent descriptor permits the embedded legacy application fallback.
@@ -313,11 +408,12 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     )?;
     app.set_creation_presentation(manifest.title.clone());
     if options.headless {
-        let mut runtime = Runtime::new(app, tick_duration)?;
-        runtime.reset()?;
-        for _ in 0..options.ticks.unwrap_or(10) {
-            runtime.step()?;
-        }
+        let (runtime, input) = headless_runtime(
+            app,
+            tick_duration,
+            options.ticks.unwrap_or(10),
+            options.input_frames.as_deref(),
+        )?;
         let app = runtime.app();
         let mut output = serde_json::json!({
             "mode": "creation",
@@ -328,7 +424,9 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             "fixed_dt": tick_duration.as_secs_f64(),
             "runtime_speed_override": null,
             "authored_scene": app.session().scene(),
+            "authored_actions": app.session().authoring().actions,
             "runtime_scene": app.content().scene(),
+            "input": input,
         });
         if let Some(camera) = manifest.initial_camera {
             output["initial_camera"] = serde_json::to_value(camera).map_err(|e| e.to_string())?;
@@ -376,11 +474,12 @@ fn execute_generic(options: Options) -> Result<(), String> {
     let mut app = GenericMotionLab::new(session, meshes, generic::FIXED_DT)?;
     app.set_speed_override(options.speed)?;
     if options.headless {
-        let mut runtime = Runtime::new(app, generic::FIXED_DT)?;
-        runtime.reset()?;
-        for _ in 0..options.ticks.unwrap_or(10) {
-            runtime.step()?;
-        }
+        let (runtime, input) = headless_runtime(
+            app,
+            generic::FIXED_DT,
+            options.ticks.unwrap_or(10),
+            options.input_frames.as_deref(),
+        )?;
         let app = runtime.app();
         println!(
             "{}",
@@ -392,7 +491,9 @@ fn execute_generic(options: Options) -> Result<(), String> {
                 "fixed_dt": generic::FIXED_DT.as_secs_f64(),
                 "runtime_speed_override": options.speed,
                 "authored_scene": app.session().scene(),
+                "authored_actions": app.session().authoring().actions,
                 "runtime_scene": app.content().scene(),
+                "input": input,
             }))
             .map_err(|e| e.to_string())?
         );
@@ -421,7 +522,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions"],
             })
         );
         return;
@@ -461,6 +562,46 @@ mod tests {
             .unwrap()
             .is_some());
         for flags in [
+            vec![
+                "--creation",
+                "app.json",
+                "--headless",
+                "--input-frames",
+                "input.json",
+            ],
+            vec![
+                "--generic-demo",
+                "--headless",
+                "--input-frames",
+                "input.json",
+            ],
+            vec!["--headless", "--input-frames", "input.json"],
+        ] {
+            assert!(options(&flags).unwrap().is_some());
+        }
+        for flags in [
+            vec!["--input-frames"],
+            vec!["--creation", "app.json", "--input-frames", "input.json"],
+            vec!["--generic-demo", "--input-frames", "input.json"],
+            vec![
+                "--headless",
+                "--script",
+                "legacy.rhai",
+                "--input-frames",
+                "input.json",
+            ],
+            vec![
+                "--generic-demo",
+                "--headless",
+                "--input-frames",
+                "one.json",
+                "--input-frames",
+                "two.json",
+            ],
+        ] {
+            assert!(options(&flags).is_err(), "accepted {flags:?}");
+        }
+        for flags in [
             vec!["--scene", "scene.json"],
             vec!["--generic-demo"],
             vec!["--script", "motion.rhai"],
@@ -478,6 +619,41 @@ mod tests {
         assert!(options(&["--creation", "missing/app.json", "--help"])
             .unwrap()
             .is_none());
+        // Admission reads the entire bounded file before Reset. A malformed or
+        // unknown later frame cannot leave an already-simulated prefix behind.
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("input.json");
+        let actions = ActionMap::new();
+        std::fs::write(&path, b"[{},{}]").unwrap();
+        assert_eq!(
+            read_input_frames(Some(&path), 2, &actions).unwrap().len(),
+            2
+        );
+        assert!(read_input_frames(Some(&path), 1, &actions).is_err());
+        for data in [
+            r#"[{}, {"unknown":{"type":"axis1d","value":1}}]"#,
+            r#"[{"x":{"type":"axis1d","value":1},"x":{"type":"axis1d","value":0}}]"#,
+            r#"[{}, {"x":{"type":"button","held":1,"pressed":false,"released":false}}]"#,
+            "[{},",
+        ] {
+            std::fs::write(&path, data).unwrap();
+            assert!(read_input_frames(Some(&path), 2, &actions).is_err());
+        }
+        std::fs::write(&path, b"[]").unwrap();
+        assert!(read_input_frames(Some(&path), 0, &actions)
+            .unwrap()
+            .is_empty());
+        std::fs::File::create(&path)
+            .unwrap()
+            .set_len(1024 * 1024 + 1)
+            .unwrap();
+        assert!(read_input_frames(Some(&path), 2, &actions).is_err());
+        #[cfg(unix)]
+        {
+            let link = directory.path().join("linked.json");
+            std::os::unix::fs::symlink(&path, &link).unwrap();
+            assert!(read_input_frames(Some(&link), 2, &actions).is_err());
+        }
     }
 
     #[test]
@@ -492,6 +668,14 @@ mod tests {
         assert_eq!(
             select_creation(&default, &executable).unwrap(),
             Some(descriptor.clone())
+        );
+        let supplied = options(&["--headless", "--input-frames", "input.json"])
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            select_creation(&supplied, &executable).unwrap(),
+            Some(descriptor.clone()),
+            "input is not an explicit content override of an installed creation"
         );
         let generic = options(&["--generic-demo"]).unwrap().unwrap();
         assert!(select_creation(&generic, &executable).unwrap().is_none());

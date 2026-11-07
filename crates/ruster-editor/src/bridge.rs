@@ -1,4 +1,6 @@
 //! Explicit opt-in, same-user local bridge. Never owns mutable editor state.
+#[path = "../../support/strict_json.rs"]
+mod strict_json;
 use std::io::{BufReader, Write};
 use std::os::unix::{fs::PermissionsExt, net::UnixListener};
 use std::sync::{mpsc, Arc, Mutex};
@@ -254,7 +256,7 @@ impl Bridge {
                         if byte[0] == b'\n' || bytes.len() as u64 > LIMIT { break; }
                     }
                     if bytes.len() as u64 > LIMIT || bytes.last() != Some(&b'\n') { return None; }
-                    let value: Value = serde_json::from_slice(&bytes).ok()?;
+                    let value: Value = strict_json::parse(&bytes).ok()?;
                     let (pending, state, result) = new_pending(value, deadline);
                     sender.try_send(pending).ok()?;
                     ctx.request_repaint();
@@ -374,6 +376,64 @@ pub(crate) fn preparing_test_lease(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // Raw same-user socket frames must reject before a mutable editor callback;
+    // testing normalized Values alone cannot detect duplicate-key loss.
+    #[test]
+    fn raw_socket_duplicates_never_dispatch_and_string_payload_is_opaque() {
+        use std::io::BufRead;
+        use std::os::unix::net::UnixStream;
+        let mut bridge = Bridge::start(egui::Context::default()).unwrap();
+        let path = bridge.directory.path().join("editor.sock");
+        let opaque = "return {update=function(o) return o end} -- {\"key\":1,\"key\":2}";
+        let arguments = json!({"expected_session_token":"session","expected_revision":"0","binding_id":"binding","name":"script","value":{"type":"text","value":opaque}});
+        let valid =
+            serde_json::to_vec(&json!({"operation":"behavior_property_set","arguments":arguments}))
+                .unwrap();
+        let mut observed = Vec::new();
+        for (request, expected) in [
+            (&br#"{"operation":"behavior_runtime_step","arguments":{"input_frame":{"fire":{"type":"axis1d","value":0},"fire":{"type":"axis1d","value":1}}}}"#[..], None),
+            (&br#"{"operation":"behavior_runtime_step","arguments":{"input_frame":{"fire":{"type":"axis1d","value":0,"value":1}}}}"#[..], None),
+            (valid.as_slice(), Some(&arguments)),
+        ] {
+            let path = path.clone();
+            let mut bytes = request.to_vec();
+            bytes.push(b'\n');
+            let (send, reply) = mpsc::sync_channel(1);
+            let client = std::thread::spawn(move || {
+                let mut stream = UnixStream::connect(path).unwrap();
+                stream.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
+                stream.write_all(&bytes).unwrap();
+                let mut wire = String::new();
+                BufReader::new(stream).read_line(&mut wire).unwrap();
+                send.send(serde_json::from_str::<Value>(&wire).unwrap()).unwrap();
+            });
+            let count = observed.len();
+            let deadline = Instant::now() + Duration::from_secs(5);
+            let response = loop {
+                match reply.try_recv() {
+                    Ok(response) => break response,
+                    Err(mpsc::TryRecvError::Empty) => {}
+                    Err(error) => panic!("socket client failed: {error}"),
+                }
+                assert!(Instant::now() < deadline, "socket boundary deadline");
+                bridge.dispatch_command(|_, operation, arguments| {
+                    observed.push((operation.to_owned(), arguments));
+                    json!({"ok":true,"result":{}})
+                });
+                std::thread::park_timeout(Duration::from_millis(1));
+            };
+            client.join().unwrap();
+            if let Some(expected) = expected {
+                assert_eq!(response["ok"], true);
+                assert_eq!(observed.len(), count + 1);
+                assert_eq!(observed.last().unwrap(), &("behavior_property_set".into(), expected.clone()));
+            } else {
+                assert_eq!(response["error"]["code"], "bridge_unavailable");
+                assert_eq!(observed.len(), count, "duplicate raw input reached editor dispatch");
+            }
+        }
+    }
 
     #[test]
     fn expired_queued_edit_never_executes_even_when_editor_wins_lock() {

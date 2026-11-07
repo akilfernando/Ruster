@@ -19,6 +19,7 @@ mod authoring;
 pub mod input;
 mod lighting;
 mod lighting_authoring;
+#[path = "../../support/strict_json.rs"]
 mod strict_json;
 mod surface;
 pub use authoring::*;

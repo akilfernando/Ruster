@@ -1,6 +1,7 @@
 //! Data-only, revisioned behavior tools. No file paths, VM work or executable authority.
 use super::SceneEditor;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
+use ruster_scene::input::ActionDefinition;
 use ruster_scene::{BehaviorBinding, BehaviorSource, PropertyValue};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
@@ -80,6 +81,8 @@ impl SceneEditor {
             "behavior_binding_remove" => &["binding_id"],
             "behavior_property" => &["binding_id", "name"],
             "behavior_property_set" => &["binding_id", "name", "value"],
+            "behavior_action" | "behavior_action_remove" => &["action_id"],
+            "behavior_action_set" => &["action_id", "definition"],
             _ => return Err(error("unsupported_operation")),
         };
         let map = args.as_object().ok_or_else(|| error("invalid_arguments"))?;
@@ -102,6 +105,21 @@ impl SceneEditor {
             let page = match string(args, "kind")? {
                 "sources" => serde_json::to_value(self.session.inspect_sources(offset, 16)),
                 "bindings" => serde_json::to_value(self.session.inspect_bindings(offset, 16)),
+                "actions" => {
+                    let actions = &self.session.authoring().actions;
+                    let items: Vec<_> = actions
+                        .iter()
+                        .skip(offset)
+                        .take(16)
+                        .map(|(id, definition)| json!({"id":id,"definition":definition}))
+                        .collect();
+                    let end = offset.saturating_add(items.len());
+                    serde_json::to_value(ruster_scene::AuthoringPage {
+                        items,
+                        total: actions.len(),
+                        next_offset: (end < actions.len()).then_some(end),
+                    })
+                }
                 "diagnostics" => {
                     serde_json::to_value(self.session.authoring_diagnostics(offset, 16))
                 }
@@ -117,6 +135,15 @@ impl SceneEditor {
             return Err(error("stale_revision"));
         }
         match op {
+            "behavior_action" => {
+                let definition = self
+                    .session
+                    .action(string(args, "action_id")?)
+                    .ok_or_else(|| error("action_not_found"))?;
+                return Ok(
+                    json!({"session_token":token,"revision":revision.to_string(),"action_id":args["action_id"],"definition":definition}),
+                );
+            }
             "behavior_source" => {
                 let value = self
                     .session
@@ -157,6 +184,17 @@ impl SceneEditor {
             return Err(error("drafts_pending"));
         }
         let result = match op {
+            "behavior_action_set" => {
+                let definition: ActionDefinition =
+                    serde_json::from_value(args["definition"].clone())
+                        .map_err(|_| error("invalid_arguments"))?;
+                self.session
+                    .set_action(revision, string(args, "action_id")?, Some(definition))
+            }
+            "behavior_action_remove" => {
+                self.session
+                    .set_action(revision, string(args, "action_id")?, None)
+            }
             "behavior_source_set" => {
                 self.session
                     .set_source(revision, string(args, "source_id")?, Some(source(args)?))
@@ -229,6 +267,112 @@ impl SceneEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+    // Unique action wire boundary: full definitions share Session validation,
+    // history and human-draft authority while inspection remains bounded.
+    #[test]
+    fn action_definitions_share_guarded_history_and_bounded_inspection() {
+        let mut scene = ruster_scene::Scene::empty("action-wire");
+        scene.objects.push(ruster_scene::Object::cube("cube", None));
+        let mut editor = SceneEditor::new(ruster_scene::Session::new(scene).unwrap());
+        let token =
+            editor.command("wire", "scene_inspect", json!({}))["result"]["session_token"].clone();
+        let pre = |revision: u64| json!({"expected_session_token":token,"expected_revision":revision.to_string()});
+        let definition = json!({"label":"Traverse","kind":{"type":"axis1d","negative":["arrow_left"],"positive":["arrow_right"]}});
+        let mut set = pre(0);
+        set["action_id"] = "move".into();
+        set["definition"] = definition.clone();
+        let mut stale = set.clone();
+        stale["expected_session_token"] = "other".into();
+        assert_eq!(
+            editor.command("wire", "behavior_action_set", stale)["error"]["code"],
+            "stale_session"
+        );
+        assert_eq!(
+            editor.command("wire", "behavior_action_set", set.clone())["ok"],
+            true
+        );
+        assert_eq!(editor.session.undo_len(), 1);
+        assert_eq!(
+            editor.command("wire", "behavior_action_set", set.clone())["error"]["code"],
+            "stale_revision"
+        );
+        set["expected_revision"] = "1".into();
+        assert_eq!(
+            editor.command("wire", "behavior_action_set", set.clone())["result"]["changed"],
+            false
+        );
+        assert_eq!(editor.session.undo_len(), 1);
+        let before = editor.session.snapshot_bytes().unwrap();
+        for invalid in [
+            json!({"kind":{"type":"button","keys":["escape"]}}),
+            json!({"kind":{"type":"button","keys":[],"extra":null}}),
+        ] {
+            let mut invalid_set = set.clone();
+            invalid_set["definition"] = invalid;
+            assert_eq!(
+                editor.command("wire", "behavior_action_set", invalid_set)["error"]["code"],
+                "invalid_arguments"
+            );
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
+        }
+        let mut read = pre(1);
+        read["action_id"] = "move".into();
+        editor.draft.as_mut().unwrap().translation[0] = "-".into();
+        assert_eq!(
+            editor.command("wire", "behavior_action", read.clone())["result"]["definition"],
+            definition
+        );
+        assert_eq!(
+            editor.command("wire", "behavior_action_remove", read.clone())["error"]["code"],
+            "drafts_pending"
+        );
+        assert_eq!(editor.draft.as_ref().unwrap().translation[0], "-");
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
+        editor.sync_draft();
+        assert_eq!(
+            editor.command("wire", "behavior_action_remove", read)["ok"],
+            true
+        );
+        assert!(editor.session.action("move").is_none());
+        set["expected_revision"] = "2".into();
+        assert_eq!(
+            editor.command("wire", "behavior_action_set", set)["error"]["code"],
+            "invalid_arguments",
+            "Undo restores a reversible identity; Set cannot silently reuse it"
+        );
+        assert_eq!(editor.command("wire", "scene_undo", pre(2))["ok"], true);
+        assert_eq!(
+            serde_json::to_value(editor.session.action("move").unwrap()).unwrap(),
+            definition
+        );
+        for index in 0..16 {
+            let mut set = pre(editor.session.scene().revision);
+            set["action_id"] = format!("spare-{index:02}").into();
+            set["definition"] = json!({"kind":{"type":"button","keys":[]}});
+            assert_eq!(
+                editor.command("wire", "behavior_action_set", set)["ok"],
+                true
+            );
+        }
+        let first = editor.command("wire", "behavior_inspect", json!({"kind":"actions"}));
+        assert_eq!(first["result"]["page"]["total"], 17);
+        assert_eq!(
+            first["result"]["page"]["items"].as_array().unwrap().len(),
+            16
+        );
+        assert_eq!(
+            first["result"]["page"]["items"][0],
+            json!({"id":"move","definition":definition})
+        );
+        assert_eq!(first["result"]["page"]["next_offset"], 16);
+        let last = editor.command(
+            "wire",
+            "behavior_inspect",
+            json!({"kind":"actions","offset":"16"}),
+        );
+        assert_eq!(last["result"]["page"]["items"].as_array().unwrap().len(), 1);
+        assert_eq!(last["result"]["page"]["next_offset"], Value::Null);
+    }
     // Unique boundary: source encoding and per-property reads must fit the actual
     // bridge frame while preserving shared history and human draft authority.
     #[test]

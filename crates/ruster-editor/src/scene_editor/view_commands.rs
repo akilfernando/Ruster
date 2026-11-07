@@ -257,6 +257,7 @@ mod tests {
         );
         editor.runtime.visible = true;
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            input: None,
             key: crate::behavior_worker::RunKey::default(),
             tick: 7,
             scene: std::sync::Arc::new(editor.session.scene().clone()),

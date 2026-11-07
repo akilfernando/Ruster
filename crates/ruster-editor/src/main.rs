@@ -11,6 +11,7 @@ mod commands;
 mod creation_export;
 mod directory_grant;
 mod editor_theme;
+mod input_ui;
 mod manipulation;
 mod model;
 mod recovery;

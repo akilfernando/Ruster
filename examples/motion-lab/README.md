@@ -79,3 +79,10 @@ cargo test --locked -p ruster-motion-lab
 ```
 
 Native tests must follow the project's workspace2 isolation procedure in `AGENTS.md`. The legacy mode has no generic-editor recovery or IDE integration; use the shared Scene5 workflow above for new authoring. Human Unity/Unreal familiarity and full M8 acceptance remain separate project gates.
+
+
+## Authored controls and supplied headless frames (I1a working integration)
+
+Scene11 actions and explicit Lua host API2 use the shared generic runtime. Native Run → Control runtime owns keyboard input; Escape releases it. Generated hints follow the actual saved map, with last committed input and bounded runtime pose observations. No sample-specific Rust input callback is required. Keyboard-only Button/digital1D Axis controls and their end-to-end acceptance are undergoing [I1a qualification](../../docs/evidence/I1A-foundation.md).
+
+Headless generic or creation mode accepts `--input-frames /absolute/frames.json`: a regular JSON file, at most1MiB, containing an array of sparse named-action frames. Every frame validates against the actual map before Reset/ticks; the array cannot exceed `--ticks`. For example `[{"traverse":{"type":"axis1d","value":1}},{}]` supplies one positive tick then a neutral tick; any remaining ticks are also neutral. This flag rejects native/legacy modes and never injects OS events. Output labels programmatic/neutral origin and actual last committed observations. Default headless execution remains neutral. Exact exported/native application qualification remains pending.

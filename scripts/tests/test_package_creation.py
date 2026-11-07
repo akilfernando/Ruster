@@ -392,6 +392,49 @@ class CreationDistributionTests(unittest.TestCase):
                     (content_root/"content.json").write_bytes(package_creation.encoded(bad))
                     with self.subTest(roughness_record=mutation),self.assertRaises(ValueError):
                         package_creation.source_content(content_root,None)
+                # Scene11 retains actions-only authoring, both immutable roles,
+                # Descriptor4 and exact scene bytes. Old kits reject before staging.
+                input_scene = copy.deepcopy(mapped_scene)
+                input_scene["format_version"] = 11
+                input_scene["authoring"]["actions"] = {
+                    "home": {"label": None, "kind": {"type": "button", "keys": ["home"]}},
+                    "traverse": {"kind": {"type": "axis1d", "negative": ["a"], "positive": ["d"]}}}
+                input_bytes = package_creation.encoded(input_scene)
+                input_content = {**mapped_content, "schema": 7,
+                                 "scene_sha256": package_creation.sha256(input_bytes)}
+                (content_root/"scene.json").write_bytes(input_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(input_content))
+                with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old-kit preflight")), \
+                        patch.object(package_creation.tempfile, "TemporaryDirectory", side_effect=AssertionError("old-kit staging")):
+                    with self.assertRaisesRegex(ValueError, "Scene11 input_actions"):
+                        package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                capable["profile"] = package_creation.INPUT_PROFILE
+                (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                input_response = {**mapped_response, "authored_scene": package_creation.typed_scene(input_scene),
+                                  "authored_actions": package_creation.authored_actions(input_scene)}
+                with patch.object(package_creation, "run_runtime", return_value={**input_response, "authored_actions": {}}):
+                    with self.assertRaisesRegex(ValueError, "retain authored input actions"):
+                        package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                input_output = base/"input.tar.gz"
+                with patch.object(package_creation, "run_runtime", return_value=input_response):
+                    package_creation.package(kit, content_root, input_output)
+                with tarfile.open(input_output) as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"], 4)
+                    self.assertEqual(descriptor["texture_roles"], {"albedo":"base_color_srgb", "finish":"roughness_linear"})
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), input_bytes)
+                bad = copy.deepcopy(input_content)
+                bad["textures"]["finish"].pop("texture_role")
+                (content_root/"content.json").write_bytes(package_creation.encoded(bad))
+                with self.assertRaises(ValueError):
+                    package_creation.source_content(content_root, None)
+                # The input-capable kit still accepts the unchanged Scene10 route.
+                (content_root/"scene.json").write_bytes(mapped_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(mapped_content))
+                with patch.object(package_creation, "run_runtime", return_value=mapped_response):
+                    package_creation.package(kit, content_root, base/"roughness-with-input-kit.tar.gz")
                 # The new kit accepts the unchanged old descriptor3 route.
                 (content_root/"scene.json").write_bytes(surface_bytes)
                 (content_root/"content.json").write_bytes(package_creation.encoded(surface_content))
@@ -453,6 +496,8 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.SUN_SHADOW_PROFILE, "capabilities": ["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "point_shadows"]},
                         {**package_creation.ROUGHNESS_PROFILE, "descriptor_version":3},
                         {**package_creation.ROUGHNESS_PROFILE, "capabilities": package_creation.ROUGHNESS_PROFILE["capabilities"][:-2]+["roughness_maps","surface_materials"]},
+                        {**package_creation.INPUT_PROFILE, "descriptor_version":5},
+                        {**package_creation.INPUT_PROFILE, "capabilities": ["input_actions", *package_creation.ROUGHNESS_PROFILE["capabilities"]]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
                         package_creation.check_profile(invalid_profile)
@@ -642,6 +687,41 @@ class CreationDistributionTests(unittest.TestCase):
                 package_creation.validate_surface_fields(invalid)
         old["authoring"]["bindings"]["object"]["properties"]["roughness_texture"]=None
         package_creation.validate_surface_fields(old)
+        # Input admission owns definitions and structural history, never strings
+        # or arbitrary properties. Typed runtime preflight owns key semantics.
+        button = {"kind": {"type": "button", "keys": ["home"]}}
+        actions = copy.deepcopy(mapped)
+        actions["format_version"] = 11
+        actions["authoring"] = {"sources": {}, "bindings": {},
+                                "actions": {f"a{n}": copy.deepcopy(button) for n in range(32)}}
+        package_creation.validate_input_fields(actions)
+        for version in range(1,11):
+            for location in ("authoring", "undo", "redo"):
+                for payload in (None, {}, []):
+                    invalid = copy.deepcopy(old)
+                    invalid["format_version"] = version
+                    if location == "authoring": invalid["authoring"]["actions"] = payload
+                    else: invalid[location] = [{"actions": payload}]
+                    with self.subTest(input_version=(version,location,payload)),self.assertRaisesRegex(ValueError,"Scene11"):
+                        package_creation.validate_input_fields(invalid)
+        for mutation in ("overflow", "null", "boolean-key", "too-many-keys", "kind-fields", "history-null", "history-overflow", "history-definition"):
+            invalid = copy.deepcopy(actions)
+            if mutation == "overflow": invalid["authoring"]["actions"]["overflow"] = button
+            elif mutation == "null": invalid["authoring"]["actions"] = None
+            elif mutation == "boolean-key": invalid["authoring"]["actions"]["a0"]["kind"]["keys"] = [True]
+            elif mutation == "too-many-keys": invalid["authoring"]["actions"]["a0"]["kind"]["keys"] = ["a","b","c","d","e"]
+            elif mutation == "kind-fields": invalid["authoring"]["actions"]["a0"]["kind"]["extra"] = 1
+            elif mutation == "history-null": invalid["undo"] = [{"actions": None}]
+            elif mutation == "history-overflow": invalid["undo"] = [{"actions": [{"id":"a", "after":button}]*33}]
+            else: invalid["redo"] = [{"actions": [{"id":"a", "before":{"kind":{"type":"button", "keys":False}}}]}]
+            with self.subTest(input_shape=mutation),self.assertRaises(ValueError):
+                package_creation.validate_input_fields(invalid)
+        unrelated = copy.deepcopy(old)
+        unrelated["authoring"]["sources"] = {"source":{"text":'{"actions":null}'}}
+        unrelated["authoring"]["bindings"]["object"]["properties"]["actions"] = None
+        package_creation.validate_input_fields(unrelated)
+        with self.assertRaisesRegex(ValueError, "duplicate JSON field"):
+            package_creation.decode(b'{"authoring":{"actions":{"a":{},"a":{}}}}', "duplicate action IDs")
 
     @unittest.skipUnless(sys.platform == "linux", "Linux process lifecycle required")
     def test_cancellation_reaps_the_owned_preflight_child(self):

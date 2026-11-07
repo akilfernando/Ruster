@@ -1,6 +1,10 @@
 //! Cached, owned debugger presentation and asynchronous operation receipts.
 use super::*;
+use crate::behavior_worker::{
+    DebugRequestError, InputError, InputMapIdentity, InputOrigin, InputReceipt,
+};
 use ruster_behavior::debug::{Breakpoint, Resume, StopSnapshot, ValueNode};
+use ruster_scene::input::ActionFrame;
 use serde_json::{json, Value};
 use std::collections::VecDeque;
 
@@ -22,6 +26,8 @@ struct Receipt {
     key: RunKey,
     operation: Operation,
     state: &'static str,
+    expected_tick: Option<u64>,
+    input: Option<InputReceipt>,
 }
 fn run_id(key: RunKey) -> String {
     format!(
@@ -31,10 +37,70 @@ fn run_id(key: RunKey) -> String {
 }
 impl Receipt {
     fn value(&self) -> Value {
-        json!({"operation_id":self.id.to_string(),"run_id":run_id(self.key),"operation":format!("{:?}",self.operation),"state":self.state})
+        json!({"operation_id":self.id.to_string(),"run_id":run_id(self.key),"operation":format!("{:?}",self.operation),"state":self.state,
+            "expected_tick":self.expected_tick.map(|tick|tick.to_string()),
+            "expected_input":self.input.filter(|_|self.expected_tick.is_some()).map(input_receipt_wire),
+            "committed_input":self.input.filter(|_|self.state=="completed").map(input_receipt_wire)})
     }
 }
+fn hash_wire(hash: &[u8; 32]) -> String {
+    hash.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+fn parse_hash(value: &Value) -> Option<InputMapIdentity> {
+    let text = value.as_str()?;
+    if text.len() != 64
+        || !text
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+    {
+        return None;
+    }
+    let mut hash = [0; 32];
+    for (byte, pair) in hash.iter_mut().zip(text.as_bytes().as_chunks::<2>().0) {
+        *byte = u8::from_str_radix(std::str::from_utf8(pair).ok()?, 16).ok()?;
+    }
+    Some(hash)
+}
+fn input_number(value: &Value) -> Option<u64> {
+    let text = value.as_str()?;
+    if text.is_empty()
+        || (text != "0" && text.starts_with('0'))
+        || !text.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    text.parse().ok()
+}
+fn input_receipt_wire(receipt: InputReceipt) -> Value {
+    json!({"map_identity":hash_wire(&receipt.map_identity),"frame_hash":hash_wire(&receipt.frame_hash),
+        "tick":receipt.tick.to_string(),"input_epoch":receipt.input_epoch.to_string(),"origin":receipt.origin})
+}
 impl RuntimeUi {
+    pub(super) fn program_step_pending(&self) -> bool {
+        self.debug
+            .active
+            .as_ref()
+            .is_some_and(|receipt| receipt.expected_tick.is_some())
+    }
+    fn receipt_value(&self, receipt: &Receipt) -> Value {
+        let mut value = receipt.value();
+        let detailed = self
+            .frame
+            .as_ref()
+            .filter(|frame| frame.key == receipt.key)
+            .and_then(|frame| {
+                frame.input.as_ref().filter(|input| {
+                    Some(input.receipt) == receipt.input
+                        && frame.tick == input.receipt.tick
+                        && receipt.state == "completed"
+                })
+            });
+        value["input_details"] = match detailed {
+            Some(input) => json!({"status":"available","frame":input.frame}),
+            None => json!({"status":"unavailable"}),
+        };
+        value
+    }
     pub(super) fn clear_debug_document(&mut self) {
         self.debug = DebugUi {
             next_operation: self.debug.next_operation,
@@ -88,6 +154,22 @@ impl RuntimeUi {
             },
             VmEvent::Error { operation, .. } | VmEvent::Rejected { operation, .. } => *operation,
         };
+        // A same-key Step acknowledgement alone is insufficient for an input
+        // operation. A mismatch stays unverified/busy rather than completing it.
+        if let Some(receipt) = self.debug.active.as_mut().filter(|receipt| {
+            receipt.key == event.key()
+                && receipt.operation == operation
+                && receipt.expected_tick.is_some()
+        }) {
+            if let VmEvent::Step { run, input, .. } = event {
+                if receipt.expected_tick.and_then(|tick| tick.checked_add(1)) != Some(run.tick)
+                    || receipt.input != Some(*input)
+                {
+                    receipt.state = "unverified";
+                    return;
+                }
+            }
+        }
         if self.awaiting == Some((event.key(), operation)) {
             self.awaiting = None;
         }
@@ -98,6 +180,9 @@ impl RuntimeUi {
             .is_some_and(|receipt| receipt.key == event.key() && receipt.operation == operation)
         {
             let mut receipt = self.debug.active.take().unwrap();
+            if let VmEvent::Step { input, .. } = event {
+                receipt.input = Some(*input);
+            }
             receipt.state = if matches!(event, VmEvent::Error { .. } | VmEvent::Rejected { .. }) {
                 "failed"
             } else {
@@ -106,7 +191,7 @@ impl RuntimeUi {
             self.retain_receipt(receipt);
         }
     }
-    fn queue_control(&mut self, operation: Operation) -> Result<RunKey, String> {
+    pub(super) fn queue_control(&mut self, operation: Operation) -> Result<RunKey, String> {
         if self.shutdown
             || !self.ready
             || self.pending.is_some()
@@ -131,6 +216,86 @@ impl RuntimeUi {
         });
         self.flush();
         Ok(key)
+    }
+    fn queue_program_step(&mut self, args: &Value) -> Result<(RunKey, u64, InputReceipt), String> {
+        if self.shutdown
+            || !self.ready
+            || self.stale
+            || self.pending.is_some()
+            || self.awaiting.is_some()
+        {
+            return Err("Runtime is busy or not ready; inspect it before supplying input.".into());
+        }
+        if self.playing {
+            return Err("runtime_playing".into());
+        }
+        let expected_tick = input_number(&args["expected_tick"]).ok_or("invalid_arguments")?;
+        let map_identity = parse_hash(&args["expected_map_identity"]).ok_or("invalid_arguments")?;
+        let expected_input_epoch =
+            input_number(&args["expected_input_epoch"]).ok_or("invalid_arguments")?;
+        let next_tick = expected_tick.checked_add(1).ok_or("tick_exhausted")?;
+        let worker = self.worker.as_ref().ok_or("input_unavailable")?;
+        let key = worker.current_key();
+        match worker.debug_stop(key) {
+            Ok(None) => {}
+            Ok(Some(_)) => return Err("debug_stopped".into()),
+            Err(DebugRequestError::Busy) => return Err("runtime_busy".into()),
+            Err(DebugRequestError::StaleKey) => return Err("stale_run".into()),
+            Err(_) => return Err("input_unavailable".into()),
+        }
+        let frame = self
+            .frame
+            .as_ref()
+            .filter(|frame| frame.key == key)
+            .ok_or("stale_run")?;
+        if frame.tick != expected_tick {
+            return Err("stale_tick".into());
+        }
+        let meta = worker
+            .current_input_meta(key)
+            .map_err(|error| match error {
+                InputError::Busy => "input_busy",
+                InputError::StaleRun => "stale_run",
+                _ => "input_unavailable",
+            })?;
+        if meta.enabled {
+            return Err("runtime_playing".into());
+        }
+        if meta.claimed {
+            return Err("input_owned".into());
+        }
+        if meta.map_identity != map_identity {
+            return Err("stale_input_map".into());
+        }
+        if meta.epoch != expected_input_epoch {
+            return Err("stale_input_epoch".into());
+        }
+        let input: ActionFrame =
+            serde_json::from_value(args["input_frame"].clone()).map_err(|_| "invalid_input")?;
+        let map = &self.captured.as_ref().ok_or("input_unavailable")?.actions;
+        let frame = input
+            .validate_against(map)
+            .map_err(|_| "invalid_input")?
+            .into_frame();
+        let receipt = InputReceipt {
+            map_identity,
+            frame_hash: Sha256::digest(
+                serde_json::to_vec(&frame).expect("validated frame serializes"),
+            )
+            .into(),
+            tick: next_tick,
+            input_epoch: expected_input_epoch,
+            origin: InputOrigin::Programmatic,
+        };
+        self.pending = Some(Request::ProgramStep {
+            key,
+            expected_tick,
+            map_identity,
+            expected_input_epoch,
+            frame,
+        });
+        self.flush();
+        Ok((key, expected_tick, receipt))
     }
     pub(crate) fn breakpoint(
         &mut self,
@@ -298,6 +463,23 @@ impl RuntimeUi {
         generation: u64,
     ) -> Result<Value, String> {
         let current = self.worker.as_ref().map(VmWorker::current_key);
+        let supplied = if op == "behavior_runtime_step" {
+            let present = [
+                "input_frame",
+                "expected_tick",
+                "expected_map_identity",
+                "expected_input_epoch",
+            ]
+            .iter()
+            .filter(|field| args.get(**field).is_some())
+            .count();
+            if present != 0 && present != 4 {
+                return Err("invalid_arguments".into());
+            }
+            present == 4
+        } else {
+            false
+        };
         let offset = args
             .get("offset")
             .and_then(Value::as_str)
@@ -316,7 +498,39 @@ impl RuntimeUi {
                         .chain(self.debug.recent.iter())
                         .find(|receipt| receipt.id == id)
                 })
-                .map(Receipt::value);
+                .map(|receipt| self.receipt_value(receipt));
+            let input_meta = match self
+                .worker
+                .as_ref()
+                .zip(current)
+                .map(|(worker, key)| worker.current_input_meta(key))
+            {
+                Some(Ok(meta)) => {
+                    json!({"status":"available","map_identity":hash_wire(&meta.map_identity),
+                    "epoch":meta.epoch.to_string(),"enabled":meta.enabled,"claimed":meta.claimed})
+                }
+                Some(Err(InputError::Busy)) => json!({"status":"busy"}),
+                _ => json!({"status":"unavailable"}),
+            };
+            let last_input = self
+                .frame
+                .as_ref()
+                .filter(|frame| Some(frame.key) == current)
+                .and_then(|frame| {
+                    frame
+                        .input
+                        .as_ref()
+                        .filter(|input| frame.tick == input.receipt.tick)
+                });
+            let last_input = match last_input {
+                Some(input) => {
+                    let mut value = input_receipt_wire(input.receipt);
+                    value["status"] = json!("available");
+                    value["frame"] = json!(input.frame);
+                    value
+                }
+                None => json!({"status":"unavailable"}),
+            };
             let objects: Vec<_> = self
                 .frame
                 .iter()
@@ -330,7 +544,7 @@ impl RuntimeUi {
                 .as_ref()
                 .map_or(0, |frame| frame.scene.objects.len());
             return Ok(
-                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string())}),
+                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"input_observation":"Committed tick snapshots do not report current physical key state.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string())}),
             );
         }
         if op == "behavior_breakpoints" {
@@ -423,6 +637,8 @@ impl RuntimeUi {
             .next_operation
             .checked_add(1)
             .ok_or("Operation identity exhausted")?;
+        let mut expected_tick = None;
+        let mut input = None;
         let key = match operation {
             Operation::Reset => {
                 let ctx = self
@@ -435,6 +651,12 @@ impl RuntimeUi {
                 self.stop(generation, session.scene().revision);
                 self.worker.as_ref().ok_or("No runtime")?.current_key()
             }
+            Operation::Step if supplied => {
+                let (key, tick, receipt) = self.queue_program_step(args)?;
+                expected_tick = Some(tick);
+                input = Some(receipt);
+                key
+            }
             _ => self.queue_control(operation)?,
         };
         if self.pending.is_none() && self.awaiting.is_none() {
@@ -446,6 +668,8 @@ impl RuntimeUi {
             key,
             operation,
             state: "pending",
+            expected_tick,
+            input,
         };
         let value = receipt.value();
         self.debug.active = Some(receipt);
@@ -505,9 +729,22 @@ mod tests {
             .unwrap();
         let id = session.authoring().sources.keys().next().unwrap().clone();
         let mut source = session.source(&id).unwrap().clone();
-        source.text="return {update=function(o,p,dt)\n local amount=2\n o.translation[1]=o.translation[1]+amount*dt\n return o\nend}".into();
+        source.host_api_version = ruster_behavior::INPUT_HOST_API_VERSION;
+        source.text="return {update=function(o,p,dt,host)\n local amount=2\n local input=host.button('fire')\n if dt>0 and input.pressed then o.translation[2]=o.translation[2]+1 end\n o.translation[1]=o.translation[1]+amount*dt\n return o\nend}".into();
         session
             .set_source(session.scene().revision, &id, Some(source.clone()))
+            .unwrap();
+        session
+            .set_action(
+                session.scene().revision,
+                "fire",
+                Some(ruster_scene::input::ActionDefinition {
+                    label: None,
+                    kind: ruster_scene::input::ActionKind::Button {
+                        keys: vec![ruster_scene::input::InputKey::A],
+                    },
+                }),
+            )
             .unwrap();
         let authored = session.snapshot_bytes().unwrap();
         let ctx = egui::Context::default();
@@ -632,6 +869,186 @@ mod tests {
                     .unwrap()
         );
         drive(&mut runtime, |runtime| runtime.ready);
+        // One input-bearing operation is pinned to the accepted map/epoch/tick.
+        // Its scalar receipt never keeps historical copies of full frames.
+        let state = runtime
+            .runtime_api("behavior_runtime_inspect", &json!({}), &session, 2)
+            .unwrap();
+        assert_eq!(state["input"]["status"], "available");
+        assert_eq!(state["last_committed_input"]["status"], "unavailable");
+        let mut supplied = json!({"expected_run_id":state["run_id"],"expected_tick":"0",
+            "expected_map_identity":state["input"]["map_identity"],"expected_input_epoch":state["input"]["epoch"],
+            "input_frame":{"fire":{"type":"button","held":true,"pressed":true,"released":false}}});
+        let consumed = runtime
+            .runtime_api("behavior_runtime_step", &supplied, &session, 2)
+            .unwrap();
+        assert!(runtime
+            .runtime_api("behavior_runtime_step", &supplied, &session, 2)
+            .is_err());
+        // A same-key/operation event with the wrong input origin cannot attest
+        // completion. The genuine worker event remains queued and may verify it.
+        let expected = runtime.debug.active.as_ref().unwrap().input.unwrap();
+        let mut wrong = expected;
+        wrong.origin = InputOrigin::Neutral;
+        runtime.accept_operation(&VmEvent::Step {
+            key: runtime.current_run().unwrap(),
+            run: crate::behavior_worker::RunInfo {
+                key: runtime.current_run().unwrap(),
+                tick: expected.tick,
+            },
+            input: wrong,
+        });
+        assert_eq!(runtime.debug.active.as_ref().unwrap().state, "unverified");
+        assert!(runtime.awaiting.is_some());
+        drive(&mut runtime, |runtime| {
+            runtime.debug.active.is_none()
+                && runtime.frame.as_ref().is_some_and(|frame| frame.tick == 1)
+        });
+        let committed = runtime
+            .runtime_api(
+                "behavior_runtime_inspect",
+                &json!({"operation_id":consumed["operation_id"]}),
+                &session,
+                2,
+            )
+            .unwrap();
+        assert_eq!(committed["operation"]["state"], "completed");
+        assert_eq!(
+            committed["operation"]["committed_input"]["origin"],
+            "programmatic"
+        );
+        assert_eq!(
+            committed["operation"]["input_details"]["status"],
+            "available"
+        );
+        assert_eq!(
+            committed["last_committed_input"]["frame"],
+            supplied["input_frame"]
+        );
+        assert_eq!(
+            runtime
+                .runtime_api("behavior_runtime_step", &supplied, &session, 2)
+                .unwrap_err(),
+            "stale_tick"
+        );
+        let with_input = runtime.frame.as_ref().unwrap().scene.clone();
+        runtime
+            .runtime_api(
+                "behavior_runtime_step",
+                &json!({"expected_run_id":committed["run_id"]}),
+                &session,
+                2,
+            )
+            .unwrap();
+        drive(&mut runtime, |runtime| {
+            runtime.debug.active.is_none()
+                && runtime.frame.as_ref().is_some_and(|frame| frame.tick == 2)
+        });
+        let neutral = runtime
+            .runtime_api(
+                "behavior_runtime_inspect",
+                &json!({"operation_id":consumed["operation_id"]}),
+                &session,
+                2,
+            )
+            .unwrap();
+        assert_eq!(neutral["operation"]["state"], "completed");
+        assert_eq!(
+            neutral["operation"]["input_details"]["status"],
+            "unavailable"
+        );
+        assert_eq!(neutral["last_committed_input"]["origin"], "neutral");
+        assert_eq!(
+            neutral["last_committed_input"]["frame"]["fire"]["held"],
+            false
+        );
+        assert_eq!(
+            neutral["last_committed_input"]["frame"]["fire"]["pressed"],
+            false
+        );
+        let left = |scene: &ruster_scene::Scene| {
+            scene
+                .objects
+                .iter()
+                .find(|object| object.id == "left")
+                .unwrap()
+                .transform
+                .translation[1]
+        };
+        assert_eq!(
+            left(&runtime.frame.as_ref().unwrap().scene),
+            left(&with_input)
+        );
+        assert_eq!(left(&with_input), left(session.scene()) + 1.0);
+        supplied["expected_tick"] = "2".into();
+        supplied["expected_input_epoch"] = neutral["input"]["epoch"].clone();
+        for (field, value, error) in [
+            (
+                "expected_map_identity",
+                json!("0".repeat(64)),
+                "stale_input_map",
+            ),
+            (
+                "expected_input_epoch",
+                json!((neutral["input"]["epoch"]
+                    .as_str()
+                    .unwrap()
+                    .parse::<u64>()
+                    .unwrap()
+                    + 1)
+                .to_string()),
+                "stale_input_epoch",
+            ),
+            ("expected_tick", json!("0"), "stale_tick"),
+            (
+                "input_frame",
+                json!({"fire":{"type":"axis1d","value":1}}),
+                "invalid_input",
+            ),
+        ] {
+            let mut invalid = supplied.clone();
+            invalid[field] = value;
+            assert_eq!(
+                runtime
+                    .runtime_api("behavior_runtime_step", &invalid, &session, 2)
+                    .unwrap_err(),
+                error
+            );
+            assert!(runtime.debug.active.is_none());
+            assert_eq!(runtime.frame.as_ref().unwrap().tick, 2);
+        }
+        let mut partial = supplied.clone();
+        partial.as_object_mut().unwrap().remove("expected_tick");
+        assert_eq!(
+            runtime
+                .runtime_api("behavior_runtime_step", &partial, &session, 2)
+                .unwrap_err(),
+            "invalid_arguments"
+        );
+        let run = json!({"expected_run_id":neutral["run_id"]});
+        runtime
+            .runtime_api("behavior_runtime_play", &run, &session, 2)
+            .unwrap();
+        drive(&mut runtime, |runtime| {
+            runtime.playing && runtime.debug.active.is_none()
+        });
+        assert_eq!(
+            runtime
+                .runtime_api("behavior_runtime_step", &supplied, &session, 2)
+                .unwrap_err(),
+            "runtime_playing"
+        );
+        assert!(
+            runtime.playing,
+            "rejecting supplied Step must not pause playback"
+        );
+        runtime
+            .runtime_api("behavior_runtime_pause", &run, &session, 2)
+            .unwrap();
+        drive(&mut runtime, |runtime| {
+            !runtime.playing && runtime.debug.active.is_none()
+        });
+        assert_eq!(session.snapshot_bytes().unwrap(), authored);
         runtime.worker.as_mut().unwrap().request_shutdown().unwrap();
         let terminal = json!({"expected_run_id":run_id(runtime.current_run().unwrap())});
         assert!(runtime

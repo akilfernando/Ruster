@@ -537,3 +537,12 @@ V2b integration2026-11-06: current Save writes Scene8 and export stages content 
 
 
 V2b controls/recovery source checkpoint (native qualification pending): select the Sun, enable **Shadows** and choose **Standard** or **High**. Clean standalone toggles/quality choices commit immediately and share Undo. If raw text or another light draft is pending, the whole form stays grouped until Apply light or Enter from the owned field. **Advanced shadows** holds raw Depth bias/Normal offset fields in world shadow texels0..4; invalid recovered text opens those fields for repair. Escape cancels and Tab traverses within the existing focus model. Shared light transactions/Undo/Redo and agent guards are reused. Recovery draft6 preserves new raw controls; genuine pre6data remains supported and relabeled new shadow fields reject. The separate viewport report/inspector warnings describe the last prepared update, with actionable High/closer-geometry guidance for limited detail. Source widget/recovery checks do not substitute for focused native or physical usability acceptance.
+
+
+## Creator input actions (I1a working integration)
+
+The current development slice adds **Edit → Input actions…**. Define a stable-ID Button or signed digital Axis, add/remove/capture logical keys, then Apply; shared Undo restores the previous definition. Escape cancels capture before cancelling its form. Labels can change without rewriting Lua IDs. Unbound actions remain neutral; conflicts across actions are visible and affect all matching actions. There are at most32actions/four total keys each; Escape/Tab and modifier chords are unavailable as bindings. This is a keyboard-only logical-key policy, dependent on the current keyboard layout.
+
+Opt an embedded Lua source into host API2, query `host.axis("traverse")` or `host.button("home").pressed`, then return the owner's complete TRS as usual. Reset captures the authored map. Play and choose **Control runtime** to give the actual viewport keyboard control; Escape releases it. Pause/Stop/Reset, edits, focus/UI ownership or debugger suspension clear old latches. After continuing a debugger stop, choose Control again to request fresh ownership. Runtime poses/live keys never enter Save. The action form participates in unsaved raw-draft recovery and never restores live capture.
+
+This source integration is undergoing the [I1a feasibility gate](../../docs/evidence/I1A-foundation.md); native keyboard/recovery/export acceptance is not yet complete. Use disposable projects until that gate qualifies the complete workflow.

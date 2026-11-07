@@ -7,6 +7,8 @@ mod lighting_tools;
 mod material_tools;
 mod persistence_tools;
 mod runtime_tools;
+#[path = "../../support/strict_json.rs"]
+mod strict_json;
 mod view_tools;
 use serde_json::{json, Map, Value};
 use std::io::{self, BufRead, BufReader, Write};
@@ -452,7 +454,7 @@ impl Server {
         frame: &[u8],
         mut bridge: impl FnMut(&str, &Value) -> Value,
     ) -> Option<Value> {
-        let request: Value = match serde_json::from_slice(frame) {
+        let request: Value = match strict_json::parse(frame) {
             Ok(value) => value,
             Err(_) => return Some(rpc_error(Value::Null, -32700, "Invalid JSON")),
         };
@@ -778,6 +780,37 @@ mod tests {
                 -32600
             );
         }
+        let mut server = ready();
+        let mut dispatches = 0;
+        for input in [
+            &br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"behavior_runtime_step","arguments":{"expected_session_token":"session","expected_revision":"0","expected_run_id":"1:2:3","expected_tick":"0","expected_map_identity":"0000000000000000000000000000000000000000000000000000000000000000","expected_input_epoch":"1","input_frame":{"fire":{"type":"axis1d","value":0},"fire":{"type":"axis1d","value":1}}}}}"#[..],
+            &br#"{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"behavior_runtime_step","arguments":{"expected_session_token":"session","expected_revision":"0","expected_run_id":"1:2:3","expected_tick":"0","expected_map_identity":"0000000000000000000000000000000000000000000000000000000000000000","expected_input_epoch":"1","input_frame":{"fire":{"type":"axis1d","value":0,"value":1}}}}}"#[..],
+        ] {
+            assert_eq!(server.handle(input, |_, _| {
+                dispatches += 1;
+                json!({"ok":true,"result":{}})
+            }).unwrap()["error"]["code"], -32700);
+        }
+        assert_eq!(
+            dispatches, 0,
+            "duplicate keys must reject before normalization/dispatch"
+        );
+        let opaque = "return {update=function(o) return o end} -- {\"key\":1,\"key\":2}";
+        let arguments = json!({"expected_session_token":"session","expected_revision":"0","binding_id":"binding","name":"script","value":{"type":"text","value":opaque}});
+        let request = json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"behavior_property_set","arguments":arguments}});
+        let response = server
+            .handle(&serde_json::to_vec(&request).unwrap(), |name, actual| {
+                dispatches += 1;
+                assert_eq!(name, "behavior_property_set");
+                assert_eq!(
+                    actual, &arguments,
+                    "Lua-looking string contents stay opaque"
+                );
+                json!({"ok":true,"result":{}})
+            })
+            .unwrap();
+        assert_eq!(response["result"]["isError"], false);
+        assert_eq!(dispatches, 1);
     }
 
     #[test]
@@ -850,7 +883,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 65);
+        assert_eq!(tools.len(), 68);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -912,6 +945,9 @@ mod tests {
                 "behavior_binding_remove",
                 "behavior_property",
                 "behavior_property_set",
+                "behavior_action",
+                "behavior_action_set",
+                "behavior_action_remove",
                 "behavior_runtime_inspect",
                 "behavior_runtime_reset",
                 "behavior_runtime_play",

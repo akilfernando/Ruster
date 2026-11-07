@@ -59,84 +59,90 @@ impl ActionKind {
     }
 }
 
-/// Stable logical keys only: no physical-key fallback, modifiers or chords.
-/// Escape and Tab are representable for diagnostics but reserved for host UI.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum InputKey {
-    A,
-    B,
-    C,
-    D,
-    E,
-    F,
-    G,
-    H,
-    I,
-    J,
-    K,
-    L,
-    M,
-    N,
-    O,
-    P,
-    Q,
-    R,
-    S,
-    T,
-    U,
-    V,
-    W,
-    X,
-    Y,
-    Z,
-    #[serde(rename = "0")]
-    Digit0,
-    #[serde(rename = "1")]
-    Digit1,
-    #[serde(rename = "2")]
-    Digit2,
-    #[serde(rename = "3")]
-    Digit3,
-    #[serde(rename = "4")]
-    Digit4,
-    #[serde(rename = "5")]
-    Digit5,
-    #[serde(rename = "6")]
-    Digit6,
-    #[serde(rename = "7")]
-    Digit7,
-    #[serde(rename = "8")]
-    Digit8,
-    #[serde(rename = "9")]
-    Digit9,
-    ArrowLeft,
-    ArrowRight,
-    ArrowUp,
-    ArrowDown,
-    Space,
-    Enter,
-    Backspace,
-    Delete,
-    Insert,
-    Home,
-    End,
-    PageUp,
-    PageDown,
-    F1,
-    F2,
-    F3,
-    F4,
-    F5,
-    F6,
-    F7,
-    F8,
-    F9,
-    F10,
-    F11,
-    F12,
-    Escape,
-    Tab,
+// Keep stable wire IDs and native-provider logical names in one finite table.
+// Both application and editor adapters can convert without a GUI dependency or
+// allocating/serializing a JSON string on each key event.
+macro_rules! logical_keys {
+    ($($variant:ident => ($wire:literal, $name:literal),)*) => {
+        /// Logical keys only; keyboard-layout dependent, without physical fallback.
+        /// Escape/Tab exist for diagnostics but are reserved during map validation.
+        #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, Deserialize)]
+        pub enum InputKey { $(#[serde(rename = $wire)] $variant,)* }
+        impl InputKey {
+            pub const ALL: &'static [Self] = &[$(Self::$variant,)*];
+            pub fn logical_name(self) -> &'static str {
+                match self { $(Self::$variant => $name,)* }
+            }
+            pub fn from_logical_name(name: &str) -> Option<Self> {
+                match name { $($name => Some(Self::$variant),)* _ => None }
+            }
+        }
+    };
+}
+logical_keys! {
+    A => ("a", "A"),
+    B => ("b", "B"),
+    C => ("c", "C"),
+    D => ("d", "D"),
+    E => ("e", "E"),
+    F => ("f", "F"),
+    G => ("g", "G"),
+    H => ("h", "H"),
+    I => ("i", "I"),
+    J => ("j", "J"),
+    K => ("k", "K"),
+    L => ("l", "L"),
+    M => ("m", "M"),
+    N => ("n", "N"),
+    O => ("o", "O"),
+    P => ("p", "P"),
+    Q => ("q", "Q"),
+    R => ("r", "R"),
+    S => ("s", "S"),
+    T => ("t", "T"),
+    U => ("u", "U"),
+    V => ("v", "V"),
+    W => ("w", "W"),
+    X => ("x", "X"),
+    Y => ("y", "Y"),
+    Z => ("z", "Z"),
+    Digit0 => ("0", "0"),
+    Digit1 => ("1", "1"),
+    Digit2 => ("2", "2"),
+    Digit3 => ("3", "3"),
+    Digit4 => ("4", "4"),
+    Digit5 => ("5", "5"),
+    Digit6 => ("6", "6"),
+    Digit7 => ("7", "7"),
+    Digit8 => ("8", "8"),
+    Digit9 => ("9", "9"),
+    ArrowLeft => ("arrow_left", "Left"),
+    ArrowRight => ("arrow_right", "Right"),
+    ArrowUp => ("arrow_up", "Up"),
+    ArrowDown => ("arrow_down", "Down"),
+    Space => ("space", "Space"),
+    Enter => ("enter", "Enter"),
+    Backspace => ("backspace", "Backspace"),
+    Delete => ("delete", "Delete"),
+    Insert => ("insert", "Insert"),
+    Home => ("home", "Home"),
+    End => ("end", "End"),
+    PageUp => ("page_up", "PageUp"),
+    PageDown => ("page_down", "PageDown"),
+    F1 => ("f1", "F1"),
+    F2 => ("f2", "F2"),
+    F3 => ("f3", "F3"),
+    F4 => ("f4", "F4"),
+    F5 => ("f5", "F5"),
+    F6 => ("f6", "F6"),
+    F7 => ("f7", "F7"),
+    F8 => ("f8", "F8"),
+    F9 => ("f9", "F9"),
+    F10 => ("f10", "F10"),
+    F11 => ("f11", "F11"),
+    F12 => ("f12", "F12"),
+    Escape => ("escape", "Escape"),
+    Tab => ("tab", "Tab"),
 }
 
 /// Validate authored bounds, including inactive/unbound definitions. Sharing a
@@ -241,6 +247,7 @@ impl ActionFrame {
             )));
         }
         for (id, value) in &self.0 {
+            validate_id(id)?;
             let definition = actions.get(id).ok_or_else(|| {
                 SceneError::Invalid(format!("input frame contains unknown action '{id}'"))
             })?;
@@ -288,6 +295,12 @@ pub struct ValidatedActionFrame {
 impl ValidatedActionFrame {
     pub fn neutral(actions: &ActionMap) -> Result<Self, SceneError> {
         ActionFrame::default().validate_against(actions)
+    }
+
+    /// Move values into a supplied frame for validation at a different runtime
+    /// boundary, without cloning IDs. This does not carry map/run authority.
+    pub fn into_frame(self) -> ActionFrame {
+        ActionFrame(self.values)
     }
 
     pub fn get(&self, id: &str) -> Option<&ActionValue> {
@@ -456,6 +469,14 @@ mod tests {
 
     #[test]
     fn authored_actions_enforce_local_bounds_and_strict_logical_keys() {
+        for key in InputKey::ALL {
+            assert_eq!(InputKey::from_logical_name(key.logical_name()), Some(*key));
+            assert_eq!(
+                serde_json::from_str::<InputKey>(&serde_json::to_string(key).unwrap()).unwrap(),
+                *key
+            );
+        }
+        assert_eq!(InputKey::from_logical_name("PhysicalKeyA"), None);
         assert!(validate_action_map(&ActionMap::new()).is_ok());
         assert!(validate_action_map(&map()).is_ok()); // Cross-action sharing.
         assert!(validate_action_map(&BTreeMap::from([(

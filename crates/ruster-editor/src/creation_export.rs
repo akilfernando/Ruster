@@ -578,11 +578,28 @@ fn verify_helpers(
         "surface_materials",
         "roughness_maps"
     ]);
+    let mut input_profile = roughness_profile.clone();
+    input_profile["capabilities"] = json!([
+        "initial_camera",
+        "opaque_materials",
+        "authored_lighting",
+        "sun_shadows",
+        "surface_materials",
+        "roughness_maps",
+        "input_actions"
+    ]);
     let profile = &manifest["profile"];
-    if scene_version >= 10 && profile != &roughness_profile {
+    if scene_version >= 11 && profile != &input_profile {
+        return Err("runtime kit does not support Scene11 input_actions; prepare a current Linux runtime kit".into());
+    }
+    if scene_version >= 10 && profile != &roughness_profile && profile != &input_profile {
         return Err("runtime kit does not support Scene10 roughness_maps; prepare a current Linux runtime kit".into());
     }
-    if scene_version >= 9 && profile != &surface_profile && profile != &roughness_profile {
+    if scene_version >= 9
+        && profile != &surface_profile
+        && profile != &roughness_profile
+        && profile != &input_profile
+    {
         return Err("runtime kit does not support Scene9 surface_materials; prepare a current Linux runtime kit".into());
     }
 
@@ -590,6 +607,7 @@ fn verify_helpers(
         && profile != &shadow_profile
         && profile != &surface_profile
         && profile != &roughness_profile
+        && profile != &input_profile
     {
         return Err(
             "runtime kit does not support Scene8 sun_shadows; prepare a current Linux runtime kit"
@@ -601,6 +619,7 @@ fn verify_helpers(
         && profile != &shadow_profile
         && profile != &surface_profile
         && profile != &roughness_profile
+        && profile != &input_profile
     {
         return Err("runtime kit does not support Scene7 authored_lighting; prepare a current Linux runtime kit".into());
     }
@@ -610,6 +629,7 @@ fn verify_helpers(
         && profile != &shadow_profile
         && profile != &surface_profile
         && profile != &roughness_profile
+        && profile != &input_profile
     {
         return Err("runtime kit does not support Scene6 opaque_materials; prepare a current Linux runtime kit".into());
     }
@@ -620,6 +640,7 @@ fn verify_helpers(
         && profile != &shadow_profile
         && profile != &surface_profile
         && profile != &roughness_profile
+        && profile != &input_profile
     {
         return Err(
             "unsupported runtime kit creation profile; prepare a current Linux runtime kit".into(),
@@ -632,6 +653,7 @@ fn verify_helpers(
         && profile != &shadow_profile
         && profile != &surface_profile
         && profile != &roughness_profile
+        && profile != &input_profile
     {
         return Err(
             "runtime kit does not support initial_camera; prepare a current runtime kit".into(),
@@ -814,7 +836,8 @@ fn prepare(
         8 => 4,
         9 => 5,
         10 => 6,
-        _ => return Err("export requires a supported Scene1–10 document".into()),
+        11 => 7,
+        _ => return Err("export requires a supported Scene1–11 document".into()),
     };
     let mut content_manifest = json!({"schema":schema, "title":request.title, "tick_millis":100,
         "scene_sha256":scene_hash, "meshes":meshes});
@@ -1343,6 +1366,22 @@ mod tests {
         for version in 1..=10 {
             verify_helpers(root.path(), true, version).unwrap();
         }
+        assert!(verify_helpers(root.path(), false, 11)
+            .unwrap_err()
+            .contains("Scene11 input_actions"));
+        manifest["profile"]["capabilities"] = json!([
+            "initial_camera",
+            "opaque_materials",
+            "authored_lighting",
+            "sun_shadows",
+            "surface_materials",
+            "roughness_maps",
+            "input_actions"
+        ]);
+        write(&manifest);
+        for version in 1..=11 {
+            verify_helpers(root.path(), true, version).unwrap();
+        }
         // Capability lists are exact: unknown features and reordered claims do
         // not establish support for the selected lighting/shader contract.
         manifest["profile"]["capabilities"] = json!([
@@ -1375,7 +1414,10 @@ args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
 content=pathlib.Path(args['--content'])
 kit=pathlib.Path(args['--runtime-kit'])
 value=json.loads((content/'content.json').read_bytes())
-assert value['schema']==6
+assert value['schema']==7
+scene=json.loads((content/'scene.json').read_bytes())
+assert scene['format_version']==11
+assert scene['authoring']['actions']=={'home':{'kind':{'type':'button','keys':[]}}}
 assert value['meshes']['mesh']['normal_policy']=='flat'
 assert set(value['meshes'])=={'mesh'} and set(value['textures'])=={'texture','roughness'}
 assert value['meshes']['mesh']['path']=='meshes/0000.obj'
@@ -1410,7 +1452,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             "helper":"scripts/package_creation.py","files":records,
             "profile":{"format":"ruster-runtime","version":1,"descriptor_format":"ruster-application",
                 "descriptor_version":4,"os":"linux","arch":"x86_64",
-                "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials","roughness_maps"]}})).unwrap()).unwrap();
+                "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials","roughness_maps","input_actions"]}})).unwrap()).unwrap();
         let mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
         fs::write(root.path().join("source.obj"), mesh).unwrap();
         fs::write(root.path().join("unused.obj"), mesh).unwrap();
@@ -1457,6 +1499,9 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             },
         );
         let mut session = ruster_scene::Session::new(scene).unwrap();
+        session
+            .set_action(0, "home", Some(Default::default()))
+            .unwrap();
         let scene_path = root.path().join("scene.json");
         session.save(&scene_path).unwrap();
         let scene_bytes = session.snapshot_bytes().unwrap();
@@ -1486,7 +1531,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         )
         .unwrap();
         let staged: Value = serde_json::from_slice(&fs::read(&prepared.archive).unwrap()).unwrap();
-        assert_eq!(staged["schema"], 6);
+        assert_eq!(staged["schema"], 7);
         assert_eq!(staged["meshes"]["mesh"]["normal_policy"], "flat");
         assert_eq!(staged["textures"]["texture"]["sha256"], digest(&png));
         assert_eq!(

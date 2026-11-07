@@ -85,6 +85,12 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         let render = cc.wgpu_render_state.as_ref().ok_or("Vulkan renderer unavailable")?;
         let metrics = ruster_render::install(render);
         Ok(Box::new(Host {
+            action_surface: None,
+            action_surface_rect: None,
+            action_control_owned: false,
+            action_claim_frame: None,
+            last_control_frame: None,
+            last_action_frame: None,
             navigation: ruster_render::NavigationOptions { camera: options.initial_camera, ..Default::default() },
             runtime, metrics, render: Some(render.clone()), options, last_frame: Instant::now(), error: None,
             ui_frames: 0, exit_error: host_error,
@@ -109,6 +115,12 @@ struct Host<A: Application> {
     ui_frames: u64,
     exit_error: Arc<Mutex<Option<String>>>,
     navigation: ruster_render::NavigationOptions,
+    action_surface: Option<egui::Id>,
+    action_surface_rect: Option<egui::Rect>,
+    action_control_owned: bool,
+    action_claim_frame: Option<u64>,
+    last_control_frame: Option<u64>,
+    last_action_frame: Option<u64>,
 }
 
 impl<A: Application> Host<A> {
@@ -130,6 +142,10 @@ impl<A: Application> Host<A> {
     }
 
     fn route_keyboard(&mut self, ctx: &egui::Context) {
+        if self.runtime.app().keyboard_actions().is_some() {
+            self.route_action_keyboard(ctx);
+            return;
+        }
         // UI gets first refusal: editing text or keyboard-focused widgets must not drive behavior.
         let mut input = InputFrame::default();
         if !ctx.egui_wants_keyboard_input() && ctx.input(|i| i.focused) {
@@ -168,9 +184,127 @@ impl<A: Application> Host<A> {
             self.report(result);
         }
     }
+    fn release_action_control(&mut self, ctx: &egui::Context) {
+        self.action_control_owned = false;
+        self.runtime.app_mut().cancel_action_input();
+        if let Some(surface) = self.action_surface {
+            ctx.memory_mut(|memory| memory.surrender_focus(surface));
+        }
+    }
+    fn route_action_keyboard(&mut self, ctx: &egui::Context) {
+        let frame = ctx.cumulative_frame_nr();
+        // A genuine UI activation requests the surface focus, but must not
+        // also admit the Enter/key that activated its button in this frame.
+        if self.action_claim_frame == Some(ctx.cumulative_frame_nr()) {
+            self.last_action_frame = Some(frame);
+            self.runtime.app_mut().cancel_action_input();
+            return;
+        }
+        let focused = ctx.input(|i| i.focused);
+        if self.error.is_some() || !focused {
+            self.release_action_control(ctx);
+            self.last_action_frame = Some(frame);
+            return;
+        }
+        if !self.runtime.is_running() {
+            self.release_action_control(ctx);
+            if !ctx.egui_wants_keyboard_input()
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+            {
+                self.runtime.set_running(true);
+            }
+            self.last_action_frame = Some(frame);
+            return;
+        }
+        if ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+            self.release_action_control(ctx);
+            self.last_action_frame = Some(frame);
+            return;
+        }
+        if !self.action_control_owned {
+            self.runtime.app_mut().cancel_action_input();
+            if !ctx.egui_wants_keyboard_input()
+                && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Space))
+            {
+                self.runtime.set_running(false);
+            }
+            self.last_action_frame = Some(frame);
+            return;
+        }
+        // The current viewport Response is built after routing. Egui will
+        // surrender its focus on outside clicks then, so reject that interaction
+        // now, before a held key could advance a same-frame tick.
+        let outside_pointer = ctx
+            .input(|input| input.pointer.any_pressed() || input.pointer.any_click())
+            && ctx
+                .input(|input| input.pointer.interact_pos())
+                .is_none_or(|position| {
+                    self.action_surface_rect
+                        .is_none_or(|rect| !rect.contains(position))
+                });
+        if outside_pointer || egui::Popup::is_any_open(ctx) {
+            self.release_action_control(ctx);
+            self.last_action_frame = Some(frame);
+            return;
+        }
+        let owns_focus = ctx.memory(|memory| {
+            self.action_surface
+                .is_some_and(|surface| memory.focused() == Some(surface))
+        });
+        let forbidden_modifier = ctx.input(|i| {
+            let chord = |m: egui::Modifiers| m.ctrl || m.alt || m.mac_cmd;
+            chord(i.modifiers)
+                || i.events.iter().any(|e| match e {
+                    egui::Event::Key { modifiers, .. } => chord(*modifiers),
+                    egui::Event::ModifiersChanged(modifiers) => chord(*modifiers),
+                    _ => false,
+                })
+        });
+        if !owns_focus || forbidden_modifier {
+            self.release_action_control(ctx);
+            self.last_action_frame = Some(frame);
+            return;
+        }
+        // Discarded layout passes must not replay a short down/up after an
+        // earlier pass's tick already consumed it.
+        if self.last_action_frame == Some(frame) {
+            return;
+        }
+        self.last_action_frame = Some(frame);
+        let events: Vec<_> = ctx.input(|i| {
+            i.events
+                .iter()
+                .filter_map(|event| match event {
+                    egui::Event::Key {
+                        key,
+                        pressed,
+                        repeat,
+                        ..
+                    } if !repeat => ruster_scene::input::InputKey::from_logical_name(key.name())
+                        .map(|key| (key, *pressed)),
+                    _ => None,
+                })
+                .take(257)
+                .collect()
+        });
+        if events.len() > 256 {
+            self.release_action_control(ctx);
+            self.report(Err(
+                "Keyboard input overflow; input suspended. Reset to recover.".into(),
+            ));
+            return;
+        }
+        let result = self.runtime.app_mut().action_input(true, &events);
+        self.report(result);
+    }
+
     // Shared production layout also permits the GPU-free owner case to inspect
     // real panel/callback bounds without constructing a native eframe::Frame.
+    #[cfg(test)]
     fn scene_ui(&mut self, root: &mut egui::Ui) {
+        self.scene_ui_with_input_time(root, None);
+    }
+    fn scene_ui_with_input_time(&mut self, root: &mut egui::Ui, input_time: Option<Duration>) {
         let ctx = root.ctx().clone();
         egui::Panel::top("application-lifecycle").show(root, |ui| {
             ui.horizontal(|ui| {
@@ -210,6 +344,24 @@ impl<A: Application> Host<A> {
                     "Paused"
                 });
                 ui.label(format!("Tick {}", self.runtime.tick()));
+                if self.runtime.app().keyboard_actions().is_some() {
+                    let label = if self.action_control_owned { "Release controls (Esc)" } else { "Control runtime" };
+                    if ui.add_enabled(self.runtime.is_running() && self.error.is_none() && self.action_surface.is_some(), egui::Button::new(label))
+                        .on_hover_text("Keyboard controls belong to the scene. Esc releases them; use Pause or Esc then Space to pause.")
+                        .clicked() && self.last_control_frame != Some(ctx.cumulative_frame_nr()) {
+                        self.last_control_frame = Some(ctx.cumulative_frame_nr());
+                        if self.action_control_owned {
+                            self.release_action_control(&ctx);
+                        } else {
+                            self.action_control_owned = true;
+                            self.action_claim_frame = Some(ctx.cumulative_frame_nr());
+                            if let Some(surface) = self.action_surface {
+                                ctx.memory_mut(|memory| memory.request_focus(surface));
+                            }
+                        }
+                    }
+                }
+
                 if let Some(message) = self.metrics.lock().ok().and_then(|metrics| {
                     (metrics.frames > 0)
                         .then(|| metrics.display_status.warning())
@@ -243,6 +395,10 @@ impl<A: Application> Host<A> {
             self.reset();
         }
         self.route_keyboard(&ctx);
+        if let Some(elapsed) = input_time {
+            let advanced = self.runtime.advance(elapsed).map(|_| ());
+            self.report(advanced);
+        }
 
         // Application UI/input may have edited scene data. Invalid state never reaches the GPU.
         let valid = self.runtime.app().content().validate();
@@ -253,16 +409,26 @@ impl<A: Application> Host<A> {
                 let app = self.runtime.app();
                 let content = app.content();
                 let selected = app.selected();
-                let picked = ruster_render::viewport_with_materials(
+                let viewport = ruster_render::viewport_with_materials(
                     ui,
                     content.scene(),
                     selected.as_slice(),
                     content.meshes(),
                     content.textures(),
                     &mut self.navigation,
-                )
-                .picked;
-                if let Some(id) = picked {
+                );
+                if self.runtime.app().keyboard_actions().is_some() {
+                    self.action_surface = Some(viewport.response.id);
+                    self.action_surface_rect = Some(viewport.rect);
+                    // The activation button is outside the viewport. Request
+                    // focus only after its real Response has processed that click.
+                    if self.action_claim_frame == Some(ctx.cumulative_frame_nr())
+                        && self.action_control_owned
+                    {
+                        viewport.response.request_focus();
+                    }
+                }
+                if let Some(id) = viewport.picked {
                     self.runtime.app_mut().select(&id);
                 }
             } else {
@@ -292,10 +458,12 @@ impl<A: Application> eframe::App for Host<A> {
         let now = Instant::now();
         let elapsed = now.saturating_duration_since(self.last_frame);
         self.last_frame = now;
-        let advanced = self.runtime.advance(elapsed).map(|_| ());
-        self.report(advanced);
-
-        self.scene_ui(root);
+        let authored_input = self.runtime.app().keyboard_actions().is_some();
+        if !authored_input {
+            let advanced = self.runtime.advance(elapsed).map(|_| ());
+            self.report(advanced);
+        }
+        self.scene_ui_with_input_time(root, authored_input.then_some(elapsed));
         if self.runtime.is_running() {
             ctx.request_repaint_after(
                 self.options
@@ -346,6 +514,10 @@ mod tests {
     struct KeyboardApp {
         content: Content,
         inputs: Vec<InputFrame>,
+        actions: Option<ruster_scene::input::ActionMap>,
+        action_events: Vec<Vec<(ruster_scene::input::InputKey, bool)>>,
+        action_owned: bool,
+        text: String,
     }
 
     impl Application for KeyboardApp {
@@ -360,6 +532,27 @@ mod tests {
         }
         fn input(&mut self, input: &InputFrame) -> Result<(), String> {
             self.inputs.push(input.clone());
+            Ok(())
+        }
+        fn keyboard_actions(&self) -> Option<&ruster_scene::input::ActionMap> {
+            self.actions.as_ref()
+        }
+        fn action_input(
+            &mut self,
+            owned: bool,
+            events: &[(ruster_scene::input::InputKey, bool)],
+        ) -> Result<(), String> {
+            self.action_owned = owned;
+            self.action_events.push(events.to_vec());
+            Ok(())
+        }
+        fn cancel_action_input(&mut self) {
+            self.action_owned = false;
+        }
+        fn ui(&mut self, ui: &mut egui::Ui) -> Result<(), String> {
+            if self.actions.is_some() {
+                ui.text_edit_singleline(&mut self.text);
+            }
             Ok(())
         }
     }
@@ -392,14 +585,214 @@ mod tests {
         output.textures_delta.clear();
     }
 
+    // Unique boundary: the shared native host must acquire a real viewport
+    // response, suppress activation/repeat keys and fold input once per frame.
+    #[test]
+    fn authored_controls_use_real_viewport_focus_and_do_not_replay_discarded_passes() {
+        use ruster_scene::input::{ActionDefinition, ActionKind, InputKey};
+        let app = KeyboardApp {
+            content: Content::new(ruster_scene::Scene::demo(), MeshMap::new()).unwrap(),
+            inputs: Vec::new(),
+            actions: Some(std::collections::BTreeMap::from([(
+                "fire".into(),
+                ActionDefinition {
+                    label: None,
+                    kind: ActionKind::Button {
+                        keys: vec![InputKey::Space],
+                    },
+                },
+            )])),
+            action_events: Vec::new(),
+            action_owned: false,
+            text: String::new(),
+        };
+        let options = HostOptions::default();
+        let mut host = Host {
+            action_surface: None,
+            action_surface_rect: None,
+            action_control_owned: false,
+            action_claim_frame: None,
+            last_control_frame: None,
+            last_action_frame: None,
+            navigation: ruster_render::NavigationOptions::default(),
+            runtime: Runtime::new(app, options.tick_duration).unwrap(),
+            options,
+            last_frame: Instant::now(),
+            metrics: Arc::new(Mutex::new(ruster_render::Metrics::default())),
+            render: None,
+            error: None,
+            ui_frames: 0,
+            exit_error: Arc::new(Mutex::new(None)),
+        };
+        host.runtime.set_running(true);
+        let ctx = egui::Context::default();
+        let mut time = 0.;
+        let mut draw = |host: &mut Host<KeyboardApp>,
+                        events: Vec<egui::Event>,
+                        focused: bool,
+                        discard: bool| {
+            time += 0.1;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused,
+                    events,
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200., 800.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    host.scene_ui(ui);
+                    if discard && ctx.current_pass_index() == 0 {
+                        ctx.request_discard("input pass replay guard");
+                    }
+                },
+            );
+            output.textures_delta.clear();
+            output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text == "Control runtime" => {
+                    Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center())
+                }
+                _ => None,
+            })
+        };
+        let mut control = None;
+        for _ in 0..3 {
+            control = draw(&mut host, vec![], true, false);
+        }
+        let position = control.expect("real production Control runtime button");
+        let click = |position| {
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        draw(&mut host, click(position), true, true);
+        assert!(
+            host.action_control_owned,
+            "actual button must claim control"
+        );
+        assert!(
+            !host.runtime.app().action_owned,
+            "activation frame admits no gameplay input"
+        );
+        let before = host.runtime.app().action_events.len();
+        let mut release = key(egui::Key::Space, egui::Modifiers::NONE);
+        if let egui::Event::Key { pressed, .. } = &mut release {
+            *pressed = false;
+        }
+        draw(
+            &mut host,
+            vec![key(egui::Key::Space, egui::Modifiers::NONE), release],
+            true,
+            true,
+        );
+        assert!(
+            host.runtime.is_running(),
+            "mapped Space belongs to gameplay while controlled"
+        );
+        assert_eq!(
+            host.runtime.app().action_events.len(),
+            before + 1,
+            "discarded pass cannot duplicate a tap"
+        );
+        assert_eq!(
+            host.runtime.app().action_events.last().unwrap(),
+            &vec![(InputKey::Space, true), (InputKey::Space, false)]
+        );
+        assert!(host.runtime.app().action_owned);
+        draw(&mut host, vec![], false, false);
+        assert!(!host.action_control_owned);
+        assert!(
+            !host.runtime.app().action_owned,
+            "real window blur cancels control"
+        );
+        let control = draw(&mut host, vec![], true, false).unwrap();
+        draw(&mut host, click(control), true, false);
+        assert!(host.action_control_owned);
+        draw(
+            &mut host,
+            vec![key(egui::Key::Space, egui::Modifiers::NONE)],
+            true,
+            false,
+        );
+        draw(
+            &mut host,
+            vec![key(egui::Key::Escape, egui::Modifiers::NONE)],
+            true,
+            false,
+        );
+        let control = draw(&mut host, vec![], true, false).unwrap();
+        draw(&mut host, click(control), true, false);
+        assert!(host.action_control_owned);
+        let mut repeat = key(egui::Key::Space, egui::Modifiers::NONE);
+        if let egui::Event::Key { repeat: flag, .. } = &mut repeat {
+            *flag = true;
+        }
+        draw(&mut host, vec![repeat], true, false);
+        assert!(
+            host.runtime.app().action_events.last().unwrap().is_empty(),
+            "OS repeat cannot revive a held key after cancellation"
+        );
+        let before_outside = host.runtime.app().action_events.len();
+        let mut outside = click(egui::pos2(1190., 790.));
+        outside.push(key(egui::Key::A, egui::Modifiers::NONE));
+        draw(&mut host, outside, true, false);
+        assert_eq!(
+            host.runtime.app().action_events.len(),
+            before_outside,
+            "outside interaction cancels before admitting a same-frame key"
+        );
+        assert!(!host.action_control_owned);
+        assert!(host.runtime.is_running(), "Escape releases without pausing");
+        let mut released_space = key(egui::Key::Space, egui::Modifiers::NONE);
+        if let egui::Event::Key { pressed, .. } = &mut released_space {
+            *pressed = false;
+        }
+        draw(&mut host, vec![released_space], true, false);
+        draw(
+            &mut host,
+            vec![key(egui::Key::Space, egui::Modifiers::NONE)],
+            true,
+            false,
+        );
+        assert!(
+            !host.runtime.is_running(),
+            "unowned Space retains the lifecycle shortcut"
+        );
+    }
+
     #[test]
     fn real_egui_focus_routes_shortcuts_text_and_held_state() {
         let app = KeyboardApp {
             content: Content::new(ruster_scene::Scene::demo(), MeshMap::new()).unwrap(),
             inputs: Vec::new(),
+            actions: None,
+            action_events: Vec::new(),
+            action_owned: false,
+            text: String::new(),
         };
         let options = HostOptions::default();
         let mut host = Host {
+            action_surface: None,
+            action_surface_rect: None,
+            action_control_owned: false,
+            action_claim_frame: None,
+            last_control_frame: None,
+            last_action_frame: None,
             navigation: ruster_render::NavigationOptions::default(),
             runtime: Runtime::new(app, options.tick_duration).unwrap(),
             options,

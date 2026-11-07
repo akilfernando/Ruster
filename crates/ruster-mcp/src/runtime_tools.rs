@@ -2,17 +2,23 @@
 use serde_json::{json, Map, Value};
 
 const TOOLS: &[(&str, &str, &[&str])] = &[
-    ("behavior_runtime_inspect", "Inspect cached runtime state, a bounded object page and recent operation completion. Never waits on scripts.", &[]),
+    ("behavior_runtime_inspect", "Inspect cached runtime state, a bounded object page and scalar operation receipts. Input metadata describes the accepted map/ownership epoch; last_committed_input describes only a matching committed tick, never current physical keys. Historical input details are available only while the current retained frame matches that receipt. Never waits on scripts.", &[]),
     ("behavior_runtime_reset", "Queue an authored snapshot Reset. Returns operation/run identity immediately; inspect completion. Unfinished source is preserved on failure.", &[]),
     ("behavior_runtime_play", "Queue fixed-step playback for the inspected run. Does not change authored data.", &["expected_run_id"]),
     ("behavior_runtime_pause", "Pause between atomic ticks. A debugger stop inside a tick uses debugger controls instead.", &["expected_run_id"]),
-    ("behavior_runtime_step", "Queue one complete atomic fixed tick; distinct from source-level debugger Next.", &["expected_run_id"]),
+    ("behavior_runtime_step", "Queue one complete atomic fixed tick while paused; distinct from source-level debugger Next. Omit all input fields for a neutral tick, or supply all four input fields to pin one frame to the exact run/map/ownership epoch/committed tick. Supplied input never becomes held native input. Playing, pending operations, physical input ownership and debugger stops reject without implicit pause; inspect the operation receipt before further work and never replay an unknown outcome.", &["expected_run_id"]),
     ("behavior_runtime_stop", "Cancel the inspected run immediately and return authored display; inspect asynchronous cleanup.", &["expected_run_id"]),
     ("behavior_breakpoints", "Inspect a bounded page of session-local source/hash/line breakpoints.", &[]),
     ("behavior_breakpoint_set", "Enable/remove one exact source/hash/line breakpoint, optionally scoped to a binding. No authored data change.", &["source_id", "source_hash", "line", "binding_id", "enabled"]),
     ("behavior_debug_inspect", "Read bounded pages of the current owned stop snapshot. No expressions, VM calls or live variable handles.", &["expected_run_id", "expected_stop_id"]),
     ("behavior_debug_next", "Resume the exact stop with actual step-over; nested calls are skipped unless explicitly breakpointed.", &["expected_run_id", "expected_stop_id"]),
     ("behavior_debug_continue", "Continue the exact stopped call/environment; pending atomic tick remains private until commit.", &["expected_run_id", "expected_stop_id"]),
+];
+const INPUT_FIELDS: &[&str] = &[
+    "input_frame",
+    "expected_tick",
+    "expected_map_identity",
+    "expected_input_epoch",
 ];
 
 pub fn supported(name: &str) -> bool {
@@ -36,15 +42,66 @@ fn optional(name: &str) -> &'static [&'static str] {
         "behavior_runtime_inspect" => &["offset", "operation_id"],
         "behavior_breakpoints" => &["offset"],
         "behavior_debug_inspect" => &["offset", "limit"],
+        "behavior_runtime_step" => INPUT_FIELDS,
         _ => &[],
     }
 }
+fn input_frame_schema() -> Value {
+    json!({"type":"object","maxProperties":32,
+        "propertyNames":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$"},
+        "additionalProperties":{"oneOf":[
+            super::object_schema(json!({"type":{"const":"button"},"held":{"type":"boolean"},"pressed":{"type":"boolean"},"released":{"type":"boolean"}}), vec!["type","held","pressed","released"]),
+            super::object_schema(json!({"type":{"const":"axis1d"},"value":{"type":"integer","enum":[-1,0,1]}}), vec!["type","value"])
+        ]},"description":"Sparse stable action-ID map, at most32 entries. Omitted actions are neutral. Button edges may both be true for a short tap. The editor validates IDs and value kinds against the immutable accepted map before enqueue and again at tick admission."})
+}
+fn valid_input_frame(value: &Value) -> bool {
+    value.as_object().is_some_and(|frame| {
+        frame.len() <= 32
+            && frame.iter().all(|(id, value)| {
+                !id.is_empty()
+                    && id.len() <= 128
+                    && id
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+                    && value.as_object().is_some_and(|value| {
+                        match value.get("type").and_then(Value::as_str) {
+                            Some("button") => {
+                                super::exact_keys(
+                                    value,
+                                    &["type", "held", "pressed", "released"],
+                                    &[],
+                                ) && ["held", "pressed", "released"]
+                                    .iter()
+                                    .all(|field| value[*field].is_boolean())
+                            }
+                            Some("axis1d") => {
+                                super::exact_keys(value, &["type", "value"], &[])
+                                    && value["value"]
+                                        .as_i64()
+                                        .is_some_and(|value| (-1..=1).contains(&value))
+                            }
+                            _ => false,
+                        }
+                    })
+            })
+    })
+}
 fn shape(field: &str) -> Value {
     match field {
-        "expected_revision" | "expected_stop_id" | "operation_id" | "offset" | "line" | "limit" => {
+        "expected_revision"
+        | "expected_stop_id"
+        | "operation_id"
+        | "offset"
+        | "line"
+        | "limit"
+        | "expected_tick"
+        | "expected_input_epoch" => {
             json!({"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20})
         }
-        "source_hash" => json!({"type":"string","pattern":"^[0-9a-f]{64}$"}),
+        "source_hash" | "expected_map_identity" => {
+            json!({"type":"string","pattern":"^[0-9a-f]{64}$"})
+        }
+        "input_frame" => input_frame_schema(),
         "enabled" => json!({"type":"boolean"}),
         "binding_id" => json!({"type":["string","null"],"minLength":1,"maxLength":128}),
         _ => {
@@ -56,7 +113,12 @@ pub fn list() -> Vec<Value> {
     TOOLS.iter().map(|(name,description,_)| {
         let required=fields(name).unwrap();
         let properties:Map<String,Value>=required.iter().copied().chain(optional(name).iter().copied()).map(|field|(field.into(),shape(field))).collect();
-        json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false},"annotations":{"readOnlyHint":read_only(name),"openWorldHint":false}})
+        let mut schema = super::object_schema(Value::Object(properties), required);
+        if *name == "behavior_runtime_step" {
+            let dependencies:Map<String,Value> = INPUT_FIELDS.iter().map(|field| ((*field).into(), json!(INPUT_FIELDS.iter().filter(|other| *other != field).collect::<Vec<_>>()))).collect();
+            schema["dependentRequired"] = Value::Object(dependencies);
+        }
+        json!({"name":name,"description":description,"inputSchema":schema,"annotations":{"readOnlyHint":read_only(name),"openWorldHint":false}})
     }).collect()
 }
 pub fn valid(name: &str, args: &Value) -> bool {
@@ -69,12 +131,26 @@ pub fn valid(name: &str, args: &Value) -> bool {
     if !required.iter().all(|field| args.contains_key(*field)) {
         return false;
     }
+    if name == "behavior_runtime_step" {
+        let present = INPUT_FIELDS
+            .iter()
+            .filter(|field| args.contains_key(**field))
+            .count();
+        if present != 0 && present != INPUT_FIELDS.len() {
+            return false;
+        }
+    }
     args.iter().all(|(field, value)| {
         if !required.contains(&field.as_str()) && !optional(name).contains(&field.as_str()) {
             return false;
         }
         match field.as_str() {
-            "expected_revision" | "offset" | "operation_id" => super::canonical_u64(value),
+            "expected_revision"
+            | "offset"
+            | "operation_id"
+            | "expected_tick"
+            | "expected_input_epoch" => super::canonical_u64(value),
+            "input_frame" => valid_input_frame(value),
             "expected_stop_id" | "line" | "limit" => {
                 super::canonical_u64(value)
                     && value
@@ -89,7 +165,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
                                 }
                         })
             }
-            "source_hash" => value.as_str().is_some_and(|s| {
+            "source_hash" | "expected_map_identity" => value.as_str().is_some_and(|s| {
                 s.len() == 64
                     && s.bytes()
                         .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
@@ -107,4 +183,82 @@ pub fn valid(name: &str, args: &Value) -> bool {
             }),
         }
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // Unique adapter boundary: input pins are all-or-none, frames are bounded
+    // before forwarding, and neutral legacy Step is not silently rewritten.
+    #[test]
+    fn supplied_step_pins_and_sparse_frames_forward_without_rewriting() {
+        let neutral = json!({"expected_session_token":"session","expected_revision":"3","expected_run_id":"1:2:3"});
+        let mut supplied = neutral.clone();
+        supplied["input_frame"] = json!({"fire":{"type":"button","held":false,"pressed":true,"released":true},"move":{"type":"axis1d","value":-1}});
+        supplied["expected_tick"] = "9007199254740993".into();
+        supplied["expected_map_identity"] = "ab".repeat(32).into();
+        supplied["expected_input_epoch"] = "18446744073709551615".into();
+        let mut server = super::super::tests::ready();
+        for args in [&neutral, &supplied] {
+            assert!(valid("behavior_runtime_step", args));
+            let request = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"behavior_runtime_step","arguments":args}});
+            let domain =
+                json!({"ok":false,"error":{"code":"runtime_playing","message":"Pause first"}});
+            let response = server
+                .handle(&serde_json::to_vec(&request).unwrap(), |name, forwarded| {
+                    assert_eq!(name, "behavior_runtime_step");
+                    assert_eq!(forwarded, args);
+                    domain.clone()
+                })
+                .unwrap();
+            assert_eq!(response["result"]["structuredContent"], domain);
+        }
+        for field in INPUT_FIELDS {
+            let mut partial = supplied.clone();
+            partial.as_object_mut().unwrap().remove(*field);
+            assert!(!valid("behavior_runtime_step", &partial));
+        }
+        for frame in [
+            Value::Null,
+            json!({"fire":{"type":"button","held":true,"pressed":false,"released":false,"extra":null}}),
+            json!({"move":{"type":"axis1d","value":2}}),
+            json!({"move":{"type":"axis1d","value":1.0}}),
+            json!({"move":{"type":"unknown","value":0}}),
+            Value::Object(
+                (0..33)
+                    .map(|index| (format!("a-{index}"), json!({"type":"axis1d","value":0})))
+                    .collect(),
+            ),
+        ] {
+            let mut invalid = supplied.clone();
+            invalid["input_frame"] = frame;
+            assert!(!valid("behavior_runtime_step", &invalid));
+        }
+        for (field, value) in [
+            ("expected_tick", json!(9007199254740993u64)),
+            ("expected_input_epoch", json!("01")),
+            ("expected_map_identity", json!("AB".repeat(32))),
+        ] {
+            let mut invalid = supplied.clone();
+            invalid[field] = value;
+            assert!(!valid("behavior_runtime_step", &invalid));
+        }
+        let tools = list();
+        let step = tools
+            .iter()
+            .find(|tool| tool["name"] == "behavior_runtime_step")
+            .unwrap();
+        assert_eq!(
+            step["inputSchema"]["dependentRequired"]
+                .as_object()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(
+            step["inputSchema"]["properties"]["input_frame"]["maxProperties"],
+            32
+        );
+    }
 }

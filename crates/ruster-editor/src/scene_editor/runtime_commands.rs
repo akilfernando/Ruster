@@ -37,10 +37,18 @@ impl SceneEditor {
             "behavior_runtime_inspect" => (&[], &["offset", "operation_id"]),
             "behavior_breakpoints" => (&[], &["offset"]),
             "behavior_runtime_reset" => (&[], &[]),
-            "behavior_runtime_play"
-            | "behavior_runtime_pause"
-            | "behavior_runtime_step"
-            | "behavior_runtime_stop" => (&["expected_run_id"], &[]),
+            "behavior_runtime_play" | "behavior_runtime_pause" | "behavior_runtime_stop" => {
+                (&["expected_run_id"], &[])
+            }
+            "behavior_runtime_step" => (
+                &["expected_run_id"],
+                &[
+                    "input_frame",
+                    "expected_tick",
+                    "expected_map_identity",
+                    "expected_input_epoch",
+                ],
+            ),
             "behavior_breakpoint_set" => (
                 &["source_id", "source_hash", "line", "binding_id", "enabled"],
                 &[],
@@ -68,9 +76,37 @@ impl SceneEditor {
         {
             return Err(fail("invalid_arguments"));
         }
+        if op == "behavior_runtime_step" {
+            let present = [
+                "input_frame",
+                "expected_tick",
+                "expected_map_identity",
+                "expected_input_epoch",
+            ]
+            .iter()
+            .filter(|field| map.contains_key(**field))
+            .count();
+            if present != 0 && present != 4 {
+                return Err(fail("invalid_arguments"));
+            }
+        }
         for (field, value) in map {
             let valid = match field.as_str() {
-                "offset" | "operation_id" | "expected_revision" => number(value).is_some(),
+                "offset"
+                | "operation_id"
+                | "expected_revision"
+                | "expected_tick"
+                | "expected_input_epoch" => number(value).is_some(),
+                "expected_map_identity" => value.as_str().is_some_and(|hash| {
+                    hash.len() == 64
+                        && hash
+                            .bytes()
+                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                }),
+                "input_frame" => {
+                    serde_json::from_value::<ruster_scene::input::ActionFrame>(value.clone())
+                        .is_ok()
+                }
                 "expected_stop_id" => number(value).is_some_and(|n| n > 0),
                 "line" => number(value).is_some_and(|n| (1..=16385).contains(&n)),
                 "limit" => number(value).is_some_and(|n| (1..=16).contains(&n)),
@@ -127,7 +163,23 @@ impl SceneEditor {
             .runtime_api(op, args, &self.session, self.generation)
             .map_err(|message| {
                 (
-                    if message == "stale_run" || message == "stale_stop" {
+                    if matches!(
+                        message.as_str(),
+                        "stale_run"
+                            | "stale_stop"
+                            | "invalid_arguments"
+                            | "invalid_input"
+                            | "stale_tick"
+                            | "stale_input_map"
+                            | "stale_input_epoch"
+                            | "input_owned"
+                            | "runtime_playing"
+                            | "runtime_busy"
+                            | "debug_stopped"
+                            | "input_busy"
+                            | "input_unavailable"
+                            | "tick_exhausted"
+                    ) {
                         message.clone()
                     } else {
                         "runtime_error".into()

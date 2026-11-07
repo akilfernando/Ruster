@@ -227,3 +227,182 @@ fn generic_cli_replays_read_only_scene_and_explicit_mesh_resources() {
         .status
         .success());
 }
+
+// Application boundary: one UI admission can precede several fixed ticks;
+// edges occur once, Pause cancels held state, supplied frames never persist,
+// and a saved remap changes controls without serializing runtime motion.
+#[test]
+fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
+    use ruster_behavior::INPUT_HOST_API_VERSION;
+    use ruster_scene::input::{
+        ActionDefinition, ActionFrame, ActionKind, ActionValue, ButtonState, InputKey,
+    };
+    use ruster_scene::BehaviorSource;
+    use ruster_scene::{BehaviorBinding, Object, Scene};
+    use std::collections::BTreeMap;
+    let mut scene = Scene::empty("action-consumer");
+    scene.objects.push(Object::cube("head", None));
+    let mut session = Session::new(scene).unwrap();
+    session
+        .set_action(
+            0,
+            "travel",
+            Some(ActionDefinition {
+                label: None,
+                kind: ActionKind::Axis1d {
+                    negative: vec![InputKey::ArrowLeft],
+                    positive: vec![InputKey::ArrowRight],
+                },
+            }),
+        )
+        .unwrap();
+    session
+        .set_action(
+            1,
+            "home",
+            Some(ActionDefinition {
+                label: None,
+                kind: ActionKind::Button {
+                    keys: vec![InputKey::H],
+                },
+            }),
+        )
+        .unwrap();
+    session.set_source(2, "controller", Some(BehaviorSource { label: None,
+        language_id: "lua54".into(), host_api_version: INPUT_HOST_API_VERSION,
+        text: "return {update=function(o,p,dt,h) if dt>0 then o.translation[1]=o.translation[1]+h.axis('travel'); if h.button('home').pressed then o.translation[1]=0 end end; return o end}".into()
+    })).unwrap();
+    session
+        .set_binding(
+            3,
+            "control",
+            Some(BehaviorBinding {
+                object_id: "head".into(),
+                source_id: "controller".into(),
+                enabled: true,
+                properties: BTreeMap::new(),
+            }),
+        )
+        .unwrap();
+    let original = session.snapshot_bytes().unwrap();
+    let mut runtime = runtime(session);
+    runtime.reset().unwrap();
+    runtime.set_running(true);
+    runtime
+        .app_mut()
+        .action_input(
+            true,
+            &[
+                (InputKey::ArrowRight, true),
+                (InputKey::H, true),
+                (InputKey::H, false),
+            ],
+        )
+        .unwrap();
+    assert_eq!(runtime.advance(FIXED_DT * 2).unwrap(), 2);
+    assert_eq!(
+        runtime.app().content().scene().objects[0]
+            .transform
+            .translation[0],
+        1.0
+    );
+    let (tick, frame, origin) = runtime.app().input_observation().unwrap();
+    assert_eq!((tick, origin), (2, "native"));
+    assert_eq!(frame.0["home"], ActionValue::Button(ButtonState::default()));
+    runtime.set_running(false);
+    runtime.step().unwrap();
+    assert_eq!(
+        runtime.app().content().scene().objects[0]
+            .transform
+            .translation[0],
+        1.0
+    );
+    let expected_tick = runtime.tick();
+    let supplied = ActionFrame(BTreeMap::from([(
+        "travel".into(),
+        ActionValue::Axis1d { value: -1 },
+    )]));
+    assert!(ruster_motion_lab::generic::step_with_input(
+        &mut runtime,
+        expected_tick - 1,
+        supplied.clone()
+    )
+    .is_err());
+    ruster_motion_lab::generic::step_with_input(&mut runtime, expected_tick, supplied).unwrap();
+    assert_eq!(runtime.app().input_observation().unwrap().2, "programmatic");
+    assert_eq!(
+        runtime.app().content().scene().objects[0]
+            .transform
+            .translation[0],
+        0.0
+    );
+    runtime.step().unwrap();
+    assert_eq!(
+        runtime.app().content().scene().objects[0]
+            .transform
+            .translation[0],
+        0.0
+    );
+    assert_eq!(runtime.app().session().snapshot_bytes().unwrap(), original);
+    let mut remapped = Session::from_snapshot_bytes(&original).unwrap();
+    let mut definition = remapped.action("travel").unwrap().clone();
+    definition.kind = ActionKind::Axis1d {
+        negative: vec![InputKey::A],
+        positive: vec![InputKey::D],
+    };
+    remapped.set_action(4, "travel", Some(definition)).unwrap();
+    let remapped_bytes = remapped.snapshot_bytes().unwrap();
+    runtime
+        .app_mut()
+        .replace_session(Session::from_snapshot_bytes(&remapped_bytes).unwrap())
+        .unwrap();
+    runtime.reset().unwrap();
+    runtime.set_running(true);
+    runtime
+        .app_mut()
+        .action_input(true, &[(InputKey::ArrowRight, true)])
+        .unwrap();
+    runtime.advance(FIXED_DT).unwrap();
+    assert_eq!(
+        runtime.app().content().scene().objects[0]
+            .transform
+            .translation[0],
+        0.0
+    );
+    let before = runtime.app().content().scene().clone();
+    let expected_tick = runtime.tick();
+    assert!(ruster_motion_lab::generic::step_with_input(
+        &mut runtime,
+        expected_tick,
+        ActionFrame::default()
+    )
+    .is_err());
+    assert!(
+        runtime.is_running(),
+        "a supplied-frame request cannot implicitly pause"
+    );
+    assert_eq!(runtime.app().content().scene(), &before);
+    runtime
+        .app_mut()
+        .action_input(true, &[(InputKey::D, true)])
+        .unwrap();
+    runtime.advance(FIXED_DT).unwrap();
+    assert_eq!(
+        runtime.app().content().scene().objects[0]
+            .transform
+            .translation[0],
+        1.0
+    );
+    runtime.set_running(false);
+    runtime.step().unwrap();
+    assert_eq!(
+        runtime.app().content().scene().objects[0]
+            .transform
+            .translation[0],
+        1.0
+    );
+    assert_eq!(
+        runtime.app().session().snapshot_bytes().unwrap(),
+        remapped_bytes
+    );
+}

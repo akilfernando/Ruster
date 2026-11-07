@@ -1,5 +1,6 @@
 //! Bounded embedded source/property working copies. Session owns authored data.
 mod runtime_debug;
+mod runtime_input;
 use eframe::egui;
 use ruster_scene::{BehaviorBinding, BehaviorSource, PropertyValue, Session};
 use serde::{Deserialize, Serialize};
@@ -801,7 +802,7 @@ impl BehaviorUi {
                 });
                 if let Some(source)=session.source(&binding.source_id) {
 
-                    if source.language_id!=ruster_behavior::LANGUAGE_ID||source.host_api_version!=ruster_behavior::HOST_API_VERSION {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
                 } else {ui.colored_label(egui::Color32::YELLOW,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
                 ui.label("Properties");
                 for (name,summary) in &self.property_rows {
@@ -1096,6 +1097,13 @@ enum Request {
     Play(RunKey),
     Pause(RunKey),
     Step(RunKey),
+    ProgramStep {
+        key: RunKey,
+        expected_tick: u64,
+        map_identity: crate::behavior_worker::InputMapIdentity,
+        expected_input_epoch: u64,
+        frame: ruster_scene::input::ActionFrame,
+    },
     Invalidate(RunKey),
     Stop(RunKey),
 }
@@ -1114,6 +1122,19 @@ impl Request {
             Self::Play(key) => VmCommand::Play { key: *key },
             Self::Pause(key) => VmCommand::Pause { key: *key },
             Self::Step(key) => VmCommand::Step { key: *key },
+            Self::ProgramStep {
+                key,
+                expected_tick,
+                map_identity,
+                expected_input_epoch,
+                frame,
+            } => VmCommand::ProgramStep {
+                key: *key,
+                expected_tick: *expected_tick,
+                map_identity: *map_identity,
+                expected_input_epoch: *expected_input_epoch,
+                frame: frame.clone(),
+            },
             Self::Invalidate(key) => VmCommand::Invalidate { key: *key },
             Self::Stop(key) => VmCommand::Stop { key: *key },
         }
@@ -1122,6 +1143,7 @@ impl Request {
 #[derive(Default)]
 pub(super) struct RuntimeUi {
     debug: runtime_debug::DebugUi,
+    input_control: runtime_input::InputControl,
     context: Option<egui::Context>,
     awaiting: Option<(RunKey, Operation)>,
     worker: Option<VmWorker>,
@@ -1273,15 +1295,17 @@ impl RuntimeUi {
         let (Some(worker), Some(request)) = (&self.worker, &self.pending) else {
             return;
         };
-        match worker.try_request(request.command()) {
+        let command = request.command();
+        let key = command.key();
+        match worker.try_request(command) {
             Ok(()) => {
                 self.awaiting = Some((
-                    request.command().key(),
+                    key,
                     match request {
                         Request::Reset { .. } => Operation::Reset,
                         Request::Play(_) => Operation::Play,
                         Request::Pause(_) => Operation::Pause,
-                        Request::Step(_) => Operation::Step,
+                        Request::Step(_) | Request::ProgramStep { .. } => Operation::Step,
                         Request::Invalidate(_) => Operation::Invalidate,
                         Request::Stop(_) => Operation::Stop,
                     },
@@ -1307,6 +1331,7 @@ impl RuntimeUi {
                     if !self.worker.as_ref().unwrap().accepts(event.key()) {
                         continue;
                     }
+                    let program_step_pending = self.program_step_pending();
                     self.accept_operation(&event);
                     match event {
                         VmEvent::Reset { key, run } => self.acknowledge_reset(key, run.tick),
@@ -1381,7 +1406,9 @@ impl RuntimeUi {
                             last_good,
                             ..
                         } => {
-                            self.playing = false;
+                            if operation != Operation::Step || !program_step_pending {
+                                self.playing = false;
+                            }
                             if last_good.is_none() {
                                 self.ready = false;
                             }
@@ -1547,6 +1574,9 @@ impl RuntimeUi {
                 });}
             });
         });
+        if !session.authoring().actions.is_empty() {
+            self.input_control_button(ui, blocked);
+        }
         if let Some(stop) = self.debug_snapshot() {
             ui.colored_label(
                 egui::Color32::YELLOW,
@@ -2012,6 +2042,7 @@ mod tests {
                 key: old,
                 tick: 7,
                 scene: old_scene.clone(),
+                input: None,
             }),
             visible: true,
             ready: true,
@@ -2032,6 +2063,7 @@ mod tests {
             key: first,
             tick: 0,
             scene: Arc::new(ruster_scene::Scene::empty("obsolete-assets")),
+            input: None,
         });
         assert!(runtime.reset_succeeded.is_none());
         assert!(Arc::ptr_eq(
@@ -2044,6 +2076,7 @@ mod tests {
             key: second,
             tick: 0,
             scene: Arc::new(ruster_scene::Scene::empty("new-assets")),
+            input: None,
         });
         assert_eq!(runtime.reset_succeeded, Some(second));
         assert_eq!(runtime.frame.as_ref().unwrap().key, second);

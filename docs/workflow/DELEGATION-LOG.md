@@ -510,3 +510,11 @@ Sol delivers the external baseline helpers and pure input.rs without execution. 
 
 
 Sol’s exclusive behavior lib assignment delivers opt-inAPI2, neutral legacyStep/Reset and single-frame scoped typed queries. Root reads/fmts and runs8lib+1CLI+4debugger cases plus strictalltargetlint; allpass. Astra independently reviews actualdiff, finds no library blocker and limits acceptance to library/map/cache/scope/rollback—not forthcoming worker/native ownership. Public behavior/scene README guides are updated in the same session; no new framework or VM budget is introduced.
+
+
+## I1a integration continuation — 2026-11-07
+
+Root reuses the session routing snapshot; no new discovery or model-switch claim. Sol source-only bounded assignments integrate exact package profiles, headless frames, shared editor/adapter action commands and worker leases; root owns all Cargo/format/Python/native execution. Astra independently reviews actual worker/host concurrency and finds read-only Busy revocation, missing final native admission check and delayed outside-click focus surrender. Root repairs these and qualifies focused owning checks; subsequent editor forms/receipt wiring and post-debugger fresh claim remain in progress. No native/complete milestone claim is inferred. Agent usage/cost/elapsed metrics are unknown. [Chronological evidence](../evidence/I1A-foundation.md) records actual failures and limited passes.
+
+
+I1a first combined source checkpoint: Sol source-only assignments add bounded action forms, lean recoverable draft generation (removing idle full-draft clones), scalar programmatic Step receipts,68-tool adapter discovery and shared raw unique-key parsing. Astra read-only reviews identify transient capture ownership/visibility and discarded-pass input reuse, plus normalization before typed wire validation. Root repairs/integrates and owns all execution. The full runner's initial lint failure remains retained; repaired strict workspace lint and271Rust/26Python cases pass, with2inspection-only cases/strict feature lint and3existing ignored device probes. Root has not launched a native window; unexpected desktop state prompts availability revalidation. [Evidence](../evidence/I1A-foundation.md) separates actual fixture failures from product defects and native gates. No feature/goal acceptance is inferred; usage/cost totals unknown.

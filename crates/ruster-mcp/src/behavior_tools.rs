@@ -1,7 +1,7 @@
 //! Bounded data authoring only; execution remains an editor-owned asynchronous workflow.
 use serde_json::{json, Map, Value};
 const TOOLS: &[(&str,&str,&[&str])] = &[
-    ("behavior_inspect","Page through source/binding summaries or missing-reference diagnostics; no source/property bodies.",&["kind"]),
+    ("behavior_inspect","Page through source/binding summaries, full action definitions or missing-reference diagnostics, at most16 rows; no source/property bodies.",&["kind"]),
     ("behavior_source","Read one embedded source as base64 UTF-8 with SHA256; no filesystem access.",&["source_id"]),
     ("behavior_source_set","Upsert embedded source data, including unfinished code. Shared Undo; no compilation or execution.",&["source_id","label","language_id","host_api_version","text_base64"]),
     ("behavior_source_remove","Remove embedded source; dependent bindings remain repairable. Shared Undo.",&["source_id"]),
@@ -11,6 +11,9 @@ const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_binding_remove","Detach one behavior binding. Shared Undo; source stays available.",&["binding_id"]),
     ("behavior_property","Read one typed property or null for absent; no complete property-map response.",&["binding_id","name"]),
     ("behavior_property_set","Set one typed property or use null to remove. Shared Undo, no execution.",&["binding_id","name","value"]),
+    ("behavior_action","Read one complete authored action definition under current scene session/revision authority; no live key state.",&["action_id"]),
+    ("behavior_action_set","Replace/upsert a complete authored action definition. At most32 actions including unbound definitions; at most4 total logical keys per action. Cross-action key sharing is allowed; repeated/opposite keys and reserved Escape/Tab reject. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
+    ("behavior_action_remove","Remove one authored action definition through shared Undo. Reversible action IDs remain reserved; Undo restores them. Existing script references remain available for repair; no live runtime map mutation.",&["action_id"]),
 ];
 pub fn supported(name: &str) -> bool {
     TOOLS.iter().any(|t| t.0 == name)
@@ -22,13 +25,79 @@ fn fields(name: &str) -> Option<Vec<&'static str>> {
     }
     Some(fields)
 }
+fn action_keys_schema() -> Value {
+    json!({"type":"array","maxItems":4,"items":{"type":"string","minLength":1,"maxLength":16,"pattern":"^[a-z0-9_]+$"},
+        "description":"Logical IDs: a..z, 0..9, arrow_left/right/up/down, space, enter, backspace, delete, insert, home, end, page_up/down, f1..f12. Escape/Tab are reserved. No physical-key fallback, modifiers or chords. Empty means unbound. The editor validates membership, repeats and axis overlap."})
+}
+fn action_definition_schema() -> Value {
+    super::object_schema(
+        json!({
+            "label":{"type":["string","null"],"minLength":1,"maxLength":128,
+                "description":"Optional display label;1..128 UTF-8 bytes without surrounding whitespace or controls."},
+            "kind":{"oneOf":[
+                super::object_schema(json!({"type":{"const":"button"},"keys":action_keys_schema()}), vec!["type","keys"]),
+                super::object_schema(json!({"type":{"const":"axis1d"},"negative":action_keys_schema(),"positive":action_keys_schema()}), vec!["type","negative","positive"])
+            ],"description":"Complete typed binding; present arrays are required. Axis directions share a total4-key limit; opposite held directions resolve to zero."}
+        }),
+        vec!["kind"],
+    )
+}
+// Structural wire bounds only. Shared Session validation owns the finite key
+// vocabulary, reserved keys, duplicates/overlap and display-label semantics.
+fn valid_action_keys(value: &Value) -> bool {
+    value.as_array().is_some_and(|keys| {
+        keys.len() <= 4
+            && keys.iter().all(|key| {
+                key.as_str().is_some_and(|key| {
+                    !key.is_empty()
+                        && key.len() <= 16
+                        && key.bytes().all(|byte| {
+                            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'_'
+                        })
+                })
+            })
+    })
+}
+fn valid_action_definition(value: &Value) -> bool {
+    value.as_object().is_some_and(|definition| {
+        if !super::exact_keys(definition, &["kind"], &["label"])
+            || !definition.get("label").is_none_or(|label| {
+                label.is_null() || label.as_str().is_some_and(|label| label.len() <= 128)
+            })
+        {
+            return false;
+        }
+        definition["kind"].as_object().is_some_and(|kind| {
+            match kind.get("type").and_then(Value::as_str) {
+                Some("button") => {
+                    super::exact_keys(kind, &["type", "keys"], &[])
+                        && valid_action_keys(&kind["keys"])
+                }
+                Some("axis1d") => {
+                    super::exact_keys(kind, &["type", "negative", "positive"], &[])
+                        && valid_action_keys(&kind["negative"])
+                        && valid_action_keys(&kind["positive"])
+                        && kind["negative"].as_array().unwrap().len()
+                            + kind["positive"].as_array().unwrap().len()
+                            <= 4
+                }
+                _ => false,
+            }
+        })
+    })
+}
 fn shape(field: &str) -> Value {
     match field {
         "expected_revision" | "offset" => {
             json!({"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20})
         }
         "expected_session_token" => json!({"type":"string","minLength":1,"maxLength":256}),
-        "kind" => json!({"enum":["sources","bindings","diagnostics"]}),
+        "kind" => json!({"enum":["sources","bindings","actions","diagnostics"]}),
+        "action_id" => {
+            json!({"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$",
+            "description":"Stable action ID; current and reversible history reservations cannot be silently reused."})
+        }
+        "definition" => action_definition_schema(),
         "label" => json!({"type":["string","null"],"maxLength":128}),
         "host_api_version" => json!({"type":"integer","minimum":1,"maximum":4294967295u64}),
         "text_base64" => {
@@ -69,7 +138,7 @@ pub fn list() -> Vec<Value> {
         let required=fields(name).unwrap();
         let mut properties:Map<String,Value>=required.iter().map(|f|(f.to_string(),shape(f))).collect();
         if matches!(*name,"behavior_inspect"|"behavior_binding") {properties.insert("offset".into(),shape("offset"));}
-        json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false},"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_source"|"behavior_binding"|"behavior_property"),"openWorldHint":false}})
+        json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false},"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_source"|"behavior_binding"|"behavior_property"|"behavior_action"),"openWorldHint":false}})
     }).collect()
 }
 pub fn valid(name: &str, args: &Value) -> bool {
@@ -94,9 +163,17 @@ pub fn valid(name: &str, args: &Value) -> bool {
                 .as_u64()
                 .is_some_and(|n| n > 0 && n <= u32::MAX as u64),
             "enabled" => value.is_boolean(),
+            "definition" => valid_action_definition(value),
+            "action_id" => value.as_str().is_some_and(|id| {
+                !id.is_empty()
+                    && id.len() <= 128
+                    && id
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+            }),
             "kind" => value
                 .as_str()
-                .is_some_and(|v| ["sources", "bindings", "diagnostics"].contains(&v)),
+                .is_some_and(|v| ["sources", "bindings", "actions", "diagnostics"].contains(&v)),
             "label" => value.is_null() || value.as_str().is_some_and(|v| v.len() <= 128),
             "text_base64" => value.as_str().is_some_and(|v| v.len() <= 21848),
             "value" => {
@@ -164,5 +241,67 @@ mod tests {
             response["result"]["structuredContent"]["error"]["code"],
             "drafts_pending"
         );
+        let action = json!({"expected_session_token":"session","expected_revision":"9007199254740993","action_id":"move"});
+        let mut set = action.clone();
+        set["definition"] = json!({"label":"Traverse","kind":{"type":"axis1d","negative":["a","arrow_left"],"positive":["d","arrow_right"]}});
+        let tools = list();
+        for (index, (name, args, readonly)) in [
+            ("behavior_action", action.clone(), true),
+            ("behavior_action_set", set.clone(), false),
+            ("behavior_action_remove", action.clone(), false),
+            (
+                "behavior_inspect",
+                json!({"kind":"actions","offset":"0"}),
+                true,
+            ),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            assert!(valid(name, &args));
+            let tool = tools.iter().find(|tool| tool["name"] == name).unwrap();
+            assert_eq!(tool["annotations"]["readOnlyHint"], readonly);
+            let domain = json!({"ok":false,"error":{"code":"stale_revision","message":"Inspect current revision"}});
+            let request = json!({"jsonrpc":"2.0","id":index+2,"method":"tools/call","params":{"name":name,"arguments":args}});
+            let response = server
+                .handle(
+                    &serde_json::to_vec(&request).unwrap(),
+                    |forwarded_name, forwarded| {
+                        assert_eq!(forwarded_name, name);
+                        assert_eq!(forwarded, &args);
+                        domain.clone()
+                    },
+                )
+                .unwrap();
+            assert_eq!(response["result"]["structuredContent"], domain);
+        }
+        for definition in [
+            Value::Null,
+            json!({"kind":{"type":"button","keys":["a"],"physical":true}}),
+            json!({"kind":{"type":"axis1d","negative":[]}}),
+            json!({"kind":{"type":"axis1d","negative":["a","b"],"positive":["c","d","e"]}}),
+            json!({"kind":{"type":"vector2","keys":[]}}),
+            json!({"kind":{"type":"button","keys":[1]}}),
+        ] {
+            let mut invalid = set.clone();
+            invalid["definition"] = definition;
+            assert!(!valid("behavior_action_set", &invalid));
+        }
+        let mut invalid = set.clone();
+        invalid["path"] = "/unavailable".into();
+        assert!(!valid("behavior_action_set", &invalid));
+        invalid = set.clone();
+        invalid.as_object_mut().unwrap().remove("expected_revision");
+        assert!(!valid("behavior_action_set", &invalid));
+        invalid = action;
+        invalid["expected_revision"] = "01".into();
+        assert!(!valid("behavior_action", &invalid));
+        let mut unbound = set;
+        unbound["definition"] = json!({"kind":{"type":"button","keys":[]}});
+        assert!(valid("behavior_action_set", &unbound));
+        // Finite-key membership/reservations remain the editor's owning check,
+        // rather than a second independently maintained key table in this crate.
+        unbound["definition"]["kind"]["keys"] = json!(["future_key"]);
+        assert!(valid("behavior_action_set", &unbound));
     }
 }
