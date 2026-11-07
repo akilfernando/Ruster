@@ -165,6 +165,8 @@ objects. Camera/selection are session views, not persisted scene transforms.
 **Save scene** persists the current file with conflict checks. **Save scene as…**
 creates a new path. **Open scene…** warns before discarding unsaved data; failed
 loads preserve the current scene. Closing unsaved work offers Save/Discard/Cancel.
+A successful correction clears the matching earlier human Save error for the same
+document. Newer independent diagnostics and committed cleanup warnings stay visible.
 The behavior runtime controls described below replace the editor's earlier
 static-arrangement tick toolbar. Standalone `ruster-scene run` and isolated
 `scene_replay` still provide their original static lifecycle replay; they do not

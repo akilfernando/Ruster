@@ -121,6 +121,12 @@ impl Reply {
             }
         }
     }
+    pub(super) fn finish_save(self, editor: &mut SceneEditor, outcome: Outcome) {
+        match (self, outcome) {
+            (Self::Human, Err((_, message))) => editor.human_save_failed(&message),
+            (reply, outcome) => reply.finish(editor, outcome),
+        }
+    }
 }
 struct Admission<'a> {
     token: &'a str,
@@ -545,7 +551,7 @@ impl Controller {
         }
         if let Some(save) = &mut self.saving {
             if let Some(reply) = save.reply.take() {
-                reply.finish(editor, Err(failure.clone()));
+                reply.finish_save(editor, Err(failure.clone()));
             }
             save.phase = Phase::Cancelling;
             save.continuation = save_commands::Continuation::SaveOnly;
@@ -733,7 +739,7 @@ impl Controller {
                 "Save worker disconnected before publication; the current document was preserved."
             };
             if let Some(reply) = save.reply.take() {
-                reply.finish(editor, Err(error("save_error", message)));
+                reply.finish_save(editor, Err(error("save_error", message)));
             }
             editor.error = message.into();
             self.status = message.into();
@@ -834,7 +840,10 @@ impl Controller {
                         Err(failure) => {
                             let mut save = self.saving.take().unwrap();
                             if let Some(reply) = save.reply.take() {
-                                reply.finish(editor, Err((failure.code().into(), failure.message)));
+                                reply.finish_save(
+                                    editor,
+                                    Err((failure.code().into(), failure.message)),
+                                );
                             }
                             #[cfg(feature = "inspection")]
                             self.timing_result(TimingKind::Save, job, "failure");
@@ -863,7 +872,10 @@ impl Controller {
                             #[cfg(feature = "inspection")]
                             self.timing_result(TimingKind::Save, job, "failure");
                             if let Some(reply) = save.reply.take() {
-                                reply.finish(editor, Err((failure.code().into(), failure.message)));
+                                reply.finish_save(
+                                    editor,
+                                    Err((failure.code().into(), failure.message)),
+                                );
                             }
                         }
                         Ok(saved)
@@ -879,7 +891,7 @@ impl Controller {
                                 ..Default::default()
                             });
                             if let Some(reply) = save.reply.take() {
-                                reply.finish(editor, Err(error("save_error", "Save committed but its document identity could not be adopted; inspect or reopen before retrying.")));
+                                reply.finish_save(editor, Err(error("save_error", "Save committed but its document identity could not be adopted; inspect or reopen before retrying.")));
                             }
                         }
                         Ok(saved) => {
@@ -2829,6 +2841,16 @@ mod tests {
                 )
                 .unwrap();
         }
+        if case.starts_with("save_human_error_") {
+            editor
+                .session
+                .set_mesh(
+                    editor.session.scene().revision,
+                    "left",
+                    Some("triangle".into()),
+                )
+                .unwrap();
+        }
         editor
             .session
             .rename(
@@ -2844,6 +2866,117 @@ mod tests {
         let accepted = editor.resolved["triangle"].clone();
         let associated = editor.session.path().unwrap().to_path_buf();
         let before = std::fs::read(&associated).unwrap();
+        if case.starts_with("save_human_error_") {
+            let rejected_root = root.join("rejected-save-root");
+            std::fs::create_dir(&rejected_root).unwrap();
+            let rejected = rejected_root.join("recovered.json");
+            let authored = editor.session.snapshot_bytes().unwrap();
+            editor.start_human_save(rejected.clone(), Continuation::SaveOnly);
+            // The first authorizing service submits preparation. Subsequent
+            // read-side service observes its worker result without publishing.
+            editor.asset_frame(ctx, true);
+            until(editor, ctx, |e| {
+                !e.asset_busy() && !e.asset_paint_cleanup_pending()
+            });
+            assert!(editor.error.contains("Save As across asset roots"));
+            let rejected_message = editor.error.clone();
+            assert!(editor.save_receipt.is_none());
+            assert!(!rejected.exists());
+            assert_eq!(std::fs::read(&associated).unwrap(), before);
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
+
+            if case == "save_human_error_warning" {
+                let recovery_root = root.join("corrected-save-recovery");
+                let store = crate::recovery::Store::open(recovery_root.clone()).unwrap();
+                editor.recovery = crate::recovery_ui::RecoveryUi::at(store);
+                let snapshot = editor.recovery_snapshot();
+                editor.recovery.checkpoint(snapshot);
+                editor.wait_recovery();
+                let checkpoint = std::fs::read_dir(&recovery_root)
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path())
+                    .find(|path| {
+                        path.file_name()
+                            .unwrap()
+                            .to_string_lossy()
+                            .starts_with("window-")
+                    })
+                    .unwrap()
+                    .join("checkpoint.json");
+                std::fs::write(checkpoint, "external checkpoint replacement").unwrap();
+            }
+
+            let corrected = root.join("corrected-recovered.json");
+            editor.start_human_save(corrected.clone(), Continuation::SaveOnly);
+            editor.asset_frame(ctx, true);
+            until(editor, ctx, |e| {
+                e.asset_ops
+                    .saving
+                    .as_ref()
+                    .is_some_and(|save| save.phase == Phase::Prepared)
+            });
+            assert_eq!(
+                editor.error, rejected_message,
+                "A new Save admission must not prematurely erase the known failure"
+            );
+            let newer = "Newer independent rendering diagnostic";
+            if case == "save_human_error_superseded" {
+                editor.error = newer.into();
+            }
+            editor.asset_frame(ctx, true);
+            until(editor, ctx, |e| {
+                !e.asset_busy() && !e.asset_paint_cleanup_pending()
+            });
+            let bytes = std::fs::read(&corrected).unwrap();
+            assert_eq!(bytes, authored);
+            assert_eq!(std::fs::read(&associated).unwrap(), before);
+            assert_eq!(editor.session.path(), Some(corrected.as_path()));
+            assert!(!editor.session.is_dirty());
+            let receipt = editor.save_receipt.as_ref().unwrap();
+            assert_eq!(receipt["committed"], true);
+            assert_eq!(receipt["revision"], revision.to_string());
+            assert_eq!(receipt["path"], corrected.display().to_string());
+            assert_eq!(
+                receipt["document_sha256"],
+                persistence_commands::document_hash(&bytes)
+            );
+            assert_eq!(receipt["followup_pending"], false);
+            match case {
+                "save_human_error_repaired" => {
+                    assert!(
+                        editor.error.is_empty(),
+                        "Successful correction must retire its owned Save failure: {}",
+                        editor.error
+                    );
+                    assert!(receipt["warning"].is_null());
+                    assert_eq!(editor.notice, "Scene saved.");
+                }
+                "save_human_error_superseded" => {
+                    assert_eq!(
+                        editor.error, newer,
+                        "Successful correction must preserve a newer independent diagnostic"
+                    );
+                    assert!(receipt["warning"].is_null());
+                }
+                "save_human_error_warning" => {
+                    assert!(receipt["warning"]
+                        .as_str()
+                        .unwrap()
+                        .contains("recovery cleanup failed"));
+                    assert!(editor.error.contains("recovery cleanup failed"));
+                    assert!(!editor.error.contains(rejected_message.as_str()));
+                    assert!(editor.notice.contains("recovery cleanup failed"));
+                }
+                _ => unreachable!(),
+            }
+            assert_eq!(editor.generation, generation);
+            assert!(editor.assets.as_ref().unwrap().matches_identity(&identity));
+            assert!(Arc::ptr_eq(&editor.resolved["triangle"], &accepted));
+            until(editor, ctx, |e| !e.asset_ops.pending());
+            editor.asset_shutdown();
+            until(editor, ctx, SceneEditor::asset_finished);
+            return;
+        }
         let human = matches!(
             case,
             "save_human_offset"
@@ -3984,6 +4117,9 @@ mod tests {
             "save_draft",
             "save_cancel",
             "save_prepare_failure",
+            "save_human_error_repaired",
+            "save_human_error_superseded",
+            "save_human_error_warning",
             "save_close_prepared",
             "save_close_publishing",
             "save_human_offset",

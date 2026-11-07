@@ -39,6 +39,11 @@ impl Pin {
     }
 }
 impl SceneEditor {
+    pub(super) fn human_save_failed(&mut self, message: &str) {
+        let message = persistence_commands::bounded(message);
+        self.error = message.clone();
+        self.human_save_error = Some((self.generation, message));
+    }
     pub(super) fn canonical_asset_root(&self) -> Option<PathBuf> {
         self.assets
             .as_ref()
@@ -186,6 +191,18 @@ impl SceneEditor {
         reset: impl FnOnce(Option<&eframe::egui_wgpu::RenderState>) -> Result<(), String>,
         #[cfg(feature = "inspection")] probe: &mut asset_timing::Probe,
     ) -> (RetiredAssets, Option<u64>) {
+        // Retire only the still-visible failure from this document's human
+        // Save. New independent diagnostics and committed warnings keep their
+        // own authority. Warning generation below occurs after this cleanup.
+        if self
+            .human_save_error
+            .take()
+            .is_some_and(|(generation, message)| {
+                generation == self.generation && self.error == message
+            })
+        {
+            self.error.clear();
+        }
         let Saved {
             session,
             destination_store,
@@ -357,7 +374,7 @@ impl SceneEditor {
     }
     fn save_with_continuation_inner(&mut self, kind: Continuation) {
         if let Err(error) = self.asset_root_guard() {
-            self.error = error;
+            self.human_save_failed(&error);
             return;
         }
         if !self.apply() {
@@ -379,7 +396,7 @@ impl SceneEditor {
     }
     fn start_human_save_inner(&mut self, path: PathBuf, kind: Continuation) {
         if self.asset_busy() {
-            self.error = "Content or Save work is already in progress.".into();
+            self.human_save_failed("Content or Save work is already in progress.");
             return;
         }
         if !self.apply() {
@@ -403,12 +420,12 @@ impl SceneEditor {
                         });
                     }
                     Err((failure, request, reply)) => {
-                        reply.finish(self, Err(failure));
+                        reply.finish_save(self, Err(failure));
                         controller.retire_unsent_save(request);
                     }
                 }
             }
-            Err((_, message)) => self.error = message,
+            Err((_, message)) => self.human_save_failed(&message),
         }
         self.asset_ops = controller;
     }

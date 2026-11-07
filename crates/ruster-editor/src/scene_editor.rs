@@ -371,6 +371,7 @@ pub struct SceneEditor {
     save_sequence: u64,
     save_receipt: Option<Value>,
     save_warning: Option<String>,
+    human_save_error: Option<(u64, String)>,
     save_continuation: Option<save_commands::AfterSave>,
     save_dialog_continuation: save_commands::Continuation,
     #[cfg(test)]
@@ -551,6 +552,7 @@ impl SceneEditor {
             save_sequence: 0,
             save_receipt: None,
             save_warning: None,
+            human_save_error: None,
             save_continuation: None,
             save_dialog_continuation: Default::default(),
             #[cfg(test)]
