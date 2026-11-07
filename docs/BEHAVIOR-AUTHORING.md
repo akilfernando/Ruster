@@ -50,3 +50,13 @@ The owner-thread debugger backend is integrated atf54246c after independent revi
 ### M8 closeout — 2026-11-04
 
 All three planned stages now pass their bounded native/API gates: generic recoverable data editing and owning runtime; explicit derived Zed working copies with conflict/Undo/durable saved-base authority and actual generated LuaLS; owned in-app locals/Next/Continue with asynchronous runtime/debug MCP parity. Actual Zed workspace launch is observed; focused Zed GUI/DAP is not claimed. Review and native checks repaired receipt identities/terminal failures, cancelled-hook replacement and Enter focus retention. Final source/property/precision recovery uses drafts-v3 with legacy-unit preservation. See [tooling](evidence/M8-integrated-tooling.md), [debugger](evidence/M8-debugger-native.md) and [milestone evaluation](ROADMAP-REVIEW.md#m8-completion-evaluation--2026-11-04). M8 is complete in recorded Linux scope; M9 is deferred at the user’s request. Earlier next-stage paragraphs are historical planning, superseded by this closeout.
+
+
+## Typed property keyboard submission — 2026-11-07
+
+In the Inspector's **Add property** section, choose a type and enter its Name. Enter in the Name field adds the typed property's default value through the same shared Undo transaction as **Add typed property**. Enter used inside the type popup stays with that popup. Choose **Edit value** to set a value or reference, then Enter or **Apply property value** to commit it. Source text continues to use Ctrl+Enter for **Apply source data**.
+
+
+## Runtime transform inspection — 2026-11-07
+
+Runtime view shows the selected target's read-only Position, Rotation in degrees and Scale from its displayed frame. Tick and current/stale labels identify that snapshot. **Edit authored transform** releases scene keyboard control and opens the authored precision workflow. Session owns authored values, raw drafts, history and Save. Other component sections identify their authored ownership and Reset workflow. Source and real-inspector checks pass. Rebuilt native qualification is recorded in STATUS as it completes.

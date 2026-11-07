@@ -1179,6 +1179,11 @@ impl RuntimeUi {
     pub fn is_playing(&self) -> bool {
         self.playing
     }
+    /// Retained frame currently selected for display, including stale frames.
+    /// Callers classify currency separately without replacing its shown pose.
+    pub(crate) fn displayed_frame(&self) -> Option<&Frame> {
+        self.frame.as_ref().filter(|_| self.visible)
+    }
     pub fn observe(
         &mut self,
         generation: u64,

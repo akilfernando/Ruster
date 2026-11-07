@@ -129,3 +129,20 @@ Root/Astra select `serde_json/float_roundtrip` at the owning ruster-scene depend
 This shared feature can correct previously misrounded f64 values elsewhere in the dependency graph. Existing canonical authored f32 documents and compatibility cases remain required evidence. Fresh integration/build/current-kit/native raw-negative proofs are required. Earlier performance/source/binary evidence retains its original identity. Query math and algorithms are unchanged, while raw JSON admission changes. Current verification is in progress.
 
 The first full integration attempt stops at a strict Clippy manual Option-to-slice lint before Rust tests. The standard `Option::as_slice` expression and a Mesh/Collider heading-order correction precede the fresh gate. `authoring-integration-2` passes 282 Rust and 26 Python cases, strict workspace all-target Clippy, formatting and Markdown checks in 152.99 seconds. Three existing device probes remain ignored. Test-profile compilation consumes 107 seconds. All checked non-Markdown inputs are pinned. Exact new default/inspection builds, export/native raw-negative checks and the full creator workflow remain open.
+
+## Accepted runtime Inspector ownership repair — 2026-11-07
+
+Root/Astra select this bounded UI direction after the direct creator walkthrough reaches barrier contact while the Inspector reports the starting authored position. The saved Scene remains correct. Native evidence is retained in `ordinary-course-2/keyboard-motion-1` under the P2a external workspace. Implementation and new native qualification are in progress.
+
+Session owns authored transforms, precision drafts, history and saved documents. The retained runtime Frame owns preview poses. Runtime view presents the active target's read-only transform from the same displayed Frame used by the viewport, with its tick and current/stale status. A target absent from that snapshot has an explicit unavailable presentation. Target-kind matching protects geometry/light identity across retained frames.
+
+An **Edit authored transform** action releases runtime input and switches to the existing authored view. Existing precision controls then expose the retained authored values and drafts. Remaining editable component sections identify their authored ownership and Reset workflow. This is an agent-selected presentation serving the confirmed creator and keyboard requirements.
+
+| Considered direction | Consequence | Disposition |
+| --- | --- | --- |
+| Relabel the existing authored fields during runtime view | The visible moving object's pose remains difficult to inspect directly. | Insufficient for the demonstrated workflow. |
+| Copy preview poses into Session-backed precision fields | Preview and authored ownership would become coupled across editing, Save and recovery. | Rejected. |
+| Show two complete precision forms together | Additional density and competing editing surfaces would complicate the Inspector. | Rejected. |
+| Present the displayed Frame's read-only pose with a direct authored-edit route | Exposes current creation behavior and preserves the existing editing ownership model. | Selected. |
+
+The implementation uses a borrowed displayed-frame selector and bounded active-target display values. Verification extends the existing real Inspector/runtime ownership case with distinct poses, normal/compact layouts, retained stale and missing targets, raw-draft preservation and a real authored-edit button gesture. The original failed native live-value assertion stays in place for the rebuilt editor qualification.

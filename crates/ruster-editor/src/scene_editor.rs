@@ -22,6 +22,7 @@ mod material_visual_probe;
 mod nonvisual;
 mod persistence_commands;
 mod runtime_commands;
+mod runtime_transform_ui;
 mod save_commands;
 mod shadow_feedback;
 mod view_commands;
@@ -3250,6 +3251,10 @@ impl SceneEditor {
             });
         });
         if self.selected.is_none() {
+            if self.runtime.visible {
+                ui.strong("Authored components");
+                ui.label("Changes affect the authored scene. Reset preview to use them.");
+            }
             self.ambient_inspector_ui(ui);
             self.display_inspector_ui(ui);
             ui.label("Select an object or light to edit its properties.");
@@ -3280,45 +3285,54 @@ impl SceneEditor {
             }
             return;
         }
-        ui.separator();
-        ui.strong("Transform");
-        if self.draft != self.baseline_fields {
-            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
-                    ui.label("Recovered transform fields — repair or revert before other precision edits");
-                    let mut enter=false;
-                    let mut escape=false;
-                    if let Some(fields)=&mut self.draft {
-                        for (label, values) in [("Position", &mut fields.translation), (fields.rotation_unit.label(), &mut fields.rotation), ("Scale", &mut fields.scale)] {
-                            ui.label(label);
-                            ui.horizontal_wrapped(|ui| { for (axis,text) in ["X","Y","Z"].into_iter().zip(values) {
-                                ui.label(axis);
-                                let response=ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(1024).interactive(ui.is_enabled()));
-                                let owned=response.has_focus() || ui.memory(|m|m.had_focus_last_frame(response.id));
-                                enter|=owned && ui.input(|i|i.key_pressed(egui::Key::Enter));
-                                escape|=owned && ui.input(|i|i.key_pressed(egui::Key::Escape));
-                            }});
+        if self.runtime.visible {
+            self.runtime_transform_ui(ui);
+        } else {
+            ui.separator();
+            ui.strong("Transform");
+            if self.draft != self.baseline_fields {
+                ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+                        ui.label("Recovered transform fields — repair or revert before other precision edits");
+                        let mut enter=false;
+                        let mut escape=false;
+                        if let Some(fields)=&mut self.draft {
+                            for (label, values) in [("Position", &mut fields.translation), (fields.rotation_unit.label(), &mut fields.rotation), ("Scale", &mut fields.scale)] {
+                                ui.label(label);
+                                ui.horizontal_wrapped(|ui| { for (axis,text) in ["X","Y","Z"].into_iter().zip(values) {
+                                    ui.label(axis);
+                                    let response=ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(1024).interactive(ui.is_enabled()));
+                                    let owned=response.has_focus() || ui.memory(|m|m.had_focus_last_frame(response.id));
+                                    enter|=owned && ui.input(|i|i.key_pressed(egui::Key::Enter));
+                                    escape|=owned && ui.input(|i|i.key_pressed(egui::Key::Escape));
+                                }});
+                            }
                         }
+                        if ui.button("Apply recovered transform fields").clicked() || enter {self.apply();}
+                        if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
+                    });
+            }
+            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.ids.is_empty(), |ui| {
+                    match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
+                        Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
+                        Ok(false)=>{},Err(error)=>self.error=error,
                     }
-                    if ui.button("Apply recovered transform fields").clicked() || enter {self.apply();}
-                    if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
                 });
+            ui.add_enabled_ui(
+                self.color_draft.is_none()
+                    && self.material_draft.is_none()
+                    && self.lighting_draft.is_none()
+                    && self.display_draft.is_none()
+                    && self.collider_draft.is_none()
+                    && !self.behavior.pending()
+                    && !self.input_actions.pending(),
+                |ui| self.manipulation_ui(ui),
+            );
         }
-        ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.ids.is_empty(), |ui| {
-                match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
-                    Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
-                    Ok(false)=>{},Err(error)=>self.error=error,
-                }
-            });
-        ui.add_enabled_ui(
-            self.color_draft.is_none()
-                && self.material_draft.is_none()
-                && self.lighting_draft.is_none()
-                && self.display_draft.is_none()
-                && self.collider_draft.is_none()
-                && !self.behavior.pending()
-                && !self.input_actions.pending(),
-            |ui| self.manipulation_ui(ui),
-        );
+        if self.runtime.visible {
+            ui.separator();
+            ui.strong("Authored components");
+            ui.label("Changes affect the authored scene. Reset preview to use them.");
+        }
         self.light_inspector_ui(ui);
         ui.separator();
         if let Some(object) = self
@@ -4665,7 +4679,7 @@ impl SceneEditor {
             let viewport = ruster_render::viewport_with_materials(
                 ui,
                 if self.runtime.visible {
-                    self.runtime.frame.as_ref().map(|frame|frame.scene.as_ref()).unwrap_or(self.session.scene())
+                    self.runtime.displayed_frame().map(|frame|frame.scene.as_ref()).unwrap_or(self.session.scene())
                 } else {
                     authored_view
                 },
@@ -4695,7 +4709,7 @@ impl SceneEditor {
                 let active = self.selected.as_slice();
                 collider_viewport::paint(ui, &viewport, authored_view, active);
             } else if !self.runtime.stale {
-                if let Some(frame) = self.runtime.frame.as_ref()
+                if let Some(frame) = self.runtime.displayed_frame()
                     .filter(|frame| Some(frame.key) == self.runtime.current_run())
                 {
                     if let Some(observations) = &frame.query_observations {
@@ -5948,6 +5962,185 @@ mod tests {
             &new_texture
         ));
         assert!(editor.reset_assets.is_none());
+
+        // The Inspector must read the same retained runtime Scene as the
+        // viewport, without rebasing or erasing authored precision drafts.
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        editor.select_object(Some("left".into()), false);
+        editor
+            .runtime
+            .reset(&ctx, &editor.session, editor.generation)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while editor.runtime.frame.as_ref().map(|frame| frame.key) != editor.runtime.current_run() {
+            assert!(
+                Instant::now() < deadline,
+                "Reset must publish its matching frame"
+            );
+            editor.runtime.poll(&ctx);
+            std::thread::yield_now();
+        }
+        let current = editor.runtime.current_run().unwrap();
+        let mut displayed = editor
+            .runtime
+            .frame
+            .as_ref()
+            .unwrap()
+            .scene
+            .as_ref()
+            .clone();
+        let moved = displayed
+            .objects
+            .iter_mut()
+            .find(|object| object.id == "left")
+            .unwrap();
+        moved.transform.translation = [0.625, 1.25, -0.375];
+        moved.transform.scale = [2.5, 3.5, 4.5];
+        editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            key: current,
+            tick: 37,
+            scene: Arc::new(displayed.clone()),
+            query_observations: None,
+            input: None,
+        });
+        editor.runtime.visible = true;
+        editor.runtime.stale = false;
+        let mut raw = serde_json::to_value(editor.manipulation.snapshot_drafts()).unwrap();
+        raw["precision"][0] = json!("-");
+        raw["edited"][0] = json!(true);
+        raw["revision"] = json!(editor.session.scene().revision);
+        editor
+            .manipulation
+            .restore_drafts(
+                editor.session.scene(),
+                serde_json::from_value(raw.clone()).unwrap(),
+            )
+            .unwrap();
+        let authored = editor.session.snapshot_bytes().unwrap();
+        let fields = editor.draft.clone();
+        let draw = |editor: &mut SceneEditor, size, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    ui.set_width(340.0);
+                    editor.inspector_scroll_ui(ui);
+                },
+            );
+            output.textures_delta.clear();
+            output
+                .shapes
+                .into_iter()
+                .filter_map(|shape| {
+                    let egui::epaint::Shape::Text(text) = shape.shape else {
+                        return None;
+                    };
+                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    shape
+                        .clip_rect
+                        .contains_rect(rect)
+                        .then(|| (text.galley.job.text.clone(), rect))
+                })
+                .collect::<Vec<_>>()
+        };
+        for size in [egui::vec2(1280.0, 800.0), egui::vec2(640.0, 480.0)] {
+            draw(&mut editor, size, vec![]);
+            let text = draw(&mut editor, size, vec![]);
+            for value in ["0.625", "1.25", "-0.375"] {
+                assert!(
+                    text.iter().any(|(label, _)| label == value),
+                    "Visible runtime Inspector must show the retained numeric pose {value}"
+                );
+            }
+            assert!(text.iter().any(|(label, _)| label == "Runtime transform"));
+            assert!(text.iter().any(|(label, _)| label.contains("Tick 37")));
+            assert!(text
+                .iter()
+                .any(|(label, _)| label.to_ascii_lowercase().contains("read-only")));
+            assert!(text
+                .iter()
+                .any(|(label, _)| label.to_ascii_lowercase().contains("current")));
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
+            assert_eq!(
+                serde_json::to_value(editor.manipulation.snapshot_drafts()).unwrap(),
+                raw
+            );
+            assert!(editor.draft == fields);
+        }
+        editor.runtime.stale = true;
+        let stale = draw(&mut editor, egui::vec2(640.0, 480.0), vec![]);
+        assert!(stale
+            .iter()
+            .any(|(label, _)| label.to_ascii_lowercase().contains("stale")));
+        assert!(
+            stale.iter().any(|(label, _)| label == "0.625"),
+            "Stale presentation must still identify the retained displayed pose"
+        );
+
+        let mut missing = displayed.clone();
+        missing.objects.retain(|object| object.id != "left");
+        // A light reusing the old geometry ID in another frame is not the
+        // selected geometry target. Never mask absence with another kind.
+        missing.lighting = ruster_scene::Lighting::authored_default("left");
+        editor.runtime.frame.as_mut().unwrap().scene = Arc::new(missing);
+        let absent = draw(&mut editor, egui::vec2(640.0, 480.0), vec![]);
+        assert!(
+            absent.iter().any(|(label, _)| {
+                let label = label.to_ascii_lowercase();
+                label.contains("not present")
+                    || label.contains("missing")
+                    || label.contains("unavailable")
+            }),
+            "Missing runtime target needs explicit presentation, not an authored fallback"
+        );
+        assert!(!absent.iter().any(|(label, _)| label == "0.625"));
+
+        editor.runtime.frame.as_mut().unwrap().scene = Arc::new(displayed);
+        editor.runtime.stale = false;
+        let text = draw(&mut editor, egui::vec2(640.0, 480.0), vec![]);
+        let button = text
+            .iter()
+            .find(|(label, _)| label == "Edit authored transform")
+            .expect("Runtime Inspector needs an explicit authored-edit route")
+            .1
+            .center();
+        for pressed in [true, false] {
+            draw(
+                &mut editor,
+                egui::vec2(640.0, 480.0),
+                vec![
+                    egui::Event::PointerMoved(button),
+                    egui::Event::PointerButton {
+                        pos: button,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        assert!(!editor.runtime.visible);
+        assert_eq!(
+            editor.runtime.current_run(),
+            Some(current),
+            "Authored edit must not Reset the run"
+        );
+        assert_eq!(editor.runtime.frame.as_ref().unwrap().tick, 37);
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
+        assert_eq!(
+            serde_json::to_value(editor.manipulation.snapshot_drafts()).unwrap(),
+            raw,
+            "Returning to authored editing must preserve raw precision text and edit masks"
+        );
+        assert!(editor.draft == fields);
+        let authored_text = draw(&mut editor, egui::vec2(640.0, 480.0), vec![]);
+        assert!(authored_text.iter().any(|(label, _)| label == "-"));
+        editor.runtime.shutdown();
     }
     #[test]
     fn embedded_source_save_and_recovery_keep_unfinished_work_and_guard_agents() {
