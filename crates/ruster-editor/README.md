@@ -560,3 +560,6 @@ Escape during key capture returns focus to its original Capture button; a second
 Invalid action names keep their raw text and the actual Enter-submitting field focused; feedback appears beside the names. Rejected capture feedback appears beside its current owner. Capture buttons have stable identities across feedback changes, so Enter can rearm immediately after accepting a key.
 
 **Runtime → Runtime input help…** opens generated current bindings and read-only committed input/behavior poses. Values describe the named committed tick and origin, not current physical keys; stale or mismatched maps/runs hide old values and explain Reset. Opening releases scene control; Escape or the focused Close button closes help and returns to Runtime. The Control runtime row retains its size with an empty map and explains why control is disabled. These ordinary-workflow changes await native normal/compact qualification.
+
+
+Help focuses its Close button on genuine opening. While that help owns focus, Page Up/Down scroll and Home/End jump; Escape/Enter close. Its measured footer remains outside the scroll body, including retained compact sizes. The Control row also contains concise Reset/debug status so those transitions do not add another viewport row. Source checks cover these paths; native8 and zero-unnecessary-resource-cost qualification remain pending.

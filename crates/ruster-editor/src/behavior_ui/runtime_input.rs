@@ -16,6 +16,7 @@ pub(super) struct InputControl {
     help_focus: bool,
     help_activation_frame: Option<u64>,
     help_return_focus: Option<egui::Id>,
+    help_close: Option<egui::Id>,
 }
 impl RuntimeUi {
     pub(crate) fn input_owned(&self) -> bool {
@@ -157,6 +158,7 @@ impl RuntimeUi {
         self.input_control.help_open = true;
         self.input_control.help_focus = true;
         self.input_control.help_return_focus = None;
+        self.input_control.help_close = None;
         self.input_control.help_activation_frame = Some(ctx.cumulative_frame_nr());
     }
 
@@ -193,18 +195,74 @@ impl RuntimeUi {
         let popup_at_start = egui::Popup::is_any_open(ctx);
         let activation =
             self.input_control.help_activation_frame == Some(ctx.cumulative_frame_nr());
+        let pointer_gesture = ctx.input(|input| {
+            input.pointer.any_pressed() || input.pointer.any_released() || input.pointer.any_click()
+        });
+        let navigation = if !activation
+            && !popup_at_start
+            && !pointer_gesture
+            && ctx.input(|input| {
+                input.focused
+                    && !input.modifiers.any()
+                    && !input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+            })
+            && self.input_control.help_close.is_some_and(|id| {
+                ctx.memory(|memory| memory.focused()) == Some(id)
+                    && ctx.read_response(id).is_some_and(|response| {
+                        response.enabled()
+                            && response.has_focus()
+                            && response.interact_rect.contains_rect(response.rect)
+                    })
+            }) {
+            ctx.input_mut(|input| {
+                [
+                    egui::Key::PageUp,
+                    egui::Key::PageDown,
+                    egui::Key::Home,
+                    egui::Key::End,
+                ]
+                .into_iter()
+                .find(|key| input.consume_key(egui::Modifiers::NONE, *key))
+            })
+        } else {
+            None
+        };
         let mut opened = true;
         let mut close = false;
         let mut focus = self.input_control.help_focus;
         egui::Window::new("Runtime input help")
             .id(egui::Id::unique("runtime_input_help"))
-            .open(&mut opened).collapsible(false).default_width(420.0)
-            .min_width(180.0).max_width((ctx.content_rect().width() - 32.0).max(180.0))
+            .open(&mut opened).collapsible(false).default_width(520.0)
+            .min_width(180.0).max_width((ctx.content_rect().width() - 32.0).clamp(180.0, 520.0))
+            .max_height((ctx.content_rect().height() - 48.0).max(200.0))
             .show(ctx, |ui| {
+                let hint = egui::WidgetText::from("Page Up/Down scroll · Home/End jump.")
+                    .into_galley(ui, Some(egui::TextWrapMode::Wrap), ui.available_width(), egui::TextStyle::Body);
+                let padding = egui::Margin::from(ui.spacing().button_padding).sum();
+                let close_text = egui::WidgetText::from("Close input help")
+                    .into_galley(ui, Some(egui::TextWrapMode::Wrap),
+                        (ui.available_width() - padding.x).max(0.0), egui::TextStyle::Body);
+                let close_height = (close_text.size().y + padding.y).max(ui.spacing().interact_size.y);
+                // Reserve the measured footer in this retained Window before
+                // sizing the body. Screen budget alone can clip its Close row.
+                let footer_height = hint.size().y + close_height + 2.0 * ui.spacing().item_spacing.y;
+                let body_height = (ui.available_height() - footer_height).max(0.0)
+                    .min((ctx.content_rect().height() - 160.0).clamp(100.0, 720.0));
                 egui::ScrollArea::vertical().id_salt("runtime_input_help_scroll")
-                    .max_height((ctx.content_rect().height() - 160.0).clamp(100.0, 480.0))
+                    .animated(false)
+                    .min_scrolled_height(0.0)
+                    .max_height(body_height)
                     .show(ui, |ui| {
-                        ui.heading("Current authored controls");
+                        match navigation {
+                            Some(egui::Key::PageUp) => ui.scroll_with_delta(egui::vec2(0.0, ui.clip_rect().height() * 0.8)),
+                            Some(egui::Key::PageDown) => ui.scroll_with_delta(egui::vec2(0.0, -ui.clip_rect().height() * 0.8)),
+                            Some(egui::Key::Home) => ui.scroll_to_cursor(Some(egui::Align::TOP)),
+                            _ => {}
+                        }
+                        ui.heading("Scene controls");
                         if session.authoring().actions.is_empty() {
                             ui.label("No actions defined. Add actions in Input actions.");
                         }
@@ -215,7 +273,7 @@ impl RuntimeUi {
                             ui.label(action_hint(&definition.kind));
                         }
                         ui.separator();
-                        ui.heading("Runtime observation");
+                        ui.heading("Preview state");
                         if !current {
                             ui.label(if self.stale {
                                 "Runtime snapshot stale. Reset to inspect the current scene and action map."
@@ -223,11 +281,9 @@ impl RuntimeUi {
                                 "Runtime snapshot unavailable for the current scene, map or run. Reset preview."
                             });
                             if let Some(frame) = &self.frame {
-                                ui.label(format!("Retained snapshot tick {} · run {}:{}:{}", frame.tick,
-                                    frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision));
+                                ui.label(format!("Retained preview tick {}", frame.tick));
                             }
-                            return;
-                        }
+                        } else {
                         ui.label(if self.input_owned() {
                             "Scene controls active. Escape releases ownership."
                         } else if self.playing {
@@ -236,8 +292,7 @@ impl RuntimeUi {
                             "Preview paused. Ordinary Step uses a neutral input frame."
                         });
                         let frame = self.frame.as_ref().expect("current snapshot checked");
-                        ui.label(format!("Committed runtime tick {} · run {}:{}:{}", frame.tick,
-                            frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision));
+                        ui.label(format!("Committed preview tick {}", frame.tick));
                         if let Some(input) = frame.input.as_deref().filter(|input| {
                             input.receipt.tick == frame.tick
                                 && input.frame.0.keys().eq(session.authoring().actions.keys())
@@ -248,7 +303,7 @@ impl RuntimeUi {
                                 InputOrigin::Programmatic => "programmatic step",
                             };
                             ui.strong(format!("Last committed input · tick {} · {origin}", input.receipt.tick));
-                            ui.label(format!("Input epoch {}. Values describe this committed tick.", input.receipt.input_epoch));
+                            ui.label("Values describe the committed tick. Current physical-key state is separate.");
                             for (id, value) in &input.frame.0 {
                                 ui.label(match value {
                                     ActionValue::Button(value) => format!("{id} · Held {} · Pressed {} · Released {}", value.held, value.pressed, value.released),
@@ -260,7 +315,7 @@ impl RuntimeUi {
                                 else { "Last committed input is unavailable for this snapshot." });
                         }
                         ui.separator();
-                        ui.heading("Committed behavior poses");
+                        ui.heading("Object transforms");
                         let bindings = &session.authoring().bindings;
                         let count = bindings.values().filter(|binding| binding.enabled).count();
                         if count == 0 { ui.label("No enabled behavior bindings."); }
@@ -274,8 +329,14 @@ impl RuntimeUi {
                                 ui.label(format!("{id} · Object {} unavailable in this snapshot.", binding.object_id));
                             }
                         }
+                        }
+                        if navigation == Some(egui::Key::End) {
+                            ui.scroll_to_cursor(Some(egui::Align::BOTTOM));
+                        }
                     });
-                let button = ui.button("Close input help");
+                ui.label(hint);
+                let button = ui.button(close_text);
+                self.input_control.help_close = Some(button.id);
                 // Closing the opening menu can surrender focus later in the
                 // activation pass. Hand it to Close once the popup is gone.
                 let pointer_gesture = ui.input(|input| input.pointer.any_pressed()
@@ -304,6 +365,9 @@ impl RuntimeUi {
             });
         self.input_control.help_focus = focus;
         self.input_control.help_open = opened && !close;
+        if !self.input_control.help_open {
+            self.input_control.help_close = None;
+        }
     }
     pub(crate) fn input_finish(
         &mut self,
@@ -478,17 +542,18 @@ mod tests {
         // An action-map edit must not consume another row of the ordinary
         // toolbar and therefore resize the real remaining viewport Response.
         // This layout check needs no worker or GPU resources.
-        fn remaining_viewport(session: &Session) -> egui::Rect {
+        fn remaining_viewport(session: &Session, stale: bool, size: egui::Vec2) -> egui::Rect {
             let ctx = egui::Context::default();
-            let mut runtime = RuntimeUi::default();
+            crate::editor_theme::configure(&ctx);
+            let mut runtime = RuntimeUi {
+                stale,
+                ..Default::default()
+            };
             let mut viewport = None;
             let mut output = ctx.run_ui(
                 egui::RawInput {
                     focused: true,
-                    screen_rect: Some(egui::Rect::from_min_size(
-                        egui::Pos2::ZERO,
-                        egui::vec2(1000., 800.),
-                    )),
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
                     ..Default::default()
                 },
                 |ui| {
@@ -501,22 +566,29 @@ mod tests {
             output.textures_delta.clear();
             viewport.unwrap()
         }
-        let mut layout = Session::new(ruster_scene::Scene::empty("input-layout")).unwrap();
-        let empty = remaining_viewport(&layout);
-        layout
-            .set_action(0, "home", Some(ActionDefinition::default()))
-            .unwrap();
-        let first = remaining_viewport(&layout);
-        layout.set_action(1, "home", None).unwrap();
-        let last = remaining_viewport(&layout);
-        assert_eq!(
-            first, empty,
-            "first action must preserve the viewport footprint"
-        );
-        assert_eq!(
-            last, empty,
-            "last action removal must preserve the viewport footprint"
-        );
+        for size in [egui::vec2(1000., 800.), egui::vec2(640., 480.)] {
+            let mut layout = Session::new(ruster_scene::Scene::empty("input-layout")).unwrap();
+            let empty = remaining_viewport(&layout, false, size);
+            layout
+                .set_action(0, "home", Some(ActionDefinition::default()))
+                .unwrap();
+            let first = remaining_viewport(&layout, false, size);
+            let stale = remaining_viewport(&layout, true, size);
+            layout.set_action(1, "home", None).unwrap();
+            let last = remaining_viewport(&layout, false, size);
+            assert_eq!(
+                first, empty,
+                "first action must preserve the viewport footprint"
+            );
+            assert_eq!(
+                stale, first,
+                "Reset-required status stays within the existing Control row"
+            );
+            assert_eq!(
+                last, empty,
+                "last action removal must preserve the viewport footprint"
+            );
+        }
 
         let mut session = Session::new(ruster_scene::Scene::empty("input-focus")).unwrap();
         session
@@ -531,7 +603,17 @@ mod tests {
                 }),
             )
             .unwrap();
+        for id in ["fine", "raise", "lower"] {
+            session
+                .set_action(
+                    session.scene().revision,
+                    id,
+                    Some(ActionDefinition::default()),
+                )
+                .unwrap();
+        }
         let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
         let mut runtime = RuntimeUi::default();
         let key = runtime.reset(&ctx, &session, 1).unwrap();
         let wait = |runtime: &mut RuntimeUi, playing| {
@@ -751,6 +833,22 @@ mod tests {
                 .find_map(|shape| find(&shape.shape, label))
                 .unwrap_or_else(|| panic!("visible input help control {label:?}"))
         }
+        fn visible_label(shapes: &[egui::epaint::ClippedShape], label: &str) -> bool {
+            fn find(shape: &egui::epaint::Shape, clip: egui::Rect, label: &str) -> bool {
+                match shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                        clip.contains_rect(text.galley.rect.translate(text.pos.to_vec2()))
+                    }
+                    egui::epaint::Shape::Vec(shapes) => {
+                        shapes.iter().any(|shape| find(shape, clip, label))
+                    }
+                    _ => false,
+                }
+            }
+            shapes
+                .iter()
+                .any(|shape| find(&shape.shape, shape.clip_rect, label))
+        }
         for size in [egui::vec2(1000.0, 800.0), egui::vec2(640.0, 480.0)] {
             width.set(size.x);
             height.set(size.y);
@@ -776,6 +874,53 @@ mod tests {
                     "genuine opening focuses the visible Close button"
                 );
                 assert!(egui::Rect::from_min_size(egui::Pos2::ZERO, size).contains(close));
+                let close_id = focused.id;
+                for navigation in [
+                    egui::Key::Home,
+                    egui::Key::End,
+                    egui::Key::PageUp,
+                    egui::Key::PageDown,
+                    egui::Key::Home,
+                ] {
+                    draw(
+                        &mut runtime,
+                        [true, false]
+                            .into_iter()
+                            .map(|pressed| egui::Event::Key {
+                                key: navigation,
+                                physical_key: None,
+                                pressed,
+                                repeat: false,
+                                modifiers: egui::Modifiers::NONE,
+                            })
+                            .collect(),
+                        false,
+                    );
+                    draw(&mut runtime, vec![], false);
+                    let owner = ctx.read_response(close_id).unwrap();
+                    assert!(
+                        owner.enabled()
+                            && owner.has_focus()
+                            && owner.interact_rect.contains_rect(owner.rect),
+                        "help scrolling retains the actual visible Close owner at {size:?}"
+                    );
+                    assert!(visible_label(
+                        &rendered.borrow(),
+                        "Page Up/Down scroll · Home/End jump."
+                    ));
+                    if navigation == egui::Key::Home {
+                        assert!(visible_label(&rendered.borrow(), "Scene controls"));
+                    }
+                    if navigation == egui::Key::End {
+                        assert!(visible_label(&rendered.borrow(), "Object transforms"));
+                    }
+                    if navigation == egui::Key::PageDown && size.y == 480.0 {
+                        assert!(
+                            !visible_label(&rendered.borrow(), "Scene controls"),
+                            "Page Down moves actual compact help content"
+                        );
+                    }
+                }
                 draw(
                     &mut runtime,
                     vec![egui::Event::Key {

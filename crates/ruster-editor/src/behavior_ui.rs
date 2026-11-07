@@ -1577,23 +1577,19 @@ impl RuntimeUi {
             self.input_help_menu_response(&runtime_menu.response);
         });
         // Always reserve the same ordinary row, including an empty action map.
-        self.input_control_button(ui, blocked, !session.authoring().actions.is_empty());
-        if let Some(stop) = self.debug_snapshot() {
-            ui.colored_label(
-                egui::Color32::YELLOW,
-                format!(
-                    "Paused · {}:{} · tick {}",
-                    stop.source_id,
-                    stop.line
-                        .map(|line| line.to_string())
-                        .as_deref()
-                        .unwrap_or("?"),
-                    stop.committed_tick
-                ),
-            );
-        } else if self.stale && self.diagnostic.is_none() {
-            ui.colored_label(egui::Color32::YELLOW, "Runtime stale · Reset required");
-        }
+        ui.horizontal(|ui| {
+            self.input_control_button(ui, blocked, !session.authoring().actions.is_empty());
+            let status = if self.debug_snapshot().is_some() {
+                Some(("Paused in debugger", "Open Runtime → Behavior debugger for the stopped source, line and tick."))
+            } else if self.stale && self.diagnostic.is_none() {
+                Some(("Reset required", "The scene or its controls changed. Reset to preview the current authored state."))
+            } else { None };
+            if let Some((label, detail)) = status {
+                ui.add_sized(egui::vec2(ui.available_width().max(0.0), ui.spacing().interact_size.y),
+                    egui::Label::new(egui::RichText::new(label).color(egui::Color32::YELLOW)).truncate())
+                    .on_hover_text(detail);
+            }
+        });
         self.flush();
         self.input_help_window(ui.ctx(), session, generation);
         reset
