@@ -1,6 +1,6 @@
 # 0039 — Pending recovery repair and preserved source checkpoints
 
-Accepted engineering choice2026-11-08 within the user's approved [first phase](../plans/ENGINEERING-IMPROVEMENT-SEQUENCE.md). Root adopts Astra's bounded design after source review. Implementation and native qualification are in progress.
+Accepted engineering choice2026-11-08 within the user's approved [first phase](../plans/ENGINEERING-IMPROVEMENT-SEQUENCE.md). Root adopts Astra's bounded design after source review. Implemented and qualified within the bounded first-phase recovery outcome on 2026-11-08. Root execution and independent Astra review accept the evidence described below.
 
 ## Context
 
@@ -35,6 +35,16 @@ Copying backups or adding persistent lineage metadata creates further publicatio
 The editor retains one additional bounded source lease, and each Restore needs one available working slot. Preserved originals remain until explicit discard. Latest typing has checkpoint protection only after a successful worker acknowledgement. This decision extends existing recovery semantics and makes no additional power-loss guarantee.
 
 Extend existing production-owner tests for compound/stale compatibility, explicit resume, strict rejection, repeated Fields checkpoints, MCP/Save/selection authority, source bytes, full-store refusal and source-lease release. Verify ordinary review keyboard handoff and real disposable crash/Restore/repair/SaveAs/fresh reopen. Root owns execution and records results in STATUS and first-phase evidence. Source review alone does not close those gates.
+
+## Accepted verification
+
+The current affected gate passes all 125 editor cases, strict default lint, formatting and documentation in 6.66 seconds. Strict inspection all-target lint passes in 2.42 seconds. The unchanged full-workspace, packaging and runtime evidence remains separately pinned.
+
+Focused native journeys restore old-owner compound and stale-action records, retain exact raw values across a further crash, repair through ordinary Enter controls and Save As, and reopen cleanly in fresh default editors. A legacy draft-v1/radians shape over Scene12 exercises repeated checkpoint updates and exact invalid-text recovery. This fixture does not establish historical scene-v1 document compatibility by itself.
+
+Native MCP refusals establish unchanged exposed authored fields, revision, dirty and pending state. Exact post-guard working checkpoints establish retained raw values. The owning editor test supplies complete payload and history invariants. These complementary checks are not attributed solely to the transport helper, whose scene read endpoint lacks undo/redo lengths.
+
+Build3 compound/Fields evidence remains applicable to unchanged recovery owners. Build4 additionally qualifies clean Input actions Escape dismissal in the stale journey and fresh legacy/stale default reopens. Default reopen processes explicitly opt into local MCP for read-only assertions. All normal native cases close with exit0, scanner0 and protected desktop restoration. Injected events use actual OS focus. Physical-human acceptance and additional power-loss durability remain outside this evidence. [Detailed first-phase results](../evidence/ENGINEERING-FIRST-PHASE.md)
 
 ## Supersession
 
