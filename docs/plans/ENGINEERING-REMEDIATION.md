@@ -2,6 +2,8 @@
 
 Proposed2026-11-08 after the [comprehensive engineering audit](../evidence/ENGINEERING-AUDIT.md). These packages are recommendations for user selection. The audit execution approval authorizes findings and fix plans. Each selected package requires its own bounded implementation acceptance. Relative effort describes coupling and verification burden, without a calendar commitment.
 
+The [staged improvement sequence](ENGINEERING-IMPROVEMENT-SEQUENCE.md) now proposes scheduling, with native performance attribution beginning alongside urgent recovery and export work. Use that sequence for execution planning and the packages below for detailed finding contracts. Both remain proposals.
+
 ## Recommended first milestone
 
 **Restore trustworthy pending-edit recovery.** A creator can keep editing, crash and reopen the latest pending text through ordinary recovery without an editor-produced checkpoint becoming unusable. Cover AUD-003 and AUD-004. This protects unfinished work before optimization or feature expansion.
