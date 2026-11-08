@@ -1481,6 +1481,8 @@ impl SceneEditor {
                     && next.session.scene().objects.is_empty()
                     && next.session.authoring().is_empty();
                 if let Some(path) = next.session.path() {
+                    next.navigation.camera = next.workspace.camera_for(path);
+                    next.navigation.reset = next.navigation.camera.is_none();
                     next.workspace.remember(path);
                 }
                 if clipboard {
@@ -7450,6 +7452,87 @@ mod tests {
             source_only.needs_recovery(),
             "a detached source-only document is authored work, even with zero history/objects"
         );
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut paths = Vec::new();
+        for name in [
+            "outgoing.scene.json",
+            "cached.scene.json",
+            "uncached.scene.json",
+        ] {
+            let path = directory.path().join(name);
+            Session::new(Scene::demo()).unwrap().save(&path).unwrap();
+            paths.push(path.canonicalize().unwrap());
+        }
+        let outgoing_path = &paths[0];
+        let cached_path = &paths[1];
+        let uncached_path = &paths[2];
+        let cached_camera = ruster_render::CameraState {
+            target: [1.0, 2.0, 3.0],
+            yaw: 0.7,
+            pitch: 0.4,
+            distance: 8.0,
+            orthographic: true,
+        };
+        let outgoing_camera = ruster_render::CameraState {
+            target: [-2.0, 1.0, 0.5],
+            yaw: -0.3,
+            pitch: 0.2,
+            distance: 12.0,
+            orthographic: false,
+        };
+        // Ordinary Open constructs with detached preferences before the real
+        // workspace moves at the recovery acknowledgement. Reopen must use
+        // the camera just remembered from the outgoing live view.
+        for case in ["uncached", "new", "recovered", "cached", "same-path"] {
+            let mut workspace = Workspace::detached();
+            workspace.remember(outgoing_path);
+            workspace.remember_camera(outgoing_path, cached_camera);
+            workspace.remember(cached_path);
+            workspace.remember_camera(cached_path, cached_camera);
+            let mut current =
+                SceneEditor::with_workspace(Session::open(outgoing_path).unwrap(), workspace);
+            current.navigation.camera = Some(outgoing_camera);
+            current.navigation.reset = false;
+            let session = match case {
+                "uncached" => Session::open(uncached_path).unwrap(),
+                "cached" => Session::open(cached_path).unwrap(),
+                "same-path" => Session::open(outgoing_path).unwrap(),
+                "new" => Session::new(Scene::authored_empty("untitled")).unwrap(),
+                "recovered" => Session::from_snapshot_bytes(
+                    &Session::open(cached_path)
+                        .unwrap()
+                        .snapshot_bytes()
+                        .unwrap(),
+                )
+                .unwrap(),
+                _ => unreachable!(),
+            };
+            let mut next = SceneEditor::with_workspace(session, Workspace::detached());
+            let constructor_navigation = (next.navigation.camera, next.navigation.reset);
+            assert_eq!(constructor_navigation, (None, true));
+            if case == "recovered" {
+                next.recovered_origin = Some(cached_path.clone());
+            }
+            current.begin_replacement(next, None, case != "recovered", false);
+            current.wait_recovery();
+            assert!(current.recovery_transition.is_none(), "{case}");
+            assert_eq!(
+                current.workspace.camera_for(outgoing_path),
+                Some(outgoing_camera),
+                "the outgoing live camera must be remembered for {case}"
+            );
+            let expected_navigation = match case {
+                "cached" => (Some(cached_camera), false),
+                "same-path" => (Some(outgoing_camera), false),
+                _ => constructor_navigation,
+            };
+            assert_eq!(
+                (current.navigation.camera, current.navigation.reset),
+                expected_navigation,
+                "replacement camera for {case}"
+            );
+        }
     }
 
     // Unique integration risk: object membership changes need ID-based diffs,
