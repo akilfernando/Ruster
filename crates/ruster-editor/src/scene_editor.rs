@@ -3264,12 +3264,12 @@ impl SceneEditor {
         });
     }
     fn inspector_scroll_ui(&mut self, ui: &mut egui::Ui) {
+        self.recovered_input_notice(ui);
         egui::ScrollArea::vertical()
             .animated(false)
             .show(ui, |ui| self.inspector_contents(ui));
     }
     fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
-        self.recovered_input_notice(ui);
         let title = if self.manipulation.ids.len() > 1 {
             format!("{} selected", self.manipulation.ids.len())
         } else {
@@ -8485,6 +8485,208 @@ mod tests {
         stale_visual["color"]["revision"] = json!(0);
         let mut rejected = SceneEditor::new(compound.restore().unwrap());
         assert!(rejected.restore_recovery_drafts(stale_visual).is_err());
+
+        // The real Inspector must keep recovery navigation outside its scroll
+        // body while the creator reaches and applies a lower visual component.
+        for size in [egui::vec2(960.0, 640.0), egui::vec2(640.0, 480.0)] {
+            let layout_ctx = egui::Context::default();
+            layout_ctx.enable_accesskit();
+            crate::editor_theme::configure(&layout_ctx);
+            let mut layout_editor = SceneEditor::new(compound.restore().unwrap());
+            let mut display_payload = compound_payload.clone();
+            display_payload.as_object_mut().unwrap().remove("color");
+            let mut display = display_ui::DisplayDraft::new(layout_editor.session.scene());
+            display.profile = display_ui::DisplayMode::Surface;
+            display.exposure_stops = "0.5".into();
+            display_payload["display"] = serde_json::to_value(display).unwrap();
+            layout_editor.notice = "Recovery layout footer".into();
+            let footer_rect = std::cell::Cell::new(None);
+            let footer_baseline = std::cell::Cell::new(None);
+            let mut time = 0.0;
+            let mut frame = |editor: &mut SceneEditor, events| {
+                time += 0.1;
+                let mut output = layout_ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        time: Some(time),
+                        events,
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        editor.ui(ui);
+                        footer_rect.set(
+                            egui::containers::panel::PanelState::load(
+                                &layout_ctx,
+                                ui.scope_id().with("scene_status"),
+                            )
+                            .map(|state| state.outer_rect),
+                        );
+                    },
+                );
+                output.textures_delta.clear();
+                output
+            };
+            let visible_text = |output: &egui::FullOutput, label: &str| {
+                output.shapes.iter().find_map(|shape| {
+                    let egui::epaint::Shape::Text(text) = &shape.shape else {
+                        return None;
+                    };
+                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    (text.galley.job.text == label && shape.clip_rect.contains_rect(rect))
+                        .then_some(rect)
+                })
+            };
+            let review_bounds = |output: &egui::FullOutput| {
+                let bounds = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .and_then(|update| {
+                        update
+                            .nodes
+                            .iter()
+                            .find(|(_, node)| {
+                                node.role() == egui::accesskit::Role::Button
+                                    && node.label() == Some("Review recovered action…")
+                            })
+                            .and_then(|(_, node)| node.bounds())
+                    })
+                    .expect("the sticky Review action must expose real accessibility bounds");
+                let rect = egui::Rect::from_min_max(
+                    egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                    egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                );
+                assert!(
+                    layout_ctx.content_rect().contains_rect(rect),
+                    "Review action outside {size:?}: {rect:?}"
+                );
+                assert!(
+                    visible_text(output, "Review recovered action…").is_some(),
+                    "Review action must paint without clipping"
+                );
+                let footer = footer_rect
+                    .get()
+                    .expect("the ordinary status panel must exist");
+                assert_eq!(
+                    Some(footer),
+                    footer_baseline.get(),
+                    "recovery navigation must preserve the ordinary footer allocation"
+                );
+                assert!(
+                    layout_ctx.content_rect().contains_rect(footer),
+                    "status panel must fit the window: {footer:?}"
+                );
+                let painted: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| {
+                        let egui::epaint::Shape::Text(text) = &shape.shape else {
+                            return None;
+                        };
+                        let bounds = egui::Rect::from_min_size(text.pos, text.galley.size());
+                        bounds.intersects(footer).then_some((
+                            text.galley.job.text.as_str(),
+                            bounds,
+                            shape.clip_rect,
+                        ))
+                    })
+                    .collect();
+                assert!(painted.iter().any(|(_, bounds, clip)| footer.contains_rect(*bounds) && clip.contains_rect(*bounds)),
+                    "the status panel must paint a complete summary at {size:?}: footer={footer:?}, text={painted:?}");
+                let accessible = output
+                    .platform_output
+                    .accesskit_update
+                    .as_ref()
+                    .is_some_and(|update| {
+                        update.nodes.iter().any(|(_, node)| {
+                            node.role() == egui::accesskit::Role::Label
+                                && node.bounds().is_some_and(|bounds| {
+                                    footer.contains_rect(egui::Rect::from_min_max(
+                                        egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                                        egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+                                    ))
+                                })
+                        })
+                    });
+                assert!(
+                    accessible,
+                    "the visible status summary must have accessibility bounds inside its panel"
+                );
+                assert!(
+                    footer.top() - rect.bottom() >= 80.0,
+                    "recovery navigation must leave room for the Inspector body and footer"
+                );
+                rect
+            };
+            frame(&mut layout_editor, vec![]);
+            frame(&mut layout_editor, vec![]);
+            footer_baseline.set(footer_rect.get());
+            layout_editor
+                .restore_recovery_drafts(display_payload)
+                .unwrap();
+            frame(&mut layout_editor, vec![]);
+            let mut output = frame(&mut layout_editor, vec![]);
+            assert!(visible_text(
+                &output,
+                "Finish the recovered Scene display edit in the Inspector first."
+            )
+            .is_some());
+            let pinned = review_bounds(&output);
+            let scroll_point =
+                egui::pos2(pinned.center().x, (pinned.bottom() + size.y - 36.0) * 0.5);
+            for _ in 0..24 {
+                output = frame(
+                    &mut layout_editor,
+                    vec![
+                        egui::Event::PointerMoved(scroll_point),
+                        egui::Event::MouseWheel {
+                            unit: egui::MouseWheelUnit::Point,
+                            delta: egui::vec2(0.0, -120.0),
+                            phase: egui::TouchPhase::Move,
+                            source: egui::MouseWheelSource::Unknown,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+                assert_eq!(
+                    review_bounds(&output),
+                    pinned,
+                    "wheel scrolling must not move recovery navigation"
+                );
+                output = frame(&mut layout_editor, vec![]);
+                assert_eq!(review_bounds(&output), pinned);
+                if visible_text(&output, "Apply display").is_some() {
+                    break;
+                }
+            }
+            let point = visible_text(&output, "Apply display")
+                .expect("real wheel scrolling must reach Apply display")
+                .center();
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(
+                &mut layout_editor,
+                vec![egui::Event::PointerMoved(point), pointer(true)],
+            );
+            frame(&mut layout_editor, vec![pointer(false)]);
+            layout_editor.notice = "Recovery layout footer".into();
+            let output = frame(&mut layout_editor, vec![]);
+            assert!(
+                layout_editor.display_draft.is_none(),
+                "the real Apply button must resolve the visual draft"
+            );
+            assert!(layout_editor.recovered_input.is_some());
+            review_bounds(&output);
+            assert_eq!(
+                layout_editor.recovery_snapshot().unwrap().drafts().unwrap()["input_actions"],
+                raw
+            );
+        }
 
         // Real modal controls stay reachable with long unfinished values at
         // 960x640 and its 480x320 logical equivalent at 2x desktop scaling.

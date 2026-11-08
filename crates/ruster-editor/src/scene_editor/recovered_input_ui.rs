@@ -3,6 +3,24 @@ use super::SceneEditor;
 use eframe::egui;
 
 impl SceneEditor {
+    fn recovered_visual_name(&self) -> Option<&'static str> {
+        if self.display_draft.is_some() {
+            Some("Scene display")
+        } else if let Some(draft) = &self.lighting_draft {
+            Some(if draft.is_ambient() {
+                "Scene lighting"
+            } else {
+                "Light"
+            })
+        } else if self.material_draft.is_some() {
+            Some("Material")
+        } else if self.color_draft.is_some() {
+            Some("Color")
+        } else {
+            None
+        }
+    }
+
     fn recovered_input_ready(&self) -> bool {
         self.recovered_input.is_some()
             && self.editing_available_for_recovery()
@@ -44,11 +62,17 @@ impl SceneEditor {
             return;
         }
         ui.strong("Recovered action needs review");
-        ui.label(if self.recovered_input_ready() {
-            "One recovered action remains. Review it before resuming, or explicitly discard it."
+        if let Some(name) = self.recovered_visual_name() {
+            ui.label(format!(
+                "Finish the recovered {name} edit in the Inspector first."
+            ));
+        } else if self.recovered_input_ready() {
+            ui.label("Review your recovered action before resuming or discarding it.");
         } else {
-            "Finish the recovered visual edit with its Apply or Cancel controls first. Your action draft stays preserved."
-        });
+            ui.label(
+                "Finish the current operation first. Your recovered action draft stays preserved.",
+            );
+        }
         if ui.button("Review recovered action…").clicked() {
             self.recovered_input_open = true;
             self.recovered_input_focused = false;
@@ -61,6 +85,7 @@ impl SceneEditor {
             return;
         }
         let ready = self.recovered_input_ready();
+        let visual = self.recovered_visual_name();
         let draft = self
             .recovered_input
             .as_ref()
@@ -83,7 +108,11 @@ impl SceneEditor {
                         draft.recovered_values_ui(ui);
                         ui.separator();
                         if !ready {
-                            ui.label("Apply or cancel the visual draft first. Keep for later returns to that work.");
+                            if let Some(name) = visual {
+                                ui.label(format!("Finish the recovered {name} edit in the Inspector first. Keep for later returns to that work."));
+                            } else {
+                                ui.label("Finish the current operation first. Keep for later preserves this action draft.");
+                            }
                         }
                         match &review {
                             Ok(()) => {

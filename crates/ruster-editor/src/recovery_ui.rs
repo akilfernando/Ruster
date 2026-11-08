@@ -422,11 +422,12 @@ impl RecoveryUi {
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 600.0));
             let now = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|time| time.as_secs());
             ui.heading("Recover unfinished work");
-            ui.label("Restore opens an unsaved copy and reserves a separate working checkpoint. Original projects and source checkpoints stay preserved until explicitly discarded.");
+            ui.label("Restore opens an unsaved copy. The source checkpoint is kept for later. Discard removes only the selected recovery checkpoint.");
             egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-170.0).max(64.0)).show(ui, |ui| {
                 for candidate in &self.candidates {
                     ui.separator();
-                    ui.label(candidate.scene_id.as_deref().unwrap_or("Unreadable checkpoint"));
+                    let filename = candidate.origin.as_ref().and_then(|path| path.file_name()).map(|name| name.to_string_lossy());
+                    ui.strong(filename.as_deref().or(candidate.scene_id.as_deref()).unwrap_or("Unreadable checkpoint"));
                     let age = now.and_then(|now| now.checked_sub(candidate.timestamp));
                     let saved = match age {
                         Some(seconds @ 0..=59) => format!("Saved {seconds}s ago"),
@@ -437,12 +438,13 @@ impl RecoveryUi {
                     };
                     ui.label(saved);
                     egui::CollapsingHeader::new("Checkpoint details").id_salt(&candidate.id).show(ui, |ui| {
+                        if let Some(path) = &candidate.origin { ui.add(egui::Label::new(path.display().to_string()).wrap()); }
+                        if let Some(scene_id) = &candidate.scene_id { ui.label(format!("Scene ID {scene_id}")); }
                         ui.label(format!("ID {}", candidate.id));
                         ui.label(format!("Recorded Unix time {}", candidate.timestamp));
                         if let Some(sequence) = candidate.sequence { ui.label(format!("Sequence {sequence} within this checkpoint journal")); }
                         if let Some(revision) = candidate.revision { ui.label(format!("Scene revision {revision}")); }
                     });
-                    if let Some(path) = &candidate.origin { ui.add(egui::Label::new(path.display().to_string()).truncate()).on_hover_text(path.display().to_string()); }
                     if let Some(error) = &candidate.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
                     ui.horizontal_wrapped(|ui| {
                         let restore=ui.add_enabled(candidate.error.is_none(), egui::Button::new("Restore as unsaved copy"));
