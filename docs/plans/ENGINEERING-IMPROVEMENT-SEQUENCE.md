@@ -2,6 +2,8 @@
 
 Proposed2026-11-08 by Astra and root following the [engineering audit](../evidence/ENGINEERING-AUDIT.md). The user requests planning and explicitly prioritizes investing sufficient time in optimization and product quality. The user approves execution with “Execute”2026-11-08. The completed first phase covers independent1R/1D/1P tickets. Root/Astra accept it after the documented bounded reference/B-baseline revision and independent artifact review. The60Hz reference is accepted as a qualification target. Numerical optimization gates follow the pilot, and later implementation choices retain their stated review points.
 
+The user subsequently authorizes the bounded stage2 admission experiment with “Proceed”. Its [accepted result](ASSET-ADMISSION-EXPERIMENT.md#accepted-result--2026-11-08) closes AUD-005 within that contract. Remaining stages and findings retain their selection/review boundaries.
+
 This document owns the proposed execution order. The [remediation packages](ENGINEERING-REMEDIATION.md) retain the detailed finding contracts. The audit remains the frozen findings/evidence record. Astra's full planning draft and structured24-finding mapping are retained at `/home/akilf/Projects/Ruster-Audits/engineering-audit-20261108/planning-astra/`.
 
 ## Recommendation

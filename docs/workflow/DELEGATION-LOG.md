@@ -748,3 +748,10 @@ The user authorizes the bounded experiment with “Proceed”. Existing agents r
 
 
 2026-11-08 admission candidate checkpoint. Sol/high prepares test-only extensions first. Root captures actual descriptor red and Content baseline pass, then authorizes the two private policies and sequential admission. Root observes green and full283Rust/28Python verification in89.23seconds. Astra/high reviews the actual source/precedence/role/confinement diff and finds no blocker. Sol/high prepares fixed comparison source; Astra reviews its source/binary/fixture seals, schedule, failure quarantine and exact declared statistics. Root AST-checks the final scripts. The protocol is frozen before production edits and candidate results. Execution/retention remains root-owned and pending.
+
+
+## 2026-11-08 — admission measured acceptance
+
+Sol/high (`phase1_perf_protocol`) prepares the fixed comparison owner/analyzer, then repairs a pre-data process-permission assumption while preserving the original sources/failure. Astra/high reviews both source versions, frozen estimators and guard coverage. Root exclusively builds, traces and executes all 60 comparison children, after separate public/normal-runtime correctness and borrowed private boundary observations. Root verifies 423 artifacts and 33 execution inputs.
+
+Sol/high (`phase1_source_export`) independently derives raw paired statistics before reading the approved analysis, verifies seals/outcomes/reaping and finds no integrity or contract blocker. Astra/high reviews the actual outliers, orders and chronology and recommends qualified retention under the frozen model. Root integrates that acceptance with every correctness/overlap/read-trace obligation and updates the current plan, decision, roadmap and handoff. Metrics remain specific to the declared source/host/cache regime. Child usage/elapsed metrics are unavailable.

@@ -53,3 +53,10 @@ The smaller alternative is preserving current collect-before-admit behavior. It 
 ## Candidate execution decision — 2026-11-08
 
 The unmodified public-path baseline and endpoint variability pilot complete before product edits. Astra/root accept the fixed12-pair-per-class comparison and practical regression interpretation recorded in [execution evidence](../evidence/ASSET-ADMISSION.md#frozen-candidate-decision--2026-11-08). Its external protocol is immutable. [Decision0040](../decisions/0040-cumulative-application-payload-admission.md) records the bounded implementation and compatibility choice. No retention or improvement result follows before the required candidate checks and measurements.
+
+
+## Accepted result — 2026-11-08
+
+Root/Astra retain the bounded repair after baseline-first implementation, the fixed paired comparison and independent raw review. Valid near/exact-cap content is identical. Descriptor rejection occurs at the first crossing, with no later suffix reads. Mixed-role and complete-UV geometry correctness, direct Content precedence and actual runtime headless entrypoint checks pass. All six numerical gates pass with the recorded shared-host, outlier and visibility qualifications. [Final evidence](../evidence/ASSET-ADMISSION.md#final-disposition--2026-11-08).
+
+Completed decoded texture payload in the five-chain case falls by 22,369,620 bytes. Its paired loading wall/whole-child CPU is approximately 22% lower and mean process RSS high-water is 16.1 MiB lower. Decoder scratch and process/GPU memory remain distinct from the logical admission policy. Exact-cap timing improvement remains unresolved within the conditional interval. This experiment stops here. Broader resource lifecycle and AUD-006/007 retain separate review boundaries.

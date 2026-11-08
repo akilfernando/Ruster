@@ -1,6 +1,6 @@
 # 0040 — Cumulative application payload admission
 
-Date2026-11-08. Status accepted for the bounded implementation experiment. Final retention requires the frozen correctness/resource/regression gates.
+Date 2026-11-08. Status accepted and verified for the bounded AUD-005 repair. Product source `4e87f83` passes the frozen correctness/resource/regression gates and independent review.
 
 ## Context
 
@@ -27,3 +27,8 @@ Astra/root freeze the comparison after the unmodified baseline and before produc
 ## Supersession
 
 No prior decision is superseded. A future streaming or renderability policy requires its own accepted decision and measurements.
+
+
+## Verified outcome
+
+The expanded existing owners pass red→green and the full 283 Rust/28 Python gate. Public valid content remains identical, while complete read traces and separate private borrowed observations establish earlier suffix avoidance and the expected completed-payload overlap. All six fixed paired comparison gates pass. The five-texture rejection workload observes about 22% lower loading wall/whole-child CPU and 16.1 MiB lower process RSS high-water on this shared warm-cache host. Exact-cap timing retains outliers/order sensitivity and conditional pointwise intervals. Final retention includes those qualifications. [Measured evidence](../evidence/ASSET-ADMISSION.md#independent-review-and-retention--2026-11-08).

@@ -2,7 +2,7 @@
 
 Proposed2026-11-08 after the [comprehensive engineering audit](../evidence/ENGINEERING-AUDIT.md). These packages are recommendations for user selection. The audit execution approval authorizes findings and fix plans. Each selected package requires its own bounded implementation acceptance. Relative effort describes coupling and verification burden, without a calendar commitment.
 
-The [staged improvement sequence](ENGINEERING-IMPROVEMENT-SEQUENCE.md) now proposes scheduling, with native performance attribution beginning alongside urgent recovery and export work. Use that sequence for execution planning and the packages below for detailed finding contracts. The user subsequently approved execution of1R/1D/1P. Those first-phase scopes now have [qualified acceptance](../evidence/ENGINEERING-FIRST-PHASE.md#final-disposition--2026-11-08). The remaining packages retain their proposal/selection status.
+The [staged improvement sequence](ENGINEERING-IMPROVEMENT-SEQUENCE.md) now proposes scheduling, with native performance attribution beginning alongside urgent recovery and export work. Use that sequence for execution planning and the packages below for detailed finding contracts. The user subsequently approved execution of1R/1D/1P. Those first-phase scopes now have [qualified acceptance](../evidence/ENGINEERING-FIRST-PHASE.md#final-disposition--2026-11-08). The subsequently authorized bounded AUD-005 admission repair also has [qualified acceptance](../evidence/ASSET-ADMISSION.md#final-disposition--2026-11-08). The remaining packages retain their proposal/selection status.
 
 ## Recommended first milestone
 
