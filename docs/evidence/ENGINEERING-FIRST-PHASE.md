@@ -137,3 +137,14 @@ The proposed next decision-ready experiment is [cumulative descriptor admission]
 
 
 Astra separately inspects all12raw process streams, filling the root analyzer's narrower family/process/DRM error collection. All91retained errors are vanished `/proc/PID/fd/N` entries during enumeration, with0–28per run. The descriptor target was not yet known at that readlink step, so these are consistent with concurrent closure and cannot be attributed specifically to NVIDIA DRM. No other nested process/status/smaps/sensor read errors or truncation are found. Successful CPU boundaries and PSS reads remain separate. Original raw errors remain preserved.
+
+
+### Separate standalone runtime cost — 2026-11-08
+
+The frozen `performance/R-NVIDIA-cost-2/` case uses the original17payload exported application, exact runtime ab2fe1f3504394c9b4cf8bf9baa50af4d383a7c96df9f57866eb4a2ec41ecea7, explicit NVIDIA, validation-off/MangoHud-off and no MCP/inspection/listener. After30secondwarmup, one absolute120secondCPU window records17.19CPU-seconds over120.000250seconds, with93.326microseconds endpoint overrun. It closes normally0/scanner0, restores the protected desktop and verifies all17payloads unchanged. Root checks all eight retained artifact hashes.
+
+The actual startup line proves NVIDIA/Vulkan and requested/applied4×MSAA at1280×800logical client size. Live applied HDR/exposure/viewport extent are unavailable through the ordinary runtime interface and remain unknown. The source-authored display/light state is separately pinned. Lifetime summary has9039ticks,8959UI/prepared frames, nine objects, five uploads/554952bytes, six last-frame draws and no unresolved error. Counts include setup/warmup/active/close and cannot establish active-window rate or physical presentation.
+
+This is one descriptive boundary-CPU characterization, with no dense collector/perf added. Its different observation regime prevents subtracting it from editor dense CPU to infer editor overhead. The earlier pilot's proposed R six-pair design is superseded for this bounded NVIDIA control characterization. Intel R visible acceptance remains held, and no R noise or cross-hardware equivalence claim is made. A future runtime optimization needs its own matched endpoint/noise/observer protocol.
+
+Astra catches an unconditional lock removal in the new external runtime owner before native execution. Root retains the first frozen protocol unexecuted. Sol corrects cleanup to retain the native lease after ambiguous launch/failure; Astra/root review it, root syntax-checks and freezes fresh cost2. No product source change follows. The actual successful run releases the lease after verified shutdown. Idle and sparse creator-operation endpoints remain open.
