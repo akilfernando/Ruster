@@ -392,3 +392,10 @@ The dense256-object/32-query complete Step improves9.231964→5.618190ms but mis
 
 External artifacts are retained under `/home/akilf/Projects/Ruster-Creations/p2a-clearance-bench-20261107`. Current native receipts are in `.studio/runtime-focus-native-2/root-keyboard-review.json`, with current build15 pins in `.studio/build-15-manifest.json`. All retained timing/resource/application evidence keeps its exact source and binary identity.
 
+
+
+## 2026-11-08 — engineering first-phase completion
+
+Root/Astra accept1R recovery,1D relocated source closure and revised1Pmeasurement references after independent artifact review. Native Save qualification exposes an ordinary Open camera reset. Sourceba2fcd0 repairs the real Workspace handoff, with red→green coverage and Build5 same-process/fresh default acceptance. The earlier private f32-oracle and invalid preferences-seed failures remain preserved. The complete Save pair has56successful transactions/sixOpens, unchanged Doc1 and normal lifecycle/restoration. [Final evaluation](ROADMAP-REVIEW.md#engineering-first-phase-attribution-evaluation--2026-11-08).
+
+Earlier active planning and intermediate pending states are retained in the chronological evidence. Current STATUS summarizes acceptance. The Intel presentation failure, corrected GPU attribution, A/A imbalance and unresolved physical/energy/peak-memory qualifications remain explicit. The selected admission experiment is proposed for later review, with its loading/overlap baseline due before implementation.

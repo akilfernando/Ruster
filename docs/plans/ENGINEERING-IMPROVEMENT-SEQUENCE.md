@@ -1,6 +1,6 @@
 # Engineering improvement sequence
 
-Proposed2026-11-08 by Astra and root following the [engineering audit](../evidence/ENGINEERING-AUDIT.md). The user requests planning and explicitly prioritizes investing sufficient time in optimization and product quality. The user approves execution with “Execute”2026-11-08. The active first phase covers independent1R/1D/1P tickets. The60Hz reference is accepted as a qualification target. Numerical optimization gates follow the pilot, and later implementation choices retain their stated review points.
+Proposed2026-11-08 by Astra and root following the [engineering audit](../evidence/ENGINEERING-AUDIT.md). The user requests planning and explicitly prioritizes investing sufficient time in optimization and product quality. The user approves execution with “Execute”2026-11-08. The completed first phase covers independent1R/1D/1P tickets. Root/Astra accept it after the documented bounded reference/B-baseline revision and independent artifact review. The60Hz reference is accepted as a qualification target. Numerical optimization gates follow the pilot, and later implementation choices retain their stated review points.
 
 This document owns the proposed execution order. The [remediation packages](ENGINEERING-REMEDIATION.md) retain the detailed finding contracts. The audit remains the frozen findings/evidence record. Astra's full planning draft and structured24-finding mapping are retained at `/home/akilf/Projects/Ruster-Audits/engineering-audit-20261108/planning-astra/`.
 
@@ -101,7 +101,7 @@ App frame starts, Host gaps and present calls cannot establish display cadence o
 
 Stage1P exits with the baseline, instrumentation/noise limitations, critical-path attribution or a specific unresolved cause, proposed operation budgets and one decision-ready stage2 experiment. It promises a useful decision even if a speedup is not demonstrated.
 
-2026-11-08 bounded revision. Astra/root replace unsupported numerical operation gates with source-scoped observed references and explicit endpoint-specific prerequisites, under this plan's stop/revise rule. The60Hz target remains unqualified. B's near-cap loading/overlap baseline belongs before implementation of the separately reviewed admission experiment. Save qualification and final review remain pending. The [named-reference decision](../evidence/ENGINEERING-FIRST-PHASE.md#named-reference-and-stopping-decision--2026-11-08) owns the rationale and limits.
+2026-11-08 bounded revision. Astra/root replace unsupported numerical operation gates with source-scoped observed references and explicit endpoint-specific prerequisites, under this plan's stop/revise rule. The60Hz target remains unqualified. B's near-cap loading/overlap baseline belongs before implementation of the separately reviewed admission experiment. Save qualification and final review now pass. The [named-reference decision](../evidence/ENGINEERING-FIRST-PHASE.md#named-reference-and-stopping-decision--2026-11-08) owns the rationale and limits.
 
 ### Memory, idle and energy
 

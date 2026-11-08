@@ -1,6 +1,6 @@
 # Milestone roadmap
 
-Updated 2026-11-07. This is the working delivery plan requested by the user. Milestone scope is an implementation plan, not a promise of dates or already delivered capabilities. Developer experience is the primary pillar; the product is an interactive simulation and visualization engine with games as one application.
+Updated 2026-11-08. This is the working delivery plan requested by the user. Milestone scope is an implementation plan, not a promise of dates or already delivered capabilities. Developer experience is the primary pillar; the product is an interactive simulation and visualization engine with games as one application.
 
 The user requested a quality-first realignment with Astra on2026-11-05 after identifying missing core capabilities. The sequence below supersedes finish-M9-first scheduling and generic long-horizon session goals. Historical M0–M8 evidence remains valid within its original scope. [Capability inventory](ENGINE-CAPABILITIES.md) records the gaps; [reassessment](ROADMAP-REVIEW.md#quality-first-roadmap-realignment--2026-11-05) records the rationale.
 
@@ -30,6 +30,8 @@ This is the root/Astra working plan under the user's realignment authorization. 
 V1 precedes V2/V3; reusable composition precedes broad prefab/scene-lifecycle claims. Input, UI, audio, physics and animation are separate slices around a representative playable creation rather than one huge game goal. Rich import evolves before its dependent animation/material workflows can be accepted. Basic visibility/LOD should precede expensive ray-traced quality features. Profiling, API/script ergonomics, asset identities, compatibility, recovery and packaging are continuous dependencies, not a late cleanup stage.
 
 Terrain/open worlds, networking/multiplayer, broader VFX/particles/cinematics, proper2D tools, enterprise integrations and additional platforms remain explicit application-dependent planning decisions. They are tracked gaps, not silently included in every session or declared unnecessary. Windows remains intended but unverified; Linux prototype support does not expand by roadmap wording.
+
+The2026-11-08engineering improvement first phase is accepted under its [evaluation](ROADMAP-REVIEW.md#engineering-first-phase-attribution-evaluation--2026-11-08). Recovery and editable-source integrity, honest measurement metadata, native creator workflow references and ordinary Open camera restoration qualify within their recorded limits. The separately reviewed [asset-admission experiment](plans/ASSET-ADMISSION-EXPERIMENT.md) is the next decision-ready proposal, with loading/overlap baseline measurements required before implementation. Broader capability stages and M9 retain their existing scope.
 
 ## Session and promotion gates
 

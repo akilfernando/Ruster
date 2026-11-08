@@ -733,3 +733,10 @@ Root owns all checks and native input. Sol/high (`phase1_source_export`) extends
 
 
 2026-11-08 camera follow-up. Root verifies125affected editor tests and strict default/inspection lint, then Build5 ordinary SaveAs/edit/Save/Open plus fresh default reopen. All six read-only observer stages and both normal lifecycles pass. Sol/high (`phase1_perf_protocol`) versions the observer to the independently copied fixture2 and actual Build5 pins. Astra/high reviews the actual bounded V4→V5 delta. Root records full document/history/camera equality, visual review and retained preparation failures. Source-scoped named references and endpoint prerequisites replace unsupported new numerical gates under the approved stop/revise rule. Metrics beyond recorded build/check times remain unknown.
+
+
+## 2026-11-08 — Save reference and first-phase exit
+
+Sol/high (`phase1_perf_protocol`) prepares the attach-only Build5 Save owner from the accepted design. Root review requires the actual qualification schema, paired initial equality and exact live bindings. Astra/high (`phase1_recovery_design`) reviews source scopes, resource keys, authority, bounds and external900secondfailure quarantine. Root AST-checks/freezes and exclusively executes both3+25Save/three-Open arms, normal closes, actual parent waits and106artifact hashes per arm plus106frozen inputs. Every scheduled cycle and lifecycle qualifies.
+
+Sol/high (`phase1_source_export`) independently derives the expected full Doc1 and summarizes raw spans, Host gaps, memory, CPU and bounded SDK journals. Its statistics match root's separate computation, with no blocker. Astra's conditional exit recommendation closes after that result and documentary reconciliation. All named measurements retain their original binary/regime and statistical limits. No further cohort, new instrumentation or candidate optimization is required for this phase. Child elapsed/usage metrics are unavailable.

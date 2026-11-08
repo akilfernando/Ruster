@@ -2,6 +2,12 @@
 
 Started2026-11-08 after the user approves execution of the [staged sequence](../plans/ENGINEERING-IMPROVEMENT-SEQUENCE.md). Independent scopes are1R recovery AUD-003/004,1D source export AUD-001 and1P native attribution/AUD-022. Workspace is `/home/akilf/Projects/Ruster-Audits/phase1-20261108`. Source/desktop baseline and helper provenance are pinned there. The user confirms they are away and permits focused testing.
 
+## Final disposition — 2026-11-08
+
+Root/Astra accept1R,1Dand the revised1Pscope after independent raw Save review. Productba2fcd0 and pinned Build5 editors are the latest verified implementation. The [final evaluation](../ROADMAP-REVIEW.md#engineering-first-phase-attribution-evaluation--2026-11-08) records the creator outcome, measured references, unresolved qualifications and next experiment. Subsequent sections preserve successive checkpoints, including failed preparations and their superseding corrections. This final disposition and STATUS own the current state.
+
+The phase closes recovery/source-export defects, honest timing metadata and the ordinary Open camera defect. All required revised cohorts and lifecycle checks complete. Existing owner timing distributions supply named references with endpoint-specific prerequisites for future gates. Intel presentation and60Hz/physical cadence remain unqualified; observer effects, A/A imbalance, energy and sampled-memory limits persist. Near-admission B loading/overlap measurements belong before separately reviewed AUD-005implementation. The experiment is decision-ready. No optimization candidate has been implemented or measured.
+
 ## 1D source export — accepted bounded repair
 
 An explicit compiler-input allowlist now includes the shared strict JSON parser and compatibility shader fixture. Existing exclusions remain covered, including adjacent private support/shader files. An added actual-checkout test exports and relocates both named apps and checks source bytes/manifest pins. Seven focused packaging tests pass.
@@ -216,3 +222,34 @@ Sourceba2fcd0 passes the affected125editor gate and strict default/inspection li
 ObserverV5 and protocol `performance/save-gesture-capability-3-v5/protocol.json` are independently source-reviewed by Astra/root before native execution. Root verifies all six stages in inspection run `C-save-gesture-capability-3` and fresh default run `C-save-gesture-fresh-reopen-3`. Actual SaveAs by Enter, floorX0.125by Enter, Ctrl+S and Ctrl+O preserve the independently derived entire Doc1 including revision2/Undo2/Redo0. Both same-process Open and fresh default process restore the exact declared camera. The latter explicitly enables MCP for read-only assertions and has no inspection listener. Root reviews actual initial/dialog/reopened captures and the default compositor image. No engine/presentation latency distribution follows from this staged capability.
 
 `verification/save-v5-capability-qualified.json` seals stage and artifact pins, full canonical equality and both normal0/scanner0/protected-restored lifecycles. Its final target has7091bytes and SHA `0f5bd6563b98dbe287bed033e55b26eec47529af77e477f281d2803af7be6e7a`. Original source C remains9f958273… unchanged. Fixture1's saved document and failed camera receipt remain preserved. A first read-only UI inspection invocation lacks the global Python MCP module before importing/creating an output or sending events. Its log is retained, and the established offline SDK environment performs the successful read. All focused input remains injected and targets disposable owned windows. Clipboard and protected desktop state remain intact. The native lease is released only after both parent exits are verified.
+
+
+### Build5 clean-associated Save reference — 2026-11-08
+
+Root freezes `performance/C-NVIDIA-save-N1/protocol.json`, SHA `b03a05f12bcd0a93b912bc7ade71c762155399676e6158168e948d3e6361a5d7`, after Astra/source review and root AST validation of the final owner. Both fresh inspection processes use identical Build5 bytes, target Doc1, seed, NVIDIA/Vulkan/validation-off/MangoHud-off regime and1280×800client. Each arm completes30secondsettling, three warmup clean Saves,25measured clean Saves and three functional Opens. The on process verifies the off process's initial authored/quality/runtime/view/desktop context before input. SDK contexts are bounded per cycle. Existing internal spans are reused, with no product profiler added.
+
+All56ordinary Ctrl+S transactions produce new committed/settled persistence identities while preserving the entire7091byteDoc1, revision2/Undo2/Redo0 and its original hash. All six ordinary Opens produce new scene incarnations and preserve the camera. Runtime remains unstarted. Timing-off has zero rows. Timing-on has exactly28complete `scene_save`/origin-null/`success` rows with focused trailing frames, no overflow/overlap and complete monotonic/drained resource reports. Each row has the source-required span cardinalities. The ordinary injected UI route is established by event logs and new receipts. The null origin remains the actual Save schema.
+
+The measured25Save rows supply these per-operation named references. Nearest-rank p95is the24th ordered observation. Repeated intervals of the same name are grouped by operation; nested spans across different names overlap.
+
+| Existing internal owner | Median ms | p95 ms | Maximum ms |
+| --- | --- | --- | --- |
+| Human Save admission |0.030456|0.038244|0.038944|
+| Save adoption |2.048631|2.623344|3.161518|
+| Workspace update within adoption |2.026430|2.598901|3.139158|
+| Save follow-up |0.011091|0.012014|0.013990|
+| Authorization, per-operation sum |0.004922|0.044899|0.046102|
+| Per-operation maximum Host gap |18.777087|21.367616|21.658351|
+
+All25measured rows have four recorded Host gaps and four prepared frames. Reported target allocations and mesh/texture/light uploads and upload bytes are zero. These named intervals omit separate worker serialization/filesystem timing. The imposed event waits and subsequent SDK reads prevent an engine/display latency inference from external gesture brackets. The measured Host gaps likewise leave60Hz presentation unqualified. These are observed references, without a new numerical acceptance gate or speedup claim.
+
+Measured-class application CPU is5.36seconds/134.867813seconds off and5.34seconds/134.073222seconds on. Process order, shared host and observer perturbation remain confounded in this N=1pair. No negligible-overhead or causal-cost estimate follows. Warmup and Open classes remain separate in raw reports. Root's independent narrow calculation is `root-statistics-crosscheck.json`.
+
+Both processes and actual parents exit normally, each scanner returns0and the exact protected desktop restores. Root verifies106sealed artifacts per arm and106frozen input hashes, records `root-integrity-review.json` and releases the native lease afterward. All retained default-capability inputs remain unchanged, so its fresh default reopen is reused as correctness evidence. Its process supplied no Save performance measurement. Independent raw summary finds no blocker, and Astra's conditional acceptance closes after that result and documentary reconciliation.
+
+
+The independent read-only review `root-review-source.json`, SHA `aaa8cb371c6039fbd27ab621990ddbc3e2cb7b1fe19749d435f9978721700c2f`, derives expected Doc1 from the pinned original and declared transform/history change. It confirms all31cycles per arm,56new Save receipts, six new Open incarnations, exact full-document hashes and live f32 camera/transform equality. Every operation completes by its first post-gesture poll, so intermediate commit/replacement-to-settled durations remain unresolved. All shared named statistics and CPU endpoints exactly match root's separate calculation.
+
+Each arm has35SDK journals,458successful read calls and69discovered tools. The31cycle journals each hold14calls, maximum260088bytes. Measured Save PSS increases217874→218112KiB off and217834→218056KiB on, respectively238/222KiB. Three Opens increase218112→220728KiB and218056→220622KiB, respectively2616/2566KiB. Raw status VmRSS remains distinct from smaps_rollup RSS/PSS, including the retained accounting discrepancy. These boundary samples establish neither leak freedom nor a leak, memory savings or transient/process-family/GPU peaks. All1544/1543off/on guards pass. Their maximum durations226.110/236.325ms and maximum start gaps1.120019/1.122953seconds qualify the external observer.
+
+Final product checks reuse unchanged inputs. Sourceba2fcd0 has the affected125editor tests, strict default/inspection lint and formatting already recorded above. The earlier full283Rust/28Python and real relocated export results remain evidence for their unchanged owners. The final Markdown-only `python3 scripts/check.py` gate passes in0.17seconds, with output in `verification/first-phase-final-docs.log`. All owned native/measurement/build processes are reaped and the native lease is released. Original C/R, source recovery journals, earlier fixture failures and sealed P2a evidence remain preserved under their recorded pins. The first phase stops here.
