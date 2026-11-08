@@ -27,7 +27,7 @@ Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to 
 
 ### Pending-edit recovery
 
-Restoring opens an unsaved copy and preserves the source checkpoint. The editor reserves a separate working checkpoint before replacing the current scene. Recovery storage has16slots. When full, explicitly discard an older checkpoint before restoring again. No checkpoint is evicted automatically. After a successful draft-free Save, the preserved source becomes available for explicit Discard in Recovery.
+Restoring opens an unsaved copy and preserves the source checkpoint. The editor reserves a separate working checkpoint before replacing the current scene. Recovery storage has16slots. When full, explicitly discard an older checkpoint before restoring again. No checkpoint is evicted automatically. After a successful draft-free Save, the preserved source becomes available for explicit Discard in Recovery. The picker sorts by recorded save time, shows relative age and keeps journal IDs, sequences and raw timestamps in Checkpoint details.
 
 Older checkpoints containing both an action draft and a visual draft restore through a bounded repair flow. Apply or Cancel the existing visual draft first. **Review recovered action** shows its raw action values and whether the original baseline still matches. **Resume editing** explicitly adopts the current revision and opens Input actions. **Keep for later** or Escape preserves the recovered action. **Discard recovered draft** resolves that draft explicitly. Changed or missing action baselines remain preserved for inspection and explicit discard.
 

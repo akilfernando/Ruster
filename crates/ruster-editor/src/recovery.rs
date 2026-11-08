@@ -216,7 +216,7 @@ impl Store {
     pub fn allocate(&self) -> Result<Journal, String> {
         let _directory = self.directory_lock()?;
         if self.directories()?.len() >= MAX_RECORDS {
-            return Err("All16 recovery slots are occupied. Explicitly discard an older checkpoint or move it aside before restoring; none was evicted.".into());
+            return Err("All 16 recovery slots are occupied. Explicitly discard an older checkpoint or move it aside before restoring. Every record was preserved.".into());
         }
         let temporary = tempfile::Builder::new()
             .prefix("window-")

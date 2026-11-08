@@ -35,3 +35,7 @@ One helper omitted an SDK-required read discriminator, another checked an unsupp
 ## Next checks
 
 Complete integrated source gates and native1R ordinary repair/repeated crash/MCP/SaveAs/fresh-reopen evidence. Resolve or explicitly reject the optional observer, freeze a usable native pilot protocol and collect the declared baseline/attribution cohorts. Derive numerical optimization criteria before selecting a candidate. Milestones retain independent acceptance. The sealed P2a and frozen audit remain separate historical evidence.
+
+### Checkpoint picker follow-up
+
+Root moves machine IDs/Unix timestamps/per-journal sequences under Checkpoint details, shows relative save age and sorts by recorded time. Full-store guidance explicitly requests freeing a slot. The complete125-editor suite passes in2.65s, with strict default/inspection lint passing in10.47/2.59s. This UI-only follow-up reuses unchanged model/runtime/script/export evidence from the integrated gate. Fresh binary pins are required before native qualification.

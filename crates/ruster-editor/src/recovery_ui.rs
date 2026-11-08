@@ -5,7 +5,7 @@ use eframe::egui;
 use std::{
     path::PathBuf,
     sync::mpsc::{TryRecvError, TrySendError},
-    time::Instant,
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 pub(super) enum Intent {
@@ -117,7 +117,10 @@ impl RecoveryUi {
     pub fn refresh(&mut self) {
         if let Some(store) = &self.store {
             match store.scan() {
-                Ok(candidates) => self.candidates = candidates,
+                Ok(mut candidates) => {
+                    candidates.sort_by_key(|candidate| std::cmp::Reverse(candidate.timestamp));
+                    self.candidates = candidates;
+                }
                 Err(error) => self.set_warning(error),
             }
         }
@@ -417,13 +420,28 @@ impl RecoveryUi {
         let mut intent = None;
         egui::Modal::new(egui::Id::unique("recovery_picker")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 600.0));
+            let now = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|time| time.as_secs());
             ui.heading("Recover unfinished work");
             ui.label("Restore opens an unsaved copy and reserves a separate working checkpoint. Original projects and source checkpoints stay preserved until explicitly discarded.");
             egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-170.0).max(64.0)).show(ui, |ui| {
                 for candidate in &self.candidates {
                     ui.separator();
                     ui.label(candidate.scene_id.as_deref().unwrap_or("Unreadable checkpoint"));
-                    ui.add(egui::Label::new(format!("{} · saved at Unix time {} · sequence {} · scene revision {}", candidate.id, candidate.timestamp, candidate.sequence.map_or_else(|| "unknown".into(), |value| value.to_string()), candidate.revision.map_or_else(|| "unknown".into(), |value| value.to_string()))).wrap());
+                    let age = now.and_then(|now| now.checked_sub(candidate.timestamp));
+                    let saved = match age {
+                        Some(seconds @ 0..=59) => format!("Saved {seconds}s ago"),
+                        Some(seconds @ 60..=3599) => format!("Saved {} min ago", seconds / 60),
+                        Some(seconds @ 3600..=86399) => format!("Saved {}h ago", seconds / 3600),
+                        Some(seconds) => format!("Saved {} days ago", seconds / 86400),
+                        None => "Recorded time is later than the system clock".into(),
+                    };
+                    ui.label(saved);
+                    egui::CollapsingHeader::new("Checkpoint details").id_salt(&candidate.id).show(ui, |ui| {
+                        ui.label(format!("ID {}", candidate.id));
+                        ui.label(format!("Recorded Unix time {}", candidate.timestamp));
+                        if let Some(sequence) = candidate.sequence { ui.label(format!("Sequence {sequence} within this checkpoint journal")); }
+                        if let Some(revision) = candidate.revision { ui.label(format!("Scene revision {revision}")); }
+                    });
                     if let Some(path) = &candidate.origin { ui.add(egui::Label::new(path.display().to_string()).truncate()).on_hover_text(path.display().to_string()); }
                     if let Some(error) = &candidate.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
                     ui.horizontal_wrapped(|ui| {

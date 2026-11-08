@@ -1332,7 +1332,7 @@ impl SceneEditor {
                 ruster_render::refresh_shader(render, ruster_render::default_shader())
             {
                 working.retire().map_err(|cleanup| {
-                    format!("{error}; unused recovery reservation cleanup failed: {cleanup}")
+                    format!("{error}. Unused recovery reservation cleanup failed. {cleanup}")
                 })?;
                 return Err(error);
             }
@@ -6815,7 +6815,7 @@ mod tests {
         let mut full = SceneEditor::new(Session::new(Scene::empty("full-store")).unwrap());
         full.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
         let unchanged = full.session.snapshot_bytes().unwrap();
-        assert!(full.restore_checkpoint(&id).unwrap_err().contains("All16"));
+        assert!(full.restore_checkpoint(&id).unwrap_err().contains("All 16"));
         assert_eq!(full.session.snapshot_bytes().unwrap(), unchanged);
         assert!(full.recovery_source.is_none() && full.recovery_transition.is_none());
         assert_eq!(std::fs::read(&source_record).unwrap(), source_bytes);
