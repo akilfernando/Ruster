@@ -101,6 +101,8 @@ App frame starts, Host gaps and present calls cannot establish display cadence o
 
 Stage1P exits with the baseline, instrumentation/noise limitations, critical-path attribution or a specific unresolved cause, proposed operation budgets and one decision-ready stage2 experiment. It promises a useful decision even if a speedup is not demonstrated.
 
+2026-11-08 bounded revision. Astra/root replace unsupported numerical operation gates with source-scoped observed references and explicit endpoint-specific prerequisites, under this plan's stop/revise rule. The60Hz target remains unqualified. B's near-cap loading/overlap baseline belongs before implementation of the separately reviewed admission experiment. Save qualification and final review remain pending. The [named-reference decision](../evidence/ENGINEERING-FIRST-PHASE.md#named-reference-and-stopping-decision--2026-11-08) owns the rationale and limits.
+
 ### Memory, idle and energy
 
 Measure simultaneous process-family RSS/PSS, individual high-water, logical active/candidate/retired CPU/GPU bytes, uploads, target allocations and available GPU residency. State sampling intervals and unobserved peaks. Separate individual process high-waters from simultaneous family peak. Integrated shared memory and logical allocation totals overlap.
