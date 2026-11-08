@@ -214,6 +214,150 @@ fn content_rejects_missing_references_and_invalid_mesh_before_rendering() {
         .validate()
         .unwrap_err()
         .contains("missing texture unavailable"));
+
+    let mip_chain = |role: ruster_assets::TextureRole| {
+        let mut edge = 2048;
+        let mut mips = Vec::new();
+        loop {
+            mips.push(ruster_assets::TextureMip {
+                width: edge,
+                height: edge,
+                bytes: vec![255; edge as usize * edge as usize * role.bytes_per_pixel()],
+            });
+            if edge == 1 {
+                break;
+            }
+            edge /= 2;
+        }
+        Arc::new(ruster_assets::Texture {
+            role,
+            width: 2048,
+            height: 2048,
+            mips,
+        })
+    };
+    let color_chain = mip_chain(ruster_assets::TextureRole::BaseColor);
+    let data_chain = mip_chain(ruster_assets::TextureRole::Roughness);
+    let plain_scene = Scene::demo();
+    // Shared immutable allocations still count once per mapped asset ID.
+    let near: TextureMap = (0..3)
+        .map(|index| (format!("color-{index}"), color_chain.clone()))
+        .collect();
+    assert_eq!(
+        near.values()
+            .map(|value| value.payload_bytes())
+            .sum::<usize>(),
+        ruster_assets::MAX_TEXTURE_RESOLVED_BYTES - 4
+    );
+    Content::with_textures(plain_scene.clone(), MeshMap::new(), near.clone()).unwrap();
+    let mut exact = near;
+    exact.insert("tiny".into(), texture.clone());
+    Content::with_textures(plain_scene.clone(), MeshMap::new(), exact.clone()).unwrap();
+    let mut over = exact;
+    over.insert("overflow".into(), roughness.clone());
+    assert!(
+        Content::with_textures(plain_scene.clone(), MeshMap::new(), over.clone())
+            .err()
+            .unwrap()
+            .contains("64 MiB")
+    );
+    let mixed: TextureMap = (0..2)
+        .map(|index| (format!("color-{index}"), color_chain.clone()))
+        .chain((0..4).map(|index| (format!("data-{index}"), data_chain.clone())))
+        .collect();
+    assert_eq!(
+        mixed
+            .values()
+            .map(|value| value.payload_bytes())
+            .sum::<usize>(),
+        ruster_assets::MAX_TEXTURE_RESOLVED_BYTES - 4
+    );
+    Content::with_textures(plain_scene.clone(), MeshMap::new(), mixed).unwrap();
+    let invalid_texture = Arc::new(ruster_assets::Texture {
+        role: ruster_assets::TextureRole::BaseColor,
+        width: 1,
+        height: 1,
+        mips: vec![ruster_assets::TextureMip {
+            width: 1,
+            height: 1,
+            bytes: vec![255; 3],
+        }],
+    });
+    over.insert("zz-invalid".into(), invalid_texture.clone());
+    assert!(
+        Content::with_textures(plain_scene.clone(), MeshMap::new(), over)
+            .err()
+            .unwrap()
+            .contains("texture zz-invalid:")
+    );
+
+    let triangle = content.meshes()["triangle"].as_ref();
+    let large_mesh = Arc::new(ruster_assets::Mesh {
+        vertices: triangle
+            .vertices
+            .iter()
+            .cloned()
+            .cycle()
+            .take(ruster_assets::MAX_VERTICES)
+            .collect(),
+        indices: triangle
+            .indices
+            .iter()
+            .copied()
+            .cycle()
+            .take(ruster_assets::MAX_TRIANGLES * 3)
+            .collect(),
+        texcoords: Some(vec![[0.0; 2]; ruster_assets::MAX_VERTICES]),
+    });
+    let large_count = ruster_assets::MAX_RESOLVED_BYTES / large_mesh.payload_bytes();
+    let remaining = ruster_assets::MAX_RESOLVED_BYTES - large_count * large_mesh.payload_bytes();
+    let tail_vertex_count = (remaining - 24 * 4) / 32;
+    let tail = Arc::new(ruster_assets::Mesh {
+        // Eight triangles leave an exact multiple of32-byte UV-complete vertices.
+        vertices: triangle
+            .vertices
+            .iter()
+            .cloned()
+            .cycle()
+            .take(tail_vertex_count)
+            .collect(),
+        indices: [0, 1, 2].repeat(8),
+        texcoords: Some(vec![[0.0; 2]; tail_vertex_count]),
+    });
+    let mut meshes: MeshMap = (0..large_count)
+        .map(|index| (format!("large-{index:02}"), large_mesh.clone()))
+        .collect();
+    meshes.insert("tail".into(), tail);
+    assert_eq!(
+        meshes
+            .values()
+            .map(|value| value.payload_bytes())
+            .sum::<usize>(),
+        ruster_assets::MAX_RESOLVED_BYTES
+    );
+    Content::new(plain_scene.clone(), meshes.clone()).unwrap();
+    meshes.insert("overflow".into(), content.meshes()["triangle"].clone());
+    assert!(Content::new(plain_scene.clone(), meshes.clone())
+        .err()
+        .unwrap()
+        .contains("48 MiB"));
+    // Mesh validation/budget precede texture validation, while all geometry
+    // validation precedes the mesh budget in the existing Content contract.
+    assert!(Content::with_textures(
+        plain_scene.clone(),
+        meshes.clone(),
+        [("bad".into(), invalid_texture)].into()
+    )
+    .err()
+    .unwrap()
+    .contains("48 MiB"));
+    let mut invalid_mesh = triangle.clone();
+    invalid_mesh.indices[0] = u32::MAX;
+    meshes.insert("zz-invalid".into(), Arc::new(invalid_mesh));
+    assert!(Content::new(plain_scene, meshes)
+        .err()
+        .unwrap()
+        .contains("mesh zz-invalid:"));
 }
 
 #[test]

@@ -48,3 +48,8 @@ Primary sources accessed2026-11-08 by the source/planning reviewers inform owner
 - Bevy's soft per-frame upload budget trades availability latency for smoother frame work and permits a whole asset to exceed the soft limit. Adopting that mechanism would introduce a scheduling policy beyond this admission correction. [RenderAssetBytesPerFrame](https://docs.rs/bevy/0.19.1/bevy/render/render_asset/struct.RenderAssetBytesPerFrame.html).
 
 The smaller alternative is preserving current collect-before-admit behavior. It retains the demonstrated avoidable decoded payload. A broader streaming/cache design needs its own creator workflow and measurements. This experiment should decide whether a local cumulative policy is sufficient before considering that architecture.
+
+
+## Candidate execution decision — 2026-11-08
+
+The unmodified public-path baseline and endpoint variability pilot complete before product edits. Astra/root accept the fixed12-pair-per-class comparison and practical regression interpretation recorded in [execution evidence](../evidence/ASSET-ADMISSION.md#frozen-candidate-decision--2026-11-08). Its external protocol is immutable. [Decision0040](../decisions/0040-cumulative-application-payload-admission.md) records the bounded implementation and compatibility choice. No retention or improvement result follows before the required candidate checks and measurements.

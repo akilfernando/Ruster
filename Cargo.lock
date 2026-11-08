@@ -3065,6 +3065,7 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "log",
+ "png",
  "ruster-assets",
  "ruster-render",
  "ruster-scene",

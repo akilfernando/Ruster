@@ -16,6 +16,20 @@ use std::{collections::BTreeMap, sync::Arc, time::Duration};
 pub type MeshMap = BTreeMap<String, Arc<Mesh>>;
 pub type TextureMap = BTreeMap<String, Arc<ruster_assets::Texture>>;
 
+fn checked_mesh_bytes(current: usize, additional: usize) -> Result<usize, String> {
+    current
+        .checked_add(additional)
+        .filter(|bytes| *bytes <= ruster_assets::MAX_RESOLVED_BYTES)
+        .ok_or_else(|| "application meshes exceed 48 MiB resolved geometry".into())
+}
+
+fn checked_texture_bytes(current: usize, additional: usize) -> Result<usize, String> {
+    current
+        .checked_add(additional)
+        .filter(|bytes| *bytes <= ruster_assets::MAX_TEXTURE_RESOLVED_BYTES)
+        .ok_or_else(|| "application textures exceed 64 MiB resolved payload".into())
+}
+
 /// Validated immutable mesh snapshots alongside application-owned scene state.
 /// Construct a new Content to replace meshes; this keeps retained GPU identities stable.
 #[derive(Clone)]
@@ -43,24 +57,20 @@ impl Content {
         if meshes.keys().any(|id| textures.contains_key(id)) {
             return Err("application mesh/texture asset IDs must be distinct".into());
         }
-        let mut bytes = 0;
         for (id, mesh) in &meshes {
             ruster_assets::validate_mesh(mesh).map_err(|e| format!("mesh {id}: {e}"))?;
-            bytes += mesh.payload_bytes();
         }
-        if bytes > ruster_assets::MAX_RESOLVED_BYTES {
-            return Err("application meshes exceed 48 MiB resolved geometry".into());
-        }
-        let mut texture_bytes = 0;
+        meshes.values().try_fold(0, |bytes, mesh| {
+            checked_mesh_bytes(bytes, mesh.payload_bytes())
+        })?;
         for (id, texture) in &textures {
             ruster_scene::validate_id(id).map_err(|error| error.to_string())?;
             ruster_assets::validate_texture(texture)
                 .map_err(|error| format!("texture {id}: {error}"))?;
-            texture_bytes += texture.payload_bytes();
         }
-        if texture_bytes > ruster_assets::MAX_TEXTURE_RESOLVED_BYTES {
-            return Err("application textures exceed 64 MiB resolved payload".into());
-        }
+        textures.values().try_fold(0, |bytes, texture| {
+            checked_texture_bytes(bytes, texture.payload_bytes())
+        })?;
         let content = Self {
             scene,
             meshes,

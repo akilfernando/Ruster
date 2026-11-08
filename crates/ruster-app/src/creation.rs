@@ -273,36 +273,43 @@ impl CreationManifest {
 
     pub fn load_textures(&self, root: &ResourceRoot) -> Result<TextureMap, String> {
         self.validate()?;
-        self.textures
-            .iter()
-            .map(|(id, path)| {
-                let role = self
-                    .texture_roles
-                    .as_ref()
-                    .and_then(|roles| roles.get(id))
-                    .copied()
-                    .unwrap_or(ruster_assets::TextureRole::BaseColor);
-                root.texture_with_role(path, role)
-                    .map(|texture| (id.clone(), texture))
-            })
-            .collect()
+        let mut textures = TextureMap::new();
+        let mut bytes = 0;
+        for (id, path) in &self.textures {
+            let role = self
+                .texture_roles
+                .as_ref()
+                .and_then(|roles| roles.get(id))
+                .copied()
+                .unwrap_or(ruster_assets::TextureRole::BaseColor);
+            let texture = root.texture_with_role(path, role)?;
+            bytes =
+                super::checked_texture_bytes(bytes, texture.payload_bytes()).map_err(|error| {
+                    format!("texture {id}: {error}; reduce the creation's texture content")
+                })?;
+            textures.insert(id.clone(), texture);
+        }
+        Ok(textures)
     }
 
     pub fn load_meshes(&self, root: &ResourceRoot) -> Result<MeshMap, String> {
         self.validate()?;
-        self.meshes
-            .iter()
-            .map(|(id, path)| {
-                root.mesh_with_normal_policy(
-                    path,
-                    self.mesh_normal_policies
-                        .get(id)
-                        .copied()
-                        .unwrap_or(ruster_assets::MeshNormalPolicy::Flat),
-                )
-                .map(|mesh| (id.clone(), mesh))
-            })
-            .collect()
+        let mut meshes = MeshMap::new();
+        let mut bytes = 0;
+        for (id, path) in &self.meshes {
+            let mesh = root.mesh_with_normal_policy(
+                path,
+                self.mesh_normal_policies
+                    .get(id)
+                    .copied()
+                    .unwrap_or(ruster_assets::MeshNormalPolicy::Flat),
+            )?;
+            bytes = super::checked_mesh_bytes(bytes, mesh.payload_bytes()).map_err(|error| {
+                format!("mesh {id}: {error}; reduce the creation's mesh content")
+            })?;
+            meshes.insert(id.clone(), mesh);
+        }
+        Ok(meshes)
     }
 }
 
@@ -593,6 +600,70 @@ mod tests {
             "\"roughness\":\"roughness_linear\",\"roughness\":\"base_color_srgb\"",
         );
         assert!(serde_json::from_str::<CreationManifest>(&duplicate).is_err());
+
+        // Each loader must reject its crossing resource before reaching a
+        // later resource failure. The public admission fixture journeys cover
+        // both suffix variants and observe their actual read/decode sequence.
+        let mut large_png = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut large_png, 2048, 2048);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&vec![128; 2048 * 2048 * 3])
+                .unwrap();
+        }
+        assert!(large_png.len() <= ruster_assets::MAX_TEXTURE_SOURCE_BYTES);
+        std::fs::write(directory.path().join("large.png"), large_png).unwrap();
+        std::fs::write(directory.path().join("after-budget.png"), b"malformed PNG").unwrap();
+        let mut over_textures = manifest.clone();
+        over_textures.meshes.clear();
+        over_textures.mesh_normal_policies.clear();
+        over_textures.textures = (1..=4)
+            .map(|index| (format!("t{index:02}"), "large.png".into()))
+            .collect();
+        over_textures
+            .textures
+            .insert("t05".into(), "after-budget.png".into());
+        over_textures.texture_roles = Some(
+            over_textures
+                .textures
+                .keys()
+                .map(|id| (id.clone(), ruster_assets::TextureRole::BaseColor))
+                .collect(),
+        );
+        let texture_error = over_textures.load_textures(&root).unwrap_err();
+
+        let large_obj = "v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\n".to_owned()
+            + &"f 1/1 2/2 3/3\n".repeat(ruster_assets::MAX_TRIANGLES);
+        assert!(large_obj.len() <= ruster_assets::MAX_SOURCE_BYTES);
+        std::fs::write(directory.path().join("large.obj"), large_obj).unwrap();
+        let mut over_meshes = manifest.clone();
+        over_meshes.textures.clear();
+        over_meshes.texture_roles = Some(BTreeMap::new());
+        over_meshes.meshes = (1..=15)
+            .map(|index| (format!("m{index:02}"), "large.obj".into()))
+            .collect();
+        over_meshes
+            .meshes
+            .insert("m16".into(), "after-budget.obj".into());
+        over_meshes.mesh_normal_policies = over_meshes
+            .meshes
+            .keys()
+            .map(|id| (id.clone(), ruster_assets::MeshNormalPolicy::Flat))
+            .collect();
+        let mesh_error = over_meshes.load_meshes(&root).unwrap_err();
+        assert!(
+            texture_error.contains("64 MiB")
+                && texture_error.contains("t04")
+                && mesh_error.contains("48 MiB")
+                && mesh_error.contains("m15"),
+            "first-crossing texture error {texture_error:?}; mesh error {mesh_error:?}"
+        );
+        assert!(!directory.path().join(".ruster-assets.json").exists());
+        assert!(!directory.path().join(".ruster-cache").exists());
 
         for path in [
             "../outside.json",
