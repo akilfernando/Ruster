@@ -1,6 +1,6 @@
-# Proposed asset-admission experiment
+# Asset-admission experiment
 
-Prepared2026-11-08 for the first-phase review. This is a decision-ready stage2 proposal. Stage2 implementation remains subject to the review boundary in the [approved sequence](ENGINEERING-IMPROVEMENT-SEQUENCE.md).
+Prepared2026-11-08 for the first-phase review. The user authorizes this bounded experiment with “Proceed” after that phase's accepted handoff. Baseline measurements and frozen candidate criteria precede product changes. The [approved sequence](ENGINEERING-IMPROVEMENT-SEQUENCE.md) retains later review boundaries. [Current experiment evidence](../evidence/ASSET-ADMISSION.md) owns execution state and results.
 
 ## Creator outcome and selection
 
