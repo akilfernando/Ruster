@@ -711,3 +711,10 @@ Sol/high prepares a two-case explicit-ICD Khronos reference helper. Astra/high a
 
 
 Sol/high prepares a source-pinned subprocess composition of immutable pilot v3 for NVIDIA. It catches root's mistaken assumption that v3 timed the inspection editor. Actual source and Intel receipts use the default binary. Root preserves the separate inspection control and performs a fresh explicit default control. Astra/high accepts the wrapper's receipt/seal, source pinning and NVIDIA-only qualification boundaries. Root syntax-checks, freezes and executes the fixed quiet-first pair. Both cases close0/scanner0/restored. Dense collection has121samples, a retained transient descriptor race and no NVIDIA DRM engine counters. CPU difference remains descriptive N=1. No child executes native/build/test work. Usage/cost and attributable elapsed remain unknown.
+
+
+### First-phase measured continuation — 2026-11-08
+
+Root executes the immutable NVIDIA six-pair/two-session dense A/A cohort. All12cases complete0/scanner0/restored. Root checks artifact hashes and computes run-level summaries and the qualified paired t interval. Astra/high independently reviews raw streams and source label handling. It accepts a descriptive observer-conditioned baseline, retaining91transient descriptor-enumeration errors and unexplained same-sign paired differences. No unbiased-noise, physical-presentation or candidate-speedup acceptance follows.
+
+Sol/high reviews current admission/disposal owners and primary engine loading guidance. Astra/high checks the proposed resource arithmetic, prefix-plus-candidate overlap and measurement separation. Root writes `plans/ASSET-ADMISSION-EXPERIMENT.md` as the decision-ready stage2 proposal. Astra accepts it and catches the distinction between error precedence and proof of no later reads. Root clarifies the required observed read/decode sequence. Stage2 implementation remains outside this first-phase execution. Usage/cost and attributable elapsed remain unknown.
