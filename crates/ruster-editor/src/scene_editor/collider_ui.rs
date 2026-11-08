@@ -161,6 +161,7 @@ impl SceneEditor {
             && self.draft == self.baseline_fields
             && !self.behavior.pending()
             && !self.input_actions.pending()
+            && self.recovered_input.is_none()
             && self.dialog.is_none()
             && !self.export_dialog
             && !self.asset_dialog

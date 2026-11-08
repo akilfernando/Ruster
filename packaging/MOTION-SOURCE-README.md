@@ -5,11 +5,21 @@ contains the application, required shared kit/backend crates, pinned compatibili
 patches, licenses and packaging tools. Registry packages are not vendored; fetch
 the locked dependencies and install the pinned Rust toolchain on a fresh machine.
 A C compiler/linker is required for bundled Lua. System Lua is not required.
+Shared parser support and compatibility fixtures are included at their original
+relative paths so the shared kit's default-feature test targets can build.
 
 ```sh
 cargo run --locked --offline -p ruster-motion-lab -- --generic-demo --headless --ticks 10
 cargo run --locked --offline -p ruster-motion-lab -- --generic-demo
 cargo run --locked --offline -p ruster-motion-lab -- --scene examples/motion-lab/resources/generic.scene.json --headless
+```
+
+From this workspace root, check all included default-feature targets and run
+their tests after fetching the locked dependencies.
+
+```sh
+cargo check --locked --offline --workspace --all-targets
+cargo test --locked --offline --workspace
 ```
 
 Edit the example's owned scene/source or application presentation, then rebuild.

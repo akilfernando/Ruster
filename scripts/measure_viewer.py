@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Bounded Linux/Hyprland release viewer workload; never enables validation.
+"""Bounded Linux/Hyprland viewer workload with inherited launch environment.
 
 Run each binary with identical session/window settings. CPU is process utime+stime
 from /proc, not wall time in acquire/present. Output includes complete viewer logs.
+The binary's build profile and effective Vulkan validation state are unknown.
 """
 import argparse
 import hashlib
@@ -12,6 +13,37 @@ from pathlib import Path
 import subprocess
 import tempfile
 import time
+
+
+def measurement_metadata(binary, env):
+    """Record launch requests without inferring loaded layers or build profile."""
+    layer_variables = (
+        "VK_INSTANCE_LAYERS",
+        "VK_LAYER_PATH",
+        "VK_ADD_LAYER_PATH",
+        "VK_LOADER_LAYERS_ENABLE",
+        "VK_LOADER_LAYERS_DISABLE",
+        "VK_LOADER_LAYERS_ALLOW",
+        "VK_LAYER_SETTINGS_PATH",
+        "VK_LAYER_VALIDATE_SYNC",
+        "VK_LAYER_ENABLES",
+        "VK_LAYER_DISABLES",
+        "WGPU_VALIDATION",
+        "WGPU_DEBUG",
+        "WGPU_GPU_BASED_VALIDATION",
+    )
+    return dict(
+        binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+        binary_profile=None,
+        binary_profile_reason="Build provenance is not supplied or verified by this script",
+        validation=None,
+        validation_requested=dict(
+            command_line=False,
+            environment={name: env[name] for name in layer_variables if name in env},
+            environment_preserved=True,
+        ),
+        validation_observed_reason="Effective loaded Vulkan layers are not observed by this script",
+    )
 
 
 def main():
@@ -42,9 +74,9 @@ def main():
 
     initial_workspace = json.loads(ctl("activeworkspace", "-j"))["id"]
     results = []
-    output = dict(binary_sha256=hashlib.sha256(binary.read_bytes()).hexdigest(),
+    output = dict(measurement_metadata(binary, env),
                   command=[str(binary)], recorded_utc=time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                  validation=False, warmup_seconds=1,
+                  warmup_seconds=1,
                   sample_seconds=args.seconds, repeats=args.repeats, required_workspace=args.workspace,
                   initial_active_workspace=initial_workspace,
                   proc_clock_ticks=os.sysconf("SC_CLK_TCK"),

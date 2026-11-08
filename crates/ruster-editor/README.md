@@ -8,7 +8,7 @@ cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
 
 See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-content-and-shader-iteration-m6) below for their controls. The [editor experience baseline](../../docs/EDITOR-EXPERIENCE.md) records required usability still to deliver.
 
-Current source saves Scene12 and raw drafts in Recovery10. Opt-in Lua API3 adds spatial queries while preserving API1/API2. Current exact delivery uses content8 and Descriptor5. The [P2a controls](#primitive-collider-authoring--p2a) and [live requirement audit](../../docs/evidence/P2a-readiness.md) describe this active slice. Dated milestone notes retain their original pinned contracts. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
+Current source saves Scene12 and raw drafts in Recovery10. Opt-in Lua API3 adds spatial queries while preserving API1/API2. Current exact delivery uses content8 and Descriptor5. The [P2a controls](#primitive-collider-authoring--p2a) and [live requirement audit](../../docs/evidence/P2a-readiness.md) describe its bounded accepted capability. Dated milestone notes retain their original pinned contracts. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
 
 ## Surface materials, finish maps and scene display (V3a/V3b)
 
@@ -23,6 +23,15 @@ In **Scene display**, explicitly choose **Surface HDR** to enable this surface r
 **PNG interpretation** defaults to **Base color (sRGB)**. Choose **Roughness map (linear)** for grayscale/red-channel finish data; the role is fixed per asset ID and Refresh preserves it. One source can be imported under separate IDs for both interpretations. In Material, choose the matching **Roughness map** slot or **None (clear)**. **Roughness multiplier** scales the map, with the effective result clamped to0.08–1; choose1 explicitly for its full range. Filter and Wrap affect both slots. Diffuse, Legacy SDR and custom shaders retain inactive references without enabling surface shading automatically. Missing maps show a provisional scalar viewport fallback; faithful export requires valid accepted dependencies.
 
 Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to cancel. In Assets, Enter in the ID advances to Source; Enter in Source submits the import. A dropdown owns its selection/dismissal key before the surrounding form. Invalid values retain focus/text and authored state. Recovery10 preserves unfinished surface and collider drafts and restores an unsaved copy. The creator chooses a fresh Save destination while the original remains preserved. Genuine older drafts migrate after strict field-presence validation. Save writes Scene12 and requires a matching current runtime kit. The accepted [V3a](../../docs/evidence/V3A-readiness.md) and [V3b](../../docs/evidence/V3B-readiness.md) checkpoints retain their original contracts.
+
+
+### Pending-edit recovery
+
+Restoring opens an unsaved copy and preserves the source checkpoint. The editor reserves a separate working checkpoint before replacing the current scene. Recovery storage has16slots. When full, explicitly discard an older checkpoint before restoring again. No checkpoint is evicted automatically. After a successful draft-free Save, the preserved source becomes available for explicit Discard in Recovery.
+
+Older checkpoints containing both an action draft and a visual draft restore through a bounded repair flow. Apply or Cancel the existing visual draft first. **Review recovered action** shows its raw action values and whether the original baseline still matches. **Resume editing** explicitly adopts the current revision and opens Input actions. **Keep for later** or Escape preserves the recovered action. **Discard recovered draft** resolves that draft explicitly. Changed or missing action baselines remain preserved for inspection and explicit discard.
+
+Pending recovered work blocks conflicting edits, Save completion and MCP mutations. Enter that resumes an action cannot also Apply it. Recovered Transform Fields keep their original angle units, invalid text and subsequent edits in automatic checkpoints. Latest typing is protected after a successful checkpoint, with existing recovery timing and durability limits. [Decision0039](../../docs/decisions/0039-pending-recovery-repair.md) records ownership and compatibility. First-phase native acceptance is tracked in [current evidence](../../docs/evidence/ENGINEERING-FIRST-PHASE.md).
 
 ## Legacy logistics mode
 

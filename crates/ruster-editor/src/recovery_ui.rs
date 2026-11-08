@@ -186,6 +186,11 @@ impl RecoveryUi {
     pub fn reschedule(&mut self) {
         self.observed = None;
     }
+    pub fn checkpoint_now(&mut self) {
+        self.wanted = true;
+        self.deadline
+            .changed(Instant::now() - std::time::Duration::from_secs(2));
+    }
     pub fn schedule(&self, ctx: &egui::Context, now: Instant) {
         if !self.busy && self.boundary.is_none() && !self.shutdown && !self.broken {
             if let Some(delay) = self.deadline.remaining(now) {
@@ -413,11 +418,12 @@ impl RecoveryUi {
         egui::Modal::new(egui::Id::unique("recovery_picker")).show(ctx, |ui| {
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 600.0));
             ui.heading("Recover unfinished work");
-            ui.label("Restore opens an unsaved copy. Original project files are never overwritten automatically.");
+            ui.label("Restore opens an unsaved copy and reserves a separate working checkpoint. Original projects and source checkpoints stay preserved until explicitly discarded.");
             egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-170.0).max(64.0)).show(ui, |ui| {
                 for candidate in &self.candidates {
                     ui.separator();
                     ui.label(candidate.scene_id.as_deref().unwrap_or("Unreadable checkpoint"));
+                    ui.add(egui::Label::new(format!("{} · saved at Unix time {} · sequence {} · scene revision {}", candidate.id, candidate.timestamp, candidate.sequence.map_or_else(|| "unknown".into(), |value| value.to_string()), candidate.revision.map_or_else(|| "unknown".into(), |value| value.to_string()))).wrap());
                     if let Some(path) = &candidate.origin { ui.add(egui::Label::new(path.display().to_string()).truncate()).on_hover_text(path.display().to_string()); }
                     if let Some(error) = &candidate.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
                     ui.horizontal_wrapped(|ui| {

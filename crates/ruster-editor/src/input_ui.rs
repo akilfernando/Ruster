@@ -107,21 +107,74 @@ impl Draft {
             && kind_valid
     }
 
-    pub(super) fn validate_snapshot(&self, session: &Session) -> Result<(), String> {
+    pub(super) fn validate_recovery_storage(&self, session: &Session) -> Result<(), String> {
         if !self.storage_valid() {
             return Err(
                 "Action draft has unsupported bounds or structure; record preserved.".into(),
             );
         }
-        if self.scene_id != session.scene().id
-            || self.revision != session.scene().revision
-            || self.base_hash
-                != fingerprint(self.edited_id.as_deref().and_then(|id| session.action(id)))
+        if self.scene_id != session.scene().id || self.revision > session.scene().revision {
+            return Err(
+                "Action draft belongs to another scene or a future revision; record preserved."
+                    .into(),
+            );
+        }
+        Ok(())
+    }
+
+    pub(super) fn revision(&self) -> u64 {
+        self.revision
+    }
+
+    pub(super) fn recovered_values_ui(&self, ui: &mut egui::Ui) {
+        ui.label(match (self.intent, self.edited_id.is_some()) {
+            (Intent::Remove, _) => "Recovered request to delete this action.",
+            (Intent::Set, true) => "Recovered changes to an existing action.",
+            (Intent::Set, false) => "Recovered new action.",
+        });
+        ui.strong("Action ID");
+        ui.add(egui::Label::new(egui::RichText::new(&self.id).monospace()).wrap());
+        if let Some(original) = self
+            .edited_id
+            .as_ref()
+            .filter(|original| *original != &self.id)
+        {
+            ui.add(egui::Label::new(format!("Originally editing {original}")).wrap());
+        }
+        ui.strong("Label");
+        if self.label.is_empty() {
+            ui.label("No label entered");
+        } else {
+            ui.add(egui::Label::new(&self.label).wrap());
+        }
+        ui.strong("Controls");
+        ui.add(egui::Label::new(hint(&self.kind)).wrap());
+    }
+
+    pub(super) fn review_recovery(&self, session: &Session) -> Result<(), String> {
+        self.validate_recovery_storage(session)?;
+        if self.base_hash
+            != fingerprint(self.edited_id.as_deref().and_then(|id| session.action(id)))
             || self
                 .edited_id
                 .as_ref()
                 .is_some_and(|id| session.action(id).is_none())
         {
+            return Err("The original action changed or is missing. Raw recovered values remain preserved for inspection or explicit discard.".into());
+        }
+        Ok(())
+    }
+
+    pub(super) fn resume_recovery(&self, session: &Session) -> Result<Self, String> {
+        self.review_recovery(session)?;
+        let mut resumed = self.clone();
+        resumed.revision = session.scene().revision;
+        Ok(resumed)
+    }
+
+    pub(super) fn validate_snapshot(&self, session: &Session) -> Result<(), String> {
+        self.review_recovery(session)?;
+        if self.revision != session.scene().revision {
             return Err("Actions changed; cancel this draft and inspect again.".into());
         }
         Ok(())
@@ -262,6 +315,23 @@ impl InputUi {
         self.focus_first = self.pending();
         self.validation_focus = None;
         self.message.clear();
+        Ok(())
+    }
+
+    pub(super) fn resume_recovered(
+        &mut self,
+        draft: Draft,
+        session: &Session,
+        ctx: &egui::Context,
+    ) -> Result<(), String> {
+        if self.pending() {
+            return Err(
+                "Resolve the current input action draft before resuming recovered work.".into(),
+            );
+        }
+        self.restore_drafts(Some(draft), session)?;
+        // Resume owns this entire frame, including further layout passes.
+        self.claim_frame(ctx);
         Ok(())
     }
 

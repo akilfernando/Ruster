@@ -1,0 +1,37 @@
+# Engineering improvement first phase
+
+Started2026-11-08 after the user approves execution of the [staged sequence](../plans/ENGINEERING-IMPROVEMENT-SEQUENCE.md). Independent scopes are1R recovery AUD-003/004,1D source export AUD-001 and1P native attribution/AUD-022. Workspace is `/home/akilf/Projects/Ruster-Audits/phase1-20261108`. Source/desktop baseline and helper provenance are pinned there. The user confirms they are away and permits focused testing.
+
+## 1D source export — accepted bounded repair
+
+An explicit compiler-input allowlist now includes the shared strict JSON parser and compatibility shader fixture. Existing exclusions remain covered, including adjacent private support/shader files. An added actual-checkout test exports and relocates both named apps and checks source bytes/manifest pins. Seven focused packaging tests pass.
+
+Both actual CLI exports relocate successfully. In a bubblewrap namespace with the original checkout hidden, each passes `cargo check --locked --offline --workspace --all-targets` and `cargo test --locked --offline --workspace`. Shared cached dependencies remain available through an explicit target mount. Real owned crates compile from the relocated paths. Logs, commands, exit statuses and timings are in `source-exports-1/`. Updated source READMEs describe these checks.
+
+Evaluation closes the missing compiler/test-input boundary. This gives creators independently buildable source templates and adds coverage the fake distribution fixtures lacked. Source export acceptance does not expand standalone binary, native platform or license-compliance guarantees. The audit's optional inspection dependency inventory finding remains separately assigned.
+
+## 1R recovery — implemented, native qualification pending
+
+[0039](../decisions/0039-pending-recovery-repair.md) records accepted engineering choices. Existing version10 draft encoding holds one deferred action alongside an existing visual draft. Shared capture preserves all pending raw values. Explicit baseline review gates Resume, while pending authority blocks unrelated ordinary/MCP mutations. Source journals are preserved under leases, with a separate working slot reserved before replacement. Successful draft-free Save releases the source for explicit discard.
+
+The recovered Fields regression now drives actual TextEdit input and the production checkpoint worker. Before repair, the second record retains the old text. Generation notification makes it write the latest invalid raw text. `fields-red-3.log` and `fields-green-1.log` retain the owning red/green result. Earlier harness errors are separate retained attempts, comprising an exact filter matching zero cases and an unhandled headless texture delta.
+
+The initial complete125-editor suite passes in2.45s. Subsequent review-dialog changes replace prominent raw JSON with human-readable values, put technical details under disclosure and keep footer actions outside scrolling content. Extended existing real-widget coverage passes at960×640and480×320logical dimensions, including Tab, blank-header/idle Escape and Enter handoff. The affected case passes in0.28s. The integrated full gate passes283Rust/28Python cases, strict default Clippy, formatting and Markdown in75.98s. Supplemental strict inspection all-target lint passes in10.64s. Native crash/repair/MCP journeys remain pending.
+
+Astra's independent source reviews identify two integration defects and confirm repairs. Working-slot reservation now precedes shared shader reset, preserving failed-Restore atomicity. Successful Save releases the original lease without retiring its bytes. Final modal review finds no additional preservation/authority blocker. Reviews are source evidence, with actual execution attributed to root.
+
+## 1P attribution — capability and fixture preparation
+
+AUD-022 metadata now distinguishes inherited validation requests, unknown effective loaded layers and unknown binary profile, retaining binary SHA256. The unique metadata regression passes. Profiling tools are extracted into a user-scoped cache after repository SHA256 verification. `perf` and `pidstat` work. Intel PMU access is denied and turbostat reports unavailable MSR counters. No global perf/security/governor/power change is made. Initial CachyOS mirror403failures and working extra-repository package selection are retained.
+
+A bounded external collector records CPU/PSS/scheduling, temperatures, clocks, raw named-domain energy and per-client DRM fdinfo, with executable/start-time guards, explicit missingness and duplicate-client references. Syntax, bounded synthetic DRM cases and a short owned-process check pass. Actual Intel process sampling succeeds. These are sampled counters, with overlapping memory/energy scopes and unobserved subsecond peaks.
+
+A new nine-object current-format Native Atelier fixture combines preserved Finish Patterns resource bytes with an API3 autonomous input/query probe. It opens through the actual editor, reports complete accepted assets, HDR and4×MSAA, and runs successful sweep/overlap observations. The initial fixture used unavailable `math.pi`; root corrects it through native MCP, then saves through the ordinary persistence authority. The failed Reset remains evidence of fixture preparation. The successful explicit save receipt pins final bytes. A genuine current-kit export commits17payloads for the exact runtime fixture. Preparation, SDK calls and receipts are retained under `.studio/fixture-C/` and `.studio/native-capability-1/`.
+
+The optional MangoHud0.8.4 observer produces pre-present interval CSV and accessible telemetry. It measures application call intervals, without physical display/GPU-completion/input-latency certification. A five-second capability run is unaccepted as a cost cohort. Its normal shutdown aborts with double-free after unloading the observer, while protected desktop restoration succeeds. Exact-PID coredump evidence includes MangoHud teardown/sampling frames. The predeclared fixed comparison then closes normally in all three cases, comprising observer-free, loaded/no-log and logging with the standard wrapper preload. Each restores the desktop. This narrows the investigation without explaining the original abort or establishing overhead. Root withholds statistical observer acceptance pending matched overhead and longer qualification. Original data and failures remain preserved. No attribution to Ruster or a specific observer root cause is accepted yet.
+
+One helper omitted an SDK-required read discriminator, another checked an unsupported persistence response key after a known committed Save, and a screenshot helper found no grim executable. Their errors remain retained. The Save receipt establishes the mutation's result and is inspected before further work. These harness failures do not count as product findings. No unqualified timing or successful normal observer shutdown is claimed.
+
+## Next checks
+
+Complete integrated source gates and native1R ordinary repair/repeated crash/MCP/SaveAs/fresh-reopen evidence. Resolve or explicitly reject the optional observer, freeze a usable native pilot protocol and collect the declared baseline/attribution cohorts. Derive numerical optimization criteria before selecting a candidate. Milestones retain independent acceptance. The sealed P2a and frozen audit remain separate historical evidence.

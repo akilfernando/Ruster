@@ -4,6 +4,8 @@ This is an editable standalone workspace with the small delivery challenge,
 shared application/scene/render/assets/core crates and the bounded vendored
 Vulkan HAL patch. All engine path dependencies and the root HAL override are
 relative to this tree. It needs no original Ruster checkout, editor or MCP.
+Shared parser support and the compatibility fixtures needed by the included
+crates' tests are included at their original relative paths.
 
 With the pinned Rust toolchain installed:
 
@@ -22,6 +24,14 @@ unless the pinned versions are already cached; then add `--offline`. Native
 mode needs Linux desktop libraries and a Vulkan-capable driver. Only Linux
 x86_64 on the recorded workstation has been exercised; this is an evolving API,
 not an engine alpha or a supported platform matrix.
+
+From the exported workspace root, check every included default-feature target
+and run the workspace tests after fetching the locked dependencies.
+
+```sh
+cargo check --locked --offline --workspace --all-targets
+cargo test --locked --offline --workspace
+```
 
 For a relocated executable, copy the entire `examples/yard-app/resources`
 directory beside it as `resources`; or pass `--resources PATH`. Resources are

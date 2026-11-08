@@ -159,6 +159,8 @@ pub struct Candidate {
     pub origin: Option<PathBuf>,
     pub scene_id: Option<String>,
     pub timestamp: u64,
+    pub sequence: Option<u64>,
+    pub revision: Option<u64>,
     pub error: Option<String>,
 }
 impl Store {
@@ -214,7 +216,7 @@ impl Store {
     pub fn allocate(&self) -> Result<Journal, String> {
         let _directory = self.directory_lock()?;
         if self.directories()?.len() >= MAX_RECORDS {
-            return Err("All16 recovery slots are occupied. Restore or explicitly discard an older checkpoint; none was evicted.".into());
+            return Err("All16 recovery slots are occupied. Explicitly discard an older checkpoint or move it aside before restoring; none was evicted.".into());
         }
         let temporary = tempfile::Builder::new()
             .prefix("window-")
@@ -239,6 +241,8 @@ impl Store {
                 origin: None,
                 scene_id: None,
                 timestamp: 0,
+                sequence: None,
+                revision: None,
                 error: None,
             };
             if !path.symlink_metadata().map_err(|e| e.to_string())?.is_dir() {
@@ -266,8 +270,12 @@ impl Store {
                 Ok(record) => {
                     candidate.origin = record.snapshot.origin.clone();
                     candidate.timestamp = record.timestamp;
+                    candidate.sequence = Some(record.sequence);
                     match record.snapshot.restore() {
-                        Ok(session) => candidate.scene_id = Some(session.scene().id.clone()),
+                        Ok(session) => {
+                            candidate.scene_id = Some(session.scene().id.clone());
+                            candidate.revision = Some(session.scene().revision);
+                        }
                         Err(error) => candidate.error = Some(error),
                     }
                 }

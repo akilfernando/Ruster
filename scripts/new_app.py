@@ -18,6 +18,8 @@ from package_app import APPS, KIT_CRATES, ROOT, app_spec, cargo, file_manifest, 
 
 CRATES = KIT_CRATES
 ROOT_FILES = ("Cargo.lock", "rust-toolchain.toml", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt")
+# Compiler inputs and compatibility fixtures outside the selected crate trees.
+SHARED_INPUTS = ("crates/support/strict_json.rs", "examples/content/scene.wgsl", "examples/logistics.scenario.json")
 VENDOR_FILES = ("Cargo.toml", "Cargo.toml.orig", "build.rs", "README.md", "LICENSE.MIT", "LICENSE.APACHE", "RUSTER-PATCH.md")
 PACKAGING_FILES = ("scripts/package_app.py", "scripts/dependency_notices.py")
 CREATION_PACKAGING_FILE = "scripts/package_creation.py"
@@ -98,8 +100,8 @@ def export(root: Path, output: Path, normalize_lock: bool = True, app: str = "ya
         copy_tree(root, sample + "/src", stage, {".rs", ".wgsl"})
         if (root / sample / "tests").is_dir():
             copy_tree(root, sample + "/tests", stage, {".rs", ".json", ".obj", ".wgsl"})
-        # The shared core's existing compatibility test opens this owned fixture.
-        put(stage, "examples/logistics.scenario.json", read_regular(root, "examples/logistics.scenario.json"))
+        for name in SHARED_INPUTS:
+            put(stage, name, read_regular(root, name))
         for name in spec.resources:
             relative = sample + "/resources/" + name
             put(stage, relative, read_regular(root, relative))

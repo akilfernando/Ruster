@@ -300,6 +300,14 @@ impl SceneEditor {
         continuation: Continuation,
         result: Result<(), String>,
     ) {
+        if result.is_ok()
+            && !self.pending_recovery_drafts()
+            && self.recovery_source.take().is_some()
+        {
+            // Release only the read-only lease. The original checkpoint is
+            // deliberately left byte-for-byte available for explicit discard.
+            self.recovery.refresh();
+        }
         if let Err(message) = result {
             self.append_save_warning(&format!("recovery cleanup failed: {message}"));
         }

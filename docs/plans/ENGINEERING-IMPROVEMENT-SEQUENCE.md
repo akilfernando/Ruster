@@ -1,6 +1,6 @@
-# Proposed engineering improvement sequence
+# Engineering improvement sequence
 
-Proposed2026-11-08 by Astra and root following the [engineering audit](../evidence/ENGINEERING-AUDIT.md). The user requests planning and explicitly prioritizes investing sufficient time in optimization and product quality. This is a proposal awaiting approval. Implementation goals and product budgets require their own acceptance.
+Proposed2026-11-08 by Astra and root following the [engineering audit](../evidence/ENGINEERING-AUDIT.md). The user requests planning and explicitly prioritizes investing sufficient time in optimization and product quality. The user approves execution with “Execute”2026-11-08. The active first phase covers independent1R/1D/1P tickets. The60Hz reference is accepted as a qualification target. Numerical optimization gates follow the pilot, and later implementation choices retain their stated review points.
 
 This document owns the proposed execution order. The [remediation packages](ENGINEERING-REMEDIATION.md) retain the detailed finding contracts. The audit remains the frozen findings/evidence record. Astra's full planning draft and structured24-finding mapping are retained at `/home/akilf/Projects/Ruster-Audits/engineering-audit-20261108/planning-astra/`.
 
@@ -35,7 +35,7 @@ Source edits can be delegated independently. Root serializes builds, native inte
 
 AUD-005/006 and AUD-007 require their own correctness/ownership resolution even when another hypothesis wins stage2 priority. A workload exercising a faulty admission boundary cannot qualify until the boundary is repaired. The first improvement does not depend on completing every maintenance ticket.
 
-## First proposed goal — 1R recovery integrity
+## First implementation goal — 1R recovery integrity
 
 ### Creator outcome and boundaries
 
@@ -62,9 +62,9 @@ Completion requires both owning red cases to turn green, supported compatibility
 
 ## Early performance goal — 1P native attribution
 
-### Proposed reference workloads
+### Reference workloads
 
-These defaults are for approval and measurement design. Minimum hardware specifications and numerical product guarantees remain unresolved.
+Execution adopts these defaults for qualification and measurement design. Minimum hardware specifications and numerical product guarantees remain unresolved.
 
 | Workload | Proposed configuration | What it establishes |
 | --- | --- | --- |
@@ -75,7 +75,7 @@ These defaults are for approval and measurement design. Minimum hardware specifi
 
 Use Iris Xe as the first reference adapter and RTX4060Laptop as a control/regression adapter. This i9/32GiB host cannot establish a low-end device floor. Stage5 requires a real lower-resource machine.
 
-Propose60Hz interaction/play for C/R at the declared reference quality on a suitable display. Its16.67ms interval is a planning target awaiting approval. Derive operation budgets and useful headroom from measured native paths before a candidate comparison. Existing5ms foreground/50ms Host-gap references apply only to their original named operations and conditions. No universal2ms added-cost gate follows.
+The reference target is60Hz interaction/play for C/R at the declared quality on a suitable display. Its16.67ms interval is a qualification target. Derive operation budgets and useful headroom from measured native paths before a candidate comparison. Existing5ms foreground/50ms Host-gap references apply only to their original named operations and conditions. No universal2ms added-cost gate follows.
 
 ### Lean instrumentation and tool access
 
@@ -150,7 +150,7 @@ Every finding remains unresolved until its owning evidence closes it. Conditiona
 
 ## Approval and stopping points
 
-The recommended next approval covers1R as the first bounded goal and independently scoped1D/1P in the same phase. Hardware/workload/60Hz defaults remain proposals. Numeric optimization gates follow the A/A pilot and precede candidate results. Rename durability and compound Apply are later separate choices.
+The2026-11-08 execution approval covers1R and independently scoped1D/1P in the same phase. Hardware/workload/60Hz defaults are adopted as reference targets for qualification. Numeric optimization gates follow the A/A pilot and precede candidate results. Rename durability and compound Apply are later separate choices.
 
 At each milestone, evaluate the creator outcome, direct/MCP parity, compatibility, keyboard/error paths, performance and resource evidence, remaining gaps and next priority. Use affected existing tests and narrowly justified extensions. Performance cohorts stay outside routine unrelated gates.
 

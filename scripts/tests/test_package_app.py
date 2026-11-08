@@ -36,6 +36,8 @@ class DistributionTests(unittest.TestCase):
         put("crates/ruster-scene/tests/fixtures/legacy-v1.scene.json", "{}\n")
         put("examples/yard-app/Cargo.toml", '[package]\nname = "ruster-yard"\nversion.workspace = true\n[dependencies]\nruster-app = {path = "../../crates/ruster-app"}\n')
         put("examples/yard-app/src/main.rs", "fn main() {}\n")
+        put("crates/support/strict_json.rs", "pub fn parse() {}\n")
+        put("examples/content/scene.wgsl", "// compatibility shader\n")
         put("examples/logistics.scenario.json", "{}\n")
         put("examples/yard-app/resources/truck.obj", "v 0 0 0\n")
         for name in new_app.VENDOR_FILES:
@@ -53,7 +55,8 @@ class DistributionTests(unittest.TestCase):
     def test_source_allowlist_relocation_and_no_overwrite(self):
         """A new creator tree carries relative engine paths, never local private/cache files."""
         for relative in (".env", "crates/ruster-app/src/credentials.env", "crates/ruster-app/src/target/leaked.rs",
-                         "examples/yard-app/resources/private.obj", "crates/ruster-editor/src/lib.rs"):
+                         "examples/yard-app/resources/private.obj", "crates/ruster-editor/src/lib.rs",
+                         "crates/support/private.rs", "examples/content/private.wgsl"):
             package_app.put(self.root, relative, b"SECRET")
         destination = self.base / "my-app"
         manifest = new_app.export(self.root, destination, normalize_lock=False)
@@ -79,6 +82,25 @@ class DistributionTests(unittest.TestCase):
         linked.symlink_to(self.root, target_is_directory=True)
         with self.assertRaisesRegex(ValueError, "outside the checkout"):
             new_app.export(self.root, linked / "wrong-location", normalize_lock=False)
+
+    def test_real_source_exports_preserve_shared_compiler_and_test_inputs(self):
+        """Both real application kits retain out-of-crate inputs after relocation."""
+        root = Path(__file__).resolve().parents[2]
+        required = ("crates/support/strict_json.rs", "examples/content/scene.wgsl",
+                    "examples/logistics.scenario.json",
+                    "crates/ruster-scene/tests/fixtures/legacy-v1.scene.json")
+        for app in ("yard", "motion-lab"):
+            with self.subTest(app=app):
+                destination = self.base / app
+                manifest = new_app.export(root, destination, normalize_lock=False, app=app)
+                moved = self.base / (app + "-relocated")
+                destination.rename(moved)
+                files = {entry["path"]: entry for entry in manifest["files"]}
+                for name in required:
+                    original = (root / name).read_bytes()
+                    self.assertEqual((moved / name).read_bytes(), original)
+                    self.assertEqual(files[name]["sha256"], hashlib.sha256(original).hexdigest())
+                    self.assertEqual(files[name]["bytes"], len(original))
 
     def test_export_missing_file_and_symlink_fail_without_partial_destination(self):
         """Incomplete or symlinked sources cannot escape or expose a partial source project."""

@@ -21,6 +21,7 @@ mod material_ui;
 mod material_visual_probe;
 mod nonvisual;
 mod persistence_commands;
+mod recovered_input_ui;
 mod runtime_commands;
 mod runtime_transform_ui;
 mod save_commands;
@@ -409,6 +410,11 @@ pub struct SceneEditor {
     baseline_fields: Option<Fields>,
     workspace: Workspace,
     recovery: crate::recovery_ui::RecoveryUi,
+    // Read-only source lease. Only the separate working journal is retired.
+    recovery_source: Option<crate::recovery::Journal>,
+    recovered_input: Option<crate::input_ui::Draft>,
+    recovered_input_open: bool,
+    recovered_input_focused: bool,
     recovery_transition: Option<RecoveryTransition>,
     close_cleanup_error: Option<String>,
     close_shutdown: bool,
@@ -585,6 +591,10 @@ impl SceneEditor {
             baseline_fields: draft.clone(),
             workspace,
             recovery: crate::recovery_ui::RecoveryUi::disabled(),
+            recovery_source: None,
+            recovered_input: None,
+            recovered_input_open: false,
+            recovered_input_focused: false,
             recovery_transition: None,
             close_cleanup_error: None,
             close_shutdown: false,
@@ -661,6 +671,7 @@ impl SceneEditor {
             || self.draft != self.baseline_fields
             || self.behavior.pending()
             || self.input_actions.pending()
+            || self.recovered_input.is_some()
     }
     fn pending_recovery_drafts(&self) -> bool {
         self.drafts() || self.rename_pending || self.manipulation.offset_pending()
@@ -672,6 +683,9 @@ impl SceneEditor {
         self.editing_available() && !self.behavior.pending()
     }
     fn editing_available(&self) -> bool {
+        self.recovered_input.is_none() && self.editing_available_for_recovery()
+    }
+    fn editing_available_for_recovery(&self) -> bool {
         !self.asset_publishing()
             && !self.asset_loading()
             && (self.color_draft.is_none()
@@ -853,9 +867,11 @@ impl SceneEditor {
             }
         }
     }
-    #[cfg(test)]
-    fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
-        let drafts = RecoveryDrafts {
+    fn recovery_drafts(&self) -> Result<RecoveryDrafts, String> {
+        if self.recovered_input.is_some() && self.input_actions.pending() {
+            return Err("Both live and deferred input drafts exist; checkpoint preserved for explicit repair.".into());
+        }
+        Ok(RecoveryDrafts {
             version: 10,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
@@ -863,13 +879,20 @@ impl SceneEditor {
             pending_name: self.rename_pending.then(|| self.name_text.clone()),
             manipulation: self.manipulation.snapshot_drafts(),
             behavior: Some(self.behavior.snapshot()),
-            input_actions: self.input_actions.drafts(),
+            input_actions: self
+                .input_actions
+                .drafts()
+                .or_else(|| self.recovered_input.clone()),
             color: self.color_draft.clone(),
             material: self.material_draft.clone(),
             lighting: self.lighting_draft.clone(),
             display: self.display_draft.clone(),
             collider: self.collider_draft.clone(),
-        };
+        })
+    }
+    #[cfg(test)]
+    fn recovery_snapshot(&self) -> Result<crate::recovery::Snapshot, String> {
+        let drafts = self.recovery_drafts()?;
         let mut snapshot = crate::recovery::Snapshot::capture(
             &self.session,
             self.asset_origin.clone(),
@@ -1136,16 +1159,12 @@ impl SceneEditor {
             }
         }
         if let Some(input) = &draft.input_actions {
-            input.validate_snapshot(&self.session)?;
+            input.validate_recovery_storage(&self.session)?;
             if draft.pending_name.is_some()
                 || draft
                     .behavior
                     .as_ref()
                     .is_some_and(|behavior| behavior.pending())
-                || draft.color.is_some()
-                || draft.material.is_some()
-                || draft.lighting.is_some()
-                || draft.display.is_some()
                 || draft.fields.as_ref().is_some_and(|fields| {
                     draft
                         .selection
@@ -1160,6 +1179,18 @@ impl SceneEditor {
                     "Unsupported compound input action recovery draft; checkpoint preserved."
                         .into(),
                 );
+            }
+        }
+        let defer_input = draft.input_actions.as_ref().is_some_and(|input| {
+            input.revision() != scene.revision
+                || draft.color.is_some()
+                || draft.material.is_some()
+                || draft.lighting.is_some()
+                || draft.display.is_some()
+        });
+        if !defer_input {
+            if let Some(input) = &draft.input_actions {
+                input.validate_snapshot(&self.session)?;
             }
         }
         // Validate visual drafts' exclusive ownership before touching selection or
@@ -1227,6 +1258,17 @@ impl SceneEditor {
             }
             self.behavior.restore(&self.session, behavior)?;
         }
+        self.recovered_input = if defer_input {
+            draft.input_actions.take()
+        } else {
+            None
+        };
+        self.recovered_input_open = self.recovered_input.is_some()
+            && self.color_draft.is_none()
+            && self.material_draft.is_none()
+            && self.lighting_draft.is_none()
+            && self.display_draft.is_none();
+        self.recovered_input_focused = false;
         self.input_actions
             .restore_drafts(draft.input_actions, &self.session)?;
         self.input_actions_open = self.input_actions.pending();
@@ -1276,13 +1318,28 @@ impl SceneEditor {
                     recovered: true,
                     recovery_shader: false,
                 });
+        // Reserve capacity before replacing anything or changing the renderer.
+        // The original remains a read-only lease throughout the restore.
+        let working = self
+            .recovery
+            .store
+            .as_ref()
+            .ok_or("Recovery store unavailable.")?
+            .allocate()?;
         let render = self.render.clone();
         if let Some(render) = render.as_ref().filter(|_| self.shader_revision > 0) {
-            ruster_render::refresh_shader(render, ruster_render::default_shader())?;
+            if let Err(error) =
+                ruster_render::refresh_shader(render, ruster_render::default_shader())
+            {
+                working.retire().map_err(|cleanup| {
+                    format!("{error}; unused recovery reservation cleanup failed: {cleanup}")
+                })?;
+                return Err(error);
+            }
         }
         next.workspace.welcome = false;
         next.render = render;
-        next.notice = "Recovered as an unsaved copy. Save requests a fresh filename; original project unchanged.".into();
+        next.notice = "Recovered as an unsaved copy. Save requests a fresh filename. The original checkpoint is preserved until explicitly discarded in Recovery.".into();
         if let Some(origin) = snapshot.origin.as_ref().or(snapshot.asset_origin.as_ref()) {
             let parent = if snapshot.origin.is_some() {
                 origin.parent().unwrap_or(origin)
@@ -1291,10 +1348,11 @@ impl SceneEditor {
             };
             next.path_text = parent.join("recovered-scene.json").display().to_string();
         }
+        next.recovery_source = Some(journal);
         self.recovery
             .candidates
             .retain(|candidate| candidate.id != id);
-        self.begin_replacement(next, Some(journal), false, true);
+        self.begin_replacement(next, Some(working), false, true);
         Ok(())
     }
     fn recovery_frame(&mut self, ctx: &egui::Context) {
@@ -1315,8 +1373,7 @@ impl SceneEditor {
         }
         self.recovery_maintenance(ctx);
     }
-    fn recovery_maintenance(&mut self, ctx: &egui::Context) {
-        let now = Instant::now();
+    fn observe_recovery(&mut self, now: Instant) -> bool {
         let pending = self.needs_recovery() || self.pending_recovery_drafts();
         self.recovery.observe(
             self.session.scene().revision,
@@ -1327,6 +1384,11 @@ impl SceneEditor {
             pending,
             now,
         );
+        pending
+    }
+    fn recovery_maintenance(&mut self, ctx: &egui::Context) {
+        let now = Instant::now();
+        let pending = self.observe_recovery(now);
         if self.recovery.due(now)
             && pending
             && self.recovery_transition.is_none()
@@ -1335,26 +1397,12 @@ impl SceneEditor {
             let session = self.session.clone();
             let asset_origin = self.asset_origin.clone();
             let recovered_origin = self.recovered_origin.clone();
-            let drafts = RecoveryDrafts {
-                version: 10,
-                revision: session.scene().revision,
-                selection: self.manipulation.ids.clone(),
-                fields: self.draft.clone(),
-                pending_name: self.rename_pending.then(|| self.name_text.clone()),
-                manipulation: self.manipulation.snapshot_drafts(),
-                behavior: Some(self.behavior.snapshot()),
-                input_actions: self.input_actions.drafts(),
-                color: self.color_draft.clone(),
-                material: self.material_draft.clone(),
-                lighting: self.lighting_draft.clone(),
-                display: self.display_draft.clone(),
-                collider: self.collider_draft.clone(),
-            };
+            let drafts = self.recovery_drafts();
             let capture = Box::new(move || {
                 let mut snapshot = crate::recovery::Snapshot::capture(
                     &session,
                     asset_origin,
-                    &serde_json::to_value(drafts).map_err(|e| e.to_string())?,
+                    &serde_json::to_value(drafts?).map_err(|e| e.to_string())?,
                 )?;
                 if session.path().is_none() {
                     snapshot.origin = recovered_origin;
@@ -1459,6 +1507,9 @@ impl SceneEditor {
                 next.asset_ops = std::mem::take(&mut self.asset_ops);
                 next.asset_ops.fresh_root_adopted();
                 *self = *next;
+                if self.recovery_source.is_some() && self.observe_recovery(Instant::now()) {
+                    self.recovery.checkpoint_now();
+                }
                 if shader {
                     if let Some(intent) = &mut self.pending_asset_open {
                         intent.recovery_shader = true;
@@ -1691,6 +1742,10 @@ impl SceneEditor {
         }
     }
     fn apply(&mut self) -> bool {
+        if self.recovered_input.is_some() {
+            self.error = "Resolve the recovered visual draft in its own controls, then review or discard the recovered action before saving or changing selection.".into();
+            return false;
+        }
         if self.asset_publishing() || self.asset_loading() {
             self.error="Asset publication is finishing; authored edits are reserved until acknowledgement.".into();
             return false;
@@ -3214,6 +3269,7 @@ impl SceneEditor {
             .show(ui, |ui| self.inspector_contents(ui));
     }
     fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
+        self.recovered_input_notice(ui);
         let title = if self.manipulation.ids.len() > 1 {
             format!("{} selected", self.manipulation.ids.len())
         } else {
@@ -3268,7 +3324,8 @@ impl SceneEditor {
                         && self.display_draft.is_none()
                         && self.collider_draft.is_none()
                         && !self.behavior.pending()
-                        && !self.input_actions.pending(),
+                        && !self.input_actions.pending()
+                        && self.recovered_input.is_none(),
                     |ui| self.manipulation_ui(ui),
                 );
             }
@@ -3293,27 +3350,30 @@ impl SceneEditor {
             ui.separator();
             ui.strong("Transform");
             if self.draft != self.baseline_fields {
-                ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+                ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
                         ui.label("Recovered transform fields — repair or revert before other precision edits");
                         let mut enter=false;
                         let mut escape=false;
+                        let mut changed=false;
                         if let Some(fields)=&mut self.draft {
                             for (label, values) in [("Position", &mut fields.translation), (fields.rotation_unit.label(), &mut fields.rotation), ("Scale", &mut fields.scale)] {
                                 ui.label(label);
                                 ui.horizontal_wrapped(|ui| { for (axis,text) in ["X","Y","Z"].into_iter().zip(values) {
                                     ui.label(axis);
                                     let response=ui.add(egui::TextEdit::singleline(text).desired_width(70.0).char_limit(1024).interactive(ui.is_enabled()));
+                                    changed|=response.changed();
                                     let owned=response.has_focus() || ui.memory(|m|m.had_focus_last_frame(response.id));
                                     enter|=owned && ui.input(|i|i.key_pressed(egui::Key::Enter));
                                     escape|=owned && ui.input(|i|i.key_pressed(egui::Key::Escape));
                                 }});
                             }
                         }
+                        if changed {self.draft_generation=self.draft_generation.wrapping_add(1);}
                         if ui.button("Apply recovered transform fields").clicked() || enter {self.apply();}
                         if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
                     });
             }
-            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.input_actions.pending() && !self.manipulation.ids.is_empty(), |ui| {
+            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.ids.is_empty(), |ui| {
                     match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                         Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                         Ok(false)=>{},Err(error)=>self.error=error,
@@ -3326,7 +3386,8 @@ impl SceneEditor {
                     && self.display_draft.is_none()
                     && self.collider_draft.is_none()
                     && !self.behavior.pending()
-                    && !self.input_actions.pending(),
+                    && !self.input_actions.pending()
+                    && self.recovered_input.is_none(),
                 |ui| self.manipulation_ui(ui),
             );
         }
@@ -4321,7 +4382,12 @@ impl SceneEditor {
             });
             ui.menu_button("Edit", |ui| {
                 if ui.button("Input actions…").clicked() {
-                    self.input_actions_open = true;
+                    if self.recovered_input.is_some() {
+                        self.recovered_input_open = true;
+                        self.recovered_input_focused = false;
+                    } else {
+                        self.input_actions_open = true;
+                    }
                     self.runtime.release_input(ui.ctx());
                     ui.close();
                 }
@@ -4854,6 +4920,7 @@ impl SceneEditor {
             });
         }
         self.content_ui(&ctx);
+        self.recovered_input_window(&ctx);
         if self.input_actions_open {
             self.runtime.release_input(&ctx);
             let editable = self.input_action_editable();
@@ -5891,6 +5958,85 @@ mod tests {
             payload["manipulation"] = manipulation;
             e.restore_recovery_drafts(payload).unwrap();
             assert_eq!(e.draft.as_ref().unwrap().rotation[0], "-");
+            // A restored raw field must keep scheduling subsequent checkpoints.
+            let directory = tempfile::tempdir().unwrap();
+            e.recovery = crate::recovery_ui::RecoveryUi::at(
+                crate::recovery::Store::open(directory.path().join("recovery")).unwrap(),
+            );
+            let ctx = egui::Context::default();
+            let frame = |editor: &mut SceneEditor, events| {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(1200.0, 1600.0),
+                        )),
+                        events,
+                        ..Default::default()
+                    },
+                    |ui| editor.inspector_contents(ui),
+                );
+                output.textures_delta.clear();
+                output
+            };
+            let checkpoint = |editor: &mut SceneEditor| {
+                editor.recovery.observe(
+                    editor.session.scene().revision,
+                    editor.manipulation.draft_generation(),
+                    editor
+                        .draft_generation
+                        .wrapping_add(editor.behavior.generation())
+                        .wrapping_add(editor.input_actions.generation()),
+                    true,
+                    Instant::now() - Duration::from_secs(2),
+                );
+                editor.recovery_maintenance(&ctx);
+                editor.wait_recovery();
+                let path = std::fs::read_dir(directory.path().join("recovery"))
+                    .unwrap()
+                    .map(|entry| entry.unwrap().path().join("checkpoint.json"))
+                    .find(|path| path.is_file())
+                    .expect("production worker publishes a checkpoint");
+                serde_json::from_slice::<Value>(&std::fs::read(path).unwrap()).unwrap()
+            };
+            let first = checkpoint(&mut e);
+            let output = frame(&mut e, vec![]);
+            let position = output
+                .shapes
+                .iter()
+                .find_map(|shape| {
+                    if let egui::Shape::Text(text) = &shape.shape {
+                        (text.galley.job.text == "-")
+                            .then_some(text.pos + egui::vec2(2.0, text.galley.size().y / 2.0))
+                    } else {
+                        None
+                    }
+                })
+                .expect("recovered raw rotation is visibly editable");
+            for pressed in [true, false] {
+                frame(
+                    &mut e,
+                    vec![
+                        egui::Event::PointerMoved(position),
+                        egui::Event::PointerButton {
+                            pos: position,
+                            button: egui::PointerButton::Primary,
+                            pressed,
+                            modifiers: egui::Modifiers::NONE,
+                        },
+                    ],
+                );
+            }
+            frame(&mut e, vec![egui::Event::Text("x".into())]);
+            let edited = e.draft.as_ref().unwrap().rotation[0].clone();
+            assert_ne!(edited, "-", "actual TextEdit receives the input");
+            let second = checkpoint(&mut e);
+            assert_ne!(first, second, "new raw text produces another checkpoint");
+            assert_eq!(
+                second["snapshot"]["drafts"]["fields"]["rotation"][0],
+                edited
+            );
+            e.recovery.disconnect_wait();
             assert!(!e.apply());
             assert_eq!(
                 e.recovery_snapshot().unwrap().drafts().unwrap()["fields"]["rotation_unit"],
@@ -6509,6 +6655,12 @@ mod tests {
         e.recovery.disconnect_wait();
         drop(e); // Simulate a crash: do not retire the journal.
         let id = store.scan().unwrap().remove(0).id;
+        let source_record = dir
+            .path()
+            .join("recovery")
+            .join(&id)
+            .join("checkpoint.json");
+        let source_bytes = std::fs::read(&source_record).unwrap();
         std::fs::write(&path, "external project replacement").unwrap();
         let mut restored = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
         // Explicit process startup grant precedes the human-owned Restore.
@@ -6516,6 +6668,8 @@ mod tests {
         let before_restore = inspect(&mut restored);
         restored.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
         restored.restore_checkpoint(&id).unwrap();
+        restored.wait_recovery();
+        restored.recovery_frame(&egui::Context::default());
         restored.wait_recovery();
         restored.test_finish_asset_work();
         let after_restore = inspect(&mut restored);
@@ -6578,22 +6732,48 @@ mod tests {
             .save_scene(project.join("partial-save.json"))
             .unwrap();
         assert!(store.scan().unwrap().is_empty());
+        assert!(
+            restored.recovery_source.is_some(),
+            "partial Save keeps the source lease"
+        );
+        assert_eq!(std::fs::read(&source_record).unwrap(), source_bytes);
         restored.recovery.disconnect_wait();
         drop(restored);
         assert_eq!(
             store.scan().unwrap().len(),
-            1,
-            "saving with drafts does not retire recovery"
+            2,
+            "the original and separate working checkpoint both survive a crash with drafts"
         );
+        let working_id = store
+            .scan()
+            .unwrap()
+            .into_iter()
+            .find(|candidate| candidate.id != id)
+            .unwrap()
+            .id;
+        let working_record = dir
+            .path()
+            .join("recovery")
+            .join(&working_id)
+            .join("checkpoint.json");
+        let working_bytes = std::fs::read(&working_record).unwrap();
         let mut final_copy = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
         final_copy.save_grant = Some(persistence_commands::SaveGrant::new(&project).unwrap());
         final_copy.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
-        final_copy.restore_checkpoint(&id).unwrap();
+        final_copy.restore_checkpoint(&working_id).unwrap();
         final_copy.wait_recovery();
         final_copy.test_finish_asset_work();
         final_copy.rename_pending = false;
         final_copy.sync_draft();
         final_copy.manipulation.delta = std::array::from_fn(|_| "0".into());
+        final_copy.finalize_saved_followup(
+            save_commands::Continuation::SaveOnly,
+            Err("injected cleanup failure".into()),
+        );
+        assert!(
+            final_copy.recovery_source.is_some(),
+            "failed cleanup keeps the read-only source lease"
+        );
         let repaired = inspect(&mut final_copy);
         assert_eq!(repaired["grant_valid"], true);
         assert_eq!(repaired["can_save_as"], true);
@@ -6606,6 +6786,17 @@ mod tests {
             final_copy.command("test", "scene_save", save_args(&repaired, "recovered.json"));
         assert_eq!(committed["ok"], true, "{committed}");
         assert_eq!(committed["result"]["receipt"]["committed"], true);
+        assert!(
+            final_copy.recovery_source.is_none(),
+            "successful draft-free Save releases the preserved source for explicit discard"
+        );
+        assert_eq!(std::fs::read(&source_record).unwrap(), source_bytes);
+        assert_eq!(std::fs::read(&working_record).unwrap(), working_bytes);
+        assert_eq!(
+            store.scan().unwrap().len(),
+            2,
+            "both preserved source checkpoints are explicitly discardable in the same editor"
+        );
         assert_eq!(
             Session::open(project.join("recovered.json"))
                 .unwrap()
@@ -6615,10 +6806,25 @@ mod tests {
         );
         final_copy.recovery.disconnect_wait();
         drop(final_copy);
-        assert!(
-            store.scan().unwrap().is_empty(),
-            "successful draft-free save retires recovery"
+        assert_eq!(
+            store.scan().unwrap().len(),
+            2,
+            "successful draft-free Save retires only its fresh working journal"
         );
+        let reservations: Vec<_> = (0..14).map(|_| store.allocate().unwrap()).collect();
+        let mut full = SceneEditor::new(Session::new(Scene::empty("full-store")).unwrap());
+        full.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
+        let unchanged = full.session.snapshot_bytes().unwrap();
+        assert!(full.restore_checkpoint(&id).unwrap_err().contains("All16"));
+        assert_eq!(full.session.snapshot_bytes().unwrap(), unchanged);
+        assert!(full.recovery_source.is_none() && full.recovery_transition.is_none());
+        assert_eq!(std::fs::read(&source_record).unwrap(), source_bytes);
+        for reservation in reservations {
+            reservation.retire().unwrap();
+        }
+        store.discard(&id).unwrap();
+        store.discard(&working_id).unwrap();
+        assert!(store.scan().unwrap().is_empty());
         assert_eq!(
             std::fs::read_to_string(path).unwrap(),
             "external project replacement"
@@ -8028,10 +8234,12 @@ mod tests {
     // Unique owner boundary: accepted new bindings and invalid raw action fields
     // travel together through production recovery without restoring live capture.
     #[test]
-    fn input_action_recovery_keeps_raw_draft_and_rejects_old_or_compound_ownership() {
+    fn input_action_recovery_preserves_compound_work_and_requires_explicit_baseline_review() {
         use ruster_scene::input::{ActionDefinition, ActionKind, InputKey};
         use sha2::{Digest, Sha256};
-        let mut session = Session::new(Scene::empty("action-recovery")).unwrap();
+        let mut scene = Scene::demo();
+        scene.id = "action-recovery".into();
+        let mut session = Session::new(scene).unwrap();
         let definition = ActionDefinition {
             label: Some("Home".into()),
             kind: ActionKind::Button {
@@ -8045,6 +8253,7 @@ mod tests {
             "base_hash":format!("{:x}",Sha256::digest(serde_json::to_vec(&definition).unwrap())),
             "id":"home","label":" unfinished label ","kind":{"type":"button","keys":["space"]},"intent":"set"});
         let mut editor = SceneEditor::new(session);
+        editor.select_object(Some("left".into()), false);
         editor
             .input_actions
             .restore_drafts(
@@ -8076,7 +8285,14 @@ mod tests {
             raw
         );
         let document = restored.session.snapshot_bytes().unwrap();
-        for kind in ["old-present", "old-null", "stale", "compound"] {
+        for kind in [
+            "old-present",
+            "old-null",
+            "future",
+            "wrong-scene",
+            "changed-baseline",
+            "compound",
+        ] {
             let mut bad = payload.clone();
             match kind {
                 "old-present" => bad["version"] = json!(8),
@@ -8084,7 +8300,9 @@ mod tests {
                     bad["version"] = json!(8);
                     bad["input_actions"] = Value::Null;
                 }
-                "stale" => bad["input_actions"]["revision"] = json!(0),
+                "future" => bad["input_actions"]["revision"] = json!(2),
+                "wrong-scene" => bad["input_actions"]["scene_id"] = json!("another-scene"),
+                "changed-baseline" => bad["input_actions"]["base_hash"] = json!("0".repeat(64)),
                 _ => bad["manipulation"]["delta"][0] = json!("1"),
             }
             assert!(restored.restore_recovery_drafts(bad).is_err(), "{kind}");
@@ -8094,5 +8312,347 @@ mod tests {
                 raw
             );
         }
+
+        // Every affected form uses the same gate for new drafts and Apply,
+        // including Save-before-New/Close and the nonmodal actions window.
+        for kind in ["color", "material", "ambient", "display", "create-light"] {
+            let mut blocked = SceneEditor::new(snapshot.restore().unwrap());
+            blocked.restore_recovery_drafts(payload.clone()).unwrap();
+            blocked.input_actions_open = false;
+            let color = json!({"object_id":"left","revision":1,
+                "baseline":blocked.session.scene().objects[0].color,"channels":["0.5","0.3","0.2","1"]});
+            match kind {
+                "color" => blocked.color_draft = Some(serde_json::from_value(color).unwrap()),
+                "material" => {
+                    blocked.material_draft = Some(material_ui::MaterialDraft {
+                        revision: 1,
+                        object_id: "left".into(),
+                        original_assignment: None,
+                        original_material: None,
+                        intent: material_ui::MaterialIntent::Create,
+                        name: "Recovered material".into(),
+                        tint: ["0.5".into(), "0.5".into(), "0.5".into()],
+                        response_mode: material_ui::MaterialResponseMode::Diffuse,
+                        roughness: "0.5".into(),
+                        texture: None,
+                        roughness_texture: None,
+                        filter: ruster_scene::TextureFilter::Nearest,
+                        address: ruster_scene::TextureAddress::Repeat,
+                    })
+                }
+                "ambient" => {
+                    let mut draft = lighting_ui::LightingDraft::ambient(blocked.session.scene());
+                    if let lighting_ui::LightingDraft::Ambient { intensity, .. } = &mut draft {
+                        *intensity = "0.2".into();
+                    }
+                    blocked.lighting_draft = Some(draft);
+                }
+                "display" => {
+                    let mut draft = display_ui::DisplayDraft::new(blocked.session.scene());
+                    draft.profile = display_ui::DisplayMode::Surface;
+                    draft.exposure_stops = "0.5".into();
+                    blocked.display_draft = Some(draft);
+                }
+                _ => {}
+            }
+            let apply = |editor: &mut SceneEditor| match kind {
+                "color" => editor.apply_color_draft(),
+                "material" => editor.apply_material_draft(),
+                "ambient" => editor.apply_lighting_draft(),
+                "display" => editor.apply_display_draft(),
+                _ => editor.create_light_ui(ruster_scene::LightKind::Point { range: 5.0 }),
+            };
+            let authored = blocked.session.snapshot_bytes().unwrap();
+            for pending in ["ordinary", "new", "close"] {
+                blocked.new_scene_pending = pending == "new";
+                blocked.close_pending = pending == "close";
+                assert!(!apply(&mut blocked), "{kind}/{pending}");
+                assert_eq!(blocked.session.snapshot_bytes().unwrap(), authored);
+                assert_eq!(
+                    serde_json::to_value(blocked.input_actions.drafts()).unwrap(),
+                    raw
+                );
+            }
+            blocked.new_scene_pending = false;
+            blocked.close_pending = false;
+            blocked.input_actions.clear();
+            assert!(apply(&mut blocked), "{kind}: {}", blocked.error);
+            assert_eq!(blocked.session.scene().revision, 2);
+        }
+
+        // Reproduce the old producer's supported compound through the actual
+        // capture owner, retaining invalid visual text and exact action text.
+        editor.color_draft = Some(serde_json::from_value(json!({"object_id":"left","revision":1,
+            "baseline":editor.session.scene().objects[0].color,"channels":["unfinished red","0.3","0.2","1"]})).unwrap());
+        let compound = editor.recovery_snapshot().unwrap();
+        let compound_payload = compound.drafts().unwrap();
+        let mut repaired = SceneEditor::new(compound.restore().unwrap());
+        repaired
+            .restore_recovery_drafts(compound_payload.clone())
+            .unwrap();
+        assert!(repaired.color_draft.is_some() && repaired.recovered_input.is_some());
+        assert!(!repaired.input_actions.pending() && !repaired.input_actions.capturing());
+        assert!(!repaired.behavior_editable() && !repaired.input_action_editable());
+        let before = repaired.session.snapshot_bytes().unwrap();
+        let history = repaired.session.undo_len();
+        assert!(
+            !repaired.apply(),
+            "generic Apply must not partially resolve deferred work"
+        );
+        repaired.save();
+        assert!(repaired.dialog.is_none());
+        repaired.queued_selection = Some((Some("right".into()), false));
+        repaired.process_queued_selection();
+        assert_eq!(repaired.selected.as_deref(), Some("left"));
+        assert!(!repaired.apply_color_draft());
+        assert_eq!(repaired.session.snapshot_bytes().unwrap(), before);
+        let state = repaired.command("owner", "scene_inspect", json!({}))["result"].clone();
+        assert_eq!(state["drafts_pending"], true);
+        assert_eq!(repaired.command("owner", "scene_color", json!({"expected_session_token":state["session_token"],"expected_revision":state["revision"],"object_id":"left","color":[1,1,1,1]}))["error"]["code"], "drafts_pending");
+        assert_eq!(
+            repaired.recovery_snapshot().unwrap().drafts().unwrap(),
+            compound_payload
+        );
+
+        // Exercise production scheduling/capture at each ownership transition.
+        let checkpoint = |editor: &mut SceneEditor| {
+            let directory = tempfile::tempdir().unwrap();
+            let store = crate::recovery::Store::open(directory.path().join("recovery")).unwrap();
+            editor.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
+            editor.observe_recovery(Instant::now() - Duration::from_secs(3));
+            editor.recovery_frame(&egui::Context::default());
+            editor.wait_recovery();
+            assert!(
+                editor.recovery.warning.is_empty(),
+                "{}",
+                editor.recovery.warning
+            );
+            editor.recovery.disconnect_wait();
+            let candidate = store.scan().unwrap().remove(0);
+            let (_lease, snapshot) = store.claim(&candidate.id).unwrap();
+            snapshot.drafts().unwrap()
+        };
+        assert_eq!(checkpoint(&mut repaired), compound_payload);
+        let mut visual = serde_json::to_value(repaired.color_draft.clone()).unwrap();
+        visual["channels"][0] = json!("0.5");
+        repaired.color_draft = Some(serde_json::from_value(visual).unwrap());
+        assert!(
+            repaired.apply_color_draft(),
+            "the existing visual remains repairable"
+        );
+        assert_eq!(repaired.session.undo_len(), history + 1);
+        assert_eq!(
+            serde_json::to_value(&repaired.recovered_input).unwrap(),
+            raw
+        );
+        assert!(!repaired.input_action_editable() && !repaired.behavior_editable());
+        assert!(!repaired.create_light_ui(ruster_scene::LightKind::Point { range: 5.0 }));
+        let stale_payload = checkpoint(&mut repaired);
+        assert_eq!(stale_payload["input_actions"], raw);
+        assert!(stale_payload.get("color").is_none());
+        let mut stale = SceneEditor::new(
+            Session::from_snapshot_bytes(&repaired.session.snapshot_bytes().unwrap()).unwrap(),
+        );
+        stale
+            .restore_recovery_drafts(stale_payload.clone())
+            .unwrap();
+        assert!(stale.recovered_input.is_some() && !stale.input_actions.pending());
+        for kind in ["hash", "missing-target"] {
+            let mut conflict = stale_payload.clone();
+            if kind == "hash" {
+                conflict["input_actions"]["base_hash"] = json!("0".repeat(64));
+            } else {
+                conflict["input_actions"]["edited_id"] = json!("missing");
+            }
+            let mut review = SceneEditor::new(
+                Session::from_snapshot_bytes(&repaired.session.snapshot_bytes().unwrap()).unwrap(),
+            );
+            review.restore_recovery_drafts(conflict.clone()).unwrap();
+            assert!(
+                review
+                    .resume_recovered_input(&egui::Context::default())
+                    .is_err(),
+                "{kind}"
+            );
+            assert_eq!(
+                review.recovery_snapshot().unwrap().drafts().unwrap()["input_actions"],
+                conflict["input_actions"]
+            );
+            review.discard_recovered_input();
+            assert!(!review.drafts());
+        }
+        let mut stale_visual = compound_payload.clone();
+        stale_visual["color"]["revision"] = json!(0);
+        let mut rejected = SceneEditor::new(compound.restore().unwrap());
+        assert!(rejected.restore_recovery_drafts(stale_visual).is_err());
+
+        // Real modal controls stay reachable with long unfinished values at
+        // 960x640 and its 480x320 logical equivalent at 2x desktop scaling.
+        for size in [egui::vec2(960.0, 640.0), egui::vec2(480.0, 320.0)] {
+            let review_ctx = egui::Context::default();
+            let mut modal_editor = SceneEditor::new(
+                Session::from_snapshot_bytes(&repaired.session.snapshot_bytes().unwrap()).unwrap(),
+            );
+            let mut long = stale_payload.clone();
+            long["input_actions"]["label"] = json!("unfinished recovered label ".repeat(100));
+            modal_editor.restore_recovery_drafts(long.clone()).unwrap();
+            let authored = modal_editor.session.snapshot_bytes().unwrap();
+            let submitted = std::cell::Cell::new(false);
+            let mut time = 0.0;
+            let mut frame = |editor: &mut SceneEditor, events| {
+                time += 0.1;
+                let mut output = review_ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        time: Some(time),
+                        events,
+                        screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                        ..Default::default()
+                    },
+                    |ui| {
+                        editor.recovered_input_window(&review_ctx);
+                        if editor.input_actions_open {
+                            submitted.set(
+                                submitted.get()
+                                    || editor
+                                        .input_actions
+                                        .show(ui, &editor.session, true)
+                                        .is_some(),
+                            );
+                        }
+                    },
+                );
+                output.textures_delta.clear();
+                output
+            };
+            frame(&mut modal_editor, vec![]);
+            let output = frame(&mut modal_editor, vec![]);
+            let text_rect = |output: &egui::FullOutput, label: &str| {
+                output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| {
+                        let egui::epaint::Shape::Text(text) = &shape.shape else {
+                            return None;
+                        };
+                        if text.galley.job.text != label {
+                            return None;
+                        }
+                        let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                        Some((rect, shape.clip_rect))
+                    })
+                    .unwrap_or_else(|| panic!("missing review text {label} at {size:?}"))
+            };
+            for label in [
+                "Resume editing",
+                "Discard recovered draft",
+                "Keep for later",
+            ] {
+                let (rect, clip) = text_rect(&output, label);
+                assert!(
+                    review_ctx.content_rect().contains_rect(rect),
+                    "{label} must fit at {size:?}: {rect:?}"
+                );
+                assert!(
+                    clip.contains_rect(rect),
+                    "{label} must remain outside the scrolling body: {rect:?}/{clip:?}"
+                );
+            }
+            assert!(
+                !output.shapes.iter().any(|shape| matches!(&shape.shape,
+                egui::epaint::Shape::Text(text) if text.galley.job.text.contains("base_hash"))),
+                "technical JSON stays collapsed by default"
+            );
+            let first = review_ctx.memory(|memory| memory.focused());
+            let key = |key| egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(&mut modal_editor, vec![key(egui::Key::Tab)]);
+            frame(&mut modal_editor, vec![]);
+            assert_ne!(
+                review_ctx.memory(|memory| memory.focused()),
+                first,
+                "Tab traverses real footer controls"
+            );
+            let point = text_rect(&output, "Review recovered action").0.center();
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos: point,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            frame(
+                &mut modal_editor,
+                vec![egui::Event::PointerMoved(point), pointer(true)],
+            );
+            frame(&mut modal_editor, vec![pointer(false)]);
+            frame(&mut modal_editor, vec![]);
+            assert!(modal_editor.recovered_input_open);
+            frame(&mut modal_editor, vec![key(egui::Key::Escape)]);
+            assert!(
+                !modal_editor.recovered_input_open,
+                "the modal owns Escape after a blank click and idle"
+            );
+            assert_eq!(
+                modal_editor.recovery_snapshot().unwrap().drafts().unwrap()["input_actions"],
+                long["input_actions"]
+            );
+            assert_eq!(modal_editor.session.snapshot_bytes().unwrap(), authored);
+            modal_editor.recovered_input = stale.recovered_input.clone();
+            modal_editor.recovered_input_open = true;
+            modal_editor.recovered_input_focused = false;
+            frame(&mut modal_editor, vec![]);
+            frame(&mut modal_editor, vec![]);
+            frame(&mut modal_editor, vec![key(egui::Key::Enter)]);
+            assert!(
+                modal_editor.recovered_input.is_none() && modal_editor.input_actions.pending(),
+                "the focused Resume button must activate by Enter"
+            );
+            assert!(
+                !submitted.get(),
+                "Resume must not Apply the action during the same frame"
+            );
+            assert_eq!(modal_editor.session.snapshot_bytes().unwrap(), authored);
+        }
+
+        let ctx = egui::Context::default();
+        let unchanged = stale.session.snapshot_bytes().unwrap();
+        let mut submitted = false;
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                events: vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                ..Default::default()
+            },
+            |ui| {
+                if stale.recovered_input.is_some() {
+                    stale.resume_recovered_input(&ctx).unwrap();
+                }
+                submitted |= stale.input_actions.show(ui, &stale.session, true).is_some();
+            },
+        );
+        output.textures_delta.clear();
+        assert!(
+            !submitted,
+            "Resume's Enter must not Apply during the same frame/layout pass"
+        );
+        assert_eq!(stale.session.snapshot_bytes().unwrap(), unchanged);
+        assert!(stale.recovered_input.is_none() && stale.input_actions.pending());
+        let mut resumed = raw.clone();
+        resumed["revision"] = json!(stale.session.scene().revision);
+        assert_eq!(checkpoint(&mut stale)["input_actions"], resumed);
+        assert!(!stale.input_actions.capturing());
+        stale.input_actions.clear();
+        assert!(!stale.drafts());
     }
 }
