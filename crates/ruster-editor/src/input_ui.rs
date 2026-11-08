@@ -258,6 +258,9 @@ pub(super) struct InputUi {
     validation_focus: Option<egui::Id>,
     message: String,
     interaction_frame: Option<u64>,
+    // Observed widget identity bridges egui clearing focus for Escape. It is
+    // never authority without current or actual previous-frame focus.
+    window_focus: Option<egui::Id>,
 }
 
 impl InputUi {
@@ -298,7 +301,7 @@ impl InputUi {
             self.changed();
         }
         self.capture = None;
-        self.focus_first = false;
+        self.focus_first = true;
         self.validation_focus = None;
         self.message.clear();
     }
@@ -504,6 +507,11 @@ impl InputUi {
         editable: bool,
         opened: &mut bool,
     ) -> Option<Edit> {
+        let pending_at_start = self.pending();
+        let capture_at_start = self.capturing();
+        let popup_at_start = egui::Popup::is_any_open(ctx);
+        let previous_focus = self.window_focus;
+        let mut close_requested = false;
         let mut edit = None;
         let window = egui::Window::new("Input actions")
             .open(opened)
@@ -511,13 +519,94 @@ impl InputUi {
             .max_width((ctx.content_rect().width() - 32.0).clamp(240.0, 520.0))
             .max_height((ctx.content_rect().height() - 48.0).max(200.0))
             .show(ctx, |ui| {
+                let footer_height =
+                    ui.spacing().interact_size.y + 2.0 * ui.spacing().item_spacing.y;
+                // Bound the scrolling body while reserving the title and the
+                // persistent Close row within the existing screen-height cap.
+                let body_height = (ctx.content_rect().height()
+                    - 48.0
+                    - ui.spacing().interact_size.y
+                    - footer_height)
+                    .max(64.0);
                 egui::ScrollArea::vertical()
                     .id_salt("input-actions-window")
                     .animated(false)
+                    .max_height(body_height)
                     .show(ui, |ui| {
                         edit = self.show(ui, session, editable);
                     });
+                ui.add_space(ui.spacing().item_spacing.y);
+                let close = ui.button("Close Input actions");
+                if self.focus_first && !self.pending() {
+                    self.focus_first = false;
+                    let focused = ctx.memory(|memory| memory.focused());
+                    if ctx.input(|input| input.focused && !input.pointer.any_pressed())
+                        && !popup_at_start
+                        && !egui::Popup::is_any_open(ctx)
+                        && ctx.memory(|memory| memory.top_modal_layer().is_none())
+                        && (focused.is_none() || focused == previous_focus)
+                    {
+                        close.request_focus();
+                    }
+                }
+                if close.clicked() && self.claim_frame(ctx) {
+                    close_requested = true;
+                }
             });
+        if let Some(window) = &window {
+            let layer = window.response.layer_id;
+            let focused = ctx.memory(|memory| memory.focused());
+            // egui read_response recomputes pointer interaction and can surrender
+            // focus. Do not reread a field just focused by another control's
+            // click; observe its real ownership on the next idle/key frame.
+            let observe_focus =
+                !ctx.input(|input| input.pointer.any_pressed() || input.pointer.any_released());
+            let current_owner = if observe_focus {
+                focused
+                    .and_then(|id| ctx.read_response(id))
+                    .filter(|response| response.layer_id == layer)
+            } else {
+                None
+            };
+            let previous_owner = observe_focus
+                && focused.is_none()
+                && previous_focus.is_some_and(|id| {
+                    ctx.memory(|memory| memory.had_focus_last_frame(id))
+                        && ctx
+                            .read_response(id)
+                            .is_some_and(|response| response.layer_id == layer)
+                });
+            let outside_press = ctx.input(|input| input.pointer.any_pressed())
+                && !window.response.contains_pointer();
+            let window_available = ctx.input(|input| input.focused)
+                && !outside_press
+                && ctx.memory(|memory| memory.top_modal_layer().is_none());
+            if window_available
+                && !pending_at_start && !self.pending()
+                && !capture_at_start && !self.capturing()
+                && !popup_at_start && !egui::Popup::is_any_open(ctx)
+                && self.interaction_frame != Some(ctx.cumulative_frame_nr())
+                && (current_owner.is_some() || previous_owner)
+                && ctx.input_mut(|input| {
+                    input.events.iter().any(|event| matches!(event,
+                        egui::Event::Key { key: egui::Key::Escape, pressed: true, repeat: false, modifiers, .. }
+                            if !modifiers.any()
+                    )) && input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                })
+            {
+                self.claim_frame(ctx);
+                close_requested = true;
+            }
+            self.window_focus = current_owner
+                .map(|response| response.id)
+                .filter(|_| window_available);
+        } else {
+            self.window_focus = None;
+        }
+        if close_requested {
+            *opened = false;
+            self.window_focus = None;
+        }
         if !*opened
             || !ctx.input(|input| input.focused)
             || window.is_none_or(|window| window.inner.is_none())
@@ -1209,6 +1298,9 @@ mod tests {
             let edit = visible_text(&shapes, "Edit").expect("list Edit is visible");
             frame(&ctx, &mut editor, &session, size, click(edit, true));
             frame(&ctx, &mut editor, &session, size, click(edit, false));
+            assert!(editor.pending(),
+                "visible Edit must begin the actual draft at {size:?}; clicked={edit:?}, focus={:?}, observed_window_focus={:?}, frame={}",
+                ctx.memory(|memory| memory.focused()), editor.window_focus, ctx.cumulative_frame_nr());
             for _ in 0..3 {
                 shapes = frame(&ctx, &mut editor, &session, size, vec![]);
             }
@@ -1481,6 +1573,96 @@ mod tests {
                 editor.drafts(),
                 retained,
                 "clipped owner cannot accept the staged key"
+            );
+            assert_eq!(session.snapshot_bytes().unwrap(), original);
+
+            // Parent Apply clears the working copy. The visible Close button
+            // receives a one-shot handoff, never an invisible retained owner.
+            editor.clear();
+            frame(&ctx, &mut editor, &session, size, vec![]);
+            let immediate_focus = ctx
+                .memory(|memory| memory.focused())
+                .and_then(|id| ctx.read_response(id))
+                .expect("Apply/Cancel immediately hands off to a real visible widget");
+            assert!(
+                immediate_focus.has_focus()
+                    && immediate_focus
+                        .interact_rect
+                        .contains_rect(immediate_focus.rect),
+                "the immediate footer focus must fit its actual interaction clip"
+            );
+            // As with the form transitions above, let the restored viewport and
+            // retained Window settle before inspecting painted text geometry.
+            for _ in 0..2 {
+                shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            }
+            let close = visible_text(&shapes, "Close Input actions")
+                .expect("Close remains outside the scrolling body");
+            let focused = ctx
+                .memory(|memory| memory.focused())
+                .and_then(|id| ctx.read_response(id));
+            assert!(
+                focused
+                    .is_some_and(|response| response.has_focus() && response.rect.contains(close)),
+                "Apply/Cancel handoff must reach the genuine visible Close button"
+            );
+            let mut opened = true;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: false,
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events: key(egui::Key::Escape),
+                    ..Default::default()
+                },
+                |_| {
+                    assert!(editor.window(&ctx, &session, true, &mut opened).is_none());
+                },
+            );
+            output.textures_delta.clear();
+            assert!(opened, "an unfocused OS window cannot own Escape dismissal");
+
+            // A genuine focus transfer outside Input actions revokes its
+            // dismissal authority, even when Escape clears that outside focus.
+            shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            let other = visible_text(&shapes, "Other control")
+                .expect("competing Inspector control is visible");
+            frame(&ctx, &mut editor, &session, size, click(other, true));
+            frame(&ctx, &mut editor, &session, size, click(other, false));
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Escape));
+            assert!(editor.window_focus.is_none());
+
+            // Cancel owns its Escape and keeps the window. Only a subsequent
+            // Escape from the handed-off footer dismisses the clean window.
+            shapes = frame(&ctx, &mut editor, &session, size, vec![]);
+            let add = visible_text(&shapes, "Add Button").unwrap();
+            frame(&ctx, &mut editor, &session, size, click(add, true));
+            frame(&ctx, &mut editor, &session, size, click(add, false));
+            frame(&ctx, &mut editor, &session, size, vec![]);
+            assert!(editor.pending());
+            frame(&ctx, &mut editor, &session, size, key(egui::Key::Escape));
+            assert!(!editor.pending());
+            frame(&ctx, &mut editor, &session, size, vec![]);
+            let mut escaped = false;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events: key(egui::Key::Escape),
+                    ..Default::default()
+                },
+                |ui| {
+                    assert!(editor.window(&ctx, &session, true, &mut opened).is_none());
+                    escaped |= ui.input(|input| input.key_pressed(egui::Key::Escape));
+                },
+            );
+            output.textures_delta.clear();
+            assert!(
+                !opened,
+                "clean Input actions must dismiss from its genuine keyboard owner"
+            );
+            assert!(
+                !escaped,
+                "dismissal consumes Escape before any later global action"
             );
             assert_eq!(session.snapshot_bytes().unwrap(), original);
         }
