@@ -744,7 +744,6 @@ impl SceneEditor {
             .iter()
             .any(|response| response.clicked() && !response.sense.senses_drag());
         let mut enter = false;
-        let mut escape = false;
         let mut submitting = None;
         for response in &fields {
             let owned = response.has_focus()
@@ -756,8 +755,6 @@ impl SceneEditor {
                 enter |= ui
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
                     && !activation_owned_enter;
-                escape |= ui
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                 submitting = Some(response.id);
             }
         }
@@ -773,13 +770,11 @@ impl SceneEditor {
                     ui.memory_mut(|memory| memory.request_focus(id));
                 }
             }
-            let action_owned = [&apply, &cancel]
-                .iter()
-                .any(|response| response.has_focus());
-            if keys_available && action_owned {
-                escape |= ui
+            // The open HUD owns global shortcuts, including when Apply has
+            // cleared child focus. Popup Escape remains with the popup.
+            let escape = keys_available
+                && ui
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            }
             if cancel.clicked() || escape {
                 self.cancel_hud_draft();
                 self.hud_open = false;
@@ -1451,6 +1446,15 @@ mod tests {
             "Enter in a valid text field submits the HUD"
         );
         assert_eq!(editor.session.hud().width, 321.0);
+        if let Some(focused) = context.memory(|memory| memory.focused()) {
+            context.memory_mut(|memory| memory.surrender_focus(focused));
+        }
+        draw(&mut editor, vec![]);
+        draw(&mut editor, vec![key(egui::Key::Escape)]);
+        assert!(
+            !editor.hud_open,
+            "Escape closes the HUD after Apply clears control focus"
+        );
         editor
             .session
             .undo(editor.session.scene().revision)
