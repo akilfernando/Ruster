@@ -1,6 +1,6 @@
 # Creator foundation gap sequence
 
-Prepared2026-11-09 after the user directs work on the remaining significant gaps before a test project. This supersedes the recommendation to begin a substantive creator challenge immediately. The user confirms that scoring, menus and application rules belong to creators. The ordering below is an agent-selected working sequence. Each row requires its own bounded contract, decision and evaluation. Current product source remains `cc6aed6`; this document records planning and source investigation.
+Prepared2026-11-09 after the user directs work on the remaining significant gaps before a test project. This supersedes the recommendation to begin a substantive creator challenge immediately. The user confirms that scoring, menus and application rules belong to creators. The ordering below is an agent-selected working sequence. Each row requires its own bounded contract, decision and evaluation. F1 is accepted on source `3c8fc8f`; later rows remain planning and source investigation.
 
 ## Outcome and working method
 
@@ -12,7 +12,7 @@ Use small subsystem fixtures and short native acceptance journeys throughout. Ea
 
 | Package | Creator capability to complete | Main dependency and bounded acceptance |
 | --- | --- | --- |
-| F1 Runtime state | Define application data that survives successful ticks, inspect it and reset predictably | Typed ownership/initialization, atomic transform/state commit, immutable observations, old-script compatibility, authoring/history/recovery and exact runtime delivery |
+| F1 Runtime state | Accepted2026-11-09 on3c8fc8f. Define application data that survives successful ticks, inspect it and reset predictably | Typed ownership/initialization, atomic transform/state commit, immutable observations, old-script compatibility, authoring/history/recovery and exact runtime delivery |
 | F2 Application lifecycle | Express initialization, updates, state transitions and communication between behaviors | Stable runtime state and explicit ordering/ownership. Select lifecycle/events/creation/destruction as separate slices; retain atomic failures and explicit identity rules |
 | F3 Runtime UI and broader interaction | Author labels, buttons, menus and bindings to creator state/actions | Shared reusable UI data/behavior, pointer and keyboard focus/navigation, UI operation during simulation pause, preview/runtime/MCP observation and remapping. Scope widgets/layout/accessibility in written slices |
 | F4 Scene composition | Organize nested transforms, reusable assemblies/prefabs and scene transitions | Settle transforms, references, instancing/overrides and lifecycle with atomic history. Group hierarchy, reusable prefab workflow and loading transitions each require separate acceptance |
@@ -34,6 +34,6 @@ The working minimum customer baseline is a small supported3D game or interactive
 
 ## First bounded milestone
 
-Start with [F1 creator-defined runtime state](F1-RUNTIME-STATE.md). The active work is source/dependency investigation and contract design. Creator state names, values and rules remain authored data. A score or inventory is one possible use of those facilities.
+Start with [F1 creator-defined runtime state](F1-RUNTIME-STATE.md). F1 is accepted after source/native/recovery/exact delivery/cost qualification. Creator state names, values and rules remain authored data. A score or inventory is one possible use of those facilities.
 
-Accept and evaluate F1 before selecting the first lifecycle/UI implementation slice. Independent source research/preparation may run concurrently. Root serializes integration, builds, benchmarks and native testing, and documents each meaningful decision in the same session.
+The [F1 evaluation](../ROADMAP-REVIEW.md#f1-runtime-state-evaluation--2026-11-09) recommends a bounded lifecycle/paused-command proposal before runtime UI. Initial export views already exist. General persisted camera components/tracking/aspect/presentation ownership should be assessed as a separate dependency alongside F2/F3. Select the first lifecycle/UI slice separately. Independent source research/preparation may run concurrently. Root serializes integration, builds, benchmarks and native testing, and documents each meaningful decision in the same session.

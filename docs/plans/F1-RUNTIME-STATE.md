@@ -1,10 +1,10 @@
 # F1 — Creator-defined runtime state
 
-Prepared2026-11-09. The user authorizes addressing significant reusable engine gaps before the later test project. Root/Astra select runtime-state investigation first. This is the bounded contract/design stage, with representation, version progression and numeric capacities pending their recorded decision. No Goal-tool goal is created by this document.
+Prepared2026-11-09. The user authorizes addressing significant reusable engine gaps before the later test project. Root/Astra select runtime state first. [Decision0044](../decisions/0044-owned-creator-runtime-state.md) owns the selected implementation contract, versions and logical capacities. Root/Astra accept source3c8fc8f after bounded qualification and independent retention review. No Goal-tool goal is created by this document.
 
 ## Creator outcome
 
-Creators can define their own typed application data, initialize it from authored defaults, update it from script/Rust behavior, inspect current committed values, and reset to predictable defaults. State supports creator-defined rules such as progress, modes or counters. Subsequent runtime UI can consume the same committed observations.
+Creators author typed application defaults through Rust, the editor and MCP. API4 behavior execution updates per-run values, and Rust/editor/MCP surfaces inspect committed observations and support predictable Reset. The F1 RuntimeState surface provides immutable public observation with script-owned patches. Existing Rust Application implementations retain their own state separately. State supports creator-defined rules such as progress, modes or counters. Subsequent runtime UI can consume the same committed observations.
 
 ## Inspected starting point
 
@@ -27,7 +27,7 @@ These observations establish the integration boundary. They establish no new sta
 7. Deliver identical semantics through the existing generic standalone runtime. Keep authored defaults preserved during preview and player runtime changes.
 8. Bound state size, conversion work, retained snapshots and debug exposure. Prevent VM tables/closures/foreign handles from becoming persistent authority. Avoid copying every binding's state into every script or UI/MCP inspection request.
 
-## Consequential decisions to settle before implementation
+## Design questions settled by decision0044
 
 - State owner and namespace. Compare per-binding state with project/session-owned state and their cross-behavior reads/writers. General application state needs a usable nonvisual owner path. The current rendered-object binding requirement must be addressed explicitly.
 - Schema ownership. Compare reusing existing typed values with a distinct runtime-state definition where validation, references or evolution differ. Reuse useful validation while retaining separate authored/runtime identities.
@@ -36,11 +36,11 @@ These observations establish the integration boundary. They establish no new sta
 - Publication/retention. Reuse the current single worker/latest-frame authority. Compare staged Rust-owned deltas and immutable per-owner snapshots, with no-op sharing as a candidate. Measure copy/serialization cost before selecting representation. Full state DTO copies on every frame/inspection require explicit justification. Settle the final-drop owner and worst-case disposal work for retained shared snapshots. Debugger locals may show private in-progress work, while committed runtime inspection must keep its published-tick identity. The existing VM allocation limit does not bound Rust-owned state or retained snapshots. Unchanged legacy scripts require an explicit cost observation.
 - Values/wire/tooling. Freeze numeric precision, typed wire representation, absence/deletion rules and reference lifetime. Reuse existing typed-value validation only where its contract fits. Current generated Lua tooling assumes the old API; version-accurate stubs and actual development-tooling behavior belong to the new API contract.
 
-## Current source-informed architecture recommendation
+## Architecture selected for F1
 
-Astra recommends stable behavior-binding identity as the state owner, with an explicit nonvisual Application target alongside Object. One application-controller binding would own application-level state within each Runtime/run. Object bindings would own their own independent state. Writers return updates to their own state; cross-owner reads, if selected, observe the same immutable tick-start snapshot and become visible on the following committed tick. Initialization must avoid partly initialized peer reads.
+Decision0044 selects stable behavior-binding identity as the state owner, with an explicit nonvisual Application target alongside Object. One application-controller binding owns application-level state within each Runtime/run. Object bindings own independent state. Writers return updates to their own state; cross-owner reads observe the same immutable tick-start snapshot and become visible on the following committed tick. Initialization must avoid partly initialized peer reads.
 
-This is a proposed architecture for the first feasibility decision. The tagged target, migration/wire compatibility, state schema and opt-in behavior API require an explicit accepted decision before implementation. The nonvisual owner path belongs in F1's completion boundary. General hierarchy remains a separate composition package. Existing API1/2/3 Reset trials retain their semantics; a new state API must distinguish tick0 initialization from a committed simulation update and state explicitly how existing input/spatial facilities are inherited. Two bindings sharing one source must retain independent state. A failed Reset preserves the previous complete runtime.
+The tagged target, migration/wire compatibility, state schema and opt-in behavior API are selected in decision0044. The nonvisual owner path belongs in F1's completion boundary. General hierarchy remains a separate composition package. Existing API1/2/3 Reset trials retain their semantics; API4 distinguishes default initialization at tick0 from committed updates and inherits the existing input/spatial facilities. Two bindings sharing one source must retain independent state. A failed Reset preserves the previous complete runtime.
 
 ## Verification and stop
 
@@ -57,3 +57,9 @@ Stop after this state contract and its end-to-end qualification are accepted. Ru
 Accessed2026-11-09. [Godot exported properties](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_exports.html) illustrates editor-visible serialized defaults. This informs authored-default ergonomics while runtime-state ownership remains a Ruster decision. [Godot process modes and pausing](https://docs.godotengine.org/en/stable/tutorials/scripting/pausing_games.html) documents independently active UI/processing during pause. This highlights a later lifecycle/UI requirement to settle alongside F2/F3. Neither source establishes Ruster behavior or performance.
 
 A requested Bevy quick-start state page was unavailable through browsing. No conclusion relies on that page. Further architecture-specific primary research belongs with the selected representation and decision.
+
+## Accepted result — 2026-11-09
+
+Root/Astra retain the ADR0044 contract on source3c8fc8f. Ordinary editor and native MCP authoring, actual raw-name/value recovery, shared history, exact source/default/state identities, normal Save/reopen/tooling/export and six source-hidden standalone tick checks pass. Separate NVIDIA Vulkan4×MSAA native apps and the default no-MCP editor close normally with preserved payloads and restored desktop. [Evidence](../evidence/F1-RUNTIME-STATE.md) and [evaluation](../ROADMAP-REVIEW.md#f1-runtime-state-evaluation--2026-11-09) retain original failures, cost observations and limits.
+
+The initial full290Rust/28Python gate and final affected127default/129inspection editor gates qualify their recorded final inputs. Three opt-in GPU cases and one existing editor device case remain ignored, with unchanged renderer-owner evidence reused and actual native validation recorded separately. Typed-completion checks use a disclosed annotated virtual document. Isolated adoption/allocation peaks, physical-human/Zed and Intel qualification remain open. Stop at this bounded state contract. F2 lifecycle/paused commands needs its own proposal before implementation.

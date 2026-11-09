@@ -239,7 +239,7 @@ Export lifecycle update2026-11-09. Inspect `operation.cleanup_pending` and optio
 
 ## Owned runtime state — F1 implementation
 
-Current source discovers72tools. F1 adds `behavior_state_default`, `behavior_state_default_set` and `behavior_runtime_state`. Root-owned verification and native qualification remain pending.
+Current source discovers72tools. F1 adds `behavior_state_default`, `behavior_state_default_set` and `behavior_runtime_state`. Root-owned checks and the112-call independent native SDK workflow qualify bounded F1, including exact receipts/state pages, stale-tick rejection and SaveAs/export. Physical-human and broader platform gates remain separate.
 
 `behavior_create` and `behavior_binding_set` accept exactly one owner representation. Existing Object requests keep `object_id`. Application requests supply `target:{"type":"application"}` and omit `object_id`. Both, neither, null or unknown target variants reject. One Application binding is allowed, including disabled bindings. Updating a binding retains its existing properties and authored state defaults.
 

@@ -4,7 +4,7 @@ Updated 2026-11-09. M8 is complete in its recorded Linux scope. The original M8 
 
 ## F1 owned runtime state — 2026-11-09
 
-[Decision0044](decisions/0044-owned-creator-runtime-state.md) accepts the F1 implementation contract, pending feature qualification and milestone retention. The Scene, behavior, generic-consumer and packaging checks pass. F1 milestone UI/native, raw-draft recovery, exact standalone delivery and state memory/tick/publication/disposal cost qualification remains pending. The [F1 plan](plans/F1-RUNTIME-STATE.md) owns these gates.
+[Decision0044](decisions/0044-owned-creator-runtime-state.md) records accepted bounded F1 on source3c8fc8f. Ordinary/native MCP authoring, actual raw-draft recovery, Save/reopen, normal tooling and exact standalone paths pass with qualified cost evidence. Isolated publication/adoption, actual Rust allocation peaks and physical-human/focused Zed acceptance remain separate. [F1 evidence](evidence/F1-RUNTIME-STATE.md).
 
 ### Author defaults and application logic
 
@@ -12,7 +12,7 @@ In the Inspector's **Behavior** section, choose **Application behavior** to work
 
 Under **State defaults**, expand **Add state field**, enter **Field name** and choose **State field type** from Number, Bool, Text or Vec3. Enter in the focused name field or **Add typed state field** commits the typed default through authored Undo. Enter inside the type popup stays with that popup. **Edit default** opens the value form. Enter or **Apply state default** commits it. Escape in the owned value field or **Revert state default** cancels that edit. **Remove field** changes the authored schema. Escape in the owned pending name/type form or **Cancel new state field** cancels field creation. **Cancel pending state field** also remains available above the form.
 
-Source, default and pending-name edits are drafts until applied. Invalid raw input remains repairable. Pending forms block conflicting operations. Finish or explicitly cancel them before Save/Reset or unrelated edits. New target/default forms use recovery drafts11 with the existing journal envelope1. Recovery integration is implemented, with its new native acceptance still pending. Shared authored Undo/Redo restores defaults and target/source data. Running state remains separate.
+Source, default and pending-name edits are drafts until applied. Invalid raw input remains repairable. Pending forms block conflicting operations. Finish or explicitly cancel them before Save/Reset or unrelated edits. New target/default forms use recovery drafts11 with the existing journal envelope1. Actual native raw-name and invalid-value crash/restore/repair acceptance passes in the recorded F1 scope. Shared authored Undo/Redo restores defaults and target/source data. Running state remains separate.
 
 Scene13 preserves Object bindings as `"object_id":"object-1"`. Application uses only `"target":{"type":"application"}`. Exactly one form is required, including when disabled. There is at most one Application binding and it consumes no geometry slot. `state_defaults` is a typed name/value map, omitted when empty. For example, `"count":{"type":"number","value":0}` declares a Number field. Properties remain configuration. Defaults define the next run's state schema. State belongs to the stable binding ID. Object duplication copies authored defaults to a fresh owner, while Application state stays with its Application binding. [Data API](../crates/ruster-scene/README.md#application-bindings-and-authored-state-defaults-format-13).
 

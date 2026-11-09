@@ -1,6 +1,6 @@
 # 0044 — Owned creator runtime state
 
-Date2026-11-09. Status accepted implementation contract, pending feature verification and milestone retention. The user approves proceeding with F1. Root selects the following defaults after Astra's independent architecture review. These numeric/API/representation defaults are agent-selected, serving the user-confirmed creator-owned application logic and lean implementation requirements.
+Date2026-11-09. Status accepted implementation and bounded milestone retention on source `3c8fc8f`. [F1 evidence](../evidence/F1-RUNTIME-STATE.md) records qualified acceptance. The user approves proceeding with F1. Root selects the following defaults after Astra's independent architecture review. These numeric/API/representation defaults are agent-selected, serving the user-confirmed creator-owned application logic and lean implementation requirements.
 
 ## Context
 
@@ -50,6 +50,6 @@ A separate initializer callback would create another lifecycle phase. Authored d
 
 ## Verification and primary evidence
 
-[F1 plan](../plans/F1-RUNTIME-STATE.md) owns milestone acceptance and stop. Root captures the public API4 unsupported-backend RED and the current legacy tick/Reset baseline before production edits. New state tests extend the existing scene, behavior, worker and generic-consumer owners. Editor/MCP/recovery and exact standalone acceptance follow integration. State memory/tick/publication/disposal observations precede retention.
+[F1 plan](../plans/F1-RUNTIME-STATE.md) owns milestone acceptance and stop. Root captures the public API4 unsupported-backend RED and legacy tick/Reset baseline before production edits. New state tests extend the existing scene, behavior, worker and generic-consumer owners. Ordinary/native MCP/recovery, exact source-hidden/headless and separate native standalone paths pass. Runtime timing, isolated retained-state disposal, paused editor CPU and end-to-end page observations support qualified retention. Isolated publication/adoption, actual Rust allocation peaks/maximum overlap and worst-case foreground disposal remain unqualified. Logical capacities remain separate from RAM guarantees.
 
 Primary references accessed2026-11-09 include [Godot exported properties](https://docs.godotengine.org/en/stable/tutorials/scripting/gdscript/gdscript_exports.html), [Lua5.4 values](https://www.lua.org/manual/5.4/manual.html#2.1) and [mlua0.12.2 scoped callbacks](https://docs.rs/mlua/0.12.2/mlua/struct.Lua.html#method.scope). These inform default ergonomics, numeric/nil semantics and callback lifetime. They establish no Ruster capability or comparative performance.
