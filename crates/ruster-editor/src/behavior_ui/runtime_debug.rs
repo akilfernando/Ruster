@@ -452,7 +452,7 @@ impl RuntimeUi {
                 source_id: Some(stop.source_id.clone().into()),
                 source_hash: Some(stop.source_hash.clone().into()),
                 binding_id: Some(stop.binding_id.clone().into()),
-                object_id: Some(stop.object_id.clone().into()),
+                object_id: stop.object_id.clone().map(Into::into),
                 phase: stop.phase,
                 message: "Debugger source stop".into(),
                 line: stop.line,
@@ -490,6 +490,9 @@ impl RuntimeUi {
             .and_then(Value::as_str)
             .and_then(|s| s.parse::<usize>().ok())
             .unwrap_or(0);
+        if op == "behavior_runtime_state" {
+            return self.state_page(args);
+        }
         if op == "behavior_runtime_inspect" {
             let requested = args
                 .get("operation_id")
@@ -556,8 +559,16 @@ impl RuntimeUi {
                 .frame
                 .as_ref()
                 .map_or(0, |frame| frame.scene.objects.len());
+            let owners=self.frame.as_ref().map(|frame|frame.state.binding_ids().skip(offset).take(16)
+                .map(|id|json!({"binding_id":id,"source_hash":frame.state.source_hash(id),
+                    "schema_hash":frame.state.schema_hash(id),"field_count":frame.state.binding(id).map_or(0,|fields|fields.len())})).collect::<Vec<_>>()).unwrap_or_default();
+            let owner_count = self
+                .frame
+                .as_ref()
+                .map_or(0, |frame| frame.state.binding_ids().count());
             return Ok(
-                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Committed tick snapshots do not report current physical key state.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string())}),
+                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Committed tick snapshots do not report current physical key state.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
+                "state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())}),
             );
         }
         if op == "behavior_breakpoints" {

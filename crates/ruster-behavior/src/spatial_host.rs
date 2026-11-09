@@ -54,7 +54,12 @@ impl Engine {
                 && authoring
                     .sources
                     .get(&binding.source_id)
-                    .is_some_and(|source| source.host_api_version == SPATIAL_HOST_API_VERSION)
+                    .is_some_and(|source| {
+                        matches!(
+                            source.host_api_version,
+                            SPATIAL_HOST_API_VERSION | STATE_HOST_API_VERSION
+                        )
+                    })
         }) {
             return Ok(None);
         }

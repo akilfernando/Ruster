@@ -16,7 +16,8 @@ fn fixture(text: &str) -> (Scene, Authoring) {
         authoring.bindings.insert(
             format!("binding-{id}"),
             BehaviorBinding {
-                object_id: id.into(),
+                target: ruster_scene::BindingTarget::Object(id.into()),
+                state_defaults: Default::default(),
                 source_id: "source".into(),
                 enabled: true,
                 properties: BTreeMap::from([

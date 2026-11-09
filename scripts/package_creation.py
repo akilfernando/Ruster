@@ -51,6 +51,8 @@ INPUT_PROFILE = {**ROUGHNESS_PROFILE, "descriptor_version": 5,
                  "capabilities": [*ROUGHNESS_PROFILE["capabilities"], "input_actions"]}
 SPATIAL_PROFILE = {**INPUT_PROFILE,
                    "capabilities": [*INPUT_PROFILE["capabilities"], "spatial_queries"]}
+STATE_PROFILE = {**SPATIAL_PROFILE,
+                 "capabilities": [*SPATIAL_PROFILE["capabilities"], "runtime_state"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -164,7 +166,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -553,6 +555,117 @@ def authored_actions(document: dict) -> dict:
     return actions
 
 
+def validate_state_fields(document: dict) -> None:
+    """Check binding-owned state, never property/source text that resembles it.
+
+    Python and serde_json need not print f64 identically. Numeric zero placeholders
+    give only a canonical size lower bound here; mandatory typed runtime preflight
+    owns exact encoded caps, reachable history and source execution validation.
+    """
+    version = document["format_version"]
+
+    def identity(value: object) -> None:
+        if not isinstance(value, str) or not IDENTITY.fullmatch(value):
+            raise ValueError("invalid state/binding identity")
+
+    def finite(value: object) -> None:
+        try:
+            valid = type(value) in (int, float) and math.isfinite(value)
+        except OverflowError:
+            valid = False
+        if not valid:
+            raise ValueError("state numbers must be finite binary64 values")
+
+    def lower_bytes(value: object) -> int:
+        return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"),
+                              allow_nan=False).encode())
+
+    def binding(value: object) -> dict:
+        if not isinstance(value, dict):
+            raise ValueError("invalid behavior binding")
+        if version < 13:
+            if "target" in value or "state_defaults" in value:
+                raise ValueError("application targets and state defaults require Scene13 runtime_state")
+            return {}  # Existing old binding validation belongs to Session.
+        required = {"source_id", "enabled", "properties"}
+        owner = "object_id" if "object_id" in value else "target"
+        exact_fields(value, required | {owner} | ({"state_defaults"} if "state_defaults" in value else set()), "behavior binding")
+        identity(value["source_id"])
+        if type(value["enabled"]) is not bool or not isinstance(value["properties"], dict):
+            raise ValueError("invalid binding enabled flag or properties")
+        if owner == "object_id":
+            identity(value[owner])
+        else:
+            exact_fields(value[owner], {"type"}, "application target")
+            if value[owner]["type"] != "application":
+                raise ValueError("invalid application target")
+        fields = value.get("state_defaults", {})
+        if not isinstance(fields, dict) or len(fields) > 64:
+            raise ValueError("state requires at most64 fields per binding")
+        lower = {}
+        for name, field in fields.items():
+            identity(name)
+            exact_fields(field, {"type", "value"}, "state value")
+            kind, data = field["type"], field["value"]
+            if kind == "number":
+                finite(data)
+                data = 0
+            elif kind == "vec3":
+                if not isinstance(data, list) or len(data) != 3:
+                    raise ValueError("state vector requires three finite numbers")
+                for component in data:
+                    finite(component)
+                data = [0, 0, 0]
+            elif kind == "bool":
+                if type(data) is not bool:
+                    raise ValueError("state bool requires a boolean")
+            elif kind == "text":
+                if not isinstance(data, str) or len(data.encode()) > 1024:
+                    raise ValueError("state text exceeds1024 UTF-8 bytes")
+            else:
+                raise ValueError("unsupported state value type")
+            lower[name] = {"type": kind, "value": data}
+        if lower_bytes(lower) > 16 * 1024:
+            raise ValueError("state exceeds16KiB per binding")
+        return lower
+
+    authoring = document.get("authoring", {})
+    bindings = authoring.get("bindings", {}) if isinstance(authoring, dict) else {}
+    if not isinstance(bindings, dict) or len(bindings) > 256:
+        raise ValueError("authoring requires at most256 bindings")
+    states, owners, application = {}, set(), False
+    for name, value in bindings.items():
+        identity(name)
+        states[name] = binding(value)
+        if version >= 13:
+            if "target" in value:
+                if application:
+                    raise ValueError("only one application binding is supported")
+                application = True
+            else:
+                owner = value["object_id"]
+                if owner in owners:
+                    raise ValueError("only one behavior binding per object is supported")
+                owners.add(owner)
+    if sum(lower_bytes(fields) for fields in states.values() if fields) > MIB:
+        raise ValueError("state exceeds1MiB per runtime")
+    for stack in ("undo", "redo"):
+        changes = document.get(stack, [])
+        for change in changes if isinstance(changes, list) else []:
+            if not isinstance(change, dict) or "bindings" not in change:
+                continue
+            deltas = change["bindings"]
+            if not isinstance(deltas, list):
+                raise ValueError("binding history requires a delta array")
+            for delta in deltas:
+                if not isinstance(delta, dict) or "id" not in delta or set(delta) - {"id", "before", "after"}:
+                    raise ValueError("invalid binding history fields")
+                identity(delta["id"])
+                for endpoint in ("before", "after"):
+                    if delta.get(endpoint) is not None:
+                        binding(delta[endpoint])
+
+
 def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     """Derive current runtime dependencies independently of the content request.
 
@@ -562,8 +675,9 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     version = document.get("format_version")
     scene = document.get("scene")
     if (document.get("format") != "ruster-scene" or type(version) is not int
-            or not 1 <= version <= 12 or not isinstance(scene, dict)):
-        raise ValueError("content requires a supported Scene1–12 document")
+            or not 1 <= version <= 13 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–13 document")
+    validate_state_fields(document)
     validate_collider_fields(document)
     validate_input_fields(document)
     validate_sun_shadows(document)
@@ -623,9 +737,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
-    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7, 8):
+    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
         raise ValueError("invalid content schema")
-    tick_field = "tick_nanos" if schema in (7, 8) else "tick_millis"
+    tick_field = "tick_nanos" if schema in (7, 8, 9) else "tick_millis"
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
@@ -633,7 +747,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     if "initial_camera" in content:
         content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
-    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema in (7, 8) else (1, 1000)
+    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema in (7, 8, 9) else (1, 1000)
     if (not isinstance(title, str) or not title or title != title.strip()
             or len(title.encode()) > 128 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in title)
             or type(content[tick_field]) is not int or not tick_minimum <= content[tick_field] <= tick_maximum):
@@ -651,8 +765,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
             or schema == 5 and document["format_version"] != 9
             or schema == 6 and document["format_version"] != 10
             or schema == 7 and document["format_version"] != 11
-            or schema == 8 and document["format_version"] != 12):
-        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12")
+            or schema == 8 and document["format_version"] != 12
+            or schema == 9 and document["format_version"] != 13):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13")
     meshes, textures = content["meshes"], content.get("textures", {})
     if (not isinstance(meshes, dict) or not isinstance(textures, dict)
             or len(meshes) + len(textures) > MAX_MESHES):
@@ -766,25 +881,27 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
     content, scene_data, document, source_specs = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
-    if content["schema"] == 8 and kit["profile"] != SPATIAL_PROFILE:
+    if content["schema"] == 9 and kit["profile"] != STATE_PROFILE:
+        raise ValueError("runtime kit does not support Scene13 runtime_state; prepare a current runtime kit")
+    if content["schema"] == 8 and kit["profile"] not in (SPATIAL_PROFILE, STATE_PROFILE):
         raise ValueError("runtime kit does not support Scene12 spatial_queries; prepare a current runtime kit")
-    if content["schema"] == 7 and kit["profile"] not in (INPUT_PROFILE, SPATIAL_PROFILE):
+    if content["schema"] == 7 and kit["profile"] not in (INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
         raise ValueError("runtime kit does not support Scene11 input_actions; prepare a current runtime kit")
-    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
+    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
         raise ValueError("runtime kit does not support Scene10 roughness_maps; prepare a current runtime kit")
-    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
+    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
         raise ValueError("runtime kit does not support Scene9 surface_materials; prepare a current runtime kit")
-    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
+    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
         raise ValueError("runtime kit does not support Scene8 sun_shadows; prepare a current runtime kit")
-    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
+    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
         raise ValueError("runtime kit does not support Scene7 authored_lighting; prepare a current runtime kit")
-    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
+    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
-    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE):
+    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5}[content["schema"]]
-    tick_field = "tick_nanos" if content["schema"] in (7, 8) else "tick_millis"
-    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] in (7, 8) else 1000)
+    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5}[content["schema"]]
+    tick_field = "tick_nanos" if content["schema"] in (7, 8, 9) else "tick_millis"
+    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] in (7, 8, 9) else 1000)
     descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
                   "scene": "resources/scene.json", tick_field: content[tick_field],
                   "meshes": {identity: "resources/" + record["path"]
@@ -826,8 +943,32 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             raise ValueError("runtime preflight did not retain creation identity, tick or authored scene")
         if camera is not None and result.get("initial_camera") != camera:
             raise ValueError("runtime preflight did not retain explicit initial camera")
-        if content["schema"] in (7, 8) and result.get("authored_actions") != authored_actions(document):
+        if content["schema"] in (7, 8, 9) and result.get("authored_actions") != authored_actions(document):
             raise ValueError("runtime preflight did not retain authored input actions")
+        if content["schema"] == 9:
+            bindings = document.get("authoring", {}).get("bindings", {})
+            def typed_defaults(binding: dict) -> dict:
+                # StateValue is binary64, even when authored JSON used an integer
+                # token that Python can retain with arbitrary precision.
+                return {name: {"type": field["type"], "value": (
+                    float(field["value"]) if field["type"] == "number" else
+                    [float(n) for n in field["value"]] if field["type"] == "vec3" else field["value"])}
+                    for name, field in binding.get("state_defaults", {}).items()}
+            defaults = {identity: typed_defaults(binding) for identity, binding in bindings.items()}
+            observed = result.get("runtime_state")
+            if not isinstance(observed, dict) or set(observed) != set(defaults):
+                raise ValueError("runtime preflight did not initialize authored state defaults")
+            # Python bool compares equal to0/1. Validate typed values before
+            # comparing; int/float JSON representations of one binary64 value
+            # may legitimately differ between the authored file and Rust output.
+            try:
+                validate_state_fields({"format_version": 13, "authoring": {"bindings": {
+                    identity: {**binding, "state_defaults": observed[identity]}
+                    for identity, binding in bindings.items()}}})
+            except ValueError as error:
+                raise ValueError("runtime preflight did not initialize authored state defaults") from error
+            if observed != defaults:
+                raise ValueError("runtime preflight did not initialize authored state defaults")
         cancelled(cancel_file)
         manifest = {"schema": 1, "kind": "ruster-creation-package", "application": "application",
                     "target": package_app.TARGET, "title": content["title"],

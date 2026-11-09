@@ -34,7 +34,8 @@ fn fixture(text: &str) -> (Scene, Authoring) {
     authoring.bindings.insert(
         "binding-a".into(),
         BehaviorBinding {
-            object_id: "a".into(),
+            target: ruster_scene::BindingTarget::Object("a".into()),
+            state_defaults: Default::default(),
             source_id: "source".into(),
             enabled: true,
             properties: BTreeMap::new(),
@@ -55,6 +56,7 @@ struct Report {
     scene: Scene,
     tick: u64,
     pause: bool,
+    state: Arc<ruster_behavior::RuntimeState>,
 }
 struct Job {
     handle: Option<DebugHandle>,
@@ -95,6 +97,7 @@ impl Job {
                 scene: runtime.scene().clone(),
                 tick: runtime.tick(),
                 pause: engine.take_debug_pause_requested(),
+                state: runtime.state().clone(),
             });
         });
         let handle = created.recv_timeout(Duration::from_secs(3)).unwrap();
@@ -259,37 +262,59 @@ fn owned_snapshot_bounds_and_exact_stops() {
 // disconnect must unwind it and discard all staged transforms from earlier bindings.
 #[test]
 fn cancel_disconnect_and_later_binding_failure_are_atomic() {
-    let text = "return {update=function(o,p,dt)\n o.translation[1]=7\n if p.fail and dt>0 then local bad=nil+1 end\n return o\nend}";
-    for mode in 0..3 {
-        let (scene, mut authoring) = fixture(text);
-        let mut second = authoring.bindings["binding-a"].clone();
-        second.object_id = "b".into();
-        second
-            .properties
-            .insert("fail".into(), PropertyValue::Bool(true));
-        authoring.bindings.insert("binding-b".into(), second);
-        let mut bp = point(text, 3);
-        bp.binding_id = Some("binding-b".into());
-        let mut job = Job::spawn(scene.clone(), authoring, vec![bp], Limits::default());
-        job.start();
-        let stop = job.stop();
-        match mode {
-            0 => job.handle().cancel(),
-            1 => drop(job.handle.take()),
-            _ => job.handle().resume(stop.stop, Resume::Continue).unwrap(),
-        }
-        let report = job.finish();
-        let error = report.result.unwrap_err();
-        assert_eq!(
-            error.code,
-            if mode < 2 {
-                DiagnosticCode::Cancelled
-            } else {
-                DiagnosticCode::Runtime
+    let text = "return {update=function(o,p,dt,h)\n o.translation[1]=7\n if p.fail and dt>0 then local bad=nil+1 end\n if h.state then return {transform=o,state={count=h.state('count')+1}} end\n return o\nend}";
+    for version in [1, ruster_behavior::STATE_HOST_API_VERSION] {
+        for mode in 0..3 {
+            let (scene, mut authoring) = fixture(text);
+            let mut second = authoring.bindings["binding-a"].clone();
+            second.target = ruster_scene::BindingTarget::Object("b".into());
+            second
+                .properties
+                .insert("fail".into(), PropertyValue::Bool(true));
+            authoring.bindings.insert("binding-b".into(), second);
+            authoring
+                .sources
+                .get_mut("source")
+                .unwrap()
+                .host_api_version = version;
+            if version == ruster_behavior::STATE_HOST_API_VERSION {
+                for binding in authoring.bindings.values_mut() {
+                    binding
+                        .state_defaults
+                        .insert("count".into(), ruster_scene::StateValue::Number(0.0));
+                }
             }
-        );
-        assert_eq!(report.tick, 0);
-        assert_eq!(report.scene, scene);
+            let mut bp = point(text, 3);
+            bp.binding_id = Some("binding-b".into());
+            let mut job = Job::spawn(scene.clone(), authoring, vec![bp], Limits::default());
+            job.start();
+            let stop = job.stop();
+            match mode {
+                0 => job.handle().cancel(),
+                1 => drop(job.handle.take()),
+                _ => job.handle().resume(stop.stop, Resume::Continue).unwrap(),
+            }
+            let report = job.finish();
+            let error = report.result.unwrap_err();
+            assert_eq!(
+                error.code,
+                if mode < 2 {
+                    DiagnosticCode::Cancelled
+                } else {
+                    DiagnosticCode::Runtime
+                }
+            );
+            assert_eq!(report.tick, 0);
+            assert_eq!(report.scene, scene);
+            if version == ruster_behavior::STATE_HOST_API_VERSION {
+                for owner in ["binding-a", "binding-b"] {
+                    assert_eq!(
+                        report.state.binding(owner).unwrap()["count"],
+                        ruster_scene::StateValue::Number(0.0)
+                    );
+                }
+            }
+        }
     }
     // Reject a token mismatch before it can strand a stopped hook on a different token.
     let mut engine = Engine::new(Limits::default()).unwrap();

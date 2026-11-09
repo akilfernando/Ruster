@@ -93,6 +93,14 @@ impl GenericMotionLab {
     pub fn runtime_tick(&self) -> Option<u64> {
         self.runtime.as_ref().map(Runtime::tick)
     }
+    pub fn runtime_state_report(
+        &self,
+    ) -> std::collections::BTreeMap<&str, &ruster_scene::StateFields> {
+        self.runtime
+            .as_ref()
+            .map(Runtime::state_report)
+            .unwrap_or_default()
+    }
     pub fn query_observations(&self) -> &[ruster_behavior::QueryObservation] {
         self.runtime
             .as_ref()
@@ -191,7 +199,7 @@ impl GenericMotionLab {
                 .scene()
                 .objects
                 .iter()
-                .find(|object| object.id == binding.object_id)
+                .find(|object| Some(object.id.as_str()) == binding.object_id())
             {
                 ui.strong(object.display_name());
                 ui.label(format!("Position {:.3?}", object.transform.translation));

@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 12;
+pub const FORMAT_VERSION: u32 = 13;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
@@ -904,12 +904,12 @@ impl Change {
             .flat_map(|d| [&d.before, &d.after])
             .flatten()
             .flat_map(|b| {
-                std::iter::once(b.object_id.as_str()).chain(b.properties.values().filter_map(|v| {
-                    match v {
+                b.object_id()
+                    .into_iter()
+                    .chain(b.properties.values().filter_map(|v| match v {
                         PropertyValue::ObjectRef(Some(id)) => Some(id.as_str()),
                         _ => None,
-                    }
-                }))
+                    }))
             })
     }
     fn contains_id(&self, id: &str) -> bool {
@@ -1204,6 +1204,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..13).contains(&version) {
+            reject_pre_v13_binding_fields(&value)?;
+        }
         if (1..12).contains(&version) {
             reject_pre_v12_collider_fields(&value, version)?;
         }
@@ -1229,7 +1232,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=12 => serde_json::from_value(value)?,
+            5..=13 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1296,6 +1299,31 @@ impl Document {
                 .persist(path)
                 .map_err(|e| SceneError::Io(e.error))?;
         }
+        Ok(())
+    }
+}
+
+// Only binding definitions acquire these fields. Property/source contents with
+// the same names retain their existing meaning, including opaque API metadata.
+fn reject_pre_v13_binding_fields(value: &serde_json::Value) -> Result<(), SceneError> {
+    let has_new_fields = |binding: &serde_json::Value| {
+        binding.get("target").is_some() || binding.get("state_defaults").is_some()
+    };
+    let mut found = value["authoring"]["bindings"]
+        .as_object()
+        .is_some_and(|bindings| bindings.values().any(has_new_fields));
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            for delta in change["bindings"].as_array().into_iter().flatten() {
+                found |= has_new_fields(&delta["before"]) || has_new_fields(&delta["after"]);
+            }
+        }
+    }
+    if found {
+        Err(SceneError::Invalid(
+            "application binding targets and state defaults require scene v13".into(),
+        ))
+    } else {
         Ok(())
     }
 }
@@ -1731,10 +1759,11 @@ impl Session {
                 .iter()
                 .map(|(id, b)| BindingSummary {
                     id: id.clone(),
-                    object_id: b.object_id.clone(),
+                    target: b.target.clone(),
                     source_id: b.source_id.clone(),
                     enabled: b.enabled,
                     property_count: b.properties.len(),
+                    state_field_count: b.state_defaults.len(),
                 }),
             offset,
             limit,
@@ -1886,6 +1915,31 @@ impl Session {
             ..Change::default()
         })
     }
+    /// Edit one authored default as the same atomic binding/history transaction.
+    pub fn set_state_default(
+        &mut self,
+        expected_revision: u64,
+        binding_id: &str,
+        name: &str,
+        value: Option<StateValue>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(binding_id)?;
+        validate_id(name)?;
+        if let Some(value) = &value {
+            value.validate()?;
+        }
+        let mut binding = self
+            .binding(binding_id)
+            .cloned()
+            .ok_or_else(|| SceneError::Invalid(format!("binding {binding_id} does not exist")))?;
+        if let Some(value) = value {
+            binding.state_defaults.insert(name.into(), value);
+        } else {
+            binding.state_defaults.remove(name);
+        }
+        self.set_binding(expected_revision, binding_id, Some(binding))
+    }
     /// Create a fresh source and its attachment as one revision and Undo step.
     /// Use set_binding to attach an existing source, or set_source for explicit repair.
     pub fn create_behavior(
@@ -1982,7 +2036,7 @@ impl Session {
         self.authoring()
             .bindings
             .iter()
-            .filter(|(_, b)| ids.contains(&b.object_id.as_str()))
+            .filter(|(_, b)| b.object_id().is_some_and(|id| ids.contains(&id)))
             .map(|(id, b)| ValueDelta {
                 id: id.clone(),
                 before: Some(b.clone()),
@@ -2000,7 +2054,7 @@ impl Session {
                 self.authoring()
                     .bindings
                     .values()
-                    .filter(move |b| &b.object_id == source)
+                    .filter(move |b| b.object_id() == Some(source.as_str()))
                     .map(move |b| (target, b))
             })
             .collect();
@@ -2010,7 +2064,7 @@ impl Session {
             .zip(ids)
             .map(|((target, b), id)| {
                 let mut binding = b.clone();
-                binding.object_id.clone_from(target);
+                binding.target = BindingTarget::Object(target.clone());
                 for value in binding.properties.values_mut() {
                     if let PropertyValue::ObjectRef(Some(reference)) = value {
                         if let Some((_, replacement)) =
@@ -3063,10 +3117,11 @@ mod tests {
     }
     fn binding(owner: &str, source: &str) -> BehaviorBinding {
         BehaviorBinding {
-            object_id: owner.into(),
+            target: BindingTarget::Object(owner.into()),
             source_id: source.into(),
             enabled: true,
             properties: BTreeMap::new(),
+            state_defaults: StateFields::new(),
         }
     }
 
@@ -3111,7 +3166,7 @@ mod tests {
         );
         assert!(session.set_binding(1, "binding-1", None).is_err());
         let mut invalid = b.clone();
-        invalid.object_id = "absent-owner".into();
+        invalid.target = BindingTarget::Object("absent-owner".into());
         assert!(session.set_binding(2, "binding-2", Some(invalid)).is_err());
         assert!(session
             .set_binding(2, "binding-2", Some(b.clone()))
@@ -3207,6 +3262,170 @@ mod tests {
         }
     }
 
+    // New binding fields must respect version labels in current and reversible
+    // positions, while default edits share the existing atomic history owner.
+    #[test]
+    fn state_defaults_history_and_v13_binding_boundaries_are_atomic() {
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let mut opaque = source("unfinished API4 source (");
+        opaque.host_api_version = 4;
+        session.set_source(0, "source", Some(opaque)).unwrap();
+        let mut original = binding("left", "source");
+        original.properties.insert(
+            "state_defaults".into(),
+            PropertyValue::Text("{\"target\":null}".into()),
+        );
+        session
+            .set_binding(1, "binding", Some(original.clone()))
+            .unwrap();
+        let legacy =
+            serde_json::from_slice::<serde_json::Value>(&session.snapshot_bytes().unwrap())
+                .unwrap();
+        for version in [5, 12] {
+            let mut value = legacy.clone();
+            value["format_version"] = version.into();
+            let restored =
+                Session::from_snapshot_bytes(&serde_json::to_vec(&value).unwrap()).unwrap();
+            assert_eq!(restored.loaded_format_version(), version as u32);
+            assert_eq!(restored.source("source").unwrap().host_api_version, 4);
+            assert_eq!(restored.binding("binding"), Some(&original));
+            for (field, contents) in [
+                ("target", serde_json::Value::Null),
+                ("target", serde_json::json!({"type":"application"})),
+                ("state_defaults", serde_json::Value::Null),
+                ("state_defaults", serde_json::json!({})),
+            ] {
+                let mut bad = value.clone();
+                bad["authoring"]["bindings"]["binding"][field] = contents;
+                assert!(
+                    Session::from_snapshot_bytes(&serde_json::to_vec(&bad).unwrap())
+                        .unwrap_err()
+                        .to_string()
+                        .contains("v13")
+                );
+            }
+        }
+        let mut disabled = original.clone();
+        disabled.enabled = false;
+        session.set_binding(2, "binding", Some(disabled)).unwrap();
+        let undo = serde_json::from_slice::<serde_json::Value>(&session.snapshot_bytes().unwrap())
+            .unwrap();
+        session.undo(3).unwrap();
+        let redo = serde_json::from_slice::<serde_json::Value>(&session.snapshot_bytes().unwrap())
+            .unwrap();
+        for (stack, mut history) in [("undo", undo), ("redo", redo)] {
+            history["format_version"] = 12.into();
+            Session::from_snapshot_bytes(&serde_json::to_vec(&history).unwrap()).unwrap();
+            let last = history[stack].as_array().unwrap().len() - 1;
+            for side in ["before", "after"] {
+                for field in ["target", "state_defaults"] {
+                    let mut bad = history.clone();
+                    bad[stack][last]["bindings"][0][side][field] = serde_json::Value::Null;
+                    assert!(
+                        Session::from_snapshot_bytes(&serde_json::to_vec(&bad).unwrap())
+                            .unwrap_err()
+                            .to_string()
+                            .contains("v13")
+                    );
+                }
+            }
+        }
+        let before = session.document.clone();
+        assert_eq!(
+            session
+                .set_state_default(4, "binding", "absent", None)
+                .unwrap(),
+            4
+        );
+        assert_eq!(session.document, before, "no-op deletion preserves Redo");
+        let revision = session
+            .set_state_default(4, "binding", "counter", Some(StateValue::Number(1.0)))
+            .unwrap();
+        let mut expected = original;
+        expected
+            .state_defaults
+            .insert("counter".into(), StateValue::Number(1.0));
+        assert_eq!(session.binding("binding"), Some(&expected));
+        let changed = session.document.clone();
+        assert_eq!(
+            session
+                .set_state_default(
+                    revision,
+                    "binding",
+                    "counter",
+                    Some(StateValue::Number(1.0))
+                )
+                .unwrap(),
+            revision
+        );
+        assert_eq!(session.document, changed);
+        for (name, value) in [
+            ("bad name", StateValue::Bool(true)),
+            ("counter", StateValue::Number(f64::NAN)),
+            ("counter", StateValue::Vec3([f64::INFINITY, 0.0, 0.0])),
+            ("counter", StateValue::Text("x".repeat(1025))),
+        ] {
+            assert!(session
+                .set_state_default(revision, "binding", name, Some(value))
+                .is_err());
+            assert_eq!(session.document, changed);
+        }
+        assert!(session
+            .set_state_default(revision - 1, "binding", "counter", None)
+            .is_err());
+        assert!(session
+            .set_state_default(revision, "missing", "counter", None)
+            .is_err());
+        assert_eq!(session.document, changed);
+        let revision = session.undo(revision).unwrap();
+        assert!(session
+            .binding("binding")
+            .unwrap()
+            .state_defaults
+            .is_empty());
+        let revision = session.redo(revision).unwrap();
+        assert_eq!(session.binding("binding"), Some(&expected));
+        let revision = session
+            .set_state_default(
+                revision,
+                "binding",
+                "escaped-a",
+                Some(StateValue::Text("\0".repeat(1024))),
+            )
+            .unwrap();
+        let revision = session
+            .set_state_default(
+                revision,
+                "binding",
+                "escaped-b",
+                Some(StateValue::Text("\0".repeat(1024))),
+            )
+            .unwrap();
+        let before = session.document.clone();
+        assert!(session
+            .set_state_default(
+                revision,
+                "binding",
+                "escaped-c",
+                Some(StateValue::Text("\0".repeat(1024)))
+            )
+            .is_err());
+        assert_eq!(
+            session.document, before,
+            "byte-cap failure preserves complete history and binding fields"
+        );
+        let summary = serde_json::to_value(session.inspect_bindings(0, 16)).unwrap();
+        assert_eq!(summary["items"][0]["object_id"], "left");
+        assert_eq!(summary["items"][0]["state_field_count"], 3);
+        assert!(summary["items"][0].get("target").is_none());
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("state-defaults.json");
+        session.save(&path).unwrap();
+        let restored = Session::open(&path).unwrap();
+        assert_eq!(restored.document, session.document);
+        assert_eq!(restored.loaded_format_version(), 13);
+    }
+
     // Unique risk: deleting/duplicating objects must transact owned bindings with the
     // geometry and remap only references inside the copied selection, including self refs.
     #[test]
@@ -3253,6 +3472,8 @@ mod tests {
         }
         let mut session = Session::new(Scene::demo()).unwrap();
         let mut a = binding("left", "source-1");
+        a.state_defaults
+            .insert("phase".into(), StateValue::Text("idle".into()));
         a.properties.insert(
             "internal".into(),
             PropertyValue::ObjectRef(Some("right".into())),
@@ -3285,8 +3506,12 @@ mod tests {
             .authoring()
             .bindings
             .values()
-            .find(|b| b.object_id == "copy-left")
+            .find(|b| b.object_id() == Some("copy-left"))
             .unwrap();
+        assert_eq!(
+            copy.state_defaults["phase"],
+            StateValue::Text("idle".into())
+        );
         assert_eq!(
             copy.properties["internal"],
             PropertyValue::ObjectRef(Some("copy-right".into()))
@@ -3299,7 +3524,7 @@ mod tests {
             .authoring()
             .bindings
             .values()
-            .find(|b| b.object_id == "copy-right")
+            .find(|b| b.object_id() == Some("copy-right"))
             .unwrap();
         assert_eq!(
             copy.properties["self_ref"],
@@ -3324,13 +3549,9 @@ mod tests {
         session.undo(8).unwrap();
         assert_eq!(session.authoring(), &copied);
         session.duplicate(9, "right", "single-copy", None).unwrap();
-        assert!(session
-            .authoring()
-            .bindings
-            .values()
-            .any(|b| b.object_id == "single-copy"
-                && b.properties["self_ref"]
-                    == PropertyValue::ObjectRef(Some("single-copy".into()))));
+        assert!(session.authoring().bindings.values().any(|b| b.object_id()
+            == Some("single-copy")
+            && b.properties["self_ref"] == PropertyValue::ObjectRef(Some("single-copy".into()))));
         session.set_binding(10, "binding-2", None).unwrap();
         assert!(
             session.contains_object_id("object-1"),
@@ -3343,6 +3564,51 @@ mod tests {
             .set_source(11, "source-1", Some(source("broken draft")))
             .unwrap();
         assert!(session.source("source-1").is_some());
+
+        let mut application = binding("unused", "app-source");
+        application.target = BindingTarget::Application;
+        application.enabled = false;
+        application
+            .state_defaults
+            .insert("score".into(), StateValue::Number(0.0));
+        application.properties.insert(
+            "reference".into(),
+            PropertyValue::ObjectRef(Some("future-object".into())),
+        );
+        let mut session = Session::new(Scene::demo()).unwrap();
+        session
+            .set_binding(0, "application", Some(application.clone()))
+            .unwrap();
+        assert!(
+            !session.contains_object_id("application"),
+            "the application target reserves no geometry identity"
+        );
+        assert!(
+            session.contains_object_id("future-object"),
+            "application properties still reserve referenced objects"
+        );
+        let summary = serde_json::to_value(session.inspect_bindings(0, 16)).unwrap();
+        assert_eq!(
+            summary["items"][0]["target"],
+            serde_json::json!({"type":"application"})
+        );
+        assert_eq!(summary["items"][0]["state_field_count"], 1);
+        assert!(summary["items"][0].get("object_id").is_none());
+        session.duplicate(1, "left", "application", None).unwrap();
+        assert_eq!(
+            session.authoring().bindings.len(),
+            1,
+            "geometry duplication never clones the application binding"
+        );
+        session.delete(2, "application").unwrap();
+        assert_eq!(session.binding("application"), Some(&application));
+        session.undo(3).unwrap();
+        session.redo(4).unwrap();
+        assert_eq!(
+            session.binding("application"),
+            Some(&application),
+            "geometry lifecycle preserves application defaults"
+        );
     }
 
     // Unique risk: v4 grouped histories must migrate without rewriting, and old

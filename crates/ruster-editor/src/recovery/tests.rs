@@ -35,7 +35,8 @@ fn authored_session() -> Session {
             1,
             "binding-left",
             Some(BehaviorBinding {
-                object_id: "left".into(),
+                target: ruster_scene::BindingTarget::Object("left".into()),
+                state_defaults: Default::default(),
                 source_id: "unfinished-source".into(),
                 enabled: true,
                 properties: BTreeMap::from([(

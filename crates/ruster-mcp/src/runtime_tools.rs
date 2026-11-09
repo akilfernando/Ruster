@@ -2,6 +2,7 @@
 use serde_json::{json, Map, Value};
 
 const TOOLS: &[(&str, &str, &[&str])] = &[
+    ("behavior_runtime_state", "Read at most16 captured committed state fields from one binding. Pin inspect.frame_run_id, committed tick, source hash (nullable) and default-schema hash. Explicitly labelled historical frames remain readable after errors or Stop. Changed-frame continuation rejects. Read-only snapshot access.", &["expected_run_id","expected_tick","binding_id","source_hash","schema_hash"]),
     ("behavior_runtime_inspect", "Inspect cached runtime state, a bounded object page and scalar operation receipts. Input metadata describes the accepted map/ownership epoch; last_committed_input describes only a matching committed tick, never current physical keys. Historical input details are available only while the current retained frame matches that receipt. Never waits on scripts.", &[]),
     ("behavior_runtime_reset", "Queue an authored snapshot Reset. Returns operation/run identity immediately; inspect completion. Unfinished source is preserved on failure.", &[]),
     ("behavior_runtime_play", "Queue fixed-step playback for the inspected run. Does not change authored data.", &["expected_run_id"]),
@@ -27,7 +28,10 @@ pub fn supported(name: &str) -> bool {
 fn read_only(name: &str) -> bool {
     matches!(
         name,
-        "behavior_runtime_inspect" | "behavior_breakpoints" | "behavior_debug_inspect"
+        "behavior_runtime_inspect"
+            | "behavior_runtime_state"
+            | "behavior_breakpoints"
+            | "behavior_debug_inspect"
     )
 }
 fn fields(name: &str) -> Option<Vec<&'static str>> {
@@ -40,6 +44,7 @@ fn fields(name: &str) -> Option<Vec<&'static str>> {
 fn optional(name: &str) -> &'static [&'static str] {
     match name {
         "behavior_runtime_inspect" => &["offset", "operation_id"],
+        "behavior_runtime_state" => &["offset"],
         "behavior_breakpoints" => &["offset"],
         "behavior_debug_inspect" => &["offset", "limit"],
         "behavior_runtime_step" => INPUT_FIELDS,
@@ -98,7 +103,7 @@ fn shape(field: &str) -> Value {
         | "expected_input_epoch" => {
             json!({"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20})
         }
-        "source_hash" | "expected_map_identity" => {
+        "source_hash" | "schema_hash" | "expected_map_identity" => {
             json!({"type":"string","pattern":"^[0-9a-f]{64}$"})
         }
         "input_frame" => input_frame_schema(),
@@ -114,6 +119,10 @@ pub fn list() -> Vec<Value> {
         let required=fields(name).unwrap();
         let properties:Map<String,Value>=required.iter().copied().chain(optional(name).iter().copied()).map(|field|(field.into(),shape(field))).collect();
         let mut schema = super::object_schema(Value::Object(properties), required);
+        if *name == "behavior_runtime_state" {
+            schema["properties"]["binding_id"]["type"]=json!("string");
+            schema["properties"]["source_hash"]["type"]=json!(["string","null"]);
+        }
         if *name == "behavior_runtime_step" {
             let dependencies:Map<String,Value> = INPUT_FIELDS.iter().map(|field| ((*field).into(), json!(INPUT_FIELDS.iter().filter(|other| *other != field).collect::<Vec<_>>()))).collect();
             schema["dependentRequired"] = Value::Object(dependencies);
@@ -145,6 +154,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
             return false;
         }
         match field.as_str() {
+            "source_hash" if name == "behavior_runtime_state" && value.is_null() => true,
             "expected_revision"
             | "offset"
             | "operation_id"
@@ -165,13 +175,15 @@ pub fn valid(name: &str, args: &Value) -> bool {
                                 }
                         })
             }
-            "source_hash" | "expected_map_identity" => value.as_str().is_some_and(|s| {
-                s.len() == 64
-                    && s.bytes()
-                        .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
-            }),
+            "source_hash" | "schema_hash" | "expected_map_identity" => {
+                value.as_str().is_some_and(|s| {
+                    s.len() == 64
+                        && s.bytes()
+                            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+                })
+            }
             "enabled" => value.is_boolean(),
-            "binding_id" if value.is_null() => true,
+            "binding_id" if value.is_null() && name != "behavior_runtime_state" => true,
             _ => value.as_str().is_some_and(|s| {
                 !s.is_empty()
                     && s.len()
@@ -260,5 +272,14 @@ mod tests {
             step["inputSchema"]["properties"]["input_frame"]["maxProperties"],
             32
         );
+        let mut state = json!({"expected_session_token":"session","expected_revision":"3",
+            "expected_run_id":"1:2:3","expected_tick":"9007199254740993",
+            "binding_id":"application","source_hash":null,"schema_hash":"ab".repeat(32)});
+        assert!(valid("behavior_runtime_state", &state));
+        state["binding_id"] = Value::Null;
+        assert!(!valid("behavior_runtime_state", &state));
+        state["binding_id"] = json!("application");
+        state["expected_tick"] = json!(9007199254740993u64);
+        assert!(!valid("behavior_runtime_state", &state));
     }
 }

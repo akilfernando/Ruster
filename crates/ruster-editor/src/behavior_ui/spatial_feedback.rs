@@ -227,6 +227,7 @@ mod tests {
         let mut runtime = RuntimeUi {
             visible: true,
             frame: Some(Frame {
+                state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
                 key: RunKey::default(),
                 tick: 1,
                 scene: Arc::new(scene),

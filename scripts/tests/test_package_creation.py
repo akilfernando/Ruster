@@ -522,9 +522,63 @@ class CreationDistributionTests(unittest.TestCase):
                     self.assertNotIn("tick_millis", descriptor)
                     self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"], package_creation.SPATIAL_PROFILE)
                     self.assertEqual(archive.extractfile("application/resources/scene.json").read(), spatial_bytes)
+                # Scene13/schema9 preserves Descriptor5 and requires state even
+                # when the nonvisual controller is disabled or defaults are empty.
+                state_scene = copy.deepcopy(spatial_scene)
+                state_scene["format_version"] = 13
+                state_scene["authoring"]["bindings"] = {
+                    "application": {"target": {"type": "application"}, "source_id": "query-source",
+                        "enabled": False, "properties": {}, "state_defaults": {
+                            "mode": {"type": "text", "value": "ready 世界"},
+                            "amount": {"type": "number", "value": 1},
+                            "binary64": {"type": "number", "value": 9007199254740993}}},
+                    "legacy": {"object_id": "marker", "source_id": "query-source",
+                               "enabled": False, "properties": {}}}
+                state_bytes = package_creation.encoded(state_scene)
+                state_content = {**spatial_content, "schema": 9,
+                                 "scene_sha256": package_creation.sha256(state_bytes)}
+                (content_root/"scene.json").write_bytes(state_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(state_content))
+                with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old state preflight")), \
+                        patch.object(package_creation.tempfile, "TemporaryDirectory", side_effect=AssertionError("old state staging")):
+                    with self.assertRaisesRegex(ValueError, "Scene13 runtime_state"):
+                        package_creation.package(kit, content_root, failed)
+                self.assertFalse(failed.exists())
+                capable["profile"] = package_creation.STATE_PROFILE
+                (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                state_response = {**spatial_response, "authored_scene": package_creation.typed_scene(state_scene),
+                    "runtime_state": {key: copy.deepcopy(binding.get("state_defaults", {}))
+                                      for key, binding in state_scene["authoring"]["bindings"].items()}}
+                state_response["runtime_state"]["application"]["binary64"]["value"] = float(9007199254740993)
+                wrong_bool = copy.deepcopy(state_response["runtime_state"])
+                wrong_bool["application"]["amount"]["value"] = True
+                for wrong in (None, {}, {"application": {}, "legacy": {}}, wrong_bool):
+                    with self.subTest(state_preflight=wrong), patch.object(package_creation, "run_runtime", return_value={**state_response, "runtime_state": wrong}):
+                        with self.assertRaisesRegex(ValueError, "initialize authored state defaults"):
+                            package_creation.package(kit, content_root, failed)
+                    self.assertFalse(failed.exists())
+                state_output = base/"state.tar.gz"
+                with patch.object(package_creation, "run_runtime", return_value=state_response):
+                    package_creation.package(kit, content_root, state_output)
+                with tarfile.open(state_output) as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"], 5)
+                    self.assertEqual(descriptor["tick_nanos"], 16_666_667)
+                    self.assertNotIn("tick_millis", descriptor)
+                    self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"], package_creation.STATE_PROFILE)
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), state_bytes)
+                for schema in (8, 9):
+                    wrong = {**state_content, "schema": schema}
+                    wrong_scene = spatial_bytes if schema == 9 else state_bytes
+                    wrong["scene_sha256"] = package_creation.sha256(wrong_scene)
+                    (content_root/"scene.json").write_bytes(wrong_scene)
+                    (content_root/"content.json").write_bytes(package_creation.encoded(wrong))
+                    with self.subTest(state_schema=schema), self.assertRaisesRegex(ValueError, "schema9 requires Scene13"):
+                        package_creation.source_content(content_root, None)
                 # Keep historical fixtures intact and reuse the existing older
                 # content branches under the newest cumulative runtime profile.
                 for old_content, old_scene, old_response, name in (
+                        (spatial_content, spatial_bytes, spatial_response, "spatial-with-state-kit"),
                         (input_content, input_bytes, input_response, "input-with-spatial-kit"),
                         (shadow_content, shadow_bytes, shadow_response, "shadow-with-spatial-kit")):
                     (content_root/"scene.json").write_bytes(old_scene)
@@ -605,6 +659,8 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.INPUT_PROFILE, "descriptor_version":4},
                         {**package_creation.INPUT_PROFILE, "capabilities": ["input_actions", *package_creation.ROUGHNESS_PROFILE["capabilities"]]},
                         {**package_creation.SPATIAL_PROFILE, "capabilities": ["spatial_queries", *package_creation.INPUT_PROFILE["capabilities"]]},
+                        {**package_creation.STATE_PROFILE, "descriptor_version": 4},
+                        {**package_creation.STATE_PROFILE, "capabilities": ["runtime_state", *package_creation.SPATIAL_PROFILE["capabilities"]]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
                         package_creation.check_profile(invalid_profile)
@@ -874,6 +930,70 @@ class CreationDistributionTests(unittest.TestCase):
         unrelated["authoring"]["sources"]["source"]["text"] = '{"collider":null}'
         unrelated["authoring"]["bindings"]["object"]["properties"]["collider"] = None
         package_creation.validate_collider_fields(unrelated)
+        # State validates only binding owners, including both history endpoints.
+        application = {"target": {"type": "application"}, "source_id": "source",
+                       "enabled": False, "properties": {}, "state_defaults": {
+                           "mode": {"type": "text", "value": "ready"},
+                           "number": {"type": "number", "value": .125},
+                           "flag": {"type": "bool", "value": True},
+                           "position": {"type": "vec3", "value": [1, 2, 3]}}}
+        state = {"format_version": 13, "authoring": {"bindings": {"app": application}}, "undo": [], "redo": []}
+        package_creation.validate_state_fields(state)
+        for version in range(1, 13):
+            for location in ("authoring", "undo", "redo"):
+                for field in ("target", "state_defaults"):
+                    invalid = {"format_version": version, "authoring": {"bindings": {}}, "undo": [], "redo": []}
+                    old_binding = {"object_id": "marker", "source_id": "source", "enabled": False,
+                                   "properties": {}, field: None}
+                    if location == "authoring": invalid[location]["bindings"]["b"] = old_binding
+                    else: invalid[location] = [{"bindings": [{"id": "b", "before" if location == "undo" else "after": old_binding}]}]
+                    with self.subTest(state_version=(version, location, field)), self.assertRaisesRegex(ValueError, "Scene13 runtime_state"):
+                        package_creation.validate_state_fields(invalid)
+        for mutation in ("both", "neither", "null-target", "extra-target", "two-apps", "null-state", "fields", "text", "number-bool", "nonfinite", "reference", "bytes", "history"):
+            invalid = copy.deepcopy(state)
+            binding = invalid["authoring"]["bindings"]["app"]
+            if mutation == "both": binding["object_id"] = "marker"
+            elif mutation == "neither": binding.pop("target")
+            elif mutation == "null-target": binding["target"] = None
+            elif mutation == "extra-target": binding["target"]["object_id"] = "marker"
+            elif mutation == "two-apps": invalid["authoring"]["bindings"]["other"] = copy.deepcopy(binding)
+            elif mutation == "null-state": binding["state_defaults"] = None
+            elif mutation == "fields": binding["state_defaults"] = {f"f{n}": {"type": "bool", "value": False} for n in range(65)}
+            elif mutation == "text": binding["state_defaults"]["mode"]["value"] = "é" * 513
+            elif mutation == "number-bool": binding["state_defaults"]["number"]["value"] = True
+            elif mutation == "nonfinite": binding["state_defaults"]["number"]["value"] = float("inf")
+            elif mutation == "reference": binding["state_defaults"]["mode"] = {"type": "object_ref", "value": None}
+            elif mutation == "bytes": binding["state_defaults"] = {f"f{n}": {"type": "text", "value": "x" * 1024} for n in range(16)}
+            else: invalid["redo"] = [{"bindings": [{"id": "app", "after": {**binding, "state_defaults": None}}]}]
+            with self.subTest(state_shape=mutation), self.assertRaises(ValueError):
+                package_creation.validate_state_fields(invalid)
+        # Field-count/text maxima are admitted when the aggregate fits. Exact
+        # numeric encoding/history validity stays with actual runtime preflight.
+        admitted = copy.deepcopy(state)
+        admitted["authoring"]["bindings"]["app"]["state_defaults"] = {
+            f"f{n}": {"type": "text", "value": "é" * 512 if n == 0 else ""} for n in range(64)}
+        package_creation.validate_state_fields(admitted)
+        exact = copy.deepcopy(state)
+        fields = {f"f{n}": {"type": "text", "value": "x" * 1024} for n in range(16)}
+        excess = len(json.dumps(fields, separators=(",", ":")).encode()) - 16 * 1024
+        fields["f15"]["value"] = "x" * (1024 - excess)
+        self.assertEqual(len(json.dumps(fields, separators=(",", ":")).encode()), 16 * 1024)
+        exact["authoring"]["bindings"]["app"]["state_defaults"] = fields
+        package_creation.validate_state_fields(exact)
+        fields["f15"]["value"] += "x"
+        with self.assertRaisesRegex(ValueError, "state exceeds16KiB"):
+            package_creation.validate_state_fields(exact)
+        aggregate = {"format_version": 13, "authoring": {"bindings": {
+            f"b{n}": {"object_id": f"o{n}", "source_id": "source", "enabled": False,
+                       "properties": {}, "state_defaults": {
+                           f"f{k}": {"type": "text", "value": "x" * 1024} for k in range(15)}}
+            for n in range(70)}}}
+        with self.assertRaisesRegex(ValueError, "state exceeds1MiB"):
+            package_creation.validate_state_fields(aggregate)
+        unrelated["authoring"]["bindings"]["object"]["properties"]["state_defaults"] = None
+        unrelated["authoring"]["sources"]["source"]["text"] = '{"target":null,"state_defaults":null}'
+        unrelated["authoring"]["sources"]["source"]["host_api_version"] = 4
+        package_creation.validate_state_fields(unrelated)
 
     @unittest.skipUnless(sys.platform == "linux", "Linux process lifecycle required")
     def test_cancellation_reaps_the_owned_preflight_child(self):

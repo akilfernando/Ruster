@@ -17,7 +17,7 @@ Usage: ruster-motion-lab [OPTIONS]
   --input-frames PATH Headless generic/creation JSON array, at most 1 MiB and N frames
   --speed N        Legacy: left property; generic: runtime-only numeric speed override
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
-  --scene PATH     Read a generic Scene12 snapshot (sources, bindings and history retained)
+  --scene PATH     Read a generic Scene13 snapshot (sources, bindings and history retained)
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
   --creation-info Print the runtime/descriptor compatibility profile and exit
   --creation PATH Read an app.json creation descriptor and its relative resources
@@ -425,6 +425,7 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             "runtime_speed_override": null,
             "authored_scene": app.session().scene(),
             "authored_actions": app.session().authoring().actions,
+            "runtime_state": app.runtime_state_report(),
             "query_observations": app.query_observations(),
             "runtime_scene": app.content().scene(),
             "input": input,
@@ -494,6 +495,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
                 "runtime_speed_override": options.speed,
                 "authored_scene": app.session().scene(),
                 "authored_actions": app.session().authoring().actions,
+            "runtime_state": app.runtime_state_report(),
                 "query_observations": app.query_observations(),
                 "runtime_scene": app.content().scene(),
                 "input": input,
@@ -525,7 +527,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state"],
             })
         );
         return;

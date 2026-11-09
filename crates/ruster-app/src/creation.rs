@@ -259,6 +259,9 @@ impl CreationManifest {
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
         let session = ruster_scene::Session::from_snapshot_bytes(&bytes)
             .map_err(|error| error.to_string())?;
+        if session.loaded_format_version() >= 13 && self.version < 5 {
+            return Err("Scene13 runtime_state requires descriptor version 5".into());
+        }
         if session.loaded_format_version() >= 12 && self.version < 5 {
             return Err("Scene12 spatial_queries requires descriptor version 5".into());
         }
@@ -365,6 +368,7 @@ mod tests {
         // Descriptor5 remains the nanos carrier for Scene12, including disabled
         // components. Earlier descriptor versions cannot relabel this content.
         let mut spatial: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        spatial["format_version"] = serde_json::json!(12);
         spatial["scene"]["objects"][0]["collider"] =
             serde_json::to_value(ruster_scene::Collider::default()).unwrap();
         std::fs::write(&scene_path, serde_json::to_vec(&spatial).unwrap()).unwrap();
@@ -380,6 +384,21 @@ mod tests {
             .load_session(&root)
             .unwrap_err()
             .contains("Scene12 spatial_queries"));
+        let mut state: serde_json::Value = serde_json::from_slice(&original).unwrap();
+        state["format_version"] = serde_json::json!(13);
+        state["authoring"] = serde_json::json!({"sources":{},"bindings":{
+            "application":{"target":{"type":"application"},"source_id":"unfinished",
+                "enabled":false,"properties":{},"state_defaults":{
+                    "mode":{"type":"text","value":"ready"}}}
+        }});
+        std::fs::write(&scene_path, serde_json::to_vec(&state).unwrap()).unwrap();
+        let state_session = loaded.load_session(&root).unwrap();
+        assert_eq!(state_session.authoring().bindings.len(), 1);
+        assert_eq!(state_session.scene(), session.scene());
+        assert!(old_spatial
+            .load_session(&root)
+            .unwrap_err()
+            .contains("Scene13 runtime_state"));
         let mut input_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
         input_scene["format_version"] = serde_json::json!(11);
         std::fs::write(&scene_path, serde_json::to_vec(&input_scene).unwrap()).unwrap();
@@ -534,7 +553,7 @@ mod tests {
             assert!(old
                 .load_session(&root)
                 .unwrap_err()
-                .contains("Scene12 spatial_queries"));
+                .contains("Scene13 runtime_state"));
             // Genuine old documents still load through old descriptors.
             let mut old_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
             old_scene["format_version"] = serde_json::json!(9);

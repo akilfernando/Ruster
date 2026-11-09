@@ -2,7 +2,7 @@
 use super::SceneEditor;
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use ruster_scene::input::ActionDefinition;
-use ruster_scene::{BehaviorBinding, BehaviorSource, PropertyValue};
+use ruster_scene::{BehaviorBinding, BehaviorSource, BindingTarget, PropertyValue, StateValue};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeMap;
@@ -50,6 +50,18 @@ fn source(args: &Value) -> Result<BehaviorSource> {
         .map_err(|e| ("invalid_arguments".into(), e.to_string()))?;
     Ok(source)
 }
+fn target(args: &Value) -> Result<BindingTarget> {
+    match (args.get("object_id"), args.get("target")) {
+        (Some(value), None) => value
+            .as_str()
+            .map(|id| BindingTarget::Object(id.into()))
+            .ok_or_else(|| error("invalid_arguments")),
+        (None, Some(value)) if value == &json!({"type":"application"}) => {
+            Ok(BindingTarget::Application)
+        }
+        _ => Err(error("invalid_arguments")),
+    }
+}
 impl SceneEditor {
     pub(super) fn behavior_command(
         &mut self,
@@ -71,16 +83,21 @@ impl SceneEditor {
                 "source_id",
                 "binding_id",
                 "object_id",
+                "target",
                 "label",
                 "language_id",
                 "host_api_version",
                 "text_base64",
             ],
             "behavior_binding" => &["binding_id", "offset"],
-            "behavior_binding_set" => &["binding_id", "object_id", "source_id", "enabled"],
+            "behavior_binding_set" => {
+                &["binding_id", "object_id", "target", "source_id", "enabled"]
+            }
             "behavior_binding_remove" => &["binding_id"],
             "behavior_property" => &["binding_id", "name"],
             "behavior_property_set" => &["binding_id", "name", "value"],
+            "behavior_state_default" => &["binding_id", "name"],
+            "behavior_state_default_set" => &["binding_id", "name", "value"],
             "behavior_action" | "behavior_action_remove" => &["action_id"],
             "behavior_action_set" => &["action_id", "definition"],
             _ => return Err(error("unsupported_operation")),
@@ -93,10 +110,13 @@ impl SceneEditor {
                     && ["expected_session_token", "expected_revision"].contains(&k.as_str()))
         }) || fields
             .iter()
-            .any(|k| *k != "offset" && !map.contains_key(*k))
+            .any(|k| !["offset", "object_id", "target"].contains(k) && !map.contains_key(*k))
             || serde_json::to_vec(args).map_or(true, |b| b.len() > 64000)
         {
             return Err(error("invalid_arguments"));
+        }
+        if matches!(op, "behavior_create" | "behavior_binding_set") {
+            target(args)?;
         }
         let offset = args.get("offset").map(number).transpose()?.unwrap_or(0);
         let offset = usize::try_from(offset).map_err(|_| error("invalid_arguments"))?;
@@ -160,7 +180,17 @@ impl SceneEditor {
                     .ok_or_else(|| error("binding_not_found"))?;
                 let properties:Vec<_> = binding.properties.iter().skip(offset).take(16).map(|(name,value)| json!({"name":name,"type":match value {PropertyValue::Number(_)=>"number",PropertyValue::Bool(_)=>"bool",PropertyValue::Text(_)=>"text",PropertyValue::Vec3(_)=>"vec3",PropertyValue::ObjectRef(_)=>"object_ref",PropertyValue::AssetRef(_)=>"asset_ref"}})).collect();
                 return Ok(
-                    json!({"session_token":token,"revision":revision.to_string(),"binding_id":args["binding_id"],"object_id":binding.object_id,"source_id":binding.source_id,"enabled":binding.enabled,"properties":properties,"property_count":binding.properties.len(),"next_offset":(offset.saturating_add(16)<binding.properties.len()).then(||(offset+16).to_string())}),
+                    json!({"session_token":token,"revision":revision.to_string(),"binding_id":args["binding_id"],"object_id":binding.object_id(),"target":binding.object_id().is_none().then(||json!({"type":"application"})),"source_id":binding.source_id,"enabled":binding.enabled,"properties":properties,"property_count":binding.properties.len(),"state_defaults":binding.state_defaults.iter().skip(offset).take(16).map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>(),"state_default_count":binding.state_defaults.len(),"next_state_offset":(offset.saturating_add(16)<binding.state_defaults.len()).then(||(offset+16).to_string()),"next_offset":(offset.saturating_add(16)<binding.properties.len()).then(||(offset+16).to_string())}),
+                );
+            }
+            "behavior_state_default" => {
+                let binding = self
+                    .session
+                    .binding(string(args, "binding_id")?)
+                    .ok_or_else(|| error("binding_not_found"))?;
+                return Ok(
+                    json!({"session_token":token,"revision":revision.to_string(),
+                    "value":binding.state_defaults.get(string(args,"name")?)}),
                 );
             }
             "behavior_property" => {
@@ -209,12 +239,23 @@ impl SceneEditor {
                 source(args)?,
                 string(args, "binding_id")?,
                 BehaviorBinding {
-                    object_id: string(args, "object_id")?.into(),
+                    target: target(args)?,
                     source_id: string(args, "source_id")?.into(),
                     enabled: true,
                     properties: BTreeMap::new(),
+                    state_defaults: BTreeMap::new(),
                 },
             ),
+            "behavior_state_default_set" => {
+                let value: Option<StateValue> = serde_json::from_value(args["value"].clone())
+                    .map_err(|_| error("invalid_arguments"))?;
+                self.session.set_state_default(
+                    revision,
+                    string(args, "binding_id")?,
+                    string(args, "name")?,
+                    value,
+                )
+            }
             "behavior_binding_remove" => {
                 self.session
                     .set_binding(revision, string(args, "binding_id")?, None)
@@ -223,7 +264,7 @@ impl SceneEditor {
                 let id = string(args, "binding_id")?;
                 let mut binding = if op == "behavior_binding_set" {
                     BehaviorBinding {
-                        object_id: string(args, "object_id")?.into(),
+                        target: target(args)?,
                         source_id: string(args, "source_id")?.into(),
                         enabled: args["enabled"]
                             .as_bool()
@@ -232,6 +273,11 @@ impl SceneEditor {
                             .session
                             .binding(id)
                             .map(|b| b.properties.clone())
+                            .unwrap_or_default(),
+                        state_defaults: self
+                            .session
+                            .binding(id)
+                            .map(|binding| binding.state_defaults.clone())
                             .unwrap_or_default(),
                     }
                 } else {
@@ -453,5 +499,77 @@ mod tests {
         assert_eq!(editor.session.source("source").unwrap().text, text);
         assert_eq!(editor.command("wire", "scene_undo", pre(3))["ok"], true);
         assert!(editor.session.binding("binding").unwrap().enabled);
+        let revision = editor.session.scene().revision;
+        let mut application = pre(revision);
+        for (key,value) in json!({"source_id":"application-source","binding_id":"application",
+            "target":{"type":"application"},"label":"Application","language_id":"lua54",
+            "host_api_version":4,"text_base64":STANDARD.encode(ruster_behavior::APPLICATION_TEMPLATE)})
+            .as_object().unwrap() {application[key]=value.clone();}
+        let mut ambiguous = application.clone();
+        ambiguous["object_id"] = json!("cube");
+        assert_eq!(
+            editor.command("wire", "behavior_create", ambiguous)["error"]["code"],
+            "invalid_arguments"
+        );
+        assert_eq!(
+            editor.command("wire", "behavior_create", application)["ok"],
+            true
+        );
+        assert_eq!(editor.session.scene().objects.len(), 1);
+        let mut state = pre(editor.session.scene().revision);
+        state["binding_id"] = json!("application");
+        state["name"] = json!("elapsed");
+        state["value"] = json!({"type":"number","value":0.0});
+        assert_eq!(
+            editor.command("wire", "behavior_state_default_set", state.clone())["ok"],
+            true
+        );
+        state["expected_revision"] = json!(editor.session.scene().revision.to_string());
+        let mut read = state.clone();
+        read.as_object_mut().unwrap().remove("value");
+        assert_eq!(
+            editor.command("wire", "behavior_state_default", read.clone())["result"]["value"],
+            state["value"]
+        );
+        // Human modal work blocks mutation while readonly observation remains available.
+        editor.rename_pending = true;
+        state["value"] = Value::Null;
+        assert_eq!(
+            editor.command("wire", "behavior_state_default_set", state.clone())["error"]["code"],
+            "recovery_pending"
+        );
+        assert_eq!(
+            editor.command("wire", "behavior_state_default", read)["result"]["value"]["value"],
+            0.0
+        );
+        editor.rename_pending = false;
+        let owner = editor.session.binding("application").unwrap();
+        let pending=serde_json::from_value(json!({"source":null,"property":null,"state_add":{
+            "binding":"application","revision":editor.session.scene().revision,
+            "base_hash":format!("{:x}",Sha256::digest(serde_json::to_vec(owner).unwrap())),
+            "source_hash":editor.session.source(&owner.source_id).map(|source|ruster_behavior::source_hash(&source.text)),
+            "name":"mode","kind":2}})).unwrap();
+        editor.behavior.restore(&editor.session, pending).unwrap();
+        assert_eq!(
+            editor.command("wire", "behavior_state_default_set", state.clone())["error"]["code"],
+            "drafts_pending"
+        );
+        editor
+            .behavior
+            .execute(
+                crate::behavior_ui::Action::CancelStateAdd,
+                &mut editor.session,
+            )
+            .unwrap();
+        assert_eq!(
+            editor.command("wire", "behavior_state_default_set", state)["ok"],
+            true
+        );
+        assert!(editor
+            .session
+            .binding("application")
+            .unwrap()
+            .state_defaults
+            .is_empty());
     }
 }

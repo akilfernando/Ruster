@@ -257,6 +257,7 @@ mod tests {
         );
         editor.runtime.visible = true;
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             input: None,
             key: crate::behavior_worker::RunKey::default(),

@@ -59,7 +59,7 @@ fn run(args: &[String]) -> Result<Option<Value>, Failure> {
         engine.step(&mut runtime).map_err(Failure::Behavior)?;
     }
     Ok(Some(
-        json!({"scene_id":session.scene().id,"authored_revision":session.scene().revision.to_string(),"tick":runtime.tick().to_string(),"fixed_dt":dt,"enabled_bindings":session.authoring().bindings.values().filter(|binding|binding.enabled).count(),"fingerprint":runtime.scene().fingerprint(),"scene":runtime.scene()}),
+        json!({"scene_id":session.scene().id,"authored_revision":session.scene().revision.to_string(),"tick":runtime.tick().to_string(),"fixed_dt":dt,"enabled_bindings":session.authoring().bindings.values().filter(|binding|binding.enabled).count(),"fingerprint":runtime.scene().fingerprint(),"scene":runtime.scene(),"runtime_state":runtime.state_report()}),
     ))
 }
 fn main() {

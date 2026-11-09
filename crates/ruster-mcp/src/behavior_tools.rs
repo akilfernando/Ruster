@@ -5,12 +5,14 @@ const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_source","Read one embedded source as base64 UTF-8 with SHA256; no filesystem access.",&["source_id"]),
     ("behavior_source_set","Upsert embedded source data, including unfinished code. Shared Undo; no compilation or execution.",&["source_id","label","language_id","host_api_version","text_base64"]),
     ("behavior_source_remove","Remove embedded source; dependent bindings remain repairable. Shared Undo.",&["source_id"]),
-    ("behavior_create","Atomically create a fresh source and enabled empty-property attachment in one Undo entry.",&["source_id","binding_id","object_id","label","language_id","host_api_version","text_base64"]),
-    ("behavior_binding","Read one binding and a page of16 property names/types; read each value separately.",&["binding_id"]),
-    ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining existing property values. Shared Undo.",&["binding_id","object_id","source_id","enabled"]),
+    ("behavior_create","Atomically create a fresh source and enabled binding in one Undo entry. Supply exactly one object_id or target:{type:application}; at most one Application binding exists including disabled bindings.",&["source_id","binding_id","label","language_id","host_api_version","text_base64"]),
+    ("behavior_binding","Read owner/source metadata,16 property names/types and16 authored state defaults. The same offset selects each page; next_offset and next_state_offset are separate.",&["binding_id"]),
+    ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining properties and state defaults. Supply exactly one object_id or target:{type:application}. Shared Undo.",&["binding_id","source_id","enabled"]),
     ("behavior_binding_remove","Detach one behavior binding. Shared Undo; source stays available.",&["binding_id"]),
     ("behavior_property","Read one typed property or null for absent; no complete property-map response.",&["binding_id","name"]),
     ("behavior_property_set","Set one typed property or use null to remove. Shared Undo, no execution.",&["binding_id","name","value"]),
+    ("behavior_state_default","Read one authored typed state default or null for absent. Runtime values belong to the committed run.",&["binding_id","name"]),
+    ("behavior_state_default_set","Set/remove one authored state field through shared Undo. Number, Bool, Text and Vec3 only,64fields/16KiB per owner and1MiB total. Null removes. Requires clean drafts. Current runtime stays unchanged until Reset.",&["binding_id","name","value"]),
     ("behavior_action","Read one complete authored action definition under current scene session/revision authority; no live key state.",&["action_id"]),
     ("behavior_action_set","Replace/upsert a complete authored action definition. At most32 actions including unbound definitions; at most4 total logical keys per action. Cross-action key sharing is allowed; repeated/opposite keys and reserved Escape/Tab reject. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
     ("behavior_action_remove","Remove one authored action definition through shared Undo. Reversible action IDs remain reserved; Undo restores them. Existing script references remain available for repair; no live runtime map mutation.",&["action_id"]),
@@ -24,6 +26,13 @@ fn fields(name: &str) -> Option<Vec<&'static str>> {
         fields.extend(["expected_session_token", "expected_revision"]);
     }
     Some(fields)
+}
+fn optional(name: &str) -> &'static [&'static str] {
+    match name {
+        "behavior_create" | "behavior_binding_set" => &["object_id", "target"],
+        "behavior_inspect" | "behavior_binding" => &["offset"],
+        _ => &[],
+    }
 }
 fn action_keys_schema() -> Value {
     json!({"type":"array","maxItems":4,"items":{"type":"string","minLength":1,"maxLength":16,"pattern":"^[a-z0-9_]+$"},
@@ -88,6 +97,7 @@ fn valid_action_definition(value: &Value) -> bool {
 }
 fn shape(field: &str) -> Value {
     match field {
+        "target" => super::object_schema(json!({"type":{"const":"application"}}), vec!["type"]),
         "expected_revision" | "offset" => {
             json!({"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20})
         }
@@ -137,8 +147,17 @@ pub fn list() -> Vec<Value> {
     TOOLS.iter().map(|(name,description,_)|{
         let required=fields(name).unwrap();
         let mut properties:Map<String,Value>=required.iter().map(|f|(f.to_string(),shape(f))).collect();
-        if matches!(*name,"behavior_inspect"|"behavior_binding") {properties.insert("offset".into(),shape("offset"));}
-        json!({"name":name,"description":description,"inputSchema":{"type":"object","properties":properties,"required":required,"additionalProperties":false},"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_source"|"behavior_binding"|"behavior_property"|"behavior_action"),"openWorldHint":false}})
+        for field in optional(name) {properties.insert((*field).into(),shape(field));}
+        if *name == "behavior_state_default_set" {
+            properties.get_mut("value").unwrap()["oneOf"].as_array_mut().unwrap().retain(|value| {
+                !matches!(value["properties"]["type"]["const"].as_str(), Some("object_ref"|"asset_ref"))
+            });
+        }
+        let mut schema=super::object_schema(Value::Object(properties),required);
+        if matches!(*name,"behavior_create"|"behavior_binding_set") {
+            schema["oneOf"]=json!([{"required":["object_id"],"not":{"required":["target"]}},{"required":["target"],"not":{"required":["object_id"]}}]);
+        }
+        json!({"name":name,"description":description,"inputSchema":schema,"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_source"|"behavior_binding"|"behavior_property"|"behavior_action"|"behavior_state_default"),"openWorldHint":false}})
     }).collect()
 }
 pub fn valid(name: &str, args: &Value) -> bool {
@@ -151,13 +170,17 @@ pub fn valid(name: &str, args: &Value) -> bool {
     if !required.iter().all(|k| args.contains_key(*k)) {
         return false;
     }
+    if matches!(name, "behavior_create" | "behavior_binding_set")
+        && args.contains_key("object_id") == args.contains_key("target")
+    {
+        return false;
+    }
     args.iter().all(|(field, value)| {
-        if !required.contains(&field.as_str())
-            && !(field == "offset" && matches!(name, "behavior_inspect" | "behavior_binding"))
-        {
+        if !required.contains(&field.as_str()) && !optional(name).contains(&field.as_str()) {
             return false;
         }
         match field.as_str() {
+            "target" => value == &json!({"type":"application"}),
             "expected_revision" | "offset" => super::canonical_u64(value),
             "host_api_version" => value
                 .as_u64()
@@ -190,10 +213,11 @@ pub fn valid(name: &str, args: &Value) -> bool {
                                 .as_array()
                                 .is_some_and(|v| v.len() == 3 && v.iter().all(Value::is_number)),
                             Some("object_ref" | "asset_ref") => {
-                                o["value"].is_null()
-                                    || o["value"]
-                                        .as_str()
-                                        .is_some_and(|s| !s.is_empty() && s.len() <= 128)
+                                name != "behavior_state_default_set"
+                                    && (o["value"].is_null()
+                                        || o["value"]
+                                            .as_str()
+                                            .is_some_and(|s| !s.is_empty() && s.len() <= 128))
                             }
                             _ => false,
                         }
@@ -299,6 +323,23 @@ mod tests {
         let mut unbound = set;
         unbound["definition"] = json!({"kind":{"type":"button","keys":[]}});
         assert!(valid("behavior_action_set", &unbound));
+        let mut application = json!({"expected_session_token":"session","expected_revision":"0",
+            "binding_id":"application","source_id":"source","enabled":true,
+            "target":{"type":"application"}});
+        assert!(valid("behavior_binding_set", &application));
+        application["object_id"] = json!("cube");
+        assert!(!valid("behavior_binding_set", &application));
+        application.as_object_mut().unwrap().remove("target");
+        assert!(valid("behavior_binding_set", &application));
+        application.as_object_mut().unwrap().remove("object_id");
+        assert!(!valid("behavior_binding_set", &application));
+        let mut state = json!({"expected_session_token":"session","expected_revision":"0",
+            "binding_id":"application","name":"elapsed","value":{"type":"number","value":0.0}});
+        assert!(valid("behavior_state_default_set", &state));
+        state["value"] = json!({"type":"object_ref","value":null});
+        assert!(!valid("behavior_state_default_set", &state));
+        state["value"] = Value::Null;
+        assert!(valid("behavior_state_default_set", &state));
         // Finite-key membership/reservations remain the editor's owning check,
         // rather than a second independently maintained key table in this crate.
         unbound["definition"]["kind"]["keys"] = json!(["future_key"]);

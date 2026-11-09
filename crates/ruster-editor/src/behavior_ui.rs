@@ -1,9 +1,12 @@
 //! Bounded embedded source/property working copies. Session owns authored data.
 mod runtime_debug;
 mod runtime_input;
+mod runtime_state;
 mod spatial_feedback;
 use eframe::egui;
-use ruster_scene::{BehaviorBinding, BehaviorSource, PropertyValue, Session};
+use ruster_scene::{
+    BehaviorBinding, BehaviorSource, BindingTarget, PropertyValue, Session, StateValue,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, ops::Range};
@@ -14,14 +17,14 @@ fn fingerprint(value: &impl Serialize) -> String {
         Sha256::digest(serde_json::to_vec(value).expect("finite authored values"))
     )
 }
-fn annotated_follower(source_id: &str) -> Result<String, String> {
-    let hint =
-        crate::behavior_files::annotation_hint(source_id).map_err(|error| error.to_string())?;
+fn annotated_template(source_id: &str, api: u32, template: &str) -> Result<String, String> {
+    let hint = crate::behavior_files::annotation_hint_for_api(source_id, api)
+        .map_err(|error| error.to_string())?;
     let annotations = hint
         .lines()
         .map(|line| format!("    {line}\n"))
         .collect::<String>();
-    Ok(ruster_behavior::FOLLOWER_TEMPLATE.replacen(
+    Ok(template.replacen(
         "    update = function",
         &format!("{annotations}    update = function"),
         1,
@@ -135,7 +138,24 @@ impl From<&PropertyValue> for ValueDraft {
         }
     }
 }
+fn state_property(value: &StateValue) -> PropertyValue {
+    match value {
+        StateValue::Number(value) => PropertyValue::Number(*value),
+        StateValue::Bool(value) => PropertyValue::Bool(*value),
+        StateValue::Text(value) => PropertyValue::Text(value.clone()),
+        StateValue::Vec3(value) => PropertyValue::Vec3(*value),
+    }
+}
 impl ValueDraft {
+    fn state(&self) -> Result<StateValue, String> {
+        match self.parse()? {
+            PropertyValue::Number(value) => Ok(StateValue::Number(value)),
+            PropertyValue::Bool(value) => Ok(StateValue::Bool(value)),
+            PropertyValue::Text(value) => Ok(StateValue::Text(value)),
+            PropertyValue::Vec3(value) => Ok(StateValue::Vec3(value)),
+            _ => Err("State fields support Number, Bool, Text and Vec3.".into()),
+        }
+    }
     fn parse(&self) -> Result<PropertyValue, String> {
         let number = |text: &str| {
             text.trim()
@@ -208,16 +228,52 @@ struct PropertyDraft {
     name: String,
     base_hash: String,
     value: ValueDraft,
+    #[serde(default)]
+    state_default: bool,
+}
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct StateAddDraft {
+    binding: String,
+    revision: u64,
+    base_hash: String,
+    source_hash: Option<String>,
+    name: String,
+    kind: usize,
+}
+impl StateAddDraft {
+    fn value(&self) -> StateValue {
+        match self.kind {
+            0 => StateValue::Number(0.0),
+            1 => StateValue::Bool(false),
+            2 => StateValue::Text(String::new()),
+            _ => StateValue::Vec3([0.0; 3]),
+        }
+    }
+    fn matches(&self, session: &Session) -> bool {
+        session.scene().revision == self.revision
+            && self.kind <= 3
+            && self.name.len() <= 128
+            && session.binding(&self.binding).is_some_and(|binding| {
+                fingerprint(binding) == self.base_hash
+                    && session
+                        .source(&binding.source_id)
+                        .map(|source| ruster_behavior::source_hash(&source.text))
+                        == self.source_hash
+            })
+    }
 }
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(super) struct Drafts {
     source: Option<SourceDraft>,
     property: Option<PropertyDraft>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    state_add: Option<StateAddDraft>,
 }
 impl Drafts {
     pub fn pending(&self) -> bool {
-        self.source.is_some() || self.property.is_some()
+        self.source.is_some() || self.property.is_some() || self.state_add.is_some()
     }
 }
 pub(super) enum Action {
@@ -227,14 +283,19 @@ pub(super) enum Action {
     },
     ExternalStatus,
     Create(String),
+    CreateApplication,
     Attach {
-        object: String,
+        target: BindingTarget,
         source: String,
     },
     Detach(String),
     Enable(String, bool),
     OpenSource(String),
     EditProperty(String, String),
+    EditState(String, String),
+    AddState(String, String, StateValue),
+    RemoveState(String, String),
+    CancelStateAdd,
     ApplySource,
     RevertSource,
     ApplyProperty,
@@ -268,6 +329,10 @@ pub(super) struct BehaviorUi {
     property_rows: Vec<(String, String)>,
     new_property: String,
     new_type: usize,
+    application: bool,
+    state_add: Option<StateAddDraft>,
+    state_add_dirty: bool,
+    state_add_focus: bool,
     pub error: String,
     source_line: Option<u32>,
     source_cursor: usize,
@@ -379,7 +444,10 @@ impl BehaviorUi {
         }
     }
     pub fn pending(&self) -> bool {
-        self.source_dirty || self.property_dirty
+        self.source_dirty || self.property_dirty || self.state_add_dirty
+    }
+    pub fn state_add_pending(&self) -> bool {
+        self.state_add_dirty && !self.source_dirty && !self.property_dirty
     }
     pub fn generation(&self) -> u64 {
         self.generation
@@ -391,9 +459,23 @@ impl BehaviorUi {
         Drafts {
             source: self.source_dirty.then(|| self.source.clone()).flatten(),
             property: self.property_dirty.then(|| self.property.clone()).flatten(),
+            state_add: self
+                .state_add_dirty
+                .then(|| self.state_add.clone())
+                .flatten(),
         }
     }
     pub fn restore(&mut self, session: &Session, drafts: Drafts) -> Result<(), String> {
+        if drafts.state_add.is_some() && (drafts.source.is_some() || drafts.property.is_some()) {
+            return Err("A new state field cannot share a recovered source/value edit; checkpoint preserved.".into());
+        }
+        if drafts
+            .state_add
+            .as_ref()
+            .is_some_and(|draft| !draft.matches(session))
+        {
+            return Err("Recovered state field has a stale binding, source, revision or unsupported raw bounds; record preserved.".into());
+        }
         if let Some(source) = &drafts.source {
             let original = session
                 .source(&source.id)
@@ -411,10 +493,17 @@ impl BehaviorUi {
             let original = session
                 .binding(&property.binding)
                 .ok_or("Recovered property draft refers to an absent binding; record preserved.")?;
-            if property.base_hash != fingerprint(original)
-                || !original
-                    .properties
+            let value = if property.state_default {
+                original
+                    .state_defaults
                     .get(&property.name)
+                    .map(state_property)
+            } else {
+                original.properties.get(&property.name).cloned()
+            };
+            if property.base_hash != fingerprint(original)
+                || !value
+                    .as_ref()
                     .is_some_and(|value| property.value.validate_draft(value))
             {
                 return Err("Recovered property draft has stale baseline, type or unsupported bounds; record preserved.".into());
@@ -427,6 +516,23 @@ impl BehaviorUi {
         self.property = drafts.property;
         self.property_dirty = self.property.is_some();
         self.property_focus = self.property_dirty;
+        self.state_add = drafts.state_add;
+        self.state_add_dirty = self.state_add.is_some();
+        self.state_add_focus = self.state_add_dirty;
+        self.application = self
+            .property
+            .as_ref()
+            .and_then(|draft| session.binding(&draft.binding))
+            .is_some_and(|binding| binding.target == BindingTarget::Application)
+            || self
+                .state_add
+                .as_ref()
+                .and_then(|draft| session.binding(&draft.binding))
+                .is_some_and(|binding| binding.target == BindingTarget::Application)
+            || session.authoring().bindings.values().any(|binding| {
+                binding.target == BindingTarget::Application
+                    && Some(binding.source_id.as_str()) == self.active_source()
+            });
         self.changed();
         Ok(())
     }
@@ -523,12 +629,23 @@ impl BehaviorUi {
         if fingerprint(&binding) != draft.base_hash {
             return Err("Attachment changed; property working copy preserved. Revert explicitly before retrying.".into());
         }
-        binding
-            .properties
-            .insert(draft.name.clone(), draft.value.parse()?);
-        session
-            .set_binding(session.scene().revision, &draft.binding, Some(binding))
-            .map_err(|error| error.to_string())?;
+        if draft.state_default {
+            session
+                .set_state_default(
+                    session.scene().revision,
+                    &draft.binding,
+                    &draft.name,
+                    Some(draft.value.state()?),
+                )
+                .map_err(|error| error.to_string())?;
+        } else {
+            binding
+                .properties
+                .insert(draft.name.clone(), draft.value.parse()?);
+            session
+                .set_binding(session.scene().revision, &draft.binding, Some(binding))
+                .map_err(|error| error.to_string())?;
+        }
         self.property = None;
         self.property_dirty = false;
         self.changed();
@@ -540,13 +657,67 @@ impl BehaviorUi {
             self.source.as_ref().unwrap().parsed()?;
         }
         if self.property_dirty {
-            self.property.as_ref().unwrap().value.parse()?;
+            let draft = self.property.as_ref().unwrap();
+            if draft.state_default {
+                draft.value.state()?;
+            } else {
+                draft.value.parse()?;
+            }
         }
         self.apply_source(session)?;
-        self.apply_property(session)
+        self.apply_property(session)?;
+        if self.state_add_dirty {
+            let draft = self
+                .state_add
+                .as_ref()
+                .ok_or("Missing state field draft")?
+                .clone();
+            self.execute(
+                Action::AddState(draft.binding.clone(), draft.name.clone(), draft.value()),
+                session,
+            )?;
+        }
+        Ok(())
     }
     pub fn execute(&mut self, action: Action, session: &mut Session) -> Result<(), String> {
         match action {
+            Action::CreateApplication => {
+                let source = session
+                    .allocate_source_ids(1)
+                    .map_err(|error| error.to_string())?
+                    .remove(0);
+                let binding = session
+                    .allocate_binding_ids(1)
+                    .map_err(|error| error.to_string())?
+                    .remove(0);
+                session
+                    .create_behavior(
+                        session.scene().revision,
+                        &source,
+                        BehaviorSource {
+                            label: Some("Application".into()),
+                            language_id: ruster_behavior::LANGUAGE_ID.into(),
+                            host_api_version: ruster_behavior::STATE_HOST_API_VERSION,
+                            text: annotated_template(
+                                &source,
+                                ruster_behavior::STATE_HOST_API_VERSION,
+                                ruster_behavior::APPLICATION_TEMPLATE,
+                            )?,
+                        },
+                        &binding,
+                        BehaviorBinding {
+                            target: BindingTarget::Application,
+                            source_id: source.clone(),
+                            enabled: true,
+                            properties: BTreeMap::new(),
+                            state_defaults: BTreeMap::new(),
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+                self.load_source(session, &source);
+                self.source_open = true;
+                self.source_focus = true;
+            }
             Action::Create(object) => {
                 let source = session
                     .allocate_source_ids(1)
@@ -564,11 +735,16 @@ impl BehaviorUi {
                             label: Some("Follower".into()),
                             language_id: ruster_behavior::LANGUAGE_ID.into(),
                             host_api_version: ruster_behavior::HOST_API_VERSION,
-                            text: annotated_follower(&source)?,
+                            text: annotated_template(
+                                &source,
+                                ruster_behavior::HOST_API_VERSION,
+                                ruster_behavior::FOLLOWER_TEMPLATE,
+                            )?,
                         },
                         &binding,
                         BehaviorBinding {
-                            object_id: object,
+                            target: ruster_scene::BindingTarget::Object(object),
+                            state_defaults: Default::default(),
                             source_id: source.clone(),
                             enabled: true,
                             properties: BTreeMap::from([
@@ -583,7 +759,7 @@ impl BehaviorUi {
                 self.source_open = true;
                 self.source_focus = true;
             }
-            Action::Attach { object, source } => {
+            Action::Attach { target, source } => {
                 let id = session
                     .allocate_binding_ids(1)
                     .map_err(|e| e.to_string())?
@@ -593,7 +769,8 @@ impl BehaviorUi {
                         session.scene().revision,
                         &id,
                         Some(BehaviorBinding {
-                            object_id: object,
+                            target,
+                            state_defaults: Default::default(),
                             source_id: source,
                             enabled: true,
                             properties: BTreeMap::new(),
@@ -614,6 +791,11 @@ impl BehaviorUi {
                     .map_err(|e| e.to_string())?;
             }
             Action::OpenSource(id) => {
+                if self.state_add_dirty {
+                    return Err(
+                        "Add or Cancel the pending state field before opening a source.".into(),
+                    );
+                }
                 if self.source_dirty && self.source.as_ref().is_some_and(|source| source.id != id) {
                     return Err("Apply or Revert the existing source draft before opening another source; its text was preserved.".into());
                 }
@@ -627,6 +809,9 @@ impl BehaviorUi {
                 self.source_focus = true;
             }
             Action::EditProperty(binding, name) => {
+                if self.state_add_dirty {
+                    return Err("Add or Cancel the pending state field first.".into());
+                }
                 if self.property_dirty {
                     return Err(
                         "Apply or Revert the existing property draft first; text preserved.".into(),
@@ -639,9 +824,73 @@ impl BehaviorUi {
                     name,
                     base_hash: fingerprint(original),
                     value: ValueDraft::from(value),
+                    state_default: false,
                 });
                 self.property_dirty = false;
                 self.property_focus = true;
+            }
+            Action::EditState(binding, name) => {
+                if self.state_add_dirty {
+                    return Err("Add or Cancel the pending state field first.".into());
+                }
+                if self.property_dirty {
+                    return Err(
+                        "Apply or Revert the existing value draft first; text preserved.".into(),
+                    );
+                }
+                let original = session.binding(&binding).ok_or("Attachment missing")?;
+                let value = original
+                    .state_defaults
+                    .get(&name)
+                    .ok_or("State field missing")?;
+                self.property = Some(PropertyDraft {
+                    binding,
+                    name,
+                    base_hash: fingerprint(original),
+                    value: ValueDraft::from(&state_property(value)),
+                    state_default: true,
+                });
+                self.property_dirty = false;
+                self.property_focus = true;
+            }
+            Action::AddState(binding, name, value) => {
+                self.state_add_focus = true;
+                if self.source_dirty || self.property_dirty {
+                    return Err("Apply or Revert the existing source/value draft before adding a state field.".into());
+                }
+                if self.state_add_dirty
+                    && !self.state_add.as_ref().is_some_and(|draft| {
+                        draft.matches(session)
+                            && draft.binding == binding
+                            && draft.name == name
+                            && std::mem::discriminant(&draft.value())
+                                == std::mem::discriminant(&value)
+                    })
+                {
+                    return Err("State field baseline changed; raw name/type preserved. Cancel explicitly before starting again.".into());
+                }
+                if session
+                    .binding(&binding)
+                    .is_some_and(|binding| binding.state_defaults.contains_key(&name))
+                {
+                    return Err("State field already exists; edit its default explicitly.".into());
+                }
+                session
+                    .set_state_default(session.scene().revision, &binding, &name, Some(value))
+                    .map_err(|error| error.to_string())?;
+                self.state_add = None;
+                self.state_add_dirty = false;
+                self.state_add_focus = false;
+            }
+            Action::CancelStateAdd => {
+                self.state_add = None;
+                self.state_add_dirty = false;
+                self.state_add_focus = false;
+            }
+            Action::RemoveState(binding, name) => {
+                session
+                    .set_state_default(session.scene().revision, &binding, &name, None)
+                    .map_err(|error| error.to_string())?;
             }
             Action::ApplySource => self.apply_source(session)?,
             Action::ApplyProperty => {
@@ -703,6 +952,10 @@ impl BehaviorUi {
         self.refresh_assets(assets);
         ui.separator();
         ui.strong("Behavior");
+        ui.horizontal_wrapped(|ui| {
+            ui.selectable_value(&mut self.application, false, "Selected object behavior");
+            ui.selectable_value(&mut self.application, true, "Application behavior");
+        });
         let mut action = None;
         let mut property_changed = false;
         if self.source_dirty
@@ -715,7 +968,15 @@ impl BehaviorUi {
         if let Some(property) = &mut self.property {
             ui.add_enabled_ui(editable, |ui| {
                 ui.group(|ui| {
-                    ui.strong(format!("Edit {}", property.name));
+                    ui.strong(format!(
+                        "Edit {}{}",
+                        if property.state_default {
+                            "state default "
+                        } else {
+                            ""
+                        },
+                        property.name
+                    ));
                     let response = value_ui(
                         ui,
                         &mut property.value,
@@ -745,10 +1006,24 @@ impl BehaviorUi {
                         self.property_dirty = true;
                     }
                     ui.horizontal_wrapped(|ui| {
-                        if ui.button("Apply property value").clicked() {
+                        if ui
+                            .button(if property.state_default {
+                                "Apply state default"
+                            } else {
+                                "Apply property value"
+                            })
+                            .clicked()
+                        {
                             action = Some(Action::ApplyProperty);
                         }
-                        if ui.button("Revert property value").clicked() {
+                        if ui
+                            .button(if property.state_default {
+                                "Revert state default"
+                            } else {
+                                "Revert property value"
+                            })
+                            .clicked()
+                        {
                             action = Some(Action::RevertProperty);
                         }
                     });
@@ -758,7 +1033,23 @@ impl BehaviorUi {
         if property_changed {
             self.changed();
         }
-        let Some(object) = object else {
+        if self.state_add_dirty {
+            if let Some(draft) = &self.state_add {
+                ui.label(format!(
+                    "Unapplied state field for binding {}",
+                    draft.binding
+                ));
+            }
+            if ui.button("Cancel pending state field").clicked() {
+                action = Some(Action::CancelStateAdd);
+            }
+        }
+        let target = if self.application {
+            Some(BindingTarget::Application)
+        } else {
+            object.map(|id| BindingTarget::Object(id.into()))
+        };
+        let Some(target) = target else {
             if !self.pending() {
                 ui.label("Select an object to add a behavior.");
             }
@@ -771,7 +1062,7 @@ impl BehaviorUi {
             .authoring()
             .bindings
             .iter()
-            .find(|(_, binding)| binding.object_id == object);
+            .find(|(_, binding)| binding.target == target);
         if let Some((id, binding)) = attached {
             if !self
                 .property_rows_key
@@ -803,7 +1094,7 @@ impl BehaviorUi {
                 });
                 if let Some(source)=session.source(&binding.source_id) {
 
-                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
                 } else {ui.colored_label(egui::Color32::YELLOW,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
                 ui.label("Properties");
                 for (name,summary) in &self.property_rows {
@@ -836,6 +1127,87 @@ impl BehaviorUi {
                     action=Some(Action::AddProperty(id.clone(),self.new_property.clone(),value));
                 }
                 });
+                ui.separator();
+                ui.strong("State defaults");
+                ui.label("Authored defaults become committed runtime fields on Reset. API4 returns own-state patches.");
+                for (name, value) in &binding.state_defaults {
+                    ui.push_id(("state", id, name), |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(name);
+                            ui.label(property_summary(&state_property(value)));
+                            if ui
+                                .add_enabled(!self.property_dirty, egui::Button::new("Edit default"))
+                                .clicked()
+                            {
+                                action = Some(Action::EditState(id.clone(), name.clone()));
+                            }
+                            if ui.button("Remove field").clicked() {
+                                action = Some(Action::RemoveState(id.clone(), name.clone()));
+                            }
+                        });
+                    });
+                }
+                let mut state_add_changed = false;
+                egui::CollapsingHeader::new("Add state field")
+                                .id_salt(("add_state", id))
+                                .default_open(self.state_add_dirty)
+                                .show(ui, |ui| {
+                                    if self.state_add_dirty && self.state_add.as_ref().is_some_and(|draft| draft.binding != *id) {
+                                        ui.label("A state field is pending for another binding. Return to it or Cancel the pending field above.");
+                                        return;
+                                    }
+                                    if !self.state_add_dirty && self.state_add.as_ref().is_none_or(|draft|
+                                        draft.binding != *id || draft.revision != session.scene().revision) {
+                                        self.state_add = Some(StateAddDraft {
+                                            binding: id.clone(),
+                                            revision: session.scene().revision,
+                                            base_hash: fingerprint(binding),
+                                            source_hash: session.source(&binding.source_id)
+                                                .map(|source| ruster_behavior::source_hash(&source.text)),
+                                            name: String::new(),
+                                            kind: 0,
+                                        });
+                                    }
+                                    ui.add_enabled_ui(!self.source_dirty && !self.property_dirty, |ui| {
+                                        let draft = self.state_add.as_mut().expect("current state field form");
+                                        let popup_at_start = egui::Popup::is_any_open(ui.ctx());
+                                        ui.label("Field name");
+                                        let name = text(ui, &mut draft.name, 128);
+                                        if self.state_add_focus && ui.is_enabled() {
+                                            name.request_focus();
+                                            name.scroll_to_me(Some(egui::Align::Center));
+                                            self.state_add_focus=false;
+                                        }
+                                        state_add_changed |= name.changed();
+                                        let kind = egui::ComboBox::from_label("State field type")
+                                            .selected_text(["Number", "Bool", "Text", "Vec3"][draft.kind])
+                                            .show_ui(ui, |ui| {
+                                                for (index, label) in ["Number", "Bool", "Text", "Vec3"].into_iter().enumerate() {
+                                                    state_add_changed |= ui.selectable_value(&mut draft.kind, index, label).changed();
+                                                }
+                                            });
+                                        let owns_key = name.has_focus() || kind.response.has_focus()
+                                            || (name.lost_focus() && ui.memory(|memory| memory.focused().is_none()));
+                                        let enter = owns_key && !popup_at_start && !egui::Popup::is_any_open(ui.ctx())
+                                            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                                        if ui.button("Add typed state field").clicked() || enter {
+                                            name.surrender_focus();
+                                            kind.response.surrender_focus();
+                                            action = Some(Action::AddState(id.clone(), draft.name.clone(), draft.value()));
+                                        }
+                                        let escape = owns_key && !popup_at_start && !egui::Popup::is_any_open(ui.ctx())
+                                            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                                        if ui.button("Cancel new state field").clicked() || escape {
+                                            name.surrender_focus();
+                                            kind.response.surrender_focus();
+                                            action = Some(Action::CancelStateAdd);
+                                        }
+                                    });
+                                });
+                if state_add_changed {
+                    self.state_add_dirty = true;
+                    self.changed();
+                }
                 egui::CollapsingHeader::new("Script details").id_salt(("behavior_details",id)).show(ui,|ui| {
                     ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
                     if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));}
@@ -843,9 +1215,11 @@ impl BehaviorUi {
                 });
             } else {
                 ui.menu_button("Add behavior…",|ui| {
-                    if ui.button("Lua follower").clicked() {action=Some(Action::Create(object.into()));ui.close();}
+                    if ui.button(if self.application {"Lua application"}else{"Lua follower"}).clicked() {
+                        action=Some(match &target {BindingTarget::Application=>Action::CreateApplication,BindingTarget::Object(id)=>Action::Create(id.clone())});ui.close();
+                    }
                     ui.menu_button("Attach existing source…",|ui| {
-                    for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::Attach{object:object.into(),source:id.clone()});ui.close();}}
+                    for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::Attach{target:target.clone(),source:id.clone()});ui.close();}}
                         if self.sources.is_empty() {ui.label("No sources in this scene.");}
                     });
                     ui.menu_button("Browse embedded sources…",|ui| {for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::OpenSource(id.clone()));ui.close();}}});
@@ -873,6 +1247,7 @@ impl BehaviorUi {
         }
     }
     pub fn source_window(&mut self, ctx: &egui::Context, editable: bool) -> Option<Action> {
+        let editable = editable && !self.state_add_dirty;
         if !self.source_open {
             return None;
         }
@@ -1164,6 +1539,9 @@ pub(super) struct RuntimeUi {
     debug: runtime_debug::DebugUi,
     input_control: runtime_input::InputControl,
     spatial_feedback_index: usize,
+    state_binding: String,
+    state_offset: usize,
+    state_page_key: Option<(RunKey, u64)>,
     context: Option<egui::Context>,
     awaiting: Option<(RunKey, Operation)>,
     worker: Option<VmWorker>,
@@ -1883,6 +2261,85 @@ mod tests {
             "a changed working copy must not receive an old diagnostic location"
         );
         assert!(recovered.pending());
+        // The same raw-value owner preserves invalid Application state defaults.
+        let mut application =
+            Session::new(ruster_scene::Scene::empty("application-drafts")).unwrap();
+        let mut state_editor = BehaviorUi::default();
+        state_editor
+            .execute(Action::CreateApplication, &mut application)
+            .unwrap();
+        assert!(application.scene().objects.is_empty());
+        let binding = application
+            .authoring()
+            .bindings
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        assert_eq!(
+            application.binding(&binding).unwrap().target,
+            BindingTarget::Application
+        );
+        state_editor
+            .execute(
+                Action::AddState(binding.clone(), "elapsed".into(), StateValue::Number(0.0)),
+                &mut application,
+            )
+            .unwrap();
+        state_editor
+            .execute(
+                Action::EditState(binding.clone(), "elapsed".into()),
+                &mut application,
+            )
+            .unwrap();
+        state_editor.property.as_mut().unwrap().value = ValueDraft::Number("-".into());
+        state_editor.property_dirty = true;
+        let drafts =
+            serde_json::from_value(serde_json::to_value(state_editor.snapshot()).unwrap()).unwrap();
+        let mut restored = BehaviorUi::default();
+        restored.restore(&application, drafts).unwrap();
+        let before = application.snapshot_bytes().unwrap();
+        assert!(restored.apply_all(&mut application).is_err());
+        assert_eq!(application.snapshot_bytes().unwrap(), before);
+        restored.property.as_mut().unwrap().value = ValueDraft::Number("7.5".into());
+        restored.apply_property(&mut application).unwrap();
+        assert_eq!(
+            application.binding(&binding).unwrap().state_defaults["elapsed"],
+            StateValue::Number(7.5)
+        );
+        application.undo(application.scene().revision).unwrap();
+        assert_eq!(
+            application.binding(&binding).unwrap().state_defaults["elapsed"],
+            StateValue::Number(0.0)
+        );
+        let mut state_editor = BehaviorUi::default();
+        let owner = application.binding(&binding).unwrap();
+        state_editor.state_add = Some(StateAddDraft {
+            binding: binding.clone(),
+            revision: application.scene().revision,
+            base_hash: fingerprint(owner),
+            source_hash: application
+                .source(&owner.source_id)
+                .map(|source| ruster_behavior::source_hash(&source.text)),
+            name: "mode".into(),
+            kind: 2,
+        });
+        state_editor.state_add_dirty = true;
+        let drafts =
+            serde_json::from_value(serde_json::to_value(state_editor.snapshot()).unwrap()).unwrap();
+        let mut restored = BehaviorUi::default();
+        restored.restore(&application, drafts).unwrap();
+        assert!(restored.pending() && restored.application);
+        assert_eq!(restored.state_add.as_ref().unwrap().name, "mode");
+        assert_eq!(restored.state_add.as_ref().unwrap().kind, 2);
+        let stale = restored.snapshot();
+        restored.apply_all(&mut application).unwrap();
+        assert!(!restored.pending());
+        assert_eq!(
+            application.binding(&binding).unwrap().state_defaults["mode"],
+            StateValue::Text(String::new())
+        );
+        assert!(BehaviorUi::default().restore(&application, stale).is_err());
     }
     #[test]
     fn bounded_editor_preserves_replaced_selection_and_footer_at_two_times_scale() {
@@ -2301,6 +2758,7 @@ mod tests {
         let old_scene = Arc::new(ruster_scene::Scene::empty("old-assets"));
         let mut runtime = RuntimeUi {
             frame: Some(Frame {
+                state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
                 query_observations: None,
                 key: old,
                 tick: 7,
@@ -2323,6 +2781,7 @@ mod tests {
         runtime.begin_reset(second);
         runtime.acknowledge_reset(first, 0);
         runtime.accept_frame(Frame {
+            state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             key: first,
             tick: 0,
@@ -2337,6 +2796,7 @@ mod tests {
         runtime.acknowledge_reset(second, 0);
         assert!(runtime.reset_succeeded.is_none());
         runtime.accept_frame(Frame {
+            state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             key: second,
             tick: 0,

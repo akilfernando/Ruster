@@ -13,11 +13,15 @@ use mlua::chunk::ChunkMode;
 use mlua::debug::DebugEvent;
 use mlua::{Function, HookTriggers, Lua, LuaOptions, StdLib, Table, Value, VmState};
 use ruster_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
-use ruster_scene::{Authoring, BehaviorBinding, BehaviorSource, PropertyValue, Scene, Transform};
+use ruster_scene::{
+    Authoring, BehaviorBinding, BehaviorSource, PropertyValue, Scene, StateFields, Transform,
+};
 use sha2::{Digest, Sha256};
 
 pub mod debug;
 pub mod spatial;
+mod state;
+pub use state::RuntimeState;
 mod spatial_host;
 use spatial_host::{install_spatial, QueryInvocation};
 pub use spatial_host::{QueryObservation, QueryResult};
@@ -31,6 +35,8 @@ pub const HOST_API_VERSION: u32 = 1;
 pub const INPUT_HOST_API_VERSION: u32 = 2;
 /// Explicit opt-in primitive spatial queries, retaining API2 action queries.
 pub const SPATIAL_HOST_API_VERSION: u32 = 3;
+pub const STATE_HOST_API_VERSION: u32 = 4;
+pub const APPLICATION_TEMPLATE: &str = include_str!("../templates/application.lua");
 pub const MAX_SPATIAL_QUERIES: u32 = 32;
 pub const FOLLOWER_TEMPLATE: &str = include_str!("../templates/follower.lua");
 const MAX_MESSAGE_BYTES: usize = 2048;
@@ -166,7 +172,7 @@ impl Diagnostic {
         self.source_id = Some(binding.source_id.clone().into_boxed_str());
         self.source_hash = source.map(|s| source_hash(&s.text).into_boxed_str());
         self.binding_id = Some(binding_id.into());
-        self.object_id = Some(binding.object_id.clone().into_boxed_str());
+        self.object_id = binding.object_id().map(Into::into);
         let prefix = format!("ruster/{}:", binding.source_id);
         self.line = self.message.find(&prefix).and_then(|start| {
             self.message[start + prefix.len()..]
@@ -189,8 +195,25 @@ pub struct Runtime {
     authoring: Authoring,
     tick: u64,
     query_observations: Vec<QueryObservation>,
+    state: Arc<RuntimeState>,
 }
 impl Runtime {
+    pub fn state(&self) -> &Arc<RuntimeState> {
+        &self.state
+    }
+    /// Complete headless report, borrowing fields without duplicating their values.
+    pub fn state_report(&self) -> BTreeMap<&str, &StateFields> {
+        self.authoring
+            .bindings
+            .iter()
+            .map(|(id, binding)| {
+                (
+                    id.as_str(),
+                    self.state.binding(id).unwrap_or(&binding.state_defaults),
+                )
+            })
+            .collect()
+    }
     pub fn scene(&self) -> &Scene {
         &self.scene
     }
@@ -212,9 +235,11 @@ struct HostInput<'a> {
     frame: &'a ValidatedActionFrame,
     spatial: Option<&'a QueryInvocation>,
     binding_id: &'a str,
+    state: &'a RuntimeState,
 }
 #[derive(Clone, Copy)]
 struct TickInput<'a> {
+    state: &'a RuntimeState,
     frame: &'a ValidatedActionFrame,
     spatial: Option<&'a QueryInvocation>,
 }
@@ -428,13 +453,16 @@ impl Engine {
         if source.language_id != LANGUAGE_ID
             || !matches!(
                 source.host_api_version,
-                HOST_API_VERSION | INPUT_HOST_API_VERSION | SPATIAL_HOST_API_VERSION
+                HOST_API_VERSION
+                    | INPUT_HOST_API_VERSION
+                    | SPATIAL_HOST_API_VERSION
+                    | STATE_HOST_API_VERSION
             )
         {
             return Err(Diagnostic::plain(
                 DiagnosticCode::UnsupportedBackend,
                 Phase::Compile,
-                "this provisional backend supports lua54 host API1, API2 input or API3 spatial queries; authored data is preserved",
+                "this provisional backend supports lua54 host API1, API2 input, API3 spatial queries or API4 runtime state; authored data is preserved",
             ));
         }
         let hash = source_hash(&source.text);
@@ -486,29 +514,37 @@ impl Engine {
         self.begin()?;
         self.begin_debug(0, true);
         let snapshot = Arc::new(scene.clone());
+        let state = RuntimeState::defaults(authoring)?;
+        let mut trial_state = state.clone();
         let queries = self.query_invocation(scene, authoring, 0)?;
         for (id, binding) in &authoring.bindings {
             if !binding.enabled {
                 continue;
             }
-            self.evaluate_binding(
+            let output = self.evaluate_binding(
                 id,
                 binding,
                 authoring,
                 &snapshot,
                 0.0,
                 TickInput {
+                    state: &state,
                     frame: &input,
                     spatial: queries.as_ref(),
                 },
             )?;
+            RuntimeState::apply(&mut trial_state, id, output.state).map_err(|error| {
+                error.context(id, binding, authoring.sources.get(&binding.source_id))
+            })?;
         }
+        trial_state.validate_total()?;
         self.check_cancelled()?;
         Ok(Runtime {
             scene: scene.clone(),
             authoring: authoring.clone(),
             tick: 0,
             query_observations: Vec::new(),
+            state,
         })
     }
     /// Atomic fixed-dt update in stable binding-ID order against one tick-start snapshot.
@@ -539,28 +575,39 @@ impl Engine {
         self.begin_debug(runtime.tick, false);
         let snapshot = Arc::new(runtime.scene.clone());
         let mut staged = runtime.scene.clone();
+        let mut staged_state = runtime.state.clone();
         let queries = self.query_invocation(&runtime.scene, &runtime.authoring, runtime.tick)?;
         for (id, binding) in &runtime.authoring.bindings {
             if !binding.enabled {
                 continue;
             }
-            let transform = self.evaluate_binding(
+            let output = self.evaluate_binding(
                 id,
                 binding,
                 &runtime.authoring,
                 &snapshot,
                 self.limits.fixed_dt,
                 TickInput {
+                    state: &runtime.state,
                     frame: &input,
                     spatial: queries.as_ref(),
                 },
             )?;
-            staged
-                .objects
-                .iter_mut()
-                .find(|o| o.id == binding.object_id)
-                .expect("validated runtime owner")
-                .transform = transform;
+            if let Some(transform) = output.transform {
+                staged
+                    .objects
+                    .iter_mut()
+                    .find(|object| Some(object.id.as_str()) == binding.object_id())
+                    .expect("validated runtime owner")
+                    .transform = transform;
+            }
+            RuntimeState::apply(&mut staged_state, id, output.state).map_err(|error| {
+                error.context(
+                    id,
+                    binding,
+                    runtime.authoring.sources.get(&binding.source_id),
+                )
+            })?;
         }
         // Returned TRS can invalidate enabled sphere scale even without a query.
         // Definitions are immutable during a Runtime. Existing objects without
@@ -576,12 +623,14 @@ impl Engine {
                 })?;
             }
         }
+        staged_state.validate_total()?;
         self.check_cancelled()?;
         let observations =
             queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());
         runtime.scene = staged;
         runtime.tick = next;
         runtime.query_observations = observations;
+        runtime.state = staged_state;
         Ok(())
     }
     fn evaluate_binding(
@@ -592,7 +641,7 @@ impl Engine {
         snapshot: &Arc<Scene>,
         dt: f64,
         tick_input: TickInput<'_>,
-    ) -> Result<Transform, Diagnostic> {
+    ) -> Result<BindingOutput, Diagnostic> {
         let source = authoring.sources.get(&binding.source_id);
         let result = (|| {
             let source = source.ok_or_else(|| {
@@ -602,6 +651,15 @@ impl Engine {
                     "binding source is missing; repair its stable source ID",
                 )
             })?;
+            if source.host_api_version != STATE_HOST_API_VERSION
+                && (binding.object_id().is_none() || !binding.state_defaults.is_empty())
+            {
+                return Err(Diagnostic::plain(
+                    DiagnosticCode::UnsupportedBackend,
+                    Phase::Compile,
+                    "Application targets and runtime state require lua54 host API4",
+                ));
+            }
             let main = self.compile(&binding.source_id, source)?;
             if let Some(session) = self.debugger.borrow_mut().as_mut() {
                 session.context(debug::Context {
@@ -613,7 +671,7 @@ impl Engine {
                         .hash
                         .clone(),
                     binding_id: id.into(),
-                    object_id: binding.object_id.clone(),
+                    object_id: binding.object_id().map(Into::into),
                     phase: Phase::Module,
                 });
             }
@@ -631,12 +689,14 @@ impl Engine {
                     "behavior cancelled",
                 ));
             }
-            let input = &snapshot
-                .objects
-                .iter()
-                .find(|o| o.id == binding.object_id)
-                .expect("validated runtime owner")
-                .transform;
+            let input = binding.object_id().map(|id| {
+                &snapshot
+                    .objects
+                    .iter()
+                    .find(|object| object.id == id)
+                    .expect("validated runtime owner")
+                    .transform
+            });
             let result = self.evaluate_with_input(
                 &main,
                 input,
@@ -648,6 +708,7 @@ impl Engine {
                     frame: tick_input.frame,
                     spatial: tick_input.spatial,
                     binding_id: id,
+                    state: tick_input.state,
                 },
             );
             // Clear even after module/update/output errors; cached chunks must not retain
@@ -691,7 +752,7 @@ impl Engine {
             ValidatedActionFrame::neutral(&BTreeMap::new()).expect("empty action map is valid");
         self.evaluate_with_input(
             main,
-            input,
+            Some(input),
             properties,
             snapshot,
             dt,
@@ -700,23 +761,33 @@ impl Engine {
                 frame: &neutral,
                 spatial: None,
                 binding_id: "",
+                state: &RuntimeState::default(),
             },
         )
+        .and_then(|output| {
+            output.transform.ok_or_else(|| {
+                Diagnostic::plain(
+                    DiagnosticCode::InvalidOutput,
+                    Phase::Output,
+                    "API1 requires an object transform",
+                )
+            })
+        })
     }
     fn evaluate_with_input(
         &self,
         main: &Function,
-        input: &Transform,
+        input: Option<&Transform>,
         properties: &BTreeMap<String, PropertyValue>,
         snapshot: Arc<Scene>,
         dt: f64,
         host_input: HostInput<'_>,
-    ) -> Result<Transform, Diagnostic> {
+    ) -> Result<BindingOutput, Diagnostic> {
         // Scope expires host callbacks and drops their Rust captures synchronously,
         // even if authored Lua leaves unreachable cycles awaiting a later VM GC.
         self.lua
             .scope(|scope| {
-                Ok((|| -> Result<Transform, Diagnostic> {
+                Ok((|| -> Result<BindingOutput, Diagnostic> {
                     let (environment, host) = environment(&self.lua, scope, &snapshot, host_input)
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     main.set_environment(environment)
@@ -728,7 +799,9 @@ impl Engine {
                     let update: Function = module
                         .raw_get("update")
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
-                    let object = transform_table(&self.lua, input)
+                    let object = input
+                        .map(|input| transform_table(&self.lua, input))
+                        .transpose()
                         .map_err(|e| self.error(e, Phase::Update, DiagnosticCode::Runtime))?;
                     let props = self
                         .lua
@@ -752,16 +825,102 @@ impl Engine {
                         return Err(Diagnostic::plain(
                             DiagnosticCode::InvalidOutput,
                             Phase::Output,
-                            "update must return a complete transform table",
+                            if host_input.api_version == STATE_HOST_API_VERSION {
+                                "API4 update must return a transform/state envelope"
+                            } else {
+                                "update must return a complete transform table"
+                            },
                         ));
                     };
-                    read_transform(&output)
-                        .map_err(|e| self.error(e, Phase::Output, DiagnosticCode::InvalidOutput))
+                    let result = if host_input.api_version == STATE_HOST_API_VERSION {
+                        read_state_output(&output, input.is_some(), host_input)
+                    } else {
+                        read_transform(&output).map(|transform| BindingOutput {
+                            transform: Some(transform),
+                            state: StateFields::new(),
+                        })
+                    };
+                    result.map_err(|e| self.error(e, Phase::Output, DiagnosticCode::InvalidOutput))
                 })())
             })
             .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?
     }
 }
+struct BindingOutput {
+    transform: Option<Transform>,
+    state: StateFields,
+}
+
+fn state_read(
+    lua: &Lua,
+    state: &RuntimeState,
+    binding: &str,
+    name: &mlua::LuaString,
+) -> mlua::Result<Value> {
+    if name.as_bytes().len() > 128 {
+        return Err(mlua::Error::runtime("state field name exceeds 128 bytes"));
+    }
+    let name = name.to_str()?;
+    let value = state
+        .binding(binding)
+        .and_then(|fields| fields.get(name.as_ref()))
+        .ok_or_else(|| mlua::Error::runtime(format!("unknown state field '{binding}.{name}'")))?;
+    state::lua_value(lua, value)
+}
+
+fn read_state_output(
+    table: &Table,
+    object: bool,
+    input: HostInput<'_>,
+) -> mlua::Result<BindingOutput> {
+    state::plain_table(table)?;
+    for (count, entry) in table.pairs::<Value, Value>().enumerate() {
+        let (key, _) = entry?;
+        let Value::String(key) = key else {
+            return Err(mlua::Error::runtime(
+                "API4 output accepts only transform and state keys",
+            ));
+        };
+        if count >= 2 || !matches!(key.to_str()?.as_ref(), "transform" | "state") {
+            return Err(mlua::Error::runtime(
+                "API4 output accepts only transform and state keys",
+            ));
+        }
+    }
+    let transform = match (object, table.raw_get::<Value>("transform")?) {
+        (true, Value::Table(transform)) => {
+            state::plain_table(&transform)?;
+            for name in ["translation", "rotation", "scale"] {
+                state::plain_table(&transform.raw_get::<Table>(name)?)?;
+            }
+            Some(read_transform(&transform)?)
+        }
+        (false, Value::Nil) => None,
+        (true, _) => {
+            return Err(mlua::Error::runtime(
+                "Object API4 output requires a complete transform",
+            ))
+        }
+        (false, _) => {
+            return Err(mlua::Error::runtime(
+                "Application API4 output must omit transform",
+            ))
+        }
+    };
+    let state = match table.raw_get::<Value>("state")? {
+        Value::Nil => StateFields::new(),
+        Value::Table(patch) => state::read_patch(
+            patch,
+            input
+                .state
+                .binding(input.binding_id)
+                .ok_or_else(|| mlua::Error::runtime("state owner is unavailable"))?,
+        )?,
+        _ => return Err(mlua::Error::runtime("API4 state patch must be a table")),
+    };
+    Ok(BindingOutput { transform, state })
+}
+
 fn environment<'scope, 'env: 'scope>(
     lua: &Lua,
     scope: &'scope mlua::Scope<'scope, 'env>,
@@ -798,7 +957,7 @@ fn environment<'scope, 'env: 'scope>(
     // same-text cache hits. Scoped captures expire before returning to the host.
     if matches!(
         input.api_version,
-        INPUT_HOST_API_VERSION | SPATIAL_HOST_API_VERSION
+        INPUT_HOST_API_VERSION | SPATIAL_HOST_API_VERSION | STATE_HOST_API_VERSION
     ) {
         host.raw_set(
             "button",
@@ -839,8 +998,32 @@ fn environment<'scope, 'env: 'scope>(
             })?,
         )?;
     }
-    if input.api_version == SPATIAL_HOST_API_VERSION {
+    if matches!(
+        input.api_version,
+        SPATIAL_HOST_API_VERSION | STATE_HOST_API_VERSION
+    ) {
         install_spatial(scope, &host, input)?;
+    }
+    if input.api_version == STATE_HOST_API_VERSION {
+        host.raw_set(
+            "state",
+            scope.create_function(move |lua, name: mlua::LuaString| {
+                state_read(lua, input.state, input.binding_id, &name)
+            })?,
+        )?;
+        host.raw_set(
+            "binding_state",
+            scope.create_function(
+                move |lua, (binding, name): (mlua::LuaString, mlua::LuaString)| {
+                    if binding.as_bytes().len() > 128 {
+                        return Err(mlua::Error::runtime(
+                            "state binding reference exceeds 128 bytes",
+                        ));
+                    }
+                    state_read(lua, input.state, binding.to_str()?.as_ref(), &name)
+                },
+            )?,
+        )?;
     }
     Ok((environment, host))
 }
@@ -911,6 +1094,8 @@ fn read_transform(table: &Table) -> mlua::Result<Transform> {
 #[cfg(test)]
 mod spatial_tests;
 #[cfg(test)]
+mod state_tests;
+#[cfg(test)]
 mod tests;
 
 #[cfg(test)]
@@ -936,7 +1121,8 @@ mod input_tests {
             authoring.bindings.insert(
                 format!("binding-{id}"),
                 BehaviorBinding {
-                    object_id: id.into(),
+                    target: ruster_scene::BindingTarget::Object(id.into()),
+                    state_defaults: Default::default(),
                     source_id: "source".into(),
                     enabled: true,
                     properties: BTreeMap::new(),
@@ -1096,6 +1282,7 @@ mod input_tests {
                 o.translation[1]=2+axis
                 if button.pressed then o.translation[1]=o.translation[1]+100 end
             end
+            if host.state~=nil then return {transform=o} end
             return o
         end}"#;
         let (scene, mut authoring) = fixture(text);
@@ -1110,6 +1297,7 @@ mod input_tests {
             (HOST_API_VERSION, 1.0),
             (INPUT_HOST_API_VERSION, 103.0),
             (SPATIAL_HOST_API_VERSION, 103.0),
+            (STATE_HOST_API_VERSION, 103.0),
             (HOST_API_VERSION, 1.0),
         ] {
             authoring
@@ -1139,7 +1327,7 @@ mod input_tests {
             .sources
             .get_mut("source")
             .unwrap()
-            .host_api_version = 4;
+            .host_api_version = 5;
         let error = engine.reset(&scene, &authoring).unwrap_err();
         assert_eq!(error.code, DiagnosticCode::UnsupportedBackend);
         assert_eq!(error.binding_id.as_deref(), Some("binding-a"));

@@ -35,6 +35,7 @@ pub(super) struct Frame {
     pub key: RunKey,
     pub tick: u64,
     pub scene: Arc<Scene>,
+    pub state: Arc<ruster_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
     pub query_observations: Option<Arc<[ruster_behavior::QueryObservation]>>,
 }
@@ -953,6 +954,13 @@ fn frame(shared: &Shared, execution: &Execution, repaint: &Option<Repaint>) {
     let mut latest = shared.latest.lock().unwrap_or_else(|p| p.into_inner());
     if active(shared, info.key) && !shared.cancel.load(Ordering::SeqCst) {
         *latest = Some(Frame {
+            state: Arc::clone(
+                execution
+                    .runtime
+                    .as_ref()
+                    .expect("run info includes runtime")
+                    .state(),
+            ),
             key: info.key,
             tick: info.tick,
             scene,
@@ -1544,7 +1552,8 @@ mod tests {
             authoring.bindings.insert(
                 format!("binding-{id}"),
                 BehaviorBinding {
-                    object_id: id.into(),
+                    target: ruster_scene::BindingTarget::Object(id.into()),
+                    state_defaults: Default::default(),
                     source_id: "source".into(),
                     enabled: true,
                     properties: BTreeMap::from([(

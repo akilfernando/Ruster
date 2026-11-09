@@ -946,10 +946,27 @@ pub(super) fn source_class_name(source_id: &str) -> Result<String, FilesError> {
     id(source_id)?;
     Ok(format!("RusterProps_{}", hash(source_id.as_bytes())))
 }
-pub(super) fn annotation_hint(source_id: &str) -> Result<String, FilesError> {
+pub(super) fn annotation_hint_for_api(source_id: &str, api: u32) -> Result<String, FilesError> {
     id(source_id)?;
+    let host = match api {
+        1 => "RusterHost",
+        2 => "RusterHost2",
+        3 => "RusterHost3",
+        4 => "RusterHost4",
+        _ => return Err(error(ErrorKind::Invalid, "Unsupported tooling host API")),
+    };
+    let transform = if api == 4 {
+        "RusterTransform?"
+    } else {
+        "RusterTransform"
+    };
+    let result = if api == 4 {
+        "RusterStateUpdate"
+    } else {
+        "RusterTransform"
+    };
     Ok(format!(
-        "---@param transform RusterTransform\n---@param props {}\n---@param dt number\n---@param host RusterHost\n---@return RusterTransform\n",
+        "---@param transform {transform}\n---@param props {}\n---@param dt number\n---@param host {host}\n---@return {result}\n",
         source_class_name(source_id)?
     ))
 }
@@ -1009,6 +1026,39 @@ struct GeneratedTooling {
     files: BTreeMap<String, Vec<u8>>,
     annotation_hints: BTreeMap<String, String>,
 }
+const VERSIONED_HOST_TYPES: &str = r#"
+---@class RusterButton
+---@field held boolean
+---@field pressed boolean
+---@field released boolean
+---@class RusterHost2:RusterHost
+---@field button fun(id:string):RusterButton
+---@field axis fun(id:string):number
+---@class RusterSweep
+---@field outcome 'clear'|'blocked'|'initial_overlap'|'precision_limited'
+---@field suggested_translation RusterVec3?
+---@field fraction number
+---@field target_id string?
+---@field point RusterVec3?
+---@field normal RusterVec3?
+---@field clearance number
+---@class RusterOverlap
+---@field probe_id string
+---@field sensor_id string
+---@field position RusterVec3
+---@field overlapping boolean
+---@field signed_distance number?
+---@class RusterHost3:RusterHost2
+---@field sweep fun(probe_id:string,delta:RusterVec3):RusterSweep
+---@field overlap fun(probe_id:string,position:RusterVec3,sensor_id:string):RusterOverlap
+---@alias RusterStateValue number|boolean|string|RusterVec3
+---@class RusterStateUpdate
+---@field transform RusterTransform? Required for Object targets, omitted for Application.
+---@field state table<string,RusterStateValue>? Own known fields only, omitted/nil fields retain their committed values.
+---@class RusterHost4:RusterHost3
+---@field state fun(name:string):RusterStateValue Copied tick-start own field, missing fields fail.
+---@field binding_state fun(binding_id:string,name:string):RusterStateValue Copied tick-start peer field, missing owners/fields fail.
+"#;
 fn tooling_files(authoring: &Authoring) -> Result<GeneratedTooling, FilesError> {
     if authoring.sources.len() > MAX_SOURCES || authoring.bindings.len() > MAX_BINDINGS {
         return Err(error(
@@ -1028,15 +1078,19 @@ fn tooling_files(authoring: &Authoring) -> Result<GeneratedTooling, FilesError> 
             .validate()
             .map_err(|e| error(ErrorKind::Invalid, e.to_string()))?;
     }
-    let mut files = BTreeMap::from([("types/host.lua".into(), HOST_TYPES.as_bytes().to_vec())]);
+    let host_types = format!("{HOST_TYPES}{VERSIONED_HOST_TYPES}");
+    let mut files = BTreeMap::from([("types/host.lua".into(), host_types.into_bytes())]);
     let mut hints = BTreeMap::new();
     for (source_id, source) in &authoring.sources {
-        if source.language_id == "lua54" && source.host_api_version == 1 {
+        if source.language_id == "lua54" && (1..=4).contains(&source.host_api_version) {
             files.insert(
                 format!("types/sources/{source_id}.lua"),
                 source_types(source_id, authoring)?.into_bytes(),
             );
-            hints.insert(source_id.clone(), annotation_hint(source_id)?);
+            hints.insert(
+                source_id.clone(),
+                annotation_hint_for_api(source_id, source.host_api_version)?,
+            );
         }
     }
     // Pinned LuaLS3.19.2 accepts these builtin names (local primary template source).
@@ -1734,7 +1788,8 @@ mod tests {
         authoring.bindings.insert(
             "left-binding".into(),
             BehaviorBinding {
-                object_id: "left".into(),
+                target: ruster_scene::BindingTarget::Object("left".into()),
+                state_defaults: Default::default(),
                 source_id: "source-a".into(),
                 enabled: true,
                 properties,
@@ -1743,7 +1798,8 @@ mod tests {
         authoring.bindings.insert(
             "right-binding".into(),
             BehaviorBinding {
-                object_id: "right".into(),
+                target: ruster_scene::BindingTarget::Object("right".into()),
+                state_defaults: Default::default(),
                 source_id: "source-a".into(),
                 enabled: false,
                 properties: BTreeMap::from([
@@ -1783,6 +1839,20 @@ mod tests {
         assert!(host.contains("---@field [3] number"));
         assert!(host.contains("resolve fun(id:RusterObjectId?):RusterTransform?"));
         assert!(!host.contains("function host") && !host.contains("random"));
+        for (api, host_class, result) in [
+            (1, "RusterHost", "RusterTransform"),
+            (2, "RusterHost2", "RusterTransform"),
+            (3, "RusterHost3", "RusterTransform"),
+            (4, "RusterHost4", "RusterStateUpdate"),
+        ] {
+            let hint = annotation_hint_for_api("source-a", api).unwrap();
+            assert!(hint.contains(&format!("---@param host {host_class}\n")));
+            assert!(hint.contains(&format!("---@return {result}\n")));
+        }
+        assert!(host.contains("---@class RusterHost2:RusterHost"));
+        assert!(host.contains("---@class RusterHost3:RusterHost2"));
+        assert!(host.contains("---@class RusterHost4:RusterHost3"));
+        assert!(host.contains("binding_state fun(binding_id:string,name:string)"));
         let config: serde_json::Value =
             serde_json::from_slice(&fs::read(&output.config).unwrap()).unwrap();
         assert_eq!(config["runtime"]["version"], "Lua 5.4");
@@ -1820,7 +1890,8 @@ mod tests {
             huge.bindings.insert(
                 format!("binding-{n}"),
                 BehaviorBinding {
-                    object_id: format!("owner-{n}"),
+                    target: ruster_scene::BindingTarget::Object(format!("owner-{n}")),
+                    state_defaults: Default::default(),
                     source_id: "source-a".into(),
                     enabled: true,
                     properties: (0..64)

@@ -1,10 +1,46 @@
-# Generic behavior authoring: bounded integration plan
+# Generic behavior authoring
 
-Updated2026-11-04. Agent-selected next implementation stages under autonomous M8 development. This is a plan for unfinished editor/tooling work, not a claim that attaching/running/debugging scripts already works in the generic editor. Lua5.4 remains provisional; C# is untested and the Rhai/Motion Lab compatibility path remains separate.
+Updated 2026-11-09. M8 is complete in its recorded Linux scope. The original M8 plan below is retained as historical context and superseded by its closeout. Lua5.4 remains provisional; C# is untested and the Rhai/Motion Lab compatibility path remains separate.
 
-User steering2026-11-04: finish M8 in this run; defer M9. The stages below retain allocated M8 requirements, with milestone evaluation at completion.
+## F1 owned runtime state — 2026-11-09
 
-## Verified foundations
+[Decision0044](decisions/0044-owned-creator-runtime-state.md) accepts the F1 implementation contract, pending feature qualification and milestone retention. The Scene, behavior, generic-consumer and packaging checks pass. F1 milestone UI/native, raw-draft recovery, exact standalone delivery and state memory/tick/publication/disposal cost qualification remains pending. The [F1 plan](plans/F1-RUNTIME-STATE.md) owns these gates.
+
+### Author defaults and application logic
+
+In the Inspector's **Behavior** section, choose **Application behavior** to work without a selected geometry object. **Add behavior…** → **Lua application** creates an API4 Application source and binding. **Selected object behavior** retains the Object workflow and **Lua follower** template. An Object source must explicitly select API4 to use state. APIs1–3 keep their original contracts. **Edit behavior source** opens the embedded source editor. Ctrl+Enter or **Apply source data** applies source data. Ctrl+S applies and saves. Escape hides the source window while retaining its draft.
+
+Under **State defaults**, expand **Add state field**, enter **Field name** and choose **State field type** from Number, Bool, Text or Vec3. Enter in the focused name field or **Add typed state field** commits the typed default through authored Undo. Enter inside the type popup stays with that popup. **Edit default** opens the value form. Enter or **Apply state default** commits it. Escape in the owned value field or **Revert state default** cancels that edit. **Remove field** changes the authored schema. Escape in the owned pending name/type form or **Cancel new state field** cancels field creation. **Cancel pending state field** also remains available above the form.
+
+Source, default and pending-name edits are drafts until applied. Invalid raw input remains repairable. Pending forms block conflicting operations. Finish or explicitly cancel them before Save/Reset or unrelated edits. New target/default forms use recovery drafts11 with the existing journal envelope1. Recovery integration is implemented, with its new native acceptance still pending. Shared authored Undo/Redo restores defaults and target/source data. Running state remains separate.
+
+Scene13 preserves Object bindings as `"object_id":"object-1"`. Application uses only `"target":{"type":"application"}`. Exactly one form is required, including when disabled. There is at most one Application binding and it consumes no geometry slot. `state_defaults` is a typed name/value map, omitted when empty. For example, `"count":{"type":"number","value":0}` declares a Number field. Properties remain configuration. Defaults define the next run's state schema. State belongs to the stable binding ID. Object duplication copies authored defaults to a fresh owner, while Application state stays with its Application binding. [Data API](../crates/ruster-scene/README.md#application-bindings-and-authored-state-defaults-format-13).
+
+### Run, inspect and repair
+
+Reset builds a complete defaults snapshot, including disabled bindings, then trials enabled sources at dt 0. Trial transforms and state patches are validated and discarded. Successful Reset publishes authored transforms and defaults at tick 0. Step commits state, transforms, tick and query observations atomically. Failed Step preserves the previous complete frame. Failed Reset preserves the previous runtime under its existing stale/error rules. Pause/resume retains state. Source/default/schema changes require explicit Reset without implicit migration.
+
+API4 `host.state(name)` and `host.binding_state(binding_id, name)` read copied tick-start fields. All readers see the prior committed values, including when another binding has already staged a change. Scripts return only their own field patches. An Object envelope also requires its complete transform. Application receives nil and omits transform. Missing/nil patch fields retain values. Unknown fields, changed types or invalid output reject the operation. Mutable globals and closures are recreated per evaluation, so lasting data belongs in declared state. [Complete API4 contract and example](../crates/ruster-behavior/README.md#opt-in-api4-owned-runtime-state).
+
+Open **Committed runtime state**, choose **State owner**, and inspect the displayed run/tick and typed values. Fields use 16-item pages. Pause to browse stable pages. Historical warnings identify retained frames after edits, errors or Stop. The inspector is read-only. Debugger locals can show private in-progress evaluation while this panel continues to show the committed snapshot.
+
+The selected bounds are 64 fields per binding, 1024 UTF-8 bytes per Text, 16 KiB canonical typed JSON per owner and 1 MiB across nonempty committed owner maps. Empty maps charge 0 to that aggregate. Final Step admission considers the complete transaction, with at most 4 MiB logical private staging across 256 owners. Number/Vec3 components are finite f64. Lua integer conversion admits only the inclusive ±2^53 range. Rust containers, defaults, VM allocations and retained frames have separate costs. These serialized limits establish no whole-process memory guarantee.
+
+### MCP, save and delivery
+
+`behavior_state_default` reads authored defaults. `behavior_state_default_set` changes/removes one typed default through revisioned authored history. Runtime state changes through script execution. There is no arbitrary runtime-state setter.
+
+`behavior_runtime_inspect` discovers state owners and reports `frame_run_id`, committed `tick`, captured revision and `state_snapshot_status`. Pin `behavior_runtime_state` with that `frame_run_id` as `expected_run_id`, `expected_tick`, `binding_id`, exact `source_hash` (including null when reported) and `schema_hash`. Field pages contain at most 16 entries. Continue only with those same captured identities and returned offset. Changed-frame continuation rejects. The response labels `current_committed` or `historical_committed` and its captured revision. A retained historical frame remains readable after Stop/errors even when the current operation run differs. Every request still needs the current editor session token/revision guard. A captured frame grants no old-session mutation authority.
+
+Save/reopen preserves authored defaults and history, with runtime state excluded. Scene13 export uses content schema9 and a prepared kit advertising `runtime_state`. Launch descriptor5 remains unchanged. Generic Motion and `ruster-behavior check/run` headless outputs include a typed binding-ID `runtime_state` map, with `{}` for old stateless runs. `check` reports defaults at tick 0 after the discarded trial. `run` reports committed state after the requested ticks. [Consumer workflow](../examples/motion-lab/README.md#api4-application-and-object-state).
+
+F1 exposes data editing and committed inspection. Creator-authored runtime UI/HUDs are outside this milestone. Rust applications retain their existing app-owned egui callback. Later creator-facing UI must use the same owned data and lifecycle authority.
+
+## Historical M8 integration plan — 2026-11-04
+
+The user requested finishing M8 while deferring M9. The following stages retain the original planning record. The M8 closeout below records their bounded completion.
+
+### Foundations at the planning checkpoint
 
 Scene5 persists sources, bindings and typed properties/references without requiring runnable code. Sources/bindings share guarded history; `create_behavior` creates a new source plus attachment atomically. CLI source/binding commands and the headless `ruster-behavior check/run` consumer exercise that document. The Lua library has bounded capabilities, fresh environments/modules, scoped resolver callbacks, atomic copied-state ticks, cancellation and contextual diagnostics. [Decision0018](decisions/0018-language-neutral-behavior-authoring.md), [0019](decisions/0019-provisional-lua-backend.md) and [production cost](evidence/M8-behavior-cost.md) own the accepted scope. None implies editor runtime integration.
 

@@ -19,6 +19,7 @@ pub(super) fn supported(op: &str) -> bool {
     matches!(
         op,
         "behavior_runtime_inspect"
+            | "behavior_runtime_state"
             | "behavior_runtime_reset"
             | "behavior_runtime_play"
             | "behavior_runtime_pause"
@@ -35,6 +36,16 @@ impl SceneEditor {
     pub(super) fn runtime_command(&mut self, token: &str, op: &str, args: &Value) -> Result<Value> {
         let (fields, optional): (&[&str], &[&str]) = match op {
             "behavior_runtime_inspect" => (&[], &["offset", "operation_id"]),
+            "behavior_runtime_state" => (
+                &[
+                    "expected_run_id",
+                    "expected_tick",
+                    "binding_id",
+                    "source_hash",
+                    "schema_hash",
+                ],
+                &["offset"],
+            ),
             "behavior_breakpoints" => (&[], &["offset"]),
             "behavior_runtime_reset" => (&[], &[]),
             "behavior_runtime_play" | "behavior_runtime_pause" | "behavior_runtime_stop" => {
@@ -92,17 +103,20 @@ impl SceneEditor {
         }
         for (field, value) in map {
             let valid = match field.as_str() {
+                "source_hash" if op == "behavior_runtime_state" && value.is_null() => true,
                 "offset"
                 | "operation_id"
                 | "expected_revision"
                 | "expected_tick"
                 | "expected_input_epoch" => number(value).is_some(),
-                "expected_map_identity" => value.as_str().is_some_and(|hash| {
-                    hash.len() == 64
-                        && hash
-                            .bytes()
-                            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
-                }),
+                "expected_map_identity" | "source_hash" | "schema_hash" => {
+                    value.as_str().is_some_and(|hash| {
+                        hash.len() == 64
+                            && hash
+                                .bytes()
+                                .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+                    })
+                }
                 "input_frame" => {
                     serde_json::from_value::<ruster_scene::input::ActionFrame>(value.clone())
                         .is_ok()
@@ -110,7 +124,7 @@ impl SceneEditor {
                 "expected_stop_id" => number(value).is_some_and(|n| n > 0),
                 "line" => number(value).is_some_and(|n| (1..=16385).contains(&n)),
                 "limit" => number(value).is_some_and(|n| (1..=16).contains(&n)),
-                "binding_id" if value.is_null() => true,
+                "binding_id" if value.is_null() && op != "behavior_runtime_state" => true,
                 "enabled" => value.is_boolean(),
                 _ => value.as_str().is_some_and(|text| {
                     !text.is_empty()
@@ -134,7 +148,10 @@ impl SceneEditor {
             if number(&args["expected_revision"]) != Some(revision) {
                 return Err(fail("stale_revision"));
             }
-            if op != "behavior_debug_inspect" && op != "behavior_runtime_stop" {
+            if !matches!(
+                op,
+                "behavior_debug_inspect" | "behavior_runtime_state" | "behavior_runtime_stop"
+            ) {
                 if op == "behavior_runtime_reset" && self.asset_busy() {
                     return Err((
                         "asset_busy".into(),
@@ -166,6 +183,8 @@ impl SceneEditor {
                     if matches!(
                         message.as_str(),
                         "stale_run"
+                            | "state_unavailable"
+                            | "stale_state_schema"
                             | "stale_stop"
                             | "invalid_arguments"
                             | "invalid_input"

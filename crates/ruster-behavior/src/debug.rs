@@ -70,7 +70,7 @@ pub struct StopSnapshot {
     pub source_id: String,
     pub source_hash: String,
     pub binding_id: String,
-    pub object_id: String,
+    pub object_id: Option<String>,
     pub phase: Phase,
     pub committed_tick: u64,
     pub attempted_tick: u64,
@@ -220,7 +220,7 @@ pub(crate) struct Context {
     pub source_id: String,
     pub source_hash: String,
     pub binding_id: String,
-    pub object_id: String,
+    pub object_id: Option<String>,
     pub phase: Phase,
 }
 struct StepTarget {
@@ -392,7 +392,7 @@ impl DebugSession {
         let metadata_bytes = context.source_id.len()
             + context.source_hash.len()
             + context.binding_id.len()
-            + context.object_id.len();
+            + context.object_id.as_ref().map_or(0, String::len);
         let (frames, nodes, truncated) = inspect(lua, metadata_bytes)?;
         let snapshot = Arc::new(StopSnapshot {
             run: self.run,

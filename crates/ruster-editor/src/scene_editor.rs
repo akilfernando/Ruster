@@ -74,6 +74,7 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "scene_persistence_inspect",
     "scene_save",
     "behavior_runtime_inspect",
+    "behavior_runtime_state",
     "behavior_runtime_reset",
     "behavior_runtime_play",
     "behavior_runtime_pause",
@@ -94,6 +95,8 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "behavior_binding_remove",
     "behavior_property",
     "behavior_property_set",
+    "behavior_state_default",
+    "behavior_state_default_set",
     "behavior_action",
     "behavior_action_set",
     "behavior_action_remove",
@@ -735,7 +738,11 @@ impl SceneEditor {
                 | Action::RevertProperty
                 | Action::OpenSource(_)
                 | Action::EditProperty(_, _)
-        );
+                | Action::EditState(_, _)
+                | Action::CancelStateAdd
+        ) || (matches!(action, Action::AddState(_, _, _))
+            && self.behavior.state_add_pending()
+            && self.behavior_editable());
         if !own_draft_action {
             if let Err(error) = self.guard() {
                 self.behavior.error = error;
@@ -872,7 +879,7 @@ impl SceneEditor {
             return Err("Both live and deferred input drafts exist; checkpoint preserved for explicit repair.".into());
         }
         Ok(RecoveryDrafts {
-            version: 10,
+            version: 11,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -908,6 +915,19 @@ impl SceneEditor {
         let material_field = value.get("material").is_some();
         let lighting_field = value.get("lighting").is_some();
         let version = value.get("version").and_then(Value::as_u64);
+        if version.is_some_and(|version| version < 11)
+            && value.get("behavior").is_some_and(|behavior| {
+                behavior.get("state_add").is_some()
+                    || behavior
+                        .get("property")
+                        .is_some_and(|value| value.get("state_default").is_some())
+            })
+        {
+            return Err(
+                "State default recovery fields require draft version11; checkpoint preserved."
+                    .into(),
+            );
+        }
         if version.is_some_and(|version| version < 10) && value.get("collider").is_some() {
             return Err(
                 "Collider recovery fields require draft version10; checkpoint preserved.".into(),
@@ -991,7 +1011,7 @@ impl SceneEditor {
                     && fields_unit != Some(false)
             }
             Some(4) => !lighting_field && manipulation_unit && fields_unit != Some(false),
-            Some(5..=10) => manipulation_unit && fields_unit != Some(false),
+            Some(5..=11) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -1019,7 +1039,7 @@ impl SceneEditor {
         }
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((2..=10).contains(&draft.version) && draft.behavior.is_some()))
+            || ((2..=11).contains(&draft.version) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -3271,6 +3291,27 @@ impl SceneEditor {
             .animated(false)
             .show(ui, |ui| self.inspector_contents(ui));
     }
+    fn behavior_inspector_ui(&mut self, ui: &mut egui::Ui) {
+        let editable = self.behavior_editable();
+        let behavior_object = self.selected.as_deref().filter(|id| {
+            self.session
+                .scene()
+                .objects
+                .iter()
+                .any(|object| object.id == *id)
+        });
+        if let Some(action) = self.behavior.inspector(
+            ui,
+            &self.session,
+            behavior_object,
+            self.assets.as_ref(),
+            self.generation,
+            editable,
+        ) {
+            self.behavior_action(action);
+        }
+        self.runtime.state_inspector(ui);
+    }
     fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
         let title = if self.manipulation.ids.len() > 1 {
             format!("{} selected", self.manipulation.ids.len())
@@ -3331,19 +3372,7 @@ impl SceneEditor {
                     |ui| self.manipulation_ui(ui),
                 );
             }
-            if self.behavior.pending() {
-                let editable = self.behavior_editable();
-                if let Some(action) = self.behavior.inspector(
-                    ui,
-                    &self.session,
-                    None,
-                    self.assets.as_ref(),
-                    self.generation,
-                    editable,
-                ) {
-                    self.behavior_action(action);
-                }
-            }
+            self.behavior_inspector_ui(ui);
             return;
         }
         if self.runtime.visible {
@@ -3424,18 +3453,8 @@ impl SceneEditor {
             self.collider_inspector_ui(ui);
             self.material_inspector_ui(ui);
             self.color_inspector_ui(ui);
-            let editable = self.behavior_editable();
-            if let Some(action) = self.behavior.inspector(
-                ui,
-                &self.session,
-                self.selected.as_deref(),
-                self.assets.as_ref(),
-                self.generation,
-                editable,
-            ) {
-                self.behavior_action(action);
-            }
         }
+        self.behavior_inspector_ui(ui);
         self.ambient_inspector_ui(ui);
         self.display_inspector_ui(ui);
         ui.separator();
@@ -6385,6 +6404,7 @@ mod tests {
             BTreeMap::from([("texture".into(), new_texture.clone())]),
         ));
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             key: first,
             tick: 0,
@@ -6413,6 +6433,7 @@ mod tests {
             &old_texture
         ));
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             key: second,
             tick: 0,
@@ -6463,6 +6484,7 @@ mod tests {
         moved.transform.translation = [0.625, 1.25, -0.375];
         moved.transform.scale = [2.5, 3.5, 4.5];
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             key: current,
             tick: 37,
             scene: Arc::new(displayed.clone()),
@@ -6647,7 +6669,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 10);
+        assert_eq!(payload["version"], 11);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -7102,7 +7124,7 @@ mod tests {
         component.collider_draft = Some(raw.clone());
         let snapshot = component.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 10);
+        assert_eq!(payload["version"], 11);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.collider_draft, Some(raw.clone()));
@@ -8169,7 +8191,7 @@ mod tests {
             assert_eq!(candidates.len(), 1);
             let (_journal, snapshot) = store.claim(&candidates[0].id).unwrap();
             let payload = snapshot.drafts().unwrap();
-            assert_eq!(payload["version"], 10);
+            assert_eq!(payload["version"], 11);
             if shadow {
                 assert_eq!(
                     payload["lighting"]["shadow"]["depth_bias_texels"],
@@ -8287,7 +8309,7 @@ mod tests {
         let exact = source.display_draft.clone();
         let snapshot = source.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 10);
+        assert_eq!(payload["version"], 11);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.display_draft, exact);

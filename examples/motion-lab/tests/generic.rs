@@ -143,6 +143,61 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
         runtime.app().session().snapshot_bytes().unwrap(),
         unfinished_bytes
     );
+
+    // State inspection must stay with the captured old Runtime after replacing
+    // authored defaults/source and rejecting Reset, just like visible motion.
+    let mut stateful = demo();
+    let mut source = stateful.source("follower").unwrap().clone();
+    source.host_api_version = ruster_behavior::STATE_HOST_API_VERSION;
+    source.text = "return {update=function(o,p,dt,h) return {transform=o,state={count=h.state('count')+1}} end}".into();
+    stateful
+        .set_source(stateful.scene().revision, "follower", Some(source))
+        .unwrap();
+    let owners: Vec<_> = stateful.authoring().bindings.keys().cloned().collect();
+    for owner in &owners {
+        stateful
+            .set_state_default(
+                stateful.scene().revision,
+                owner,
+                "count",
+                Some(ruster_scene::StateValue::Number(0.0)),
+            )
+            .unwrap();
+    }
+    let mut stateful_runtime = crate::runtime(stateful);
+    stateful_runtime.reset().unwrap();
+    stateful_runtime.step().unwrap();
+    let committed = serde_json::to_value(stateful_runtime.app().runtime_state_report()).unwrap();
+    assert_eq!(committed[&owners[0]]["count"]["value"], 1.0);
+    let bytes = stateful_runtime.app().session().snapshot_bytes().unwrap();
+    let mut replacement = Session::from_snapshot_bytes(&bytes).unwrap();
+    replacement
+        .set_state_default(
+            replacement.scene().revision,
+            &owners[0],
+            "count",
+            Some(ruster_scene::StateValue::Number(99.0)),
+        )
+        .unwrap();
+    let mut broken = replacement.source("follower").unwrap().clone();
+    broken.text = "unfinished source".into();
+    replacement
+        .set_source(replacement.scene().revision, "follower", Some(broken))
+        .unwrap();
+    stateful_runtime
+        .app_mut()
+        .replace_session(replacement)
+        .unwrap();
+    assert_eq!(
+        serde_json::to_value(stateful_runtime.app().runtime_state_report()).unwrap(),
+        committed
+    );
+    assert!(stateful_runtime.reset().is_err());
+    assert_eq!(
+        serde_json::to_value(stateful_runtime.app().runtime_state_report()).unwrap(),
+        committed
+    );
+    assert_eq!(stateful_runtime.app().runtime_tick(), Some(1));
 }
 
 // Actual CLI/resource wiring is not covered by Engine tests. Reject missing resources,
@@ -305,7 +360,8 @@ fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
             3,
             "control",
             Some(BehaviorBinding {
-                object_id: "head".into(),
+                target: ruster_scene::BindingTarget::Object("head".into()),
+                state_defaults: Default::default(),
                 source_id: "controller".into(),
                 enabled: true,
                 properties: BTreeMap::new(),

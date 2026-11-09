@@ -321,12 +321,15 @@ impl RuntimeUi {
                         if count == 0 { ui.label("No enabled behavior bindings."); }
                         if count > 16 { ui.label(format!("Showing the first 16 of {count} enabled bindings.")); }
                         for (id, binding) in bindings.iter().filter(|(_, binding)| binding.enabled).take(16) {
-                            if let Some(object) = frame.scene.objects.iter().find(|object| object.id == binding.object_id) {
+                            if let Some(object) = frame.scene.objects.iter().find(|object| Some(object.id.as_str()) == binding.object_id()) {
                                 ui.strong(format!("{} · {id}", object.display_name()));
                                 ui.label(format!("Position {:.3?}", object.transform.translation));
                                 ui.label(format!("Rotation {:.3?}", object.transform.rotation));
                             } else {
-                                ui.label(format!("{id} · Object {} unavailable in this snapshot.", binding.object_id));
+                                ui.label(match binding.object_id() {
+                                    Some(object)=>format!("{id} · Object {object} unavailable in this snapshot."),
+                                    None=>format!("{id} · Application behavior"),
+                                });
                             }
                         }
                         }
@@ -565,6 +568,7 @@ mod tests {
                     .into();
                 runtime.visible = true;
                 runtime.frame = Some(Frame {
+                    state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
                     key: RunKey::default(),
                     tick: 1,
                     scene: Arc::new(snapshot),

@@ -41,7 +41,8 @@ fn fixture(source: &str) -> (Scene, Authoring) {
     authoring.bindings.insert(
         "a-probe".into(),
         BehaviorBinding {
-            object_id: "probe".into(),
+            target: ruster_scene::BindingTarget::Object("probe".into()),
+            state_defaults: Default::default(),
             source_id: "source".into(),
             enabled: true,
             properties: BTreeMap::new(),
@@ -147,7 +148,8 @@ fn spatial_lua_persists_stops_withdraws_and_commits_only_successful_observations
     moving.bindings.insert(
         "0-barrier".into(),
         BehaviorBinding {
-            object_id: "barrier".into(),
+            target: ruster_scene::BindingTarget::Object("barrier".into()),
+            state_defaults: Default::default(),
             source_id: "barrier-source".into(),
             enabled: true,
             properties: BTreeMap::new(),
@@ -164,7 +166,7 @@ fn spatial_lua_persists_stops_withdraws_and_commits_only_successful_observations
     // observations, complete Scene and tick remain byte-for-byte values.
     let mut late = authoring.clone();
     let mut binding = late.bindings["a-probe"].clone();
-    binding.object_id = "sensor".into();
+    binding.target = ruster_scene::BindingTarget::Object("sensor".into());
     binding
         .properties
         .insert("fail".into(), PropertyValue::Bool(true));
@@ -197,7 +199,7 @@ fn spatial_budget_spans_bindings_reset_and_tick_and_final_scale_is_atomic() {
         .properties
         .insert("repeats".into(), PropertyValue::Number(16.0));
     let mut second = authoring.bindings["a-probe"].clone();
-    second.object_id = "sensor".into();
+    second.target = ruster_scene::BindingTarget::Object("sensor".into());
     authoring.bindings.insert("z-sensor".into(), second);
     let mut engine = Engine::new(Limits::default()).unwrap();
     let mut runtime = engine.reset(&scene, &authoring).unwrap();
