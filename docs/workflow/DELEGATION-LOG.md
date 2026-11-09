@@ -755,3 +755,10 @@ The user authorizes the bounded experiment with “Proceed”. Existing agents r
 Sol/high (`phase1_perf_protocol`) prepares the fixed comparison owner/analyzer, then repairs a pre-data process-permission assumption while preserving the original sources/failure. Astra/high reviews both source versions, frozen estimators and guard coverage. Root exclusively builds, traces and executes all 60 comparison children, after separate public/normal-runtime correctness and borrowed private boundary observations. Root verifies 423 artifacts and 33 execution inputs.
 
 Sol/high (`phase1_source_export`) independently derives raw paired statistics before reading the approved analysis, verifies seals/outcomes/reaping and finds no integrity or contract blocker. Astra/high reviews the actual outliers, orders and chronology and recommends qualified retention under the frozen model. Root integrates that acceptance with every correctness/overlap/read-trace obligation and updates the current plan, decision, roadmap and handoff. Metrics remain specific to the declared source/host/cache regime. Child usage/elapsed metrics are unavailable.
+
+
+## 2026-11-09 — next milestone recommendation
+
+Root inspects current admission/render planning, interaction and disposal owners. Astra/high (`phase1_recovery_design`) performs a read-only strategic review under the existing root model snapshot and recommends AUD-006 ahead of AUD-008 for the whole-creation visual/selection consequence and continuity with accepted admission work. Unit-sensitive picking remains the immediate next interaction priority, followed by separately measured export disposal. Root records the bounded proposal and preserves user selection before implementation. No code, tests, benchmarks or native sessions are changed or run. Child elapsed/usage metrics are unavailable.
+
+Planning verification uses the Markdown-only `python3 scripts/check.py` lane and passes in 0.24 seconds. Production checks are unselected because this change contains only planning documentation.

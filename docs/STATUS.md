@@ -1,6 +1,6 @@
 # Current project status
 
-Updated2026-11-08. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
+Updated2026-11-09. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
 ## Product direction and confirmed feedback
 
@@ -125,6 +125,12 @@ All822frozen paths have explicit dispositions, with vendor/history scope qualifi
 Twelve current-source offscreen cost runs pass output/resource oracles. Intel dense scene medians9.848/9.857/17.120ms and completion14.051/14.081/21.627ms show material variation without contemporaneous power/thermal telemetry. These are descriptive validation-on serialized observations, without a stable device budget or native presentation claim. No new physical-human or native focus walkthrough was performed. Independent Astra raw-result review accepts that qualified scope. Astra gives qualified acceptance of the integrated report after correcting four current-document coverage notes. The final documentation gate is recorded below.
 
 [Remediation packages](plans/ENGINEERING-REMEDIATION.md) are proposed for user selection. Recommended first milestone is trustworthy pending-edit recovery, including already-created incompatible/stale checkpoints. Concrete bounded ownership/admission fixes precede unmeasured broad rewrites. P2a stays accepted and sealed. No product remediation or new capability goal is activated by this audit. Final `python3 scripts/check.py` selects Markdown-only checks and passes in0.17s, with the final recording rechecked before commit. Unchanged full baseline/inspection/GPU evidence is reused. Verification logs and final handoff live in the external audit workspace.
+
+## Proposed next milestone — renderable geometry
+
+2026-11-09. The user asks where to go after accepted AUD-005. Root/Astra recommend [consistent mesh admission through rendering and delivery](plans/RENDERABLE-MESH-ADMISSION.md), scoped to AUD-006. Actual source still expands non-UV vertices from 24 CPU bytes to 32 GPU bytes under the same 48 MiB caps, potentially clearing the displayed mesh closure while CPU picking retains source triangles. Full visible boundary reproduction and a preflight-versus-layout choice precede implementation.
+
+The proposal requires ordinary editor/MCP diagnosis agreement, faithful accepted geometry, matching selection, preserved work, save/reopen and standalone delivery, with bounded ownership and measured costs. Suggested follow-ups are source-unit selection/Fit (AUD-008/016) and export cleanup ownership (AUD-007), each independently scoped. A concrete creator exercise then selects further feature work. This is planning only. User selection, a new goal and implementation remain pending.
 
 ## Asset admission — accepted
 
