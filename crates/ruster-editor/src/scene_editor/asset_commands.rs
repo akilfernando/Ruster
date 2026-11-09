@@ -3875,7 +3875,14 @@ mod tests {
     // app code. Only a later root-frame pass0 can hand its last map owner off.
     #[test]
     fn discarded_pass_resources_wait_for_later_root_frame_and_worker_ack() {
-        for case in ["replace", "close", "preview", "pending_reset", "save"] {
+        for case in [
+            "replace",
+            "close",
+            "preview",
+            "pending_reset",
+            "save",
+            "immediate_session",
+        ] {
             let ctx = egui::Context::default();
             let mut editor = SceneEditor::with_workspace(
                 Session::new(Scene::empty("retirement")).unwrap(),
@@ -3918,7 +3925,7 @@ mod tests {
                     scene: Arc::new(Scene::empty("reset")),
                 });
                 editor.runtime.reset_succeeded = Some(key);
-            } else if case == "pending_reset" {
+            } else if matches!(case, "pending_reset" | "immediate_session") {
                 editor.resolved.clear();
                 editor.preview_assets.clear();
             }
@@ -4011,6 +4018,37 @@ mod tests {
                                 editor.capture_reset_assets(key);
                                 assert!(editor.reset_assets.as_ref().unwrap().1.is_empty());
                             }
+                            "immediate_session" => {
+                                editor.retire_reset_assets();
+                                let mut controller = std::mem::take(&mut editor.asset_ops);
+                                assert_eq!(controller.retired_frame, Some(0));
+                                assert!(!controller.fence_ready);
+                                assert!(!controller.retiring && controller.immediate.is_none());
+                                let painted_owners = weak.strong_count();
+                                controller.immediate = Some(RetiredAssets {
+                                    session: Some(Box::new(editor.session.clone())),
+                                    ..Default::default()
+                                });
+                                controller.ensure_worker(&ctx).unwrap();
+                                // Do not poll between submission and observation.
+                                // Even an already delivered worker ack cannot
+                                // clear this controller's in-flight flag yet.
+                                controller.retire_inner(&mut editor);
+                                assert!(controller.retiring);
+                                assert!(!controller.retiring_paint);
+                                assert!(controller.immediate.is_none());
+                                assert_eq!(controller.retired_frame, Some(0));
+                                assert!(!controller.fence_ready);
+                                let painted = controller.retired.as_ref().unwrap();
+                                assert!(painted.session.is_none());
+                                assert_eq!(painted.maps[2].meshes.len(), 1);
+                                assert!(Arc::ptr_eq(
+                                    painted.maps[2].meshes.get("old").unwrap(),
+                                    &weak.upgrade().unwrap()
+                                ));
+                                assert_eq!(weak.strong_count(), painted_owners);
+                                editor.asset_ops = controller;
+                            }
                             _ => unreachable!(),
                         }
                         // Replacement carries the same controller and pending
@@ -4024,7 +4062,16 @@ mod tests {
                 } else {
                     assert_eq!(ctx.cumulative_frame_nr(), 0);
                     assert!(editor.asset_ops.retired.is_some());
-                    assert!(!editor.asset_ops.retiring);
+                    assert!(
+                        !editor.asset_ops.retiring_paint,
+                        "case={case}: painted retirement crossed its fence: retiring={}, retired_frame={:?}, fence_ready={}, status={}",
+                        editor.asset_ops.retiring,
+                        editor.asset_ops.retired_frame,
+                        editor.asset_ops.fence_ready,
+                        editor.asset_ops.status
+                    );
+                    assert_eq!(editor.asset_ops.retired_frame, Some(0), "case={case}");
+                    assert!(!editor.asset_ops.fence_ready, "case={case}");
                     if case == "save" {
                         assert!(editor.asset_ops.retired.as_ref().unwrap().session.is_none());
                     }

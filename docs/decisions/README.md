@@ -44,3 +44,4 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 - [0040 Cumulative application payload admission](0040-cumulative-application-payload-admission.md) records the accepted AUD-005 boundary.
 - [0041 Compact mesh GPU storage](0041-compact-mesh-gpu-storage.md) records the candidate AUD-006 representation.
 - [0042 Worker-owned export staging](0042-worker-owned-export-staging.md) records the candidate AUD-007 lifecycle.
+- [0043 Checked picking and camera framing](0043-checked-picking-and-camera-framing.md) records the candidate AUD-008/016 numeric and failure-feedback contract.

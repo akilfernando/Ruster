@@ -1957,6 +1957,8 @@ mod tests {
                                 rect,
                                 response,
                                 picked: None,
+                                fit_attempted: false,
+                                fit_error: None,
                                 view: view.to_cols_array_2d().map(|row| row.map(|v| v as f32)),
                                 projection: projection
                                     .to_cols_array_2d()

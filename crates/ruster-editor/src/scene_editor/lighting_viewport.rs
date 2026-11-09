@@ -387,8 +387,16 @@ pub(super) fn frame_selection(
     if !low.is_finite() || !high.is_finite() {
         return None;
     }
-    camera.target = ((low + high) * 0.5).to_array().map(|value| value as f32);
-    camera.distance = ((high - low).length().max(1.0) * 1.5 / f64::from(aspect.min(1.0))) as f32;
+    let target = (low + high) * 0.5;
+    let distance = (high - low).length().max(1.0) * 1.5 / f64::from(aspect.min(1.0));
+    if target.abs().max_element() > 1.0e7
+        || !distance.is_finite()
+        || !(0.01..=1.0e7).contains(&distance)
+    {
+        return None;
+    }
+    camera.target = target.to_array().map(|value| value as f32);
+    camera.distance = distance as f32;
     camera.is_valid().then_some(camera)
 }
 
@@ -576,6 +584,51 @@ mod tests {
             1.0
         )
         .is_none());
-        assert!(frame_selection(&scene, &[sun_id.clone(), sun_id], &meshes, camera, 1.0).is_none());
+        assert!(frame_selection(
+            &scene,
+            &[sun_id.clone(), sun_id.clone()],
+            &meshes,
+            camera,
+            1.0
+        )
+        .is_none());
+        for aspect in [0.0, -1.0, f32::NAN, f32::INFINITY, 1.0e-8] {
+            assert!(
+                frame_selection(&scene, &mixed, &meshes, camera, aspect).is_none(),
+                "invalid or overflowing portrait aspect {aspect}"
+            );
+        }
+        // The raw distance is outside the domain but rounds to its f32 upper
+        // bound. Admission must occur before that narrowing loses the excess.
+        if let ruster_scene::Lighting::Authored { lights, .. } = &mut scene.lighting {
+            lights.get_mut(&sun_id).unwrap().transform.translation = [0.0; 3];
+        }
+        scene.objects[0].transform = Transform {
+            scale: [6.666667, 1.0, 1.0],
+            ..Default::default()
+        };
+        let raw_distance = f64::from(scene.objects[0].transform.scale[0]) * 1_000_000.0 * 1.5;
+        assert!(raw_distance > 1.0e7 && raw_distance as f32 == 1.0e7);
+        let meshes = BTreeMap::from([(
+            "triangle".into(),
+            Arc::new(ruster_assets::Mesh {
+                texcoords: None,
+                indices: vec![0, 1, 2],
+                vertices: [
+                    [999_999.0, 0.0, 0.0],
+                    [1_000_000.0, 0.0, 0.0],
+                    [999_999.0, 1.0, 0.0],
+                ]
+                .map(|position| ruster_assets::Vertex {
+                    position,
+                    normal: [0.0, 0.0, 1.0],
+                })
+                .to_vec(),
+            }),
+        )]);
+        assert!(
+            frame_selection(&scene, &mixed, &meshes, camera, 1.0).is_none(),
+            "raw out-of-domain mixed selection must not round into an accepted Fit"
+        );
     }
 }

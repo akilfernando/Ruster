@@ -4740,6 +4740,8 @@ impl SceneEditor {
             self.navigation.keyboard_enabled=self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
             self.navigation.movement_speed=self.workspace.prefs.movement_speed;
             let authored_view = transient.as_ref().unwrap_or(self.session.scene());
+            let mut mixed_fit_error = None;
+            let mut mixed_fit_succeeded = false;
             if self.navigation.frame_selected
                 && self.manipulation.ids.iter().any(|id| authored_view.lighting.light(id).is_some())
             {
@@ -4757,10 +4759,18 @@ impl SceneEditor {
                         )
                     }) {
                         self.navigation.camera = Some(camera);
+                        self.navigation.clear_fit_error = true;
+                        mixed_fit_succeeded = true;
+                    } else {
+                        mixed_fit_error = Some(ruster_render::FIT_ERROR);
                     }
                 } else if self.runtime.visible {
                     self.notice = "Switch to the authored view to frame selected lights.".into();
                 }
+            }
+            if let Some(error) = mixed_fit_error {
+                self.error = error.into();
+                ui.colored_label(ui.visuals().warn_fg_color, error);
             }
             let viewport = ruster_render::viewport_with_materials(
                 ui,
@@ -4778,6 +4788,12 @@ impl SceneEditor {
                 if self.runtime.visible { &self.preview_textures } else { &self.resolved_textures },
                 &mut self.navigation,
             );
+            if let Some(error) = viewport.fit_error.filter(|_| viewport.fit_attempted) {
+                self.error = error.into();
+            } else if (mixed_fit_succeeded || viewport.fit_attempted) && mixed_fit_error.is_none()
+                && self.error == ruster_render::FIT_ERROR {
+                self.error.clear();
+            }
             self.runtime.input_finish(&ctx, &viewport.response, blocked);
             self.captures.rect = Some(viewport.rect);
             self.captures.receipt = Some(viewport.receipt.clone());
@@ -5826,6 +5842,181 @@ mod tests {
                 "Details must preserve the retained problem"
             );
             assert_eq!(editor.shader_notice, messages[0]);
+        }
+        // Both shared geometry Fit and the editor-only mixed light route must
+        // preserve the view and surface a retained, readable failure.
+        for mixed_light in [false, true] {
+            let ctx = egui::Context::default();
+            crate::editor_theme::configure(&ctx);
+            let mut scene = Scene::authored_empty("fit-feedback");
+            let light_id = scene.lighting.lights().next().unwrap().0.to_owned();
+            let mut object = Scene::demo().objects.remove(0);
+            let object_id = object.id.clone();
+            object.mesh = Some("large-fit-source".into());
+            object.transform = Transform {
+                scale: [1000.0; 3],
+                ..Default::default()
+            };
+            scene.objects.push(object);
+            let mut editor = SceneEditor::new(Session::new(scene).unwrap());
+            editor.resolved.insert(
+                "large-fit-source".into(),
+                Arc::new(ruster_assets::Mesh {
+                    texcoords: None,
+                    indices: vec![0, 1, 2],
+                    vertices: [
+                        [-1_000_000.0, 0.0, 0.0],
+                        [1_000_000.0, 0.0, 0.0],
+                        [0.0, 1.0, 0.0],
+                    ]
+                    .map(|position| ruster_assets::Vertex {
+                        position,
+                        normal: [0.0, 0.0, 1.0],
+                    })
+                    .to_vec(),
+                }),
+            );
+            editor.select_object(Some(object_id), false);
+            if mixed_light {
+                editor.select_object(Some(light_id), true);
+            }
+            let camera = ruster_render::CameraState {
+                target: [1.0, 2.0, 3.0],
+                yaw: 0.3,
+                pitch: 0.7,
+                distance: 8.0,
+                orthographic: true,
+            };
+            editor.navigation.camera = Some(camera);
+            editor.navigation.reset = false;
+            editor.navigation.frame_selected = true;
+            let mut error_visible = false;
+            let mut fit_button = None;
+            for _ in 0..2 {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 640.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| editor.ui(ui),
+                );
+                output.textures_delta.clear();
+                fit_button = output.shapes.iter().find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text)
+                        if text.galley.job.text == "Fit"
+                            && shape.clip_rect.contains_rect(egui::Rect::from_min_size(
+                                text.pos,
+                                text.galley.size(),
+                            )) =>
+                    {
+                        Some(text.pos + text.galley.size() * 0.5)
+                    }
+                    _ => None,
+                });
+                assert_eq!(editor.navigation.camera, Some(camera));
+                assert!(
+                    editor.error.contains("Cannot frame this content"),
+                    "failed Fit must retain an editor diagnostic (mixed light {mixed_light})"
+                );
+                error_visible |= output.shapes.iter().any(|shape| {
+                    matches!(&shape.shape, egui::epaint::Shape::Text(text)
+                        if text.galley.job.text.contains("Cannot frame this content")
+                        && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))
+                });
+            }
+            assert!(
+                error_visible,
+                "Fit failure must be readable in the real viewport (mixed light {mixed_light})"
+            );
+            if !mixed_light {
+                editor.error = "Newer unrelated problem".into();
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 640.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| editor.ui(ui),
+                );
+                output.textures_delta.clear();
+                assert_eq!(
+                    editor.error, "Newer unrelated problem",
+                    "idle Fit feedback must not overwrite a newer editor diagnostic"
+                );
+                assert!(output.shapes.iter().any(|shape| {
+                    matches!(&shape.shape, egui::epaint::Shape::Text(text)
+                        if text.galley.job.text.contains("Cannot frame this content")
+                        && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))
+                }), "the retained Fit warning remains visible independently");
+                // A new actual failure legitimately replaces the diagnostic
+                // and supplies the precondition for the toolbar repair below.
+                editor.navigation.frame_selected = true;
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        screen_rect: Some(egui::Rect::from_min_size(
+                            egui::Pos2::ZERO,
+                            egui::vec2(960.0, 640.0),
+                        )),
+                        ..Default::default()
+                    },
+                    |ui| editor.ui(ui),
+                );
+                output.textures_delta.clear();
+                assert_eq!(editor.error, ruster_render::FIT_ERROR);
+            }
+            for vertex in
+                &mut Arc::make_mut(editor.resolved.get_mut("large-fit-source").unwrap()).vertices
+            {
+                vertex.position = vertex.position.map(|coordinate| coordinate * 1.0e-6);
+            }
+            let fit_button = fit_button.expect("ordinary Fit must remain visible after rejection");
+            // The real toolbar activation repairs only its own diagnostic.
+            // Repeating it must preserve an unrelated retained editor error.
+            for unrelated in [false, true] {
+                if unrelated {
+                    editor.error = "Unrelated retained problem".into();
+                }
+                for pressed in [true, false] {
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            focused: true,
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(960.0, 640.0),
+                            )),
+                            events: vec![
+                                egui::Event::PointerMoved(fit_button),
+                                egui::Event::PointerButton {
+                                    pos: fit_button,
+                                    button: egui::PointerButton::Primary,
+                                    pressed,
+                                    modifiers: egui::Modifiers::NONE,
+                                },
+                            ],
+                            ..Default::default()
+                        },
+                        |ui| editor.ui(ui),
+                    );
+                    output.textures_delta.clear();
+                }
+                assert!(editor.navigation.camera.unwrap().is_valid());
+                assert_eq!(
+                    editor.error,
+                    if unrelated {
+                        "Unrelated retained problem"
+                    } else {
+                        ""
+                    }
+                );
+            }
         }
     }
     // Folding advanced controls must never hide recovered/invalid input, and

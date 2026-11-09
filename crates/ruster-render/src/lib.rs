@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use bytemuck::{Pod, Zeroable};
 use eframe::{egui, egui_wgpu};
-use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
+use glam::{DVec3, EulerRot, Mat3, Mat4, Quat, Vec3};
 use ruster_scene::{Object, Scene};
 use wgpu::util::DeviceExt;
 
@@ -403,6 +403,9 @@ pub struct NavigationOptions {
     pub camera: Option<CameraState>,
     pub toggle_projection: bool,
     pub view_preset: Option<ViewPreset>,
+    /// A frontend-owned Fit succeeded outside the shared geometry route.
+    /// Consumed once to clear its old diagnostic, without claiming a shared Fit.
+    pub clear_fit_error: bool,
 }
 impl Default for NavigationOptions {
     fn default() -> Self {
@@ -415,6 +418,7 @@ impl Default for NavigationOptions {
             camera: None,
             toggle_projection: false,
             view_preset: None,
+            clear_fit_error: false,
         }
     }
 }
@@ -426,23 +430,45 @@ struct Camera {
     distance: f32,
     orthographic: bool,
 }
+impl Default for Camera {
+    fn default() -> Self {
+        Self {
+            target: Vec3::ZERO,
+            yaw: 0.65,
+            pitch: 0.45,
+            distance: 8.0,
+            orthographic: false,
+        }
+    }
+}
 impl Camera {
-    fn fit(scene: &Scene, meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>) -> Self {
-        Self::fit_objects(scene.objects.iter(), meshes)
+    fn fit(
+        scene: &Scene,
+        meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+        aspect: f32,
+    ) -> Option<Self> {
+        Self::fit_objects(scene.objects.iter(), meshes, aspect)
     }
     fn fit_objects<'a>(
         objects: impl Iterator<Item = &'a Object>,
         meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
-    ) -> Self {
+        aspect: f32,
+    ) -> Option<Self> {
+        if !aspect.is_finite() || aspect <= 0.0 {
+            return None;
+        }
         let mut count = 0;
-        let mut low = Vec3::splat(f32::INFINITY);
-        let mut high = Vec3::splat(f32::NEG_INFINITY);
+        let mut low = DVec3::splat(f64::INFINITY);
+        let mut high = DVec3::splat(f64::NEG_INFINITY);
         for object in objects {
             count += 1;
-            let matrix = model(object);
+            let matrix = model(object).as_dmat4();
             if let Some(mesh) = object_mesh(object, meshes) {
                 for vertex in &mesh.vertices {
-                    let p = matrix.transform_point3(Vec3::from(vertex.position));
+                    let p = matrix.transform_point3(Vec3::from(vertex.position).as_dvec3());
+                    if !p.is_finite() {
+                        return None;
+                    }
                     low = low.min(p);
                     high = high.max(p);
                 }
@@ -450,7 +476,10 @@ impl Camera {
                 for x in [-0.5, 0.5] {
                     for y in [-0.5, 0.5] {
                         for z in [-0.5, 0.5] {
-                            let p = matrix.transform_point3(Vec3::new(x, y, z));
+                            let p = matrix.transform_point3(DVec3::new(x, y, z));
+                            if !p.is_finite() {
+                                return None;
+                            }
                             low = low.min(p);
                             high = high.max(p);
                         }
@@ -459,17 +488,26 @@ impl Camera {
             }
         }
         let (target, distance) = if count == 0 {
-            (Vec3::ZERO, 8.0)
+            (DVec3::ZERO, 8.0)
         } else {
             ((low + high) * 0.5, (high - low).length().max(1.0) * 1.5)
         };
-        Self {
-            target,
-            yaw: 0.65,
-            pitch: 0.45,
-            distance,
-            orthographic: false,
+        // The diagonal sphere fits vertically. Apply the actual portrait
+        // aspect before narrowing, so rounding cannot admit an oversized fit.
+        let distance = distance / f64::from(aspect.min(1.0));
+        if !target.is_finite()
+            || target.abs().max_element() > 1.0e7
+            || !distance.is_finite()
+            || !(0.01..=1.0e7).contains(&distance)
+        {
+            return None;
         }
+        let camera = Self {
+            target: target.as_vec3(),
+            distance: distance as f32,
+            ..Self::default()
+        };
+        camera.checked_matrices(aspect).map(|_| camera)
     }
     fn state(self) -> CameraState {
         CameraState {
@@ -534,10 +572,13 @@ impl Camera {
         self.target = fitted.target;
         self.distance = fitted.distance;
     }
-    fn fit_aspect(&mut self, aspect: f32) {
-        // The diagonal-derived sphere already fits the vertical field of view.
-        // Portrait viewports need more distance to fit its horizontal extent.
-        self.distance /= aspect.clamp(f32::EPSILON, 1.0);
+    fn checked_matrices(self, aspect: f32) -> Option<(Mat4, Mat4, Mat4)> {
+        if !self.state().is_valid() || !aspect.is_finite() || aspect <= 0.0 {
+            return None;
+        }
+        let (view, projection, overlay) = self.matrices(aspect);
+        (view.is_finite() && projection.is_finite() && overlay.is_finite())
+            .then_some((view, projection, overlay))
     }
     fn navigate(&mut self, delta: egui::Vec2, pan: bool, speed: f32, height: f32) {
         if pan {
@@ -665,6 +706,11 @@ pub struct ViewportInteraction {
     pub response: egui::Response,
     /// Newly clicked surface; the host decides whether an overlay consumes the click.
     pub picked: Option<String>,
+    /// This frame evaluated a shared Fit/Reset candidate, including initial Fit.
+    pub fit_attempted: bool,
+    /// A rejected Fit leaves the last valid view installed. Frontends may retain
+    /// this same actionable diagnostic alongside their other editor errors.
+    pub fit_error: Option<&'static str>,
     /// Right-handed view matrix, in column-major order.
     pub view: [[f32; 4]; 4],
     /// wgpu projection with clip depth 0..1, in column-major order.
@@ -673,6 +719,9 @@ pub struct ViewportInteraction {
     /// Its screen x/y coordinates match `projection`.
     pub gizmo_projection: [[f32; 4]; 4],
 }
+
+/// Shared creator-facing explanation for an out-of-domain framing candidate.
+pub const FIT_ERROR: &str = "Cannot frame this content within the supported camera range. Reduce its coordinates or scale, or widen the viewport.";
 
 /// Paint a scene and return the viewport response and camera for a subsequent overlay.
 /// Every selected stable ID receives the existing material highlight. Disable navigation
@@ -715,25 +764,36 @@ pub fn viewport_with_materials(
 ) -> ViewportInteraction {
     let navigation_enabled = navigation.enabled;
     let camera_id = ui.scope_id().with(("ruster-3d-camera", &scene.id));
-    let stored_camera = ui.ctx().data_mut(|data| data.get_temp::<Camera>(camera_id));
-    let mut fitted = stored_camera.is_none();
-    let mut camera = stored_camera.unwrap_or_else(|| Camera::fit(scene, meshes));
-    if let Some(state) = navigation.camera.filter(|state| state.is_valid()) {
-        camera = Camera::from_state(state);
-        fitted = false;
+    let error_id = camera_id.with("fit-error");
+    let stored_camera = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<Camera>(camera_id))
+        .filter(|camera| camera.state().is_valid());
+    let previous = navigation
+        .camera
+        .filter(|state| state.is_valid())
+        .map(Camera::from_state)
+        .or(stored_camera);
+    let mut fitted = previous.is_none();
+    let preserved_camera = previous.unwrap_or_default();
+    let mut camera = preserved_camera;
+    let mut selected_fit = false;
+    let mut fit_error = ui
+        .ctx()
+        .data_mut(|data| data.get_temp::<Option<&'static str>>(error_id))
+        .flatten();
+    if std::mem::take(&mut navigation.clear_fit_error) {
+        fit_error = None;
     }
     if navigation_enabled && navigation.reset {
-        camera = Camera::fit(scene, meshes);
+        let default = Camera::default();
+        camera.yaw = default.yaw;
+        camera.pitch = default.pitch;
+        camera.orthographic = default.orthographic;
         fitted = true;
     }
     if navigation_enabled && navigation.frame_selected && !selected.is_empty() {
-        camera.frame(Camera::fit_objects(
-            scene
-                .objects
-                .iter()
-                .filter(|o| selected.contains(&o.id.as_str())),
-            meshes,
-        ));
+        selected_fit = true;
         fitted = true;
     }
     if navigation_enabled && navigation.toggle_projection {
@@ -789,7 +849,7 @@ pub fn viewport_with_materials(
             .add_enabled(navigation_enabled, egui::Button::new("Fit"))
             .clicked()
         {
-            camera.frame(Camera::fit(scene, meshes));
+            selected_fit = false;
             fitted = true;
         }
     });
@@ -798,8 +858,34 @@ pub fn viewport_with_materials(
         egui::Sense::click_and_drag(),
     );
     if fitted {
-        camera.fit_aspect(rect.aspect_ratio());
+        let fit = if selected_fit {
+            Camera::fit_objects(
+                scene
+                    .objects
+                    .iter()
+                    .filter(|object| selected.contains(&object.id.as_str())),
+                meshes,
+                rect.aspect_ratio(),
+            )
+        } else {
+            Camera::fit(scene, meshes, rect.aspect_ratio())
+        };
+        let candidate = fit
+            .map(|fit| {
+                let mut candidate = camera;
+                candidate.frame(fit);
+                candidate
+            })
+            .filter(|candidate| candidate.checked_matrices(rect.aspect_ratio()).is_some());
+        if let Some(candidate) = candidate {
+            camera = candidate;
+            fit_error = None;
+        } else {
+            camera = preserved_camera;
+            fit_error = Some(FIT_ERROR);
+        }
     }
+    let accepted_camera = camera;
     let speed = navigation.movement_speed.clamp(0.05, 1000.0);
     let pan = response.dragged_by(egui::PointerButton::Middle)
         || (response.dragged_by(egui::PointerButton::Secondary) && ui.input(|i| i.modifiers.shift));
@@ -812,9 +898,10 @@ pub fn viewport_with_materials(
         );
     }
     if navigation_enabled && response.hovered() {
-        camera.distance = (camera.distance
-            * (-ui.input(|input| input.smooth_scroll_delta.y) * 0.002).exp())
-        .clamp(0.01, 1.0e7);
+        let scroll = ui.input(|input| input.smooth_scroll_delta.y);
+        if scroll != 0.0 {
+            camera.distance = (camera.distance * (-scroll * 0.002).exp()).clamp(0.01, 1.0e7);
+        }
         if navigation.keyboard_enabled
             && ui.input(|i| i.focused && i.pointer.button_down(egui::PointerButton::Secondary))
         {
@@ -841,10 +928,18 @@ pub fn viewport_with_materials(
             }
         }
     }
+    let (view, projection, gizmo_projection) = match camera.checked_matrices(rect.aspect_ratio()) {
+        Some(matrices) => matrices,
+        None => {
+            camera = accepted_camera;
+            camera.matrices(rect.aspect_ratio())
+        }
+    };
     navigation.camera = Some(camera.state());
     ui.ctx()
         .data_mut(|data| data.insert_temp(camera_id, camera));
-    let (view, projection, gizmo_projection) = camera.matrices(rect.aspect_ratio());
+    ui.ctx()
+        .data_mut(|data| data.insert_temp(error_id, fit_error));
     let view_projection = projection * view;
     let picked = if response.clicked() {
         response.interact_pointer_pos().and_then(|p| {
@@ -996,11 +1091,32 @@ pub fn viewport_with_materials(
             egui::Color32::YELLOW,
         );
     }
+    if let Some(error) = fit_error {
+        let painter = ui.painter().with_clip_rect(rect);
+        let position = rect.left_top() + egui::vec2(8.0, 8.0);
+        let galley = painter.layout(
+            error.into(),
+            egui::TextStyle::Body.resolve(ui.style()),
+            ui.visuals().warn_fg_color,
+            (rect.width() - 16.0).max(1.0),
+        );
+        painter.rect_filled(
+            egui::Rect::from_min_size(
+                position - egui::vec2(4.0, 4.0),
+                galley.size() + egui::vec2(8.0, 8.0),
+            ),
+            4.0,
+            ui.visuals().extreme_bg_color,
+        );
+        painter.galley(position, galley, ui.visuals().warn_fg_color);
+    }
     ViewportInteraction {
         receipt,
         rect,
         response,
         picked,
+        fit_attempted: fitted,
+        fit_error,
         view: view.to_cols_array_2d(),
         projection: projection.to_cols_array_2d(),
         gizmo_projection: gizmo_projection.to_cols_array_2d(),
@@ -1021,17 +1137,36 @@ fn pick(
     x: f32,
     y: f32,
 ) -> Option<String> {
+    // Invert the actual matrices sent to rendering, with f64 arithmetic. Casting
+    // an already inverted f32 matrix retains its source-unit-sensitive error.
+    let view_projection = view_projection.as_dmat4();
+    if !view_projection.is_finite() || view_projection.determinant() == 0.0 {
+        return None;
+    }
     let inverse = view_projection.inverse();
-    let near = inverse.project_point3(Vec3::new(x, y, 0.0));
-    let far = inverse.project_point3(Vec3::new(x, y, 1.0));
-    let direction = (far - near).normalize();
+    let near = inverse.project_point3(DVec3::new(f64::from(x), f64::from(y), 0.0));
+    let far = inverse.project_point3(DVec3::new(f64::from(x), f64::from(y), 1.0));
+    let length = (far - near).length();
+    if !near.is_finite() || !far.is_finite() || !length.is_finite() || length <= 0.0 {
+        return None;
+    }
+    let direction = (far - near) / length;
     scene
         .objects
         .iter()
         .filter_map(|object| {
-            let inverse = model(object).inverse();
+            let matrix = model(object).as_dmat4();
+            if !matrix.is_finite() || matrix.determinant() == 0.0 {
+                return None;
+            }
+            let inverse = matrix.inverse();
             let origin = inverse.transform_point3(near);
+            // Do not normalize this local direction. Its t remains a world
+            // distance from the near point across differently scaled objects.
             let ray = inverse.transform_vector3(direction);
+            if !origin.is_finite() || !ray.is_finite() {
+                return None;
+            }
             if let Some(mesh) = object_mesh(object, meshes) {
                 return mesh
                     .indices
@@ -1039,19 +1174,22 @@ fn pick(
                     .0
                     .iter()
                     .filter_map(|triangle| {
-                        let a = Vec3::from(mesh.vertices.get(triangle[0] as usize)?.position);
-                        let b = Vec3::from(mesh.vertices.get(triangle[1] as usize)?.position);
-                        let c = Vec3::from(mesh.vertices.get(triangle[2] as usize)?.position);
+                        let a = Vec3::from(mesh.vertices.get(triangle[0] as usize)?.position)
+                            .as_dvec3();
+                        let b = Vec3::from(mesh.vertices.get(triangle[1] as usize)?.position)
+                            .as_dvec3();
+                        let c = Vec3::from(mesh.vertices.get(triangle[2] as usize)?.position)
+                            .as_dvec3();
                         ray_triangle(origin, ray, a, b, c)
                     })
-                    .filter(|distance| *distance <= (far - near).length())
-                    .min_by(f32::total_cmp)
+                    .filter(|distance| *distance <= length)
+                    .min_by(f64::total_cmp)
                     .map(|distance| (distance, &object.id));
             }
-            let mut enter = 0.0_f32;
-            let mut exit = (far - near).length();
+            let mut enter = 0.0_f64;
+            let mut exit = length;
             for axis in 0..3 {
-                if ray[axis].abs() < 1.0e-8 {
+                if ray[axis] == 0.0 {
                     if origin[axis].abs() > 0.5 {
                         return None;
                     }
@@ -1069,12 +1207,20 @@ fn pick(
 }
 
 // Match the renderer's backface culling; positive model scales preserve winding.
-fn ray_triangle(origin: Vec3, direction: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Option<f32> {
+fn ray_triangle(origin: DVec3, direction: DVec3, a: DVec3, b: DVec3, c: DVec3) -> Option<f64> {
     let e1 = b - a;
     let e2 = c - a;
     let p = direction.cross(e2);
     let determinant = e1.dot(p);
-    if determinant <= 1.0e-8 {
+    // This bounds cancellation in the local scalar triple product, rather
+    // than imposing a source-unit-dependent geometric cutoff. It does not
+    // bound input/matrix error or supply an exact, watertight predicate.
+    let permanent = e1.x.abs() * ((direction.y * e2.z).abs() + (direction.z * e2.y).abs())
+        + e1.y.abs() * ((direction.z * e2.x).abs() + (direction.x * e2.z).abs())
+        + e1.z.abs() * ((direction.x * e2.y).abs() + (direction.y * e2.x).abs());
+    let unit_roundoff = f64::EPSILON * 0.5;
+    let gamma8 = 8.0 * unit_roundoff / (1.0 - 8.0 * unit_roundoff);
+    if !determinant.is_finite() || !permanent.is_finite() || determinant <= gamma8 * permanent {
         return None;
     }
     let t = origin - a;
@@ -1084,11 +1230,11 @@ fn ray_triangle(origin: Vec3, direction: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Opt
     }
     let q = t.cross(e1);
     let v = direction.dot(q) / determinant;
-    if v < 0.0 || u + v > 1.0 {
+    if !v.is_finite() || v < 0.0 || u + v > 1.0 {
         return None;
     }
     let distance = e2.dot(q) / determinant;
-    (distance >= 0.0).then_some(distance)
+    (distance.is_finite() && distance >= 0.0).then_some(distance)
 }
 
 #[repr(C)]
@@ -2410,7 +2556,7 @@ mod tests {
             members.iter().map(|m| m.offset).collect::<Vec<_>>(),
             [0, 64]
         );
-        let camera = Camera::fit(&Scene::demo(), &BTreeMap::new());
+        let camera = Camera::fit(&Scene::demo(), &BTreeMap::new(), 1.0).unwrap();
         let eye = camera.eye_mode();
         assert_eq!(eye[3], 1.);
         assert!(Vec3::from_slice(&eye[..3])
@@ -2549,9 +2695,8 @@ mod tests {
                 ViewPreset::Top,
                 ViewPreset::Isometric,
             ] {
-                let mut camera = Camera::fit(&scene, &meshes);
+                let mut camera = Camera::fit(&scene, &meshes, aspect).unwrap();
                 camera.set_preset(preset);
-                camera.fit_aspect(aspect);
                 let (view, projection, _) = camera.matrices(aspect);
                 for x in [-0.5, 0.5] {
                     for y in [-0.5, 0.5] {
@@ -2575,7 +2720,7 @@ mod tests {
         scene.objects.truncate(1);
         scene.objects[0].transform.translation = [1.2, -0.4, 0.7];
         let meshes = BTreeMap::new();
-        let mut camera = Camera::fit(&scene, &meshes);
+        let mut camera = Camera::fit(&scene, &meshes, 1.0).unwrap();
         for preset in [
             ViewPreset::Front,
             ViewPreset::Back,
@@ -2610,7 +2755,7 @@ mod tests {
                 assert!((gpu.x - tool.x).abs() < 1e-5 && (gpu.y - tool.y).abs() < 1e-5);
             }
             let old = camera.state();
-            camera.frame(Camera::fit(&Scene::demo(), &meshes));
+            camera.frame(Camera::fit(&Scene::demo(), &meshes, 1.0).unwrap());
             assert_eq!(camera.yaw, old.yaw);
             assert_eq!(camera.pitch, old.pitch);
             assert_eq!(camera.orthographic, old.orthographic);
@@ -2623,8 +2768,12 @@ mod tests {
     fn navigation_frames_selection_and_preserves_camera_when_input_is_owned() {
         let scene = Scene::demo();
         let meshes = BTreeMap::new();
-        let selected =
-            Camera::fit_objects(scene.objects.iter().filter(|o| o.id == "right"), &meshes);
+        let selected = Camera::fit_objects(
+            scene.objects.iter().filter(|o| o.id == "right"),
+            &meshes,
+            1.0,
+        )
+        .unwrap();
         assert!(selected.target.abs_diff_eq(Vec3::new(2.0, 0.0, 0.0), 1e-5));
         let mut pan = selected;
         pan.navigate(egui::vec2(20.0, 10.0), true, 4.0, 600.0);
@@ -2709,6 +2858,242 @@ mod tests {
             ..initial
         };
         assert!(!invalid.is_valid());
+
+        // Domain rejection must be atomic after the actual portrait aspect is
+        // known, including a raw target that would round back into f32 bounds.
+        let draw_fit = |ctx: &egui::Context,
+                        scene: &Scene,
+                        meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+                        navigation: &mut NavigationOptions,
+                        size,
+                        events| {
+            let mut feedback = (false, None);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    let viewport = viewport_with_navigation(
+                        ui,
+                        scene,
+                        &[scene.objects[0].id.as_str()],
+                        meshes,
+                        navigation,
+                    );
+                    feedback = (viewport.fit_attempted, viewport.fit_error);
+                },
+            );
+            output.textures_delta.clear();
+            (output, feedback)
+        };
+        let previous = CameraState {
+            target: [1.0, 2.0, 3.0],
+            yaw: 0.3,
+            pitch: 0.7,
+            distance: 8.0,
+            orthographic: true,
+        };
+        for (case, positions, scale, translation, size) in [
+            (
+                "target",
+                [
+                    [999_999.0, 0.0, 0.0],
+                    [1_000_000.0, 0.0, 0.0],
+                    [999_999.0, 1.0, 0.0],
+                ],
+                [10.0; 3],
+                [5.125, 0.0, 0.0],
+                egui::vec2(800.0, 600.0),
+            ),
+            (
+                "extent",
+                [
+                    [-1_000_000.0, 0.0, 0.0],
+                    [1_000_000.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                ],
+                [1000.0; 3],
+                [0.0; 3],
+                egui::vec2(800.0, 600.0),
+            ),
+            (
+                "portrait",
+                [
+                    [-1_000_000.0, 0.0, 0.0],
+                    [1_000_000.0, 0.0, 0.0],
+                    [0.0, 1.0, 0.0],
+                ],
+                [1.0; 3],
+                [0.0; 3],
+                egui::vec2(100.0, 900.0),
+            ),
+        ] {
+            let mut scene = Scene::demo();
+            scene.objects.truncate(1);
+            scene.objects[0].mesh = Some("fit-source".into());
+            scene.objects[0].transform = ruster_scene::Transform {
+                scale,
+                translation,
+                ..Default::default()
+            };
+            scene.validate().unwrap();
+            let mesh = ruster_assets::Mesh {
+                texcoords: None,
+                indices: vec![0, 1, 2],
+                vertices: positions
+                    .map(|position| ruster_assets::Vertex {
+                        position,
+                        normal: [0.0, 0.0, 1.0],
+                    })
+                    .to_vec(),
+            };
+            ruster_assets::validate_mesh(&mesh).unwrap();
+            let meshes = BTreeMap::from([("fit-source".into(), Arc::new(mesh))]);
+            for (prior, reset) in [
+                (Some(previous), false),
+                (Some(previous), true),
+                (None, true),
+            ] {
+                let ctx = egui::Context::default();
+                let mut navigation = NavigationOptions {
+                    camera: prior,
+                    reset,
+                    frame_selected: !reset,
+                    ..Default::default()
+                };
+                let mut error_visible = false;
+                for frame in 0..2 {
+                    let (output, feedback) =
+                        draw_fit(&ctx, &scene, &meshes, &mut navigation, size, Vec::new());
+                    assert_eq!(feedback, (frame == 0, Some(FIT_ERROR)));
+                    let camera = navigation
+                        .camera
+                        .expect("a safe camera must remain installed");
+                    assert!(camera.is_valid(), "invalid Fit default for {case}");
+                    if let Some(prior) = prior {
+                        assert_eq!(
+                            camera, prior,
+                            "failed Fit must preserve the entire prior view for {case}"
+                        );
+                    }
+                    error_visible |= output.shapes.iter().any(|shape| {
+                        matches!(&shape.shape, egui::epaint::Shape::Text(text)
+                            if text.galley.job.text.contains("Cannot frame this content")
+                            && shape.clip_rect.contains_rect(egui::Rect::from_min_size(text.pos, text.galley.size())))
+                    });
+                }
+                assert!(
+                    error_visible,
+                    "Fit failure must remain visibly actionable for {case}"
+                );
+                let before_clear = navigation.camera;
+                navigation.clear_fit_error = true;
+                let (_, feedback) =
+                    draw_fit(&ctx, &scene, &meshes, &mut navigation, size, Vec::new());
+                assert_eq!(
+                    feedback,
+                    (false, None),
+                    "frontend success only clears feedback"
+                );
+                assert!(
+                    !navigation.clear_fit_error,
+                    "feedback pulse is consumed once"
+                );
+                assert_eq!(navigation.camera, before_clear);
+            }
+        }
+        // Merely hovering the viewport without wheel input preserves valid
+        // boundary cameras exactly, rather than opportunistically changing them.
+        for distance in [0.01, 1.0e7] {
+            let ctx = egui::Context::default();
+            let mut navigation = NavigationOptions {
+                camera: Some(CameraState {
+                    distance,
+                    ..previous
+                }),
+                ..Default::default()
+            };
+            let before = navigation.camera;
+            draw_fit(
+                &ctx,
+                &scene,
+                &BTreeMap::new(),
+                &mut navigation,
+                egui::vec2(800.0, 600.0),
+                vec![egui::Event::PointerMoved(egui::pos2(400.0, 300.0))],
+            );
+            assert_eq!(navigation.camera, before);
+        }
+        // Pan and focused RMB flight are also whole-camera transactions at
+        // the domain edge. Neither may store an invalid pose for the next frame.
+        for flight in [false, true] {
+            let ctx = egui::Context::default();
+            let boundary = CameraState {
+                target: [1.0e7, 0.0, 0.0],
+                yaw: if flight {
+                    std::f32::consts::FRAC_PI_2
+                } else {
+                    0.0
+                },
+                ..previous
+            };
+            let mut navigation = NavigationOptions {
+                camera: Some(boundary),
+                movement_speed: 1000.0,
+                keyboard_enabled: true,
+                ..Default::default()
+            };
+            let button = if flight {
+                egui::PointerButton::Secondary
+            } else {
+                egui::PointerButton::Middle
+            };
+            let mut events = vec![
+                egui::Event::PointerMoved(pos),
+                egui::Event::PointerButton {
+                    pos,
+                    button,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ];
+            if flight {
+                events.push(egui::Event::Key {
+                    key: egui::Key::S,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+            draw_fit(
+                &ctx,
+                &scene,
+                &BTreeMap::new(),
+                &mut navigation,
+                egui::vec2(800.0, 600.0),
+                events,
+            );
+            if !flight {
+                draw_fit(
+                    &ctx,
+                    &scene,
+                    &BTreeMap::new(),
+                    &mut navigation,
+                    egui::vec2(800.0, 600.0),
+                    vec![egui::Event::PointerMoved(pos - egui::vec2(100.0, 0.0))],
+                );
+            }
+            assert_eq!(
+                navigation.camera,
+                Some(boundary),
+                "invalid {} must preserve the accepted pose",
+                if flight { "flight" } else { "pan" }
+            );
+        }
     }
 
     #[test]
@@ -2770,6 +3155,75 @@ mod tests {
             None,
             "far-clipped geometry cannot be picked"
         );
+
+        // Distances from differently scaled source meshes must remain world
+        // distances. Normalizing either local ray reverses this nearest hit.
+        let triangle = |unit: f32| {
+            Arc::new(ruster_assets::Mesh {
+                texcoords: None,
+                vertices: [[-1.0, -1.0, 0.0], [1.0, -1.0, 0.0], [0.0, 1.0, 0.0]]
+                    .map(|point| ruster_assets::Vertex {
+                        position: point.map(|coordinate| coordinate * unit),
+                        normal: [0.0, 0.0, 1.0],
+                    })
+                    .to_vec(),
+                indices: vec![0, 1, 2],
+            })
+        };
+        let mut front = scene.objects[0].clone();
+        front.id = "front-source".into();
+        front.mesh = Some("large-source".into());
+        front.transform.translation = [0.0; 3];
+        front.transform.rotation = [0.1, 0.3, 0.2];
+        front.transform.scale = [0.002, 0.001, 0.001];
+        let mut back = front.clone();
+        back.id = "back-source".into();
+        back.mesh = Some("small-source".into());
+        back.transform.translation = [0.0, 0.0, -3.0];
+        back.transform.rotation = [-0.1, -0.2, 0.15];
+        back.transform.scale = [500.0, 1000.0, 500.0];
+        scene.objects = vec![back, front];
+        scene.validate().unwrap();
+        let mut meshes = BTreeMap::from([
+            ("large-source".into(), triangle(1000.0)),
+            ("small-source".into(), triangle(0.001)),
+        ]);
+        assert_eq!(
+            pick(&scene, &meshes, vp, 0.0, 0.0).as_deref(),
+            Some("front-source")
+        );
+        let mut reversed = (*meshes["large-source"]).clone();
+        reversed.indices.swap(1, 2);
+        meshes.insert("large-source".into(), Arc::new(reversed));
+        assert_eq!(
+            pick(&scene, &meshes, vp, 0.0, 0.0).as_deref(),
+            Some("back-source")
+        );
+        scene.objects.truncate(1);
+        scene.objects[0].transform.rotation = [0.0; 3];
+        for z in [-1000.0, 5.9995] {
+            scene.objects[0].transform.translation[2] = z;
+            assert_eq!(
+                pick(&scene, &meshes, vp, 0.0, 0.0),
+                None,
+                "clip boundary at {z}"
+            );
+        }
+
+        // A nonzero local slab direction can be tiny after a supported large
+        // scale, yet enter the cube before the far clip plane.
+        scene.objects[0].mesh = None;
+        scene.objects[0].transform.translation = [500.0, 0.0, -300.0];
+        scene.objects[0].transform.scale = [1000.0, 1.0, 1000.0];
+        let view = Mat4::look_to_rh(
+            Vec3::new(-0.0001, 0.0, 6.0),
+            Vec3::new(0.000001, 0.0, -1.0).normalize(),
+            Vec3::Y,
+        );
+        assert_eq!(
+            pick(&scene, &BTreeMap::new(), projection * view, 0.0, 0.0),
+            Some(scene.objects[0].id.clone())
+        );
     }
     #[test]
     fn imported_triangle_controls_pick_and_exact_fit_bounds() {
@@ -2792,7 +3246,7 @@ mod tests {
             indices: vec![0, 1, 2],
         });
         let meshes = BTreeMap::from([("triangle".into(), mesh)]);
-        let camera = Camera::fit(&scene, &meshes);
+        let camera = Camera::fit(&scene, &meshes, 1.0).unwrap();
         let (view, projection, gizmo_projection) = camera.matrices(1.6);
         let vp = projection * view;
         for (point, hit) in [
@@ -2811,6 +3265,102 @@ mod tests {
             .target
             .abs_diff_eq(Vec3::new(3.8, -0.1, -1.0), 1.0e-5));
         assert!((camera.distance - Vec3::new(2.4, 1.6, 0.0).length() * 1.5).abs() < 1.0e-5);
+        let mut unreferenced = (*meshes["triangle"]).clone();
+        unreferenced.vertices.push(ruster_assets::Vertex {
+            position: [20.0, 0.0, 0.0],
+            normal: [0.0, 0.0, 1.0],
+        });
+        let all_vertices = Camera::fit(
+            &scene,
+            &BTreeMap::from([("triangle".into(), Arc::new(unreferenced))]),
+            1.0,
+        )
+        .unwrap();
+        assert!(
+            all_vertices
+                .target
+                .abs_diff_eq(Vec3::new(13.4, -0.1, -1.0), 1.0e-5),
+            "Fit retains the existing all-vertex bounds contract"
+        );
+
+        // Equivalent accepted source units must pick the same visible surface
+        // through the actual f32 view/model matrices used for rendering.
+        for unit in [0.001_f32, 1.0, 1000.0] {
+            let object = &mut scene.objects[0];
+            object.transform.translation = [0.0, 0.0, -1.0];
+            object.transform.rotation = [0.15, 0.3, 0.1];
+            object.transform.scale = [unit.recip(); 3];
+            let mesh = ruster_assets::Mesh {
+                texcoords: None,
+                vertices: [[-0.5, -0.5, 0.0], [0.5, -0.5, 0.0], [0.0, 0.5, 0.0]]
+                    .map(|point| ruster_assets::Vertex {
+                        position: point.map(|coordinate| coordinate * unit),
+                        normal: [0.0, 0.0, 1.0],
+                    })
+                    .to_vec(),
+                indices: vec![0, 1, 2],
+            };
+            ruster_assets::validate_mesh(&mesh).unwrap();
+            let meshes = BTreeMap::from([("triangle".into(), Arc::new(mesh))]);
+            scene.validate().unwrap();
+            for orthographic in [false, true] {
+                let camera = Camera {
+                    target: Vec3::ZERO,
+                    yaw: 0.0,
+                    pitch: 0.0,
+                    distance: 6.0,
+                    orthographic,
+                };
+                let (view, projection, _) = camera.matrices(1.6);
+                let vp = projection * view;
+                for (point, hit) in [([0.0, -0.125, 0.0], true), ([0.49, 0.45, 0.0], false)] {
+                    let world =
+                        model(&scene.objects[0]).transform_point3(Vec3::from_array(point) * unit);
+                    let ndc = vp.project_point3(world);
+                    assert_eq!(
+                        pick(&scene, &meshes, vp, ndc.x, ndc.y).is_some(),
+                        hit,
+                        "source unit {unit}, orthographic {orthographic}"
+                    );
+                }
+            }
+        }
+        assert!(
+            ray_triangle(DVec3::Z, DVec3::X, DVec3::ZERO, DVec3::X, DVec3::Y).is_none(),
+            "parallel rays have no front-facing intersection"
+        );
+        assert!(
+            ray_triangle(
+                DVec3::Z,
+                DVec3::NEG_Z,
+                DVec3::ZERO,
+                DVec3::X,
+                DVec3::X * 2.0
+            )
+            .is_none(),
+            "degenerate triangles remain unpickable"
+        );
+        let b = DVec3::new(1.0, 1.0, 0.0);
+        let c = DVec3::new(0.0, 1.0, 1.0);
+        for delta in [f64::EPSILON, 1.0e-10] {
+            let direction = DVec3::new(1.0, 2.0, 1.0 - delta);
+            assert!(
+                b.dot(direction.cross(c)) > 0.0,
+                "fixture has a positive determinant"
+            );
+            let hit = ray_triangle((b + c) / 3.0 - direction, direction, DVec3::ZERO, b, c);
+            if delta == f64::EPSILON {
+                assert!(
+                    hit.is_none(),
+                    "roundoff-ambiguous grazing is conservatively rejected"
+                );
+            } else {
+                assert!(
+                    hit.is_some_and(|distance| distance.is_finite() && distance >= 0.0),
+                    "a resolved grazing intersection remains pickable"
+                );
+            }
+        }
     }
 
     #[test]
@@ -2927,7 +3477,9 @@ mod tests {
             ] {
                 assert!(validated_pipeline(&device, &r.pipeline_layout, source, samples).is_err());
             }
-            let camera = Camera::fit(&Scene::demo(), &BTreeMap::new()).matrices(1.0);
+            let camera = Camera::fit(&Scene::demo(), &BTreeMap::new(), 1.0)
+                .unwrap()
+                .matrices(1.0);
             queue.write_buffer(
                 &r.camera,
                 0,
