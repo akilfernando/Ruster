@@ -40,3 +40,7 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 | [0034](0034-direct-lit-dielectric-surface-feasibility.md) | V3a opt-in direct-lit dielectric/HDR/import-policy feasibility (experimental, acceptance pending) |
 
 - [0039 Pending recovery repair and preserved source checkpoints](0039-pending-recovery-repair.md) records the approved first-phase compatibility and journal ownership choice. Native qualification remains in progress.
+
+- [0040 Cumulative application payload admission](0040-cumulative-application-payload-admission.md) records the accepted AUD-005 boundary.
+- [0041 Compact mesh GPU storage](0041-compact-mesh-gpu-storage.md) records the candidate AUD-006 representation.
+- [0042 Worker-owned export staging](0042-worker-owned-export-staging.md) records the candidate AUD-007 lifecycle.

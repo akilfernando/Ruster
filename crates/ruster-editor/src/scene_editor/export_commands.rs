@@ -49,7 +49,9 @@ impl SceneEditor {
             return Err("Custom shaders cannot be exported yet. Choose the built-in appearance for this session.".into());
         }
         if self.creation_export.busy() {
-            return Err("An export is already running. Wait or cancel it first.".into());
+            return Err(
+                "An export is still active. Check its status and wait for it to finish.".into(),
+            );
         }
         Ok(())
     }
@@ -395,6 +397,13 @@ impl SceneEditor {
                     }
                     _ => (),
                 }
+                if let Some(warning) = state["operation"]["cleanup_warning"].as_str() {
+                    if state["operation"]["state"] == "failed" {
+                        self.error = format!("{} {warning}", self.error);
+                    } else {
+                        self.notice = format!("{} {warning}", self.notice);
+                    }
+                }
             }
         }
     }
@@ -547,13 +556,24 @@ impl SceneEditor {
                                 ui.label("No export is running.");
                             }
                         }
-                    }
-                    if self.creation_export.busy() {
-                        if ui.button("Cancel export").clicked() {
-                            self.creation_export.cancel();
+                        if state["operation"]["cleanup_pending"] == true {
+                            ui.label("Removing private export files…");
                         }
-                    } else if ui.button("Close export status").clicked() {
-                        self.export_status_open = false;
+                        if let Some(warning) = state["operation"]["cleanup_warning"].as_str() {
+                            ui.colored_label(ui.visuals().warn_fg_color, warning);
+                        }
+                        if state["busy"] == true
+                            && matches!(
+                                state["operation"]["state"].as_str(),
+                                Some("running" | "cancelling")
+                            )
+                        {
+                            if ui.button("Cancel export").clicked() {
+                                self.creation_export.cancel();
+                            }
+                        } else if ui.button("Close export status").clicked() {
+                            self.export_status_open = false;
+                        }
                     }
                     if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
                         self.creation_export.cancel();

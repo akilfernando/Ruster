@@ -135,9 +135,38 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resourc
         9,
         "unresolved content must retire cached pixels/bindings"
     );
+    verify_uv_stream_switch(device, queue, r);
     verify_role_budget_swap(device, queue, &mut r.materials);
     verify_mesh_budget_swap(device, queue);
     eprintln!("GPU probe: decoded PNG UV/sRGB pixels, per-draw missing UV isolation, unchanged zero uploads, same-ID mesh/texture replacement and rendering after worker CPU-source release passed");
+}
+
+// Observe location10 directly through both layouts under the same stable ID.
+fn verify_uv_stream_switch(device: &wgpu::Device, queue: &wgpu::Queue, r: &mut Resources) {
+    let source = "struct Output { @builtin(position) position: vec4<f32>, @location(0) uv: vec2<f32> }; @vertex fn vs(@location(0) position: vec3<f32>, @location(10) uv: vec2<f32>) -> Output { return Output(vec4<f32>(position, 1.), uv); } @fragment fn fs(input: Output) -> @location(0) vec4<f32> { return vec4<f32>(input.uv, 1., 1.); }";
+    let original = r.pipeline.clone();
+    r.pipeline = validated_pipeline(device, &r.pipeline_layout, source, r.sample_count).unwrap();
+    let mut mesh = ruster_assets::parse_obj(
+        b"v -1 -1 0.5\nv 1 -1 0.5\nv 1 1 0.5\nv -1 1 0.5\nf 1 2 3\nf 1 3 4\n",
+    )
+    .unwrap();
+    let key = BindingKey::default();
+    r.materials
+        .prepare(device, queue, std::iter::once((&key, None, None)));
+    for with_uvs in [true, false, true] {
+        mesh.texcoords = with_uvs.then(|| vec![[0.75, 0.5]; mesh.vertices.len()]);
+        let snapshot = Arc::new(mesh.clone());
+        assert!(prepare_mesh(device, &mut r.meshes, "diagnostic", &snapshot).is_some());
+        let expected = if with_uvs {
+            [225, 188, 255]
+        } else {
+            [0, 0, 255]
+        };
+        let bytes = render(device, queue, r, &key);
+        assert_pixel(&bytes, 32, 32, expected);
+        assert!(prepare_mesh(device, &mut r.meshes, "diagnostic", &snapshot).is_none());
+    }
+    r.pipeline = original;
 }
 
 // One existing GPU ownership case: valid final mixed-role closure must not be
@@ -254,11 +283,15 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
                 count
             ],
             indices: (0..count).map(|index| (index % 3) as u32).collect(),
-            texcoords: None,
+            texcoords: Some(vec![[0.; 2]; count]),
         })
     };
     let large = mesh(ruster_assets::MAX_VERTICES);
     let small = mesh(ruster_assets::MAX_VERTICES / 8);
+    assert!(
+        large.payload_bytes() * 14 + small.payload_bytes() <= ruster_assets::MAX_RESOLVED_BYTES
+    );
+    assert!(large.payload_bytes() * 15 > ruster_assets::MAX_RESOLVED_BYTES);
     let mut groups = (0..15)
         .map(|index| DrawGroup {
             key: Some(format!("mesh-{index:02}")),
@@ -437,13 +470,14 @@ fn render(
             }),
             ..Default::default()
         });
-        pass.set_pipeline(&r.pipeline);
+        pass.set_pipeline(r.pipeline.for_mesh(gpu));
         pass.set_bind_group(0, &r.camera_bind, &[]);
         pass.set_bind_group(1, r.materials.bind(key), &[]);
         pass.set_bind_group(2, &r.lighting.bind, &[]);
         pass.set_bind_group(3, r.shadows.bind(), &[]);
         pass.set_vertex_buffer(0, gpu.vertices.slice(..));
         pass.set_vertex_buffer(1, r.instances.slice(..));
+        pass.set_vertex_buffer(2, gpu.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
         pass.set_index_buffer(gpu.indices.slice(..), wgpu::IndexFormat::Uint32);
         pass.draw_indexed(0..gpu.count, 0, 0..1);
     }

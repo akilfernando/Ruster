@@ -8,7 +8,7 @@ use std::{
     process::{Child, Command, ExitStatus, Stdio},
     sync::{
         atomic::{AtomicBool, Ordering},
-        mpsc::{self, Receiver, TryRecvError},
+        mpsc::{self, Receiver, SyncSender, TryRecvError},
         Arc,
     },
     thread,
@@ -155,8 +155,8 @@ pub(crate) fn parse_initial_camera(
 }
 
 struct Prepared {
-    // Own staging until publication, including on receiver/controller drop.
-    _temporary: TempDir,
+    // This owner never leaves the export worker.
+    _temporary: Staging,
     archive: PathBuf,
     destination: PathBuf,
     directory: DirectoryGrant,
@@ -164,11 +164,147 @@ struct Prepared {
     receipt: Value,
 }
 
+struct Staging {
+    temporary: TempDir,
+    #[cfg(test)]
+    _cleanup_observer: CleanupObserver,
+    #[cfg(test)]
+    fail_cleanup: bool,
+    #[cfg(test)]
+    cleanup_release: Option<Receiver<()>>,
+    #[cfg(test)]
+    prepared_observer: Option<SyncSender<()>>,
+}
+
+impl Staging {
+    fn new(temporary: TempDir) -> Self {
+        Self {
+            temporary,
+            #[cfg(test)]
+            _cleanup_observer: CleanupObserver(None),
+            #[cfg(test)]
+            fail_cleanup: false,
+            #[cfg(test)]
+            cleanup_release: None,
+            #[cfg(test)]
+            prepared_observer: None,
+        }
+    }
+
+    fn path(&self) -> &Path {
+        self.temporary.path()
+    }
+
+    fn cleanup(self) -> Result<(), String> {
+        #[cfg(test)]
+        if let Some(release) = self.cleanup_release {
+            release.recv_timeout(Duration::from_secs(5)).unwrap();
+        }
+        #[cfg(test)]
+        if self.fail_cleanup {
+            let path = self.temporary.keep();
+            return Err(format!(
+                "injected staging cleanup failure at {}",
+                path.display()
+            ));
+        }
+        let path = self.temporary.path().to_owned();
+        self.temporary.close().map_err(|error| {
+            format!(
+                "Could not remove private export files at {}: {error}. Check this location and remove any leftover staging files.",
+                path.display()
+            )
+        })
+    }
+}
+
+#[cfg(test)]
+struct CleanupObserver(Option<mpsc::Sender<thread::ThreadId>>);
+
+#[cfg(test)]
+impl Drop for CleanupObserver {
+    fn drop(&mut self) {
+        if let Some(observer) = &self.0 {
+            let _ = observer.send(thread::current().id());
+        }
+    }
+}
+
+struct Publication {
+    archive: PathBuf,
+    destination: PathBuf,
+    directory: DirectoryGrant,
+    identity: Identity,
+    receipt: Value,
+}
+
+impl Prepared {
+    fn into_parts(self) -> (Staging, Publication) {
+        (
+            self._temporary,
+            Publication {
+                archive: self.archive,
+                destination: self.destination,
+                directory: self.directory,
+                identity: self.identity,
+                receipt: self.receipt,
+            },
+        )
+    }
+}
+
+enum Event {
+    Prepared(Publication),
+    Failed(String),
+    Cleaned(Result<(), String>),
+}
+
+#[derive(PartialEq, Eq)]
+enum Phase {
+    Preparing,
+    Cleaning,
+    Finished,
+}
+
 struct Job {
-    operation: u64,
     identity: Identity,
     cancel: Arc<AtomicBool>,
-    receiver: Receiver<Result<Prepared, String>>,
+    receiver: Receiver<Event>,
+    // Dropping this endpoint releases worker-owned staging after publication,
+    // cancellation or Controller Drop. No owner-thread send can block.
+    release_staging: Option<SyncSender<()>>,
+    worker: thread::JoinHandle<()>,
+    context: egui::Context,
+    phase: Phase,
+}
+
+fn finish_preparation(
+    result: Result<Prepared, String>,
+    sender: SyncSender<Event>,
+    release_staging: Receiver<()>,
+    context: &egui::Context,
+) {
+    match result {
+        Ok(prepared) => {
+            let (staging, publication) = prepared.into_parts();
+            if sender.send(Event::Prepared(publication)).is_ok() {
+                #[cfg(test)]
+                if let Some(observer) = &staging.prepared_observer {
+                    let _ = observer.send(());
+                }
+                context.request_repaint();
+                // The owner releases this endpoint only after deciding whether
+                // to publish. A dropped owner releases it through disconnect.
+                let _ = release_staging.recv();
+            }
+            let cleanup = staging.cleanup();
+            let _ = sender.send(Event::Cleaned(cleanup));
+        }
+        Err(error) => {
+            let _ = sender.send(Event::Failed(error));
+        }
+    }
+    context.request_repaint();
 }
 
 pub(crate) struct Controller {
@@ -270,7 +406,7 @@ impl Controller {
         }
         if self.busy() {
             return Err(
-                "an export is still running; inspect or cancel it before starting another".into(),
+                "an export is still active; inspect its status and wait for it to finish before starting another".into(),
             );
         }
         let configured = self
@@ -326,14 +462,13 @@ impl Controller {
         let identity = request.identity.clone();
         let initial_camera = request.initial_camera.map(camera_value);
         let (sender, receiver) = mpsc::sync_channel(1);
-        let context = context.clone();
-        thread::Builder::new()
+        let (release_staging, release_receiver) = mpsc::sync_channel(0);
+        let worker_context = context.clone();
+        let worker = thread::Builder::new()
             .name("creation-export".into())
             .spawn(move || {
                 let result = prepare(request, directory, &worker_cancel);
-                // A dropped controller drops the private prepared artifact as well.
-                let _ = sender.send(result);
-                context.request_repaint();
+                finish_preparation(result, sender, release_receiver, &worker_context);
             })
             .map_err(|e| format!("cannot start export worker: {e}"))?;
         let mut status = json!({"operation_id": operation.to_string(), "state": "running", "identity": identity.wire_value()});
@@ -342,10 +477,13 @@ impl Controller {
         }
         self.status = Some(status.clone());
         self.job = Some(Job {
-            operation,
             identity,
             cancel,
             receiver,
+            release_staging: Some(release_staging),
+            worker,
+            context: context.clone(),
+            phase: Phase::Preparing,
         });
         Ok(status)
     }
@@ -353,51 +491,99 @@ impl Controller {
     /// Called from ordinary frame/bridge dispatch. Until completion this does
     /// only memory checks and a nonblocking receive; the worker wakes the UI.
     pub(crate) fn poll(&mut self, current: &Identity) -> bool {
-        let Some(job) = self.job.as_ref() else {
+        let Some(job) = self.job.as_mut() else {
             return false;
         };
         let mut changed = false;
-        if current != &job.identity && !job.cancel.swap(true, Ordering::AcqRel) {
+        if job.phase == Phase::Preparing
+            && current != &job.identity
+            && !job.cancel.swap(true, Ordering::AcqRel)
+        {
             if let Some(status) = &mut self.status {
                 status["state"] = json!("cancelling");
                 status["reason"] = json!("the creation identity changed during export");
             }
             changed = true;
         }
-        let result = match job.receiver.try_recv() {
-            Ok(result) => result,
-            Err(TryRecvError::Empty) => return changed,
-            Err(TryRecvError::Disconnected) => Err("export worker ended without a result".into()),
-        };
-        let job = self.job.take().expect("job exists until completion");
-        let mut status = json!({"operation_id": job.operation.to_string(), "identity": job.identity.wire_value()});
-        if let Some(camera) = self
-            .status
-            .as_ref()
-            .and_then(|status| status.get("initial_camera"))
-        {
-            status["initial_camera"] = camera.clone();
-        }
-        if job.cancel.load(Ordering::Acquire) || current != &job.identity {
-            status["state"] = json!("cancelled");
-        } else {
-            match result.and_then(|prepared| publish(prepared, current, &job.cancel)) {
-                Ok(receipt) => {
-                    status["state"] = json!("committed");
-                    status["receipt"] = receipt;
+        let status = self.status.as_mut().expect("active export has status");
+        match job.receiver.try_recv() {
+            Ok(Event::Prepared(publication)) => {
+                if job.cancel.load(Ordering::Acquire) || current != &job.identity {
+                    status["state"] = json!("cancelled");
+                } else {
+                    match publish(publication, current, &job.cancel) {
+                        Ok(receipt) => {
+                            status["state"] = json!("committed");
+                            status["receipt"] = receipt;
+                        }
+                        Err(error) => {
+                            status["state"] = json!("failed");
+                            status["error"] = json!(error);
+                        }
+                    }
                 }
-                Err(error) => {
+                status["cleanup_pending"] = json!(true);
+                job.phase = Phase::Cleaning;
+                job.release_staging.take();
+                changed = true;
+            }
+            Ok(Event::Failed(error)) => {
+                if job.cancel.load(Ordering::Acquire) || current != &job.identity {
+                    status["state"] = json!("cancelled");
+                } else {
                     status["state"] = json!("failed");
                     status["error"] = json!(error);
                 }
+                job.phase = Phase::Finished;
+                job.release_staging.take();
+                changed = true;
+            }
+            Ok(Event::Cleaned(cleanup)) => {
+                status["cleanup_pending"] = json!(false);
+                if let Err(warning) = cleanup {
+                    status["cleanup_warning"] = json!(warning);
+                }
+                job.phase = Phase::Finished;
+                changed = true;
+            }
+            Err(TryRecvError::Disconnected) if job.phase != Phase::Finished => {
+                if job.phase == Phase::Preparing {
+                    if job.cancel.load(Ordering::Acquire) {
+                        status["state"] = json!("cancelled");
+                    } else {
+                        status["state"] = json!("failed");
+                        status["error"] = json!("export worker ended without a result");
+                    }
+                } else {
+                    // Publication has already been decided. A lost cleanup
+                    // notification must never erase a committed receipt.
+                    status["cleanup_pending"] = json!(false);
+                    status["cleanup_warning"] = json!(
+                        "Export worker ended before private-file cleanup could be confirmed."
+                    );
+                }
+                job.phase = Phase::Finished;
+                job.release_staging.take();
+                changed = true;
+            }
+            Err(TryRecvError::Empty | TryRecvError::Disconnected) => (),
+        }
+        if job.phase == Phase::Finished {
+            if job.worker.is_finished() {
+                self.job.take();
+                self.terminals
+                    .push_back(self.status.take().expect("completed export has status"));
+                if self.terminals.len() > 8 {
+                    self.terminals.pop_front();
+                }
+                changed = true;
+            } else {
+                // Terminal delivery can precede thread exit. Admission and
+                // normal Close wait without joining or spinning on the owner.
+                job.context.request_repaint_after(Duration::from_millis(16));
             }
         }
-        self.status = None;
-        self.terminals.push_back(status);
-        if self.terminals.len() > 8 {
-            self.terminals.pop_front();
-        }
-        true
+        changed
     }
 
     pub(crate) fn inspect(&self, operation: Option<u64>) -> Result<Value, String> {
@@ -423,7 +609,7 @@ impl Controller {
 
     pub(crate) fn cancel(&mut self) -> bool {
         let Some(job) = &self.job else { return false };
-        if job.cancel.swap(true, Ordering::AcqRel) {
+        if job.phase != Phase::Preparing || job.cancel.swap(true, Ordering::AcqRel) {
             return false;
         }
         if let Some(status) = &mut self.status {
@@ -801,10 +987,12 @@ fn prepare(
         request.initial_camera.is_some(),
         scene_version,
     )?;
-    let temporary = tempfile::Builder::new()
-        .prefix(".ruster-export-")
-        .tempdir_in(directory.validate()?)
-        .map_err(|e| format!("cannot create private export staging: {e}"))?;
+    let temporary = Staging::new(
+        tempfile::Builder::new()
+            .prefix(".ruster-export-")
+            .tempdir_in(directory.validate()?)
+            .map_err(|e| format!("cannot create private export staging: {e}"))?,
+    );
     let content = temporary.path().join("content");
     fs::create_dir(&content).map_err(|e| e.to_string())?;
     fs::write(content.join("scene.json"), &request.scene_bytes).map_err(|e| e.to_string())?;
@@ -1178,7 +1366,7 @@ fn validate_receipt(
 }
 
 fn publish(
-    mut prepared: Prepared,
+    mut prepared: Publication,
     current: &Identity,
     cancel: &AtomicBool,
 ) -> Result<Value, String> {
@@ -1635,13 +1823,137 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         let archive = temporary.path().join("bundle.tar.gz");
         fs::write(&archive, b"validated archive").unwrap();
         Prepared {
-            _temporary: temporary,
+            _temporary: Staging::new(temporary),
             archive,
             destination: root.join("My Creation.tar.gz"),
             directory: DirectoryGrant::new(root).unwrap(),
             identity: captured,
             receipt: json!({"archive_sha256":"already validated"}),
         }
+    }
+
+    fn test_job(result: Result<Prepared, String>) -> Job {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let (release_staging, release_receiver) = mpsc::sync_channel(0);
+        let context = egui::Context::default();
+        let worker_context = context.clone();
+        let worker = thread::spawn(move || {
+            finish_preparation(result, sender, release_receiver, &worker_context);
+        });
+        Job {
+            identity: identity(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            receiver,
+            release_staging: Some(release_staging),
+            worker,
+            context,
+            phase: Phase::Preparing,
+        }
+    }
+
+    fn wait_finished(controller: &mut Controller, current: &Identity) {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while controller.busy() {
+            assert!(Instant::now() < deadline, "export did not finish");
+            controller.poll(current);
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    fn publish_fixture(
+        prepared: Prepared,
+        current: &Identity,
+        cancel: &AtomicBool,
+    ) -> Result<Value, String> {
+        let (_staging, publication) = prepared.into_parts();
+        publish(publication, current, cancel)
+    }
+
+    // Observe the actual staging owner's destruction, after TempDir cleanup,
+    // through the same bounded handoff used by the real export worker.
+    #[test]
+    fn staging_cleanup_stays_on_export_worker() {
+        for outcome in ["commit", "cancel", "stale", "collision", "buffered_drop"] {
+            let root = tempfile::tempdir().unwrap();
+            let mut artifact = prepared(root.path(), identity());
+            let staging = artifact._temporary.path().to_owned();
+            let (observer, observed) = mpsc::channel();
+            let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+            artifact._temporary._cleanup_observer = CleanupObserver(Some(observer));
+            artifact._temporary.prepared_observer = Some(ready_sender);
+            let mut controller = Controller::disabled();
+            controller.status = Some(json!({"operation_id":"1","state":"running"}));
+            controller.job = Some(test_job(Ok(artifact)));
+            let worker_thread = controller.job.as_ref().unwrap().worker.thread().id();
+            ready_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+            assert!(staging.exists());
+            assert!(observed.try_recv().is_err());
+            let mut current = identity();
+            if outcome == "cancel" {
+                assert!(controller.cancel());
+            }
+            if outcome == "stale" {
+                current.revision += 1;
+            }
+            if outcome == "collision" {
+                fs::write(root.path().join("My Creation.tar.gz"), b"existing output").unwrap();
+            }
+            if outcome == "buffered_drop" {
+                drop(controller);
+            } else {
+                wait_finished(&mut controller, &current);
+                assert_eq!(
+                    controller.inspect(Some(1)).unwrap()["operation"]["state"],
+                    match outcome {
+                        "commit" => "committed",
+                        "collision" => "failed",
+                        _ => "cancelled",
+                    }
+                );
+            }
+            assert_eq!(
+                observed.recv_timeout(Duration::from_secs(2)).unwrap(),
+                worker_thread,
+                "private staging must be destroyed on the export worker ({outcome})"
+            );
+            assert!(!staging.exists());
+            assert_eq!(
+                root.path().join("My Creation.tar.gz").exists(),
+                matches!(outcome, "commit" | "collision")
+            );
+            if outcome == "collision" {
+                assert_eq!(
+                    fs::read(root.path().join("My Creation.tar.gz")).unwrap(),
+                    b"existing output"
+                );
+            }
+        }
+
+        // A receiver already gone before Ready must also release staging,
+        // without waiting for an acknowledgment that can never arrive.
+        let root = tempfile::tempdir().unwrap();
+        let mut artifact = prepared(root.path(), identity());
+        let staging = artifact._temporary.path().to_owned();
+        let (observer, observed) = mpsc::channel();
+        artifact._temporary._cleanup_observer = CleanupObserver(Some(observer));
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(receiver);
+        let (_release_sender, release_receiver) = mpsc::sync_channel(0);
+        let worker = thread::spawn(move || {
+            finish_preparation(
+                Ok(artifact),
+                sender,
+                release_receiver,
+                &egui::Context::default(),
+            );
+        });
+        let worker_thread = worker.thread().id();
+        worker.join().unwrap();
+        assert_eq!(
+            observed.recv_timeout(Duration::from_secs(2)).unwrap(),
+            worker_thread
+        );
+        assert!(!staging.exists());
     }
 
     // These model completion ordering without launching Python: stale authored,
@@ -1661,16 +1973,16 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             }
             let artifact = prepared(root.path(), identity());
             let output = artifact.destination.clone();
-            assert!(publish(artifact, &current, &AtomicBool::new(false)).is_err());
+            assert!(publish_fixture(artifact, &current, &AtomicBool::new(false)).is_err());
             assert!(!output.exists());
         }
         let root = tempfile::tempdir().unwrap();
         let artifact = prepared(root.path(), identity());
         let output = artifact.destination.clone();
-        assert!(publish(artifact, &identity(), &AtomicBool::new(true)).is_err());
+        assert!(publish_fixture(artifact, &identity(), &AtomicBool::new(true)).is_err());
         assert!(!output.exists());
         fs::write(&output, b"existing output").unwrap();
-        assert!(publish(
+        assert!(publish_fixture(
             prepared(root.path(), identity()),
             &identity(),
             &AtomicBool::new(false)
@@ -1683,9 +1995,9 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         let changed_directory = prepared(&scoped, identity());
         fs::rename(&scoped, root.path().join("retired")).unwrap();
         fs::create_dir(&scoped).unwrap();
-        assert!(publish(changed_directory, &identity(), &AtomicBool::new(false)).is_err());
+        assert!(publish_fixture(changed_directory, &identity(), &AtomicBool::new(false)).is_err());
         assert!(!scoped.join("My Creation.tar.gz").exists());
-        let receipt = publish(
+        let receipt = publish_fixture(
             prepared(root.path(), identity()),
             &identity(),
             &AtomicBool::new(false),
@@ -1818,37 +2130,63 @@ while True:
     #[test]
     fn completion_receipts_survive_response_loss_replacement_and_later_jobs() {
         let root = tempfile::tempdir().unwrap();
-        let (sender, receiver) = mpsc::sync_channel(1);
-        assert!(sender.send(Ok(prepared(root.path(), identity()))).is_ok());
+        let mut artifact = prepared(root.path(), identity());
+        let staging = artifact._temporary.path().to_owned();
+        let (cleanup_sender, cleanup_receiver) = mpsc::channel();
+        let (ready_sender, ready_receiver) = mpsc::sync_channel(1);
+        artifact._temporary.cleanup_release = Some(cleanup_receiver);
+        artifact._temporary.fail_cleanup = true;
+        artifact._temporary.prepared_observer = Some(ready_sender);
         let mut controller = Controller::disabled();
         let old_configuration = controller.configuration_token();
         controller.configure_runtime_kit(root.path()).unwrap();
         assert_ne!(controller.configuration_token(), old_configuration);
         controller.status = Some(json!({"operation_id":"7","state":"running"}));
-        controller.job = Some(Job {
-            operation: 7,
-            identity: identity(),
-            cancel: Arc::new(AtomicBool::new(false)),
-            receiver,
-        });
+        controller.job = Some(test_job(Ok(artifact)));
         assert!(controller.configure_runtime_kit(root.path()).is_err());
+        ready_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(controller.poll(&identity()));
+        let pending = controller.inspect(Some(7)).unwrap();
+        assert_eq!(pending["operation"]["state"], "committed");
+        assert_eq!(pending["operation"]["cleanup_pending"], true);
+        assert!(controller.busy());
+        assert!(!controller.finished());
+        assert!(controller.configure_runtime_kit(root.path()).is_err());
+        assert!(
+            !controller.cancel(),
+            "publication cannot be cancelled during cleanup"
+        );
+        controller.scene_replaced();
+        let mut changed_identity = identity();
+        changed_identity.revision += 1;
+        controller.poll(&changed_identity);
+        assert_eq!(controller.inspect(Some(7)).unwrap(), pending);
+        cleanup_sender.send(()).unwrap();
+        wait_finished(&mut controller, &changed_identity);
         let receipt = controller.inspect(Some(7)).unwrap();
         assert_eq!(receipt["operation"]["state"], "committed");
+        assert_eq!(
+            receipt["operation"]["receipt"],
+            pending["operation"]["receipt"]
+        );
+        assert_eq!(receipt["operation"]["cleanup_pending"], false);
+        assert!(receipt["operation"]["cleanup_warning"]
+            .as_str()
+            .unwrap()
+            .contains("cleanup failure"));
+        assert_eq!(
+            fs::read(root.path().join("My Creation.tar.gz")).unwrap(),
+            b"validated archive"
+        );
+        assert!(staging.exists(), "injected failure retains private staging");
+        fs::remove_dir_all(staging).unwrap();
         assert_eq!(controller.inspect(Some(7)).unwrap(), receipt);
         assert!(controller.inspect(Some(8)).is_err());
         controller.scene_replaced();
         assert_eq!(controller.inspect(Some(7)).unwrap(), receipt);
         assert!(controller.finished());
         for operation in 8..=15 {
-            let (sender, receiver) = mpsc::sync_channel(1);
-            assert!(sender.send(Err("expected fixture failure".into())).is_ok());
-            controller.job = Some(Job {
-                operation,
-                identity: identity(),
-                cancel: Arc::new(AtomicBool::new(false)),
-                receiver,
-            });
+            controller.job = Some(test_job(Err("expected fixture failure".into())));
             controller.status =
                 Some(json!({"operation_id":operation.to_string(),"state":"running"}));
             assert!(controller.inspect(Some(7)).is_ok());
@@ -1856,7 +2194,7 @@ while True:
                 controller.scene_replaced();
                 assert!(controller.busy());
             }
-            assert!(controller.poll(&identity()));
+            wait_finished(&mut controller, &identity());
         }
         assert!(controller.inspect(Some(7)).is_err());
         assert_eq!(
@@ -1866,6 +2204,76 @@ while True:
         assert_eq!(
             controller.inspect(None).unwrap()["operation"]["operation_id"],
             "15"
+        );
+        // Losing only the cleanup notification after publication must preserve
+        // the owner's committed receipt, even under a changed scene identity.
+        let (sender, receiver) = mpsc::sync_channel(1);
+        drop(sender);
+        controller.job = Some(Job {
+            identity: identity(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            receiver,
+            release_staging: None,
+            worker: thread::spawn(|| ()),
+            context: egui::Context::default(),
+            phase: Phase::Cleaning,
+        });
+        controller.status = Some(json!({"operation_id":"16","state":"committed",
+            "receipt":receipt["operation"]["receipt"],"cleanup_pending":true}));
+        wait_finished(&mut controller, &changed_identity);
+        let disconnected = controller.inspect(Some(16)).unwrap();
+        assert_eq!(disconnected["operation"]["state"], "committed");
+        assert_eq!(
+            disconnected["operation"]["receipt"],
+            receipt["operation"]["receipt"]
+        );
+        assert_eq!(disconnected["operation"]["cleanup_pending"], false);
+        assert!(disconnected["operation"]["cleanup_warning"]
+            .as_str()
+            .unwrap()
+            .contains("could be confirmed"));
+        // A terminal message can precede thread exit. Admission must retain
+        // the existing worker until it actually returns, without joining it.
+        let (sender, receiver) = mpsc::sync_channel(1);
+        let (sent_sender, sent_receiver) = mpsc::sync_channel(1);
+        let (exit_sender, exit_receiver) = mpsc::sync_channel(1);
+        let worker = thread::spawn(move || {
+            assert!(sender.send(Event::Cleaned(Ok(()))).is_ok());
+            sent_sender.send(()).unwrap();
+            exit_receiver.recv_timeout(Duration::from_secs(5)).unwrap();
+        });
+        controller.job = Some(Job {
+            identity: identity(),
+            cancel: Arc::new(AtomicBool::new(false)),
+            receiver,
+            release_staging: None,
+            worker,
+            context: egui::Context::default(),
+            phase: Phase::Cleaning,
+        });
+        controller.status = Some(json!({"operation_id":"17","state":"committed",
+            "receipt":receipt["operation"]["receipt"],"cleanup_pending":true}));
+        sent_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        assert!(controller.poll(&changed_identity));
+        let finishing = controller.inspect(Some(17)).unwrap();
+        assert_eq!(finishing["operation"]["state"], "committed");
+        assert_eq!(finishing["operation"]["cleanup_pending"], false);
+        assert!(controller
+            .job
+            .as_ref()
+            .is_some_and(|job| { job.phase == Phase::Finished && !job.worker.is_finished() }));
+        assert!(controller.busy());
+        assert!(!controller.finished());
+        assert!(controller.configure_runtime_kit(root.path()).is_err());
+        assert!(!controller.poll(&changed_identity));
+        assert_eq!(controller.inspect(Some(17)).unwrap(), finishing);
+        exit_sender.send(()).unwrap();
+        wait_finished(&mut controller, &changed_identity);
+        assert!(controller.finished());
+        controller.configure_runtime_kit(root.path()).unwrap();
+        assert_eq!(
+            controller.inspect(Some(17)).unwrap()["operation"],
+            finishing["operation"]
         );
         let mut wide = identity();
         wide.generation = u64::MAX;

@@ -62,7 +62,7 @@ impl<'a> MeshPlan<'a> {
         {
             // A stable fallback closure owns no rejected buffers. In particular,
             // invalid source identity changes cannot create repeated epochs.
-            rejection = Some("Ruster requested mesh GPU vertex/index payload exceeds 48 MiB; source meshes may be valid but the renderer vertex layout is larger; meshes use cube fallback");
+            rejection = Some("Ruster requested mesh vertex/UV/index payload exceeds 48 MiB; meshes use cube fallback");
             sources.clear();
         }
         if rejection != validation.rejection {
@@ -91,22 +91,7 @@ impl<'a> MeshPlan<'a> {
             if current.get(id).is_some_and(|gpu| gpu.matches(mesh)) {
                 continue;
             }
-            let vertices = mesh
-                .vertices
-                .iter()
-                .enumerate()
-                .map(|(index, vertex)| Vertex {
-                    position: vertex.position,
-                    normal: vertex.normal,
-                    uv: mesh
-                        .texcoords
-                        .as_ref()
-                        .and_then(|uvs| uvs.get(index))
-                        .copied()
-                        .unwrap_or([0.; 2]),
-                })
-                .collect::<Vec<_>>();
-            let gpu = GpuMesh::new(device, Some(Arc::downgrade(mesh)), &vertices, &mesh.indices);
+            let gpu = GpuMesh::new(device, Some(Arc::downgrade(mesh)), mesh);
             uploads += 1;
             bytes += gpu.bytes;
             current.insert(id.to_owned(), gpu);
@@ -115,7 +100,7 @@ impl<'a> MeshPlan<'a> {
     }
 }
 fn mesh_bytes(mesh: &ruster_assets::Mesh) -> u64 {
-    (mesh.vertices.len() * size_of::<Vertex>() + mesh.indices.len() * size_of::<u32>()) as u64
+    mesh.payload_bytes() as u64
 }
 
 struct Retired {

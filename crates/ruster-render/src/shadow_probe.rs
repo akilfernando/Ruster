@@ -41,8 +41,8 @@ impl Default for Case {
 }
 struct Probe {
     resources: Resources,
-    shadow_color: wgpu::RenderPipeline,
-    baseline_color: wgpu::RenderPipeline,
+    shadow_color: ScenePipelines,
+    baseline_color: ScenePipelines,
     shadow_depth: wgpu::RenderPipeline,
     uniform: wgpu::Buffer,
     shadow_bind: wgpu::BindGroup,
@@ -100,7 +100,7 @@ impl Probe {
                 },
             ],
         });
-        let camera_layout = resources.pipeline.get_bind_group_layout(0);
+        let camera_layout = resources.pipeline.with_uvs.get_bind_group_layout(0);
         let color_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("feasibility compatible color layout"),
             bind_group_layouts: &[
@@ -355,11 +355,12 @@ impl Probe {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(if shadow.is_some() {
+            let pipelines = if shadow.is_some() {
                 &self.shadow_color
             } else {
                 &self.baseline_color
-            });
+            };
+            pass.set_pipeline(pipelines.for_mesh(&self.resources.cube));
             pass.set_bind_group(0, &self.resources.camera_bind, &[]);
             pass.set_bind_group(
                 1,
@@ -370,6 +371,15 @@ impl Probe {
             pass.set_bind_group(3, &self.shadow_bind, &[]);
             pass.set_vertex_buffer(0, self.resources.cube.vertices.slice(..));
             pass.set_vertex_buffer(1, self.resources.instances.slice(..));
+            pass.set_vertex_buffer(
+                2,
+                self.resources
+                    .cube
+                    .uvs
+                    .as_ref()
+                    .unwrap_or(&self.resources.zero_uv)
+                    .slice(..),
+            );
             pass.set_index_buffer(
                 self.resources.cube.indices.slice(..),
                 wgpu::IndexFormat::Uint32,

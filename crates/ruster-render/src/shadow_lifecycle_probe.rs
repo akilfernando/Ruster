@@ -21,7 +21,6 @@ struct Probe {
 
 impl Probe {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Self {
-        let (vertices, indices) = cube();
         let instance = Instance {
             model: Mat4::IDENTITY.to_cols_array_2d(),
             normal: [[1., 0., 0., 0.], [0., 1., 0., 0.], [0., 0., 1., 0.]],
@@ -39,7 +38,7 @@ impl Probe {
         });
         Self {
             shadows: ShadowGpu::new(device, queue),
-            cube: GpuMesh::new(device, None, &vertices, &indices),
+            cube: GpuMesh::new(device, None, &cube()),
             meshes: BTreeMap::new(),
             instances,
             groups: vec![DrawGroup {

@@ -1,5 +1,7 @@
 //! Shared bounded 3D viewport. No application behavior or editor state lives here.
 mod asset_gpu;
+#[cfg(test)]
+mod geometry_probe;
 mod lighting_gpu;
 mod material_gpu;
 #[cfg(test)]
@@ -144,8 +146,10 @@ pub struct Metrics {
     pub shadow_units_per_texel: Option<f64>,
     pub shadow_detail_limited: bool,
     pub shadow_precision_limited: bool,
+    /// Retained mesh payload plus the built-in cube and shared constant UV.
     pub mesh_bytes: u64,
-    /// Cumulative vertex/index payload creation, including the built-in cube.
+    /// Cumulative vertex/UV/index payload creation, including the built-in cube
+    /// and the shared eight-byte constant UV attribute outside asset admission.
     pub mesh_uploads: u64,
     pub mesh_upload_bytes: u64,
     /// Retained immutable base-color payload, including the two one-pixel defaults.
@@ -1092,7 +1096,6 @@ fn ray_triangle(origin: Vec3, direction: Vec3, a: Vec3, b: Vec3, c: Vec3) -> Opt
 struct Vertex {
     position: [f32; 3],
     normal: [f32; 3],
-    uv: [f32; 2],
 }
 #[repr(C)]
 #[derive(Clone, Copy, Pod, Zeroable)]
@@ -1103,8 +1106,9 @@ struct Instance {
     base_color: [f32; 4],
     response: [f32; 4],
 }
-fn cube() -> (Vec<Vertex>, Vec<u32>) {
+fn cube() -> ruster_assets::Mesh {
     let mut vertices = Vec::new();
+    let mut texcoords = Vec::new();
     let mut indices = Vec::new();
     for (normal, u, v) in [
         (Vec3::X, -Vec3::Z, Vec3::Y),
@@ -1116,15 +1120,19 @@ fn cube() -> (Vec<Vertex>, Vec<u32>) {
     ] {
         let base = vertices.len() as u32;
         for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-            vertices.push(Vertex {
+            vertices.push(ruster_assets::Vertex {
                 position: ((normal + u * x + v * y) * 0.5).to_array(),
                 normal: normal.to_array(),
-                uv: [x * 0.5 + 0.5, y * 0.5 + 0.5],
             });
+            texcoords.push([x * 0.5 + 0.5, y * 0.5 + 0.5]);
         }
         indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
     }
-    (vertices, indices)
+    ruster_assets::Mesh {
+        vertices,
+        indices,
+        texcoords: Some(texcoords),
+    }
 }
 
 fn choose_samples(
@@ -1277,13 +1285,14 @@ struct Timestamps {
     pending: Arc<Mutex<bool>>,
 }
 struct Resources {
-    builtin_sdr: wgpu::RenderPipeline,
-    builtin_hdr: Option<wgpu::RenderPipeline>,
+    builtin_sdr: ScenePipelines,
+    builtin_hdr: Option<ScenePipelines>,
     hdr_samples: Option<u32>,
     requested_samples: u32,
-    pipeline: wgpu::RenderPipeline,
+    pipeline: ScenePipelines,
     composite: wgpu::RenderPipeline,
     cube: GpuMesh,
+    zero_uv: wgpu::Buffer,
     meshes: BTreeMap<String, GpuMesh>,
     pipeline_layout: wgpu::PipelineLayout,
     materials: MaterialGpu,
@@ -1371,9 +1380,15 @@ impl Resources {
             multiview_mask: None,
             cache: None,
         });
-        let (vertices, indices) = cube();
-        let cube = GpuMesh::new(device, None, &vertices, &indices);
-        let mesh_bytes = cube.bytes;
+        let cube = GpuMesh::new(device, None, &cube());
+        // One constant attribute serves every mesh without authored UVs. This
+        // fixed renderer overhead is separate from imported mesh admission.
+        let zero_uv = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+            label: Some("shared constant zero UV"),
+            contents: bytemuck::bytes_of(&[0.0_f32; 2]),
+            usage: wgpu::BufferUsages::VERTEX,
+        });
+        let mesh_bytes = cube.bytes + zero_uv.size();
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene camera"),
             size: 80,
@@ -1437,6 +1452,7 @@ impl Resources {
             pipeline,
             composite,
             cube,
+            zero_uv,
             meshes: BTreeMap::new(),
             pipeline_layout,
             materials,
@@ -1635,13 +1651,30 @@ fn instance_buffer(device: &wgpu::Device, capacity: usize) -> wgpu::Buffer {
         mapped_at_creation: false,
     })
 }
+#[derive(Clone)]
+struct ScenePipelines {
+    with_uvs: wgpu::RenderPipeline,
+    without_uvs: wgpu::RenderPipeline,
+}
+impl ScenePipelines {
+    fn for_mesh(&self, mesh: &GpuMesh) -> &wgpu::RenderPipeline {
+        if mesh.uvs.is_some() {
+            &self.with_uvs
+        } else {
+            &self.without_uvs
+        }
+    }
+}
+
 fn validated_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
     source: &str,
     sample_count: u32,
-) -> Result<wgpu::RenderPipeline, String> {
+) -> Result<ScenePipelines, String> {
     let scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
+    // Both stream layouts are compiled inside the same validation scope. The
+    // caller publishes the pair only after neither variant reported an error.
     let candidate = scene_pipeline(device, layout, source, sample_count);
     if let Some(error) = pollster::block_on(scope.pop()) {
         return Err(format!(
@@ -1655,7 +1688,7 @@ fn scene_pipeline(
     layout: &wgpu::PipelineLayout,
     source: &str,
     sample_count: u32,
-) -> wgpu::RenderPipeline {
+) -> ScenePipelines {
     scene_pipeline_format(device, layout, source, sample_count, COLOR)
 }
 fn scene_pipeline_format(
@@ -1664,12 +1697,12 @@ fn scene_pipeline_format(
     source: &str,
     sample_count: u32,
     format: wgpu::TextureFormat,
-) -> wgpu::RenderPipeline {
+) -> ScenePipelines {
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
         label: Some("Ruster refreshable scene shader"),
         source: wgpu::ShaderSource::Wgsl(source.into()),
     });
-    // Old shaders keep their original input locations/strides without feeding
+    // Old shaders keep their original input locations without feeding
     // undeclared material attributes (which Vulkan reports as unused inputs).
     let locations = wgpu::naga::front::wgsl::parse_str(source)
         .ok()
@@ -1709,59 +1742,73 @@ fn scene_pipeline_format(
             })
             .collect::<Vec<_>>()
     };
-    let mesh_attributes = used(&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3,10=>Float32x2]);
+    let mesh_attributes = used(&wgpu::vertex_attr_array![0=>Float32x3,1=>Float32x3]);
+    let uv_attributes = used(&wgpu::vertex_attr_array![10=>Float32x2]);
     let instance_attributes = used(
         &wgpu::vertex_attr_array![2=>Float32x4,3=>Float32x4,4=>Float32x4,5=>Float32x4,6=>Float32x4,7=>Float32x4,8=>Float32x4,9=>Float32x4,11=>Float32x4,12=>Float32x4],
     );
-    let mesh_layout = wgpu::VertexBufferLayout {
-        array_stride: size_of::<Vertex>() as u64,
-        step_mode: wgpu::VertexStepMode::Vertex,
-        attributes: &mesh_attributes,
+    let create = |uv_stride| {
+        device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Ruster shared depth-tested instanced meshes"),
+            layout: Some(layout),
+            vertex: wgpu::VertexState {
+                module: &shader,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: size_of::<Vertex>() as u64,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &mesh_attributes,
+                    }),
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: size_of::<Instance>() as u64,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &instance_attributes,
+                    }),
+                    Some(wgpu::VertexBufferLayout {
+                        array_stride: uv_stride,
+                        step_mode: wgpu::VertexStepMode::Vertex,
+                        attributes: &uv_attributes,
+                    }),
+                ],
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &shader,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[Some(format.into())],
+            }),
+            primitive: wgpu::PrimitiveState {
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: DEPTH,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Less),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: wgpu::MultisampleState {
+                count: sample_count,
+                ..Default::default()
+            },
+            multiview_mask: None,
+            cache: None,
+        })
     };
-    let instance_layout = wgpu::VertexBufferLayout {
-        array_stride: size_of::<Instance>() as u64,
-        step_mode: wgpu::VertexStepMode::Instance,
-        attributes: &instance_attributes,
-    };
-    device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-        label: Some("Ruster shared depth-tested instanced meshes"),
-        layout: Some(layout),
-        vertex: wgpu::VertexState {
-            module: &shader,
-            entry_point: Some("vs"),
-            compilation_options: Default::default(),
-            buffers: &[Some(mesh_layout), Some(instance_layout)],
-        },
-        fragment: Some(wgpu::FragmentState {
-            module: &shader,
-            entry_point: Some("fs"),
-            compilation_options: Default::default(),
-            targets: &[Some(format.into())],
-        }),
-        primitive: wgpu::PrimitiveState {
-            cull_mode: Some(wgpu::Face::Back),
-            ..Default::default()
-        },
-        depth_stencil: Some(wgpu::DepthStencilState {
-            format: DEPTH,
-            depth_write_enabled: Some(true),
-            depth_compare: Some(wgpu::CompareFunction::Less),
-            stencil: Default::default(),
-            bias: Default::default(),
-        }),
-        multisample: wgpu::MultisampleState {
-            count: sample_count,
-            ..Default::default()
-        },
-        multiview_mask: None,
-        cache: None,
-    })
+    ScenePipelines {
+        with_uvs: create(size_of::<[f32; 2]>() as u64),
+        without_uvs: create(0),
+    }
 }
 
 #[derive(Clone)]
 struct GpuMesh {
     source: Option<Weak<ruster_assets::Mesh>>,
     vertices: wgpu::Buffer,
+    uvs: Option<wgpu::Buffer>,
     indices: wgpu::Buffer,
     count: u32,
     bytes: u64,
@@ -1776,19 +1823,26 @@ impl GpuMesh {
     fn new(
         device: &wgpu::Device,
         source: Option<Weak<ruster_assets::Mesh>>,
-        vertices: &[Vertex],
-        indices: &[u32],
+        mesh: &ruster_assets::Mesh,
     ) -> Self {
+        let vertices = mesh
+            .vertices
+            .iter()
+            .map(|vertex| Vertex {
+                position: vertex.position,
+                normal: vertex.normal,
+            })
+            .collect::<Vec<_>>();
         // Cache bounds only when the existing GPU upload identity changes.
         // Referenced vertices determine coverage; unused source vertices do not.
         let mut low = Vec3::splat(f32::INFINITY);
         let mut high = Vec3::splat(f32::NEG_INFINITY);
-        for &index in indices {
+        for &index in &mesh.indices {
             let position = Vec3::from(vertices[index as usize].position);
             low = low.min(position);
             high = high.max(position);
         }
-        if indices.is_empty() {
+        if mesh.indices.is_empty() {
             low = Vec3::ZERO;
             high = Vec3::ZERO;
         }
@@ -1797,16 +1851,23 @@ impl GpuMesh {
             bounds: [low, high],
             vertices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("retained scene vertices"),
-                contents: bytemuck::cast_slice(vertices),
+                contents: bytemuck::cast_slice(&vertices),
                 usage: wgpu::BufferUsages::VERTEX,
+            }),
+            uvs: mesh.texcoords.as_ref().map(|uvs| {
+                device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
+                    label: Some("retained scene UVs"),
+                    contents: bytemuck::cast_slice(uvs),
+                    usage: wgpu::BufferUsages::VERTEX,
+                })
             }),
             indices: device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
                 label: Some("retained scene indices"),
-                contents: bytemuck::cast_slice(indices),
+                contents: bytemuck::cast_slice(&mesh.indices),
                 usage: wgpu::BufferUsages::INDEX,
             }),
-            count: indices.len() as u32,
-            bytes: std::mem::size_of_val(vertices) as u64 + std::mem::size_of_val(indices) as u64,
+            count: mesh.indices.len() as u32,
+            bytes: mesh.payload_bytes() as u64,
         }
     }
 }
@@ -1837,8 +1898,7 @@ fn prepare_mesh(
         meshes.remove(id);
         return None;
     }
-    let candidate_bytes =
-        (mesh.vertices.len() * size_of::<Vertex>() + mesh.indices.len() * size_of::<u32>()) as u64;
+    let candidate_bytes = mesh.payload_bytes() as u64;
     let retained_bytes = meshes
         .iter()
         .filter(|(key, _)| key.as_str() != id)
@@ -1849,22 +1909,7 @@ fn prepare_mesh(
         meshes.remove(id);
         return None;
     }
-    let vertices = mesh
-        .vertices
-        .iter()
-        .enumerate()
-        .map(|(index, vertex)| Vertex {
-            position: vertex.position,
-            normal: vertex.normal,
-            uv: mesh
-                .texcoords
-                .as_ref()
-                .and_then(|uvs| uvs.get(index))
-                .copied()
-                .unwrap_or([0.0; 2]),
-        })
-        .collect::<Vec<_>>();
-    let gpu = GpuMesh::new(device, Some(identity), &vertices, &mesh.indices);
+    let gpu = GpuMesh::new(device, Some(identity), mesh);
     let bytes = gpu.bytes;
     meshes.insert(id.into(), gpu);
     Some(bytes)
@@ -2094,11 +2139,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 occlusion_query_set: None,
                 multiview_mask: None,
             });
-            pass.set_pipeline(if applied_hdr {
+            let pipelines = if applied_hdr {
                 r.builtin_hdr.as_ref().expect("HDR capability checked")
             } else {
                 &r.pipeline
-            });
+            };
             pass.set_bind_group(0, &r.camera_bind, &[]);
             pass.set_bind_group(2, &r.lighting.bind, &[]);
             pass.set_bind_group(3, r.shadows.bind(), &[]);
@@ -2110,7 +2155,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                     .as_ref()
                     .and_then(|id| r.meshes.get(id))
                     .unwrap_or(&r.cube);
+                pass.set_pipeline(pipelines.for_mesh(mesh));
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
+                pass.set_vertex_buffer(2, mesh.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.count, 0, group.range.clone());
             }
@@ -2190,7 +2237,8 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.texture_bytes = r.materials.bytes();
         metrics.draw_calls = self.groups.len();
         metrics.objects = instance_count;
-        metrics.mesh_bytes = r.cube.bytes + r.meshes.values().map(|mesh| mesh.bytes).sum::<u64>();
+        metrics.mesh_bytes =
+            r.cube.bytes + r.zero_uv.size() + r.meshes.values().map(|mesh| mesh.bytes).sum::<u64>();
         metrics.instance_capacity_bytes = (r.capacity * size_of::<Instance>()) as u64;
         metrics.target_bytes = format_target_bytes(size, samples, format);
         metrics.sample_count = samples;
@@ -2850,6 +2898,7 @@ mod tests {
         let (device, queue) =
             pollster::block_on(adapter.request_device(&descriptor)).expect("Vulkan device");
         eprintln!("GPU probe adapter: {:?}", adapter.get_info());
+        geometry_probe::verify(&device, &queue);
         for samples in [1, 2, 4] {
             if supported_samples(&adapter, &device, samples) != samples {
                 eprintln!("GPU probe: {samples}x unsupported; skipped");
@@ -2922,13 +2971,14 @@ mod tests {
                         }),
                         ..Default::default()
                     });
-                    pass.set_pipeline(&r.pipeline);
+                    pass.set_pipeline(r.pipeline.for_mesh(&r.cube));
                     pass.set_bind_group(0, &r.camera_bind, &[]);
                     pass.set_bind_group(1, r.materials.bind(&BindingKey::default()), &[]);
                     pass.set_bind_group(2, &r.lighting.bind, &[]);
                     pass.set_bind_group(3, r.shadows.bind(), &[]);
                     pass.set_vertex_buffer(0, r.cube.vertices.slice(..));
                     pass.set_vertex_buffer(1, r.instances.slice(..));
+                    pass.set_vertex_buffer(2, r.cube.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
                     pass.set_index_buffer(r.cube.indices.slice(..), wgpu::IndexFormat::Uint32);
                     pass.draw_indexed(0..r.cube.count, 0, 0..1);
                 }
