@@ -77,10 +77,18 @@ impl RuntimeUi {
         };
         let identity = (frame.key, frame.commit_revision);
         if self.invocation.key != Some(identity) {
-            self.invocation = InvocationDraft {
-                key: Some(identity),
-                ..Default::default()
-            };
+            if self.invocation.key.is_some_and(|(key, _)| key == frame.key) {
+                // A new commit invalidates raw arguments, not the creator's
+                // choice from this run's immutable catalog.
+                self.invocation.key = Some(identity);
+                self.invocation.arguments.clear();
+                self.invocation.dirty = false;
+            } else {
+                self.invocation = InvocationDraft {
+                    key: Some(identity),
+                    ..Default::default()
+                };
+            }
         }
         let Some((binding_id, _binding)) = frame.authoring.bindings.iter().find(|(_, binding)| {
             binding.target == BindingTarget::Application && !binding.commands.is_empty()
@@ -113,6 +121,13 @@ impl RuntimeUi {
             && self.debug_snapshot().is_none();
         let mut submit = false;
         let mut cancel = false;
+        let mut submit_control = None;
+        if self
+            .control_focus
+            .is_some_and(|request| request.operation == Operation::Command)
+        {
+            self.maintain_control_focus(ui.ctx());
+        }
         egui::CollapsingHeader::new("Application commands").id_salt("runtime_application_commands").show(ui, |ui| {
             ui.label(format!("Paused run · commit revision {}", identity.1));
             if let Some(receipt)=self.last_command_receipt() {
@@ -157,8 +172,10 @@ impl RuntimeUi {
                     && command_key(ui,egui::Key::Enter);
                 let invoke_id = ui.make_persistent_id(("invoke-command", &binding_id, &self.invocation.command));
                 let invoke = ui.scope_builder(egui::UiBuilder::new().scope_id(invoke_id), |ui| ui.button("Invoke Application command")).inner;
+                self.restore_control_focus(&invoke);
                 owns |= command_field_focus(ui, Some(invoke.id));
                 submit = (command_clicked(&invoke) || enter) && command_claim(ui.ctx(), &mut self.command_action_frame);
+                if submit && invoke.has_focus() { submit_control = Some(invoke.clone()); }
                 let cancel_id = ui.make_persistent_id(("cancel-command", &binding_id, &self.invocation.command));
                 let cancel_button = ui.scope_builder(egui::UiBuilder::new().scope_id(cancel_id), |ui| ui.button("Cancel command arguments")).inner;
                 owns |= command_field_focus(ui, Some(cancel_button.id));
@@ -168,10 +185,8 @@ impl RuntimeUi {
             });
         });
         if cancel {
-            self.invocation = InvocationDraft {
-                key: Some(identity),
-                ..Default::default()
-            };
+            self.invocation.arguments.clear();
+            self.invocation.dirty = false;
         }
         if submit {
             let arguments = self
@@ -183,7 +198,12 @@ impl RuntimeUi {
             match arguments.and_then(|arguments|self.runtime_api("behavior_runtime_command",&json!({
                 "expected_run_id":run_id,"expected_commit_revision":identity.1.to_string(),"schema_hash":schema_hash,
                 "binding_id":binding_id,"command_id":self.invocation.command,"arguments":arguments}),session,identity.0.generation)) {
-                Ok(_) => self.invocation.dirty=false,
+                Ok(_) => {
+                    self.invocation.dirty=false;
+                    if let Some(response) = submit_control {
+                        self.arm_control_focus(&response, identity.0, Operation::Command);
+                    }
+                },
                 Err(error) => self.status=error,
             }
         }

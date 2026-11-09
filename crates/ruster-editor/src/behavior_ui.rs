@@ -1212,7 +1212,7 @@ impl BehaviorUi {
                             ui.label(name);
                             ui.label(summary);
                             if ui.add_enabled(!self.property_dirty,egui::Button::new("Edit value")).clicked() {action=Some(Action::EditProperty(id.clone(),name.clone()));}
-                            ui.menu_button("⋯",|ui| {if ui.button("Remove value").clicked(){action=Some(Action::RemoveProperty(id.clone(),name.clone()));ui.close();}}).response.on_hover_text("Property actions");
+                            ui.menu_button("…",|ui| {if ui.button("Remove value").clicked(){action=Some(Action::RemoveProperty(id.clone(),name.clone()));ui.close();}}).response.on_hover_text("Property actions");
                         });
                     });
                 }
@@ -1726,7 +1726,30 @@ impl RuntimeUi {
         let new_intent = ctx.input(|input| {
             !input.focused
                 || input.pointer.any_pressed()
-                || input.events.iter().any(|event| {
+                || input.events.iter().enumerate().any(|(index, event)| {
+                    // Winit emits printable text immediately after its key.
+                    // A repeated Space remains the same held button gesture.
+                    if request.operation == Operation::Command
+                        && matches!(event, egui::Event::Text(text) if text == " ")
+                        && matches!(input.events[..index].last(),
+                            Some(egui::Event::Key { key: egui::Key::Space, pressed: true,
+                                repeat: true, modifiers, .. }) if !modifiers.any())
+                    {
+                        return false;
+                    }
+                    if request.operation == Operation::Command
+                        && matches!(event,
+                        egui::Event::MouseWheel { delta, .. } if *delta != egui::Vec2::ZERO)
+                    {
+                        return true;
+                    }
+                    if request.operation == Operation::Command
+                        && matches!(event,
+                        egui::Event::Key { key: egui::Key::Enter | egui::Key::Space,
+                            pressed: true, repeat: true, modifiers, .. } if !modifiers.any())
+                    {
+                        return false;
+                    }
                     matches!(
                         event,
                         egui::Event::Key { pressed: true, .. }
@@ -1767,13 +1790,18 @@ impl RuntimeUi {
                 .as_ref()
                 .is_some_and(|frame| frame.key == request.key);
         let complete = match request.operation {
-            Operation::Reset | Operation::Pause | Operation::Step => frame_ready && !self.playing,
+            Operation::Reset | Operation::Pause | Operation::Step | Operation::Command => {
+                frame_ready && !self.playing
+            }
             Operation::Play => frame_ready && self.playing,
             Operation::Stop => !self.ready && !self.playing,
-            Operation::Invalidate | Operation::Command => false,
+            Operation::Invalidate => false,
         };
         if complete {
             response.request_focus();
+            if request.operation == Operation::Command {
+                response.scroll_to_me(None);
+            }
             self.cancel_control_focus();
         }
     }

@@ -292,7 +292,7 @@ mod tests {
         // Same tick, different commit: only a captured API5 flag can require the new pin.
         let mut lifecycle = session.source("application-source").unwrap().clone();
         lifecycle.host_api_version = ruster_behavior::LIFECYCLE_HOST_API_VERSION;
-        lifecycle.text="return {initialize=function(p,h) return {state={count=10}} end, command=function(n,a,p,h) return {state={count=h.state('count')+a.delta}} end, update=function(o,p,dt,h) return {state={count=h.state('count')+(dt>0 and 1 or 0)}} end}".into();
+        lifecycle.text="return {initialize=function(p,h) return {state={count=10}} end, command=function(n,a,p,h) if n=='noop' then return {} end; return {state={count=h.state('count')+a.delta}} end, update=function(o,p,dt,h) return {state={count=h.state('count')+(dt>0 and 1 or 0)}} end}".into();
         session
             .set_source(
                 session.scene().revision,
@@ -307,6 +307,16 @@ mod tests {
                 "adjust",
                 Some(ruster_scene::CommandDefinition {
                     arguments: BTreeMap::from([("delta".into(), StateValue::Number(1.0))]),
+                }),
+            )
+            .unwrap();
+        session
+            .set_command_definition(
+                session.scene().revision,
+                "application",
+                "noop",
+                Some(ruster_scene::CommandDefinition {
+                    arguments: BTreeMap::new(),
                 }),
             )
             .unwrap();
@@ -424,6 +434,183 @@ mod tests {
             runtime.state_page(&page).unwrap()["fields"][0]["value"],
             json!({"type":"number","value":15.0})
         );
+        // The real command form keeps the selected command and genuine keyboard
+        // owner across a worker acknowledgement, including a disabled paint.
+        // Reuse this worker rather than manufacturing a committed Frame.
+        ctx.all_styles_mut(|style| style.animation_time = 0.0);
+        fn point(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {
+            fn find(
+                shape: &egui::epaint::Shape,
+                clip: egui::Rect,
+                label: &str,
+            ) -> Option<egui::Pos2> {
+                match shape {
+                    egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                        let rect = text.galley.rect.translate(text.pos.to_vec2());
+                        clip.contains_rect(rect).then_some(rect.center())
+                    }
+                    egui::epaint::Shape::Vec(children) => {
+                        children.iter().find_map(|shape| find(shape, clip, label))
+                    }
+                    _ => None,
+                }
+            }
+            shapes
+                .iter()
+                .find_map(|shape| find(&shape.shape, shape.clip_rect, label))
+                .unwrap_or_else(|| panic!("visible command control missing: {label}"))
+        }
+        let render = |runtime: &mut RuntimeUi, events| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 800.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| runtime.command_controls(ui, &session, true),
+            );
+            output.textures_delta.clear();
+            output.shapes
+        };
+        let click = |position, pressed| {
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ]
+        };
+        let key = |key, pressed| {
+            vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        let shapes = render(&mut runtime, vec![]);
+        let header = point(&shapes, "Application commands");
+        render(&mut runtime, click(header, true));
+        render(&mut runtime, click(header, false));
+        for _ in 0..3 {
+            render(&mut runtime, vec![]);
+        }
+        let choice = point(&render(&mut runtime, vec![]), "adjust");
+        render(&mut runtime, click(choice, true));
+        render(&mut runtime, click(choice, false));
+        let noop = point(&render(&mut runtime, vec![]), "noop");
+        render(&mut runtime, click(noop, true));
+        render(&mut runtime, click(noop, false));
+        let shapes = render(&mut runtime, vec![]);
+        point(&shapes, "noop");
+        assert!(!egui::Popup::is_any_open(&ctx));
+        let invoke = point(&shapes, "Invoke Application command");
+        for _ in 0..16 {
+            let owns = ctx
+                .memory(|memory| memory.focused())
+                .and_then(|id| ctx.read_response(id))
+                .is_some_and(|response| response.rect.contains(invoke));
+            if owns {
+                break;
+            }
+            render(&mut runtime, key(egui::Key::Tab, true));
+            render(&mut runtime, key(egui::Key::Tab, false));
+        }
+        let space_press = || {
+            let mut events = key(egui::Key::Space, true);
+            events.push(egui::Event::Text(" ".into()));
+            events
+        };
+        let invoke_id = ctx
+            .memory(|memory| memory.focused())
+            .expect("Tab reaches Invoke");
+        assert!(ctx.read_response(invoke_id).unwrap().rect.contains(invoke));
+        render(&mut runtime, space_press());
+        assert!(runtime.awaiting.is_some() || runtime.pending.is_some());
+        assert_eq!(runtime.control_focus.map(|focus| focus.id), Some(invoke_id));
+        // Do not poll yet: force a genuine disabled UI frame even if the worker
+        // has already sent its acknowledgement. Egui derives repeat from key state.
+        render(&mut runtime, space_press());
+        assert_ne!(ctx.memory(|memory| memory.focused()), Some(invoke_id));
+        assert_eq!(runtime.control_focus.map(|focus| focus.id), Some(invoke_id));
+        settle(&mut runtime);
+        for _ in 0..3 {
+            point(&render(&mut runtime, space_press()), "noop");
+            assert_eq!(runtime.frame.as_ref().unwrap().commit_revision, 4);
+            assert!(runtime.pending.is_none() && runtime.awaiting.is_none());
+        }
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(invoke_id));
+        render(&mut runtime, key(egui::Key::Space, false));
+        render(&mut runtime, key(egui::Key::Enter, true));
+        settle(&mut runtime);
+        let shapes = render(&mut runtime, key(egui::Key::Enter, false));
+        point(&shapes, "noop");
+        assert_eq!(runtime.frame.as_ref().unwrap().commit_revision, 5);
+        assert_eq!(runtime.last_command_receipt().unwrap().command_id, "noop");
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(invoke_id));
+        // Deliberate scrolling while the command is pending cancels the
+        // handoff. An acknowledgement must not recapture keyboard focus.
+        render(&mut runtime, key(egui::Key::Enter, true));
+        assert!(runtime.control_focus.is_some());
+        let mut scroll = key(egui::Key::Enter, false);
+        scroll.push(egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            delta: egui::vec2(0.0, -24.0),
+            modifiers: egui::Modifiers::NONE,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+        });
+        render(&mut runtime, scroll);
+        assert!(runtime.control_focus.is_none());
+        settle(&mut runtime);
+        let shapes = render(&mut runtime, vec![]);
+        point(&shapes, "noop");
+        assert_eq!(runtime.frame.as_ref().unwrap().commit_revision, 6);
+        assert_ne!(ctx.memory(|memory| memory.focused()), Some(invoke_id));
+        let cancel = point(&shapes, "Cancel command arguments");
+        render(&mut runtime, click(cancel, true));
+        render(&mut runtime, click(cancel, false));
+        point(&render(&mut runtime, vec![]), "noop");
+        // Reset replaces the run and intentionally drops its prior selection.
+        runtime
+            .runtime_api("behavior_runtime_reset", &json!({}), &session, 1)
+            .unwrap();
+        settle(&mut runtime);
+        let shapes = render(&mut runtime, vec![]);
+        point(&shapes, "adjust");
+        let value = point(&shapes, "1");
+        render(&mut runtime, click(value, true));
+        render(&mut runtime, click(value, false));
+        assert!(ctx.text_edit_focused());
+        render(&mut runtime, vec![egui::Event::Text("7".into())]);
+        assert!(runtime.command_draft_pending());
+        let key = runtime.frame.as_ref().unwrap().key;
+        runtime.runtime_api("behavior_runtime_step", &json!({"expected_run_id":format!("{}:{}:{}",key.generation,key.reset_epoch,key.authored_revision)}), &session, 1).unwrap();
+        settle(&mut runtime);
+        let shapes = render(&mut runtime, vec![]);
+        point(&shapes, "adjust");
+        point(&shapes, "1");
+        assert!(
+            !runtime.command_draft_pending(),
+            "a different commit discards stale raw arguments but preserves selection"
+        );
+        let replacement = runtime.frame.as_ref().unwrap();
+        page["expected_run_id"] = json!(format!(
+            "{}:{}:{}",
+            replacement.key.generation,
+            replacement.key.reset_epoch,
+            replacement.key.authored_revision
+        ));
+        page["expected_tick"] = json!("1");
+        page["expected_commit_revision"] = json!("1");
         let mut old = session.source("application-source").unwrap().clone();
         old.host_api_version = 4;
         session

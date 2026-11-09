@@ -610,4 +610,6 @@ After Reset, use Application commands while paused to choose a captured definiti
 
 Generated working copies recognize Lua APIs1–5. API5 update uses `RusterHost5`, while initialize/command use the separate state-only `RusterLifecycleHost` and `RusterLifecycleUpdate`. Generic field reads retain the Number/Bool/Text/Vec3 union. Old known-API `.txt` paths continue to require explicit reconciliation before a new `.lua` path can be written. F2a exports use content10 and the exact appended `lifecycle_commands` runtime-kit capability, retaining Descriptor5.
 
-These source changes and representative tests await root-owned checks and native workflow qualification.
+Root-owned default and inspection checks pass. Native workflow qualification is in progress and tracked in the F2a evidence.
+
+Application command forms retain the selected command through successful same-run commits and Cancel. A new commit refreshes arguments from the captured authored defaults. Reset/run replacement clears the form. A genuinely keyboard-focused Invoke control retains its owner through pending paints and reveals itself once on acknowledgement, unless a new key, pointer, scroll or focus change supersedes that intent. Held activation keys cannot submit another operation.
