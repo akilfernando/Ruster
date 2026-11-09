@@ -30,6 +30,7 @@ fn known_lua_api(language: &str, api: u32) -> bool {
                 | ruster_behavior::INPUT_HOST_API_VERSION
                 | ruster_behavior::SPATIAL_HOST_API_VERSION
                 | ruster_behavior::STATE_HOST_API_VERSION
+                | ruster_behavior::LIFECYCLE_HOST_API_VERSION
         )
 }
 
@@ -980,14 +981,15 @@ pub(super) fn annotation_hint_for_api(source_id: &str, api: u32) -> Result<Strin
         2 => "RusterHost2",
         3 => "RusterHost3",
         4 => "RusterHost4",
+        5 => "RusterHost5",
         _ => return Err(error(ErrorKind::Invalid, "Unsupported tooling host API")),
     };
-    let transform = if api == 4 {
+    let transform = if matches!(api, 4 | 5) {
         "RusterTransform?"
     } else {
         "RusterTransform"
     };
-    let result = if api == 4 {
+    let result = if matches!(api, 4 | 5) {
         "RusterStateUpdate"
     } else {
         "RusterTransform"
@@ -1082,6 +1084,14 @@ const VERSIONED_HOST_TYPES: &str = r#"
 ---@class RusterStateUpdate
 ---@field transform RusterTransform? Required for Object targets, omitted for Application.
 ---@field state table<string,RusterStateValue>? Own known fields only, omitted/nil fields retain their committed values.
+---@class RusterLifecycleHost
+---@field state fun(name:string):RusterStateValue Copied operation-start own field.
+---@field binding_state fun(binding_id:string,name:string):RusterStateValue Copied operation-start peer field.
+---@class RusterLifecycleUpdate
+---@field state table<string,RusterStateValue>? Own known fields only. No transform or other envelope fields.
+---@alias RusterInitialize fun(props:table<string,any>,host:RusterLifecycleHost):RusterLifecycleUpdate
+---@alias RusterCommand fun(name:string,args:table<string,RusterStateValue>,props:table<string,any>,host:RusterLifecycleHost):RusterLifecycleUpdate
+---@class RusterHost5:RusterHost4
 ---@class RusterHost4:RusterHost3
 ---@field state fun(name:string):RusterStateValue Copied tick-start own field, missing fields fail.
 ---@field binding_state fun(binding_id:string,name:string):RusterStateValue Copied tick-start peer field, missing owners/fields fail.
@@ -1443,8 +1453,9 @@ mod tests {
             (1, "lua54", 2, "lua"),
             (2, "lua54", 3, "lua"),
             (3, "lua54", 4, "lua"),
-            (4, "lua54", 5, "txt"),
-            (5, "future-language", 4, "txt"),
+            (4, "lua54", 5, "lua"),
+            (5, "lua54", 6, "txt"),
+            (6, "future-language", 4, "txt"),
         ] {
             let mut script = source("unfinished source(");
             script.language_id = language.into();
@@ -1457,7 +1468,7 @@ mod tests {
         // Their unchanged version1 manifests remain readable, but neither a
         // fresh Lua destination nor explicit observed-file resolution may hide
         // that prior path. Reconciliation is an explicit creator operation.
-        for api in 2..=4 {
+        for api in 2..=5 {
             let legacy_temp = tempfile::tempdir().unwrap();
             let legacy_context = self::context(legacy_temp.path(), "legacy.scene.json");
             legacy_context.prepare(true).unwrap();
@@ -1894,6 +1905,7 @@ mod tests {
             "left-binding".into(),
             BehaviorBinding {
                 target: ruster_scene::BindingTarget::Object("left".into()),
+                commands: Default::default(),
                 state_defaults: Default::default(),
                 source_id: "source-a".into(),
                 enabled: true,
@@ -1904,6 +1916,7 @@ mod tests {
             "right-binding".into(),
             BehaviorBinding {
                 target: ruster_scene::BindingTarget::Object("right".into()),
+                commands: Default::default(),
                 state_defaults: Default::default(),
                 source_id: "source-a".into(),
                 enabled: false,
@@ -1949,6 +1962,7 @@ mod tests {
             (2, "RusterHost2", "RusterTransform"),
             (3, "RusterHost3", "RusterTransform"),
             (4, "RusterHost4", "RusterStateUpdate"),
+            (5, "RusterHost5", "RusterStateUpdate"),
         ] {
             let hint = annotation_hint_for_api("source-a", api).unwrap();
             assert!(hint.contains(&format!("---@param host {host_class}\n")));
@@ -1996,6 +2010,7 @@ mod tests {
                 format!("binding-{n}"),
                 BehaviorBinding {
                     target: ruster_scene::BindingTarget::Object(format!("owner-{n}")),
+                    commands: Default::default(),
                     state_defaults: Default::default(),
                     source_id: "source-a".into(),
                     enabled: true,

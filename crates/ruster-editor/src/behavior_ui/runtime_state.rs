@@ -15,6 +15,12 @@ impl RuntimeUi {
         if args["expected_tick"].as_str() != Some(&frame.tick.to_string()) {
             return Err("stale_tick".into());
         }
+        match args.get("expected_commit_revision") {
+            Some(value) if value.as_str() == Some(&frame.commit_revision.to_string()) => {}
+            Some(_) => return Err("stale_commit_revision".into()),
+            None if frame.commit_revision_required => return Err("commit_revision_required".into()),
+            None => {}
+        }
         let binding = args["binding_id"].as_str().ok_or("invalid_arguments")?;
         let fields = frame.state.binding(binding).ok_or("state_unavailable")?;
         let source_hash = frame.state.source_hash(binding);
@@ -46,6 +52,8 @@ impl RuntimeUi {
             .collect();
         Ok(
             json!({"run_id":args["expected_run_id"],"tick":frame.tick.to_string(),
+            "commit_revision":frame.commit_revision.to_string(),"commit_revision_required":frame.commit_revision_required,
+            "last_step_commit_revision":frame.last_step_commit_revision.map(|value|value.to_string()),
             "binding_id":binding,"source_hash":source_hash,"schema_hash":schema_hash,
             "fields":values,"field_count":fields.len(),
             "next_offset":(offset.saturating_add(16)<fields.len()).then(||offset.saturating_add(16).to_string()),
@@ -68,13 +76,14 @@ impl RuntimeUi {
     pub fn state_inspector(&mut self, ui: &mut egui::Ui) {
         egui::CollapsingHeader::new("Committed runtime state").show(ui,|ui| {
             let Some(frame)=self.frame.as_ref() else {ui.label("Reset preview to inspect committed state.");return;};
-            let key=(frame.key,frame.tick);
+            let key=(frame.key,frame.tick,frame.commit_revision);
             if self.state_page_key != Some(key) {
                 self.state_page_key=Some(key);
                 self.state_offset=0;
             }
             ui.label(format!("Run {}:{}:{} · tick {}",frame.key.generation,
                 frame.key.reset_epoch,frame.key.authored_revision,frame.tick));
+            ui.label(format!("Commit revision {} · last Step {:?}",frame.commit_revision,frame.last_step_commit_revision));
             if self.stale || !self.ready || Some(frame.key) != self.current_run() {
                 ui.colored_label(egui::Color32::YELLOW,"Historical snapshot. Reset to inspect current authored defaults.");
             }
@@ -105,10 +114,10 @@ impl RuntimeUi {
                 });
             }
             ui.horizontal_wrapped(|ui| {
-                if ui.add_enabled(self.state_offset>0,egui::Button::new("Previous state fields")).clicked() {
+                if ui.add_enabled(!self.playing && self.state_offset>0,egui::Button::new("Previous state fields")).clicked() {
                     self.state_offset=self.state_offset.saturating_sub(16);
                 }
-                if ui.add_enabled(self.state_offset.saturating_add(16)<fields.len(),egui::Button::new("Next state fields")).clicked() {
+                if ui.add_enabled(!self.playing && self.state_offset.saturating_add(16)<fields.len(),egui::Button::new("Next state fields")).clicked() {
                     self.state_offset=self.state_offset.saturating_add(16);
                 }
             });
@@ -135,7 +144,7 @@ mod tests {
             label:None,language_id:ruster_behavior::LANGUAGE_ID.into(),host_api_version:4,
             text:"return {update=function(o,p,dt,h) return {state={count=h.state('count')+1}} end}".into(),
         },"application",BehaviorBinding {target:BindingTarget::Application,
-            source_id:"application-source".into(),enabled:true,properties:BTreeMap::new(),
+            source_id:"application-source".into(),enabled:true,properties:BTreeMap::new(),commands:Default::default(),
             state_defaults:BTreeMap::from([("count".into(),StateValue::Number(0.0))])}).unwrap();
         let ctx = egui::Context::default();
         let (notify, pulses) = mpsc::sync_channel(1);
@@ -279,6 +288,160 @@ mod tests {
         assert_eq!(
             runtime.state_page(&current).unwrap()["fields"][0]["value"],
             json!({"type":"number","value":99.0})
+        );
+        // Same tick, different commit: only a captured API5 flag can require the new pin.
+        let mut lifecycle = session.source("application-source").unwrap().clone();
+        lifecycle.host_api_version = ruster_behavior::LIFECYCLE_HOST_API_VERSION;
+        lifecycle.text="return {initialize=function(p,h) return {state={count=10}} end, command=function(n,a,p,h) return {state={count=h.state('count')+a.delta}} end, update=function(o,p,dt,h) return {state={count=h.state('count')+(dt>0 and 1 or 0)}} end}".into();
+        session
+            .set_source(
+                session.scene().revision,
+                "application-source",
+                Some(lifecycle),
+            )
+            .unwrap();
+        session
+            .set_command_definition(
+                session.scene().revision,
+                "application",
+                "adjust",
+                Some(ruster_scene::CommandDefinition {
+                    arguments: BTreeMap::from([("delta".into(), StateValue::Number(1.0))]),
+                }),
+            )
+            .unwrap();
+        session
+            .set_action(
+                session.scene().revision,
+                "confirm",
+                Some(ruster_scene::input::ActionDefinition {
+                    label: None,
+                    kind: ruster_scene::input::ActionKind::Button { keys: vec![] },
+                }),
+            )
+            .unwrap();
+        runtime.observe(1, session.scene().revision, None, 0);
+        runtime
+            .runtime_api("behavior_runtime_reset", &json!({}), &session, 1)
+            .unwrap();
+        drive(&mut runtime, 0);
+        let frame = runtime.frame.as_ref().unwrap();
+        let run = format!(
+            "{}:{}:{}",
+            frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision
+        );
+        let mut page = json!({"expected_run_id":run,"expected_tick":"0","binding_id":"application",
+            "source_hash":frame.state.source_hash("application"),"schema_hash":frame.state.schema_hash("application")});
+        assert_eq!(
+            runtime.state_page(&page).unwrap_err(),
+            "commit_revision_required"
+        );
+        page["expected_commit_revision"] = json!("0");
+        assert_eq!(
+            runtime.state_page(&page).unwrap()["fields"][0]["value"],
+            json!({"type":"number","value":10.0})
+        );
+        let mut command = json!({"expected_run_id":run,"expected_commit_revision":"0","binding_id":"application",
+            "command_id":"adjust","schema_hash":frame.command_schema_hash,"arguments":{"delta":{"type":"number","value":2.0}}});
+        let mut noncanonical = command.clone();
+        noncanonical["expected_commit_revision"] = json!("00");
+        assert_eq!(
+            runtime
+                .runtime_api("behavior_runtime_command", &noncanonical, &session, 1)
+                .unwrap_err(),
+            "invalid_arguments"
+        );
+        assert_eq!(runtime.frame.as_ref().unwrap().commit_revision, 0);
+        runtime
+            .runtime_api("behavior_runtime_command", &command, &session, 1)
+            .unwrap();
+        assert!(runtime
+            .runtime_api("behavior_runtime_command", &command, &session, 1)
+            .is_err());
+        settle(&mut runtime);
+        let frame = runtime.frame.as_ref().unwrap();
+        assert_eq!(
+            (
+                frame.tick,
+                frame.commit_revision,
+                frame.last_step_commit_revision
+            ),
+            (0, 1, None)
+        );
+        assert_eq!(
+            runtime.state_page(&page).unwrap_err(),
+            "stale_commit_revision"
+        );
+        let receipt = runtime.last_command_receipt().unwrap();
+        assert_eq!(
+            (
+                receipt.previous_commit_revision,
+                receipt.commit_revision,
+                receipt.tick
+            ),
+            (0, 1, 0)
+        );
+        runtime
+            .runtime_api(
+                "behavior_runtime_step",
+                &json!({"expected_run_id":run}),
+                &session,
+                1,
+            )
+            .unwrap();
+        drive(&mut runtime, 1);
+        let before = runtime.frame.as_ref().unwrap().clone();
+        assert_eq!(before.last_step_commit_revision, Some(2));
+        let input = before
+            .input
+            .as_ref()
+            .expect("Step carries actual input snapshot");
+        assert!(input.frame.0.contains_key("confirm"));
+        command["expected_commit_revision"] = json!("2");
+        runtime
+            .runtime_api("behavior_runtime_command", &command, &session, 1)
+            .unwrap();
+        settle(&mut runtime);
+        let after = runtime.frame.as_ref().unwrap();
+        assert_eq!(
+            (
+                after.tick,
+                after.commit_revision,
+                after.last_step_commit_revision
+            ),
+            (1, 3, Some(2))
+        );
+        assert!(Arc::ptr_eq(&before.scene, &after.scene));
+        assert!(Arc::ptr_eq(input, after.input.as_ref().unwrap()));
+        assert!(Arc::ptr_eq(&before.authoring, &after.authoring));
+        assert_eq!(
+            runtime.queue_command(&command).unwrap_err(),
+            "stale_commit_revision"
+        );
+        page["expected_tick"] = json!("1");
+        page["expected_commit_revision"] = json!("3");
+        assert_eq!(
+            runtime.state_page(&page).unwrap()["fields"][0]["value"],
+            json!({"type":"number","value":15.0})
+        );
+        let mut old = session.source("application-source").unwrap().clone();
+        old.host_api_version = 4;
+        session
+            .set_source(session.scene().revision, "application-source", Some(old))
+            .unwrap();
+        runtime.observe(1, session.scene().revision, None, 0);
+        let mut omitted = page.clone();
+        omitted
+            .as_object_mut()
+            .unwrap()
+            .remove("expected_commit_revision");
+        assert_eq!(
+            runtime.state_page(&omitted).unwrap_err(),
+            "commit_revision_required"
+        );
+        assert_eq!(
+            runtime.state_page(&page).unwrap()["snapshot_status"],
+            "historical_committed"
         );
         runtime.shutdown();
     }

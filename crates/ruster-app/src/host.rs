@@ -400,7 +400,8 @@ impl<A: Application> Host<A> {
             .default_size(280.0)
             .resizable(true)
             .show(root, |ui| {
-                let result = self.runtime.app_mut().ui(ui);
+                let playing = self.runtime.is_running();
+                let result = self.runtime.app_mut().ui_with_playback(ui, playing);
                 self.report(result);
             });
 

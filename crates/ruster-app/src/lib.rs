@@ -175,6 +175,10 @@ pub trait Application: 'static {
     fn ui(&mut self, _ui: &mut egui::Ui) -> Result<(), String> {
         Ok(())
     }
+    /// Playback-aware controls. Existing applications retain their ordinary UI callback.
+    fn ui_with_playback(&mut self, ui: &mut egui::Ui, _playing: bool) -> Result<(), String> {
+        self.ui(ui)
+    }
     fn input(&mut self, _input: &InputFrame) -> Result<(), String> {
         Ok(())
     }

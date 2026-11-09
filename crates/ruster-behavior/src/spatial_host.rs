@@ -14,7 +14,10 @@ pub struct QueryObservation {
 
 // Match existing runtime/MCP identity counters, including values beyond the
 // exact-integer range of JavaScript JSON clients. Rust consumers keep u64.
-fn counter_string<S: serde::Serializer>(value: &u64, serializer: S) -> Result<S::Ok, S::Error> {
+pub(super) fn counter_string<S: serde::Serializer>(
+    value: &u64,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     serializer.serialize_str(&value.to_string())
 }
 
@@ -57,7 +60,9 @@ impl Engine {
                     .is_some_and(|source| {
                         matches!(
                             source.host_api_version,
-                            SPATIAL_HOST_API_VERSION | STATE_HOST_API_VERSION
+                            SPATIAL_HOST_API_VERSION
+                                | STATE_HOST_API_VERSION
+                                | LIFECYCLE_HOST_API_VERSION
                         )
                     })
         }) {

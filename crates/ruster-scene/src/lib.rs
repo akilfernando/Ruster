@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 13;
+pub const FORMAT_VERSION: u32 = 14;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
@@ -1204,6 +1204,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..14).contains(&version) {
+            reject_pre_v14_command_fields(&value)?;
+        }
         if (1..13).contains(&version) {
             reject_pre_v13_binding_fields(&value)?;
         }
@@ -1232,7 +1235,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=13 => serde_json::from_value(value)?,
+            5..=14 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1305,6 +1308,27 @@ impl Document {
 
 // Only binding definitions acquire these fields. Property/source contents with
 // the same names retain their existing meaning, including opaque API metadata.
+fn reject_pre_v14_command_fields(value: &serde_json::Value) -> Result<(), SceneError> {
+    let has_commands = |binding: &serde_json::Value| binding.get("commands").is_some();
+    let mut found = value["authoring"]["bindings"]
+        .as_object()
+        .is_some_and(|bindings| bindings.values().any(has_commands));
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            for delta in change["bindings"].as_array().into_iter().flatten() {
+                found |= has_commands(&delta["before"]) || has_commands(&delta["after"]);
+            }
+        }
+    }
+    if found {
+        Err(SceneError::Invalid(
+            "application commands require scene v14".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
 fn reject_pre_v13_binding_fields(value: &serde_json::Value) -> Result<(), SceneError> {
     let has_new_fields = |binding: &serde_json::Value| {
         binding.get("target").is_some() || binding.get("state_defaults").is_some()
@@ -1764,10 +1788,40 @@ impl Session {
                     enabled: b.enabled,
                     property_count: b.properties.len(),
                     state_field_count: b.state_defaults.len(),
+                    command_count: b.commands.len(),
                 }),
             offset,
             limit,
         )
+    }
+    /// List bounded command summaries without copying argument maps.
+    pub fn inspect_commands(
+        &self,
+        binding_id: &str,
+        offset: usize,
+        limit: usize,
+    ) -> Result<AuthoringPage<CommandSummary>, SceneError> {
+        let binding = self
+            .binding(binding_id)
+            .ok_or_else(|| SceneError::Invalid(format!("binding {binding_id} does not exist")))?;
+        Ok(authoring::page(
+            binding
+                .commands
+                .iter()
+                .map(|(id, definition)| CommandSummary {
+                    id: id.clone(),
+                    argument_count: definition.arguments.len(),
+                }),
+            offset,
+            limit,
+        ))
+    }
+    pub fn command_definition(
+        &self,
+        binding_id: &str,
+        command_id: &str,
+    ) -> Option<&CommandDefinition> {
+        self.binding(binding_id)?.commands.get(command_id)
     }
     /// Structural diagnostics only. Backend/schema/asset availability belongs to their owning hosts.
     pub fn authoring_diagnostics(
@@ -1937,6 +1991,31 @@ impl Session {
             binding.state_defaults.insert(name.into(), value);
         } else {
             binding.state_defaults.remove(name);
+        }
+        self.set_binding(expected_revision, binding_id, Some(binding))
+    }
+    /// Edit one command definition through the existing binding/history transaction.
+    pub fn set_command_definition(
+        &mut self,
+        expected_revision: u64,
+        binding_id: &str,
+        command_id: &str,
+        definition: Option<CommandDefinition>,
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        validate_id(binding_id)?;
+        validate_id(command_id)?;
+        if let Some(definition) = &definition {
+            definition.validate()?;
+        }
+        let mut binding = self
+            .binding(binding_id)
+            .cloned()
+            .ok_or_else(|| SceneError::Invalid(format!("binding {binding_id} does not exist")))?;
+        if let Some(definition) = definition {
+            binding.commands.insert(command_id.into(), definition);
+        } else {
+            binding.commands.remove(command_id);
         }
         self.set_binding(expected_revision, binding_id, Some(binding))
     }
@@ -3122,6 +3201,7 @@ mod tests {
             enabled: true,
             properties: BTreeMap::new(),
             state_defaults: StateFields::new(),
+            commands: BTreeMap::new(),
         }
     }
 
@@ -3423,7 +3503,202 @@ mod tests {
         session.save(&path).unwrap();
         let restored = Session::open(&path).unwrap();
         assert_eq!(restored.document, session.document);
-        assert_eq!(restored.loaded_format_version(), 13);
+        assert_eq!(restored.loaded_format_version(), FORMAT_VERSION);
+    }
+
+    // Commands add a binding-only version boundary and setter. Reuse the real
+    // history/document owner for rollback, strict wire and bounded discovery.
+    #[test]
+    fn command_definitions_history_and_v14_boundaries_are_atomic() {
+        use serde_json::{json, Value};
+        let mut session = Session::new(Scene::empty("commands")).unwrap();
+        let mut opaque = source("unfinished API5 source (commands)");
+        opaque.host_api_version = 5;
+        session.set_source(0, "source", Some(opaque)).unwrap();
+        let mut original = binding("unused", "source");
+        original.target = BindingTarget::Application;
+        original
+            .properties
+            .insert("commands".into(), PropertyValue::Text("opaque".into()));
+        original
+            .state_defaults
+            .insert("count".into(), StateValue::Number(0.0));
+        session
+            .set_binding(1, "application", Some(original.clone()))
+            .unwrap();
+        let legacy: Value = serde_json::from_slice(&session.snapshot_bytes().unwrap()).unwrap();
+        let mut v13 = legacy.clone();
+        v13["format_version"] = json!(13);
+        let restored = Session::from_snapshot_bytes(&serde_json::to_vec(&v13).unwrap()).unwrap();
+        assert_eq!(restored.source("source").unwrap().host_api_version, 5);
+        assert_eq!(restored.binding("application"), Some(&original));
+        for version in 1..14 {
+            for commands in [Value::Null, json!({}), json!({"restart":{"arguments":{}}})] {
+                let mut bad = legacy.clone();
+                bad["format_version"] = json!(version);
+                bad["authoring"]["bindings"]["application"]["commands"] = commands;
+                assert!(
+                    Session::from_snapshot_bytes(&serde_json::to_vec(&bad).unwrap())
+                        .unwrap_err()
+                        .to_string()
+                        .contains("v14")
+                );
+            }
+        }
+        let mut disabled = original.clone();
+        disabled.enabled = false;
+        session
+            .set_binding(2, "application", Some(disabled))
+            .unwrap();
+        let undo: Value = serde_json::from_slice(&session.snapshot_bytes().unwrap()).unwrap();
+        session.undo(3).unwrap();
+        let redo: Value = serde_json::from_slice(&session.snapshot_bytes().unwrap()).unwrap();
+        for (stack, mut history) in [("undo", undo), ("redo", redo)] {
+            history["format_version"] = json!(13);
+            Session::from_snapshot_bytes(&serde_json::to_vec(&history).unwrap()).unwrap();
+            let last = history[stack].as_array().unwrap().len() - 1;
+            for side in ["before", "after"] {
+                for commands in [Value::Null, json!({}), json!({"restart":{"arguments":{}}})] {
+                    let mut bad = history.clone();
+                    bad[stack][last]["bindings"][0][side]["commands"] = commands;
+                    assert!(
+                        Session::from_snapshot_bytes(&serde_json::to_vec(&bad).unwrap())
+                            .unwrap_err()
+                            .to_string()
+                            .contains("v14")
+                    );
+                }
+            }
+        }
+        let before = session.document.clone();
+        assert_eq!(
+            session
+                .set_command_definition(4, "application", "absent", None)
+                .unwrap(),
+            4
+        );
+        assert_eq!(session.document, before, "absent removal retains Redo");
+        let first = CommandDefinition {
+            arguments: BTreeMap::from([("amount".into(), StateValue::Number(1.0))]),
+        };
+        let revision = session
+            .set_command_definition(4, "application", "restart", Some(first.clone()))
+            .unwrap();
+        let mut expected = original;
+        expected.commands.insert("restart".into(), first.clone());
+        assert_eq!(session.binding("application"), Some(&expected));
+        let before = session.document.clone();
+        assert_eq!(
+            session
+                .set_command_definition(revision, "application", "restart", Some(first))
+                .unwrap(),
+            revision
+        );
+        assert_eq!(session.document, before, "equal definition is a no-op");
+        let edited = CommandDefinition {
+            arguments: BTreeMap::from([("amount".into(), StateValue::Number(2.0))]),
+        };
+        let revision = session
+            .set_command_definition(revision, "application", "restart", Some(edited.clone()))
+            .unwrap();
+        let revision = session
+            .set_command_definition(revision, "application", "restart", None)
+            .unwrap();
+        assert!(session.binding("application").unwrap().commands.is_empty());
+        let revision = session.undo(revision).unwrap();
+        assert_eq!(
+            session.command_definition("application", "restart"),
+            Some(&edited)
+        );
+        let revision = session.redo(revision).unwrap();
+        assert!(session
+            .command_definition("application", "restart")
+            .is_none());
+        let mut revision = session.undo(revision).unwrap();
+        for index in 0..MAX_COMMANDS - 1 {
+            revision = session
+                .set_command_definition(
+                    revision,
+                    "application",
+                    &format!("command-{index:02}"),
+                    Some(CommandDefinition {
+                        arguments: StateFields::new(),
+                    }),
+                )
+                .unwrap();
+        }
+        let before = session.document.clone();
+        let evictions = session.history_evictions();
+        for (expected_revision, owner, name, definition) in [
+            (revision - 1, "application", "restart", None),
+            (revision, "missing", "restart", None),
+            (revision, "application", "bad name", None),
+            (revision, "application", "crossing", Some(edited.clone())),
+            (
+                revision,
+                "application",
+                "restart",
+                Some(CommandDefinition {
+                    arguments: (0..=MAX_COMMAND_ARGUMENTS)
+                        .map(|index| (format!("arg-{index}"), StateValue::Bool(false)))
+                        .collect(),
+                }),
+            ),
+        ] {
+            assert!(session
+                .set_command_definition(expected_revision, owner, name, definition)
+                .is_err());
+            assert_eq!(session.document, before);
+            assert_eq!(session.history_evictions(), evictions);
+        }
+        let page = session.inspect_commands("application", 0, 1).unwrap();
+        assert_eq!(page.total, MAX_COMMANDS);
+        assert_eq!(
+            page.items[0],
+            CommandSummary {
+                id: "command-00".into(),
+                argument_count: 0
+            }
+        );
+        assert_eq!(page.next_offset, Some(1));
+        assert_eq!(
+            session
+                .inspect_commands("application", 0, usize::MAX)
+                .unwrap()
+                .items
+                .len(),
+            MAX_COMMANDS
+        );
+        assert!(session
+            .inspect_commands("application", usize::MAX, 16)
+            .unwrap()
+            .items
+            .is_empty());
+        assert!(session.inspect_commands("missing", 0, 16).is_err());
+        assert!(session.command_definition("missing", "restart").is_none());
+        assert_eq!(
+            serde_json::to_value(session.inspect_bindings(0, 16)).unwrap()["items"][0]
+                ["command_count"],
+            MAX_COMMANDS
+        );
+
+        let bytes = session.snapshot_bytes().unwrap();
+        let raw = String::from_utf8(bytes).unwrap();
+        for duplicate in [
+            raw.replacen("\"commands\":{\"command-00\":", "\"commands\":{},\"commands\":{\"command-00\":", 1),
+            raw.replacen("\"commands\":{\"command-00\":", "\"commands\":{\"command-00\":{\"arguments\":{}},\"command-00\":", 1),
+            raw.replacen("\"amount\":{\"type\":\"number\",\"value\":2.0}",
+                "\"amount\":{\"type\":\"number\",\"value\":2.0},\"amou\\u006et\":{\"type\":\"number\",\"value\":2.0}", 1),
+        ] {
+            assert_ne!(duplicate, raw, "duplicate fixture must change actual command bytes");
+            assert!(Session::from_snapshot_bytes(duplicate.as_bytes()).unwrap_err().to_string().contains("duplicate JSON key"));
+        }
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("commands.json");
+        session.save(&path).unwrap();
+        let restored = Session::open(&path).unwrap();
+        assert_eq!(restored.document, session.document);
+        assert_eq!(restored.loaded_format_version(), FORMAT_VERSION);
     }
 
     // Unique risk: deleting/duplicating objects must transact owned bindings with the
@@ -3571,6 +3846,12 @@ mod tests {
         application
             .state_defaults
             .insert("score".into(), StateValue::Number(0.0));
+        application.commands.insert(
+            "restart".into(),
+            CommandDefinition {
+                arguments: StateFields::new(),
+            },
+        );
         application.properties.insert(
             "reference".into(),
             PropertyValue::ObjectRef(Some("future-object".into())),
@@ -3839,6 +4120,18 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("bounded.json");
         let mut session = Session::new(Scene::empty("bounded")).unwrap();
+        let mut application = binding("unused", "missing-source");
+        application.target = BindingTarget::Application;
+        application.enabled = false;
+        application.commands.insert(
+            "set_mode".into(),
+            CommandDefinition {
+                arguments: BTreeMap::from([("mode".into(), StateValue::Text("ready".into()))]),
+            },
+        );
+        session
+            .set_binding(0, "application", Some(application))
+            .unwrap();
         // Reuse this reachable-payload byte oracle with the new authoring field,
         // rather than adding a second near-cap suite for action history.
         for n in 0..input::MAX_ACTIONS {
@@ -3944,6 +4237,49 @@ mod tests {
         ));
         assert_eq!(group.document, before);
         assert_eq!(group.history_evictions(), evictions);
+        // A catalog edit must reserve its complete binding before/after delta,
+        // even when every individual definition remains within its own limit.
+        let mut application = binding("unused", "missing-source");
+        application.target = BindingTarget::Application;
+        application.enabled = false;
+        group
+            .set_binding(group.scene().revision, "application", Some(application))
+            .unwrap();
+        let definition = CommandDefinition {
+            arguments: (0..15)
+                .map(|index| {
+                    (
+                        format!("arg-{index}"),
+                        StateValue::Text("x".repeat(MAX_PROPERTY_TEXT_BYTES)),
+                    )
+                })
+                .collect(),
+        };
+        definition.validate().unwrap();
+        let mut capacity_rejected = false;
+        for index in 0..MAX_COMMANDS {
+            let before = group.document.clone();
+            let evictions = group.history_evictions();
+            match group.set_command_definition(
+                group.scene().revision,
+                "application",
+                &format!("command-{index}"),
+                Some(definition.clone()),
+            ) {
+                Ok(_) => {}
+                Err(SceneError::Capacity) => {
+                    assert_eq!(group.document, before);
+                    assert_eq!(group.history_evictions(), evictions);
+                    capacity_rejected = true;
+                    break;
+                }
+                Err(error) => panic!("unexpected command admission failure {error}"),
+            }
+        }
+        assert!(
+            capacity_rejected,
+            "catalog history must participate in whole-document capacity"
+        );
         let mut pages = Session::new(Scene::empty("pages")).unwrap();
         for i in 0..17 {
             pages

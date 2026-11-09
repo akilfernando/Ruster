@@ -22,6 +22,8 @@ pub mod debug;
 pub mod spatial;
 mod state;
 pub use state::RuntimeState;
+mod lifecycle;
+pub use lifecycle::CommandReceipt;
 mod spatial_host;
 use spatial_host::{install_spatial, QueryInvocation};
 pub use spatial_host::{QueryObservation, QueryResult};
@@ -36,6 +38,7 @@ pub const INPUT_HOST_API_VERSION: u32 = 2;
 /// Explicit opt-in primitive spatial queries, retaining API2 action queries.
 pub const SPATIAL_HOST_API_VERSION: u32 = 3;
 pub const STATE_HOST_API_VERSION: u32 = 4;
+pub const LIFECYCLE_HOST_API_VERSION: u32 = 5;
 pub const APPLICATION_TEMPLATE: &str = include_str!("../templates/application.lua");
 pub const MAX_SPATIAL_QUERIES: u32 = 32;
 pub const FOLLOWER_TEMPLATE: &str = include_str!("../templates/follower.lua");
@@ -93,6 +96,8 @@ pub enum Phase {
     Compile,
     Module,
     Update,
+    Initialize,
+    Command,
     Output,
     Commit,
 }
@@ -112,6 +117,9 @@ pub enum DiagnosticCode {
     InvalidOutput,
     TickExhausted,
     QueryLimit,
+    InvalidCommand,
+    StaleCommit,
+    CommitExhausted,
 }
 #[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
 pub struct Diagnostic {
@@ -192,12 +200,34 @@ pub fn source_hash(text: &str) -> String {
 #[derive(Clone, Debug)]
 pub struct Runtime {
     scene: Scene,
-    authoring: Authoring,
+    authoring: Arc<Authoring>,
     tick: u64,
+    commit_revision: u64,
+    last_step_commit_revision: Option<u64>,
+    commit_revision_required: bool,
+    command_schema: Option<(String, String)>,
     query_observations: Vec<QueryObservation>,
     state: Arc<RuntimeState>,
 }
 impl Runtime {
+    pub fn authoring_snapshot(&self) -> &Arc<Authoring> {
+        &self.authoring
+    }
+    pub fn commit_revision(&self) -> u64 {
+        self.commit_revision
+    }
+    pub fn last_step_commit_revision(&self) -> Option<u64> {
+        self.last_step_commit_revision
+    }
+    pub fn commit_revision_required(&self) -> bool {
+        self.commit_revision_required
+    }
+    pub fn command_schema_hash(&self, binding_id: &str) -> Option<&str> {
+        self.command_schema
+            .as_ref()
+            .filter(|(id, _)| id == binding_id)
+            .map(|(_, hash)| hash.as_str())
+    }
     pub fn state(&self) -> &Arc<RuntimeState> {
         &self.state
     }
@@ -370,9 +400,22 @@ impl Engine {
         self.hook_ready.set(true);
         Ok(())
     }
-    fn begin_debug(&self, tick: u64, suppressed: bool) {
+    fn begin_debug(
+        &self,
+        tick: u64,
+        attempted_tick: u64,
+        commit_revision: u64,
+        attempted_commit_revision: u64,
+        suppressed: bool,
+    ) {
         if let Some(session) = self.debugger.borrow_mut().as_mut() {
-            session.begin(tick, suppressed);
+            session.begin(
+                tick,
+                attempted_tick,
+                commit_revision,
+                attempted_commit_revision,
+                suppressed,
+            );
         }
     }
     fn debug_phase(&self, phase: Phase) {
@@ -457,12 +500,13 @@ impl Engine {
                     | INPUT_HOST_API_VERSION
                     | SPATIAL_HOST_API_VERSION
                     | STATE_HOST_API_VERSION
+                    | LIFECYCLE_HOST_API_VERSION
             )
         {
             return Err(Diagnostic::plain(
                 DiagnosticCode::UnsupportedBackend,
                 Phase::Compile,
-                "this provisional backend supports lua54 host API1, API2 input, API3 spatial queries or API4 runtime state; authored data is preserved",
+                "this provisional backend supports lua54 host API1–5; authored data is preserved",
             ));
         }
         let hash = source_hash(&source.text);
@@ -512,9 +556,30 @@ impl Engine {
             Diagnostic::plain(DiagnosticCode::InvalidInput, Phase::Setup, &e.to_string())
         })?;
         self.begin()?;
-        self.begin_debug(0, true);
+        self.begin_debug(0, 0, 0, 0, true);
         let snapshot = Arc::new(scene.clone());
-        let state = RuntimeState::defaults(authoring)?;
+        let defaults = RuntimeState::defaults(authoring)?;
+        let mut state = defaults.clone();
+        for (id, binding) in &authoring.bindings {
+            if binding.enabled
+                && authoring
+                    .sources
+                    .get(&binding.source_id)
+                    .is_some_and(|source| source.host_api_version == LIFECYCLE_HOST_API_VERSION)
+            {
+                let patch = self.evaluate_lifecycle(
+                    id,
+                    binding,
+                    authoring,
+                    &defaults,
+                    lifecycle::Invocation::Initialize,
+                )?;
+                RuntimeState::apply(&mut state, id, patch).map_err(|error| {
+                    error.context(id, binding, authoring.sources.get(&binding.source_id))
+                })?;
+            }
+        }
+        state.validate_total()?;
         let mut trial_state = state.clone();
         let queries = self.query_invocation(scene, authoring, 0)?;
         for (id, binding) in &authoring.bindings {
@@ -541,8 +606,18 @@ impl Engine {
         self.check_cancelled()?;
         Ok(Runtime {
             scene: scene.clone(),
-            authoring: authoring.clone(),
+            authoring: Arc::new(authoring.clone()),
             tick: 0,
+            commit_revision: 0,
+            last_step_commit_revision: None,
+            commit_revision_required: authoring.bindings.values().any(|binding| {
+                binding.enabled
+                    && authoring
+                        .sources
+                        .get(&binding.source_id)
+                        .is_some_and(|source| source.host_api_version == LIFECYCLE_HOST_API_VERSION)
+            }),
+            command_schema: lifecycle::catalog_identity(authoring)?,
             query_observations: Vec::new(),
             state,
         })
@@ -571,8 +646,21 @@ impl Engine {
                 "runtime tick exhausted; reset before continuing",
             )
         })?;
+        let commit_revision = runtime.commit_revision.checked_add(1).ok_or_else(|| {
+            Diagnostic::plain(
+                DiagnosticCode::CommitExhausted,
+                Phase::Setup,
+                "commit revision exhausted; Reset before continuing",
+            )
+        })?;
         self.begin()?;
-        self.begin_debug(runtime.tick, false);
+        self.begin_debug(
+            runtime.tick,
+            next,
+            runtime.commit_revision,
+            commit_revision,
+            false,
+        );
         let snapshot = Arc::new(runtime.scene.clone());
         let mut staged = runtime.scene.clone();
         let mut staged_state = runtime.state.clone();
@@ -629,6 +717,8 @@ impl Engine {
             queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());
         runtime.scene = staged;
         runtime.tick = next;
+        runtime.commit_revision = commit_revision;
+        runtime.last_step_commit_revision = Some(commit_revision);
         runtime.query_observations = observations;
         runtime.state = staged_state;
         Ok(())
@@ -651,13 +741,23 @@ impl Engine {
                     "binding source is missing; repair its stable source ID",
                 )
             })?;
-            if source.host_api_version != STATE_HOST_API_VERSION
-                && (binding.object_id().is_none() || !binding.state_defaults.is_empty())
+            if !matches!(
+                source.host_api_version,
+                STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+            ) && (binding.object_id().is_none() || !binding.state_defaults.is_empty())
             {
                 return Err(Diagnostic::plain(
                     DiagnosticCode::UnsupportedBackend,
                     Phase::Compile,
-                    "Application targets and runtime state require lua54 host API4",
+                    "Application targets and runtime state require lua54 host API4 or API5",
+                ));
+            }
+            if !binding.commands.is_empty() && source.host_api_version != LIFECYCLE_HOST_API_VERSION
+            {
+                return Err(Diagnostic::plain(
+                    DiagnosticCode::UnsupportedBackend,
+                    Phase::Compile,
+                    "Application command declarations require lua54 host API5",
                 ));
             }
             let main = self.compile(&binding.source_id, source)?;
@@ -825,14 +925,20 @@ impl Engine {
                         return Err(Diagnostic::plain(
                             DiagnosticCode::InvalidOutput,
                             Phase::Output,
-                            if host_input.api_version == STATE_HOST_API_VERSION {
+                            if matches!(
+                                host_input.api_version,
+                                STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+                            ) {
                                 "API4 update must return a transform/state envelope"
                             } else {
                                 "update must return a complete transform table"
                             },
                         ));
                     };
-                    let result = if host_input.api_version == STATE_HOST_API_VERSION {
+                    let result = if matches!(
+                        host_input.api_version,
+                        STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+                    ) {
                         read_state_output(&output, input.is_some(), host_input)
                     } else {
                         read_transform(&output).map(|transform| BindingOutput {
@@ -921,12 +1027,7 @@ fn read_state_output(
     Ok(BindingOutput { transform, state })
 }
 
-fn environment<'scope, 'env: 'scope>(
-    lua: &Lua,
-    scope: &'scope mlua::Scope<'scope, 'env>,
-    snapshot: &'env Scene,
-    input: HostInput<'env>,
-) -> mlua::Result<(Table, Table)> {
+fn base_environment(lua: &Lua) -> mlua::Result<Table> {
     let environment = lua.create_table()?;
     let math = lua.create_table()?;
     let originals: Table = lua.globals().raw_get("math")?;
@@ -934,6 +1035,44 @@ fn environment<'scope, 'env: 'scope>(
         math.raw_set(name, originals.raw_get::<Function>(name)?)?;
     }
     environment.raw_set("math", math)?;
+    Ok(environment)
+}
+
+fn install_state_host<'scope, 'env: 'scope>(
+    scope: &'scope mlua::Scope<'scope, 'env>,
+    host: &Table,
+    runtime_state: &'env RuntimeState,
+    binding_id: &'env str,
+) -> mlua::Result<()> {
+    host.raw_set(
+        "state",
+        scope.create_function(move |lua, name: mlua::LuaString| {
+            state_read(lua, runtime_state, binding_id, &name)
+        })?,
+    )?;
+    host.raw_set(
+        "binding_state",
+        scope.create_function(
+            move |lua, (binding, name): (mlua::LuaString, mlua::LuaString)| {
+                if binding.as_bytes().len() > 128 {
+                    return Err(mlua::Error::runtime(
+                        "state binding reference exceeds 128 bytes",
+                    ));
+                }
+                state_read(lua, runtime_state, binding.to_str()?.as_ref(), &name)
+            },
+        )?,
+    )?;
+    Ok(())
+}
+
+fn environment<'scope, 'env: 'scope>(
+    lua: &Lua,
+    scope: &'scope mlua::Scope<'scope, 'env>,
+    snapshot: &'env Scene,
+    input: HostInput<'env>,
+) -> mlua::Result<(Table, Table)> {
+    let environment = base_environment(lua)?;
     let host = lua.create_table()?;
     host.raw_set(
         "resolve",
@@ -957,7 +1096,10 @@ fn environment<'scope, 'env: 'scope>(
     // same-text cache hits. Scoped captures expire before returning to the host.
     if matches!(
         input.api_version,
-        INPUT_HOST_API_VERSION | SPATIAL_HOST_API_VERSION | STATE_HOST_API_VERSION
+        INPUT_HOST_API_VERSION
+            | SPATIAL_HOST_API_VERSION
+            | STATE_HOST_API_VERSION
+            | LIFECYCLE_HOST_API_VERSION
     ) {
         host.raw_set(
             "button",
@@ -1000,30 +1142,15 @@ fn environment<'scope, 'env: 'scope>(
     }
     if matches!(
         input.api_version,
-        SPATIAL_HOST_API_VERSION | STATE_HOST_API_VERSION
+        SPATIAL_HOST_API_VERSION | STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
     ) {
         install_spatial(scope, &host, input)?;
     }
-    if input.api_version == STATE_HOST_API_VERSION {
-        host.raw_set(
-            "state",
-            scope.create_function(move |lua, name: mlua::LuaString| {
-                state_read(lua, input.state, input.binding_id, &name)
-            })?,
-        )?;
-        host.raw_set(
-            "binding_state",
-            scope.create_function(
-                move |lua, (binding, name): (mlua::LuaString, mlua::LuaString)| {
-                    if binding.as_bytes().len() > 128 {
-                        return Err(mlua::Error::runtime(
-                            "state binding reference exceeds 128 bytes",
-                        ));
-                    }
-                    state_read(lua, input.state, binding.to_str()?.as_ref(), &name)
-                },
-            )?,
-        )?;
+    if matches!(
+        input.api_version,
+        STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+    ) {
+        install_state_host(scope, &host, input.state, input.binding_id)?;
     }
     Ok((environment, host))
 }
@@ -1126,6 +1253,7 @@ mod input_tests {
                     source_id: "source".into(),
                     enabled: true,
                     properties: BTreeMap::new(),
+                    commands: Default::default(),
                 },
             );
         }
@@ -1298,6 +1426,7 @@ mod input_tests {
             (INPUT_HOST_API_VERSION, 103.0),
             (SPATIAL_HOST_API_VERSION, 103.0),
             (STATE_HOST_API_VERSION, 103.0),
+            (LIFECYCLE_HOST_API_VERSION, 103.0),
             (HOST_API_VERSION, 1.0),
         ] {
             authoring
@@ -1327,9 +1456,12 @@ mod input_tests {
             .sources
             .get_mut("source")
             .unwrap()
-            .host_api_version = 5;
+            .host_api_version = 6;
         let error = engine.reset(&scene, &authoring).unwrap_err();
         assert_eq!(error.code, DiagnosticCode::UnsupportedBackend);
         assert_eq!(error.binding_id.as_deref(), Some("binding-a"));
     }
 }
+
+#[cfg(test)]
+mod lifecycle_tests;

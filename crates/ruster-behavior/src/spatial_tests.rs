@@ -46,6 +46,7 @@ fn fixture(source: &str) -> (Scene, Authoring) {
             source_id: "source".into(),
             enabled: true,
             properties: BTreeMap::new(),
+            commands: Default::default(),
         },
     );
     authoring.actions.insert(
@@ -153,6 +154,7 @@ fn spatial_lua_persists_stops_withdraws_and_commits_only_successful_observations
             source_id: "barrier-source".into(),
             enabled: true,
             properties: BTreeMap::new(),
+            commands: Default::default(),
         },
     );
     let mut coherent = engine.reset(&scene, &moving).unwrap();

@@ -1,7 +1,11 @@
 //! Bounded embedded source/property working copies. Session owns authored data.
+mod command_catalog;
+use command_catalog::{command_claim, command_clicked, command_field_focus, command_key};
+mod runtime_commands;
 mod runtime_debug;
 mod runtime_input;
 mod runtime_state;
+use command_catalog::CommandDraft;
 mod spatial_feedback;
 use eframe::egui;
 use ruster_scene::{
@@ -20,10 +24,25 @@ fn fingerprint(value: &impl Serialize) -> String {
 fn annotated_template(source_id: &str, api: u32, template: &str) -> Result<String, String> {
     let hint = crate::behavior_files::annotation_hint_for_api(source_id, api)
         .map_err(|error| error.to_string())?;
+    let hint = if api == ruster_behavior::LIFECYCLE_HOST_API_VERSION {
+        hint.replace("@param transform ", "@param object ")
+    } else {
+        hint
+    };
     let annotations = hint
         .lines()
         .map(|line| format!("    {line}\n"))
         .collect::<String>();
+    let property_class =
+        crate::behavior_files::source_class_name(source_id).map_err(|error| error.to_string())?;
+    let template = if api == ruster_behavior::LIFECYCLE_HOST_API_VERSION {
+        template.replacen("    initialize = function",
+            &format!("    ---@param props {property_class}\n    ---@param host RusterLifecycleHost\n    ---@return RusterLifecycleUpdate\n    initialize = function"),1)
+            .replacen("    command = function",
+            &format!("    ---@param name string\n    ---@param args table<string,RusterStateValue>\n    ---@param props {property_class}\n    ---@param host RusterLifecycleHost\n    ---@return RusterLifecycleUpdate\n    command = function"),1)
+    } else {
+        template.to_owned()
+    };
     Ok(template.replacen(
         "    update = function",
         &format!("{annotations}    update = function"),
@@ -280,10 +299,15 @@ pub(super) struct Drafts {
     property: Option<PropertyDraft>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     state_add: Option<StateAddDraft>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    command: Option<CommandDraft>,
 }
 impl Drafts {
     pub fn pending(&self) -> bool {
-        self.source.is_some() || self.property.is_some() || self.state_add.is_some()
+        self.source.is_some()
+            || self.property.is_some()
+            || self.state_add.is_some()
+            || self.command.is_some()
     }
 }
 pub(super) enum Action {
@@ -294,6 +318,10 @@ pub(super) enum Action {
     ExternalStatus,
     Create(String),
     CreateApplication,
+    EditCommand(String, Option<String>),
+    ApplyCommand,
+    CancelCommand,
+    RemoveCommand(String, String),
     Attach {
         target: BindingTarget,
         source: String,
@@ -343,6 +371,9 @@ pub(super) struct BehaviorUi {
     state_add: Option<StateAddDraft>,
     state_add_dirty: bool,
     state_add_focus: bool,
+    command: Option<CommandDraft>,
+    command_focus: bool,
+    command_action_frame: Option<u64>,
     pub error: String,
     source_line: Option<u32>,
     source_cursor: usize,
@@ -351,6 +382,10 @@ pub(super) struct BehaviorUi {
     source_footer: Option<egui::Rect>,
     #[cfg(test)]
     state_add_name_response: Option<(egui::Id, egui::Rect)>,
+    #[cfg(test)]
+    command_name_response: Option<(egui::Id, egui::Rect)>,
+    #[cfg(test)]
+    command_apply_response: Option<(egui::Id, egui::Rect)>,
 }
 struct CapturedSource {
     id: String,
@@ -456,7 +491,7 @@ impl BehaviorUi {
         }
     }
     pub fn pending(&self) -> bool {
-        self.source_dirty || self.property_dirty || self.state_add_dirty
+        self.source_dirty || self.property_dirty || self.state_add_dirty || self.command.is_some()
     }
     pub fn state_add_pending(&self) -> bool {
         self.state_add_dirty && !self.source_dirty && !self.property_dirty
@@ -471,6 +506,7 @@ impl BehaviorUi {
         Drafts {
             source: self.source_dirty.then(|| self.source.clone()).flatten(),
             property: self.property_dirty.then(|| self.property.clone()).flatten(),
+            command: self.command.clone(),
             state_add: self
                 .state_add_dirty
                 .then(|| self.state_add.clone())
@@ -478,6 +514,21 @@ impl BehaviorUi {
         }
     }
     pub fn restore(&mut self, session: &Session, drafts: Drafts) -> Result<(), String> {
+        if drafts
+            .command
+            .as_ref()
+            .is_some_and(|draft| !draft.matches(session))
+        {
+            return Err("Recovered command definition has stale identity or unsupported raw bounds. Record preserved.".into());
+        }
+        if drafts.command.is_some()
+            && (drafts.source.is_some() || drafts.property.is_some() || drafts.state_add.is_some())
+        {
+            return Err(
+                "Recovered command draft cannot share another authored edit. Record preserved."
+                    .into(),
+            );
+        }
         if drafts.state_add.is_some() && (drafts.source.is_some() || drafts.property.is_some()) {
             return Err("A new state field cannot share a recovered source/value edit; checkpoint preserved.".into());
         }
@@ -521,6 +572,8 @@ impl BehaviorUi {
                 return Err("Recovered property draft has stale baseline, type or unsupported bounds; record preserved.".into());
             }
         }
+        self.command = drafts.command;
+        self.command_focus = self.command.is_some();
         self.source = drafts.source;
         self.source_dirty = self.source.is_some();
         self.source_open = self.source_dirty;
@@ -531,11 +584,12 @@ impl BehaviorUi {
         self.state_add = drafts.state_add;
         self.state_add_dirty = self.state_add.is_some();
         self.state_add_focus = self.state_add_dirty;
-        self.application = self
-            .property
-            .as_ref()
-            .and_then(|draft| session.binding(&draft.binding))
-            .is_some_and(|binding| binding.target == BindingTarget::Application)
+        self.application = self.command.is_some()
+            || self
+                .property
+                .as_ref()
+                .and_then(|draft| session.binding(&draft.binding))
+                .is_some_and(|binding| binding.target == BindingTarget::Application)
             || self
                 .state_add
                 .as_ref()
@@ -676,6 +730,9 @@ impl BehaviorUi {
                 draft.value.parse()?;
             }
         }
+        if self.command.is_some() {
+            self.apply_command(session)?;
+        }
         self.apply_source(session)?;
         self.apply_property(session)?;
         if self.state_add_dirty {
@@ -692,7 +749,35 @@ impl BehaviorUi {
         Ok(())
     }
     pub fn execute(&mut self, action: Action, session: &mut Session) -> Result<(), String> {
+        if self.command.is_some()
+            && !matches!(
+                action,
+                Action::ApplyCommand | Action::CancelCommand | Action::Save
+            )
+        {
+            return Err(
+                "Apply or Cancel the command definition draft before other behavior changes."
+                    .into(),
+            );
+        }
         match action {
+            Action::EditCommand(binding, command) => {
+                if self.pending() {
+                    return Err("Finish the current draft before editing a command.".into());
+                }
+                self.command = Some(CommandDraft::new(session, &binding, command.as_deref())?);
+                self.command_focus = true;
+            }
+            Action::ApplyCommand => self.apply_command(session)?,
+            Action::CancelCommand => {
+                self.command = None;
+                self.command_focus = false;
+            }
+            Action::RemoveCommand(binding, command) => {
+                session
+                    .set_command_definition(session.scene().revision, &binding, &command, None)
+                    .map_err(|error| error.to_string())?;
+            }
             Action::CreateApplication => {
                 let source = session
                     .allocate_source_ids(1)
@@ -709,10 +794,10 @@ impl BehaviorUi {
                         BehaviorSource {
                             label: Some("Application".into()),
                             language_id: ruster_behavior::LANGUAGE_ID.into(),
-                            host_api_version: ruster_behavior::STATE_HOST_API_VERSION,
+                            host_api_version: ruster_behavior::LIFECYCLE_HOST_API_VERSION,
                             text: annotated_template(
                                 &source,
-                                ruster_behavior::STATE_HOST_API_VERSION,
+                                ruster_behavior::LIFECYCLE_HOST_API_VERSION,
                                 ruster_behavior::APPLICATION_TEMPLATE,
                             )?,
                         },
@@ -722,6 +807,7 @@ impl BehaviorUi {
                             source_id: source.clone(),
                             enabled: true,
                             properties: BTreeMap::new(),
+                            commands: Default::default(),
                             state_defaults: BTreeMap::new(),
                         },
                     )
@@ -756,6 +842,7 @@ impl BehaviorUi {
                         &binding,
                         BehaviorBinding {
                             target: ruster_scene::BindingTarget::Object(object),
+                            commands: Default::default(),
                             state_defaults: Default::default(),
                             source_id: source.clone(),
                             enabled: true,
@@ -782,6 +869,7 @@ impl BehaviorUi {
                         &id,
                         Some(BehaviorBinding {
                             target,
+                            commands: Default::default(),
                             state_defaults: Default::default(),
                             source_id: source,
                             enabled: true,
@@ -1115,7 +1203,7 @@ impl BehaviorUi {
                 });
                 if let Some(source)=session.source(&binding.source_id) {
 
-                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION,ruster_behavior::LIFECYCLE_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
                 } else {ui.colored_label(egui::Color32::YELLOW,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
                 ui.label("Properties");
                 for (name,summary) in &self.property_rows {
@@ -1231,6 +1319,7 @@ impl BehaviorUi {
                     self.state_add_dirty = true;
                     self.changed();
                 }
+                if let Some(command_action)=self.command_catalog(ui,session,id,binding,generation) {action=Some(command_action);}
                 egui::CollapsingHeader::new("Script details").id_salt(("behavior_details",id)).show(ui,|ui| {
                     ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
                     if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));}
@@ -1270,7 +1359,7 @@ impl BehaviorUi {
         }
     }
     pub fn source_window(&mut self, ctx: &egui::Context, editable: bool) -> Option<Action> {
-        let editable = editable && !self.state_add_dirty;
+        let editable = editable && !self.state_add_dirty && self.command.is_none();
         if !self.source_open {
             return None;
         }
@@ -1388,6 +1477,7 @@ fn property_summary(value: &PropertyValue) -> String {
 struct ValueResponse {
     changed: bool,
     focused: bool,
+    focus_id: Option<egui::Id>,
 }
 impl ValueResponse {
     fn field(&mut self, response: egui::Response, focus: &mut bool) {
@@ -1398,6 +1488,9 @@ impl ValueResponse {
         }
         self.changed |= response.changed();
         self.focused |= response.has_focus() || response.lost_focus();
+        if response.has_focus() || response.lost_focus() {
+            self.focus_id = Some(response.id);
+        }
     }
 }
 fn value_ui(
@@ -1503,6 +1596,7 @@ use crate::behavior_worker::{
     Command as VmCommand, Event as VmEvent, Frame, Operation, RequestErrorKind, RunKey, State,
     Worker as VmWorker,
 };
+use runtime_commands::InvocationDraft;
 use std::sync::Arc;
 #[derive(Clone)]
 enum Request {
@@ -1520,6 +1614,13 @@ enum Request {
         map_identity: crate::behavior_worker::InputMapIdentity,
         expected_input_epoch: u64,
         frame: ruster_scene::input::ActionFrame,
+    },
+    Dispatch {
+        key: RunKey,
+        binding_id: String,
+        expected_commit_revision: u64,
+        command_id: String,
+        arguments: ruster_scene::StateFields,
     },
     Invalidate(RunKey),
     Stop(RunKey),
@@ -1552,6 +1653,19 @@ impl Request {
                 expected_input_epoch: *expected_input_epoch,
                 frame: frame.clone(),
             },
+            Self::Dispatch {
+                key,
+                binding_id,
+                expected_commit_revision,
+                command_id,
+                arguments,
+            } => VmCommand::Dispatch {
+                key: *key,
+                binding_id: binding_id.clone(),
+                expected_commit_revision: *expected_commit_revision,
+                command_id: command_id.clone(),
+                arguments: arguments.clone(),
+            },
             Self::Invalidate(key) => VmCommand::Invalidate { key: *key },
             Self::Stop(key) => VmCommand::Stop { key: *key },
         }
@@ -1570,9 +1684,11 @@ pub(super) struct RuntimeUi {
     debug: runtime_debug::DebugUi,
     input_control: runtime_input::InputControl,
     spatial_feedback_index: usize,
+    invocation: InvocationDraft,
+    command_action_frame: Option<u64>,
     state_binding: String,
     state_offset: usize,
-    state_page_key: Option<(RunKey, u64)>,
+    state_page_key: Option<(RunKey, u64, u64)>,
     context: Option<egui::Context>,
     awaiting: Option<(RunKey, Operation)>,
     worker: Option<VmWorker>,
@@ -1654,7 +1770,7 @@ impl RuntimeUi {
             Operation::Reset | Operation::Pause | Operation::Step => frame_ready && !self.playing,
             Operation::Play => frame_ready && self.playing,
             Operation::Stop => !self.ready && !self.playing,
-            Operation::Invalidate => false,
+            Operation::Invalidate | Operation::Command => false,
         };
         if complete {
             response.request_focus();
@@ -1681,6 +1797,7 @@ impl RuntimeUi {
             return;
         }
         let previous = self.identity.replace(next);
+        self.invocation = InvocationDraft::default();
         self.supersede_operation();
         self.clear_reset();
         if let Some(worker) = &mut self.worker {
@@ -1750,6 +1867,7 @@ impl RuntimeUi {
         self.reset_succeeded = None;
     }
     fn begin_reset(&mut self, key: RunKey) {
+        self.invocation = InvocationDraft::default();
         self.spatial_feedback_index = 0;
         self.clear_reset();
         self.reset_key = Some(key);
@@ -1809,6 +1927,7 @@ impl RuntimeUi {
                         Request::Play(_) => Operation::Play,
                         Request::Pause(_) => Operation::Pause,
                         Request::Step(_) | Request::ProgramStep { .. } => Operation::Step,
+                        Request::Dispatch { .. } => Operation::Command,
                         Request::Invalidate(_) => Operation::Invalidate,
                         Request::Stop(_) => Operation::Stop,
                     },
@@ -1838,6 +1957,12 @@ impl RuntimeUi {
                     self.accept_operation(&event);
                     match event {
                         VmEvent::Reset { key, run } => self.acknowledge_reset(key, run.tick),
+                        VmEvent::Command { receipt, .. } => {
+                            self.status = format!(
+                                "Command {} committed revision {} at tick {}",
+                                receipt.command_id, receipt.commit_revision, receipt.tick
+                            );
+                        }
                         VmEvent::Step { run, .. } => {
                             self.playing = false;
                             self.status = format!(
@@ -1960,6 +2085,7 @@ impl RuntimeUi {
         }
     }
     pub fn stop(&mut self, generation: u64, revision: u64) {
+        self.invocation = InvocationDraft::default();
         self.supersede_operation();
         self.clear_reset();
         if self.shutdown {
@@ -1987,6 +2113,7 @@ impl RuntimeUi {
         self.flush();
     }
     pub fn shutdown(&mut self) {
+        self.invocation = InvocationDraft::default();
         if self.shutdown {
             return;
         }
@@ -2094,7 +2221,7 @@ impl RuntimeUi {
                 self.spatial_feedback_menu(ui);
                 if let Some(frame)=&self.frame {ui.label(format!("Committed tick {}",frame.tick));}
                 if !self.status.is_empty(){ui.label(&self.status);}
-                if let Some(diagnostic)=&self.diagnostic {ui.collapsing("Diagnostic details",|ui| {
+                if let Some(diagnostic)=&self.diagnostic {ui.collapsing("Last failure details",|ui| {
                     ui.set_max_width(360.0);
                     egui::ScrollArea::vertical().id_salt("runtime_diagnostic_details").max_height(160.0).show(ui,|ui| {
                     ui.colored_label(egui::Color32::LIGHT_RED,&diagnostic.message);
@@ -2371,6 +2498,50 @@ mod tests {
             StateValue::Text(String::new())
         );
         assert!(BehaviorUi::default().restore(&application, stale).is_err());
+        // Catalog drafts preserve invalid typed raw values and their exact authored baseline.
+        restored
+            .execute(Action::EditCommand(binding.clone(), None), &mut application)
+            .unwrap();
+        let raw = restored.command.as_mut().unwrap();
+        raw.command_id = "adjust".into();
+        raw.arguments
+            .insert("amount".into(), ValueDraft::Number("-".into()));
+        let checkpoint = serde_json::to_value(restored.snapshot()).unwrap();
+        let mut recovered = BehaviorUi::default();
+        recovered
+            .restore(
+                &application,
+                serde_json::from_value(checkpoint.clone()).unwrap(),
+            )
+            .unwrap();
+        let original = application.snapshot_bytes().unwrap();
+        assert!(recovered
+            .execute(Action::ApplyCommand, &mut application)
+            .is_err());
+        assert_eq!(application.snapshot_bytes().unwrap(), original);
+        assert!(recovered.pending());
+        recovered
+            .command
+            .as_mut()
+            .unwrap()
+            .arguments
+            .insert("amount".into(), ValueDraft::Number("2.5".into()));
+        recovered
+            .execute(Action::ApplyCommand, &mut application)
+            .unwrap();
+        assert_eq!(
+            application
+                .command_definition(&binding, "adjust")
+                .unwrap()
+                .arguments["amount"],
+            StateValue::Number(2.5)
+        );
+        assert!(!recovered.pending());
+        assert!(BehaviorUi::default()
+            .restore(&application, serde_json::from_value(checkpoint).unwrap())
+            .is_err());
+        application.undo(application.scene().revision).unwrap();
+        assert!(application.command_definition(&binding, "adjust").is_none());
     }
     #[test]
     fn bounded_editor_preserves_replaced_selection_and_footer_at_two_times_scale() {
@@ -2950,6 +3121,236 @@ mod tests {
             application.binding(&binding).unwrap().state_defaults["recovered"],
             StateValue::Number(0.0)
         );
+        recovered
+            .execute(Action::EditCommand(binding.clone(), None), &mut application)
+            .unwrap();
+        frame(&mut recovered, &application, true, vec![]);
+        let command_id = recovered.command_name_response.unwrap().0;
+        frame(
+            &mut recovered,
+            &application,
+            true,
+            vec![egui::Event::Text("re".into())],
+        );
+        frame(&mut recovered, &application, true, vec![]);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(command_id));
+        frame(
+            &mut recovered,
+            &application,
+            true,
+            vec![egui::Event::Text("set".into())],
+        );
+        assert_eq!(recovered.command.as_ref().unwrap().command_id, "reset");
+        let mut held_enter = key(egui::Key::Enter, egui::Modifiers::NONE);
+        for event in &mut held_enter {
+            if let egui::Event::Key { repeat, .. } = event {
+                *repeat = true;
+            }
+        }
+        assert!(
+            frame(&mut recovered, &application, true, held_enter).is_none(),
+            "held Enter cannot apply a command definition"
+        );
+        assert!(application.command_definition(&binding, "reset").is_none());
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(command_id),
+            "rejected held Enter retains the actual command field"
+        );
+        let release = |key| {
+            vec![egui::Event::Key {
+                key,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]
+        };
+        frame(
+            &mut recovered,
+            &application,
+            true,
+            release(egui::Key::Enter),
+        );
+        frame(
+            &mut recovered,
+            &application,
+            true,
+            vec![egui::Event::Text(" ".into())],
+        );
+        let unchanged = application.snapshot_bytes().unwrap();
+        let invalid = frame(
+            &mut recovered,
+            &application,
+            true,
+            key(egui::Key::Enter, egui::Modifiers::NONE),
+        )
+        .expect("fresh Enter reaches validation");
+        assert!(recovered.execute(invalid, &mut application).is_err());
+        assert_eq!(application.snapshot_bytes().unwrap(), unchanged);
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(command_id),
+            "invalid Enter keeps the actual submitting field ready for repair or Escape"
+        );
+        frame(
+            &mut recovered,
+            &application,
+            true,
+            release(egui::Key::Enter),
+        );
+        let cancel = frame(
+            &mut recovered,
+            &application,
+            true,
+            key(egui::Key::Escape, egui::Modifiers::NONE),
+        )
+        .expect("Escape cancels the invalid command field");
+        assert!(matches!(cancel, Action::CancelCommand));
+        recovered.execute(cancel, &mut application).unwrap();
+        frame(
+            &mut recovered,
+            &application,
+            true,
+            release(egui::Key::Escape),
+        );
+        recovered
+            .execute(Action::EditCommand(binding.clone(), None), &mut application)
+            .unwrap();
+        frame(&mut recovered, &application, true, vec![]);
+        frame(
+            &mut recovered,
+            &application,
+            true,
+            vec![egui::Event::Text("reset".into())],
+        );
+        let action = frame(
+            &mut recovered,
+            &application,
+            true,
+            key(egui::Key::Enter, egui::Modifiers::NONE),
+        )
+        .expect("Enter submits the actual focused command name");
+        assert!(matches!(action, Action::ApplyCommand));
+        recovered.execute(action, &mut application).unwrap();
+        assert!(application.command_definition(&binding, "reset").is_some());
+        assert!(!recovered.pending());
+
+        // Actual command footer, isolated from unrelated Inspector height: pointer
+        // activation and keyboard activation share one semantic owner. Failed
+        // validation leaves the same footer available across later frames.
+        recovered
+            .execute(
+                Action::EditCommand(binding.clone(), Some("reset".into())),
+                &mut application,
+            )
+            .unwrap();
+        let catalog_frame = |editor: &mut BehaviorUi, session: &Session, events| {
+            let mut action = None;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(640.0, 480.0),
+                    )),
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    action = editor.command_catalog(
+                        ui,
+                        session,
+                        &binding,
+                        session.binding(&binding).unwrap(),
+                        5,
+                    );
+                },
+            );
+            output.textures_delta.clear();
+            action
+        };
+        catalog_frame(&mut recovered, &application, release(egui::Key::Enter));
+        catalog_frame(
+            &mut recovered,
+            &application,
+            vec![egui::Event::Text(" ".into())],
+        );
+        let (apply_id, apply_rect) = recovered.command_apply_response.unwrap();
+        assert!(ctx.content_rect().contains_rect(apply_rect));
+        for pressed in [true, false] {
+            let action = catalog_frame(
+                &mut recovered,
+                &application,
+                vec![
+                    egui::Event::PointerMoved(apply_rect.center()),
+                    egui::Event::PointerButton {
+                        pos: apply_rect.center(),
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+            if !pressed {
+                assert!(matches!(action, Some(Action::ApplyCommand)));
+                assert!(recovered
+                    .execute(action.unwrap(), &mut application)
+                    .is_err());
+            }
+        }
+        // Pointer activation does not promise keyboard focus in egui. Traverse
+        // the real focus chain before testing keyboard activation of this button.
+        for _ in 0..16 {
+            if ctx.memory(|memory| memory.focused()) == Some(apply_id) {
+                break;
+            }
+            assert!(catalog_frame(
+                &mut recovered,
+                &application,
+                key(egui::Key::Tab, egui::Modifiers::NONE),
+            )
+            .is_none());
+            catalog_frame(&mut recovered, &application, release(egui::Key::Tab));
+        }
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(apply_id),
+            "the actual Apply button is reachable through Tab navigation"
+        );
+        for key_code in [egui::Key::Enter, egui::Key::Space] {
+            let held = key(key_code, egui::Modifiers::NONE);
+            let action = catalog_frame(&mut recovered, &application, held.clone());
+            assert!(matches!(action, Some(Action::ApplyCommand)));
+            assert!(recovered
+                .execute(action.unwrap(), &mut application)
+                .is_err());
+            for _ in 0..3 {
+                assert!(
+                    catalog_frame(&mut recovered, &application, held.clone()).is_none(),
+                    "a genuinely held footer key cannot submit again"
+                );
+            }
+            catalog_frame(&mut recovered, &application, release(key_code));
+            let action = catalog_frame(
+                &mut recovered,
+                &application,
+                key(key_code, egui::Modifiers::NONE),
+            );
+            assert!(matches!(action, Some(Action::ApplyCommand)));
+            assert!(recovered
+                .execute(action.unwrap(), &mut application)
+                .is_err());
+            catalog_frame(&mut recovered, &application, release(key_code));
+        }
+        assert!(matches!(
+            catalog_frame(
+                &mut recovered,
+                &application,
+                key(egui::Key::Escape, egui::Modifiers::NONE)
+            ),
+            Some(Action::CancelCommand)
+        ));
     }
     #[test]
     fn reset_ack_waits_for_matching_frame_and_superseding_reset_discards_old_pair() {
@@ -2969,6 +3370,11 @@ mod tests {
         let old_scene = Arc::new(ruster_scene::Scene::empty("old-assets"));
         let mut runtime = RuntimeUi {
             frame: Some(Frame {
+                commit_revision: 0,
+                last_step_commit_revision: None,
+                commit_revision_required: false,
+                command_schema_hash: None,
+                authoring: Arc::new(Default::default()),
                 state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
                 query_observations: None,
                 key: old,
@@ -2992,6 +3398,11 @@ mod tests {
         runtime.begin_reset(second);
         runtime.acknowledge_reset(first, 0);
         runtime.accept_frame(Frame {
+            commit_revision: 0,
+            last_step_commit_revision: None,
+            commit_revision_required: false,
+            command_schema_hash: None,
+            authoring: Arc::new(Default::default()),
             state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             key: first,
@@ -3007,6 +3418,11 @@ mod tests {
         runtime.acknowledge_reset(second, 0);
         assert!(runtime.reset_succeeded.is_none());
         runtime.accept_frame(Frame {
+            commit_revision: 0,
+            last_step_commit_revision: None,
+            commit_revision_required: false,
+            command_schema_hash: None,
+            authoring: Arc::new(Default::default()),
             state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             key: second,

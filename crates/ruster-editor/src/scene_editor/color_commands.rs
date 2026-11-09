@@ -51,7 +51,7 @@ impl ColorDraft {
 }
 
 impl SceneEditor {
-    fn color_editable(&self) -> bool {
+    pub(super) fn color_editable(&self) -> bool {
         self.color_editable_for_save(false)
     }
 
@@ -67,6 +67,7 @@ impl SceneEditor {
             && !self.manipulation.offset_pending()
             && self.draft == self.baseline_fields
             && !self.behavior.pending()
+            && !self.runtime.command_draft_pending()
             && !self.input_actions.pending()
             && (self.recovered_input.is_none() || self.color_draft.is_some())
             && self.dialog.is_none()

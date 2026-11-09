@@ -8,7 +8,7 @@ cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
 
 See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-content-and-shader-iteration-m6) below for their controls. The [editor experience baseline](../../docs/EDITOR-EXPERIENCE.md) records required usability still to deliver.
 
-Current F1 source saves Scene13 and raw drafts in Recovery11. Opt-in Lua API4 adds owned typed runtime state and an Application behavior, while preserving API1–3. Current F1 delivery uses content9 and Descriptor5 with the `runtime_state` kit capability. Root/Astra accept bounded F1 on3c8fc8f, including ordinary/native MCP authoring, raw-draft recovery, tooling, exact standalone parity and qualified cost observations. The [P2a controls](#primitive-collider-authoring--p2a) and [live requirement audit](../../docs/evidence/P2a-readiness.md) retain their bounded accepted capability and earlier pins. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
+Current source saves Scene14 and raw drafts in Recovery12. F2a adds opt-in Lua API5 initialization and paused Application commands under [0045](../../docs/decisions/0045-initialization-and-paused-application-commands.md). Its verification and retention are pending root qualification. The accepted F1 reference saves Scene13 and Recovery11.  Opt-in Lua API4 adds owned typed runtime state and an Application behavior, while preserving API1–3. Current F1 delivery uses content9 and Descriptor5 with the `runtime_state` kit capability. Root/Astra accept bounded F1 on3c8fc8f, including ordinary/native MCP authoring, raw-draft recovery, tooling, exact standalone parity and qualified cost observations. The [P2a controls](#primitive-collider-authoring--p2a) and [live requirement audit](../../docs/evidence/P2a-readiness.md) retain their bounded accepted capability and earlier pins. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
 
 ## Surface materials, finish maps and scene display (V3a/V3b)
 
@@ -22,7 +22,7 @@ In **Scene display**, explicitly choose **Surface HDR** to enable this surface r
 
 **PNG interpretation** defaults to **Base color (sRGB)**. Choose **Roughness map (linear)** for grayscale/red-channel finish data; the role is fixed per asset ID and Refresh preserves it. One source can be imported under separate IDs for both interpretations. In Material, choose the matching **Roughness map** slot or **None (clear)**. **Roughness multiplier** scales the map, with the effective result clamped to0.08–1; choose1 explicitly for its full range. Filter and Wrap affect both slots. Diffuse, Legacy SDR and custom shaders retain inactive references without enabling surface shading automatically. Missing maps show a provisional scalar viewport fallback; faithful export requires valid accepted dependencies.
 
-Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to cancel. In Assets, Enter in the ID advances to Source; Enter in Source submits the import. A dropdown owns its selection/dismissal key before the surrounding form. Invalid values retain focus/text and authored state. Recovery11 extends preserved raw fields to state defaults and restores an unsaved copy. The creator chooses a fresh Save destination while the original remains preserved. Genuine older drafts migrate after strict field-presence validation. Save writes Scene13 and requires a matching current runtime kit. The accepted [V3a](../../docs/evidence/V3A-readiness.md) and [V3b](../../docs/evidence/V3B-readiness.md) checkpoints retain their original contracts.
+Raw fields support Tab/Shift+Tab, Enter to apply the grouped edit and Escape to cancel. In Assets, Enter in the ID advances to Source; Enter in Source submits the import. A dropdown owns its selection/dismissal key before the surrounding form. Invalid values retain focus/text and authored state. Recovery12 adds authored command-definition raw drafts with captured binding/source/revision identity. Recovery11 introduced raw state defaults and restores an unsaved copy. The creator chooses a fresh Save destination while the original remains preserved. Genuine older drafts migrate after strict field-presence validation. Save writes Scene14 and requires a matching current runtime kit. The accepted [V3a](../../docs/evidence/V3A-readiness.md) and [V3b](../../docs/evidence/V3B-readiness.md) checkpoints retain their original contracts.
 
 
 ### Pending-edit recovery
@@ -252,7 +252,7 @@ modes; it does not rewrite authored data or roll back runtime ticks. Open/restar
 uses the built-in pipeline until an explicit refresh (or standalone `--shader`).
 
 Scene-v1 files still load with their existing transform history. The inspector
-shows the loaded version and that Save writes Scene13, preserving supported older history under strict owning-version admission. V1-labelled files containing
+shows the loaded version and that Save writes Scene14, preserving supported older history under strict owning-version admission. V1-labelled files containing
 v2 mesh fields are rejected. Logistics-v1 scenarios remain a separate format.
 
 Native MCP adds `asset_inspect`, `asset_import`, `asset_refresh`, `asset_rename`,
@@ -599,3 +599,15 @@ API4 retains `update(transform, props, dt, host)`. Application receives nil for 
 Recovery11 preserves unfinished typed default values through the existing value-draft owner, with binding hash/type validation before restoration. New-field name/type drafts validate their captured binding/source/revision before restoration. Stale records remain preserved for explicit repair. An older recovery label containing either new state-draft field rejects. Existing genuine drafts continue through their earlier owning-version checks. LuaLS working-copy metadata selects API1,2,3 or4 host declarations per source. API1 hints retain transform-returning semantics, and API4 hints describe the optional Application transform and state-update envelope.
 
 Root/Astra retain this bounded implementation after root-owned source checks, native keyboard/recovery, exact creator/export parity and named cost observations. Physical-human/focused Zed, isolated publication/allocation peaks and broader platform qualification remain separate. [F1 evidence](../../docs/evidence/F1-RUNTIME-STATE.md).
+
+## Initialization and Application commands — F2a candidate
+
+New Application creation selects Lua API5. Existing API1–4 source records and text keep their version until explicitly edited. API5 can initialize typed own state on Reset. Its paused commands change committed runtime state while preserving tick, transforms and the last Step input/query observations. The Inspector displays commit revision separately from tick. Runtime state pages use the Frame's captured API5 capability when requiring a commit pin.
+
+Choose Application behavior, then Add Application command. Enter in the command ID applies a parameterless definition. Add typed command argument accepts a fresh name and Number, Bool, Text or Vec3. Enter in that name adds the field. Edit values and apply the complete definition through shared Undo. Escape cancels the owning draft. Invalid raw values remain available for repair and Recovery12. Existing command IDs remain stable. Apply or Cancel an authored command draft before another mutation.
+
+After Reset, use Application commands while paused to choose a captured definition, edit typed invocation arguments and Invoke. Enter submits from its value field. Escape or Cancel command arguments restores the captured defaults. Invocation drafts remain window-local, block conflicting authored/MCP writes and clear when run/commit authority changes. The last command receipt reports catalog/input hashes, previous/new commit revision and unchanged tick. A pending request blocks another admission. Inspect its terminal outcome before proceeding.
+
+Generated working copies recognize Lua APIs1–5. API5 update uses `RusterHost5`, while initialize/command use the separate state-only `RusterLifecycleHost` and `RusterLifecycleUpdate`. Generic field reads retain the Number/Bool/Text/Vec3 union. Old known-API `.txt` paths continue to require explicit reconciliation before a new `.lua` path can be written. F2a exports use content10 and the exact appended `lifecycle_commands` runtime-kit capability, retaining Descriptor5.
+
+These source changes and representative tests await root-owned checks and native workflow qualification.

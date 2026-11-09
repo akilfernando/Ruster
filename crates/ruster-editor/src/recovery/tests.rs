@@ -36,6 +36,7 @@ fn authored_session() -> Session {
             "binding-left",
             Some(BehaviorBinding {
                 target: ruster_scene::BindingTarget::Object("left".into()),
+                commands: Default::default(),
                 state_defaults: Default::default(),
                 source_id: "unfinished-source".into(),
                 enabled: true,

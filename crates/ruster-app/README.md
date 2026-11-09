@@ -4,7 +4,7 @@
 
 ## Small application surface
 
-Implement `Application::content`, `tick` and `reset`. The host supplies Run/Pause, Step, Reset, status/error feedback, a resizable application panel and the shared 3D viewport. Optional `ui`, `input`, `selected`, `select` and `completed` callbacks add application controls, keyboard behavior, selection and a normal completion condition. UI is ordinary egui, reexported as `ruster_app::egui`; application UI does not require an editor dependency.
+Implement `Application::content`, `tick` and `reset`. The host supplies Run/Pause, Step, Reset, status/error feedback, a resizable application panel and the shared 3D viewport. Optional `ui`, `ui_with_playback`, `input`, `selected`, `select` and `completed` callbacks add application controls, keyboard behavior, selection and a normal completion condition. UI is ordinary egui, reexported as `ruster_app::egui`; application UI does not require an editor dependency.
 
 ```rust,ignore
 use ruster_app::{Application, Content, HostOptions, MeshMap, Step};
@@ -67,7 +67,7 @@ Focused tests protect fixed-step replay/completion/reset, stalled scheduling and
 
 ## Creator launch resources
 
-`ruster_app::creation::CreationManifest` reads a bounded `app.json` (`ruster-application`, versions1–5) with `title`, relative `scene` path, `meshes` ID/path map, one versioned fixed-tick duration and optional `initial_camera`. Unknown fields/versions and duplicate mapping IDs fail. `InitialCamera::camera_state()` validates the camera against shared renderer bounds. Paths stay within a read-only `ResourceRoot`; `load_session` preserves supported Scene1–13 behavior/history without granting save association or writing caches/locks.
+`ruster_app::creation::CreationManifest` reads a bounded `app.json` (`ruster-application`, versions1–5) with `title`, relative `scene` path, `meshes` ID/path map, one versioned fixed-tick duration and optional `initial_camera`. Unknown fields/versions and duplicate mapping IDs fail. `InitialCamera::camera_state()` validates the camera against shared renderer bounds. Paths stay within a read-only `ResourceRoot`; `load_session` preserves supported Scene1–14 behavior/history without granting save association or writing caches/locks.
 
 Descriptor2 adds texture ID/path mappings; descriptor1 rejects texture mappings. Descriptor3 and later require one explicit `flat` or `authored_when_complete` normal policy per mesh ID. Descriptor1/2 reject `mesh_normal_policies` even when null/empty. Descriptor4 and later require `texture_roles`, including an explicit empty object when there are no textures. Its IDs must exactly match `textures`, with `base_color_srgb` or `roughness_linear` for each. Descriptor1–3 omit this field and retain base-color interpretation; they reject any explicit new role field, including null/empty. The Rust representation is `Option<BTreeMap<_, _>>`: old descriptors use `None`, and descriptor4/5 use `Some`, including `Some(empty)`.
 
@@ -93,3 +93,12 @@ Scene13 delivery uses content schema9 and a prepared runtime kit whose ordered c
 The generic headless consumer reports committed `runtime_state` alongside authored/runtime scenes and tick. Old stateless API1–3 runs report `{}`. Saved/exported defaults are authored initial data. A running simulation's state is separate from project saves. Reset trials use defaults at dt 0 and discard trial output, then publish defaults at tick 0. The backend owns atomic state/transform/tick/query commits and its logical payload limits. [API4 reference](../ruster-behavior/README.md#opt-in-api4-owned-runtime-state).
 
 The editor exposes default editing and read-only committed-state inspection. Creator-authored runtime widgets/HUDs are outside F1. Rust applications can continue using their existing `Application::ui` callback. Scene/behavior/generic-consumer/packaging checks and bounded F1 ordinary/native MCP/recovery/exact standalone workflows pass. Cost observations retain their workload/hardware/memory/publication qualifications. [Creator workflow](../../docs/BEHAVIOR-AUTHORING.md#f1-owned-runtime-state--2026-11-09).
+
+
+## Paused Application commands and Scene14
+
+Updated 2026-11-09. `Application::ui_with_playback(ui, playing)` is an additive callback. Its default implementation calls the existing `ui(ui)`. The native host captures its actual Run/Pause state before the callback, so applications can admit deliberate paused controls without introducing a second clock. Existing `ui` implementors retain their entry point.
+
+Scene14 stores Application command definitions and uses content10 with the exact runtime-kit profile that appends `lifecycle_commands` after `runtime_state`. Descriptor5 and `tick_nanos` remain unchanged. Current kits accept the supported older content profiles. `CreationManifest::load_session` retains the catalog as authored data, independently of interpreter selection. The kit's Rust `Application` trait still owns its own state mutation semantics.
+
+Motion's generic consumer delegates API5 initialization and command transactions to the shared behavior Engine. Its standalone controls permit dispatch only while the actual host is paused and the captured run/commit is current. Typed argument drafts remain local to the window, retain invalid raw values, and clear on Reset or document replacement. They never change authored defaults or saved content. The new callback and catalog/profile integration remain candidates pending F2a verification. [Accepted contract](../../docs/decisions/0045-initialization-and-paused-application-commands.md).

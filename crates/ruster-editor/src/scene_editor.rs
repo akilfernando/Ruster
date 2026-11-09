@@ -75,6 +75,7 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "scene_save",
     "behavior_runtime_inspect",
     "behavior_runtime_state",
+    "behavior_runtime_command",
     "behavior_runtime_reset",
     "behavior_runtime_play",
     "behavior_runtime_pause",
@@ -97,6 +98,8 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "behavior_property_set",
     "behavior_state_default",
     "behavior_state_default_set",
+    "behavior_command",
+    "behavior_command_set",
     "behavior_action",
     "behavior_action_set",
     "behavior_action_remove",
@@ -673,6 +676,7 @@ impl SceneEditor {
             || self.manipulation.precision_pending()
             || self.draft != self.baseline_fields
             || self.behavior.pending()
+            || self.runtime.command_draft_pending()
             || self.input_actions.pending()
             || self.recovered_input.is_some()
     }
@@ -680,10 +684,14 @@ impl SceneEditor {
         self.drafts() || self.rename_pending || self.manipulation.offset_pending()
     }
     fn behavior_editable(&self) -> bool {
-        self.editing_available() && !self.input_actions.pending()
+        self.editing_available()
+            && !self.input_actions.pending()
+            && !self.runtime.command_draft_pending()
     }
     fn input_action_editable(&self) -> bool {
-        self.editing_available() && !self.behavior.pending()
+        self.editing_available()
+            && !self.behavior.pending()
+            && !self.runtime.command_draft_pending()
     }
     fn editing_available(&self) -> bool {
         self.recovered_input.is_none() && self.editing_available_for_recovery()
@@ -740,6 +748,8 @@ impl SceneEditor {
                 | Action::EditProperty(_, _)
                 | Action::EditState(_, _)
                 | Action::CancelStateAdd
+                | Action::ApplyCommand
+                | Action::CancelCommand
         ) || (matches!(action, Action::AddState(_, _, _))
             && self.behavior.state_add_pending()
             && self.behavior_editable());
@@ -879,7 +889,7 @@ impl SceneEditor {
             return Err("Both live and deferred input drafts exist; checkpoint preserved for explicit repair.".into());
         }
         Ok(RecoveryDrafts {
-            version: 11,
+            version: 12,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -915,6 +925,15 @@ impl SceneEditor {
         let material_field = value.get("material").is_some();
         let lighting_field = value.get("lighting").is_some();
         let version = value.get("version").and_then(Value::as_u64);
+        if version.is_some_and(|version| version < 12)
+            && value
+                .get("behavior")
+                .is_some_and(|behavior| behavior.get("command").is_some())
+        {
+            return Err(
+                "Command recovery fields require draft version12; checkpoint preserved.".into(),
+            );
+        }
         if version.is_some_and(|version| version < 11)
             && value.get("behavior").is_some_and(|behavior| {
                 behavior.get("state_add").is_some()
@@ -1011,7 +1030,7 @@ impl SceneEditor {
                     && fields_unit != Some(false)
             }
             Some(4) => !lighting_field && manipulation_unit && fields_unit != Some(false),
-            Some(5..=11) => manipulation_unit && fields_unit != Some(false),
+            Some(5..=12) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -1039,7 +1058,7 @@ impl SceneEditor {
         }
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((2..=11).contains(&draft.version) && draft.behavior.is_some()))
+            || ((2..=12).contains(&draft.version) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -1764,6 +1783,12 @@ impl SceneEditor {
         }
     }
     fn apply(&mut self) -> bool {
+        if self.runtime.command_draft_pending() {
+            self.error =
+                "Invoke or cancel the pending Application command arguments before other changes."
+                    .into();
+            return false;
+        }
         if self.recovered_input.is_some() {
             self.error = "Resolve the recovered visual draft in its own controls, then review or discard the recovered action before saving or changing selection.".into();
             return false;
@@ -3311,6 +3336,10 @@ impl SceneEditor {
             self.behavior_action(action);
         }
         self.runtime.state_inspector(ui);
+        let command_editable =
+            self.editing_available() && !self.behavior.pending() && !self.input_actions.pending();
+        self.runtime
+            .command_controls(ui, &self.session, command_editable);
     }
     fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
         let title = if self.manipulation.ids.len() > 1 {
@@ -3367,6 +3396,7 @@ impl SceneEditor {
                         && self.display_draft.is_none()
                         && self.collider_draft.is_none()
                         && !self.behavior.pending()
+                        && !self.runtime.command_draft_pending()
                         && !self.input_actions.pending()
                         && self.recovered_input.is_none(),
                     |ui| self.manipulation_ui(ui),
@@ -3381,7 +3411,7 @@ impl SceneEditor {
             ui.separator();
             ui.strong("Transform");
             if self.draft != self.baseline_fields {
-                ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+                ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
                         ui.label("Recovered transform fields — repair or revert before other precision edits");
                         let mut enter=false;
                         let mut escape=false;
@@ -3404,7 +3434,7 @@ impl SceneEditor {
                         if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
                     });
             }
-            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.ids.is_empty(), |ui| {
+            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.ids.is_empty(), |ui| {
                     match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                         Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                         Ok(false)=>{},Err(error)=>self.error=error,
@@ -3417,6 +3447,7 @@ impl SceneEditor {
                     && self.display_draft.is_none()
                     && self.collider_draft.is_none()
                     && !self.behavior.pending()
+                    && !self.runtime.command_draft_pending()
                     && !self.input_actions.pending()
                     && self.recovered_input.is_none(),
                 |ui| self.manipulation_ui(ui),
@@ -6404,6 +6435,11 @@ mod tests {
             BTreeMap::from([("texture".into(), new_texture.clone())]),
         ));
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            commit_revision: 0,
+            last_step_commit_revision: None,
+            commit_revision_required: false,
+            command_schema_hash: None,
+            authoring: std::sync::Arc::new(Default::default()),
             state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             key: first,
@@ -6433,6 +6469,11 @@ mod tests {
             &old_texture
         ));
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            commit_revision: 0,
+            last_step_commit_revision: None,
+            commit_revision_required: false,
+            command_schema_hash: None,
+            authoring: std::sync::Arc::new(Default::default()),
             state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             key: second,
@@ -6484,6 +6525,11 @@ mod tests {
         moved.transform.translation = [0.625, 1.25, -0.375];
         moved.transform.scale = [2.5, 3.5, 4.5];
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            commit_revision: 0,
+            last_step_commit_revision: None,
+            commit_revision_required: false,
+            command_schema_hash: None,
+            authoring: std::sync::Arc::new(Default::default()),
             state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             key: current,
             tick: 37,
@@ -6669,7 +6715,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 11);
+        assert_eq!(payload["version"], 12);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -6790,6 +6836,146 @@ mod tests {
             exact
         );
         assert_eq!(orphan.session.snapshot_bytes().unwrap(), authored);
+        // Transient invocation fields are a separate raw owner. Exercise its
+        // real widget so unrelated edits cannot silently replace that owner.
+        let mut application = SceneEditor::test_loaded(Session::new(Scene::demo()).unwrap());
+        application.behavior_action(crate::behavior_ui::Action::CreateApplication);
+        let binding = application
+            .session
+            .authoring()
+            .bindings
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        application
+            .session
+            .set_command_definition(
+                application.session.scene().revision,
+                &binding,
+                "adjust",
+                Some(ruster_scene::CommandDefinition {
+                    arguments: BTreeMap::from([(
+                        "amount".into(),
+                        ruster_scene::StateValue::Number(42.0),
+                    )]),
+                }),
+            )
+            .unwrap();
+        application.observe_runtime();
+        let command_ctx = egui::Context::default();
+        application
+            .runtime
+            .reset(&command_ctx, &application.session, application.generation)
+            .unwrap();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while application.runtime.frame.as_ref().map(|frame| frame.key)
+            != application.runtime.current_run()
+        {
+            assert!(Instant::now() < deadline, "command run must initialize");
+            application.runtime.poll(&command_ctx);
+            std::thread::yield_now();
+        }
+        let commands = |application: &mut SceneEditor, events| {
+            let mut output = command_ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1100.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    let editable = application.editing_available()
+                        && !application.behavior.pending()
+                        && !application.input_actions.pending();
+                    application
+                        .runtime
+                        .command_controls(ui, &application.session, editable);
+                },
+            );
+            output.textures_delta.clear();
+            output
+        };
+        let visible = |output: &egui::FullOutput, label: &str| {
+            output
+                .shapes
+                .iter()
+                .find_map(|shape| {
+                    let egui::Shape::Text(text) = &shape.shape else {
+                        return None;
+                    };
+                    let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                    (text.galley.job.text == label && shape.clip_rect.contains_rect(rect))
+                        .then_some(rect.center())
+                })
+                .unwrap_or_else(|| panic!("visible command control {label}"))
+        };
+        let click = |application: &mut SceneEditor, pos| {
+            let pointer = |pressed| egui::Event::PointerButton {
+                pos,
+                button: egui::PointerButton::Primary,
+                pressed,
+                modifiers: egui::Modifiers::NONE,
+            };
+            commands(
+                application,
+                vec![egui::Event::PointerMoved(pos), pointer(true)],
+            );
+            commands(application, vec![pointer(false)])
+        };
+        commands(&mut application, vec![]);
+        let output = commands(&mut application, vec![]);
+        click(&mut application, visible(&output, "Application commands"));
+        for _ in 0..16 {
+            commands(&mut application, vec![]);
+        }
+        let output = commands(&mut application, vec![]);
+        click(&mut application, visible(&output, "42"));
+        commands(&mut application, vec![egui::Event::Text("-".into())]);
+        commands(&mut application, vec![]);
+        assert!(application.runtime.command_draft_pending());
+        let original = application.session.snapshot_bytes().unwrap();
+        assert!(!application.apply());
+        assert!(!application.input_action_editable());
+        assert!(!application.behavior_editable());
+        assert!(!application.color_editable());
+        assert!(!application.material_editable());
+        assert!(!application.lighting_editable(false));
+        assert!(!application.display_editable(false));
+        assert!(!application.collider_editable(false));
+        application.select_object(Some("right".into()), false);
+        assert!(application.runtime.command_draft_pending());
+        assert_eq!(application.session.snapshot_bytes().unwrap(), original);
+        let field = command_ctx
+            .memory(|memory| memory.focused())
+            .expect("actual argument field focused");
+        let key = |key, pressed| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        commands(&mut application, vec![key(egui::Key::Enter, true)]);
+        commands(&mut application, vec![key(egui::Key::Enter, false)]);
+        assert!(application.runtime.command_draft_pending());
+        assert_eq!(
+            application.runtime.frame.as_ref().unwrap().commit_revision,
+            0
+        );
+        assert_eq!(
+            command_ctx.memory(|memory| memory.focused()),
+            Some(field),
+            "invalid submission must retain its actual editable field for repair/Escape"
+        );
+        commands(&mut application, vec![key(egui::Key::Escape, true)]);
+        commands(&mut application, vec![key(egui::Key::Escape, false)]);
+        assert!(!application.runtime.command_draft_pending());
+        assert!(application.input_action_editable());
+        application.runtime.shutdown();
     }
     // Recovery must preserve unapplied invalid text and asset provenance without
     // granting overwrite authority to the original project, even if it changed.
@@ -7124,7 +7310,7 @@ mod tests {
         component.collider_draft = Some(raw.clone());
         let snapshot = component.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 11);
+        assert_eq!(payload["version"], 12);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.collider_draft, Some(raw.clone()));
@@ -8191,7 +8377,7 @@ mod tests {
             assert_eq!(candidates.len(), 1);
             let (_journal, snapshot) = store.claim(&candidates[0].id).unwrap();
             let payload = snapshot.drafts().unwrap();
-            assert_eq!(payload["version"], 11);
+            assert_eq!(payload["version"], 12);
             if shadow {
                 assert_eq!(
                     payload["lighting"]["shadow"]["depth_bias_texels"],
@@ -8309,7 +8495,7 @@ mod tests {
         let exact = source.display_draft.clone();
         let snapshot = source.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 11);
+        assert_eq!(payload["version"], 12);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.display_draft, exact);

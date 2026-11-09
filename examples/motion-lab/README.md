@@ -1,6 +1,6 @@
 # Motion Lab
 
-A non-game motion comparison application using `ruster-app`, its shared Vulkan viewport and the same fixed-step `Runtime` as Yard. Its generic Lua mode reads supported Scene1–13 documents, including authored sources, typed properties/references, state defaults and history from the shared editor. The embedded comparison remains a Scene5 demo. The legacy Rhai project1 mode remains compatible. M8 acceptance and later bounded milestones are recorded in [current status](../../docs/STATUS.md); F1 state-specific qualification remains pending.
+A non-game motion comparison application using `ruster-app`, its shared Vulkan viewport and the same fixed-step `Runtime` as Yard. Its generic Lua mode reads supported Scene1–14 documents, including authored sources, typed properties/references, state defaults and history from the shared editor. The embedded comparison remains a Scene5 demo. The legacy Rhai project1 mode remains compatible. M8 acceptance and later bounded milestones are recorded in [current status](../../docs/STATUS.md); F1 bounded acceptance is recorded there; F2a lifecycle qualification is separate.
 
 ## Creator application entry
 
@@ -8,7 +8,7 @@ A non-game motion comparison application using `ruster-app`, its shared Vulkan v
 
 The descriptor names the creation, supported scene file, mesh-ID/relative-OBJ map and versioned fixed duration (`tick_millis` in descriptors1–4; `tick_nanos` in descriptor5). Descriptor2 adds texture-ID/relative-PNG resources consumed through shared immutable `Content`; descriptor1 remains readable without texture mappings. Scene6 materials and texture snapshots survive Reset and runtime scene replacement. Scene7 adds authored diffuse ambient/directional/point lighting as scene state, without extra descriptor fields or light-marker resources. Scene8 adds directional `kind.shadow` settings: boolean `enabled`, quality `standard`/`high`, and finite `depth_bias_texels`/`normal_bias_texels` in0–4 shadow-texel units. Omitting the whole shadow field selects disabled/standard/0.15/0; a present object must contain all four fields. Disabled nondefault settings remain authored data. Point lights cannot carry shadow settings. Current and reversible-history light definitions in older scene versions reject shadow fields, while unrelated behavior properties named `shadow` retain their existing meaning.
 
-The current runtime advertises the ordered capabilities `initial_camera`, `opaque_materials`, `authored_lighting`, `sun_shadows`, `surface_materials`, `roughness_maps`, `input_actions`, `spatial_queries`, `runtime_state` with descriptor version5. The historical Scene8 route uses content schema4 and its retained sun-shadow profile even with shadows disabled or omitted. Its application descriptor remains version2 with unchanged fields. Current kits also accept supported Scene1–5/schema1, Scene6/schema2 and Scene7/schema3 content with their existing descriptor shapes. Older frozen kits cannot consume Scene8; Scene7 separately requires an authored-lighting-capable kit. Resources resolve beneath the descriptor directory without catalog/cache/lock writes. Headless mode accepts `--headless --ticks N` and reports mode `creation`, title, authored/runtime scenes and tick. Native mode validates Reset at dt0, starts running and uses a quiet creation title/diagnostic panel with shared Run/Pause/Reset controls. No Motion-comparison metrics or authoring guidance appear in creation mode. Other content/speed overrides are rejected, preserving the selected authored content. Existing explicit generic/legacy modes retain their prior behavior.
+The current runtime advertises the ordered capabilities `initial_camera`, `opaque_materials`, `authored_lighting`, `sun_shadows`, `surface_materials`, `roughness_maps`, `input_actions`, `spatial_queries`, `runtime_state`, `lifecycle_commands` with descriptor version5. The historical Scene8 route uses content schema4 and its retained sun-shadow profile even with shadows disabled or omitted. Its application descriptor remains version2 with unchanged fields. Current kits also accept supported Scene1–5/schema1, Scene6/schema2 and Scene7/schema3 content with their existing descriptor shapes. Older frozen kits cannot consume Scene8; Scene7 separately requires an authored-lighting-capable kit. Resources resolve beneath the descriptor directory without catalog/cache/lock writes. Headless mode accepts `--headless --ticks N` and reports mode `creation`, title, authored/runtime scenes and tick. Native mode validates Reset at dt0, starts running and uses a quiet creation title/diagnostic panel with shared Run/Pause/Reset controls. No Motion-comparison metrics or authoring guidance appear in creation mode. Other content/speed overrides are rejected, preserving the selected authored content. Existing explicit generic/legacy modes retain their prior behavior.
 
 The shared [launch descriptor](../../crates/ruster-app/README.md#creator-launch-resources), prepared runtime kit and shared editor/MCP export command support standalone delivery. The Scene8 migration notes above describe its historical compatibility route. Subsequent bounded exported/native shadow acceptance is recorded in [current status](../../docs/STATUS.md). Scene13 delivery requires content schema9 and the current `runtime_state` profile; descriptor5 remains unchanged.
 
@@ -98,3 +98,35 @@ Updated 2026-11-09. Generic and creation modes consume Scene13 Object/Applicatio
 Reset snapshots all defaults, including disabled owners, validates enabled bindings at dt 0 and discards their trial output. Successful Reset restores authored transforms/defaults at tick 0. Step commits state, transforms, tick and query observations together. Pause preserves state. Authored schema/default/source edits require Reset. Runtime state never enters the saved project. Headless generic/creation reports expose `runtime_state` alongside `authored_scene` and `runtime_scene`. The legacy Rhai report retains its separate format.
 
 Use the generic editor's **Application behavior**, **State defaults** and **Committed runtime state** controls to author and inspect the same data. F1 adds per-run data ownership and read-only inspection. Creator-authored runtime UI is a later foundation. Scene/behavior/generic-consumer/packaging checks pass. Milestone UI/native, recovery, standalone and state cost qualification remains pending. [Workflow and verification scope](../../docs/BEHAVIOR-AUTHORING.md#f1-owned-runtime-state--2026-11-09).
+
+
+## API5 initialization and paused Application commands
+
+Updated 2026-11-09. This source implementation follows [decision0045](../../docs/decisions/0045-initialization-and-paused-application-commands.md), with F2a integration/native/cost qualification pending. APIs1–4 retain their original contracts. API5 may compute initial state through `initialize(props, host)`. Reset stages enabled initializers against the common defaults snapshot, then validates dt0 update trials against initialized state and discards trial output. Successful Reset publishes initialized state at tick0 and commit revision0.
+
+Scene14 Application bindings declare `commands` with typed argument defaults. The generic runtime captures the authoring snapshot and catalog schema at Reset. Its **Application commands** controls show the current run, tick and commit. Pause, select **Command**, choose **Edit command arguments**, then edit typed values and use Enter or **Invoke command**. Escape from the owned form or **Cancel command arguments** cancels. Invalid numbers/text remain in the local form. Popups retain their keyboard ownership. Held/repeated Enter or Space cannot submit another command after acknowledgement. Pointer activation and deliberate unmodified keyboard activation remain supported.
+
+A successful command changes only Application state and advances commit revision once, including for a no-op result. Tick, transforms, renderer resources and last successful simulation observations remain unchanged. Another Step advances tick and commit together and updates `last_step_commit_revision`. Argument forms capture their starting commit/schema. If a Step or another transaction changes that baseline, cancel and reopen the form. Reset and snapshot replacement clear transient forms. These runtime arguments are unjournaled and never enter authored history or project saves.
+
+Headless generic and creation modes accept one explicit `--commands PATH` file. It is a regular bounded JSON array with at most16 calls and at most1MiB file bytes. Every request has exactly the following shape.
+
+```json
+[
+  {
+    "binding_id":"application",
+    "command_id":"add",
+    "expected_commit_revision":"0",
+    "args":{"amount":{"type":"number","value":2}}
+  }
+]
+```
+
+Use the actual stable binding/command IDs from the saved catalog. Revision counters are canonical decimal strings. Arguments use the declared Number/Bool/Text/Vec3 types and overlay the captured defaults. Commands execute sequentially after Reset and before the requested ordinary ticks. Each is an atomic transaction. Earlier successful calls are not rolled back when a later call fails. An unknown/type-invalid/stale call exits nonzero without changing authored files. The backend validates each complete normalized argument map before its command evaluation. Native/legacy modes and duplicate command-file flags reject this route.
+
+```sh
+cargo run --locked -p ruster-motion-lab -- --scene my.scene.json --headless --ticks 0 --commands commands.json
+```
+
+Successful headless output includes `initialized`, canonical-string `commit_revision`, nullable `last_step_commit_revision`, bounded `captured_commands`, the last `command_receipt` and the sequence's `command_receipts`, alongside existing `runtime_state` and authored/runtime scenes. Old stateless runs still report `{}` state. Input/query observations retain their last simulation-Step provenance independently of later command commits.
+
+Scene14 delivery uses content10 and a kit advertising the exact `lifecycle_commands` profile. Descriptor5 remains unchanged. Export preflight runs the actual packaged runtime at tick0 without any supplied commands. API4 retains exact-default checks. API5 computed initializer values are validated against their declared field types and limits with mandatory initialized/commit/catalog metadata and unchanged authored/runtime transforms. Python does not execute or infer Lua initializers. Exact source-hidden/headless and native standalone acceptance remains root-owned qualification.

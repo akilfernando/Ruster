@@ -28,6 +28,7 @@ struct Receipt {
     state: &'static str,
     expected_tick: Option<u64>,
     input: Option<InputReceipt>,
+    command: Option<ruster_behavior::CommandReceipt>,
 }
 fn run_id(key: RunKey) -> String {
     format!(
@@ -38,10 +39,17 @@ fn run_id(key: RunKey) -> String {
 impl Receipt {
     fn value(&self) -> Value {
         json!({"operation_id":self.id.to_string(),"run_id":run_id(self.key),"operation":format!("{:?}",self.operation),"state":self.state,
+            "command_receipt":self.command.as_ref().map(command_receipt_wire),
             "expected_tick":self.expected_tick.map(|tick|tick.to_string()),
             "expected_input":self.input.filter(|_|self.expected_tick.is_some()).map(input_receipt_wire),
             "committed_input":self.input.filter(|_|self.state=="completed").map(input_receipt_wire)})
     }
+}
+fn command_receipt_wire(receipt: &ruster_behavior::CommandReceipt) -> Value {
+    json!({"binding_id":receipt.binding_id,"command_id":receipt.command_id,
+        "schema_hash":receipt.schema_hash,"input_sha256":receipt.input_sha256,
+        "previous_commit_revision":receipt.previous_commit_revision.to_string(),
+        "commit_revision":receipt.commit_revision.to_string(),"tick":receipt.tick.to_string()})
 }
 fn hash_wire(hash: &[u8; 32]) -> String {
     hash.iter().map(|byte| format!("{byte:02x}")).collect()
@@ -61,7 +69,7 @@ fn parse_hash(value: &Value) -> Option<InputMapIdentity> {
     }
     Some(hash)
 }
-fn input_number(value: &Value) -> Option<u64> {
+pub(super) fn input_number(value: &Value) -> Option<u64> {
     let text = value.as_str()?;
     if text.is_empty()
         || (text != "0" && text.starts_with('0'))
@@ -76,6 +84,15 @@ fn input_receipt_wire(receipt: InputReceipt) -> Value {
         "tick":receipt.tick.to_string(),"input_epoch":receipt.input_epoch.to_string(),"origin":receipt.origin})
 }
 impl RuntimeUi {
+    pub(super) fn last_command_receipt(&self) -> Option<&ruster_behavior::CommandReceipt> {
+        let key = self.frame.as_ref()?.key;
+        self.debug
+            .recent
+            .iter()
+            .rev()
+            .filter(|receipt| receipt.key == key)
+            .find_map(|receipt| receipt.command.as_ref())
+    }
     pub(super) fn program_step_pending(&self) -> bool {
         self.debug
             .active
@@ -150,6 +167,7 @@ impl RuntimeUi {
         }
         let operation = match event {
             VmEvent::Reset { .. } => Operation::Reset,
+            VmEvent::Command { .. } => Operation::Command,
             VmEvent::Step { .. } => Operation::Step,
             VmEvent::State { state, .. } => match state {
                 State::Playing => Operation::Play,
@@ -187,6 +205,12 @@ impl RuntimeUi {
             let mut receipt = self.debug.active.take().unwrap();
             if let VmEvent::Step { input, .. } = event {
                 receipt.input = Some(*input);
+            }
+            if let VmEvent::Command {
+                receipt: command, ..
+            } = event
+            {
+                receipt.command = Some(command.clone());
             }
             receipt.state = if matches!(event, VmEvent::Error { .. } | VmEvent::Rejected { .. }) {
                 "failed"
@@ -561,13 +585,13 @@ impl RuntimeUi {
                 .map_or(0, |frame| frame.scene.objects.len());
             let owners=self.frame.as_ref().map(|frame|frame.state.binding_ids().skip(offset).take(16)
                 .map(|id|json!({"binding_id":id,"source_hash":frame.state.source_hash(id),
-                    "schema_hash":frame.state.schema_hash(id),"field_count":frame.state.binding(id).map_or(0,|fields|fields.len())})).collect::<Vec<_>>()).unwrap_or_default();
+                    "schema_hash":frame.state.schema_hash(id),"command_schema_hash":frame.authoring.bindings.get(id).filter(|binding|binding.target==BindingTarget::Application).and(frame.command_schema_hash.as_deref()),"field_count":frame.state.binding(id).map_or(0,|fields|fields.len())})).collect::<Vec<_>>()).unwrap_or_default();
             let owner_count = self
                 .frame
                 .as_ref()
                 .map_or(0, |frame| frame.state.binding_ids().count());
             return Ok(
-                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Committed tick snapshots do not report current physical key state.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
+                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
                 "state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())}),
             );
         }
@@ -625,7 +649,7 @@ impl RuntimeUi {
                     .map(|(index, node)| json!({"id":index.to_string(),"value":node_wire(node)}))
                     .collect();
                 return Ok(
-                    json!({"run_id":current.map(run_id),"stop_id":stop.stop.get().to_string(),"source_id":stop.source_id,"source_hash":stop.source_hash,"binding_id":stop.binding_id,"object_id":stop.object_id,"line":stop.line.map(|line|line.to_string()),"committed_tick":stop.committed_tick.to_string(),"attempted_tick":stop.attempted_tick.to_string(),"reason":stop.reason,"frames":stop.frames.iter().map(frame_wire).collect::<Vec<_>>(),"nodes":nodes,"node_count":stop.nodes.len(),"truncated":stop.truncated,"next_offset":(offset.saturating_add(limit)<stop.nodes.len()).then(||offset.saturating_add(limit).to_string())}),
+                    json!({"run_id":current.map(run_id),"stop_id":stop.stop.get().to_string(),"source_id":stop.source_id,"source_hash":stop.source_hash,"binding_id":stop.binding_id,"object_id":stop.object_id,"line":stop.line.map(|line|line.to_string()),"commit_revision":stop.commit_revision.to_string(),"attempted_commit_revision":stop.attempted_commit_revision.to_string(),"committed_tick":stop.committed_tick.to_string(),"attempted_tick":stop.attempted_tick.to_string(),"reason":stop.reason,"frames":stop.frames.iter().map(frame_wire).collect::<Vec<_>>(),"nodes":nodes,"node_count":stop.nodes.len(),"truncated":stop.truncated,"next_offset":(offset.saturating_add(limit)<stop.nodes.len()).then(||offset.saturating_add(limit).to_string())}),
                 );
             }
             self.worker
@@ -654,6 +678,7 @@ impl RuntimeUi {
             "behavior_runtime_play" => Operation::Play,
             "behavior_runtime_pause" => Operation::Pause,
             "behavior_runtime_step" => Operation::Step,
+            "behavior_runtime_command" => Operation::Command,
             "behavior_runtime_stop" => Operation::Stop,
             _ => return Err("Unsupported runtime operation".into()),
         };
@@ -676,6 +701,7 @@ impl RuntimeUi {
                 self.stop(generation, session.scene().revision);
                 self.worker.as_ref().ok_or("No runtime")?.current_key()
             }
+            Operation::Command => self.queue_command(args)?,
             Operation::Step if supplied => {
                 let (key, tick, receipt) = self.queue_program_step(args)?;
                 expected_tick = Some(tick);
@@ -695,6 +721,7 @@ impl RuntimeUi {
             state: "pending",
             expected_tick,
             input,
+            command: None,
         };
         let value = receipt.value();
         self.debug.active = Some(receipt);

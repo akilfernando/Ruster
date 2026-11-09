@@ -53,6 +53,8 @@ SPATIAL_PROFILE = {**INPUT_PROFILE,
                    "capabilities": [*INPUT_PROFILE["capabilities"], "spatial_queries"]}
 STATE_PROFILE = {**SPATIAL_PROFILE,
                  "capabilities": [*SPATIAL_PROFILE["capabilities"], "runtime_state"]}
+LIFECYCLE_PROFILE = {**STATE_PROFILE,
+                     "capabilities": [*STATE_PROFILE["capabilities"], "lifecycle_commands"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -166,7 +168,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -580,26 +582,7 @@ def validate_state_fields(document: dict) -> None:
         return len(json.dumps(value, ensure_ascii=False, separators=(",", ":"),
                               allow_nan=False).encode())
 
-    def binding(value: object) -> dict:
-        if not isinstance(value, dict):
-            raise ValueError("invalid behavior binding")
-        if version < 13:
-            if "target" in value or "state_defaults" in value:
-                raise ValueError("application targets and state defaults require Scene13 runtime_state")
-            return {}  # Existing old binding validation belongs to Session.
-        required = {"source_id", "enabled", "properties"}
-        owner = "object_id" if "object_id" in value else "target"
-        exact_fields(value, required | {owner} | ({"state_defaults"} if "state_defaults" in value else set()), "behavior binding")
-        identity(value["source_id"])
-        if type(value["enabled"]) is not bool or not isinstance(value["properties"], dict):
-            raise ValueError("invalid binding enabled flag or properties")
-        if owner == "object_id":
-            identity(value[owner])
-        else:
-            exact_fields(value[owner], {"type"}, "application target")
-            if value[owner]["type"] != "application":
-                raise ValueError("invalid application target")
-        fields = value.get("state_defaults", {})
+    def typed_fields(fields: object) -> dict:
         if not isinstance(fields, dict) or len(fields) > 64:
             raise ValueError("state requires at most64 fields per binding")
         lower = {}
@@ -627,6 +610,43 @@ def validate_state_fields(document: dict) -> None:
             lower[name] = {"type": kind, "value": data}
         if lower_bytes(lower) > 16 * 1024:
             raise ValueError("state exceeds16KiB per binding")
+        return lower
+
+    def binding(value: object) -> dict:
+        if not isinstance(value, dict):
+            raise ValueError("invalid behavior binding")
+        if version < 14 and "commands" in value:
+            raise ValueError("application commands require Scene14 lifecycle_commands")
+        if version < 13:
+            if "target" in value or "state_defaults" in value:
+                raise ValueError("application targets and state defaults require Scene13 runtime_state")
+            return {}  # Existing old binding validation belongs to Session.
+        required = {"source_id", "enabled", "properties"}
+        owner = "object_id" if "object_id" in value else "target"
+        exact_fields(value, required | {owner} | ({"state_defaults"} if "state_defaults" in value else set())
+                     | ({"commands"} if "commands" in value else set()), "behavior binding")
+        identity(value["source_id"])
+        if type(value["enabled"]) is not bool or not isinstance(value["properties"], dict):
+            raise ValueError("invalid binding enabled flag or properties")
+        if owner == "object_id":
+            identity(value[owner])
+        else:
+            exact_fields(value[owner], {"type"}, "application target")
+            if value[owner]["type"] != "application":
+                raise ValueError("invalid application target")
+        lower = typed_fields(value.get("state_defaults", {}))
+        commands = value.get("commands", {})
+        if not isinstance(commands, dict) or len(commands) > 16:
+            raise ValueError("application requires at most16 commands")
+        if commands and owner != "target":
+            raise ValueError("nonempty commands require an application binding")
+        for command_id, definition in commands.items():
+            identity(command_id)
+            exact_fields(definition, {"arguments"}, "command definition")
+            arguments = definition["arguments"]
+            if not isinstance(arguments, dict) or len(arguments) > 16:
+                raise ValueError("command requires at most16 arguments")
+            typed_fields(arguments)
         return lower
 
     authoring = document.get("authoring", {})
@@ -675,8 +695,8 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     version = document.get("format_version")
     scene = document.get("scene")
     if (document.get("format") != "ruster-scene" or type(version) is not int
-            or not 1 <= version <= 13 or not isinstance(scene, dict)):
-        raise ValueError("content requires a supported Scene1–13 document")
+            or not 1 <= version <= 14 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–14 document")
     validate_state_fields(document)
     validate_collider_fields(document)
     validate_input_fields(document)
@@ -737,9 +757,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
-    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9):
+    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
         raise ValueError("invalid content schema")
-    tick_field = "tick_nanos" if schema in (7, 8, 9) else "tick_millis"
+    tick_field = "tick_nanos" if schema in (7, 8, 9, 10) else "tick_millis"
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
@@ -747,7 +767,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     if "initial_camera" in content:
         content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
-    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema in (7, 8, 9) else (1, 1000)
+    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema in (7, 8, 9, 10) else (1, 1000)
     if (not isinstance(title, str) or not title or title != title.strip()
             or len(title.encode()) > 128 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in title)
             or type(content[tick_field]) is not int or not tick_minimum <= content[tick_field] <= tick_maximum):
@@ -766,8 +786,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
             or schema == 6 and document["format_version"] != 10
             or schema == 7 and document["format_version"] != 11
             or schema == 8 and document["format_version"] != 12
-            or schema == 9 and document["format_version"] != 13):
-        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13")
+            or schema == 9 and document["format_version"] != 13
+            or schema == 10 and document["format_version"] != 14):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13; schema10 requires Scene14")
     meshes, textures = content["meshes"], content.get("textures", {})
     if (not isinstance(meshes, dict) or not isinstance(textures, dict)
             or len(meshes) + len(textures) > MAX_MESHES):
@@ -881,27 +902,29 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
     content, scene_data, document, source_specs = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
-    if content["schema"] == 9 and kit["profile"] != STATE_PROFILE:
+    if content["schema"] == 10 and kit["profile"] != LIFECYCLE_PROFILE:
+        raise ValueError("runtime kit does not support Scene14 lifecycle_commands; prepare a current runtime kit")
+    if content["schema"] == 9 and kit["profile"] not in (STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support Scene13 runtime_state; prepare a current runtime kit")
-    if content["schema"] == 8 and kit["profile"] not in (SPATIAL_PROFILE, STATE_PROFILE):
+    if content["schema"] == 8 and kit["profile"] not in (SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support Scene12 spatial_queries; prepare a current runtime kit")
-    if content["schema"] == 7 and kit["profile"] not in (INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
+    if content["schema"] == 7 and kit["profile"] not in (INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support Scene11 input_actions; prepare a current runtime kit")
-    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
+    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support Scene10 roughness_maps; prepare a current runtime kit")
-    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
+    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support Scene9 surface_materials; prepare a current runtime kit")
-    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
+    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support Scene8 sun_shadows; prepare a current runtime kit")
-    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
+    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support Scene7 authored_lighting; prepare a current runtime kit")
-    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
+    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
-    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE):
+    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5}[content["schema"]]
-    tick_field = "tick_nanos" if content["schema"] in (7, 8, 9) else "tick_millis"
-    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] in (7, 8, 9) else 1000)
+    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5, 10: 5}[content["schema"]]
+    tick_field = "tick_nanos" if content["schema"] in (7, 8, 9, 10) else "tick_millis"
+    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] in (7, 8, 9, 10) else 1000)
     descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
                   "scene": "resources/scene.json", tick_field: content[tick_field],
                   "meshes": {identity: "resources/" + record["path"]
@@ -943,9 +966,9 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             raise ValueError("runtime preflight did not retain creation identity, tick or authored scene")
         if camera is not None and result.get("initial_camera") != camera:
             raise ValueError("runtime preflight did not retain explicit initial camera")
-        if content["schema"] in (7, 8, 9) and result.get("authored_actions") != authored_actions(document):
+        if content["schema"] in (7, 8, 9, 10) and result.get("authored_actions") != authored_actions(document):
             raise ValueError("runtime preflight did not retain authored input actions")
-        if content["schema"] == 9:
+        if content["schema"] in (9, 10):
             bindings = document.get("authoring", {}).get("bindings", {})
             def typed_defaults(binding: dict) -> dict:
                 # StateValue is binary64, even when authored JSON used an integer
@@ -954,7 +977,15 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                     float(field["value"]) if field["type"] == "number" else
                     [float(n) for n in field["value"]] if field["type"] == "vec3" else field["value"])}
                     for name, field in binding.get("state_defaults", {}).items()}
+            sources = document.get("authoring", {}).get("sources", {})
+            # The public runtime report includes every captured binding. A
+            # stateless legacy Object contributes an empty field map.
             defaults = {identity: typed_defaults(binding) for identity, binding in bindings.items()}
+            api5 = any(binding.get("enabled") and
+                       sources.get(binding["source_id"], {}).get("host_api_version") == 5
+                       for binding in bindings.values())
+            if api5 and kit["profile"] != LIFECYCLE_PROFILE:
+                raise ValueError("API5 requires lifecycle_commands runtime capability")
             observed = result.get("runtime_state")
             if not isinstance(observed, dict) or set(observed) != set(defaults):
                 raise ValueError("runtime preflight did not initialize authored state defaults")
@@ -963,12 +994,41 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             # may legitimately differ between the authored file and Rust output.
             try:
                 validate_state_fields({"format_version": 13, "authoring": {"bindings": {
-                    identity: {**binding, "state_defaults": observed[identity]}
-                    for identity, binding in bindings.items()}}})
+                    identity: {**{key: value for key, value in binding.items() if key != "commands"}, "state_defaults": observed[identity]}
+                    for identity, binding in bindings.items() if identity in observed}}})
             except ValueError as error:
                 raise ValueError("runtime preflight did not initialize authored state defaults") from error
-            if observed != defaults:
+            if api5:
+                if any(set(observed[identity]) != set(fields) or any(
+                        observed[identity][name]["type"] != default["type"]
+                        for name, default in fields.items()) for identity, fields in defaults.items()):
+                    raise ValueError("runtime preflight changed initialized state schema")
+            elif observed != defaults:
                 raise ValueError("runtime preflight did not initialize authored state defaults")
+        if content["schema"] == 10 or (content["schema"] == 9 and api5):
+            metadata = {"initialized", "commit_revision", "last_step_commit_revision",
+                        "command_receipt", "command_receipts", "captured_commands", "runtime_scene"}
+            if (not metadata <= result.keys() or result.get("initialized") is not True or result.get("commit_revision") != "0"
+                    or result.get("last_step_commit_revision") is not None
+                    or result.get("command_receipt") is not None or result.get("command_receipts") != []
+                    or result.get("runtime_scene") != typed_scene(document)):
+                raise ValueError("runtime preflight did not complete initialization without command/tick work")
+            catalog = result.get("captured_commands")
+            expected_catalog = {(owner, name): len(definition["arguments"])
+                                for owner, binding in bindings.items()
+                                for name, definition in binding.get("commands", {}).items()}
+            if not isinstance(catalog, list) or len(catalog) != len(expected_catalog):
+                raise ValueError("runtime preflight did not retain captured command catalog")
+            seen = set()
+            for row in catalog:
+                if not isinstance(row, dict):
+                    raise ValueError("invalid captured command metadata")
+                key = (row.get("binding_id"), row.get("command_id"))
+                if (key in seen or key not in expected_catalog or type(row.get("argument_count")) is not int
+                        or row.get("argument_count") != expected_catalog[key]
+                        or not isinstance(row.get("schema_hash"), str) or not HASH.fullmatch(row["schema_hash"])):
+                    raise ValueError("runtime preflight did not retain captured command catalog")
+                seen.add(key)
         cancelled(cancel_file)
         manifest = {"schema": 1, "kind": "ruster-creation-package", "application": "application",
                     "target": package_app.TARGET, "title": content["title"],

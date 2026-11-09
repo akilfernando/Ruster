@@ -889,7 +889,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 72);
+        assert_eq!(tools.len(), 75);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -954,9 +954,12 @@ mod tests {
                 "behavior_property_set",
                 "behavior_state_default",
                 "behavior_state_default_set",
+                "behavior_command",
+                "behavior_command_set",
                 "behavior_action",
                 "behavior_action_set",
                 "behavior_action_remove",
+                "behavior_runtime_command",
                 "behavior_runtime_state",
                 "behavior_runtime_inspect",
                 "behavior_runtime_reset",

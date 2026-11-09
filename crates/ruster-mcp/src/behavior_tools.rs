@@ -13,6 +13,8 @@ const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_property_set","Set one typed property or use null to remove. Shared Undo, no execution.",&["binding_id","name","value"]),
     ("behavior_state_default","Read one authored typed state default or null for absent. Runtime values belong to the committed run.",&["binding_id","name"]),
     ("behavior_state_default_set","Set/remove one authored state field through shared Undo. Number, Bool, Text and Vec3 only,64fields/16KiB per owner and1MiB total. Null removes. Requires clean drafts. Current runtime stays unchanged until Reset.",&["binding_id","name","value"]),
+    ("behavior_command","Read one complete authored command definition or null for absent; binding summaries expose IDs and argument counts only.",&["binding_id","command_id"]),
+    ("behavior_command_set","Set/remove one Application command definition through shared Undo. Up to16 commands,16 typed arguments and16KiB normalized argument payload per command. Null removes. Clean drafts required.",&["binding_id","command_id","definition"]),
     ("behavior_action","Read one complete authored action definition under current scene session/revision authority; no live key state.",&["action_id"]),
     ("behavior_action_set","Replace/upsert a complete authored action definition. At most32 actions including unbound definitions; at most4 total logical keys per action. Cross-action key sharing is allowed; repeated/opposite keys and reserved Escape/Tab reject. Shared Undo, clean human drafts required; live runtime map stays immutable until Reset.",&["action_id","definition"]),
     ("behavior_action_remove","Remove one authored action definition through shared Undo. Reversible action IDs remain reserved; Undo restores them. Existing script references remain available for repair; no live runtime map mutation.",&["action_id"]),
@@ -143,6 +145,49 @@ fn shape(field: &str) -> Value {
         _ => json!({"type":"string","minLength":1,"maxLength":128}),
     }
 }
+pub(super) fn state_arguments_schema() -> Value {
+    let mut value = shape("value");
+    value["oneOf"]
+        .as_array_mut()
+        .unwrap()
+        .retain(|alternative| {
+            alternative["type"] != "null"
+                && !matches!(
+                    alternative["properties"]["type"]["const"].as_str(),
+                    Some("object_ref" | "asset_ref")
+                )
+        });
+    json!({"type":"object","maxProperties":16,
+        "propertyNames":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$"},
+        "additionalProperties":value})
+}
+pub(super) fn valid_state_arguments(value: &Value) -> bool {
+    value.as_object().is_some_and(|fields| {
+        fields.len() <= 16
+            && fields.iter().all(|(name, value)| {
+                !name.is_empty()
+                    && name.len() <= 128
+                    && name
+                        .bytes()
+                        .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+                    && value.as_object().is_some_and(|value| {
+                        super::exact_keys(value, &["type", "value"], &[])
+                            && match value["type"].as_str() {
+                                Some("number") => value["value"].is_number(),
+                                Some("bool") => value["value"].is_boolean(),
+                                Some("text") => value["value"]
+                                    .as_str()
+                                    .is_some_and(|text| text.len() <= 1024),
+                                Some("vec3") => value["value"].as_array().is_some_and(|values| {
+                                    values.len() == 3 && values.iter().all(Value::is_number)
+                                }),
+                                _ => false,
+                            }
+                    })
+            })
+            && serde_json::to_vec(value).is_ok_and(|bytes| bytes.len() <= 16384)
+    })
+}
 pub fn list() -> Vec<Value> {
     TOOLS.iter().map(|(name,description,_)|{
         let required=fields(name).unwrap();
@@ -153,11 +198,14 @@ pub fn list() -> Vec<Value> {
                 !matches!(value["properties"]["type"]["const"].as_str(), Some("object_ref"|"asset_ref"))
             });
         }
+        if *name == "behavior_command_set" {
+            properties.insert("definition".into(),json!({"oneOf":[{"type":"null"},super::object_schema(json!({"arguments":state_arguments_schema()}),vec!["arguments"])]}));
+        }
         let mut schema=super::object_schema(Value::Object(properties),required);
         if matches!(*name,"behavior_create"|"behavior_binding_set") {
             schema["oneOf"]=json!([{"required":["object_id"],"not":{"required":["target"]}},{"required":["target"],"not":{"required":["object_id"]}}]);
         }
-        json!({"name":name,"description":description,"inputSchema":schema,"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_source"|"behavior_binding"|"behavior_property"|"behavior_action"|"behavior_state_default"),"openWorldHint":false}})
+        json!({"name":name,"description":description,"inputSchema":schema,"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_source"|"behavior_binding"|"behavior_property"|"behavior_action"|"behavior_state_default"|"behavior_command"),"openWorldHint":false}})
     }).collect()
 }
 pub fn valid(name: &str, args: &Value) -> bool {
@@ -186,6 +234,13 @@ pub fn valid(name: &str, args: &Value) -> bool {
                 .as_u64()
                 .is_some_and(|n| n > 0 && n <= u32::MAX as u64),
             "enabled" => value.is_boolean(),
+            "definition" if name == "behavior_command_set" => {
+                value.is_null()
+                    || value.as_object().is_some_and(|definition| {
+                        super::exact_keys(definition, &["arguments"], &[])
+                            && valid_state_arguments(&definition["arguments"])
+                    })
+            }
             "definition" => valid_action_definition(value),
             "action_id" => value.as_str().is_some_and(|id| {
                 !id.is_empty()
@@ -245,6 +300,12 @@ mod tests {
     fn behavior_tools_forward_encoded_data_and_preserve_preconditions() {
         let args = json!({"expected_session_token":"session","expected_revision":"9007199254740993","source_id":"source","label":null,"language_id":"lua54","host_api_version":1,"text_base64":"AA=="});
         assert!(valid("behavior_source_set", &args));
+        let mut command = json!({"expected_session_token":"session","expected_revision":"3","binding_id":"application","command_id":"reset","definition":{"arguments":{"amount":{"type":"number","value":2.5}}}});
+        assert!(valid("behavior_command_set", &command));
+        command["definition"]["arguments"]["amount"] = json!({"type":"object_ref","value":null});
+        assert!(!valid("behavior_command_set", &command));
+        command["definition"] = Value::Null;
+        assert!(valid("behavior_command_set", &command));
         let mut extra = args.clone();
         extra["path"] = "/unavailable".into();
         assert!(!valid("behavior_source_set", &extra));

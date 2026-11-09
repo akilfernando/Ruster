@@ -28,6 +28,7 @@ fn fixture(text: &str) -> (Scene, Authoring) {
                         PropertyValue::ObjectRef(Some(if id == "a" { "b" } else { "a" }.into())),
                     ),
                 ]),
+                commands: Default::default(),
             },
         );
     }

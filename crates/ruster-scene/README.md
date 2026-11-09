@@ -1,5 +1,32 @@
 # Generic authored scenes
 
+## Application command definitions (format 14)
+
+Added 2026-11-09 under [decision0045](../../docs/decisions/0045-initialization-and-paused-application-commands.md). The Scene layer stores a language-neutral command catalog. Execution, paused dispatch and milestone qualification have separate owners.
+
+`BehaviorBinding.commands` is a `BTreeMap<String, CommandDefinition>`, defaulting to empty and omitted on serialization when empty. A nonempty catalog requires an Application binding, including when disabled. Object bindings retain their existing wire shape when the catalog is empty. Each definition requires an `arguments` map of typed Number/Bool/Text/Vec3 defaults, including an explicit empty map for a parameterless command.
+
+```json
+{
+  "commands": {
+    "restart": {"arguments": {}},
+    "set_mode": {
+      "arguments": {
+        "mode": {"type": "text", "value": "ready"}
+      }
+    }
+  }
+}
+```
+
+`MAX_COMMANDS` is 16, `MAX_COMMAND_ARGUMENTS` is 16 and `MAX_COMMAND_ARGUMENT_BYTES` is 16 KiB. `command_argument_payload_bytes(&arguments)` validates the complete map using existing identifier, finite-number/vector and 1024-byte UTF-8 Text rules. It counts canonical typed JSON, including escaping. The byte limit covers the argument map. The definition wrapper and catalog IDs add their own bytes. Commands remain subject to the independent 1 MiB authored document/reachable-history limit. Argument defaults are authored metadata and do not contribute to the committed runtime-state aggregate.
+
+`Session::set_command_definition(revision, binding_id, command_id, Option<CommandDefinition>)` shares the binding transaction and Undo/Redo owner. It preserves all other binding fields. Equal replacement or absent removal preserves revision/history/Redo. Missing bindings, stale revisions and invalid/capacity-rejected edits preserve the complete document. Geometry lifecycle operations leave the Application catalog intact.
+
+`inspect_commands(binding_id, offset, limit)` returns bounded `CommandSummary` values containing only ID and `argument_count`. `command_definition(binding_id, command_id)` borrows one complete definition. Binding summaries add only `command_count`. A full 16-definition catalog can exceed a 64 KiB transport frame, so consumers should retain the summary/single-definition split. Validated public Serialize types and sorted maps provide canonical hash input for backend/editor SHA256 owners. The Scene crate adds no hash dependency, and the geometry fingerprint keeps its existing purpose.
+
+Scene1–13 rejects any `commands` field in current bindings or either side of Undo/Redo binding deltas, including null/empty maps. Property names, source text and positive opaque source API metadata retain their existing meaning. Scene14 rejects null catalogs and malformed/unknown definition fields. Existing supported documents without command fields remain readable. Current Save and snapshot output writes Scene14. This source implementation awaits root's verification and F2a qualification.
+
 ## Application bindings and authored state defaults (format 13)
 
 The data contract added on 2026-11-09 is defined by [decision 0044](../../docs/decisions/0044-owned-creator-runtime-state.md). Backend execution and creator qualification have separate owners.
@@ -25,7 +52,7 @@ The public bounds are `MAX_STATE_FIELDS` at 64 fields, `MAX_BINDING_STATE_BYTES`
 
 `Session::set_state_default(revision, binding_id, name, Option<StateValue>)` uses the same binding transaction and shared Undo/Redo history as `set_binding`. It preserves target, source, enabled status, properties and other defaults. A missing value removes one default. No-op updates preserve revision/history/Redo. Stale, invalid and capacity-rejected updates preserve the complete document.
 
-Scene 1–12 labels reject `target` and `state_defaults` wherever a binding definition occurs, including null/empty values and both sides of Undo/Redo binding deltas. Property names and opaque source text retain their meaning. A source's positive host API metadata remains saveable independently of runtime availability. Saving or exporting a snapshot writes Scene 13.
+Scene 1–12 labels reject `target` and `state_defaults` wherever a binding definition occurs, including null/empty values and both sides of Undo/Redo binding deltas. Property names and opaque source text retain their meaning. A source's positive host API metadata remains saveable independently of runtime availability. These fields were introduced in Scene13. Current Save and snapshot output uses Scene14.
 
 Binding summaries retain `object_id` for object targets, expose the explicit application `target` for application bindings and add `state_field_count` beside `property_count`. Full authored defaults remain available through the binding accessor. Live per-run values belong to the runtime and stay separate from this authored data/history contract.
 
@@ -58,7 +85,7 @@ Use a new filename for `new` (`empty` is an alias) or `demo`; existing destinati
 
 `Scene::validate/load/save` support code-first values. `Session::new/open`, `scene`, `edit(expected_revision, object_id, &transform)`, `set_mesh(expected_revision, object_id, Option<String>)`, `undo(expected_revision)`, `redo(expected_revision)` and `save(path)` provide the authoring boundary. A no-op transform or mesh assignment keeps the revision/history and redo entries. Transform and mesh edits share one chronological undo/redo history. Every successful change, undo or redo increases the revision; stale, invalid and overflowed commands preserve state. `Scene::fingerprint` is a deterministic 16-character noncryptographic FNV-1a checksum of canonical JSON bytes (including revision), for preview comparisons rather than security. Read-only `path`, `is_dirty`, `loaded_format_version`, `undo_len` and `redo_len` expose authoring state. New sessions are unsaved. Save to an opened canonical path checks the full saved document; other paths must not exist. A failed save preserves the file association, history and dirty baseline.
 
-The JSON envelope is `{ "format": "ruster-scene", "format_version": 13, "scene": { "id": "...", "revision": 0, "objects": [...] }, "undo": [], "redo": [] }`. New saves emit format 13 with the data contract below. Existing Scene 1–12 documents remain readable with explicit new-field version guards. A nonempty optional `authoring` section holds language-neutral sources and bindings beside the unchanged rendering scene; it is omitted when empty. Optional `mesh` and `name` fields are omitted when `None`, preserving canonical scene bytes/fingerprints of old unnamed cube-only scenes. V3 scalar history supports tagged `transform`, `mesh`, `name`, `create` and `delete` entries. Name entries carry `id`, `before` and `after`; lifecycle entries carry the complete `object` and original `index`.
+The JSON envelope is `{ "format": "ruster-scene", "format_version": 14, "scene": { "id": "...", "revision": 0, "objects": [...] }, "undo": [], "redo": [] }`. New saves emit format14 with the data contract below. Existing Scene1–13 documents remain readable with explicit new-field version guards. A nonempty optional `authoring` section holds language-neutral sources and bindings beside the unchanged rendering scene; it is omitted when empty. Optional `mesh` and `name` fields are omitted when `None`, preserving canonical scene bytes/fingerprints of old unnamed cube-only scenes. V3 scalar history supports tagged `transform`, `mesh`, `name`, `create` and `delete` entries. Name entries carry `id`, `before` and `after`; lifecycle entries carry the complete `object` and original `index`.
 
 Scene v1 through v5 retain strict old schemas; v3 accepts only its scalar history variants, preserving both undo and redo. V1 rejects mesh fields (even null) and tagged history; v2 accepts only transform/mesh history and rejects name fields (even null). Opening does not rewrite a file or mark it dirty. Explicit Save upgrades even an unchanged old file to v13 without increasing its authored revision; failed saves retain the loaded-version indicator. Every reconstructed historical authored state is validated, including object count, identities and lifecycle payload/order consistency. Logistics v1 scenarios remain separate and are not migrated. Unknown fields, duplicate JSON object keys at any depth, unsupported versions, inconsistent history and corrupt/truncated inputs fail. Duplicate keys are rejected while decoding the original bytes, before JSON normalization. Pre-v5 envelopes reject authoring fields even when null; old history cannot acquire v5 fields by relabeling its version.
 

@@ -3,7 +3,7 @@ use ruster_behavior::{Diagnostic, Engine, Limits};
 use ruster_scene::Session;
 use serde_json::{json, Value};
 
-const HELP: &str = "Ruster behavior — provisional Lua5.4 runtime\n\nUsage:\n  ruster-behavior check SCENE.json\n  ruster-behavior run SCENE.json TICKS [DT]\n\nTICKS:0..10000. DT:finite seconds in(0,1], default1/60.\nCheck performs Reset's compile/module/update validation at dt0. Run resets,\nthen completes atomic fixed steps. Disabled bindings are skipped. Both commands\nread a scene5 project and emit JSON; authored files are never changed.\nErrors include source version/binding/object context where available.";
+const HELP: &str = "Ruster behavior — provisional Lua5.4 runtime\n\nUsage:\n  ruster-behavior check SCENE.json\n  ruster-behavior run SCENE.json TICKS [DT]\n\nTICKS:0..10000. DT:finite seconds in(0,1], default1/60.\nCheck performs versioned initialization and dt0 update validation. Run resets,\nthen completes atomic fixed steps. Disabled bindings are skipped. Both commands\nread supported scenes through Scene14 and emit JSON; authored files are never changed.\nErrors include source version/binding/object context where available.";
 
 enum Failure {
     Input(String),
@@ -59,7 +59,7 @@ fn run(args: &[String]) -> Result<Option<Value>, Failure> {
         engine.step(&mut runtime).map_err(Failure::Behavior)?;
     }
     Ok(Some(
-        json!({"scene_id":session.scene().id,"authored_revision":session.scene().revision.to_string(),"tick":runtime.tick().to_string(),"fixed_dt":dt,"enabled_bindings":session.authoring().bindings.values().filter(|binding|binding.enabled).count(),"fingerprint":runtime.scene().fingerprint(),"scene":runtime.scene(),"runtime_state":runtime.state_report()}),
+        json!({"scene_id":session.scene().id,"authored_revision":session.scene().revision.to_string(),"tick":runtime.tick().to_string(),"commit_revision":runtime.commit_revision().to_string(),"last_step_commit_revision":runtime.last_step_commit_revision().map(|value|value.to_string()),"fixed_dt":dt,"enabled_bindings":session.authoring().bindings.values().filter(|binding|binding.enabled).count(),"fingerprint":runtime.scene().fingerprint(),"scene":runtime.scene(),"runtime_state":runtime.state_report()}),
     ))
 }
 fn main() {

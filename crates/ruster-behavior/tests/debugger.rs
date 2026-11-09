@@ -39,6 +39,7 @@ fn fixture(text: &str) -> (Scene, Authoring) {
             source_id: "source".into(),
             enabled: true,
             properties: BTreeMap::new(),
+            commands: Default::default(),
         },
     );
     (scene, authoring)
@@ -55,6 +56,7 @@ struct Report {
     result: Result<(), Diagnostic>,
     scene: Scene,
     tick: u64,
+    commit_revision: u64,
     pause: bool,
     state: Arc<ruster_behavior::RuntimeState>,
 }
@@ -67,6 +69,15 @@ struct Job {
 }
 impl Job {
     fn spawn(scene: Scene, authoring: Authoring, points: Vec<Breakpoint>, limits: Limits) -> Self {
+        Self::spawn_operation(scene, authoring, points, limits, false)
+    }
+    fn spawn_operation(
+        scene: Scene,
+        authoring: Authoring,
+        points: Vec<Breakpoint>,
+        limits: Limits,
+        command: bool,
+    ) -> Self {
         let (created_tx, created) = mpsc::sync_channel(1);
         let (ready_tx, ready) = mpsc::sync_channel(1);
         let (wake, wakes) = mpsc::sync_channel(1);
@@ -91,11 +102,18 @@ impl Job {
             if start_rx.recv().is_err() {
                 return;
             }
-            let result = engine.step(&mut runtime);
+            let result = if command {
+                engine
+                    .dispatch_command(&mut runtime, "binding-a", 0, "set", &BTreeMap::new())
+                    .map(|_| ())
+            } else {
+                engine.step(&mut runtime)
+            };
             let _ = done_tx.send(Report {
                 result,
                 scene: runtime.scene().clone(),
                 tick: runtime.tick(),
+                commit_revision: runtime.commit_revision(),
                 pause: engine.take_debug_pause_requested(),
                 state: runtime.state().clone(),
             });
@@ -314,6 +332,65 @@ fn cancel_disconnect_and_later_binding_failure_are_atomic() {
                     );
                 }
             }
+        }
+    }
+    // A command may stop during module construction before its callback begins.
+    // Its attempted simulation tick stays current while commit revision advances.
+    let command_text = "return {\n update=function(o,p,dt,h) return {} end,\n command=function(name,args,p,h)\n local count=h.state('count')\n if p.fail then local bad=nil+1 end\n return {state={count=count+1}}\n end\n}";
+    for line in [1, 4] {
+        for mode in 0..3 {
+            let (scene, mut authoring) = fixture(command_text);
+            let source = authoring.sources.get_mut("source").unwrap();
+            source.host_api_version = ruster_behavior::LIFECYCLE_HOST_API_VERSION;
+            let binding = authoring.bindings.get_mut("binding-a").unwrap();
+            binding.target = ruster_scene::BindingTarget::Application;
+            binding
+                .properties
+                .insert("fail".into(), PropertyValue::Bool(true));
+            binding
+                .state_defaults
+                .insert("count".into(), ruster_scene::StateValue::Number(0.0));
+            binding.commands.insert(
+                "set".into(),
+                ruster_scene::CommandDefinition {
+                    arguments: BTreeMap::new(),
+                },
+            );
+            let mut job = Job::spawn_operation(
+                scene.clone(),
+                authoring,
+                vec![point(command_text, line)],
+                Limits::default(),
+                true,
+            );
+            job.start();
+            let stop = job.stop();
+            assert_eq!((stop.committed_tick, stop.attempted_tick), (0, 0));
+            assert_eq!(
+                (stop.commit_revision, stop.attempted_commit_revision),
+                (0, 1)
+            );
+            assert_eq!(stop.object_id, None);
+            match mode {
+                0 => job.handle().cancel(),
+                1 => drop(job.handle.take()),
+                _ => job.handle().resume(stop.stop, Resume::Continue).unwrap(),
+            }
+            let report = job.finish();
+            assert_eq!(
+                report.result.unwrap_err().code,
+                if mode < 2 {
+                    DiagnosticCode::Cancelled
+                } else {
+                    DiagnosticCode::Runtime
+                }
+            );
+            assert_eq!((report.tick, report.commit_revision), (0, 0));
+            assert_eq!(report.scene, scene);
+            assert_eq!(
+                report.state.binding("binding-a").unwrap()["count"],
+                ruster_scene::StateValue::Number(0.0)
+            );
         }
     }
     // Reject a token mismatch before it can strand a stopped hook on a different token.

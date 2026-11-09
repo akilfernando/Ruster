@@ -249,7 +249,7 @@ impl LightingDraft {
 }
 
 impl SceneEditor {
-    fn lighting_editable(&self, saving: bool) -> bool {
+    pub(super) fn lighting_editable(&self, saving: bool) -> bool {
         !self.asset_publishing()
             && !self.asset_loading()
             && self.color_draft.is_none()
@@ -261,6 +261,7 @@ impl SceneEditor {
             && !self.manipulation.offset_pending()
             && self.draft == self.baseline_fields
             && !self.behavior.pending()
+            && !self.runtime.command_draft_pending()
             && !self.input_actions.pending()
             && (self.recovered_input.is_none() || self.lighting_draft.is_some())
             && self.dialog.is_none()

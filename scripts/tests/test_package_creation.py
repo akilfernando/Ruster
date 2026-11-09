@@ -575,6 +575,52 @@ class CreationDistributionTests(unittest.TestCase):
                     (content_root/"content.json").write_bytes(package_creation.encoded(wrong))
                     with self.subTest(state_schema=schema), self.assertRaisesRegex(ValueError, "schema9 requires Scene13"):
                         package_creation.source_content(content_root, None)
+                # API5 initialization computes runtime values, so preflight checks
+                # the retained schema and truthful zero-work lifecycle metadata.
+                lifecycle_scene = copy.deepcopy(state_scene)
+                lifecycle_scene["format_version"] = 14
+                lifecycle_scene["authoring"]["sources"]["query-source"].update(
+                    host_api_version=5,
+                    text="return {initialize=function(p,h) return {state={amount=7}} end, update=function() return {} end, command=function() return {} end}")
+                lifecycle_scene["authoring"]["bindings"]["application"]["enabled"] = True
+                lifecycle_scene["authoring"]["sources"]["legacy-source"] = copy.deepcopy(spatial_scene["authoring"]["sources"]["query-source"])
+                lifecycle_scene["authoring"]["bindings"]["legacy"]["source_id"] = "legacy-source"
+                lifecycle_scene["authoring"]["bindings"]["legacy"]["enabled"] = True
+                lifecycle_scene["authoring"]["bindings"]["application"]["commands"] = {
+                    "set": {"arguments": {"amount": {"type": "number", "value": 2}}}}
+                lifecycle_bytes = package_creation.encoded(lifecycle_scene)
+                lifecycle_content = {**state_content, "schema": 10,
+                                     "scene_sha256": package_creation.sha256(lifecycle_bytes)}
+                (content_root/"scene.json").write_bytes(lifecycle_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(lifecycle_content))
+                with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old lifecycle kit preflight")):
+                    with self.assertRaisesRegex(ValueError, "Scene14 lifecycle_commands"):
+                        package_creation.package(kit, content_root, failed)
+                capable["profile"] = package_creation.LIFECYCLE_PROFILE
+                (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                initialized = copy.deepcopy(state_response["runtime_state"])
+                initialized["legacy"] = {}
+                initialized["application"]["amount"]["value"] = 7
+                lifecycle_response = {**state_response,
+                    "authored_scene": package_creation.typed_scene(lifecycle_scene),
+                    "runtime_scene": package_creation.typed_scene(lifecycle_scene),
+                    "runtime_state": initialized, "initialized": True, "commit_revision": "0",
+                    "last_step_commit_revision": None, "command_receipt": None, "command_receipts": [],
+                    "captured_commands": [{"binding_id": "application", "command_id": "set",
+                        "schema_hash": "ab"*32, "argument_count": 1}]}
+                for changed in ({"initialized": False}, {"commit_revision": "1"},
+                                {"last_step_commit_revision": "0"}, {"command_receipts": [{}]},
+                                {"captured_commands": []}, {"runtime_scene": {}},
+                                {"runtime_state": {"application": {}, "legacy": {}}}):
+                    with self.subTest(lifecycle_preflight=changed), patch.object(package_creation, "run_runtime", return_value={**lifecycle_response, **changed}):
+                        with self.assertRaises(ValueError):
+                            package_creation.package(kit, content_root, failed)
+                    self.assertFalse(failed.exists())
+                with patch.object(package_creation, "run_runtime", return_value=lifecycle_response):
+                    package_creation.package(kit, content_root, base/"lifecycle.tar.gz")
+                with tarfile.open(base/"lifecycle.tar.gz") as archive:
+                    self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"], package_creation.LIFECYCLE_PROFILE)
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), lifecycle_bytes)
                 # Keep historical fixtures intact and reuse the existing older
                 # content branches under the newest cumulative runtime profile.
                 for old_content, old_scene, old_response, name in (
@@ -661,6 +707,8 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.SPATIAL_PROFILE, "capabilities": ["spatial_queries", *package_creation.INPUT_PROFILE["capabilities"]]},
                         {**package_creation.STATE_PROFILE, "descriptor_version": 4},
                         {**package_creation.STATE_PROFILE, "capabilities": ["runtime_state", *package_creation.SPATIAL_PROFILE["capabilities"]]},
+                        {**package_creation.LIFECYCLE_PROFILE, "descriptor_version": 4},
+                        {**package_creation.LIFECYCLE_PROFILE, "capabilities": ["lifecycle_commands", *package_creation.STATE_PROFILE["capabilities"]]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
                         package_creation.check_profile(invalid_profile)
@@ -939,6 +987,30 @@ class CreationDistributionTests(unittest.TestCase):
                            "position": {"type": "vec3", "value": [1, 2, 3]}}}
         state = {"format_version": 13, "authoring": {"bindings": {"app": application}}, "undo": [], "redo": []}
         package_creation.validate_state_fields(state)
+        lifecycle = copy.deepcopy(state)
+        lifecycle["format_version"] = 14
+        lifecycle["authoring"]["bindings"]["app"]["commands"] = {"restart": {"arguments": {}}}
+        package_creation.validate_state_fields(lifecycle)
+        for version in range(1, 14):
+            for location in ("current", "before", "after"):
+                for commands in (None, {}, {"restart": {"arguments": {}}}):
+                    invalid = copy.deepcopy(state)
+                    invalid["format_version"] = version
+                    if location == "current":
+                        invalid["authoring"]["bindings"]["app"]["commands"] = commands
+                    else:
+                        invalid["redo"] = [{"bindings": [{"id": "app", location: {**application, "commands": commands}}]}]
+                        # Avoid a separate pre13 target guard before the history endpoint.
+                        invalid["authoring"]["bindings"] = {}
+                    with self.subTest(command_version=(version, location, commands)), self.assertRaisesRegex(ValueError, "Scene14 lifecycle_commands"):
+                        package_creation.validate_state_fields(invalid)
+        for commands in (None, {f"c{n}": {"arguments": {}} for n in range(17)},
+                         {"restart": {}}, {"restart": {"arguments": None}},
+                         {"restart": {"arguments": {f"arg{n}": {"type": "bool", "value": False} for n in range(17)}}}):
+            invalid = copy.deepcopy(lifecycle)
+            invalid["authoring"]["bindings"]["app"]["commands"] = commands
+            with self.subTest(command_shape=commands), self.assertRaises(ValueError):
+                package_creation.validate_state_fields(invalid)
         for version in range(1, 13):
             for location in ("authoring", "undo", "redo"):
                 for field in ("target", "state_defaults"):

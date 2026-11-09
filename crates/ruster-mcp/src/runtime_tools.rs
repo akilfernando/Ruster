@@ -2,7 +2,8 @@
 use serde_json::{json, Map, Value};
 
 const TOOLS: &[(&str, &str, &[&str])] = &[
-    ("behavior_runtime_state", "Read at most16 captured committed state fields from one binding. Pin inspect.frame_run_id, committed tick, source hash (nullable) and default-schema hash. Explicitly labelled historical frames remain readable after errors or Stop. Changed-frame continuation rejects. Read-only snapshot access.", &["expected_run_id","expected_tick","binding_id","source_hash","schema_hash"]),
+    ("behavior_runtime_command", "Queue one typed state-only Application command on the current initialized paused run. Pin captured catalog hash and commit revision. Inspect the terminal receipt before another request, including unknown outcomes. Commands preserve tick and last Step observations.", &["expected_run_id","expected_commit_revision","binding_id","command_id","schema_hash","arguments"]),
+    ("behavior_runtime_state", "Read at most16 captured committed state fields from one binding. Pin inspect.frame_run_id, committed tick, source hash (nullable) and default-schema hash. Supply expected_commit_revision for API5 captured runs, including historical reads. Explicitly labelled historical frames remain readable after errors or Stop. Changed-frame continuation rejects. Read-only snapshot access.", &["expected_run_id","expected_tick","binding_id","source_hash","schema_hash"]),
     ("behavior_runtime_inspect", "Inspect cached runtime state, a bounded object page and scalar operation receipts. Input metadata describes the accepted map/ownership epoch; last_committed_input describes only a matching committed tick, never current physical keys. Historical input details are available only while the current retained frame matches that receipt. Never waits on scripts.", &[]),
     ("behavior_runtime_reset", "Queue an authored snapshot Reset. Returns operation/run identity immediately; inspect completion. Unfinished source is preserved on failure.", &[]),
     ("behavior_runtime_play", "Queue fixed-step playback for the inspected run. Does not change authored data.", &["expected_run_id"]),
@@ -44,7 +45,7 @@ fn fields(name: &str) -> Option<Vec<&'static str>> {
 fn optional(name: &str) -> &'static [&'static str] {
     match name {
         "behavior_runtime_inspect" => &["offset", "operation_id"],
-        "behavior_runtime_state" => &["offset"],
+        "behavior_runtime_state" => &["offset", "expected_commit_revision"],
         "behavior_breakpoints" => &["offset"],
         "behavior_debug_inspect" => &["offset", "limit"],
         "behavior_runtime_step" => INPUT_FIELDS,
@@ -93,7 +94,8 @@ fn valid_input_frame(value: &Value) -> bool {
 }
 fn shape(field: &str) -> Value {
     match field {
-        "expected_revision"
+        "expected_commit_revision"
+        | "expected_revision"
         | "expected_stop_id"
         | "operation_id"
         | "offset"
@@ -106,6 +108,7 @@ fn shape(field: &str) -> Value {
         "source_hash" | "schema_hash" | "expected_map_identity" => {
             json!({"type":"string","pattern":"^[0-9a-f]{64}$"})
         }
+        "arguments" => super::behavior_tools::state_arguments_schema(),
         "input_frame" => input_frame_schema(),
         "enabled" => json!({"type":"boolean"}),
         "binding_id" => json!({"type":["string","null"],"minLength":1,"maxLength":128}),
@@ -119,9 +122,9 @@ pub fn list() -> Vec<Value> {
         let required=fields(name).unwrap();
         let properties:Map<String,Value>=required.iter().copied().chain(optional(name).iter().copied()).map(|field|(field.into(),shape(field))).collect();
         let mut schema = super::object_schema(Value::Object(properties), required);
-        if *name == "behavior_runtime_state" {
+        if matches!(*name,"behavior_runtime_state"|"behavior_runtime_command") {
             schema["properties"]["binding_id"]["type"]=json!("string");
-            schema["properties"]["source_hash"]["type"]=json!(["string","null"]);
+            if *name=="behavior_runtime_state" {schema["properties"]["source_hash"]["type"]=json!(["string","null"]);}
         }
         if *name == "behavior_runtime_step" {
             let dependencies:Map<String,Value> = INPUT_FIELDS.iter().map(|field| ((*field).into(), json!(INPUT_FIELDS.iter().filter(|other| *other != field).collect::<Vec<_>>()))).collect();
@@ -155,11 +158,13 @@ pub fn valid(name: &str, args: &Value) -> bool {
         }
         match field.as_str() {
             "source_hash" if name == "behavior_runtime_state" && value.is_null() => true,
-            "expected_revision"
+            "expected_commit_revision"
+            | "expected_revision"
             | "offset"
             | "operation_id"
             | "expected_tick"
             | "expected_input_epoch" => super::canonical_u64(value),
+            "arguments" => super::behavior_tools::valid_state_arguments(value),
             "input_frame" => valid_input_frame(value),
             "expected_stop_id" | "line" | "limit" => {
                 super::canonical_u64(value)
@@ -183,7 +188,12 @@ pub fn valid(name: &str, args: &Value) -> bool {
                 })
             }
             "enabled" => value.is_boolean(),
-            "binding_id" if value.is_null() && name != "behavior_runtime_state" => true,
+            "binding_id"
+                if value.is_null()
+                    && !matches!(name, "behavior_runtime_state" | "behavior_runtime_command") =>
+            {
+                true
+            }
             _ => value.as_str().is_some_and(|s| {
                 !s.is_empty()
                     && s.len()
@@ -281,5 +291,21 @@ mod tests {
         state["binding_id"] = json!("application");
         state["expected_tick"] = json!(9007199254740993u64);
         assert!(!valid("behavior_runtime_state", &state));
+        let command = json!({"expected_session_token":"session","expected_revision":"3","expected_run_id":"1:2:3",
+            "expected_commit_revision":"9007199254740993","binding_id":"application","command_id":"reset",
+            "schema_hash":"ab".repeat(32),"arguments":{"amount":{"type":"number","value":2.5}}});
+        assert!(valid("behavior_runtime_command", &command));
+        for (field, value) in [
+            ("expected_commit_revision", json!(9007199254740993u64)),
+            ("binding_id", Value::Null),
+            (
+                "arguments",
+                json!({"amount":{"type":"object_ref","value":null}}),
+            ),
+        ] {
+            let mut invalid = command.clone();
+            invalid[field] = value;
+            assert!(!valid("behavior_runtime_command", &invalid));
+        }
     }
 }

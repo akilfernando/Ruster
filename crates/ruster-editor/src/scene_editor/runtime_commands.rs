@@ -18,7 +18,8 @@ fn number(value: &Value) -> Option<u64> {
 pub(super) fn supported(op: &str) -> bool {
     matches!(
         op,
-        "behavior_runtime_inspect"
+        "behavior_runtime_command"
+            | "behavior_runtime_inspect"
             | "behavior_runtime_state"
             | "behavior_runtime_reset"
             | "behavior_runtime_play"
@@ -35,6 +36,17 @@ pub(super) fn supported(op: &str) -> bool {
 impl SceneEditor {
     pub(super) fn runtime_command(&mut self, token: &str, op: &str, args: &Value) -> Result<Value> {
         let (fields, optional): (&[&str], &[&str]) = match op {
+            "behavior_runtime_command" => (
+                &[
+                    "expected_run_id",
+                    "expected_commit_revision",
+                    "binding_id",
+                    "command_id",
+                    "schema_hash",
+                    "arguments",
+                ],
+                &[],
+            ),
             "behavior_runtime_inspect" => (&[], &["offset", "operation_id"]),
             "behavior_runtime_state" => (
                 &[
@@ -44,7 +56,7 @@ impl SceneEditor {
                     "source_hash",
                     "schema_hash",
                 ],
-                &["offset"],
+                &["offset", "expected_commit_revision"],
             ),
             "behavior_breakpoints" => (&[], &["offset"]),
             "behavior_runtime_reset" => (&[], &[]),
@@ -104,7 +116,8 @@ impl SceneEditor {
         for (field, value) in map {
             let valid = match field.as_str() {
                 "source_hash" if op == "behavior_runtime_state" && value.is_null() => true,
-                "offset"
+                "expected_commit_revision"
+                | "offset"
                 | "operation_id"
                 | "expected_revision"
                 | "expected_tick"
@@ -117,6 +130,10 @@ impl SceneEditor {
                                 .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
                     })
                 }
+                "arguments" => serde_json::from_value::<ruster_scene::StateFields>(value.clone())
+                    .is_ok_and(|fields| {
+                        ruster_scene::command_argument_payload_bytes(&fields).is_ok()
+                    }),
                 "input_frame" => {
                     serde_json::from_value::<ruster_scene::input::ActionFrame>(value.clone())
                         .is_ok()
@@ -124,7 +141,12 @@ impl SceneEditor {
                 "expected_stop_id" => number(value).is_some_and(|n| n > 0),
                 "line" => number(value).is_some_and(|n| (1..=16385).contains(&n)),
                 "limit" => number(value).is_some_and(|n| (1..=16).contains(&n)),
-                "binding_id" if value.is_null() && op != "behavior_runtime_state" => true,
+                "binding_id"
+                    if value.is_null()
+                        && !matches!(op, "behavior_runtime_state" | "behavior_runtime_command") =>
+                {
+                    true
+                }
                 "enabled" => value.is_boolean(),
                 _ => value.as_str().is_some_and(|text| {
                     !text.is_empty()
@@ -182,7 +204,10 @@ impl SceneEditor {
                 (
                     if matches!(
                         message.as_str(),
-                        "stale_run"
+                        "stale_commit_revision"
+                            | "commit_revision_required"
+                            | "stale_command_schema"
+                            | "stale_run"
                             | "state_unavailable"
                             | "stale_state_schema"
                             | "stale_stop"

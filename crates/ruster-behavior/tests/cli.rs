@@ -26,7 +26,7 @@ fn headless_reset_run_and_contextual_failure_never_modify_authored_file() {
         text: text.into(),
     };
     let mut session = Session::new(scene).unwrap();
-    session.create_behavior(0,"movement",source("return { update = function(t, p, dt) t.translation[1] = t.translation[1] + p.speed * dt; return t end }"),"mover",BehaviorBinding {target:ruster_scene::BindingTarget::Object("moving".into()),state_defaults:Default::default(),source_id:"movement".into(),enabled:true,properties:std::collections::BTreeMap::from([("speed".into(),PropertyValue::Number(2.0))])}).unwrap();
+    session.create_behavior(0,"movement",source("return { update = function(t, p, dt) t.translation[1] = t.translation[1] + p.speed * dt; return t end }"),"mover",BehaviorBinding {target:ruster_scene::BindingTarget::Object("moving".into()),state_defaults:Default::default(),source_id:"movement".into(),enabled:true,properties:std::collections::BTreeMap::from([("speed".into(),PropertyValue::Number(2.0))]),commands: Default::default(), }).unwrap();
     session.save(&path).unwrap();
     let before = std::fs::read(&path).unwrap();
     let checked = cli(&["check", file]);

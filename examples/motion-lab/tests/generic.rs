@@ -16,6 +16,25 @@ fn runtime(session: Session) -> Runtime<GenericMotionLab> {
     .unwrap()
 }
 
+fn lifecycle_session() -> Session {
+    use ruster_scene::{
+        BehaviorBinding, BehaviorSource, BindingTarget, CommandDefinition, StateFields, StateValue,
+    };
+    let mut session = Session::new(ruster_scene::Scene::empty("lifecycle-consumer")).unwrap();
+    session.create_behavior(0, "controller", BehaviorSource {
+        label: None, language_id: "lua54".into(), host_api_version: 5,
+        text: "return {initialize=function(p,h) return {state={count=3}} end, update=function() return {} end, command=function(n,a,p,h) return {state={count=h.state('count')+a.amount}} end}".into(),
+    }, "application", BehaviorBinding {
+        target: BindingTarget::Application, source_id: "controller".into(), enabled: true,
+        properties: Default::default(),
+        state_defaults: StateFields::from([("count".into(), StateValue::Number(0.0))]),
+        commands: std::collections::BTreeMap::from([("add".into(), CommandDefinition {
+            arguments: StateFields::from([("amount".into(), StateValue::Number(2.0))]),
+        })]),
+    }).unwrap();
+    session
+}
+
 // Consumer boundary: fixed host dt/tick must match the backend before any motion commits;
 // runtime overrides must leave the complete authored snapshot/history and resource file intact.
 #[test]
@@ -198,6 +217,59 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
         committed
     );
     assert_eq!(stateful_runtime.app().runtime_tick(), Some(1));
+
+    // Consumer-specific boundary: actual host Pause authority and Core commit
+    // identity must agree while command transactions leave its tick untouched.
+    use ruster_motion_lab::generic::{dispatch_command, CommandRequest};
+    let mut lifecycle = crate::runtime(lifecycle_session());
+    let mut request = CommandRequest {
+        binding_id: "application".into(),
+        command_id: "add".into(),
+        expected_commit_revision: "0".into(),
+        args: Default::default(),
+    };
+    assert!(dispatch_command(&mut lifecycle, &request).is_err());
+    lifecycle.reset().unwrap();
+    assert_eq!(
+        lifecycle.app().runtime_state_report()["application"]["count"],
+        ruster_scene::StateValue::Number(3.0)
+    );
+    let authored = lifecycle.app().session().snapshot_bytes().unwrap();
+    let scene = lifecycle.app().content().scene().clone();
+    lifecycle.set_running(true);
+    assert!(dispatch_command(&mut lifecycle, &request).is_err());
+    lifecycle.set_running(false);
+    dispatch_command(&mut lifecycle, &request).unwrap();
+    assert_eq!(lifecycle.tick(), 0);
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(1));
+    assert_eq!(lifecycle.app().last_step_commit_revision(), None);
+    assert_eq!(
+        lifecycle.app().runtime_state_report()["application"]["count"],
+        ruster_scene::StateValue::Number(5.0)
+    );
+    assert_eq!(*lifecycle.app().content().scene(), scene);
+    assert!(dispatch_command(&mut lifecycle, &request).is_err());
+    request.expected_commit_revision = "1".into();
+    request
+        .args
+        .insert("amount".into(), ruster_scene::StateValue::Number(0.0));
+    dispatch_command(&mut lifecycle, &request).unwrap();
+    lifecycle.step().unwrap();
+    assert_eq!(lifecycle.tick(), 1);
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(3));
+    assert_eq!(lifecycle.app().last_step_commit_revision(), Some(3));
+    assert_eq!(
+        lifecycle.app().session().snapshot_bytes().unwrap(),
+        authored
+    );
+    assert_eq!(
+        lifecycle.app().command_receipt_report()["commit_revision"],
+        "2"
+    );
+    assert_eq!(lifecycle.app().command_report()[0]["command_id"], "add");
+    lifecycle.reset().unwrap();
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(0));
+    assert!(lifecycle.app().command_receipt_report().is_null());
 }
 
 // Actual CLI/resource wiring is not covered by Engine tests. Reject missing resources,
@@ -309,6 +381,44 @@ fn generic_cli_replays_read_only_scene_and_explicit_mesh_resources() {
     assert!(!cli(&["--generic-demo", "--project", "legacy.json"])
         .status
         .success());
+    let lifecycle_path = directory.path().join("lifecycle.scene.json");
+    let bytes = lifecycle_session().snapshot_bytes().unwrap();
+    fs::write(&lifecycle_path, &bytes).unwrap();
+    let commands_path = directory.path().join("commands.json");
+    fs::write(&commands_path, r#"[{"binding_id":"application","command_id":"add","expected_commit_revision":"0","args":{}},{"binding_id":"application","command_id":"add","expected_commit_revision":"1","args":{"amount":{"type":"number","value":4}}}]"#).unwrap();
+    let result = cli(&[
+        "--scene",
+        "lifecycle.scene.json",
+        "--headless",
+        "--ticks",
+        "1",
+        "--commands",
+        "commands.json",
+    ]);
+    assert!(
+        result.status.success(),
+        "{}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&result.stdout).unwrap();
+    assert_eq!(value["runtime_state"]["application"]["count"]["value"], 9.0);
+    assert_eq!(value["commit_revision"], "3");
+    assert_eq!(value["last_step_commit_revision"], "3");
+    assert_eq!(value["command_receipts"].as_array().unwrap().len(), 2);
+    assert_eq!(fs::read(&lifecycle_path).unwrap(), bytes);
+    fs::write(&commands_path, r#"[{"binding_id":"application","command_id":"add","expected_commit_revision":"0","args":{}},{"binding_id":"application","command_id":"add","expected_commit_revision":"0","args":{}}]"#).unwrap();
+    assert!(!cli(&[
+        "--scene",
+        "lifecycle.scene.json",
+        "--headless",
+        "--ticks",
+        "0",
+        "--commands",
+        "commands.json"
+    ])
+    .status
+    .success());
+    assert_eq!(fs::read(&lifecycle_path).unwrap(), bytes);
 }
 
 // Application boundary: one UI admission can precede several fixed ticks;
@@ -362,6 +472,7 @@ fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
             Some(BehaviorBinding {
                 target: ruster_scene::BindingTarget::Object("head".into()),
                 state_defaults: Default::default(),
+                commands: Default::default(),
                 source_id: "controller".into(),
                 enabled: true,
                 properties: BTreeMap::new(),

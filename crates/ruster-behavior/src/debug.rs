@@ -74,6 +74,8 @@ pub struct StopSnapshot {
     pub phase: Phase,
     pub committed_tick: u64,
     pub attempted_tick: u64,
+    pub commit_revision: u64,
+    pub attempted_commit_revision: u64,
     pub line: Option<u32>,
     pub reason: StopReason,
     pub frames: Vec<Frame>,
@@ -234,6 +236,9 @@ pub struct DebugSession {
     context: Option<Context>,
     suppressed: bool,
     tick: u64,
+    attempted_tick: u64,
+    commit_revision: u64,
+    attempted_commit_revision: u64,
     depth: usize,
     next: Option<StepTarget>,
     pause_requested: bool,
@@ -277,6 +282,9 @@ impl DebugSession {
                 context: None,
                 suppressed: true,
                 tick: 0,
+                attempted_tick: 0,
+                commit_revision: 0,
+                attempted_commit_revision: 0,
                 depth: 0,
                 next: None,
                 pause_requested: false,
@@ -287,8 +295,18 @@ impl DebugSession {
     pub(crate) fn uses_cancellation(&self, cancel: &Arc<AtomicBool>) -> bool {
         Arc::ptr_eq(&self.shared.cancel, cancel)
     }
-    pub(crate) fn begin(&mut self, tick: u64, suppressed: bool) {
+    pub(crate) fn begin(
+        &mut self,
+        tick: u64,
+        attempted_tick: u64,
+        commit_revision: u64,
+        attempted_commit_revision: u64,
+        suppressed: bool,
+    ) {
         self.tick = tick;
+        self.attempted_tick = attempted_tick;
+        self.commit_revision = commit_revision;
+        self.attempted_commit_revision = attempted_commit_revision;
         self.suppressed = suppressed;
         self.pause_requested = false;
         self.clear();
@@ -403,7 +421,9 @@ impl DebugSession {
             object_id: context.object_id.clone(),
             phase: context.phase,
             committed_tick: self.tick,
-            attempted_tick: self.tick.saturating_add(1),
+            attempted_tick: self.attempted_tick,
+            commit_revision: self.commit_revision,
+            attempted_commit_revision: self.attempted_commit_revision,
             line,
             reason,
             frames,

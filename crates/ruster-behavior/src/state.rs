@@ -58,7 +58,12 @@ impl RuntimeState {
             let source = authoring.sources.get(&binding.source_id);
             if binding.state_defaults.is_empty()
                 && binding.target != BindingTarget::Application
-                && source.is_none_or(|source| source.host_api_version != STATE_HOST_API_VERSION)
+                && source.is_none_or(|source| {
+                    !matches!(
+                        source.host_api_version,
+                        STATE_HOST_API_VERSION | crate::LIFECYCLE_HOST_API_VERSION
+                    )
+                })
             {
                 continue;
             }

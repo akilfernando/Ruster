@@ -9,15 +9,19 @@ use ruster_motion_lab::generic::{self, GenericMotionLab};
 use ruster_motion_lab::{read_source, MotionLab, DEFAULT_SOURCE};
 use ruster_scene::input::{ActionFrame, ActionMap};
 
+#[path = "../../../crates/support/strict_json.rs"]
+mod strict_json;
+
 const HELP: &str = "Ruster Motion Lab — compare authored motion or open a legacy Rhai project
 
 Usage: ruster-motion-lab [OPTIONS]
   --headless       Attach the behavior to left, Reset, run fixed ticks, print transforms
   --ticks N        Headless ticks, 0–10000 (default 10)
   --input-frames PATH Headless generic/creation JSON array, at most 1 MiB and N frames
+  --commands PATH  At most16 typed paused commands after Reset, before ordinary ticks
   --speed N        Legacy: left property; generic: runtime-only numeric speed override
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
-  --scene PATH     Read a generic Scene13 snapshot (sources, bindings and history retained)
+  --scene PATH     Read a generic Scene14 snapshot (sources, bindings and history retained)
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
   --creation-info Print the runtime/descriptor compatibility profile and exit
   --creation PATH Read an app.json creation descriptor and its relative resources
@@ -66,6 +70,7 @@ struct Options {
     resources: Option<PathBuf>,
     meshes: Vec<(String, PathBuf)>,
     input_frames: Option<PathBuf>,
+    commands: Option<PathBuf>,
 }
 
 fn parse() -> Result<Option<Options>, String> {
@@ -81,13 +86,19 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
             "--headless" => options.headless = true,
             "--generic-demo" => options.generic_demo = true,
             "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project"
-            | "--scene" | "--resources" | "--mesh" | "--creation" | "--input-frames" => {
+            | "--scene" | "--resources" | "--mesh" | "--creation" | "--input-frames"
+            | "--commands" => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{arg} requires a value. See --help."))?;
                 match arg.as_str() {
                     "--scene" => options.scene = Some(value.into()),
                     "--creation" => options.creation = Some(value.into()),
+                    "--commands" => {
+                        if options.commands.replace(value.into()).is_some() {
+                            return Err("Use one --commands file".into());
+                        }
+                    }
                     "--input-frames" => {
                         if options.input_frames.replace(value.into()).is_some() {
                             return Err("Use one --input-frames file".into());
@@ -151,8 +162,10 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
     {
         return Err("--ticks requires --headless; --frames requires native mode.".into());
     }
-    if options.input_frames.is_some() && !options.headless {
-        return Err("--input-frames requires --headless generic or creation mode".into());
+    if (options.input_frames.is_some() || options.commands.is_some()) && !options.headless {
+        return Err(
+            "--input-frames and --commands require --headless generic or creation mode".into(),
+        );
     }
     if options.project.is_some() && options.script.is_some() {
         return Err("Use either --project or --script.".into());
@@ -175,7 +188,7 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
     if !options.meshes.is_empty() && options.resources.is_none() {
         return Err("--mesh requires an explicit --resources directory".into());
     }
-    if options.input_frames.is_some()
+    if (options.input_frames.is_some() || options.commands.is_some())
         && !generic
         && (options.project.is_some() || options.script.is_some() || options.save_project.is_some())
     {
@@ -201,9 +214,9 @@ fn execute(options: Options) -> Result<(), String> {
     if options.scene.is_some() || options.generic_demo {
         return execute_generic(options);
     }
-    if options.input_frames.is_some() {
+    if options.input_frames.is_some() || options.commands.is_some() {
         return Err(
-            "--input-frames requires headless generic or creation mode, not legacy Rhai mode"
+            "--input-frames/--commands require headless generic or creation mode, not legacy Rhai mode"
                 .into(),
         );
     }
@@ -275,8 +288,10 @@ fn has_explicit_content(options: &Options) -> bool {
 }
 
 fn validate_creation_options(options: &Options) -> Result<(), String> {
-    if options.input_frames.is_some() && !options.headless {
-        return Err("--input-frames requires --headless generic or creation mode".into());
+    if (options.input_frames.is_some() || options.commands.is_some()) && !options.headless {
+        return Err(
+            "--input-frames and --commands require --headless generic or creation mode".into(),
+        );
     }
     if has_explicit_content(options)
         || options.resources.is_some()
@@ -321,17 +336,49 @@ fn input_observation(app: &GenericMotionLab) -> serde_json::Value {
         .unwrap_or(serde_json::Value::Null)
 }
 
+fn read_commands(path: Option<&Path>) -> Result<Vec<generic::CommandRequest>, String> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    let bytes = ruster_assets::read_regular_file(path, 1024 * 1024)
+        .map_err(|error| format!("Command sequence {}: {error}", path.display()))?;
+    let value = strict_json::parse(&bytes).map_err(|e| format!("Command sequence: {e}"))?;
+    let commands: Vec<generic::CommandRequest> = serde_json::from_value(value)
+        .map_err(|e| format!("Expected an array of typed command requests: {e}"))?;
+    if commands.len() > 16 {
+        return Err("Use at most16 paused commands".into());
+    }
+    for command in &commands {
+        command.validate()?;
+    }
+    Ok(commands)
+}
+
 fn headless_runtime(
     app: GenericMotionLab,
     dt: Duration,
     ticks: u64,
     path: Option<&Path>,
-) -> Result<(Runtime<GenericMotionLab>, serde_json::Value), String> {
+    commands_path: Option<&Path>,
+) -> Result<
+    (
+        Runtime<GenericMotionLab>,
+        serde_json::Value,
+        Vec<serde_json::Value>,
+    ),
+    String,
+> {
     let frames = read_input_frames(path, ticks, &app.session().authoring().actions)?;
+    let commands = read_commands(commands_path)?;
     let supplied = frames.len();
     let mut frames = frames.into_iter();
     let mut runtime = Runtime::new(app, dt)?;
     runtime.reset()?;
+    let mut command_receipts = Vec::new();
+    for command in commands {
+        generic::dispatch_command(&mut runtime, &command)?;
+        command_receipts.push(runtime.app().command_receipt_report());
+    }
     let mut last_supplied = serde_json::Value::Null;
     for _ in 0..ticks {
         if let Some(frame) = frames.next() {
@@ -349,7 +396,7 @@ fn headless_runtime(
         "last_committed_input": input_observation(runtime.app()),
         "last_committed_supplied_input": last_supplied,
     });
-    Ok((runtime, input))
+    Ok((runtime, input, command_receipts))
 }
 
 /// Only an absent descriptor permits the embedded legacy application fallback.
@@ -408,11 +455,12 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     )?;
     app.set_creation_presentation(manifest.title.clone());
     if options.headless {
-        let (runtime, input) = headless_runtime(
+        let (runtime, input, command_receipts) = headless_runtime(
             app,
             tick_duration,
             options.ticks.unwrap_or(10),
             options.input_frames.as_deref(),
+            options.commands.as_deref(),
         )?;
         let app = runtime.app();
         let mut output = serde_json::json!({
@@ -426,6 +474,12 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             "authored_scene": app.session().scene(),
             "authored_actions": app.session().authoring().actions,
             "runtime_state": app.runtime_state_report(),
+                "initialized": true,
+                "commit_revision": app.runtime_commit_revision().map(|n| n.to_string()),
+                "last_step_commit_revision": app.last_step_commit_revision().map(|n| n.to_string()),
+                "captured_commands": app.command_report(),
+                "command_receipt": app.command_receipt_report(),
+                "command_receipts": command_receipts,
             "query_observations": app.query_observations(),
             "runtime_scene": app.content().scene(),
             "input": input,
@@ -477,11 +531,12 @@ fn execute_generic(options: Options) -> Result<(), String> {
     let mut app = GenericMotionLab::new(session, meshes, tick_duration)?;
     app.set_speed_override(options.speed)?;
     if options.headless {
-        let (runtime, input) = headless_runtime(
+        let (runtime, input, command_receipts) = headless_runtime(
             app,
             tick_duration,
             options.ticks.unwrap_or(10),
             options.input_frames.as_deref(),
+            options.commands.as_deref(),
         )?;
         let app = runtime.app();
         println!(
@@ -496,6 +551,12 @@ fn execute_generic(options: Options) -> Result<(), String> {
                 "authored_scene": app.session().scene(),
                 "authored_actions": app.session().authoring().actions,
             "runtime_state": app.runtime_state_report(),
+                "initialized": true,
+                "commit_revision": app.runtime_commit_revision().map(|n| n.to_string()),
+                "last_step_commit_revision": app.last_step_commit_revision().map(|n| n.to_string()),
+                "captured_commands": app.command_report(),
+                "command_receipt": app.command_receipt_report(),
+                "command_receipts": command_receipts,
                 "query_observations": app.query_observations(),
                 "runtime_scene": app.content().scene(),
                 "input": input,
@@ -527,7 +588,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands"],
             })
         );
         return;
@@ -666,6 +727,30 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let executable = directory.path().join("creation");
         let descriptor = directory.path().join(DESCRIPTOR_NAME);
+        let commands = directory.path().join("commands.json");
+        std::fs::write(&commands, r#"[{"binding_id":"app","command_id":"apply","expected_commit_revision":"0","args":{}}]"#).unwrap();
+        assert_eq!(read_commands(Some(&commands)).unwrap().len(), 1);
+        for bytes in [
+            r#"[{"binding_id":"app","command_id":"apply","expected_commit_revision":0,"args":{}}]"#,
+            r#"[{"binding_id":"app","command_id":"apply","expected_commit_revision":"01","args":{}}]"#,
+            r#"[{"binding_id":"app","command_id":"apply","expected_commit_revision":"0","args":{},"args":{}}]"#,
+        ] {
+            std::fs::write(&commands, bytes).unwrap();
+            assert!(read_commands(Some(&commands)).is_err());
+        }
+        std::fs::write(&commands, serde_json::to_vec(&vec![serde_json::json!({
+            "binding_id":"app", "command_id":"apply", "expected_commit_revision":"0", "args":{}
+        }); 17]).unwrap()).unwrap();
+        assert!(read_commands(Some(&commands)).is_err());
+        assert!(options(&[
+            "--generic-demo",
+            "--headless",
+            "--commands",
+            "commands.json"
+        ])
+        .unwrap()
+        .is_some());
+        assert!(options(&["--generic-demo", "--commands", "commands.json"]).is_err());
         let default = Options::default();
         assert!(select_creation(&default, &executable).unwrap().is_none());
         // Selection must not parse content or silently fall back when it is corrupt.

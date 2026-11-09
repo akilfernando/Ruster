@@ -177,7 +177,7 @@ impl MaterialDraft {
 }
 
 impl SceneEditor {
-    fn material_editable(&self) -> bool {
+    pub(super) fn material_editable(&self) -> bool {
         self.material_editable_for_save(false)
     }
     fn material_editable_for_save(&self, saving: bool) -> bool {
@@ -192,6 +192,7 @@ impl SceneEditor {
             && !self.manipulation.offset_pending()
             && self.draft == self.baseline_fields
             && !self.behavior.pending()
+            && !self.runtime.command_draft_pending()
             && !self.input_actions.pending()
             && (self.recovered_input.is_none() || self.material_draft.is_some())
             && self.dialog.is_none()
@@ -1468,7 +1469,7 @@ mod tests {
         let id = candidates[0].id.clone();
         let (_journal, snapshot) = store.claim(&id).unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 11);
+        assert_eq!(payload["version"], 12);
         assert_eq!(payload["material"]["roughness"], "unfinished roughness");
         assert_eq!(payload["material"]["response_mode"], "dielectric");
         assert_eq!(payload["material"]["roughness_texture"], "pending-map");

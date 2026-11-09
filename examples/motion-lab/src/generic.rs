@@ -8,6 +8,9 @@ use ruster_scene::input::{
     ActionFrame, ActionKind, ActionMap, ActionValue, InputKey, KeyEventAccumulator,
 };
 use ruster_scene::{PropertyValue, Session};
+mod commands;
+use commands::CommandUi;
+pub use commands::{dispatch_command, CommandRequest};
 
 pub const DEMO: &[u8] = include_bytes!("../resources/generic.scene.json");
 pub const FIXED_DT: Duration = Duration::from_millis(100);
@@ -44,6 +47,9 @@ pub struct GenericMotionLab {
     physical_input_owned: bool,
     pending_input: Option<ActionFrame>,
     last_input: Option<(u64, ActionFrame, &'static str)>,
+    run_epoch: u64,
+    command_ui: CommandUi,
+    command_receipt: Option<ruster_behavior::CommandReceipt>,
 }
 
 impl GenericMotionLab {
@@ -81,6 +87,9 @@ impl GenericMotionLab {
             physical_input_owned: false,
             pending_input: None,
             last_input: None,
+            run_epoch: 0,
+            command_ui: CommandUi::default(),
+            command_receipt: None,
         })
     }
 
@@ -100,6 +109,45 @@ impl GenericMotionLab {
             .as_ref()
             .map(Runtime::state_report)
             .unwrap_or_default()
+    }
+    pub fn runtime_commit_revision(&self) -> Option<u64> {
+        self.runtime.as_ref().map(Runtime::commit_revision)
+    }
+    pub fn last_step_commit_revision(&self) -> Option<u64> {
+        self.runtime
+            .as_ref()
+            .and_then(Runtime::last_step_commit_revision)
+    }
+    pub fn command_report(&self) -> serde_json::Value {
+        self.runtime.as_ref().map_or_else(
+            || serde_json::json!([]),
+            |runtime| {
+                let rows: Vec<_> = runtime
+                    .authoring_snapshot()
+                    .bindings
+                    .iter()
+                    .filter(|(_, binding)| {
+                        binding.target == ruster_scene::BindingTarget::Application
+                    })
+                    .flat_map(|(binding_id, binding)| {
+                        binding.commands.iter().map(move |(id, definition)| {
+                            serde_json::json!({"binding_id":binding_id,"command_id":id,
+                        "source_id":binding.source_id,"enabled":binding.enabled,
+                        "schema_hash":runtime.command_schema_hash(binding_id),
+                        "argument_count":definition.arguments.len()})
+                        })
+                    })
+                    .take(ruster_scene::MAX_COMMANDS)
+                    .collect();
+                serde_json::json!(rows)
+            },
+        )
+    }
+    pub fn command_receipt_report(&self) -> serde_json::Value {
+        self.command_receipt
+            .as_ref()
+            .map(commands::receipt_wire)
+            .unwrap_or(serde_json::Value::Null)
     }
     pub fn query_observations(&self) -> &[ruster_behavior::QueryObservation] {
         self.runtime
@@ -252,6 +300,8 @@ impl GenericMotionLab {
         self.cancel_action_input();
         self.action_keys = keys;
         self.last_input = None;
+        self.command_ui = CommandUi::default();
+        self.command_receipt = None;
         self.session = session;
         self.needs_reset = true;
         self.diagnostic = None;
@@ -300,7 +350,13 @@ impl Application for GenericMotionLab {
 
     fn reset(&mut self) -> Result<(), String> {
         self.cancel_action_input();
+        self.needs_reset = true;
         self.last_input = None;
+        self.command_ui = CommandUi::default();
+        let next_epoch = self
+            .run_epoch
+            .checked_add(1)
+            .ok_or("Runtime identity exhausted")?;
         let keys = KeyEventAccumulator::new(self.session.authoring().actions.clone())
             .map_err(|e| e.to_string())?;
         let mut authoring = self.session.authoring().clone();
@@ -332,6 +388,8 @@ impl Application for GenericMotionLab {
         // Engine validated transforms; meshes remain the same immutable Content resources.
         *self.content.scene_mut() = candidate.scene().clone();
         self.runtime = Some(candidate);
+        self.run_epoch = next_epoch;
+        self.command_receipt = None;
         self.action_keys = keys;
         self.needs_reset = false;
         self.diagnostic = None;
@@ -388,6 +446,7 @@ impl Application for GenericMotionLab {
             .step_with_input(runtime, &input);
         if result.is_err() {
             self.cancel_action_input();
+            self.needs_reset = true;
         }
         self.report(result)?;
         self.last_input = Some((step.tick, input, origin));
@@ -505,5 +564,9 @@ impl Application for GenericMotionLab {
             ui.label("Repair in the generic editor, save and reopen this viewer. Last committed motion remains visible.");
         }
         Ok(())
+    }
+    fn ui_with_playback(&mut self, ui: &mut egui::Ui, playing: bool) -> Result<(), String> {
+        self.commands_ui(ui, playing);
+        self.ui(ui)
     }
 }

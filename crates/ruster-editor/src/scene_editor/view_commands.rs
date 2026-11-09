@@ -257,6 +257,11 @@ mod tests {
         );
         editor.runtime.visible = true;
         editor.runtime.frame = Some(crate::behavior_worker::Frame {
+            commit_revision: 0,
+            last_step_commit_revision: None,
+            commit_revision_required: false,
+            command_schema_hash: None,
+            authoring: std::sync::Arc::new(Default::default()),
             state: std::sync::Arc::new(ruster_behavior::RuntimeState::default()),
             query_observations: None,
             input: None,

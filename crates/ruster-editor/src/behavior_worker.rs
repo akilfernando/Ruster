@@ -34,6 +34,11 @@ pub(super) struct RunKey {
 pub(super) struct Frame {
     pub key: RunKey,
     pub tick: u64,
+    pub commit_revision: u64,
+    pub last_step_commit_revision: Option<u64>,
+    pub commit_revision_required: bool,
+    pub command_schema_hash: Option<String>,
+    pub authoring: Arc<Authoring>,
     pub scene: Arc<Scene>,
     pub state: Arc<ruster_behavior::RuntimeState>,
     pub input: Option<Arc<LastConsumedInput>>,
@@ -131,6 +136,7 @@ pub(super) enum Operation {
     Step,
     Invalidate,
     Stop,
+    Command,
 }
 pub(super) enum Command {
     Reset {
@@ -154,6 +160,13 @@ pub(super) enum Command {
         expected_input_epoch: u64,
         frame: ActionFrame,
     },
+    Dispatch {
+        key: RunKey,
+        binding_id: String,
+        expected_commit_revision: u64,
+        command_id: String,
+        arguments: ruster_scene::StateFields,
+    },
     Invalidate {
         key: RunKey,
     },
@@ -169,6 +182,7 @@ impl Command {
             | Self::Pause { key }
             | Self::Step { key }
             | Self::ProgramStep { key, .. }
+            | Self::Dispatch { key, .. }
             | Self::Invalidate { key }
             | Self::Stop { key } => *key,
         }
@@ -179,6 +193,7 @@ impl Command {
             Self::Play { .. } => Operation::Play,
             Self::Pause { .. } => Operation::Pause,
             Self::Step { .. } | Self::ProgramStep { .. } => Operation::Step,
+            Self::Dispatch { .. } => Operation::Command,
             Self::Invalidate { .. } => Operation::Invalidate,
             Self::Stop { .. } => Operation::Stop,
         }
@@ -189,6 +204,10 @@ impl Command {
 }
 #[derive(Debug)]
 pub(super) enum Event {
+    Command {
+        key: RunKey,
+        receipt: ruster_behavior::CommandReceipt,
+    },
     Reset {
         key: RunKey,
         run: RunInfo,
@@ -220,6 +239,7 @@ impl Event {
     pub fn key(&self) -> RunKey {
         match self {
             Self::Reset { key, .. }
+            | Self::Command { key, .. }
             | Self::Step { key, .. }
             | Self::State { key, .. }
             | Self::Error { key, .. }
@@ -720,6 +740,23 @@ impl Worker {
         ) {
             let _ = self.shared.revoke_input(true);
         }
+        if matches!(command, Command::Dispatch { .. }) {
+            match self.debug_stop(key) {
+                Ok(None) => {}
+                Ok(Some(_)) => {
+                    return Err(RequestError {
+                        key,
+                        kind: RequestErrorKind::DebugStopped,
+                    })
+                }
+                Err(_) => {
+                    return Err(RequestError {
+                        key,
+                        kind: RequestErrorKind::Busy,
+                    })
+                }
+            }
+        }
         if let Command::ProgramStep {
             map_identity,
             expected_input_epoch,
@@ -885,6 +922,8 @@ struct Execution {
     playing: bool,
     due: Option<Instant>,
     last_input: Option<Arc<LastConsumedInput>>,
+    published_scene: Option<Arc<Scene>>,
+    published_queries: Option<Arc<[ruster_behavior::QueryObservation]>>,
 }
 impl Execution {
     fn info(&self) -> Option<RunInfo> {
@@ -900,6 +939,8 @@ impl Execution {
         self.runtime = None;
         self.key = None;
         self.last_input = None;
+        self.published_scene = None;
+        self.published_queries = None;
         *shared.input.lock().unwrap_or_else(|p| p.into_inner()) = None;
         if let Some(engine) = self.engine.as_mut() {
             let _ = engine.set_debugger(None);
@@ -930,27 +971,29 @@ fn activate(shared: &Shared, key: RunKey) -> bool {
     }
     true
 }
-fn frame(shared: &Shared, execution: &Execution, repaint: &Option<Repaint>) {
+fn frame(shared: &Shared, execution: &mut Execution, repaint: &Option<Repaint>, state_only: bool) {
     let Some(info) = execution.info() else {
         return;
     };
     if !active(shared, info.key) || shared.cancel.load(Ordering::SeqCst) {
         return;
     }
-    let scene = Arc::new(
-        execution
-            .runtime
-            .as_ref()
-            .expect("run info includes runtime")
-            .scene()
-            .clone(),
-    );
-    let observations = execution
+    let runtime = execution
         .runtime
         .as_ref()
-        .expect("run info includes runtime")
-        .query_observations();
-    let query_observations = (!observations.is_empty()).then(|| Arc::from(observations));
+        .expect("run info includes runtime");
+    if !state_only {
+        execution.published_scene = Some(Arc::new(runtime.scene().clone()));
+        let observations = runtime.query_observations();
+        execution.published_queries = (!observations.is_empty()).then(|| Arc::from(observations));
+    }
+    let scene = Arc::clone(
+        execution
+            .published_scene
+            .as_ref()
+            .expect("Reset publishes scene before commands"),
+    );
+    let query_observations = execution.published_queries.clone();
     let mut latest = shared.latest.lock().unwrap_or_else(|p| p.into_inner());
     if active(shared, info.key) && !shared.cancel.load(Ordering::SeqCst) {
         *latest = Some(Frame {
@@ -963,6 +1006,21 @@ fn frame(shared: &Shared, execution: &Execution, repaint: &Option<Repaint>) {
             ),
             key: info.key,
             tick: info.tick,
+            commit_revision: execution.runtime.as_ref().unwrap().commit_revision(),
+            last_step_commit_revision: execution
+                .runtime
+                .as_ref()
+                .unwrap()
+                .last_step_commit_revision(),
+            commit_revision_required: runtime.commit_revision_required(),
+            command_schema_hash: runtime
+                .authoring_snapshot()
+                .bindings
+                .iter()
+                .find(|(_, binding)| binding.target == ruster_scene::BindingTarget::Application)
+                .and_then(|(id, _)| runtime.command_schema_hash(id))
+                .map(str::to_owned),
+            authoring: Arc::clone(execution.runtime.as_ref().unwrap().authoring_snapshot()),
             scene,
             input: execution.last_input.clone(),
             query_observations,
@@ -1111,11 +1169,62 @@ fn process(
                     execution.runtime = Some(runtime);
                     execution.key = Some(key);
                     execution.last_input = None;
-                    frame(shared, execution, repaint);
+                    frame(shared, execution, repaint, false);
                     Some(Event::Reset {
                         key,
                         run: execution.info().expect("reset committed runtime"),
                     })
+                }
+                Ok(_) => None,
+                Err(diagnostic) => Some(Event::Error {
+                    key,
+                    operation,
+                    diagnostic,
+                    last_good: execution.info(),
+                }),
+            }
+        }
+        Command::Dispatch {
+            binding_id,
+            expected_commit_revision,
+            command_id,
+            arguments,
+            ..
+        } => {
+            if execution.key != Some(key)
+                || execution.playing
+                || shared.cancel.load(Ordering::SeqCst)
+            {
+                return Some(reject(
+                    execution,
+                    key,
+                    operation,
+                    "Command requires a current paused runtime.",
+                ));
+            }
+            let Some(runtime) = execution.runtime.as_mut() else {
+                return Some(reject(
+                    execution,
+                    key,
+                    operation,
+                    "Reset before invoking a command.",
+                ));
+            };
+            let result = execution
+                .engine
+                .as_mut()
+                .expect("runtime owns engine")
+                .dispatch_command(
+                    runtime,
+                    &binding_id,
+                    expected_commit_revision,
+                    &command_id,
+                    &arguments,
+                );
+            match result {
+                Ok(receipt) if active(shared, key) && !shared.cancel.load(Ordering::SeqCst) => {
+                    frame(shared, execution, repaint, true);
+                    Some(Event::Command { key, receipt })
                 }
                 Ok(_) => None,
                 Err(diagnostic) => Some(Event::Error {
@@ -1392,7 +1501,7 @@ fn step_with_admitted(
                 execution.playing = false;
                 execution.due = None;
             }
-            frame(shared, execution, repaint);
+            frame(shared, execution, repaint, false);
             if pause && was_playing {
                 return Some(Event::State {
                     key,
@@ -1447,6 +1556,8 @@ fn run(
         playing: false,
         due: None,
         last_input: None,
+        published_scene: None,
+        published_queries: None,
     };
     let mut pending: Option<Event> = None;
     loop {
@@ -1553,6 +1664,7 @@ mod tests {
                 format!("binding-{id}"),
                 BehaviorBinding {
                     target: ruster_scene::BindingTarget::Object(id.into()),
+                    commands: Default::default(),
                     state_defaults: Default::default(),
                     source_id: "source".into(),
                     enabled: true,
@@ -2223,9 +2335,42 @@ mod tests {
     // must notify its separate condition variable before any queue capacity exists.
     #[test]
     fn paused_debugger_stop_invalidate_and_shutdown_wake_without_actor_service() {
-        for action in 0..3 {
+        for case in 0..6 {
+            let command_case = case >= 3;
+            let action = case % 3;
             let (mut worker, pulses) = worker(Limits::default());
-            let (scene, authoring, point) = debug_fixture();
+            let (scene, authoring, mut point) = debug_fixture();
+            let authoring = if command_case {
+                let mut authoring = (*authoring).clone();
+                let source = authoring.sources.get_mut("source").unwrap();
+                source.host_api_version = ruster_behavior::LIFECYCLE_HOST_API_VERSION;
+                source.text="return {command=function(n,a,p,h)\n local next=h.state('count')+1\n return {state={count=next}}\nend, update=function(o,p,dt,h) return {} end}".into();
+                point.source_hash = ruster_behavior::source_hash(&source.text);
+                point.binding_id = Some("application".into());
+                authoring.bindings.clear();
+                authoring.bindings.insert(
+                    "application".into(),
+                    BehaviorBinding {
+                        target: ruster_scene::BindingTarget::Application,
+                        source_id: "source".into(),
+                        enabled: true,
+                        properties: BTreeMap::new(),
+                        state_defaults: BTreeMap::from([(
+                            "count".into(),
+                            ruster_scene::StateValue::Number(0.0),
+                        )]),
+                        commands: BTreeMap::from([(
+                            "change".into(),
+                            ruster_scene::CommandDefinition {
+                                arguments: BTreeMap::new(),
+                            },
+                        )]),
+                    },
+                );
+                Arc::new(authoring)
+            } else {
+                authoring
+            };
             let key = worker.advance(3, 0).unwrap();
             assert_eq!(
                 worker.set_breakpoints(key, vec![point]).unwrap(),
@@ -2239,8 +2384,50 @@ mod tests {
                 })
                 .unwrap();
             assert!(matches!(wait_event(&worker, &pulses), Event::Reset { .. }));
-            worker.try_request(Command::Step { key }).unwrap();
+            if command_case {
+                worker
+                    .try_request(Command::Dispatch {
+                        key,
+                        binding_id: "application".into(),
+                        expected_commit_revision: 0,
+                        command_id: "change".into(),
+                        arguments: BTreeMap::new(),
+                    })
+                    .unwrap();
+            } else {
+                worker.try_request(Command::Step { key }).unwrap();
+            }
             let stopped = wait_stop(&worker, &pulses, key);
+            if command_case {
+                assert_eq!(stopped.phase, ruster_behavior::Phase::Command);
+                assert_eq!(stopped.attempted_tick, 0);
+                assert_eq!(
+                    (stopped.commit_revision, stopped.attempted_commit_revision),
+                    (0, 1)
+                );
+                assert_eq!(
+                    worker
+                        .try_request(Command::Dispatch {
+                            key,
+                            binding_id: "application".into(),
+                            expected_commit_revision: 0,
+                            command_id: "change".into(),
+                            arguments: BTreeMap::new()
+                        })
+                        .unwrap_err()
+                        .kind,
+                    RequestErrorKind::DebugStopped
+                );
+                assert_eq!(
+                    worker
+                        .last_good_frame()
+                        .unwrap()
+                        .state
+                        .binding("application")
+                        .unwrap()["count"],
+                    ruster_scene::StateValue::Number(0.0)
+                );
+            }
             assert_eq!(*worker.last_good_frame().unwrap().scene, *scene);
             match action {
                 0 => {

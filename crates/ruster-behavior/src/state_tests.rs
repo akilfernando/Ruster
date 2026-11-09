@@ -26,6 +26,7 @@ fn fixture() -> (Scene, Authoring) {
                 enabled: true,
                 properties: BTreeMap::new(),
                 state_defaults: BTreeMap::from([("count".into(), StateValue::Number(0.0))]),
+                commands: Default::default(),
             },
         );
     }
@@ -210,6 +211,7 @@ fn final_state_capacity_allows_balanced_owner_changes_in_either_order() {
                 enabled: false,
                 properties: BTreeMap::new(),
                 state_defaults: fields_with_bytes(bytes),
+                commands: Default::default(),
             },
         );
     }

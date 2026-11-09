@@ -1,8 +1,8 @@
 # F2a — Initialization and paused Application commands
 
-Proposed 2026-11-09 after the user directs work onto the next foundation following accepted F1. Root/Astra recommend the bounded scope below. This is a reviewable proposal. Production implementation, new versions, numeric guards and callback syntax remain unselected until the preimplementation decision. No Goal-tool goal is created.
+Approved for implementation2026-11-09 after the user says “Proceed”. [Decision0045](../decisions/0045-initialization-and-paused-application-commands.md) freezes the selected execution, version, capacity and compatibility contract. Feature retention remains pending qualification. No Goal-tool goal is created.
 
-## Proposed goal
+## Approved goal
 
 A creator can compute initial typed state and define named Application commands, invoke them while simulation is paused through ordinary keyboard-friendly controls or native MCP, inspect the resulting committed state, and deliver the same behavior in a standalone application. Initialization, command failure and Reset preserve atomic run ownership. Commands leave simulation time fixed.
 
@@ -31,7 +31,7 @@ General authored runtime UI, general event delivery and runtime creation/destruc
 
 Root/Astra recommend the coupled slice. It keeps one execution owner and one state model. UI widgets/layout and broader messaging receive their own contracts.
 
-## Proposed execution boundary
+## Selected execution boundary
 
 ### Explicit initialization
 
@@ -39,7 +39,7 @@ Opt-in API5 introduces a distinct optional initialization phase. Construct every
 
 Initialization changes state only. Authored transforms remain the initial transforms. Versioned update validation must be ordered explicitly against the initialized snapshot, and its trial output remains discarded. Any failed later initializer, update trial, capacity check or cancellation preserves the previous complete Runtime. APIs1–4 retain their existing Reset semantics.
 
-The ADR must settle exact callback signatures, optional-update handling and debugger phase names before code. Source-level initialization runs once per successful Reset, including a subsequent explicit Reset of the same authored document. Pause/resume and ordinary Step leave that initialization boundary intact.
+Decision0045 selects the exact callback signatures, required update and diagnostic phase names before code. Source-level initialization runs once per successful Reset, including a subsequent explicit Reset of the same authored document. Pause/resume and ordinary Step leave that initialization boundary intact.
 
 ### Application commands
 
@@ -49,13 +49,13 @@ The command reads one captured committed state and returns an own-state patch. C
 
 Admission initially requires an initialized, paused, non-stale run outside a debugger stop. Running-state command scheduling is a later selected contract. A busy request is rejected before acceptance. Accepted work receives one identifiable terminal outcome through the existing worker owner. Unknown transport outcomes require receipt inspection before another action.
 
-Root-selected capacity candidates for the preimplementation decision are16commands per Application binding,16argument fields per command and16KiB canonical typed invocation data, retaining1024UTF-8-byte Text and existing whole-document/state limits. These are proposed logical guards. Record their rationale and actual memory/latency consequences before retention. Existing16-field page conventions and flat typed-value validation motivate these starting candidates.
+The accepted implementation contract selects16commands per Application binding,16argument fields per command and16KiB canonical typed invocation data, retaining1024UTF-8-byte Text and existing whole-document/state limits. These are logical guards pending measured retention. Record their rationale and actual memory/latency consequences before retention. Existing16-field page conventions and flat typed-value validation motivate these starting candidates.
 
 ### Discovery and authoring ownership
 
 Prefer a small authored catalog on the Application binding over executing Lua to discover commands. That supports the same discoverable forms in editor and MCP, shared Undo/recovery and bounded metadata. The cost is explicit scene/history/recovery evolution. A free-form name/payload alternative has lower authoring-format cost but weaker discoverability and validation before execution.
 
-The next ADR must select catalog representation, schema fingerprint, history/duplication/deletion behavior and version migration. Preserve unknown/unfinished sources as editable authored data, with execution diagnostics. Source handler availability is validated against the accepted run without trusting source-text parsing on the UI thread.
+Decision0045 selects catalog representation, schema fingerprint, history behavior and version migration. Preserve unknown/unfinished sources as editable authored data, with execution diagnostics. Source handler availability is validated against the accepted run without trusting source-text parsing on the UI thread.
 
 ## Committed identity separate from simulation time
 

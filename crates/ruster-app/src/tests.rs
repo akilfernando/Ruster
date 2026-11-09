@@ -6,6 +6,7 @@ struct Counter {
     goal: u64,
     fail: bool,
     dt: Duration,
+    ui_calls: usize,
 }
 impl Counter {
     fn new(goal: u64) -> Self {
@@ -15,10 +16,15 @@ impl Counter {
             goal,
             fail: false,
             dt: Duration::from_millis(10),
+            ui_calls: 0,
         }
     }
 }
 impl Application for Counter {
+    fn ui(&mut self, _ui: &mut egui::Ui) -> Result<(), String> {
+        self.ui_calls += 1;
+        Ok(())
+    }
     fn content(&self) -> &Content {
         &self.content
     }
@@ -46,6 +52,18 @@ impl Application for Counter {
 #[test]
 fn explicit_replay_reset_and_normal_completion_share_one_lifecycle() {
     let mut runtime = Runtime::new(Counter::new(3), Duration::from_millis(10)).unwrap();
+    let context = egui::Context::default();
+    let mut ui_passes = 0_usize;
+    let mut output = context.run_ui(Default::default(), |ui| {
+        ui_passes += 1;
+        runtime.app_mut().ui_with_playback(ui, true).unwrap();
+    });
+    output.textures_delta.clear();
+    assert_eq!(
+        runtime.app().ui_calls,
+        ui_passes,
+        "existing ui callback remains the default entry point"
+    );
     for _ in 0..3 {
         runtime.step().unwrap();
     }

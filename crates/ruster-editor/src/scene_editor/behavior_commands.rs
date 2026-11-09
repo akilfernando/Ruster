@@ -96,6 +96,8 @@ impl SceneEditor {
             "behavior_binding_remove" => &["binding_id"],
             "behavior_property" => &["binding_id", "name"],
             "behavior_property_set" => &["binding_id", "name", "value"],
+            "behavior_command" => &["binding_id", "command_id"],
+            "behavior_command_set" => &["binding_id", "command_id", "definition"],
             "behavior_state_default" => &["binding_id", "name"],
             "behavior_state_default_set" => &["binding_id", "name", "value"],
             "behavior_action" | "behavior_action_remove" => &["action_id"],
@@ -155,6 +157,16 @@ impl SceneEditor {
             return Err(error("stale_revision"));
         }
         match op {
+            "behavior_command" => {
+                let binding = self
+                    .session
+                    .binding(string(args, "binding_id")?)
+                    .ok_or_else(|| error("binding_not_found"))?;
+                return Ok(
+                    json!({"session_token":token,"revision":revision.to_string(),
+                    "binding_id":args["binding_id"],"command_id":args["command_id"],"definition":binding.commands.get(string(args,"command_id")?)}),
+                );
+            }
             "behavior_action" => {
                 let definition = self
                     .session
@@ -180,7 +192,7 @@ impl SceneEditor {
                     .ok_or_else(|| error("binding_not_found"))?;
                 let properties:Vec<_> = binding.properties.iter().skip(offset).take(16).map(|(name,value)| json!({"name":name,"type":match value {PropertyValue::Number(_)=>"number",PropertyValue::Bool(_)=>"bool",PropertyValue::Text(_)=>"text",PropertyValue::Vec3(_)=>"vec3",PropertyValue::ObjectRef(_)=>"object_ref",PropertyValue::AssetRef(_)=>"asset_ref"}})).collect();
                 return Ok(
-                    json!({"session_token":token,"revision":revision.to_string(),"binding_id":args["binding_id"],"object_id":binding.object_id(),"target":binding.object_id().is_none().then(||json!({"type":"application"})),"source_id":binding.source_id,"enabled":binding.enabled,"properties":properties,"property_count":binding.properties.len(),"state_defaults":binding.state_defaults.iter().skip(offset).take(16).map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>(),"state_default_count":binding.state_defaults.len(),"next_state_offset":(offset.saturating_add(16)<binding.state_defaults.len()).then(||(offset+16).to_string()),"next_offset":(offset.saturating_add(16)<binding.properties.len()).then(||(offset+16).to_string())}),
+                    json!({"session_token":token,"revision":revision.to_string(),"binding_id":args["binding_id"],"object_id":binding.object_id(),"target":binding.object_id().is_none().then(||json!({"type":"application"})),"source_id":binding.source_id,"enabled":binding.enabled,"properties":properties,"property_count":binding.properties.len(),"commands":binding.commands.iter().skip(offset).take(16).map(|(id,definition)|json!({"command_id":id,"argument_count":definition.arguments.len()})).collect::<Vec<_>>(),"command_count":binding.commands.len(),"command_schema_hash":format!("{:x}",Sha256::digest(serde_json::to_vec(&binding.commands).expect("valid catalog"))),"state_defaults":binding.state_defaults.iter().skip(offset).take(16).map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>(),"state_default_count":binding.state_defaults.len(),"next_state_offset":(offset.saturating_add(16)<binding.state_defaults.len()).then(||(offset+16).to_string()),"next_offset":(offset.saturating_add(16)<binding.properties.len()).then(||(offset+16).to_string())}),
                 );
             }
             "behavior_state_default" => {
@@ -214,6 +226,17 @@ impl SceneEditor {
             return Err(error("drafts_pending"));
         }
         let result = match op {
+            "behavior_command_set" => {
+                let definition: Option<ruster_scene::CommandDefinition> =
+                    serde_json::from_value(args["definition"].clone())
+                        .map_err(|_| error("invalid_arguments"))?;
+                self.session.set_command_definition(
+                    revision,
+                    string(args, "binding_id")?,
+                    string(args, "command_id")?,
+                    definition,
+                )
+            }
             "behavior_action_set" => {
                 let definition: ActionDefinition =
                     serde_json::from_value(args["definition"].clone())
@@ -243,6 +266,7 @@ impl SceneEditor {
                     source_id: string(args, "source_id")?.into(),
                     enabled: true,
                     properties: BTreeMap::new(),
+                    commands: Default::default(),
                     state_defaults: BTreeMap::new(),
                 },
             ),
@@ -273,6 +297,11 @@ impl SceneEditor {
                             .session
                             .binding(id)
                             .map(|b| b.properties.clone())
+                            .unwrap_or_default(),
+                        commands: self
+                            .session
+                            .binding(id)
+                            .map(|binding| binding.commands.clone())
                             .unwrap_or_default(),
                         state_defaults: self
                             .session
