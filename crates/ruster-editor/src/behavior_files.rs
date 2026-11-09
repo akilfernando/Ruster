@@ -22,6 +22,17 @@ const MAX_LAUNCH_ARGS: usize = 32;
 const MAX_LAUNCH_BYTES: usize = 16 * 1024;
 const MAX_ARGUMENT_BYTES: usize = 4096;
 
+fn known_lua_api(language: &str, api: u32) -> bool {
+    language == ruster_behavior::LANGUAGE_ID
+        && matches!(
+            api,
+            ruster_behavior::HOST_API_VERSION
+                | ruster_behavior::INPUT_HOST_API_VERSION
+                | ruster_behavior::SPATIAL_HOST_API_VERSION
+                | ruster_behavior::STATE_HOST_API_VERSION
+        )
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum ErrorKind {
     Unsaved,
@@ -194,13 +205,27 @@ impl Context {
     ) -> Result<PathBuf, FilesError> {
         id(source_id)?;
         id(language)?;
-        let ext = if language == "lua54" && api == 1 {
+        let ext = if known_lua_api(language, api) {
             "lua"
         } else {
             "txt"
         };
         Ok(self.root.join("src").join(format!("{source_id}.{ext}")))
     }
+}
+fn guard_legacy_lua_copy(source: &BehaviorSource, path: &Path) -> Result<(), FilesError> {
+    if known_lua_api(&source.language_id, source.host_api_version)
+        && source.host_api_version != ruster_behavior::HOST_API_VERSION
+    {
+        let previous = path.with_extension("txt");
+        if read(&previous, MAX_SOURCE_BYTES)?.is_some() {
+            return Err(error(ErrorKind::Conflict, format!(
+                "Existing API{} text working copy {} and Lua destination {} were preserved. Explicitly preserve/rename the previous text copy before exporting or refreshing the Lua copy.",
+                source.host_api_version, previous.display(), path.display()
+            )));
+        }
+    }
+    Ok(())
 }
 struct Lease(File);
 impl Lease {
@@ -718,6 +743,7 @@ fn sync(
     if !real_dir(&context.root.join("src"), create)? {
         return Ok(SyncOutcome::Missing { path });
     }
+    guard_legacy_lua_copy(source, &path)?;
     let bytes = read(&path, MAX_SOURCE_BYTES)?;
     let embedded_hash = hash(source.text.as_bytes());
     let Some(bytes) = bytes else {
@@ -809,6 +835,7 @@ fn observed_source(
         ));
     }
     let path = context.source_path(source_id, &source.language_id, source.host_api_version)?;
+    guard_legacy_lua_copy(source, &path)?;
     let bytes = read(&path, MAX_SOURCE_BYTES)?.ok_or_else(|| {
         error(
             ErrorKind::Missing,
@@ -1082,7 +1109,7 @@ fn tooling_files(authoring: &Authoring) -> Result<GeneratedTooling, FilesError> 
     let mut files = BTreeMap::from([("types/host.lua".into(), host_types.into_bytes())]);
     let mut hints = BTreeMap::new();
     for (source_id, source) in &authoring.sources {
-        if source.language_id == "lua54" && (1..=4).contains(&source.host_api_version) {
+        if known_lua_api(&source.language_id, source.host_api_version) {
             files.insert(
                 format!("types/sources/{source_id}.lua"),
                 source_types(source_id, authoring)?.into_bytes(),
@@ -1411,6 +1438,84 @@ mod tests {
     fn three_way_refresh_preserves_conflicts_and_returns_guarded_import_candidates() {
         let temp = tempfile::tempdir().unwrap();
         let context = context(temp.path(), "scene.json");
+        for (index, language, api, extension) in [
+            (0, "lua54", 1, "lua"),
+            (1, "lua54", 2, "lua"),
+            (2, "lua54", 3, "lua"),
+            (3, "lua54", 4, "lua"),
+            (4, "lua54", 5, "txt"),
+            (5, "future-language", 4, "txt"),
+        ] {
+            let mut script = source("unfinished source(");
+            script.language_id = language.into();
+            script.host_api_version = api;
+            let (path, _) =
+                exported(export(&context, &format!("extension-{index}"), &script, None).unwrap());
+            assert_eq!(path.extension().unwrap(), extension);
+        }
+        // Already-exported API2–4 text files can contain newer external edits.
+        // Their unchanged version1 manifests remain readable, but neither a
+        // fresh Lua destination nor explicit observed-file resolution may hide
+        // that prior path. Reconciliation is an explicit creator operation.
+        for api in 2..=4 {
+            let legacy_temp = tempfile::tempdir().unwrap();
+            let legacy_context = self::context(legacy_temp.path(), "legacy.scene.json");
+            legacy_context.prepare(true).unwrap();
+            real_dir(&legacy_context.root.join("src"), true).unwrap();
+            let mut script = source("embedded legacy text");
+            script.host_api_version = api;
+            let original_base = base(
+                &legacy_context,
+                "legacy",
+                &script,
+                hash(script.text.as_bytes()),
+            );
+            let mut manifest = Manifest::empty(&legacy_context);
+            manifest.sources.insert(
+                "legacy".into(),
+                ManifestSource {
+                    language_id: script.language_id.clone(),
+                    host_api_version: api,
+                    embedded_sha256: original_base.embedded_sha256.clone(),
+                    file_sha256: original_base.file_sha256.clone(),
+                },
+            );
+            let manifest_bytes = serde_json::to_vec(&manifest).unwrap();
+            fs::write(legacy_context.root.join(MANIFEST_FILE), &manifest_bytes).unwrap();
+            let loaded = load_manifest(&legacy_context).unwrap();
+            assert_eq!(loaded.source("legacy").unwrap(), original_base);
+            let canonical = legacy_context.source_path("legacy", "lua54", api).unwrap();
+            let previous = canonical.with_extension("txt");
+            let changed = b"newer external legacy text";
+            fs::write(&previous, changed).unwrap();
+            for outcome in [
+                refresh(&legacy_context, "legacy", &script, Some(&original_base)),
+                export(&legacy_context, "legacy", &script, Some(&original_base)),
+                export(&legacy_context, "legacy", &script, None),
+                import_observed(&legacy_context, "legacy", &script, &hash(changed)),
+                overwrite_observed(&legacy_context, "legacy", &script, &hash(changed)),
+            ] {
+                let error = outcome.unwrap_err();
+                assert_eq!(error.kind, ErrorKind::Conflict);
+                assert!(error.message.contains(previous.to_str().unwrap()));
+                assert!(error.message.contains(canonical.to_str().unwrap()));
+                assert!(!canonical.exists());
+                assert_eq!(fs::read(&previous).unwrap(), changed);
+            }
+            fs::write(&canonical, b"independent Lua copy").unwrap();
+            assert_eq!(
+                export(&legacy_context, "legacy", &script, Some(&original_base))
+                    .unwrap_err()
+                    .kind,
+                ErrorKind::Conflict
+            );
+            assert_eq!(fs::read(&canonical).unwrap(), b"independent Lua copy");
+            assert_eq!(fs::read(&previous).unwrap(), changed);
+            assert_eq!(
+                fs::read(legacy_context.root.join(MANIFEST_FILE)).unwrap(),
+                manifest_bytes
+            );
+        }
         let mut embedded = source("unfinished source(");
         assert_eq!(context.scene(), temp.path().join("scene.json"));
         #[cfg(unix)]

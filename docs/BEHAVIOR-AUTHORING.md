@@ -62,6 +62,8 @@ User-confirmed2026-11-04: use **Zed** as the preferred external editor; the user
 
 Embedded source remains authoritative. Generated filenames use stable IDs/hashes, never labels. Track exported embedded hash and last synchronized regular-file hash. Explicit Refresh or focus-return checks compare embedded/file/base: import file-only changes through history; rewrite only an unchanged expected working file; preserve both sides on conflict. Missing/invalid files remain repairable. No per-frame polling or silently overwritten work.
 
+Known Lua host APIs1–4 export normal `.lua` working files. Unknown language/API metadata retains `.txt`. An existing legacy API2–4 `.txt` copy blocks creating or resolving the new Lua path with an explicit conflict naming both files. Preserve and reconcile that copy explicitly before Export/Refresh. Version1 manifests remain readable, and this correction performs no automatic file migration or overwrite.
+
 Launch a configured executable with argument vectors and file/line placeholders, never a shell command. Generate project-local LuaLS configuration and type stubs; do not modify global editor settings automatically. Derive property declarations from actual bindings, including optional fields/type unions when a shared source has differing sets. Escape supported names; do not invent a source-schema parser or silently convert stored values. Verify actual completion/definition navigation and a two-sided conflict, not only generated-file existence.
 
 Diagnostics navigate by source ID+hash+line and binding/object context. For stale runs, show the captured source read-only rather than highlighting an unrelated line in edited code.
