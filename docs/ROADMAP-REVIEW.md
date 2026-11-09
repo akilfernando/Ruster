@@ -436,3 +436,29 @@ Valid-load timing retains isolated slow observations in both binaries, opposing 
 The 5% timing and 2 MiB valid-process regression guards are agent-selected engineering tradeoffs, frozen before production edits and candidate results. They are separate from user SLAs and the 60 Hz interaction target. Setup failures from metadata unit matching, private diagnostic preparation and inaccessible process executables are preserved. The repaired guard records partial executable visibility; root's exclusive execution discipline supplements it. No security or power setting is changed.
 
 The result serves creator reliability and lean loading within a local ownership correction. Stop at this accepted milestone. The CPU/GPU geometry-budget mismatch AUD-006, disposal AUD-007 and broader lifecycle/hardware/feature work retain their own review boundaries.
+
+## Reliability milestone evaluations — 2026-11-09
+
+Root/Astra separately retain AUD-006, AUD-008/016 and AUD-007. Product source is `cc6aed6`. The hybrid schedule keeps independent source work concurrent while root serializes builds, measurements and native actions. [Evidence](evidence/RELIABILITY-MILESTONES.md) owns the reproducible records and limitations.
+
+### Renderable geometry admission — AUD-006
+
+Creators can import, assign, save, reopen and deliver a47.25MiB geometry project through ordinary editing and actual MCP without representation-only cube substitution. Above-cap import rejects consistently and preserves source/catalog/document bytes. Exact48MiB UV-less/mixed production callback fixtures verify actual buffers and intended pixels. Both actual standalone applications retain18meshes through headless relocation and visible NVIDIA execution. Retain the compact representation and unchanged48MiB cap under0041.
+
+The leaner payload has explicit integration costs. Geometry CPU measurements are heterogeneous. The mixed color pass rises by a median paired0.304µs in the small fixture, and additional pipelines increase HDR/custom-shader setup observations. A fixed8-byte compatibility buffer remains outside admitted imported payload. This evidence supports the creator contract and concrete storage accounting, without a broad speedup, whole-driver peak or cross-hardware guarantee.
+
+### Source-unit picking and safe framing — AUD-008/016
+
+Equivalent visible triangles now select under reciprocal source units. Checked intersections preserve world-distance ordering. Ordinary native clicks distinguish triangle interiors from empty bounding-box regions. Invalid Fit-all, selected F and mixed light/geometry Fit preserve the exact preceding valid camera and provide actionable feedback. A successful mixed Fit clears its own prior error. Explicit MCP camera/selection compatibility remains. Retain0043.
+
+This precision repair has a measured cost. The declared65,536-triangle full traversal rises from approximately0.54ms to0.98ms in median-of-process-medians, adding about0.44ms. A private equivalent early-out fails its predeclared order-stratified preference, so it is rejected without changing production. The result improves correctness within the current linear traversal. Acceleration structures and raw JSON/schema camera endpoint alignment require separate bounded choices.
+
+### Worker-owned export cleanup — AUD-007
+
+Creators retain truthful committed receipts while staging cleanup and final worker completion run through bounded ownership. Actual destructor tests cover cancellation, stale completion, drop/disconnect, cleanup errors and terminal-delivered/worker-still-running cases. Normal ordinary/MCP delivery passes. A matched-payload native trace moves all27 final staging deletions from the editor owner to its existing worker. Retain0042.
+
+One traced pair measures filesystem deletion spans only. It supplies no whole-poll/frame-speed comparison. The worker stays occupied through cleanup and actual exit, preserving the existing capacity/Close gate. Abrupt termination remains unable to guarantee cleanup. Published results retain success plus a secondary warning if cleanup fails.
+
+### Product direction after retention
+
+These milestones make visible content, interaction and delivery more dependable while preserving bounded resource owners. Stop at these contracts. Return to one concrete creator exercise before selecting hierarchy/assemblies, animation, physics, audio or another capability. Existing capability gaps remain visible in the engine inventory. Intel presentation, physical-human qualification and broader memory/energy/hardware validation retain their separate status. No M9 completion or publication follows from this review.

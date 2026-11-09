@@ -1,6 +1,6 @@
 # Renderable mesh admission milestone
 
-Prepared 2026-11-09 after the user asks where development should go following accepted AUD-005. The user authorized tackling the reliability milestones on 2026-11-09. Investigation is active. Root selects a hybrid execution schedule, with geometry first, independent export cleanup in parallel and selection/Fit preparation read-only until the rendering contract is settled. Builds, measurements and desktop tests remain serialized. Each milestone requires separate acceptance and evaluation. No new Goal-tool goal has been created.
+Prepared 2026-11-09 after the user asks where development should go following accepted AUD-005. The user authorized tackling the reliability milestones on 2026-11-09. This milestone is accepted on2026-11-09 after root/Astra review. Root selects a hybrid execution schedule, with geometry first, independent export cleanup in parallel and selection/Fit preparation read-only until the rendering contract is settled. Builds, measurements and desktop tests remain serialized. Each milestone requires separate acceptance and evaluation. No new Goal-tool goal has been created.
 
 ## Creator outcome
 
@@ -33,10 +33,8 @@ Stop when this specific contract is verified and evaluated. Streaming, a general
 
 Take source-unit-consistent selection/Fit (AUD-008/016) and export cleanup ownership (AUD-007) as separately accepted milestones. Then return to one concrete creator exercise to choose the next capability. Hierarchy/assemblies, animation, physics and audio remain candidates whose priority depends on that exercise. The remaining audit ledger stays active without requiring every finding to close before feature work.
 
-## Active investigation checkpoint — 2026-11-09
+## Final evaluation — 2026-11-09
 
-Root captures geometry RED and the independent export-staging destructor RED before production changes. The selected geometry prototype is [compact split storage](../decisions/0041-compact-mesh-gpu-storage.md). Independent export work uses [worker-owned staging](../decisions/0042-worker-owned-export-staging.md). Both are candidates awaiting verification. Selection/Fit preparation identifies a source-unit-sensitive intersection cutoff and camera-domain failures; implementation follows the geometry contract. No reliability milestone is accepted yet.
+Root/Astra retain compact storage after the reproduced GPU failure, exact/near/mixed buffer and pixel probes, ordinary/native MCP admission and preservation checks, current default reopening and both exact headless/native standalone applications. Three existing Vulkan probes and the final changed-package/default/inspection gates pass. [Evidence](../evidence/RELIABILITY-MILESTONES.md) records costs, source/binary pins, failed preparations and qualifications.
 
-Candidate verification now passes the existing three NVIDIA Vulkan probes. Actual GPU buffer sizes equal47.25MiB near-limit and48MiB exact UV-less/mixed payloads, plus the explicitly separate cube/constant-UV overhead. Direct pixel assertions preserve the intended triangles. Texture/lighting/HDR/custom zero-UV/UV-presence replacement, shader rejection, depth and genuine retirement probes pass with captured validation and synchronization scanning. Costs, complete native workflows and final gates remain pending.
-
-The changed-package gate against660b804 passes158Rust cases, strict lint, formatting and docs in69.05seconds. Its3ignored GPU probes pass separately above. Inspection strict lint and128editor cases pass, with1existing device case ignored. No performance improvement or completed native milestone is claimed at this checkpoint.
+The separately scoped source-unit picking/Fit and worker-local export cleanup milestones also pass their own final evaluations. [Evaluations](../ROADMAP-REVIEW.md#reliability-milestone-evaluations--2026-11-09). The fixed8-byte compatibility buffer is outside the48MiB imported payload cap and included in total renderer accounting. Whole-process/driver peaks, Intel presentation and physical-human testing retain their separate scope. Stop here. A concrete creator exercise will inform the next capability proposal.

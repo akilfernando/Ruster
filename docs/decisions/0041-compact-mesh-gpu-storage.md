@@ -1,12 +1,12 @@
 # 0041 — Compact GPU mesh storage
 
-Date 2026-11-09. Status candidate architecture under implementation and verification. Root selects this bounded prototype after Astra's review. Retention remains pending the renderable-admission milestone.
+Date 2026-11-09. Status accepted by root/Astra for the separately scoped reliability milestone after final source, correctness, cost and native review. Product source `cc6aed6`.
 
 ## Context
 
-CPU admission counts position/normal vertices at24bytes, optional UVs at8bytes and indices at4bytes under48MiB. The renderer currently expands every vertex to32bytes. A root-run NVIDIA Vulkan production-callback fixture reproduces47.25MiB accepted geometry becoming an empty GPU mesh closure and18fallback cubes. The capture and failure are retained in `/home/akilf/Projects/Ruster-Audits/reliability-20261109/baseline/`.
+CPU admission counts position/normal vertices at24bytes, optional UVs at8bytes and indices at4bytes under48MiB. At the baseline, the renderer expanded every vertex to32bytes. A root-run NVIDIA Vulkan production-callback fixture reproduces47.25MiB accepted geometry becoming an empty GPU mesh closure and18fallback cubes. The capture and failure are retained in `/home/akilf/Projects/Ruster-Audits/reliability-20261109/baseline/`.
 
-## Candidate decision
+## Decision
 
 Split GPU position/normal and optional UV storage. Use an explicitly packed24byte upload type, retaining existing indices, referenced-vertex bounds and weak source identities. Imported GPU mesh payload then equals authoritative CPU payload. Keep the48MiB cap unchanged.
 
@@ -28,4 +28,8 @@ Verify small UV/non-UV/mixed appearance, exact-cap accepted closures, defensive 
 
 Astra consulted these sources on2026-11-09. The pinned local wgpu-core30.0.1 vertex-layout validation and draw bounds explicitly support zero stride. The [WebGPU vertex-buffer layout specification](https://gpuweb.github.io/gpuweb/#dictdef-gpuvertexbufferlayout) permits it. [Godot4.5 mesh storage](https://raw.githubusercontent.com/godotengine/godot/4.5-stable/servers/rendering/renderer_rd/storage_rd/mesh_storage.cpp) uses separate/default attributes. [Bevy0.17.3 mesh packing](https://raw.githubusercontent.com/bevyengine/bevy/v0.17.3/crates/bevy_mesh/src/mesh.rs) illustrates a legitimate interleaved design. These comparisons guide the candidate and do not establish Ruster performance or driver compatibility.
 
-Actual Vulkan validation, rendered output and measured representation costs remain required. Intel presentation retains its separate unresolved qualification.
+Actual Vulkan validation, rendered output and representation-cost observations pass within the final evidence scope. Intel presentation retains its separate unresolved qualification.
+
+## Acceptance and remaining qualification
+
+[Final evidence](../evidence/RELIABILITY-MILESTONES.md) records red/green owners, final affected gates, NVIDIA Vulkan and ordinary/native MCP workflows, fresh delivery, measured costs and independent raw review. [Milestone evaluation](../ROADMAP-REVIEW.md#reliability-milestone-evaluations--2026-11-09) records the retention rationale. Earlier future-tense verification sections describe the pre-acceptance obligations, now satisfied within that declared evidence scope. Intel presentation, physical-human interaction and whole-process/driver memory peaks remain separately qualified.
