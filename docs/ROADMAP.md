@@ -33,6 +33,10 @@ Terrain/open worlds, networking/multiplayer, broader VFX/particles/cinematics, p
 
 The2026-11-08engineering improvement first phase is accepted under its [evaluation](ROADMAP-REVIEW.md#engineering-first-phase-attribution-evaluation--2026-11-08). Recovery and editable-source integrity, honest measurement metadata, native creator workflow references and ordinary Open camera restoration qualify within their recorded limits. The subsequently authorized [asset-admission repair](plans/ASSET-ADMISSION-EXPERIMENT.md#accepted-result--2026-11-08) is accepted after its own loading/overlap baseline, source/correctness checks and fixed paired measurements. Remaining audit repairs require separately bounded selection. Broader capability stages and M9 retain their existing scope.
 
+## Foundation-first execution — 2026-11-09
+
+The user directs addressing the remaining significant gaps before a test project. The [foundation work packages](plans/CREATOR-FOUNDATIONS.md) now own the working dependency order and supersede an immediate substantial-game exercise. Runtime state/nonvisual ownership, lifecycle/runtime UI, composition, content/animation, physics/audio/devices/player saves, visual completion and scale receive separate bounded milestones. [F1 runtime state](plans/F1-RUNTIME-STATE.md) is in source/contract investigation. Each slice retains focused native/component/export verification and its own quality/cost evaluation. The package order is agent-selected and revisable with documented dependencies. A later integrated project tests the accepted facilities together.
+
 ## Session and promotion gates
 
 Select **one** slice at a time. Write its start state, final artifact, dependency choices, acceptance journeys and exclusions before setting the goal. Conduct an early feasibility review across the full import→authoring→render→export path before extensive UI or format work. If a new fundamental dependency appears, replan explicitly; do not substitute a sample-specific workaround or silently add another subsystem. Use [session goal discipline](DIRECTION.md#session-goal-discipline) and [testing policy](TESTING.md).

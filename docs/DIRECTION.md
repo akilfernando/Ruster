@@ -12,6 +12,10 @@ User experience is the primary product pillar. Performance, reliability and open
 
 The user explicitly confirms that Ruster is the foundation through which creators implement their own scoring systems, menus and other application rules. Reusable state, scripting, UI and lifecycle facilities must support creator-defined designs through code, direct editing and native MCP. Example challenges supply acceptance exercises for those capabilities. Their particular scoring/objective/menu rules are application content. The next-work recommendation remains a proposal. Engine architecture and the acceptance exercise require their own bounded selection.
 
+## Foundation-first execution clarification — 2026-11-09
+
+The user directs addressing remaining significant gaps before a test project. Develop the reusable creator facilities in bounded milestones under the [foundation sequence](plans/CREATOR-FOUNDATIONS.md), starting with runtime-state/nonvisual-owner investigation. Focused correctness, native usability, MCP, recovery, standalone and cost fixtures remain part of every milestone. The later integrated project tests the assembled facilities. Stage order and implementation choices remain source-informed agent proposals until their specific decision/acceptance gates.
+
 ## Project ethos: serve the creator
 
 Confirmed by the user on 2026-11-04: having systems in place is useful only insofar as those systems serve end users and help them create what they want to create. Creative intent should guide the engine; the reference examples should not define the limits of what people can imagine building with it.
