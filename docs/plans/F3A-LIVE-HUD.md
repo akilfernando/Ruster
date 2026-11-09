@@ -1,8 +1,8 @@
 # F3a — Creator-authored live HUD
 
-Proposed 2026-11-10 after the user requests the next goal plan. Root/Astra recommend this slice following accepted F1 runtime state and F2a lifecycle/commands. Implementation and a Goal-tool goal are not approved or started. The accepted F2a performance tradeoff in [0046](../decisions/0046-f2a-measured-performance-tradeoff.md) remains recorded, and its profiling investigation is closed.
+Approved for implementation 2026-11-10 after the user says “Ok, let's do it”. Root/Astra recommended this slice following accepted F1 runtime state and F2a lifecycle/commands. [Decision0047](../decisions/0047-read-only-creator-hud.md) records the selected implementation contract. A Goal-tool goal is not created. The accepted F2a performance tradeoff in [0046](../decisions/0046-f2a-measured-performance-tradeoff.md) remains recorded, and its profiling investigation is closed.
 
-## Proposed goal
+## Approved creator outcome
 
 A creator can author a small screen-space HUD containing static text and labels bound to their own committed application state through either ordinary editor controls or native MCP, then save, recover and export it with matching placement and values. Complete this bounded workflow and evaluate it before selecting interactive UI.
 

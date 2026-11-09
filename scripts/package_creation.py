@@ -55,6 +55,8 @@ STATE_PROFILE = {**SPATIAL_PROFILE,
                  "capabilities": [*SPATIAL_PROFILE["capabilities"], "runtime_state"]}
 LIFECYCLE_PROFILE = {**STATE_PROFILE,
                      "capabilities": [*STATE_PROFILE["capabilities"], "lifecycle_commands"]}
+HUD_PROFILE = {**LIFECYCLE_PROFILE,
+               "capabilities": [*LIFECYCLE_PROFILE["capabilities"], "runtime_hud"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -168,7 +170,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -686,6 +688,89 @@ def validate_state_fields(document: dict) -> None:
                         binding(delta[endpoint])
 
 
+def typed_hud(value: object) -> dict:
+    """Normalize serde defaults and validate authored data, without resolving state."""
+    defaults = {"enabled": False, "anchor": "top_left", "width": 320.0,
+                "margin": 12.0, "spacing": 6.0, "font_size": 14.0,
+                "text_color": [1.0] * 4, "background": [0.08, 0.08, 0.08, 0.9],
+                "elements": []}
+    if not isinstance(value, dict) or set(value) - defaults.keys():
+        raise ValueError("invalid HUD fields")
+    hud = {**defaults, **value}
+    if type(hud["enabled"]) is not bool or hud["anchor"] not in (
+            "top_left", "top_right", "bottom_left", "bottom_right"):
+        raise ValueError("invalid HUD enabled flag or anchor")
+    for name, minimum, maximum in (("width", 64, 1024), ("margin", 0, 256),
+                                    ("spacing", 0, 64), ("font_size", 8, 48)):
+        number = hud[name]
+        if type(number) not in (int, float) or not minimum <= number <= maximum:
+            raise ValueError("HUD layout values exceed their finite bounds")
+    for name in ("text_color", "background"):
+        color = hud[name]
+        if (not isinstance(color, list) or len(color) != 4 or any(
+                type(channel) not in (int, float) or not 0 <= channel <= 1 for channel in color)):
+            raise ValueError("HUD color requires four finite channels in0..1")
+    if not isinstance(hud["elements"], list) or len(hud["elements"]) > 32:
+        raise ValueError("HUD requires at most32 labels")
+    elements, identities, text_bytes = [], set(), 0
+    for label in hud["elements"]:
+        exact_fields(label, {"id", "source"}, "HUD label")
+        identity = label["id"]
+        if not isinstance(identity, str) or not IDENTITY.fullmatch(identity) or identity in identities:
+            raise ValueError("HUD label IDs must be valid and unique")
+        identities.add(identity)
+        source = label["source"]
+        if not isinstance(source, dict):
+            raise ValueError("invalid HUD source")
+        if source.get("kind") == "static":
+            exact_fields(source, {"kind", "text"}, "static HUD source")
+            texts = [source["text"]]
+        elif source.get("kind") == "state":
+            source = {"prefix": "", "suffix": "", "precision": 2, **source}
+            exact_fields(source, {"kind", "binding_id", "field", "value_type", "prefix", "suffix", "precision"}, "state HUD source")
+            if any(not isinstance(source[key], str) or not IDENTITY.fullmatch(source[key])
+                   for key in ("binding_id", "field")):
+                raise ValueError("invalid HUD state reference")
+            if (source["value_type"] not in ("number", "bool", "text", "vec3")
+                    or type(source["precision"]) is not int or not 0 <= source["precision"] <= 6):
+                raise ValueError("invalid HUD value type or precision")
+            texts = [source["prefix"], source["suffix"]]
+        else:
+            raise ValueError("invalid HUD source kind")
+        if any(not isinstance(text, str) for text in texts):
+            raise ValueError("HUD authored text must be strings")
+        count = sum(len(text.encode()) for text in texts)
+        if count > 1024:
+            raise ValueError("HUD label authored text exceeds1024 UTF-8 bytes")
+        text_bytes += count
+        elements.append({"id": identity, "source": source})
+    if text_bytes > 32 * 1024:
+        raise ValueError("HUD authored text exceeds32KiB")
+    hud["elements"] = elements
+    return hud
+
+
+def validate_hud_fields(document: dict) -> None:
+    version = document["format_version"]
+    authoring = document.get("authoring", {})
+    if isinstance(authoring, dict) and "hud" in authoring:
+        if version < 15:
+            raise ValueError("HUD requires Scene15 runtime_hud")
+        typed_hud(authoring["hud"])
+    for stack in ("undo", "redo"):
+        changes = document.get(stack, [])
+        for change in changes if isinstance(changes, list) else []:
+            if not isinstance(change, dict) or "hud" not in change:
+                continue
+            if version < 15:
+                raise ValueError("HUD history requires Scene15 runtime_hud")
+            delta = change["hud"]
+            if delta is not None:
+                exact_fields(delta, {"before", "after"}, "HUD history")
+                typed_hud(delta["before"])
+                typed_hud(delta["after"])
+
+
 def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     """Derive current runtime dependencies independently of the content request.
 
@@ -695,8 +780,9 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     version = document.get("format_version")
     scene = document.get("scene")
     if (document.get("format") != "ruster-scene" or type(version) is not int
-            or not 1 <= version <= 14 or not isinstance(scene, dict)):
-        raise ValueError("content requires a supported Scene1–14 document")
+            or not 1 <= version <= 15 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–15 document")
+    validate_hud_fields(document)
     validate_state_fields(document)
     validate_collider_fields(document)
     validate_input_fields(document)
@@ -757,9 +843,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
-    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10):
+    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11):
         raise ValueError("invalid content schema")
-    tick_field = "tick_nanos" if schema in (7, 8, 9, 10) else "tick_millis"
+    tick_field = "tick_nanos" if schema in (7, 8, 9, 10, 11) else "tick_millis"
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
@@ -767,7 +853,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     if "initial_camera" in content:
         content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
-    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema in (7, 8, 9, 10) else (1, 1000)
+    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema in (7, 8, 9, 10, 11) else (1, 1000)
     if (not isinstance(title, str) or not title or title != title.strip()
             or len(title.encode()) > 128 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in title)
             or type(content[tick_field]) is not int or not tick_minimum <= content[tick_field] <= tick_maximum):
@@ -787,8 +873,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
             or schema == 7 and document["format_version"] != 11
             or schema == 8 and document["format_version"] != 12
             or schema == 9 and document["format_version"] != 13
-            or schema == 10 and document["format_version"] != 14):
-        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13; schema10 requires Scene14")
+            or schema == 10 and document["format_version"] != 14
+            or schema == 11 and document["format_version"] != 15):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13; schema10 requires Scene14; schema11 requires Scene15")
     meshes, textures = content["meshes"], content.get("textures", {})
     if (not isinstance(meshes, dict) or not isinstance(textures, dict)
             or len(meshes) + len(textures) > MAX_MESHES):
@@ -902,29 +989,31 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
     content, scene_data, document, source_specs = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
-    if content["schema"] == 10 and kit["profile"] != LIFECYCLE_PROFILE:
+    if content["schema"] == 11 and kit["profile"] != HUD_PROFILE:
+        raise ValueError("runtime kit does not support Scene15 runtime_hud; prepare a current runtime kit")
+    if content["schema"] == 10 and kit["profile"] not in (LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene14 lifecycle_commands; prepare a current runtime kit")
-    if content["schema"] == 9 and kit["profile"] not in (STATE_PROFILE, LIFECYCLE_PROFILE):
+    if content["schema"] == 9 and kit["profile"] not in (STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene13 runtime_state; prepare a current runtime kit")
-    if content["schema"] == 8 and kit["profile"] not in (SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
+    if content["schema"] == 8 and kit["profile"] not in (SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene12 spatial_queries; prepare a current runtime kit")
-    if content["schema"] == 7 and kit["profile"] not in (INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
+    if content["schema"] == 7 and kit["profile"] not in (INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene11 input_actions; prepare a current runtime kit")
-    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
+    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene10 roughness_maps; prepare a current runtime kit")
-    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
+    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene9 surface_materials; prepare a current runtime kit")
-    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
+    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene8 sun_shadows; prepare a current runtime kit")
-    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
+    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene7 authored_lighting; prepare a current runtime kit")
-    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
+    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
-    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE):
+    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5, 10: 5}[content["schema"]]
-    tick_field = "tick_nanos" if content["schema"] in (7, 8, 9, 10) else "tick_millis"
-    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] in (7, 8, 9, 10) else 1000)
+    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5, 10: 5, 11: 5}[content["schema"]]
+    tick_field = "tick_nanos" if content["schema"] in (7, 8, 9, 10, 11) else "tick_millis"
+    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] in (7, 8, 9, 10, 11) else 1000)
     descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
                   "scene": "resources/scene.json", tick_field: content[tick_field],
                   "meshes": {identity: "resources/" + record["path"]
@@ -966,9 +1055,9 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             raise ValueError("runtime preflight did not retain creation identity, tick or authored scene")
         if camera is not None and result.get("initial_camera") != camera:
             raise ValueError("runtime preflight did not retain explicit initial camera")
-        if content["schema"] in (7, 8, 9, 10) and result.get("authored_actions") != authored_actions(document):
+        if content["schema"] in (7, 8, 9, 10, 11) and result.get("authored_actions") != authored_actions(document):
             raise ValueError("runtime preflight did not retain authored input actions")
-        if content["schema"] in (9, 10):
+        if content["schema"] in (9, 10, 11):
             bindings = document.get("authoring", {}).get("bindings", {})
             def typed_defaults(binding: dict) -> dict:
                 # StateValue is binary64, even when authored JSON used an integer
@@ -984,7 +1073,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             api5 = any(binding.get("enabled") and
                        sources.get(binding["source_id"], {}).get("host_api_version") == 5
                        for binding in bindings.values())
-            if api5 and kit["profile"] != LIFECYCLE_PROFILE:
+            if api5 and kit["profile"] not in (LIFECYCLE_PROFILE, HUD_PROFILE):
                 raise ValueError("API5 requires lifecycle_commands runtime capability")
             observed = result.get("runtime_state")
             if not isinstance(observed, dict) or set(observed) != set(defaults):
@@ -1005,7 +1094,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                     raise ValueError("runtime preflight changed initialized state schema")
             elif observed != defaults:
                 raise ValueError("runtime preflight did not initialize authored state defaults")
-        if content["schema"] == 10 or (content["schema"] == 9 and api5):
+        if content["schema"] in (10, 11) or (content["schema"] == 9 and api5):
             metadata = {"initialized", "commit_revision", "last_step_commit_revision",
                         "command_receipt", "command_receipts", "captured_commands", "runtime_scene"}
             if (not metadata <= result.keys() or result.get("initialized") is not True or result.get("commit_revision") != "0"
@@ -1029,6 +1118,24 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                         or not isinstance(row.get("schema_hash"), str) or not HASH.fullmatch(row["schema_hash"])):
                     raise ValueError("runtime preflight did not retain captured command catalog")
                 seen.add(key)
+        if content["schema"] == 11:
+            hud = typed_hud(document.get("authoring", {}).get("hud", {}))
+            if hud != typed_hud({}) and result.get("authored_hud") != hud:
+                raise ValueError("runtime preflight did not retain authored HUD")
+            observed_hud = result.get("hud")
+            exact_fields(observed_hud, {"labels"}, "resolved HUD")
+            labels = observed_hud["labels"]
+            expected_ids = [label["id"] for label in hud["elements"]] if hud["enabled"] else []
+            if (result.get("hud_presentation") != "committed" or not isinstance(labels, list)
+                    or len(labels) != len(expected_ids)):
+                raise ValueError("runtime preflight did not resolve committed HUD labels")
+            for label, identity in zip(labels, expected_ids):
+                exact_fields(label, {"id", "text", "diagnostic"}, "resolved HUD label")
+                if (label["id"] != identity or not isinstance(label["text"], str)
+                        or len(label["text"].encode()) > 2048
+                        or label["diagnostic"] not in (None, "missing_binding", "disabled_binding",
+                            "missing_source", "missing_field", "type_changed", "unavailable_state", "output_overflow")):
+                    raise ValueError("runtime preflight did not resolve bounded HUD labels")
         cancelled(cancel_file)
         manifest = {"schema": 1, "kind": "ruster-creation-package", "application": "application",
                     "target": package_app.TARGET, "title": content["title"],

@@ -259,6 +259,9 @@ impl CreationManifest {
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
         let session = ruster_scene::Session::from_snapshot_bytes(&bytes)
             .map_err(|error| error.to_string())?;
+        if session.loaded_format_version() >= 15 && self.version < 5 {
+            return Err("Scene15 runtime_hud requires descriptor version 5".into());
+        }
         if session.loaded_format_version() >= 14 && self.version < 5 {
             return Err("Scene14 lifecycle_commands requires descriptor version 5".into());
         }
@@ -420,6 +423,19 @@ mod tests {
             .load_session(&root)
             .unwrap_err()
             .contains("Scene14 lifecycle_commands"));
+        state["format_version"] = serde_json::json!(15);
+        state["authoring"]["hud"] = serde_json::json!({"enabled":true,"elements":[
+            {"id":"instructions","source":{"kind":"static","text":"Creator instructions 世界"}}
+        ]});
+        std::fs::write(&scene_path, serde_json::to_vec(&state).unwrap()).unwrap();
+        let hud_session = loaded.load_session(&root).unwrap();
+        assert!(hud_session.authoring().hud.enabled);
+        assert_eq!(hud_session.authoring().hud.elements.len(), 1);
+        assert_eq!(loaded.version, 5);
+        assert!(old_spatial
+            .load_session(&root)
+            .unwrap_err()
+            .contains("Scene15 runtime_hud"));
         let mut input_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
         input_scene["format_version"] = serde_json::json!(11);
         std::fs::write(&scene_path, serde_json::to_vec(&input_scene).unwrap()).unwrap();
@@ -574,7 +590,7 @@ mod tests {
             assert!(old
                 .load_session(&root)
                 .unwrap_err()
-                .contains("Scene14 lifecycle_commands"));
+                .contains("Scene15 runtime_hud"));
             // Genuine old documents still load through old descriptors.
             let mut old_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
             old_scene["format_version"] = serde_json::json!(9);

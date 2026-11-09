@@ -872,3 +872,10 @@ Setup passes three descriptor/override rejection checks and two actual unchanged
 ## 2026-11-10 — next creator-goal planning
 
 Root delegates the bounded strategy/source assessment to Astra/high under the continuous session snapshot. Astra recommends read-only state-bound HUD text before interactive menus, because actual editor/default command owners require paused execution. Source review identifies the shared Frame and the host's pre-advance sidebar timing as key presentation-identity boundaries. Root verifies those owners, reads primary Godot layout/focus and Unity binding guidance, and writes the proposed F3a contract with explicit defaults, prerequisite choices and acceptance gates. No implementation, new Goal-tool goal, benchmark or native workload is run. Specialist elapsed/usage metrics remain unavailable. [Proposed plan](../plans/F3A-LIVE-HUD.md).
+
+
+## 2026-11-10 — F3a implementation and initial qualification
+
+Root owns shared integration, documentation and every build/test/native/measurement action. Sol/high source owners prepare disjoint scene model/history, resolver/app painter/generic/editor UI, bounded MCP and delivery/version changes. Astra/high reviews immutable ownership, references, version affinity, raw recovery and observations. Root catches and repairs compile/test integration failures, then308Rust/28Python cases pass with3existing device cases ignored. Astra review leads to baseline-hash recovery, draft-ownership, reference-bound/source and captured-only paging fixes, with source-only tests integrated and executed by Root.
+
+A source-only external component probe uses archived420381f/current dependencies and existing egui. Root's first bounded18process baseline/candidate cohort reveals unnecessary clipped-label layout at changing cap. One viewport-directed painter repair is selected, with original results preserved and final qualification pending. Native helper/SDK source adapts retained exact-process guards without executing on workers. Metrics beyond available Root build/test/process receipts and worker aggregate elapsed/usage remain unavailable. [Evidence](../evidence/F3A-LIVE-HUD.md).

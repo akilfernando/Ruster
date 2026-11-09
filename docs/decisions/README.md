@@ -47,3 +47,5 @@ Decisions record context, alternatives, rationale, consequences and status. Read
 - [0043 Checked picking and camera framing](0043-checked-picking-and-camera-framing.md) records the candidate AUD-008/016 numeric and failure-feedback contract.
 
 - [0046 F2a measured performance tradeoff](0046-f2a-measured-performance-tradeoff.md) records user-accepted retention with the dense-state cost and unresolved cause preserved.
+
+- [0047 Read-only creator HUD](0047-read-only-creator-hud.md) records the F3a implementation contract, bounded transport and coherent passive presentation.

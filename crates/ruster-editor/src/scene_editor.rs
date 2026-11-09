@@ -12,6 +12,8 @@ mod color_commands;
 mod combo_focus;
 mod display_ui;
 mod export_commands;
+mod hud_commands;
+mod hud_ui;
 mod lighting_commands;
 mod lighting_ui;
 mod lighting_viewport;
@@ -100,6 +102,10 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "behavior_state_default_set",
     "behavior_command",
     "behavior_command_set",
+    "hud_inspect",
+    "hud_settings_set",
+    "hud_label_set",
+    "hud_label_move",
     "behavior_action",
     "behavior_action_set",
     "behavior_action_remove",
@@ -161,6 +167,8 @@ struct RecoveryDrafts {
     display: Option<display_ui::DisplayDraft>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     collider: Option<collider_ui::ColliderDraft>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hud: Option<hud_ui::HudDraft>,
 }
 impl From<&Transform> for Fields {
     fn from(t: &Transform) -> Self {
@@ -399,6 +407,10 @@ pub struct SceneEditor {
     input_actions: crate::input_ui::InputUi,
     input_actions_open: bool,
     runtime: crate::behavior_ui::RuntimeUi,
+    hud_open: bool,
+    hud_draft: Option<hud_ui::HudDraft>,
+    hud_cache: ruster_scene::hud::HudCache,
+    hud_last_prepared: Option<Value>,
     external: crate::behavior_external::External,
     external_focused: bool,
     queued_external: Option<(String, crate::behavior_external::Intent)>,
@@ -585,6 +597,10 @@ impl SceneEditor {
             input_actions: crate::input_ui::InputUi::default(),
             input_actions_open: false,
             runtime: crate::behavior_ui::RuntimeUi::default(),
+            hud_open: false,
+            hud_draft: None,
+            hud_cache: ruster_scene::hud::HudCache::default(),
+            hud_last_prepared: None,
             external: crate::behavior_external::External::default(),
             external_focused: false,
             queued_external: None,
@@ -668,7 +684,8 @@ impl SceneEditor {
         }
     }
     fn drafts(&self) -> bool {
-        self.color_draft.is_some()
+        self.hud_draft.is_some()
+            || self.color_draft.is_some()
             || self.material_draft.is_some()
             || self.lighting_draft.is_some()
             || self.display_draft.is_some()
@@ -684,12 +701,14 @@ impl SceneEditor {
         self.drafts() || self.rename_pending || self.manipulation.offset_pending()
     }
     fn behavior_editable(&self) -> bool {
-        self.editing_available()
+        self.hud_draft.is_none()
+            && self.editing_available()
             && !self.input_actions.pending()
             && !self.runtime.command_draft_pending()
     }
     fn input_action_editable(&self) -> bool {
-        self.editing_available()
+        self.hud_draft.is_none()
+            && self.editing_available()
             && !self.behavior.pending()
             && !self.runtime.command_draft_pending()
     }
@@ -697,7 +716,8 @@ impl SceneEditor {
         self.recovered_input.is_none() && self.editing_available_for_recovery()
     }
     fn editing_available_for_recovery(&self) -> bool {
-        !self.asset_publishing()
+        self.hud_draft.is_none()
+            && !self.asset_publishing()
             && !self.asset_loading()
             && (self.color_draft.is_none()
                 && self.material_draft.is_none()
@@ -885,11 +905,25 @@ impl SceneEditor {
         }
     }
     fn recovery_drafts(&self) -> Result<RecoveryDrafts, String> {
+        if self.hud_draft.is_some()
+            && (self.color_draft.is_some()
+                || self.material_draft.is_some()
+                || self.lighting_draft.is_some()
+                || self.display_draft.is_some()
+                || self.collider_draft.is_some()
+                || self.behavior.pending()
+                || self.input_actions.pending()
+                || self.recovered_input.is_some()
+                || self.rename_pending
+                || self.draft != self.baseline_fields)
+        {
+            return Err("HUD and other unfinished edits cannot share a checkpoint; previous checkpoint preserved.".into());
+        }
         if self.recovered_input.is_some() && self.input_actions.pending() {
             return Err("Both live and deferred input drafts exist; checkpoint preserved for explicit repair.".into());
         }
         Ok(RecoveryDrafts {
-            version: 12,
+            version: 13,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -905,6 +939,7 @@ impl SceneEditor {
             lighting: self.lighting_draft.clone(),
             display: self.display_draft.clone(),
             collider: self.collider_draft.clone(),
+            hud: self.hud_draft.clone(),
         })
     }
     #[cfg(test)]
@@ -925,6 +960,11 @@ impl SceneEditor {
         let material_field = value.get("material").is_some();
         let lighting_field = value.get("lighting").is_some();
         let version = value.get("version").and_then(Value::as_u64);
+        if version.is_some_and(|version| version < 13) && value.get("hud").is_some() {
+            return Err(
+                "HUD recovery fields require draft version13; checkpoint preserved.".into(),
+            );
+        }
         if version.is_some_and(|version| version < 12)
             && value
                 .get("behavior")
@@ -1030,7 +1070,7 @@ impl SceneEditor {
                     && fields_unit != Some(false)
             }
             Some(4) => !lighting_field && manipulation_unit && fields_unit != Some(false),
-            Some(5..=12) => manipulation_unit && fields_unit != Some(false),
+            Some(5..=13) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -1058,7 +1098,7 @@ impl SceneEditor {
         }
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((2..=12).contains(&draft.version) && draft.behavior.is_some()))
+            || ((2..=13).contains(&draft.version) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -1079,6 +1119,37 @@ impl SceneEditor {
                 .is_some_and(|text| text.chars().count() > 128 || draft.selection.is_empty())
         {
             return Err("Recovery drafts have unsupported version, selection, revision or text bounds; checkpoint preserved.".into());
+        }
+        if draft.hud.is_some()
+            && (draft.color.is_some()
+                || draft.material.is_some()
+                || draft.lighting.is_some()
+                || draft.display.is_some()
+                || draft.collider.is_some()
+                || draft.input_actions.is_some()
+                || draft.pending_name.is_some()
+                || draft
+                    .behavior
+                    .as_ref()
+                    .is_some_and(|behavior| behavior.pending())
+                || draft.fields.as_ref().is_some_and(|fields| {
+                    draft
+                        .selection
+                        .last()
+                        .and_then(|id| scene.target_transform(id))
+                        .is_some_and(|transform| {
+                            fields != &Fields::with_unit(transform, fields.rotation_unit)
+                        })
+                }))
+        {
+            return Err(
+                "Compound HUD recovery drafts are unsupported; checkpoint preserved.".into(),
+            );
+        }
+        if let Some(hud) = &draft.hud {
+            if !hud.validate_snapshot(&self.session) {
+                return Err("HUD recovery draft has invalid bounds, revision or baseline; checkpoint preserved.".into());
+            }
         }
         if let Some(collider) = &draft.collider {
             if !collider.validate_snapshot(scene, draft.selection.last().map(String::as_str))
@@ -1241,6 +1312,7 @@ impl SceneEditor {
             || draft.display.is_some()
             || draft.input_actions.is_some()
             || draft.collider.is_some()
+            || draft.hud.is_some()
         {
             let mut checked = crate::manipulation::Manipulation::default();
             checked.ids = draft.selection.clone();
@@ -1269,6 +1341,8 @@ impl SceneEditor {
         self.lighting_draft = lighting;
         self.display_draft = display;
         self.collider_draft = collider;
+        self.hud_draft = draft.hud;
+        self.hud_open = self.hud_draft.is_some();
         if let (Some(fields), Some(id)) = (&draft.fields, &self.selected) {
             let transform = self
                 .session
@@ -1797,6 +1871,9 @@ impl SceneEditor {
             self.error="Asset publication is finishing; authored edits are reserved until acknowledgement.".into();
             return false;
         }
+        if self.hud_draft.is_some() {
+            return self.apply_hud_draft();
+        }
         if self.collider_draft.is_some() {
             return self.apply_collider_draft();
         }
@@ -2164,7 +2241,7 @@ impl SceneEditor {
         }
         egui::CollapsingHeader::new("Adjust selection").id_salt("selection_adjustments").open(pending.then_some(true)).show(ui,|ui| {
             ui.label("World translation offset");
-            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
+            ui.add_enabled_ui((self.hud_draft.is_none() && self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.manipulation.active() && !self.manipulation.precision_pending(), |ui| {
                 let mut enter=false;
                 let mut escape=false;
                 let group_width=crate::manipulation::component_group_width(ui);
@@ -2762,6 +2839,12 @@ impl SceneEditor {
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
         if matches!(
             op,
+            "hud_inspect" | "hud_settings_set" | "hud_label_set" | "hud_label_move"
+        ) {
+            return self.hud_command(token, op, args);
+        }
+        if matches!(
+            op,
             "creation_export_inspect" | "creation_export_start" | "creation_export_cancel"
         ) {
             return self.export_command(token, op, args);
@@ -3342,6 +3425,16 @@ impl SceneEditor {
             .command_controls(ui, &self.session, command_editable);
     }
     fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .add_enabled(
+                self.hud_draft.is_some() || self.hud_editable(),
+                egui::Button::new("HUD…"),
+            )
+            .clicked()
+        {
+            self.hud_open = true;
+            self.runtime.release_input(ui.ctx());
+        }
         let title = if self.manipulation.ids.len() > 1 {
             format!("{} selected", self.manipulation.ids.len())
         } else {
@@ -3411,7 +3504,7 @@ impl SceneEditor {
             ui.separator();
             ui.strong("Transform");
             if self.draft != self.baseline_fields {
-                ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
+                ui.add_enabled_ui((self.hud_draft.is_none() && self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.active() && self.dialog.is_none() && !self.close_approved && !self.rename_pending && !self.new_scene_pending && !self.close_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none(), |ui| {
                         ui.label("Recovered transform fields — repair or revert before other precision edits");
                         let mut enter=false;
                         let mut escape=false;
@@ -3434,14 +3527,15 @@ impl SceneEditor {
                         if ui.button("Revert transform drafts").clicked() || escape {self.sync_draft();}
                     });
             }
-            ui.add_enabled_ui((self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.ids.is_empty(), |ui| {
+            ui.add_enabled_ui((self.hud_draft.is_none() && self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.ids.is_empty(), |ui| {
                     match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                         Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
                         Ok(false)=>{},Err(error)=>self.error=error,
                     }
                 });
             ui.add_enabled_ui(
-                self.color_draft.is_none()
+                self.hud_draft.is_none()
+                    && self.color_draft.is_none()
                     && self.material_draft.is_none()
                     && self.lighting_draft.is_none()
                     && self.display_draft.is_none()
@@ -4097,6 +4191,7 @@ impl SceneEditor {
         let blocked = self.runtime.input_owned()
             || egui::Popup::is_any_open(ctx)
             || self.input_actions_open
+            || self.hud_open
             || self.manipulation.active()
             || self.dialog.is_some()
             || self.export_dialog
@@ -4433,6 +4528,17 @@ impl SceneEditor {
                 self.command_menu_item(ui, "Close window", Action::Quit);
             });
             ui.menu_button("Edit", |ui| {
+                if ui
+                    .add_enabled(
+                        self.hud_draft.is_some() || self.hud_editable(),
+                        egui::Button::new("HUD…"),
+                    )
+                    .clicked()
+                {
+                    self.hud_open = true;
+                    self.runtime.release_input(ui.ctx());
+                    ui.close();
+                }
                 if ui.button("Input actions…").clicked() {
                     if self.recovered_input.is_some() {
                         self.recovered_input_open = true;
@@ -4702,7 +4808,8 @@ impl SceneEditor {
             self.manipulation.cancel();
             self.notice = "Transform cancelled; authored state unchanged.".into();
         }
-        let input_blocked = self.input_actions_open
+        let input_blocked = self.hud_open
+            || self.input_actions_open
             || self.guard().is_err()
             || self.manipulation.offset_pending()
             || self.asset_busy();
@@ -4907,6 +5014,7 @@ impl SceneEditor {
                     ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 self.queued_selection=Some((id,additive));
             }
+            self.paint_hud_overlay(ui, viewport.rect);
         });
         self.process_queued_selection();
         self.observe_view();
@@ -4915,6 +5023,7 @@ impl SceneEditor {
             self.remember_camera();
             self.workspace.flush();
         }
+        self.show_hud_editor(&ctx);
         self.rename_dialog(&ctx);
         if self.dialog.is_none() {
             self.path_focused = false;
@@ -6715,7 +6824,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 12);
+        assert_eq!(payload["version"], 13);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -7031,6 +7140,7 @@ mod tests {
             lighting: None,
             display: None,
             collider: None,
+            hud: None,
         })
         .unwrap();
         draft["manipulation"]
@@ -7251,6 +7361,7 @@ mod tests {
             lighting: None,
             display: None,
             collider: None,
+            hud: None,
         })
         .unwrap();
         drafts["version"] = 99.into();
@@ -7310,7 +7421,7 @@ mod tests {
         component.collider_draft = Some(raw.clone());
         let snapshot = component.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 12);
+        assert_eq!(payload["version"], 13);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.collider_draft, Some(raw.clone()));
@@ -8377,7 +8488,7 @@ mod tests {
             assert_eq!(candidates.len(), 1);
             let (_journal, snapshot) = store.claim(&candidates[0].id).unwrap();
             let payload = snapshot.drafts().unwrap();
-            assert_eq!(payload["version"], 12);
+            assert_eq!(payload["version"], 13);
             if shadow {
                 assert_eq!(
                     payload["lighting"]["shadow"]["depth_bias_texels"],
@@ -8495,7 +8606,7 @@ mod tests {
         let exact = source.display_draft.clone();
         let snapshot = source.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 12);
+        assert_eq!(payload["version"], 13);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.display_draft, exact);

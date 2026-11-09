@@ -90,7 +90,7 @@ fn text(ui: &mut egui::Ui, value: &mut String, limit: usize) -> egui::Response {
     let id = ui.next_auto_id();
     text_with_id(ui, value, limit, id)
 }
-fn text_with_id(
+pub(super) fn text_with_id(
     ui: &mut egui::Ui,
     value: &mut String,
     limit: usize,

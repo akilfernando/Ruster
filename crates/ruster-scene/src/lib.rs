@@ -12,11 +12,12 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 14;
+pub const FORMAT_VERSION: u32 = 15;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
 mod collider;
+pub mod hud;
 pub mod input;
 mod lighting;
 mod lighting_authoring;
@@ -375,7 +376,7 @@ impl Scene {
                 .chain(&document.redo)
                 .any(Change::has_authoring)
         {
-            return Err(SceneError::Invalid("document contains behavior authoring; use Session::open and an authoring-aware runtime, or explicitly export Session::scene() as geometry".into()));
+            return Err(SceneError::Invalid("document contains authoring; use Session::open and an authoring-aware runtime, or explicitly export Session::scene() as geometry".into()));
         }
         Ok(document.scene)
     }
@@ -824,6 +825,13 @@ struct ValueDelta<T> {
     before: Option<T>,
     after: Option<T>,
 }
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HudDelta {
+    before: hud::Hud,
+    after: hud::Hud,
+}
+
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct Change {
@@ -837,6 +845,8 @@ struct Change {
     bindings: Vec<ValueDelta<BehaviorBinding>>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     actions: Vec<ValueDelta<input::ActionDefinition>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    hud: Option<HudDelta>,
 }
 impl From<SceneDelta> for Change {
     fn from(delta: SceneDelta) -> Self {
@@ -877,7 +887,15 @@ fn apply_values<T: Clone + PartialEq>(
 }
 impl Change {
     fn has_authoring(&self) -> bool {
-        !self.sources.is_empty() || !self.bindings.is_empty() || !self.actions.is_empty()
+        !self.sources.is_empty()
+            || !self.bindings.is_empty()
+            || !self.actions.is_empty()
+            || self.hud.is_some()
+    }
+    fn hud_values(&self) -> impl Iterator<Item = &hud::Hud> {
+        self.hud
+            .iter()
+            .flat_map(|delta| [&delta.before, &delta.after])
     }
     fn references_asset(&self) -> bool {
         self.scene.iter().any(SceneDelta::references_asset)
@@ -951,6 +969,19 @@ impl Change {
         apply_values(&self.sources, &mut authoring.sources, undo)?;
         apply_values(&self.bindings, &mut authoring.bindings, undo)?;
         apply_values(&self.actions, &mut authoring.actions, undo)?;
+        if let Some(delta) = &self.hud {
+            delta.before.validate()?;
+            delta.after.validate()?;
+            let (expected, replacement) = if undo {
+                (&delta.after, &delta.before)
+            } else {
+                (&delta.before, &delta.after)
+            };
+            if delta.before == delta.after || &authoring.hud != expected {
+                return Err(SceneError::Invalid("inconsistent HUD history".into()));
+            }
+            authoring.hud = replacement.clone();
+        }
         scene.validate()?;
         authoring.validate(scene)
     }
@@ -1204,6 +1235,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..15).contains(&version) {
+            reject_pre_v15_hud_fields(&value)?;
+        }
         if (1..14).contains(&version) {
             reject_pre_v14_command_fields(&value)?;
         }
@@ -1235,7 +1269,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=14 => serde_json::from_value(value)?,
+            5..=15 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1302,6 +1336,26 @@ impl Document {
                 .persist(path)
                 .map_err(|e| SceneError::Io(e.error))?;
         }
+        Ok(())
+    }
+}
+
+// Restrict new fields at their owning positions, including empty or null values.
+// Source strings and arbitrary state/property keys named hud retain their meaning.
+fn reject_pre_v15_hud_fields(value: &serde_json::Value) -> Result<(), SceneError> {
+    let has_hud = value["authoring"].get("hud").is_some()
+        || ["undo", "redo"].into_iter().any(|stack| {
+            value[stack]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .any(|change| change.get("hud").is_some())
+        });
+    if has_hud {
+        Err(SceneError::Invalid(
+            "HUD authoring requires scene v15".into(),
+        ))
+    } else {
         Ok(())
     }
 }
@@ -1754,6 +1808,86 @@ impl Session {
     pub fn authoring(&self) -> &Authoring {
         &self.document.authoring
     }
+    pub fn hud(&self) -> &hud::Hud {
+        &self.authoring().hud
+    }
+
+    /// Replace one HUD as an atomic revision and Undo entry. Existing broken
+    /// references remain editable, while new references require a typed field.
+    pub fn set_hud(&mut self, expected_revision: u64, hud: hud::Hud) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        hud.validate()?;
+        if self.hud() == &hud {
+            return Ok(self.scene().revision);
+        }
+        for label in &hud.elements {
+            let previous = self.hud().elements.iter().find(|old| old.id == label.id);
+            if previous.is_none() && self.contains_hud_label_id(&label.id) {
+                return Err(SceneError::Invalid(
+                    "HUD label identity is reserved by reversible history; Undo or choose a fresh ID"
+                        .into(),
+                ));
+            }
+            let Some((binding_id, field, value_type)) = label.source.state_reference() else {
+                continue;
+            };
+            if previous.and_then(|old| old.source.state_reference())
+                == Some((binding_id, field, value_type))
+            {
+                continue;
+            }
+            let valid = self.binding(binding_id).is_some_and(|binding| {
+                binding.enabled
+                    && self.source(&binding.source_id).is_some()
+                    && binding
+                        .state_defaults
+                        .get(field)
+                        .is_some_and(|value| value_type.matches(value))
+            });
+            if !valid {
+                return Err(SceneError::Invalid(format!(
+                    "HUD label {} requires an enabled binding {binding_id} with an existing source and field {field} matching its declared type",
+                    label.id
+                )));
+            }
+        }
+        self.commit_change(Change {
+            hud: Some(HudDelta {
+                before: self.hud().clone(),
+                after: hud,
+            }),
+            ..Change::default()
+        })
+    }
+
+    fn retained_huds(&self) -> impl Iterator<Item = &hud::Hud> {
+        std::iter::once(self.hud()).chain(
+            self.document
+                .undo
+                .iter()
+                .chain(&self.document.redo)
+                .flat_map(Change::hud_values),
+        )
+    }
+
+    pub fn contains_hud_label_id(&self, id: &str) -> bool {
+        self.retained_huds()
+            .any(|hud| hud.elements.iter().any(|label| label.id == id))
+    }
+
+    pub fn allocate_hud_label_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        let used: HashSet<_> = self
+            .retained_huds()
+            .flat_map(|hud| hud.elements.iter().map(|label| label.id.as_str()))
+            .collect();
+        let next = self
+            .scene()
+            .revision
+            .checked_add(1)
+            .ok_or(SceneError::RevisionOverflow)?;
+        allocate_ids(&format!("hud-{next}"), count, hud::MAX_HUD_LABELS, used)
+    }
+
     pub fn source(&self, id: &str) -> Option<&BehaviorSource> {
         self.authoring().sources.get(id)
     }
@@ -1960,6 +2094,16 @@ impl Session {
         if before == binding {
             return Ok(self.scene().revision);
         }
+        if before.is_none()
+            && binding.is_some()
+            && self
+                .retained_huds()
+                .any(|hud| hud.binding_ids().any(|used| used == id))
+        {
+            return Err(SceneError::Invalid(
+                "binding identity is retained by a HUD reference; Undo or choose a fresh ID".into(),
+            ));
+        }
         self.commit_change(Change {
             bindings: vec![ValueDelta {
                 id: id.into(),
@@ -2086,6 +2230,9 @@ impl Session {
     pub fn contains_binding_id(&self, id: &str) -> bool {
         self.authoring().bindings.contains_key(id)
             || self
+                .retained_huds()
+                .any(|hud| hud.binding_ids().any(|used| used == id))
+            || self
                 .document
                 .undo
                 .iter()
@@ -2109,6 +2256,7 @@ impl Session {
                 .chain(&self.document.redo)
                 .flat_map(|c| c.bindings.iter().map(|d| d.id.as_str())),
         );
+        used.extend(self.retained_huds().flat_map(hud::Hud::binding_ids));
         allocate_ids("binding", count, MAX_BINDINGS, used)
     }
     fn owned_binding_deletions(&self, ids: &[&str]) -> Vec<ValueDelta<BehaviorBinding>> {
@@ -3203,6 +3351,146 @@ mod tests {
             state_defaults: StateFields::new(),
             commands: BTreeMap::new(),
         }
+    }
+
+    // One owner exercises HUD-only persistence/history, guarded new references,
+    // and repairable references across field deletion and binding identity reuse.
+    #[test]
+    fn hud_history_roundtrip_and_reference_repair_are_atomic() {
+        use hud::{Hud, HudLabel, HudSource, HudValueType};
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("hud.json");
+        let mut session = Session::new(Scene::empty("hud-scene")).unwrap();
+        let mut hud = Hud {
+            enabled: true,
+            elements: vec![HudLabel {
+                id: "instructions".into(),
+                source: HudSource::Static {
+                    text: "Ready".into(),
+                },
+            }],
+            ..Hud::default()
+        };
+        assert_eq!(session.set_hud(0, hud.clone()).unwrap(), 1);
+        assert_eq!(session.set_hud(1, hud.clone()).unwrap(), 1);
+        assert!(!session.authoring().is_empty());
+        assert!(session.set_hud(0, hud.clone()).is_err());
+        session.undo(1).unwrap();
+        assert!(session.hud().is_default());
+        assert!(session.set_hud(2, hud.clone()).is_err());
+        session.redo(2).unwrap();
+        session.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.hud(), &hud);
+        assert!(Scene::load(&path).is_err());
+
+        hud.elements.push(HudLabel {
+            id: "score".into(),
+            source: HudSource::State {
+                binding_id: "application".into(),
+                field: "score".into(),
+                value_type: HudValueType::Number,
+                prefix: "Score ".into(),
+                suffix: String::new(),
+                precision: 2,
+            },
+        });
+        let original = reopened.snapshot_bytes().unwrap();
+        assert!(reopened.set_hud(3, hud.clone()).is_err());
+        assert_eq!(reopened.snapshot_bytes().unwrap(), original);
+        let mut application = binding("unused", "missing-source");
+        application.target = BindingTarget::Application;
+        application
+            .state_defaults
+            .insert("score".into(), StateValue::Number(1.0));
+        let mut missing_source = Session::new(Scene::empty("missing-source-hud")).unwrap();
+        missing_source
+            .set_binding(0, "application", Some(application.clone()))
+            .unwrap();
+        let missing_snapshot = missing_source.snapshot_bytes().unwrap();
+        assert!(missing_source.set_hud(1, hud.clone()).is_err());
+        assert_eq!(missing_source.snapshot_bytes().unwrap(), missing_snapshot);
+        application.source_id = "hud-source".into();
+        reopened
+            .create_behavior(
+                3,
+                "hud-source",
+                source("unfinished source"),
+                "application",
+                application.clone(),
+            )
+            .unwrap();
+        reopened.set_hud(4, hud.clone()).unwrap();
+        reopened
+            .set_state_default(5, "application", "score", None)
+            .unwrap();
+        hud.margin = 20.0;
+        reopened.set_hud(6, hud.clone()).unwrap();
+        reopened.set_binding(7, "application", None).unwrap();
+        let broken = reopened.snapshot_bytes().unwrap();
+        assert!(reopened
+            .set_binding(8, "application", Some(application))
+            .is_err());
+        assert_eq!(reopened.snapshot_bytes().unwrap(), broken);
+        assert!(reopened.contains_binding_id("application"));
+        reopened.save(&path).unwrap();
+        let mut restored = Session::open(&path).unwrap();
+        assert_eq!(restored.hud(), &hud);
+        restored.undo(8).unwrap();
+        restored.undo(9).unwrap();
+        restored.undo(10).unwrap();
+        assert_eq!(
+            restored.binding("application").unwrap().state_defaults["score"],
+            StateValue::Number(1.0)
+        );
+        assert_eq!(restored.hud().margin, 12.0);
+        restored.set_source(11, "hud-source", None).unwrap();
+        let mut repairable = restored.hud().clone();
+        repairable.margin = 24.0;
+        restored.set_hud(12, repairable.clone()).unwrap();
+        restored.save(&path).unwrap();
+        assert_eq!(Session::open(&path).unwrap().hud(), &repairable);
+    }
+
+    // Future HUD owner fields must fail closed for every prior format, even
+    // empty/null history entries. Unrelated source/property names stay opaque.
+    #[test]
+    fn hud_requires_owning_scene_version_in_definition_and_history() {
+        let session = Session::new(Scene::empty("old-scene")).unwrap();
+        let value = serde_json::to_value(&session.document).unwrap();
+        for version in 1..15 {
+            let mut legacy = value.clone();
+            legacy["format_version"] = version.into();
+            assert!(Document::decode(&serde_json::to_vec(&legacy).unwrap()).is_ok());
+            for location in ["authoring", "undo", "redo"] {
+                for contents in [
+                    serde_json::Value::Null,
+                    serde_json::json!({}),
+                    serde_json::json!([]),
+                ] {
+                    let mut bad = legacy.clone();
+                    if location == "authoring" {
+                        bad["authoring"] =
+                            serde_json::json!({"sources":{},"bindings":{},"hud":contents});
+                    } else {
+                        bad[location] = serde_json::json!([{"hud":contents}]);
+                    }
+                    assert!(Document::decode(&serde_json::to_vec(&bad).unwrap()).is_err());
+                }
+            }
+        }
+        let disabled = hud::Hud {
+            margin: 24.0,
+            ..hud::Hud::default()
+        };
+        let mut retained = session;
+        retained.set_hud(0, disabled.clone()).unwrap();
+        assert_eq!(
+            Session::from_snapshot_bytes(&retained.snapshot_bytes().unwrap())
+                .unwrap()
+                .hud(),
+            &disabled
+        );
     }
 
     // Unique risk: broken source, absent backends/references and obsolete property values

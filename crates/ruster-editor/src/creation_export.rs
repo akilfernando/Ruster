@@ -796,17 +796,33 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!("lifecycle_commands"));
+    let mut hud_profile = lifecycle_profile.clone();
+    hud_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!("runtime_hud"));
     let profile = &manifest["profile"];
-    if scene_version >= 14 && profile != &lifecycle_profile {
+    if scene_version >= 15 && profile != &hud_profile {
+        return Err(
+            "runtime kit does not support Scene15 runtime_hud; prepare a current Linux runtime kit"
+                .into(),
+        );
+    }
+    if scene_version >= 14 && profile != &lifecycle_profile && profile != &hud_profile {
         return Err("runtime kit does not support Scene14 lifecycle_commands; prepare a current Linux runtime kit".into());
     }
-    if scene_version >= 13 && profile != &state_profile && profile != &lifecycle_profile {
+    if scene_version >= 13
+        && profile != &state_profile
+        && profile != &lifecycle_profile
+        && profile != &hud_profile
+    {
         return Err("runtime kit does not support Scene13 runtime_state; prepare a current Linux runtime kit".into());
     }
     if scene_version >= 12
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err("runtime kit does not support Scene12 spatial_queries; prepare a current Linux runtime kit".into());
     }
@@ -815,6 +831,7 @@ fn verify_helpers(
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err("runtime kit does not support Scene11 input_actions; prepare a current Linux runtime kit".into());
     }
@@ -824,6 +841,7 @@ fn verify_helpers(
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err("runtime kit does not support Scene10 roughness_maps; prepare a current Linux runtime kit".into());
     }
@@ -834,6 +852,7 @@ fn verify_helpers(
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err("runtime kit does not support Scene9 surface_materials; prepare a current Linux runtime kit".into());
     }
@@ -846,6 +865,7 @@ fn verify_helpers(
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err(
             "runtime kit does not support Scene8 sun_shadows; prepare a current Linux runtime kit"
@@ -861,6 +881,7 @@ fn verify_helpers(
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err("runtime kit does not support Scene7 authored_lighting; prepare a current Linux runtime kit".into());
     }
@@ -874,6 +895,7 @@ fn verify_helpers(
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err("runtime kit does not support Scene6 opaque_materials; prepare a current Linux runtime kit".into());
     }
@@ -888,6 +910,7 @@ fn verify_helpers(
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err(
             "unsupported runtime kit creation profile; prepare a current Linux runtime kit".into(),
@@ -904,6 +927,7 @@ fn verify_helpers(
         && profile != &spatial_profile
         && profile != &state_profile
         && profile != &lifecycle_profile
+        && profile != &hud_profile
     {
         return Err(
             "runtime kit does not support initial_camera; prepare a current runtime kit".into(),
@@ -1092,13 +1116,14 @@ fn prepare(
         12 => 8,
         13 => 9,
         14 => 10,
-        _ => return Err("export requires a supported Scene1–14 document".into()),
+        15 => 11,
+        _ => return Err("export requires a supported Scene1–15 document".into()),
     };
     let tick_nanos = u64::try_from(ruster_behavior::DEFAULT_FIXED_TICK.as_nanos())
         .map_err(|_| "Default fixed tick exceeds the descriptor nanosecond range")?;
     let mut content_manifest = json!({"schema":schema, "title":request.title,
         "scene_sha256":scene_hash, "meshes":meshes});
-    if matches!(schema, 7..=10) {
+    if matches!(schema, 7..=11) {
         content_manifest["tick_nanos"] = json!(tick_nanos);
     } else {
         content_manifest["tick_millis"] = json!(100);
@@ -1688,6 +1713,23 @@ mod tests {
         for version in 1..=14 {
             verify_helpers(root.path(), true, version).unwrap();
         }
+        assert!(verify_helpers(root.path(), false, 15)
+            .unwrap_err()
+            .contains("Scene15 runtime_hud"));
+        manifest["profile"]["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("runtime_hud"));
+        write(&manifest);
+        for version in 1..=15 {
+            verify_helpers(root.path(), true, version).unwrap();
+        }
+        manifest["profile"]["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .swap(9, 10);
+        write(&manifest);
+        assert!(verify_helpers(root.path(), false, 15).is_err());
         // Capability lists are exact: unknown features and reordered claims do
         // not establish support for the selected lighting/shader contract.
         manifest["profile"]["capabilities"] = json!([
@@ -1720,12 +1762,14 @@ args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
 content=pathlib.Path(args['--content'])
 kit=pathlib.Path(args['--runtime-kit'])
 value=json.loads((content/'content.json').read_bytes())
-assert value['schema']==10
+assert value['schema']==11
 assert value['tick_nanos']==16666667 and 'tick_millis' not in value
 scene=json.loads((content/'scene.json').read_bytes())
-assert scene['format_version']==14
+assert scene['format_version']==15
 assert scene['scene']['objects'][0]['collider']==dict(enabled=False,role='blocker',offset=[0,0,0],shape=dict(type='box',half_extents=[.5,.5,.5]))
 assert scene['authoring']['actions']=={'home':{'kind':{'type':'button','keys':[]}}}
+assert scene['authoring']['hud']['enabled'] is True
+assert scene['authoring']['hud']['elements']==[dict(id='instructions',source=dict(kind='static',text='Creator controls'))]
 assert value['meshes']['mesh']['normal_policy']=='flat'
 assert set(value['meshes'])=={'mesh'} and set(value['textures'])=={'texture','roughness'}
 assert value['meshes']['mesh']['path']=='meshes/0000.obj'
@@ -1760,7 +1804,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             "helper":"scripts/package_creation.py","files":records,
             "profile":{"format":"ruster-runtime","version":1,"descriptor_format":"ruster-application",
                 "descriptor_version":5,"os":"linux","arch":"x86_64",
-                "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials","roughness_maps","input_actions","spatial_queries","runtime_state","lifecycle_commands"]}})).unwrap()).unwrap();
+                "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials","roughness_maps","input_actions","spatial_queries","runtime_state","lifecycle_commands","runtime_hud"]}})).unwrap()).unwrap();
         let mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
         fs::write(root.path().join("source.obj"), mesh).unwrap();
         fs::write(root.path().join("unused.obj"), mesh).unwrap();
@@ -1811,6 +1855,21 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         session
             .set_action(0, "home", Some(Default::default()))
             .unwrap();
+        session
+            .set_hud(
+                session.scene().revision,
+                ruster_scene::hud::Hud {
+                    enabled: true,
+                    elements: vec![ruster_scene::hud::HudLabel {
+                        id: "instructions".into(),
+                        source: ruster_scene::hud::HudSource::Static {
+                            text: "Creator controls".into(),
+                        },
+                    }],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
         let scene_path = root.path().join("scene.json");
         session.save(&scene_path).unwrap();
         let scene_bytes = session.snapshot_bytes().unwrap();
@@ -1840,7 +1899,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         )
         .unwrap();
         let staged: Value = serde_json::from_slice(&fs::read(&prepared.archive).unwrap()).unwrap();
-        assert_eq!(staged["schema"], 10);
+        assert_eq!(staged["schema"], 11);
         assert_eq!(staged["tick_nanos"], 16_666_667);
         assert!(staged.get("tick_millis").is_none());
         assert_eq!(staged["meshes"]["mesh"]["normal_policy"], "flat");

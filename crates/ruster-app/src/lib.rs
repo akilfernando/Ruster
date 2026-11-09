@@ -1,6 +1,7 @@
 //! Bounded Linux application host: application-owned behavior, shared Vulkan rendering.
 pub mod creation;
 mod host;
+pub mod hud;
 mod resources;
 #[cfg(test)]
 mod tests;
@@ -178,6 +179,15 @@ pub trait Application: 'static {
     /// Playback-aware controls. Existing applications retain their ordinary UI callback.
     fn ui_with_playback(&mut self, ui: &mut egui::Ui, _playing: bool) -> Result<(), String> {
         self.ui(ui)
+    }
+    /// Passive painting after advancement and viewport creation. The painter is
+    /// clipped to the scene viewport. Existing applications need no overlay.
+    fn viewport_overlay(
+        &mut self,
+        _painter: &egui::Painter,
+        _rect: egui::Rect,
+    ) -> Result<(), String> {
+        Ok(())
     }
     fn input(&mut self, _input: &InputFrame) -> Result<(), String> {
         Ok(())

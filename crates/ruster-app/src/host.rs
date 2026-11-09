@@ -463,6 +463,9 @@ impl<A: Application> Host<A> {
                         });
                     }
                 }
+                let painter = ui.painter().with_clip_rect(viewport.rect);
+                let overlay = self.runtime.app_mut().viewport_overlay(&painter, viewport.rect);
+                self.report(overlay);
                 if let Some(id) = viewport.picked {
                     self.runtime.app_mut().select(&id);
                 }
@@ -558,6 +561,86 @@ impl<A: Application> Drop for Host<A> {
 mod tests {
     use super::*;
     use crate::{Content, MeshMap, Step};
+
+    // The overlay must observe the same post-advance scene used by the viewport.
+    // A sidebar callback runs earlier and would expose an older tick here.
+    #[test]
+    fn viewport_overlay_observes_post_advance_scene_with_viewport_clipping() {
+        struct OverlayApp {
+            content: Content,
+            tick: u64,
+            observed: Vec<u64>,
+        }
+        impl Application for OverlayApp {
+            fn content(&self) -> &Content {
+                &self.content
+            }
+            fn tick(&mut self, step: Step) -> Result<(), String> {
+                self.tick = step.tick;
+                self.content.scene_mut().objects[0].transform.translation[0] = step.tick as f32;
+                Ok(())
+            }
+            fn reset(&mut self) -> Result<(), String> {
+                Ok(())
+            }
+            fn viewport_overlay(
+                &mut self,
+                painter: &egui::Painter,
+                rect: egui::Rect,
+            ) -> Result<(), String> {
+                assert_eq!(
+                    self.content.scene().objects[0].transform.translation[0],
+                    self.tick as f32
+                );
+                assert!(rect.is_positive());
+                assert_eq!(painter.clip_rect(), rect);
+                self.observed.push(self.tick);
+                Ok(())
+            }
+        }
+        let options = HostOptions::default();
+        let app = OverlayApp {
+            content: Content::new(ruster_scene::Scene::demo(), MeshMap::new()).unwrap(),
+            tick: 0,
+            observed: Vec::new(),
+        };
+        let mut host = Host {
+            action_surface: None,
+            action_surface_rect: None,
+            action_control_owned: false,
+            action_claim_frame: None,
+            last_control_frame: None,
+            last_action_frame: None,
+            navigation: ruster_render::NavigationOptions::default(),
+            runtime: Runtime::new(app, options.tick_duration).unwrap(),
+            options,
+            last_frame: Instant::now(),
+            metrics: Arc::new(Mutex::new(ruster_render::Metrics::default())),
+            render: None,
+            error: None,
+            ui_frames: 0,
+            exit_error: Arc::new(Mutex::new(None)),
+        };
+        host.runtime.set_running(true);
+        let context = egui::Context::default();
+        run_ui(
+            &context,
+            egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(1200.0, 800.0),
+                )),
+                ..Default::default()
+            },
+            |ui| host.scene_ui_with_input_time(ui, Some(Duration::from_millis(100))),
+        );
+        assert!(host.runtime.tick() > 0);
+        assert_eq!(
+            host.runtime.app().observed.last(),
+            Some(&host.runtime.tick())
+        );
+        assert!(host.error.is_none());
+    }
 
     struct KeyboardApp {
         content: Content,

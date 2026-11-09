@@ -621,9 +621,84 @@ class CreationDistributionTests(unittest.TestCase):
                 with tarfile.open(base/"lifecycle.tar.gz") as archive:
                     self.assertEqual(json.load(archive.extractfile("application/manifest.json"))["profile"], package_creation.LIFECYCLE_PROFILE)
                     self.assertEqual(archive.extractfile("application/resources/scene.json").read(), lifecycle_bytes)
+                # Scene15/content11 requires runtime_hud even for an empty HUD.
+                # Reuse the computed initialization fixture without rewriting old versions.
+                hud_scene = copy.deepcopy(lifecycle_scene)
+                hud_scene["format_version"] = 15
+                authored_hud = {"enabled": True, "anchor": "bottom_right", "width": 288.0,
+                    "margin": 16.0, "spacing": 6.0, "font_size": 14.0,
+                    "text_color": [1.0] * 4, "background": [0.08, 0.08, 0.08, 0.9],
+                    "elements": [
+                        {"id": "instructions", "source": {"kind": "static", "text": "Creator 世界"}},
+                        {"id": "amount", "source": {"kind": "state", "binding_id": "application",
+                            "field": "amount", "value_type": "number", "prefix": "Amount ",
+                            "suffix": " units", "precision": 3}},
+                        {"id": "repair", "source": {"kind": "state", "binding_id": "removed-owner",
+                            "field": "status", "value_type": "text", "prefix": "",
+                            "suffix": "", "precision": 2}}]}
+                hud_scene["authoring"]["hud"] = authored_hud
+                hud_response = {**lifecycle_response, "authored_hud": authored_hud,
+                    "hud_presentation": "committed", "hud": {"labels": [
+                        {"id": "instructions", "text": "Creator 世界", "diagnostic": None},
+                        {"id": "amount", "text": "Amount 7.000 units", "diagnostic": None},
+                        {"id": "repair", "text": "<Unavailable>", "diagnostic": "missing_binding"}]}}
+                for empty_hud in (False, True):
+                    current = copy.deepcopy(hud_scene)
+                    if empty_hud:
+                        current["authoring"].pop("hud")
+                    current_bytes = package_creation.encoded(current)
+                    current_content = {**lifecycle_content, "schema": 11,
+                        "scene_sha256": package_creation.sha256(current_bytes)}
+                    (content_root/"scene.json").write_bytes(current_bytes)
+                    (content_root/"content.json").write_bytes(package_creation.encoded(current_content))
+                    for old_profile in (package_creation.PROFILE, package_creation.STATE_PROFILE,
+                                        package_creation.LIFECYCLE_PROFILE):
+                        capable["profile"] = old_profile
+                        (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                        with self.subTest(empty_hud=empty_hud, old_hud_profile=old_profile), \
+                                patch.object(package_creation, "run_runtime", side_effect=AssertionError("old HUD preflight")), \
+                                patch.object(package_creation.tempfile, "TemporaryDirectory", side_effect=AssertionError("old HUD staging")):
+                            with self.assertRaisesRegex(ValueError, "Scene15 runtime_hud"):
+                                package_creation.package(kit, content_root, failed)
+                        self.assertFalse(failed.exists())
+                    capable["profile"] = package_creation.HUD_PROFILE
+                    (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                    current_response = {**hud_response, "authored_scene": package_creation.typed_scene(current),
+                        "runtime_scene": package_creation.typed_scene(current)}
+                    if empty_hud:
+                        current_response.pop("authored_hud")
+                        current_response["hud"] = {"labels": []}
+                    with patch.object(package_creation, "run_runtime", return_value=current_response):
+                        package_creation.package(kit, content_root, base/f"hud-{empty_hud}.tar.gz")
+                    with tarfile.open(base/f"hud-{empty_hud}.tar.gz") as archive:
+                        descriptor = json.load(archive.extractfile("application/app.json"))
+                        self.assertEqual(descriptor["version"], 5)
+                        self.assertEqual(descriptor["tick_nanos"], 16_666_667)
+                        self.assertEqual(archive.extractfile("application/resources/scene.json").read(), current_bytes)
+                    for change in ({"hud": None}, {"hud_presentation": "authored_preview"},
+                                   {"hud": {"labels": [{"id": "other", "text": "wrong", "diagnostic": None}]}},
+                                   *([] if empty_hud else [{"authored_hud": {}}])):
+                        with self.subTest(hud_preflight=change), patch.object(package_creation, "run_runtime", return_value={**current_response, **change}):
+                            with self.assertRaises(ValueError):
+                                package_creation.package(kit, content_root, failed)
+                        self.assertFalse(failed.exists())
+                    (content_root/"content.json").write_bytes(package_creation.encoded({**current_content, "schema": 10}))
+                    with self.assertRaisesRegex(ValueError, "schema11 requires Scene15"):
+                        package_creation.source_content(content_root, None)
+                for old_hud in ({"authoring": {"hud": {}}},
+                                {"undo": [{"hud": {"before": {}, "after": {}}}]}):
+                    with self.subTest(old_hud=old_hud), self.assertRaisesRegex(ValueError, "Scene15 runtime_hud"):
+                        package_creation.validate_hud_fields({"format_version": 14, **old_hud})
+                for invalid_hud in ({"width": True}, {"margin": float("inf")},
+                                    {"elements": authored_hud["elements"] * 11},
+                                    {"elements": [{"id": "large", "source": {"kind": "static", "text": "世" * 342}}]}):
+                    with self.subTest(invalid_hud=invalid_hud), self.assertRaises(ValueError):
+                        package_creation.typed_hud(invalid_hud)
                 # Keep historical fixtures intact and reuse the existing older
                 # content branches under the newest cumulative runtime profile.
                 for old_content, old_scene, old_response, name in (
+                        (lifecycle_content, lifecycle_bytes, lifecycle_response, "lifecycle-with-hud-kit"),
+                        (state_content, state_bytes, state_response, "state-with-hud-kit"),
                         (spatial_content, spatial_bytes, spatial_response, "spatial-with-state-kit"),
                         (input_content, input_bytes, input_response, "input-with-spatial-kit"),
                         (shadow_content, shadow_bytes, shadow_response, "shadow-with-spatial-kit")):
@@ -709,6 +784,9 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.STATE_PROFILE, "capabilities": ["runtime_state", *package_creation.SPATIAL_PROFILE["capabilities"]]},
                         {**package_creation.LIFECYCLE_PROFILE, "descriptor_version": 4},
                         {**package_creation.LIFECYCLE_PROFILE, "capabilities": ["lifecycle_commands", *package_creation.STATE_PROFILE["capabilities"]]},
+                        {**package_creation.HUD_PROFILE, "descriptor_version": 4},
+                        {**package_creation.HUD_PROFILE, "capabilities": ["runtime_hud", *package_creation.LIFECYCLE_PROFILE["capabilities"]]},
+                        {**package_creation.HUD_PROFILE, "capabilities": [*package_creation.HUD_PROFILE["capabilities"], "widgets"]},
                         {**package_creation.MATERIAL_PROFILE, "version": True}):
                     with self.assertRaisesRegex(ValueError, "unsupported runtime creation profile"):
                         package_creation.check_profile(invalid_profile)

@@ -21,7 +21,7 @@ Usage: ruster-motion-lab [OPTIONS]
   --commands PATH  At most16 typed paused commands after Reset, before ordinary ticks
   --speed N        Legacy: left property; generic: runtime-only numeric speed override
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
-  --scene PATH     Read a generic Scene14 snapshot (sources, bindings and history retained)
+  --scene PATH     Read a generic Scene15 snapshot (sources, bindings and history retained)
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
   --creation-info Print the runtime/descriptor compatibility profile and exit
   --creation PATH Read an app.json creation descriptor and its relative resources
@@ -473,6 +473,8 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             "runtime_speed_override": null,
             "authored_scene": app.session().scene(),
             "authored_actions": app.session().authoring().actions,
+            "hud": app.hud_snapshot(),
+            "hud_presentation": "committed",
             "runtime_state": app.runtime_state_report(),
                 "initialized": true,
                 "commit_revision": app.runtime_commit_revision().map(|n| n.to_string()),
@@ -484,6 +486,10 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             "runtime_scene": app.content().scene(),
             "input": input,
         });
+        if !app.session().authoring().hud.is_default() {
+            output["authored_hud"] = serde_json::to_value(&app.session().authoring().hud)
+                .map_err(|error| error.to_string())?;
+        }
         if let Some(camera) = manifest.initial_camera {
             output["initial_camera"] = serde_json::to_value(camera).map_err(|e| e.to_string())?;
         }
@@ -539,29 +545,35 @@ fn execute_generic(options: Options) -> Result<(), String> {
             options.commands.as_deref(),
         )?;
         let app = runtime.app();
+        let mut output = serde_json::json!({
+            "mode": "generic_motion_comparison",
+            "scene_id": app.session().scene().id,
+            "authored_revision": app.session().scene().revision.to_string(),
+            "tick": runtime.tick().to_string(),
+            "fixed_dt": tick_duration.as_secs_f64(),
+            "runtime_speed_override": options.speed,
+            "authored_scene": app.session().scene(),
+            "authored_actions": app.session().authoring().actions,
+            "hud": app.hud_snapshot(),
+            "hud_presentation": "committed",
+            "runtime_state": app.runtime_state_report(),
+            "initialized": true,
+            "commit_revision": app.runtime_commit_revision().map(|n| n.to_string()),
+            "last_step_commit_revision": app.last_step_commit_revision().map(|n| n.to_string()),
+            "captured_commands": app.command_report(),
+            "command_receipt": app.command_receipt_report(),
+            "command_receipts": command_receipts,
+            "query_observations": app.query_observations(),
+            "runtime_scene": app.content().scene(),
+            "input": input,
+        });
+        if !app.session().authoring().hud.is_default() {
+            output["authored_hud"] = serde_json::to_value(&app.session().authoring().hud)
+                .map_err(|error| error.to_string())?;
+        }
         println!(
             "{}",
-            serde_json::to_string_pretty(&serde_json::json!({
-                "mode": "generic_motion_comparison",
-                "scene_id": app.session().scene().id,
-                "authored_revision": app.session().scene().revision.to_string(),
-                "tick": runtime.tick().to_string(),
-                "fixed_dt": tick_duration.as_secs_f64(),
-                "runtime_speed_override": options.speed,
-                "authored_scene": app.session().scene(),
-                "authored_actions": app.session().authoring().actions,
-            "runtime_state": app.runtime_state_report(),
-                "initialized": true,
-                "commit_revision": app.runtime_commit_revision().map(|n| n.to_string()),
-                "last_step_commit_revision": app.last_step_commit_revision().map(|n| n.to_string()),
-                "captured_commands": app.command_report(),
-                "command_receipt": app.command_receipt_report(),
-                "command_receipts": command_receipts,
-                "query_observations": app.query_observations(),
-                "runtime_scene": app.content().scene(),
-                "input": input,
-            }))
-            .map_err(|e| e.to_string())?
+            serde_json::to_string_pretty(&output).map_err(|e| e.to_string())?
         );
         Ok(())
     } else {
@@ -588,7 +600,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud"],
             })
         );
         return;

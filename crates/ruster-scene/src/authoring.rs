@@ -312,13 +312,20 @@ pub struct Authoring {
     /// Scene-owned keyboard actions; live key state is never authored.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     pub actions: crate::input::ActionMap,
+    /// Screen-space presentation definitions; runtime values are never authored.
+    #[serde(default, skip_serializing_if = "crate::hud::Hud::is_default")]
+    pub hud: crate::hud::Hud,
 }
 impl Authoring {
     pub fn is_empty(&self) -> bool {
-        self.sources.is_empty() && self.bindings.is_empty() && self.actions.is_empty()
+        self.sources.is_empty()
+            && self.bindings.is_empty()
+            && self.actions.is_empty()
+            && self.hud.is_default()
     }
     pub fn validate(&self, scene: &Scene) -> Result<(), SceneError> {
         crate::input::validate_action_map(&self.actions)?;
+        self.hud.validate()?;
         if self.sources.len() > MAX_SOURCES || self.bindings.len() > MAX_BINDINGS {
             return Err(SceneError::Invalid(
                 "authoring exceeds256 sources or bindings".into(),

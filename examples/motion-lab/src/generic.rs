@@ -2,8 +2,10 @@
 
 use std::{path::Path, time::Duration};
 
+use ruster_app::hud::{paint_hud, HudPresentationMode};
 use ruster_app::{egui, Application, Content, MeshMap, Step, TextureMap};
 use ruster_behavior::{Diagnostic, Engine, Limits, Runtime};
+use ruster_scene::hud::{resolve_hud, HudCache, ResolvedHud};
 use ruster_scene::input::{
     ActionFrame, ActionKind, ActionMap, ActionValue, InputKey, KeyEventAccumulator,
 };
@@ -50,6 +52,7 @@ pub struct GenericMotionLab {
     run_epoch: u64,
     command_ui: CommandUi,
     command_receipt: Option<ruster_behavior::CommandReceipt>,
+    hud_cache: HudCache,
 }
 
 impl GenericMotionLab {
@@ -90,6 +93,7 @@ impl GenericMotionLab {
             run_epoch: 0,
             command_ui: CommandUi::default(),
             command_receipt: None,
+            hud_cache: HudCache::default(),
         })
     }
 
@@ -154,6 +158,31 @@ impl GenericMotionLab {
             .as_ref()
             .map_or(&[], Runtime::query_observations)
     }
+    /// Bounded terminal/headless observation. This resolves only the authored
+    /// references and never creates a VM or serializes the full runtime state.
+    /// Presentation identity is reported separately by the owning consumer.
+    pub fn hud_snapshot(&self) -> ResolvedHud {
+        if let Some(runtime) = &self.runtime {
+            let authoring = runtime.authoring_snapshot();
+            resolve_hud(&authoring.hud, authoring, |binding, field| {
+                runtime.state().binding(binding)?.get(field)
+            })
+        } else {
+            let authoring = self.session.authoring();
+            resolve_hud(&authoring.hud, authoring, |binding, field| {
+                authoring.bindings.get(binding)?.state_defaults.get(field)
+            })
+        }
+    }
+
+    pub fn hud_presentation_mode(&self) -> HudPresentationMode {
+        match (&self.runtime, self.needs_reset) {
+            (Some(_), true) => HudPresentationMode::Stale,
+            (Some(_), false) => HudPresentationMode::Committed,
+            (None, _) => HudPresentationMode::AuthoredPreview,
+        }
+    }
+
     pub fn fixed_dt(&self) -> Duration {
         self.fixed_dt
     }
@@ -302,6 +331,7 @@ impl GenericMotionLab {
         self.last_input = None;
         self.command_ui = CommandUi::default();
         self.command_receipt = None;
+        self.hud_cache.clear();
         self.session = session;
         self.needs_reset = true;
         self.diagnostic = None;
@@ -387,12 +417,39 @@ impl Application for GenericMotionLab {
         let candidate = self.report(result)?;
         // Engine validated transforms; meshes remain the same immutable Content resources.
         *self.content.scene_mut() = candidate.scene().clone();
+        self.hud_cache.clear();
         self.runtime = Some(candidate);
         self.run_epoch = next_epoch;
         self.command_receipt = None;
         self.action_keys = keys;
         self.needs_reset = false;
         self.diagnostic = None;
+        Ok(())
+    }
+
+    fn viewport_overlay(
+        &mut self,
+        painter: &egui::Painter,
+        rect: egui::Rect,
+    ) -> Result<(), String> {
+        let mode = self.hud_presentation_mode();
+        if let Some(runtime) = &self.runtime {
+            let authoring = runtime.authoring_snapshot();
+            let resolved = self
+                .hud_cache
+                .prepare(&authoring.hud, authoring, |binding, field| {
+                    runtime.state().binding(binding)?.get(field)
+                });
+            paint_hud(painter, rect, &authoring.hud, resolved, mode);
+        } else {
+            let authoring = self.session.authoring();
+            let resolved = self
+                .hud_cache
+                .prepare(&authoring.hud, authoring, |binding, field| {
+                    authoring.bindings.get(binding)?.state_defaults.get(field)
+                });
+            paint_hud(painter, rect, &authoring.hud, resolved, mode);
+        }
         Ok(())
     }
 

@@ -4,6 +4,7 @@ mod capture_tools;
 mod collider_tools;
 mod color_tools;
 mod export_tools;
+mod hud_tools;
 mod lighting_tools;
 mod material_tools;
 mod persistence_tools;
@@ -109,6 +110,9 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if hud_tools::supported(name) {
+        return hud_tools::valid(name, arguments);
+    }
     if lighting_tools::supported(name) {
         return lighting_tools::valid(name, arguments);
     }
@@ -450,6 +454,7 @@ fn tools() -> Value {
     tools.extend(persistence_tools::list());
     tools.extend(behavior_tools::list());
     tools.extend(runtime_tools::list());
+    tools.extend(hud_tools::list());
     json!({"tools":tools})
 }
 
@@ -582,6 +587,7 @@ impl Server {
                         && !persistence_tools::supported(name)
                         && !behavior_tools::supported(name)
                         && !runtime_tools::supported(name)
+                        && !hud_tools::supported(name)
                 {
                     Err((-32602, "Unknown tool or tools/call parameters"))
                 } else if !valid_arguments(name, &arguments) {
@@ -889,7 +895,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 75);
+        assert_eq!(tools.len(), 79);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -971,7 +977,11 @@ mod tests {
                 "behavior_breakpoint_set",
                 "behavior_debug_inspect",
                 "behavior_debug_next",
-                "behavior_debug_continue"
+                "behavior_debug_continue",
+                "hud_inspect",
+                "hud_settings_set",
+                "hud_label_set",
+                "hud_label_move"
             ]
         );
         for tool in tools {

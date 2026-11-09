@@ -3126,6 +3126,7 @@ dependencies = [
  "eframe",
  "log",
  "png",
+ "ruster-app",
  "ruster-assets",
  "ruster-behavior",
  "ruster-core",
