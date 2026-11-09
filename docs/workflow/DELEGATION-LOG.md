@@ -894,3 +894,8 @@ Astra/high's independent evidence audit identifies unqualified compact/scaled au
 ## 2026-11-10 — F3a keyboard visibility follow-through
 
 Root's rebuilt native2×check confirms repaired footer/error visibility, then exposes a partly clipped Tab target. Sol/high extends the existing scaled-Window owner for keyboard visibility, using unit focus separately from the actual native acquisition path. Root corrects a stale RawInput API, obtains actual RED and implements a six-line body-local focus-scroll repair. The exact regression passes GREEN. Native final follow-through and graphics appearance HOLD remain explicit. No new test owner, renderer workaround or performance campaign is introduced.
+
+
+## 2026-11-10 — F3a Enter activation ownership
+
+Root's dynamic native traversal exposes label Enter also submitting the enclosing form. Sol/high extends the existing keyboard owner with dynamic painted-row acquisition, avoiding fixed Tab counts. Root obtains RED, implements a frame-local activation check following Astra/high's source review, and adds actual positive text-field submission. The same owner passes GREEN and final134default/136inspection gates pass. No test-count increase, persistent UI state or new routing framework is introduced. Native final follow-through remains required.

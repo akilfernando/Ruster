@@ -695,6 +695,11 @@ impl SceneEditor {
             self.draft_generation = self.draft_generation.wrapping_add(1);
         }
         let keys_available = editable && !popup_at_start && !egui::Popup::is_any_open(ui.ctx());
+        // egui activates click-only controls on Enter without consuming the key.
+        // Focused text edits retain drag selection and still submit the form.
+        let activation_owned_enter = fields
+            .iter()
+            .any(|response| response.clicked() && !response.sense.senses_drag());
         let mut enter = false;
         let mut escape = false;
         let mut submitting = None;
@@ -706,7 +711,8 @@ impl SceneEditor {
                 });
             if keys_available && owned {
                 enter |= ui
-                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter))
+                    && !activation_owned_enter;
                 escape |= ui
                     .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                 submitting = Some(response.id);
@@ -853,20 +859,20 @@ impl SceneEditor {
 mod tests {
     use super::*;
 
+    fn text_rect(shape: &egui::epaint::Shape, label: &str) -> Option<egui::Rect> {
+        match shape {
+            egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+            }
+            egui::epaint::Shape::Vec(shapes) => {
+                shapes.iter().find_map(|shape| text_rect(shape, label))
+            }
+            _ => None,
+        }
+    }
+
     #[test]
     fn hud_footer_and_error_stay_visible_in_supported_scaled_windows() {
-        fn text_rect(shape: &egui::epaint::Shape, label: &str) -> Option<egui::Rect> {
-            match shape {
-                egui::epaint::Shape::Text(text) if text.galley.text() == label => {
-                    Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
-                }
-                egui::epaint::Shape::Vec(shapes) => {
-                    shapes.iter().find_map(|shape| text_rect(shape, label))
-                }
-                _ => None,
-            }
-        }
-
         for (physical, scale) in [
             (egui::vec2(1100.0, 760.0), 1.0),
             (egui::vec2(960.0, 640.0), 1.0),
@@ -1147,6 +1153,7 @@ mod tests {
                 |ui| editor.hud_form(ui),
             );
             output.textures_delta.clear();
+            output
         };
         let key = |key| egui::Event::Key {
             key,
@@ -1180,5 +1187,96 @@ mod tests {
             .undo(editor.session.scene().revision)
             .unwrap();
         assert_eq!(editor.session.hud(), &Hud::default());
+
+        // Keyboard activation of a label row selects it within the draft.
+        // Enter must not also submit the enclosing grouped HUD transaction.
+        let hud = Hud {
+            enabled: true,
+            elements: vec![
+                HudLabel {
+                    id: "title".into(),
+                    source: HudSource::Static {
+                        text: "Title".into(),
+                    },
+                },
+                HudLabel {
+                    id: "score".into(),
+                    source: HudSource::Static {
+                        text: "Score".into(),
+                    },
+                },
+            ],
+            ..Hud::default()
+        };
+        editor
+            .session
+            .set_hud(editor.session.scene().revision, hud)
+            .unwrap();
+        editor.sync_draft();
+        editor.error.clear();
+        editor.hud_draft = Some(HudDraft::new(&editor.session));
+        let authored = editor.session.snapshot_bytes().unwrap();
+        let _ = draw(&mut editor, vec![]);
+        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("hud_width")));
+        let _ = draw(&mut editor, vec![]);
+        let mut reached_score = false;
+        for _ in 0..24 {
+            let mut released_tab = key(egui::Key::Tab);
+            if let egui::Event::Key { pressed, .. } = &mut released_tab {
+                *pressed = false;
+            }
+            let _ = draw(&mut editor, vec![key(egui::Key::Tab), released_tab]);
+            let output = draw(&mut editor, vec![]);
+            let score = output
+                .shapes
+                .iter()
+                .find_map(|shape| text_rect(&shape.shape, "2. Static text · score"));
+            let focused = context
+                .memory(|memory| memory.focused())
+                .and_then(|id| context.read_response(id));
+            if let (Some(score), Some(focused)) = (score, focused) {
+                if focused.enabled() && focused.has_focus() && focused.rect.contains_rect(score) {
+                    reached_score = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            reached_score,
+            "Tab traversal must reach the painted Score row"
+        );
+        let mut released_enter = key(egui::Key::Enter);
+        if let egui::Event::Key { pressed, .. } = &mut released_enter {
+            *pressed = false;
+        }
+        let _ = draw(&mut editor, vec![key(egui::Key::Enter), released_enter]);
+        assert_eq!(
+            editor
+                .hud_draft
+                .as_ref()
+                .and_then(|draft| draft.selected.as_deref()),
+            Some("score"),
+            "Enter must select Score while retaining the unapplied HUD draft"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
+
+        editor.hud_draft.as_mut().unwrap().width = "321".into();
+        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("hud_width")));
+        draw(&mut editor, vec![]);
+        let mut released_enter = key(egui::Key::Enter);
+        if let egui::Event::Key { pressed, .. } = &mut released_enter {
+            *pressed = false;
+        }
+        draw(&mut editor, vec![key(egui::Key::Enter), released_enter]);
+        assert!(
+            editor.hud_draft.is_none(),
+            "Enter in a valid text field submits the HUD"
+        );
+        assert_eq!(editor.session.hud().width, 321.0);
+        editor
+            .session
+            .undo(editor.session.scene().revision)
+            .unwrap();
+        assert_eq!(editor.session.hud().width, 320.0);
     }
 }

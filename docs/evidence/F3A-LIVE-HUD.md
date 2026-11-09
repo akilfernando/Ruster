@@ -88,3 +88,10 @@ The existing scaled-Window regression is extended with unit keyboard ownership, 
 
 
 Primary NVIDIA guidance accessed2026-11-10 explains that a driver update without restart can produce the observed NVML mismatch. A restart is a reasonable next environment step, inferred from the local615.78.08/620.70 mismatch. This has not been verified as the cause or cure of the independent black-capture issue. The cited page targets NVIDIA DGX/RHEL, and its package-manager procedures are not applied to this CachyOS workstation. [NVIDIA driver restart guidance](https://docs.nvidia.com/dgx/dgx-el9-user-guide/upgrading.html#upgrading-the-nvidia-gpu-driver-for-linux).
+
+
+## Enter activation ownership
+
+Build4/source4bfe4ef native checks confirm the invalid Enter→Tab→Shift+Tab path keeps both fields fully visible. Dynamic keyboard traversal reaches the Score row, but Enter selects it and also submits the enclosing HUD form, clearing its selection back to Title. The installed egui0.37 interaction code creates a synthetic primary click for Enter without consuming that key.
+
+The existing keyboard owner gains a dynamic painted-row navigation regression. Actual RED shows draft selection None instead of Score. A single frame-local click-only activation check suppresses the second form action while preserving key consumption and Escape. Focused text edits retain drag selection and continue submitting. Astra independently reviews that boundary and recommends the frame-wide check to avoid lost-focus iteration ordering. GREEN also asserts actual valid TextEdit Enter commits width321 as one undoable change. The shared test text-rectangle helper is reused. Final scoped gate passes134default cases with strict Clippy/format/Markdown in15.78seconds; inspection passes136with1existing device case ignored in3.08seconds. Final native activation/reorder and default-off reopen remain pending.
