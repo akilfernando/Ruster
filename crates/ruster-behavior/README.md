@@ -1,6 +1,6 @@
 # Provisional generic Lua behavior backend
 
-This provisional `lua54` library preserves default host API1, supports the accepted API2 named-input workflow under [I1a](../../docs/evidence/I1A-readiness.md), and adds opt-in API3 spatial queries under [P2a](../../docs/plans/P2A-SPATIAL-QUERIES.md). The P2a early foundation gate is accepted, while its complete authoring/recovery/delivery milestone remains active. The saved behavior representation remains language-neutral. Unsupported backends and invalid code remain saveable, with structured runtime rejection. Interpreter adoption remains application-selected.
+This provisional `lua54` library preserves default host API1, supports the accepted API2 named-input workflow under [I1a](../../docs/evidence/I1A-readiness.md), and adds opt-in API3 spatial queries under [P2a](../../docs/plans/P2A-SPATIAL-QUERIES.md). P2a completes its bounded authoring/recovery/delivery milestone2026-11-08 under its [final acceptance](../../docs/evidence/P2a-readiness.md). The saved behavior representation remains language-neutral. Unsupported backends and invalid code remain saveable, with structured runtime rejection. Interpreter adoption remains application-selected.
 
 The optional headless consumer uses the same saved document:
 
@@ -43,7 +43,7 @@ This is the library boundary, not a completed physical-input or MCP injection in
 
 ## P2a spatial-query development
 
-Updated2026-11-07. The API3vertical slice is in development under [P2a](../../docs/plans/P2A-SPATIAL-QUERIES.md). Its early owning tests pass. Direct creator controls, exact package/native parity and measured quality gates remain open. API1and API2environments retain their existing contracts. API3also exposes the same Button/Axis facilities.
+Updated2026-11-07. The API3vertical slice is accepted within [P2a](../../docs/plans/P2A-SPATIAL-QUERIES.md). Direct creator controls, exact package/native parity and measured quality gates pass within the [final acceptance](../../docs/evidence/P2a-readiness.md) scope. API1and API2environments retain their existing contracts. API3also exposes the same Button/Axis facilities.
 
 `host.sweep(probe_id, delta)` uses an enabled sphere collider and the immutable tick-start blocker world. The displacement has exactly three finite original numbers. The requested owner position must remain within Scene translation bounds before f32conversion. The result has `outcome`, `suggested_translation`, `fraction`, `target_id`, `point`, `normal` and effective `clearance`. Outcomes are `clear`, `blocked`, `initial_overlap` and `precision_limited`. The latter two carry no suggested movement. The suggested owner translation is authoritative after f32rounding. Fraction is an estimate along the quantized request. Point and outward target normal use world coordinates.
 

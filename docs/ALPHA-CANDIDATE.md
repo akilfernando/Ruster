@@ -2,6 +2,10 @@
 
 Updated2026-11-05. **Working candidate, not accepted or published.** The user reactivated the through-M9 goal after the M8 checkpoint. The intended outcome is adoption by another developer without continual author assistance. A version label, local green gate or successful example alone does not prove that outcome.
 
+## Historical candidate scope
+
+Reconciled2026-11-09. The candidate identities, compatibility inventories and exact-version evidence below describe the retained2026-11-05 snapshots. They do not describe current product versions or a current release freeze. [STATUS](STATUS.md) owns subsequent verified development, and the [capability inventory](ENGINE-CAPABILITIES.md) owns the current customer-readiness assessment. A future candidate must refresh these gates against its exact source and advertised support contract.
+
 ## Qualification versus product capability
 
 The user-requested2026-11-05 [quality-first roadmap realignment](ROADMAP.md#quality-first-capability-sequence) supersedes finish-M9-first/no-feature-expansion scheduling. This matrix remains the retained prototype qualification track, not proof of the expanded creator-ready product baseline. Missing visual authoring and other capability workflows are explicitly allocated in the roadmap. Before freezing a future creator-ready release, define its advertised capability contract from delivered slices and qualify that exact candidate using these gates. No old snapshot is retroactively certified for new features, and no human/platform/resource/compatibility requirement is waived.
@@ -35,9 +39,9 @@ Remote main is2b290274afd45ea00440079978ad049283a4086f, with successful [CI41794
 
 M9's revised Unity walkthrough uses a fresh disposable content project, independent workspace/recovery state, inspection disabled and explicit Vulkan/sync logs. The user controls its window. Their first findings are that repeated viewport clicks fail to select the intended object, and the inspector does not show transform changes during a gizmo drag. Failing-before real-egui cases reproduce competing cursor-centered gizmo input; the repaired adapter and live candidate fields pass. The integrated Transform-first/style slice passes175Rust/21tooling tests plus strict lint/formatting. Native layout recheck and repaired-build physical input remain distinct gates; the user subsequently reviewed the repaired release, confirming reliable selection/live Transform feedback, and closed both review windows. These observations supersede any inference that injected interaction alone established human familiarity.
 
-## Candidate compatibility inventory
+## Historical candidate compatibility inventory
 
-These are current owning-source contracts, not stable future-format promises. Unknown/corrupt versions must fail visibly and preserve original data; explicit Save is the migration boundary where documented.
+These are the historical candidate owning-source contracts, not current product versions or stable future-format promises. Unknown/corrupt versions must fail visibly and preserve original data; explicit Save is the migration boundary where documented.
 
 | Data/interface | Current reader/writer contract | Owning source/guide |
 | --- | --- | --- |

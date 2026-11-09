@@ -2,6 +2,12 @@
 
 Updated2026-11-09. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
+## Customer-readiness assessment — 2026-11-09
+
+Root/Astra assess current source and retained delivery evidence in the [capability inventory](ENGINE-CAPABILITIES.md#customer-project-readiness-assessment--2026-11-09). Ruster supports complete small bounded Linux visual/interactive applications, with a broader code-first Rust application surface than the current transform-returning Lua authoring contract. General editor-authored game completion still needs first-class per-run state and runtime UI/feedback, followed by application-selected composition/content/audio/animation/physics and exact-candidate adoption/platform qualification. This is a maturity assessment, without a numerical completion percentage or new implementation goal.
+
+The user explicitly confirms that creators own scoring systems, menus and application rules. Ruster supplies reusable state/scripting/UI/lifecycle facilities through code, direct editing and native MCP. Root/Astra recommend investigating one complete creator-authored play loop to exercise those facilities, with score/objective/menu rules authored as application content. Scope/architecture/activation remain for a separate bounded plan. Current capability/roadmap P2a labels are reconciled, and the M9 compatibility inventory is explicitly marked as a historical snapshot. Verification uses `python3 scripts/check.py` against HEAD81c5b6c and passes the Markdown-only lane in0.18seconds. Runtime/source evidence is reused because implementation is unchanged.
+
 ## Product direction and confirmed feedback
 
 Enable creators to build their own games, simulations and visual applications with familiar tools, approachable behavior scripting or Rust, recoverable iteration and standalone delivery. User experience leads; Rust/Vulkan, openness, optional native MCP/manual parity, documentation continuity and lean measured implementation remain requirements. [Direction](DIRECTION.md) owns the ethos; [roadmap](ROADMAP.md) owns milestone scope.
