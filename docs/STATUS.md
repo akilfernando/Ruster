@@ -16,6 +16,10 @@ The user approves one final attempt including setup and confirms an idle opportu
 
 **Retention decision settled.** The user accepts the recorded stress-workload cost and retains bounded F2a. The performance investigation is closed, with original evidence and unresolved cause preserved. F3 runtime UI is the next candidate for a separately scoped proposal. No new implementation goal, profiler campaign, M9 acceptance or release is activated. All owned children reconcile, local/shared private snapshots are deleted after final verification, and no owned lease remains. Product source/dependencies are unchanged, with existing Rust/native evidence reused. Desktop/clipboard are untouched.
 
+## Next goal proposal — F3a live HUD
+
+2026-11-10. In response to the user's planning request, Root/Astra recommend [F3a creator-authored live HUD](plans/F3A-LIVE-HUD.md). A creator authors static and state-bound screen-space text through editor/MCP, with coherent committed-frame values, recovery and exact standalone delivery. General interactive menus need a separately selected running-command contract because current F2a admission is paused-only. Caps/layout/formatting are proposed defaults, and reference repair/presentation-edit policies and measured cost criteria must be settled before code. Implementation and a Goal-tool goal are not started.
+
 ## F1 accepted — creator-defined runtime state
 
 Completed 2026-11-09. Root/Astra retain the bounded [F1 creator runtime-state contract](plans/F1-RUNTIME-STATE.md) on source `3c8fc8f`. [Decision0044](decisions/0044-owned-creator-runtime-state.md) selects typed per-binding values, one nonvisual Application binding, API4 tick-start reads/own-state patches, atomic state/transform commit and immutable observations. Rust/editor/MCP author defaults and inspect committed state. API4 behavior execution updates values. Existing Rust Application state remains separately owned. Scene13, recovery draft11 and content9 preserve their recorded compatibility. **Stop at F1; select the next bounded slice separately.** No Goal-tool goal or public release is created.
