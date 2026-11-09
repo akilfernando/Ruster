@@ -124,7 +124,7 @@ impl GenericMotionLab {
         }
         if let Some(receipt) = &self.command_receipt {
             ui.label(format!(
-                "Last command {} · tick {} · commit {} → {}",
+                "Last command {} · tick {} · commit {} to {}",
                 receipt.command_id,
                 receipt.tick,
                 receipt.previous_commit_revision,
@@ -270,7 +270,12 @@ impl CommandUi {
                 .selected_text(&self.selected)
                 .show_ui(ui, |ui| {
                     for id in binding.commands.keys() {
-                        ui.selectable_value(&mut self.selected, id.clone(), id);
+                        if ui
+                            .selectable_value(&mut self.selected, id.clone(), id)
+                            .clicked()
+                        {
+                            ui.close();
+                        }
                     }
                 });
         });
@@ -475,6 +480,7 @@ mod tests {
         let mut app = GenericMotionLab::new(session, MeshMap::new(), FIXED_DT).unwrap();
         app.reset().unwrap();
         let context = egui::Context::default();
+        let edit_position = std::cell::Cell::new(None);
         let frame = |app: &mut GenericMotionLab, events, playing| {
             let mut output = context.run_ui(
                 egui::RawInput {
@@ -490,6 +496,12 @@ mod tests {
                 },
             );
             output.textures_delta.clear();
+            edit_position.set(output.shapes.iter().find_map(|shape| match &shape.shape {
+                egui::Shape::Text(text) if text.galley.job.text == "Edit command arguments" => {
+                    Some(text.visual_bounding_rect().center())
+                }
+                _ => None,
+            }));
         };
         let key_event = |key, pressed| egui::Event::Key {
             key,
@@ -593,5 +605,53 @@ mod tests {
         );
         app.reset().unwrap();
         assert!(app.command_ui.draft.is_none());
+        // Real menu keyboard activation selects without invoking or opening a form.
+        frame(&mut app, Vec::new(), false);
+        frame(&mut app, Vec::new(), false);
+        frame(&mut app, key(egui::Key::Tab), false);
+        frame(&mut app, key(egui::Key::Enter), false);
+        assert!(egui::Popup::is_any_open(&context), "Command menu opened");
+        frame(&mut app, key(egui::Key::ArrowDown), false);
+        frame(&mut app, key(egui::Key::ArrowDown), false);
+        frame(&mut app, key(egui::Key::Enter), false);
+        assert_eq!(app.command_ui.selected, "noop");
+        assert!(
+            !egui::Popup::is_any_open(&context),
+            "Selection closes its menu"
+        );
+        assert!(
+            app.command_ui.draft.is_none(),
+            "Selection Enter owns no form action"
+        );
+        assert_eq!(app.runtime_commit_revision(), Some(0));
+        frame(&mut app, Vec::new(), false);
+        let position = edit_position
+            .get()
+            .expect("visible Edit command arguments control");
+        frame(
+            &mut app,
+            vec![
+                egui::Event::PointerMoved(position),
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: true,
+                    modifiers: egui::Modifiers::NONE,
+                },
+                egui::Event::PointerButton {
+                    pos: position,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ],
+            false,
+        );
+        assert_eq!(app.command_ui.draft.as_ref().unwrap().command, "noop");
+        assert_eq!(
+            app.runtime_commit_revision(),
+            Some(0),
+            "Fresh Edit does not invoke"
+        );
     }
 }

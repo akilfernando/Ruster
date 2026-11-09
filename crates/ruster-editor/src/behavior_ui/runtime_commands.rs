@@ -146,7 +146,11 @@ impl RuntimeUi {
                 let previous = self.invocation.command.clone();
                 let choice = egui::ComboBox::from_id_salt("runtime_command_choice").selected_text(&previous).show_ui(ui, |ui| {
                     for id in catalog.keys() {
-                        ui.add_enabled_ui(!self.invocation.dirty, |ui| { ui.selectable_value(&mut self.invocation.command, id.clone(), id); });
+                        ui.add_enabled_ui(!self.invocation.dirty, |ui| {
+                            if ui.selectable_value(&mut self.invocation.command, id.clone(), id).clicked() {
+                                ui.close();
+                            }
+                        });
                     }
                 });
                 if choice.response.has_focus() && choice.response.gained_focus() {

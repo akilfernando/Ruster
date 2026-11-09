@@ -541,14 +541,48 @@ mod tests {
             render(&mut runtime, vec![]);
         }
         let choice = point(&render(&mut runtime, vec![]), "adjust");
-        render(&mut runtime, click(choice, true));
-        render(&mut runtime, click(choice, false));
+        // Open the chooser through genuine traversal, then select its nonfirst
+        // item with arrows and Enter. Choosing a command must close the popup
+        // without invoking it or leaving that Enter for the command footer.
+        for _ in 0..16 {
+            let owns = ctx
+                .memory(|memory| memory.focused())
+                .and_then(|id| ctx.read_response(id))
+                .is_some_and(|response| response.rect.contains(choice));
+            if owns {
+                break;
+            }
+            render(&mut runtime, key(egui::Key::Tab, true));
+            render(&mut runtime, key(egui::Key::Tab, false));
+        }
+        let choice_id = ctx.memory(|memory| memory.focused()).unwrap();
+        assert!(ctx.read_response(choice_id).unwrap().rect.contains(choice));
+        render(&mut runtime, key(egui::Key::Enter, true));
+        render(&mut runtime, key(egui::Key::Enter, false));
+        assert!(egui::Popup::is_any_open(&ctx));
         let noop = point(&render(&mut runtime, vec![]), "noop");
-        render(&mut runtime, click(noop, true));
-        render(&mut runtime, click(noop, false));
+        for _ in 0..4 {
+            let owns = ctx
+                .memory(|memory| memory.focused())
+                .and_then(|id| ctx.read_response(id))
+                .is_some_and(|response| response.rect.contains(noop));
+            if owns {
+                break;
+            }
+            render(&mut runtime, key(egui::Key::ArrowDown, true));
+            render(&mut runtime, key(egui::Key::ArrowDown, false));
+        }
+        let option_id = ctx.memory(|memory| memory.focused()).unwrap();
+        assert!(ctx.read_response(option_id).unwrap().rect.contains(noop));
+        render(&mut runtime, key(egui::Key::Enter, true));
+        render(&mut runtime, key(egui::Key::Enter, false));
         let shapes = render(&mut runtime, vec![]);
         point(&shapes, "noop");
         assert!(!egui::Popup::is_any_open(&ctx));
+        assert_eq!(runtime.frame.as_ref().unwrap().commit_revision, 3);
+        assert_eq!(runtime.frame.as_ref().unwrap().tick, 1);
+        assert!(runtime.pending.is_none() && runtime.awaiting.is_none());
+        assert!(!runtime.command_draft_pending());
         let invoke = point(&shapes, "Invoke Application command");
         for _ in 0..16 {
             let owns = ctx
