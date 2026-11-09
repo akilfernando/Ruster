@@ -144,11 +144,14 @@ impl RuntimeUi {
                     self.invocation.command = catalog.keys().next().cloned().unwrap_or_default();
                 }
                 let previous = self.invocation.command.clone();
-                egui::ComboBox::from_id_salt("runtime_command_choice").selected_text(&previous).show_ui(ui, |ui| {
+                let choice = egui::ComboBox::from_id_salt("runtime_command_choice").selected_text(&previous).show_ui(ui, |ui| {
                     for id in catalog.keys() {
                         ui.add_enabled_ui(!self.invocation.dirty, |ui| { ui.selectable_value(&mut self.invocation.command, id.clone(), id); });
                     }
                 });
+                if choice.response.has_focus() && choice.response.gained_focus() {
+                    choice.response.scroll_to_me(None);
+                }
                 if previous != self.invocation.command || self.invocation.binding != binding_id {
                     self.invocation.arguments.clear();
                 }
@@ -172,12 +175,18 @@ impl RuntimeUi {
                     && command_key(ui,egui::Key::Enter);
                 let invoke_id = ui.make_persistent_id(("invoke-command", &binding_id, &self.invocation.command));
                 let invoke = ui.scope_builder(egui::UiBuilder::new().scope_id(invoke_id), |ui| ui.button("Invoke Application command")).inner;
+                if invoke.has_focus() && invoke.gained_focus() {
+                    invoke.scroll_to_me(None);
+                }
                 self.restore_control_focus(&invoke);
                 owns |= command_field_focus(ui, Some(invoke.id));
                 submit = (command_clicked(&invoke) || enter) && command_claim(ui.ctx(), &mut self.command_action_frame);
                 if submit && invoke.has_focus() { submit_control = Some(invoke.clone()); }
                 let cancel_id = ui.make_persistent_id(("cancel-command", &binding_id, &self.invocation.command));
                 let cancel_button = ui.scope_builder(egui::UiBuilder::new().scope_id(cancel_id), |ui| ui.button("Cancel command arguments")).inner;
+                if cancel_button.has_focus() && cancel_button.gained_focus() {
+                    cancel_button.scroll_to_me(None);
+                }
                 owns |= command_field_focus(ui, Some(cancel_button.id));
                 cancel = (command_clicked(&cancel_button) || (owns && !popup
                     && !egui::Popup::is_any_open(ui.ctx()) && command_key(ui,egui::Key::Escape)))

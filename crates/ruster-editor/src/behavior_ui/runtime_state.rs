@@ -167,6 +167,8 @@ mod tests {
             loop {
                 runtime.poll(&ctx);
                 if runtime.ready
+                    && runtime.pending.is_none()
+                    && runtime.awaiting.is_none()
                     && runtime
                         .frame
                         .as_ref()
@@ -438,7 +440,7 @@ mod tests {
         // owner across a worker acknowledgement, including a disabled paint.
         // Reuse this worker rather than manufacturing a committed Frame.
         ctx.all_styles_mut(|style| style.animation_time = 0.0);
-        fn point(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {
+        fn visible_point(shapes: &[egui::epaint::ClippedShape], label: &str) -> Option<egui::Pos2> {
             fn find(
                 shape: &egui::epaint::Shape,
                 clip: egui::Rect,
@@ -458,8 +460,13 @@ mod tests {
             shapes
                 .iter()
                 .find_map(|shape| find(&shape.shape, shape.clip_rect, label))
+        }
+        fn point(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {
+            visible_point(shapes, label)
                 .unwrap_or_else(|| panic!("visible command control missing: {label}"))
         }
+        let preceding_content = std::cell::Cell::new(0.0);
+        let scroll_height = std::cell::Cell::new(760.0);
         let render = |runtime: &mut RuntimeUi, events| {
             let mut output = ctx.run_ui(
                 egui::RawInput {
@@ -471,10 +478,40 @@ mod tests {
                     events,
                     ..Default::default()
                 },
-                |ui| runtime.command_controls(ui, &session, true),
+                |ui| {
+                    egui::ScrollArea::vertical()
+                        .id_salt("command_keyboard_owner_scroll")
+                        .max_height(scroll_height.get())
+                        .show(ui, |ui| {
+                            ui.add_space(preceding_content.get());
+                            runtime.command_controls(ui, &session, true);
+                        });
+                },
             );
             output.textures_delta.clear();
             output.shapes
+        };
+        let reveal = |runtime: &mut RuntimeUi, label: &str| {
+            // ScrollAnimation has its own clock (default max duration 0.3s),
+            // independent of the disabled collapsing-header animation above.
+            // Advance real UI frames up to one simulated second; without a
+            // production scroll request the clipped-visibility oracle still fails.
+            let deadline = ctx.input(|input| input.time) + 1.0;
+            let mut shapes = Vec::new();
+            for _ in 0..64 {
+                shapes = render(runtime, vec![]);
+                let focused_rect = ctx
+                    .memory(|memory| memory.focused())
+                    .and_then(|id| ctx.read_response(id))
+                    .map(|response| response.rect);
+                let visible = visible_point(&shapes, label)
+                    .is_some_and(|point| focused_rect.is_some_and(|rect| rect.contains(point)));
+                if visible || ctx.input(|input| input.time) >= deadline {
+                    break;
+                }
+            }
+            point(&shapes, label);
+            shapes
         };
         let click = |position, pressed| {
             vec![
@@ -579,6 +616,48 @@ mod tests {
         render(&mut runtime, click(cancel, true));
         render(&mut runtime, click(cancel, false));
         point(&render(&mut runtime, vec![]), "noop");
+        // The Inspector can place this form far below its visible scroll area.
+        // Traversal must reveal a genuinely focused footer before activation,
+        // independently of the acknowledgement-specific focus handoff above.
+        preceding_content.set(900.0);
+        scroll_height.set(90.0);
+        for _ in 0..3 {
+            render(&mut runtime, vec![]);
+        }
+        assert!(ctx.read_response(invoke_id).unwrap().rect.top() > 90.0);
+        for _ in 0..32 {
+            if ctx.memory(|memory| memory.focused()) == Some(invoke_id) {
+                break;
+            }
+            render(&mut runtime, key(egui::Key::Tab, true));
+            render(&mut runtime, key(egui::Key::Tab, false));
+        }
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(invoke_id));
+        let revealed = reveal(&mut runtime, "Invoke Application command");
+        let visible_invoke = point(&revealed, "Invoke Application command");
+        assert!(ctx
+            .read_response(invoke_id)
+            .unwrap()
+            .rect
+            .contains(visible_invoke));
+        render(&mut runtime, key(egui::Key::Tab, true));
+        render(&mut runtime, key(egui::Key::Tab, false));
+        let revealed = reveal(&mut runtime, "Cancel command arguments");
+        let visible_cancel = point(&revealed, "Cancel command arguments");
+        let focused_cancel = ctx.memory(|memory| memory.focused()).unwrap();
+        assert_ne!(focused_cancel, invoke_id);
+        assert!(ctx
+            .read_response(focused_cancel)
+            .unwrap()
+            .rect
+            .contains(visible_cancel));
+        assert_eq!(runtime.frame.as_ref().unwrap().commit_revision, 6);
+        assert!(runtime.pending.is_none() && runtime.awaiting.is_none());
+        preceding_content.set(0.0);
+        scroll_height.set(760.0);
+        for _ in 0..3 {
+            render(&mut runtime, vec![]);
+        }
         // Reset replaces the run and intentionally drops its prior selection.
         runtime
             .runtime_api("behavior_runtime_reset", &json!({}), &session, 1)
