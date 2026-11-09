@@ -2,6 +2,12 @@
 
 Updated2026-11-09. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
+## F2a proposed — initialization and paused Application commands
+
+2026-11-09. The user directs work onto the next foundation. Root/Astra inspect accepted F1 source and the existing worker/application/UI boundaries, then recommend [F2a initialization and paused commands](plans/F2A-APPLICATION-LIFECYCLE.md). Creators compute initial state and invoke their own declared typed commands while simulation time is paused, with shared editor/MCP and standalone semantics. A commit revision separate from simulation tick is required for truthful state pages and dispatch identity. Preserve API1–4, the existing worker and optional initial export view.
+
+The plan records alternatives, proposed guards/catalog/version decisions, ordinary keyboard/recovery/delivery acceptance, baseline-before-code cost criteria and a finite stopping condition. This remains a reviewable scope proposal. Production implementation and the consequential ADR choices are pending selection. No new Goal-tool goal is created. The substantial integrated project remains deferred. Planning verification `python3 scripts/check.py --base a52263e` passes the Markdown-only whitespace/link lane in0.18seconds. No new production tests, benchmarks or native sessions run.
+
 ## F1 accepted — creator-defined runtime state
 
 Completed 2026-11-09. Root/Astra retain the bounded [F1 creator runtime-state contract](plans/F1-RUNTIME-STATE.md) on source `3c8fc8f`. [Decision0044](decisions/0044-owned-creator-runtime-state.md) selects typed per-binding values, one nonvisual Application binding, API4 tick-start reads/own-state patches, atomic state/transform commit and immutable observations. Rust/editor/MCP author defaults and inspect committed state. API4 behavior execution updates values. Existing Rust Application state remains separately owned. Scene13, recovery draft11 and content9 preserve their recorded compatibility. **Stop at F1; select the next bounded slice separately.** No Goal-tool goal or public release is created.
