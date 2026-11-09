@@ -884,3 +884,8 @@ A source-only external component probe uses archived420381f/current dependencies
 ## 2026-11-10 — F3a visible-layout and native preparation
 
 Sol/high prepares viewport-directed shaping and full-layout reference tests; Root executes the revised finite cohort against unchanged numerical criteria. All15candidate processes pass correctness and component references. Final workspace309Rust/28Python,135inspection cases and strict default/inspection lint pass with recorded existing device exclusions. Astra/high independently reviews bc9e313 and reports qualified source approval, with no blocking defect identified. Native/recovery/export/resource gates remain required. Sol source-only owners prepare guarded editor/runtime helpers and update current workflow/API READMEs. Root alone verifies/imports/executes tooling. Worker usage/cost metrics remain unknown. [Evidence](../evidence/F3A-LIVE-HUD.md).
+
+
+## 2026-11-10 — F3a final UX challenge
+
+Astra/high's independent evidence audit identifies unqualified compact/scaled authoring and post-error/reorder traversal while rejecting another performance campaign. Root's native480×320logical form confirms offscreen footer controls. Sol/high prepares one focused actual-Window regression, fixes the initial egui test API under Root direction, then prepares a viewport/header/footer/error budget after Root obtains actual RED. Root's GREEN passes. Root owns all native/process/GPU/capture diagnosis and remaining acceptance. The independent Vulkan-tools control reproduces black compositor capture; Root retains appearance HOLD separately from clean Intel native resize/close. Worker usage metrics remain unknown.

@@ -1,6 +1,6 @@
 # F3a live HUD qualification in progress
 
-Updated2026-11-10. The user approves the [bounded F3a plan](../plans/F3A-LIVE-HUD.md). [Decision0047](../decisions/0047-read-only-creator-hud.md) owns selected defaults and boundaries. Implementation is in progress. Native creator journeys, actual crash/Restore, exact source-hidden/native exports and final efficiency acceptance remain outstanding.
+Updated2026-11-10. The user approves the [bounded F3a plan](../plans/F3A-LIVE-HUD.md). [Decision0047](../decisions/0047-read-only-creator-hud.md) owns selected defaults and boundaries. Implementation is in progress. Independent creator/recovery journeys, source-hidden exports and the named efficiency checks pass below. Scaled-authoring repair and native exact-export visual qualification remain in progress.
 
 ## Evidence ownership and baseline
 
@@ -40,7 +40,7 @@ After integration, `workspace-tests-3.log` passes309Rust tests with3existing dev
 
 ## Remaining qualification
 
-Qualify independent ordinary editor/native-MCP authoring, compact/key ownership, actual unfinished-draft crash/Restore/repair, old references/versions/kits, exact exported headless values and native placement/resize/close/resource ownership. Capture final source/binary identity and update this record before milestone evaluation. No physical-human or M9 acceptance follows from injected tests.
+Finish the native compact/zoom2 authoring repair and keyboard traversal after errors/reordering. Reopen saved projects in final default/inspection builds, including default-off listeners. Exact exported apps have completed native resize/close/scanner/immutable checks on Intel, while black compositor captures leave appearance unqualified. Root/Astra must evaluate the final evidence and record a clear acceptance or hold before handoff. No physical-human or M9 acceptance follows from injected tests.
 
 
 ## First native authoring and policy reconciliation
@@ -67,3 +67,14 @@ Four actual native frames show each corner anchor. At960×640 the five-label gro
 Final MCP project revision116 exports MCP-HUD.tar.gz, SHAf100f646, through native MCP with exact runtime/kit/scene receipt and drained cleanup. Both current editors close0/scanner0 and root restores the protected desktop after conservative parent deferral. Independent source-derived complete oracles cover six exact source-hidden prefixes, all pass with immutable payloads and owned children reaped. Manual ticks0/1 and default paused advance followed by ticks0/1 check initialized/command/Step state, all geometry and HUD strings/commit identities. Separate MCP ticks0/1 check all four value types and final revision116. These headless checks establish values and delivery closure, while native exported placement/resize remains pending.
 
 The final copy-only editor gate passes133default cases, scoped format, strict Clippy and all local Markdown validation in48.50seconds including cache compilation. Other workspace/Python/component evidence remains applicable to unchanged owners. The corrected guidance still needs exact rebuilt default/inspection smoke and final source handoff.
+
+
+## Scaled authoring repair and current graphics boundary
+
+Final copy build2/source5679ab7 compiles default in85seconds and inspection in33.57seconds. Inspection tests pass135cases with1existing device case ignored. The actual960×640/editor-scale2 form is480×320logical points. Apply/Cancel appear at y333–361, outside that viewport. This is a demonstrated authoring defect, separate from the previously passing painted-overlay compact case. The source regression initially hits an obsolete egui Context.style test API; after correcting that API, it fails with missing visible Apply at scale2. A logical viewport/header/footer/wrapped-error budget then passes the exact regression. Final scoped gate passes134default tests, strict Clippy, format and Markdown in7.95seconds; inspection passes136tests with1existing device case ignored in3.01seconds. Only the form body scrolls, and existing IDs/keyboard semantics remain. Final native repaired-layout/traversal qualification is pending.
+
+The first NVIDIA-pinned standalone launch exits2 with no adapters and scanner1. Current loaded kernel module615.78.08 and installed NVML620.70 disagree; nvidia-smi exits18 with an explicit driver/library mismatch. Earlier native editor logs confirm Intel Iris Xe/Vulkan/4×MSAA. A phase-local helper explicitly pins that available Intel adapter and ICD, retaining exact identity/payload/validation guards.
+
+Both exact default exported apps then complete1280×800→1400×850→1280×800 parent-owned resizes, normal0/scanner0, no listeners, unchanged payloads and restored protected desktop. Actual summary reports one920-byte mesh upload across all frames, including2858frames in the manual case. The captures are black apart from the cursor, so these successful process/resource checks do not establish appearance. One independent unmodified Vulkan-tools cube on Intel produces the same black compositor capture and exits0/restores desktop. This bounds the issue to a shared capture/display path without establishing its cause. An attempted system-grim comparison is unavailable because /usr/bin/grim is absent. Native appearance remains held, with internal editor framebuffer captures and source-hidden values retained as separate evidence. No driver or compositor configuration is changed.
+
+Absence of HUD-triggered Lua evaluation, whole-state serialization/copy and additional scene texture/target upload paths is supported by source ownership review. Texture/target upload counters were not directly observed in the HUD probe. The native application mesh-upload summary above has its separate measured scope.

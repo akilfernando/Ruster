@@ -326,6 +326,47 @@ impl SceneEditor {
         let mut fields = Vec::new();
         ui.label("Screen-space text · one ordered group · up to 32 labels");
         ui.small("Apply cancels runtime preview and shows authored defaults. Reset captures the HUD and initializes live values.");
+        // Budget in current logical points after the wrapping header. Only the
+        // body scrolls, keeping Apply, Cancel and validation feedback reachable.
+        let spacing = ui.spacing().item_spacing.y;
+        let button_height = ui.spacing().interact_size.y.max(
+            ui.text_style_height(&egui::TextStyle::Button) + 2.0 * ui.spacing().button_padding.y,
+        );
+        let footer_budget = 2.0 * button_height + 3.0 * spacing;
+        let error_budget = ui
+            .painter()
+            .layout(
+                self.error.clone(),
+                egui::TextStyle::Body.resolve(ui.style()),
+                ui.visuals().error_fg_color,
+                ui.available_width(),
+            )
+            .size()
+            .y
+            .max(2.0 * ui.text_style_height(&egui::TextStyle::Body))
+            + spacing;
+        let disabled_budget = if editable {
+            0.0
+        } else {
+            ui.painter()
+                .layout(
+                    "Finish other edits and dialogs to edit the HUD.".into(),
+                    egui::TextStyle::Body.resolve(ui.style()),
+                    ui.visuals().text_color(),
+                    ui.available_width(),
+                )
+                .size()
+                .y
+                + spacing
+        };
+        let bottom = ui
+            .ctx()
+            .content_rect()
+            .bottom()
+            .min(ui.clip_rect().bottom());
+        let body_height =
+            (bottom - ui.cursor().min.y - footer_budget - error_budget - disabled_budget - 16.0)
+                .clamp(0.0, 460.0);
         let content = |ui: &mut egui::Ui| {
             fields.push(ui.checkbox(&mut draft.hud.enabled, "Show HUD"));
             ui.horizontal_wrapped(|ui| {
@@ -639,7 +680,8 @@ impl SceneEditor {
         };
         egui::ScrollArea::vertical()
             .id_salt("hud_form_scroll")
-            .max_height(460.0)
+            .max_height(body_height)
+            .min_scrolled_height(0.0)
             .show(ui, |ui| {
                 ui.add_enabled_ui(editable, content);
             });
@@ -805,6 +847,105 @@ impl SceneEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn hud_footer_and_error_stay_visible_in_supported_scaled_windows() {
+        fn text_rect(shape: &egui::epaint::Shape, label: &str) -> Option<egui::Rect> {
+            match shape {
+                egui::epaint::Shape::Text(text) if text.galley.text() == label => {
+                    Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                }
+                egui::epaint::Shape::Vec(shapes) => {
+                    shapes.iter().find_map(|shape| text_rect(shape, label))
+                }
+                _ => None,
+            }
+        }
+
+        for (physical, scale) in [
+            (egui::vec2(1100.0, 760.0), 1.0),
+            (egui::vec2(960.0, 640.0), 1.0),
+            (egui::vec2(960.0, 640.0), 2.0),
+        ] {
+            let ctx = egui::Context::default();
+            crate::ui::configure(&ctx);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, physical)),
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            output.textures_delta.clear();
+            ctx.set_zoom_factor(scale);
+            let logical = egui::Rect::from_min_size(egui::Pos2::ZERO, physical / scale);
+            let mut session =
+                Session::new(ruster_scene::Scene::empty("hud-scaled-footer")).unwrap();
+            let hud = Hud {
+                enabled: true,
+                elements: (0..MAX_HUD_LABELS)
+                    .map(|index| HudLabel {
+                        id: format!("instrument-label-{index}"),
+                        source: HudSource::Static {
+                            text: format!("Instrument reading {index}"),
+                        },
+                    })
+                    .collect(),
+                ..Hud::default()
+            };
+            session.set_hud(session.scene().revision, hud).unwrap();
+            let mut editor = SceneEditor::new(session);
+            editor.select_object(None, false);
+            let mut draft = HudDraft::new(&editor.session);
+            draft.width = "-".into();
+            draft.selected = draft.hud.elements.last().map(|label| label.id.clone());
+            let selected = draft.hud.elements.last_mut().unwrap();
+            selected.source = HudSource::State {
+                binding_id: "application".into(),
+                field: "instrument_reading".into(),
+                value_type: HudValueType::Number,
+                prefix: "Current instrument reading ".into(),
+                suffix: " units".into(),
+                precision: 2,
+            };
+            draft.precision.insert(selected.id.clone(), "2".into());
+            editor.error = draft.value().unwrap_err();
+            let error = editor.error.clone();
+            editor.hud_draft = Some(draft);
+            editor.hud_open = true;
+            let mut shapes = Vec::new();
+            for _ in 0..4 {
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        screen_rect: Some(logical),
+                        ..Default::default()
+                    },
+                    |_| editor.show_hud_editor(&ctx),
+                );
+                output.textures_delta.clear();
+                shapes = output.shapes;
+            }
+            let screen = ctx.content_rect();
+            assert!((screen.size() - logical.size()).length() <= 0.5);
+            for label in ["Apply HUD", "Cancel", error.as_str()] {
+                let (rect, clip) = shapes.iter().find_map(|shape| {
+                    text_rect(&shape.shape, label).map(|rect| (rect, shape.clip_rect))
+                }).unwrap_or_else(|| panic!("HUD footer/error {label:?} has no visible text at scale {scale} in {screen:?}"));
+                assert!(rect.is_positive());
+                assert!(screen.expand(0.5).contains_rect(rect),
+                    "HUD footer/error {label:?} at {rect:?} outside viewport {screen:?} at scale {scale}");
+                assert!(clip.expand(0.5).contains_rect(rect),
+                    "HUD footer/error {label:?} at {rect:?} is clipped by {clip:?} at scale {scale}");
+                if label != error {
+                    let padded =
+                        rect.expand2(ctx.style_of(egui::Theme::Dark).spacing.button_padding);
+                    assert!(screen.expand(0.5).contains_rect(padded),
+                        "HUD footer button {label:?} at {padded:?} outside viewport {screen:?} at scale {scale}");
+                }
+            }
+        }
+    }
 
     #[test]
     fn raw_hud_drafts_roundtrip_bound_unfinished_values_and_validate_original_identity() {
