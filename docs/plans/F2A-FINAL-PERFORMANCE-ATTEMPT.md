@@ -26,4 +26,4 @@ Execution and disposition will be recorded separately. This plan makes no claim 
 
 ## Executed disposition
 
-2026-11-10. Setup and all four records pass. Independent call-path/source review remains inconclusive, selecting no repair candidate. The final attempt ends under its overall stopping rule. [Evidence and proposed product decision](../evidence/F2A-FINAL-PERFORMANCE-ATTEMPT.md). F2a cost acceptance remains HOLD pending the user decision.
+2026-11-10. Setup and all four records pass. Independent call-path/source review remains inconclusive, selecting no repair candidate. The final attempt ends under its overall stopping rule. [Evidence and proposed product decision](../evidence/F2A-FINAL-PERFORMANCE-ATTEMPT.md). The user subsequently accepts F2a with the measured tradeoff on2026-11-10, recorded in [decision0046](../decisions/0046-f2a-measured-performance-tradeoff.md). The investigation remains inconclusive and closed.

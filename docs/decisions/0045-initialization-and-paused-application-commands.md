@@ -1,6 +1,6 @@
 # 0045 — Initialization and paused Application commands
 
-Date2026-11-09. Status accepted implementation contract after the user approves F2a with “Proceed” and root/Astra review the actual owners. Feature retention remains pending qualification. The interface, versions and logical guards below are agent-selected defaults serving the approved [F2a outcome](../plans/F2A-APPLICATION-LIFECYCLE.md).
+Date2026-11-09. Status accepted implementation contract after the user approves F2a with “Proceed” and root/Astra review the actual owners. Feature retention is accepted on2026-11-10 with the explicit measured performance tradeoff in [0046](0046-f2a-measured-performance-tradeoff.md). The interface, versions and logical guards below are agent-selected defaults serving the approved [F2a outcome](../plans/F2A-APPLICATION-LIFECYCLE.md).
 
 ## Context and alternatives
 

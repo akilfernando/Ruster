@@ -428,3 +428,8 @@ Stop at F1. The next recommendation is a bounded lifecycle/paused-command propos
 ## 2026-11-10 — F2a performance investigation ends
 
 The separately qualified private ELF load-bias repair recovers useful ancestry from unchanged captured data. An earlier fresh block stops before B dispatch on per-tool-call inherited-environment drift. The final user-approved attempt fixes one full map before dispatch, passes actual benign-launcher qualification, then completes all four high-changed A/B/B/A records. Independent source/path review is inconclusive. The investigation ends with no product optimization or acceptance waiver. Original approximately4percent/+0.49millisecond stress-workload increase remains recorded. Root/Astra propose explicit retention with a tracked tradeoff, with user decision pending and cost HOLD preserved. [Evidence](evidence/F2A-FINAL-PERFORMANCE-ATTEMPT.md).
+
+
+## 2026-11-10 — F2a retained with explicit user-accepted cost
+
+After the final bounded investigation and an explanation of the dense workload, observed cost and unresolved cause, the user accepts F2a with its approximately4percent/+0.49millisecond changed-state Step tradeoff. The milestone is accepted. Original evidence and uncertainty remain recorded, and the profiling investigation is closed. [Decision0046](decisions/0046-f2a-measured-performance-tradeoff.md) is the current retention authority. F3 remains a separate proposal.

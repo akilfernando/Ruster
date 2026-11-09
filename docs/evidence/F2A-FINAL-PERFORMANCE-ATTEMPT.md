@@ -1,6 +1,6 @@
 # F2a final performance investigation
 
-Completed 2026-11-10. **The final attempt is valid and inconclusive. The investigation ends here.** No product optimization or acceptance waiver is claimed. The original approximately4percent/+0.49millisecond dense changed-state Step concern remains unresolved. Functional F2a remains qualified, and overall cost acceptance stays HOLD pending the user's product decision.
+Completed 2026-11-10. **The final attempt is valid and inconclusive. The investigation ends here.** No product optimization or acceptance waiver is claimed. The original approximately4percent/+0.49millisecond dense changed-state Step concern remains unresolved. Functional F2a remains qualified. Following this investigation, the user accepts the measured tradeoff on2026-11-10 under [decision0046](../decisions/0046-f2a-measured-performance-tradeoff.md), settling milestone retention.
 
 ## Authority and bounded method
 
@@ -53,6 +53,6 @@ Root checks all1052inputs again after analysis and independent review. Four owne
 
 Only then Root verifies master identity/mode/hash and deletes it. `closure.json` records ordering and the descriptor hash. The deleted private master is an intentional missing input after closure. The frozen analyzer is not rerun after deletion, and future inventory checks must preserve that qualification. No full environment values are published or retained in the evidence inventory. Desktop focus, workspaces and clipboard remain untouched. Product Rust/native verification is reused against unchanged source/dependencies.
 
-Root/Astra recommend retaining functionally qualified F2a with the original dense legacy-Step performance tradeoff explicitly accepted and tracked. This is a **proposal**. User acceptance has not occurred. The alternative is to keep overall acceptance held and select feature revision/deferment. F3 remains unstarted pending that product decision. No Goal-tool goal, public release or further automatic optimization is selected.
+Root/Astra recommend retaining functionally qualified F2a with the original dense legacy-Step performance tradeoff explicitly accepted and tracked. The alternative presented is continued acceptance HOLD with feature revision/deferment. The user subsequently says “Let's accept it then and make note of it” on2026-11-10. [Decision0046](../decisions/0046-f2a-measured-performance-tradeoff.md) settles retention while preserving the unresolved cause and original measurements. F3 remains a separate unstarted proposal. No Goal-tool goal, public release or further automatic optimization is selected.
 
 The final affected `python3 scripts/check.py --base 4b42edf` passes the Markdown whitespace/link lane in0.32seconds. Production Rust/native suites are not rerun because product source/dependencies remain unchanged. `evidence-pins.json` inventories256existing external evidence files and explicitly records the expected deleted master.

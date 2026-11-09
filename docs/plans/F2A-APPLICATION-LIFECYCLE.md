@@ -1,6 +1,6 @@
 # F2a — Initialization and paused Application commands
 
-Approved for implementation2026-11-09 after the user says “Proceed”. [Decision0045](../decisions/0045-initialization-and-paused-application-commands.md) freezes the selected execution, version, capacity and compatibility contract. Feature retention remains pending qualification. No Goal-tool goal is created.
+Approved for implementation2026-11-09 after the user says “Proceed”. [Decision0045](../decisions/0045-initialization-and-paused-application-commands.md) freezes the selected execution, version, capacity and compatibility contract. The user accepts bounded F2a on2026-11-10 with the measured dense-state performance tradeoff recorded in [decision0046](../decisions/0046-f2a-measured-performance-tradeoff.md). No Goal-tool goal is created.
 
 ## Approved goal
 

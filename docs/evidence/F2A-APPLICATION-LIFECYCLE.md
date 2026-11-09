@@ -1,6 +1,6 @@
-# F2a qualification in progress
+# F2a qualification and accepted tradeoff
 
-Updated2026-11-09. The user approved the [bounded plan](../plans/F2A-APPLICATION-LIFECYCLE.md). [Decision0045](../decisions/0045-initialization-and-paused-application-commands.md) records the selected implementation contract. Qualification and feature retention remain open.
+Updated2026-11-10. The user approved the [bounded plan](../plans/F2A-APPLICATION-LIFECYCLE.md). [Decision0045](../decisions/0045-initialization-and-paused-application-commands.md) records the selected implementation contract. Functional qualification is complete on6e44269. On2026-11-10 the user accepts retention with the measured dense-state performance tradeoff in [decision0046](../decisions/0046-f2a-measured-performance-tradeoff.md). The chronological entries below preserve earlier pending/HOLD states and failures. The cause remains unresolved.
 
 ## Evidence location and pre-edit gate
 
