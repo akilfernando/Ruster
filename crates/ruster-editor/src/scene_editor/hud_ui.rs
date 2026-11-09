@@ -324,6 +324,10 @@ impl SceneEditor {
         let editable = self.hud_editable() && !self.new_scene_pending && !self.close_pending;
         let popup_at_start = egui::Popup::is_any_open(ui.ctx());
         let mut fields = Vec::new();
+        let mut focus_after_action = None;
+        let keyboard_activation = ui.input(|input| {
+            input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space)
+        });
         ui.label("Screen-space text · one ordered group · up to 32 labels");
         ui.small("Apply cancels runtime preview and shows authored defaults. Reset captures the HUD and initializes live values.");
         // Budget in current logical points after the wrapping header. Only the
@@ -409,21 +413,29 @@ impl SceneEditor {
             });
             ui.separator();
             ui.strong("Labels in display order");
+            let mut selected_label_focus = None;
             for (index, label) in draft.hud.elements.iter().enumerate() {
                 let caption = match &label.source {
                     HudSource::Static { .. } => "Static text",
                     HudSource::State { .. } => "State value",
                 };
                 let response = ui
-                    .push_id(&label.id, |ui| {
-                        ui.selectable_label(
-                            draft.selected.as_ref() == Some(&label.id),
-                            format!("{}. {} · {}", index + 1, caption, label.id),
-                        )
-                    })
+                    .scope_builder(
+                        egui::UiBuilder::new()
+                            .scope_id(egui::Id::unique(("hud_label_row", &label.id))),
+                        |ui| {
+                            ui.selectable_label(
+                                draft.selected.as_ref() == Some(&label.id),
+                                format!("{}. {} · {}", index + 1, caption, label.id),
+                            )
+                        },
+                    )
                     .inner;
                 if response.clicked() {
                     draft.selected = Some(label.id.clone());
+                }
+                if draft.selected.as_ref() == Some(&label.id) {
+                    selected_label_focus = Some(response.id);
                 }
                 fields.push(response);
             }
@@ -431,81 +443,112 @@ impl SceneEditor {
                 .selected
                 .as_ref()
                 .and_then(|id| draft.hud.elements.iter().position(|label| &label.id == id));
-            ui.horizontal_wrapped(|ui| {
-                let add = ui.add_enabled(
-                    draft.hud.elements.len() < MAX_HUD_LABELS,
-                    egui::Button::new("Add label"),
-                );
-                if add.clicked() {
-                    match draft.fresh_id(&self.session) {
-                        Ok(id) => {
-                            draft.hud.elements.push(HudLabel {
-                                id: id.clone(),
-                                source: HudSource::Static {
-                                    text: "New label".into(),
-                                },
-                            });
-                            draft.selected = Some(id);
-                        }
-                        Err(error) => self.error = error,
-                    }
-                }
-                fields.push(add);
-                let duplicate = ui.add_enabled(
-                    selected_index.is_some() && draft.hud.elements.len() < MAX_HUD_LABELS,
-                    egui::Button::new("Duplicate"),
-                );
-                if duplicate.clicked() {
-                    if let Some(index) = selected_index {
-                        match draft.fresh_id(&self.session) {
-                            Ok(id) => {
-                                let mut label = draft.hud.elements[index].clone();
-                                if let Some(raw) = draft.precision.get(&label.id).cloned() {
-                                    draft.precision.insert(id.clone(), raw);
+            ui.scope_builder(
+                egui::UiBuilder::new().scope_id(egui::Id::unique("hud_label_actions")),
+                |ui| {
+                    ui.horizontal_wrapped(|ui| {
+                        let add = ui.add_enabled(
+                            draft.hud.elements.len() < MAX_HUD_LABELS,
+                            egui::Button::new("Add label"),
+                        );
+                        let add_id = add.id;
+                        let add_keyboard = keyboard_activation && add.clicked() && add.has_focus();
+                        if add.clicked() {
+                            match draft.fresh_id(&self.session) {
+                                Ok(id) => {
+                                    draft.hud.elements.push(HudLabel {
+                                        id: id.clone(),
+                                        source: HudSource::Static {
+                                            text: "New label".into(),
+                                        },
+                                    });
+                                    draft.selected = Some(id);
                                 }
-                                label.id = id.clone();
-                                draft.hud.elements.insert(index + 1, label);
-                                draft.selected = Some(id);
+                                Err(error) => self.error = error,
                             }
-                            Err(error) => self.error = error,
                         }
-                    }
-                }
-                fields.push(duplicate);
-                let up = ui.add_enabled(
-                    selected_index.is_some_and(|index| index > 0),
-                    egui::Button::new("Move up"),
-                );
-                if up.clicked() {
-                    if let Some(index) = selected_index {
-                        draft.hud.elements.swap(index, index - 1);
-                    }
-                }
-                fields.push(up);
-                let down = ui.add_enabled(
-                    selected_index.is_some_and(|index| index + 1 < draft.hud.elements.len()),
-                    egui::Button::new("Move down"),
-                );
-                if down.clicked() {
-                    if let Some(index) = selected_index {
-                        draft.hud.elements.swap(index, index + 1);
-                    }
-                }
-                fields.push(down);
-                let remove = ui.add_enabled(selected_index.is_some(), egui::Button::new("Remove"));
-                if remove.clicked() {
-                    if let Some(index) = selected_index {
-                        let removed = draft.hud.elements.remove(index);
-                        draft.precision.remove(&removed.id);
-                        draft.selected = draft
-                            .hud
-                            .elements
-                            .get(index.min(draft.hud.elements.len().saturating_sub(1)))
-                            .map(|label| label.id.clone());
-                    }
-                }
-                fields.push(remove);
-            });
+                        fields.push(add);
+                        let duplicate = ui.add_enabled(
+                            selected_index.is_some() && draft.hud.elements.len() < MAX_HUD_LABELS,
+                            egui::Button::new("Duplicate"),
+                        );
+                        let duplicate_keyboard =
+                            keyboard_activation && duplicate.clicked() && duplicate.has_focus();
+                        if duplicate.clicked() {
+                            if let Some(index) = selected_index {
+                                match draft.fresh_id(&self.session) {
+                                    Ok(id) => {
+                                        let mut label = draft.hud.elements[index].clone();
+                                        if let Some(raw) = draft.precision.get(&label.id).cloned() {
+                                            draft.precision.insert(id.clone(), raw);
+                                        }
+                                        label.id = id.clone();
+                                        draft.hud.elements.insert(index + 1, label);
+                                        draft.selected = Some(id);
+                                    }
+                                    Err(error) => self.error = error,
+                                }
+                            }
+                        }
+                        fields.push(duplicate);
+                        let up = ui.add_enabled(
+                            selected_index.is_some_and(|index| index > 0),
+                            egui::Button::new("Move up"),
+                        );
+                        if up.clicked() {
+                            if let Some(index) = selected_index {
+                                draft.hud.elements.swap(index, index - 1);
+                                if keyboard_activation && up.has_focus() && index == 1 {
+                                    focus_after_action = selected_label_focus;
+                                }
+                            }
+                        }
+                        fields.push(up);
+                        let down = ui.add_enabled(
+                            selected_index
+                                .is_some_and(|index| index + 1 < draft.hud.elements.len()),
+                            egui::Button::new("Move down"),
+                        );
+                        if down.clicked() {
+                            if let Some(index) = selected_index {
+                                draft.hud.elements.swap(index, index + 1);
+                                if keyboard_activation
+                                    && down.has_focus()
+                                    && index + 2 == draft.hud.elements.len()
+                                {
+                                    focus_after_action = selected_label_focus;
+                                }
+                            }
+                        }
+                        fields.push(down);
+                        let remove =
+                            ui.add_enabled(selected_index.is_some(), egui::Button::new("Remove"));
+                        if remove.clicked() {
+                            if let Some(index) = selected_index {
+                                let removed = draft.hud.elements.remove(index);
+                                draft.precision.remove(&removed.id);
+                                draft.selected = draft
+                                    .hud
+                                    .elements
+                                    .get(index.min(draft.hud.elements.len().saturating_sub(1)))
+                                    .map(|label| label.id.clone());
+                            }
+                        }
+                        if keyboard_activation
+                            && remove.clicked()
+                            && remove.has_focus()
+                            && draft.hud.elements.is_empty()
+                        {
+                            focus_after_action = Some(add_id);
+                        } else if (add_keyboard || duplicate_keyboard)
+                            && draft.hud.elements.len() == MAX_HUD_LABELS
+                        {
+                            focus_after_action = Some(remove.id);
+                        }
+                        fields.push(remove);
+                    })
+                },
+            );
             if let Some(index) = draft
                 .selected
                 .as_ref()
@@ -747,6 +790,13 @@ impl SceneEditor {
         }
         if !self.error.is_empty() {
             ui.colored_label(ui.visuals().error_fg_color, &self.error);
+        }
+        // Defer handoff until widgets and owned keys are finished, so the same
+        // Enter/Space cannot activate a second control in this frame.
+        if self.hud_open && self.hud_draft.is_some() {
+            if let Some(id) = focus_after_action {
+                ui.memory_mut(|memory| memory.request_focus(id));
+            }
         }
     }
 
@@ -1214,8 +1264,10 @@ mod tests {
             .unwrap();
         editor.sync_draft();
         editor.error.clear();
+        editor.hud_open = true;
         editor.hud_draft = Some(HudDraft::new(&editor.session));
         let authored = editor.session.snapshot_bytes().unwrap();
+        let saved_hud = editor.session.hud().clone();
         let _ = draw(&mut editor, vec![]);
         context.memory_mut(|memory| memory.request_focus(egui::Id::unique("hud_width")));
         let _ = draw(&mut editor, vec![]);
@@ -1260,6 +1312,132 @@ mod tests {
         );
         assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
 
+        for target in ["Move up", "Add label"] {
+            let mut reached = false;
+            for _ in 0..32 {
+                let mut released_tab = key(egui::Key::Tab);
+                if let egui::Event::Key { pressed, .. } = &mut released_tab {
+                    *pressed = false;
+                }
+                let _ = draw(&mut editor, vec![key(egui::Key::Tab), released_tab]);
+                let output = draw(&mut editor, vec![]);
+                let caption = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| text_rect(&shape.shape, target));
+                let focused = context
+                    .memory(|memory| memory.focused())
+                    .and_then(|id| context.read_response(id));
+                if let (Some(caption), Some(focused)) = (caption, focused) {
+                    if focused.enabled()
+                        && focused.has_focus()
+                        && focused.rect.contains_rect(caption)
+                    {
+                        reached = true;
+                        break;
+                    }
+                }
+            }
+            assert!(
+                reached,
+                "Tab traversal must reach the painted {target} control"
+            );
+            let mut released_enter = key(egui::Key::Enter);
+            if let egui::Event::Key { pressed, .. } = &mut released_enter {
+                *pressed = false;
+            }
+            let mut output = draw(&mut editor, vec![key(egui::Key::Enter), released_enter]);
+            for _ in 0..4 {
+                output = draw(&mut editor, vec![]);
+            }
+            let draft = editor
+                .hud_draft
+                .as_ref()
+                .expect("Row operations stay in the HUD draft");
+            let expected_focus = if target == "Move up" {
+                assert_eq!(draft.hud.elements[0].id, "score");
+                assert_eq!(draft.selected.as_deref(), Some("score"));
+                "1. Static text · score"
+            } else {
+                assert_eq!(draft.hud.elements.len(), 3);
+                "Add label"
+            };
+            let caption = output
+                .shapes
+                .iter()
+                .find_map(|shape| text_rect(&shape.shape, expected_focus))
+                .unwrap_or_else(|| panic!("Expected visible focus destination {expected_focus:?}"));
+            let focused = context
+                .memory(|memory| memory.focused())
+                .and_then(|id| context.read_response(id));
+            assert!(
+                focused.as_ref().is_some_and(|response| response.enabled()
+                    && response.has_focus()
+                    && response.rect.contains_rect(caption)),
+                "{target} must retain keyboard ownership on {expected_focus:?} after row mutation"
+            );
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
+        }
+
+        // The Add control was reached through Tab above. Keep its real widget
+        // identity while replacing the fixture with a near-capacity draft.
+        // Activating the handed-off control verifies ownership even when the
+        // long list moves its painted coordinates within the scroll area.
+        let add_id = context.memory(|memory| memory.focused()).unwrap();
+        let draft = editor.hud_draft.as_mut().unwrap();
+        draft.hud.elements = (0..MAX_HUD_LABELS - 1)
+            .map(|index| HudLabel {
+                id: format!("boundary-{index}"),
+                source: HudSource::Static {
+                    text: format!("Reading {index}"),
+                },
+            })
+            .collect();
+        draft.selected = Some(format!("boundary-{}", MAX_HUD_LABELS - 2));
+        draft.precision.clear();
+        draw(&mut editor, vec![]);
+        let mut released = key(egui::Key::Enter);
+        if let egui::Event::Key { pressed, .. } = &mut released {
+            *pressed = false;
+        }
+        draw(&mut editor, vec![key(egui::Key::Enter), released]);
+        assert_eq!(
+            editor.hud_draft.as_ref().unwrap().hud.elements.len(),
+            MAX_HUD_LABELS
+        );
+        draw(&mut editor, vec![]);
+        let remove_id = context.memory(|memory| memory.focused()).unwrap();
+        assert_ne!(remove_id, add_id);
+
+        // Space on the handoff destination must remove exactly one label.
+        // This also catches same-frame activation of a newly focused control.
+        let mut released = key(egui::Key::Space);
+        if let egui::Event::Key { pressed, .. } = &mut released {
+            *pressed = false;
+        }
+        draw(&mut editor, vec![key(egui::Key::Space), released.clone()]);
+        assert_eq!(
+            editor.hud_draft.as_ref().unwrap().hud.elements.len(),
+            MAX_HUD_LABELS - 1
+        );
+        draw(&mut editor, vec![]);
+        assert_eq!(context.memory(|memory| memory.focused()), Some(remove_id));
+        let draft = editor.hud_draft.as_mut().unwrap();
+        draft.hud.elements.truncate(1);
+        draft.selected = Some(draft.hud.elements[0].id.clone());
+        draw(&mut editor, vec![]);
+        draw(&mut editor, vec![key(egui::Key::Space), released]);
+        assert!(editor.hud_draft.as_ref().unwrap().hud.elements.is_empty());
+        draw(&mut editor, vec![]);
+        assert_eq!(context.memory(|memory| memory.focused()), Some(add_id));
+        let mut released = key(egui::Key::Enter);
+        if let egui::Event::Key { pressed, .. } = &mut released {
+            *pressed = false;
+        }
+        draw(&mut editor, vec![key(egui::Key::Enter), released]);
+        assert_eq!(editor.hud_draft.as_ref().unwrap().hud.elements.len(), 1);
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
+
         editor.hud_draft.as_mut().unwrap().width = "321".into();
         context.memory_mut(|memory| memory.request_focus(egui::Id::unique("hud_width")));
         draw(&mut editor, vec![]);
@@ -1277,6 +1455,6 @@ mod tests {
             .session
             .undo(editor.session.scene().revision)
             .unwrap();
-        assert_eq!(editor.session.hud().width, 320.0);
+        assert_eq!(editor.session.hud(), &saved_hud);
     }
 }

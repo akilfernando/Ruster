@@ -899,3 +899,7 @@ Root's rebuilt native2×check confirms repaired footer/error visibility, then ex
 ## 2026-11-10 — F3a Enter activation ownership
 
 Root's dynamic native traversal exposes label Enter also submitting the enclosing form. Sol/high extends the existing keyboard owner with dynamic painted-row acquisition, avoiding fixed Tab counts. Root obtains RED, implements a frame-local activation check following Astra/high's source review, and adds actual positive text-field submission. The same owner passes GREEN and final134default/136inspection gates pass. No test-count increase, persistent UI state or new routing framework is introduced. Native final follow-through remains required.
+
+### 2026-11-10 F3a keyboard boundary review
+
+Root requests a bounded read-only follow-up from Astra using the existing session routing snapshot. Astra approves stable row/action scopes and deferred keyboard-only handoffs after reviewing actual source and the extended existing owner regression. No builds, desktop actions or writes are delegated. Root owns RED/GREEN, affected gates and final native qualification. Exact-export appearance remains held independently. Worker usage/elapsed metrics are unavailable.
