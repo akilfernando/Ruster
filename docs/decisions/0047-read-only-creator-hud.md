@@ -1,6 +1,6 @@
 # 0047 — Read-only creator HUD
 
-Date 2026-11-10. Status accepted implementation contract after the user approves [F3a](../plans/F3A-LIVE-HUD.md) with “Ok, let's do it”. Retention awaits qualification. Specific representation and limits are agent-selected defaults serving that approved outcome.
+Date 2026-11-10. Status accepted implementation contract after the user approves [F3a](../plans/F3A-LIVE-HUD.md) with “Ok, let's do it”. Root/Astra accept bounded F3a after the recorded creator, delivery, cost and post-reboot native visual qualification on2026-11-10. Specific representation and limits are agent-selected defaults serving that approved outcome.
 
 ## Context and alternatives
 
