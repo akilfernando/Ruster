@@ -19,7 +19,7 @@ Client configuration formats vary; this example shows the executable and environ
 
 ## Viewport observation, navigation and color
 
-Generic-scene sessions also expose `viewport_inspect`, `viewport_camera`, `scene_select`, `viewport_capture_start`, `viewport_capture_inspect` and `scene_color`. Use `tools/list` for the exact schemas; the current adapter lists64tools.
+Generic-scene sessions also expose `viewport_inspect`, `viewport_camera`, `scene_select`, `viewport_capture_start`, `viewport_capture_inspect` and `scene_color`. Use `tools/list` for the exact schemas. Current source lists79tools, including the four F3a HUD tools below.
 
 `viewport_inspect` returns the actual camera, selection and independent `view_revision`. Camera/selection changes require its exact session token, authored revision and view revision. A human's newer navigation rejects an old request. Finish drafts/dialogs/gestures first. These transient controls preserve scene Undo and runtime transforms. `scene_color` is a shared authored RGBA operation with scene revision/Undo; channels are finite0–1. The direct Inspector has matching Apply/Enter and Cancel/Escape behavior. Alpha is stored; the renderer remains opaque.
 
@@ -188,7 +188,7 @@ The phase-based [SDK smoke](../../scripts/mcp_runtime_demo.py) runs only against
 
 ## Creator application export
 
-Three asynchronous tools bring the total to49: `creation_export_inspect`, `creation_export_start` and `creation_export_cancel`. The [creator workflow](../../docs/CREATOR-WORKFLOW.md#perform-the-same-export-through-mcp) owns setup, preconditions and receipt semantics. Start requires an explicit `RUSTER_MCP_EXPORT_DIR` grant and prepared `RUSTER_RUNTIME_KIT`; it accepts a title and fresh archive leaf, never a command/executable/path. Inspect after dispatch or transport loss; do not automatically retry. The last eight terminal receipts remain inspectable across human scene replacement. Human drafts and stale scene/save/catalog/shader/template identities block publication.
+The creator-delivery checkpoint added three asynchronous tools, bringing its total to49. They are `creation_export_inspect`, `creation_export_start` and `creation_export_cancel`. The [creator workflow](../../docs/CREATOR-WORKFLOW.md#perform-the-same-export-through-mcp) owns setup, preconditions and receipt semantics. Start requires an explicit `RUSTER_MCP_EXPORT_DIR` grant and prepared `RUSTER_RUNTIME_KIT`; it accepts a title and fresh archive leaf, never a command/executable/path. Inspect after dispatch or transport loss; do not automatically retry. The last eight terminal receipts remain inspectable across human scene replacement. Human drafts and stale scene/save/catalog/shader/template identities block publication.
 
 `shader_refresh` also accepts optional boolean `builtin`; true explicitly selects the shared built-in appearance without changing the project shader file. False/omitted retains the fixed `scene.wgsl` refresh behavior. Both forms require the existing scene/session/shader preconditions.
 
@@ -216,7 +216,7 @@ Omitting the whole `shadow` field selects disabled/Standard/0.15/0. If present, 
 
 ## V3b foundation (qualification in progress)
 
-The existing65 tools now include role-aware PNG import via optional `asset_import.texture_role`: `base_color_srgb` (omitted compatibility default) or `roughness_linear`. Explicit roles are PNG-only; OBJ imports use optional `normal_policy` instead. Null/unknown roles and combining the two interpretation fields reject. Another interpretation requires another immutable asset ID; Refresh preserves accepted interpretation. Asset inspection exposes `texture_role` separately from mesh normal policy.
+The V3b65-tool checkpoint added role-aware PNG import via optional `asset_import.texture_role`, selecting `base_color_srgb` (omitted compatibility default) or `roughness_linear`. Explicit roles are PNG-only; OBJ imports use optional `normal_policy` instead. Null/unknown roles and combining the two interpretation fields reject. Another interpretation requires another immutable asset ID; Refresh preserves accepted interpretation. Asset inspection exposes `texture_role` separately from mesh normal policy.
 
 `scene_material_set.material` accepts optional `roughness_texture` (stable asset ID or null). This is a full material replacement: omission means no roughness map, as does explicit null. Inspect/copy the complete material before editing fields you intend to preserve. New/changed references and assignments validate the accepted role and complete UVs for all users, including inactive maps. Unchanged broken references remain repairable during unrelated edits. `material_inspect` returns the canonical map reference and a separate availability/role diagnostic; ready asset content does not mean that an inactive/custom display lane renders it. Shared revision/catalog/pending-draft authority is unchanged.
 
@@ -225,7 +225,7 @@ Scene10/Recovery8/catalog4/content6/descriptor4 and exact appended `roughness_ma
 
 ## Creator input actions (I1a working integration)
 
-The development adapter discovers68tools. `behavior_inspect` accepts `kind:"actions"` and pages16complete definitions. `behavior_action`, `behavior_action_set` and `behavior_action_remove` use `action_id` and the ordinary expected session/revision guards; set additionally takes `definition`, for example `{"label":"Traverse","kind":{"type":"axis1d","negative":["arrow_left"],"positive":["arrow_right"]}}`. Button definitions use `{"type":"button","keys":["space"]}`. The shared Session owns strict key, identity, capacity/history and human-draft validation; map edits invalidate the old runtime until Reset.
+The I1a adapter discovered68tools. `behavior_inspect` accepts `kind:"actions"` and pages16complete definitions. `behavior_action`, `behavior_action_set` and `behavior_action_remove` use `action_id` and the ordinary expected session/revision guards; set additionally takes `definition`, for example `{"label":"Traverse","kind":{"type":"axis1d","negative":["arrow_left"],"positive":["arrow_right"]}}`. Button definitions use `{"type":"button","keys":["space"]}`. The shared Session owns strict key, identity, capacity/history and human-draft validation; map edits invalidate the old runtime until Reset.
 
 Ordinary `behavior_runtime_step` stays neutral. An input-bearing Step must supply all four optional fields together: `input_frame`, canonical decimal-string `expected_tick`,64lowercase-hex `expected_map_identity`, and decimal-string `expected_input_epoch`, in addition to the existing exact run/session/revision guards. Obtain pins from `behavior_runtime_inspect.input`. Frames map stable IDs to `{"type":"axis1d","value":1}` or `{"type":"button","held":false,"pressed":true,"released":true}`; omissions normalize to neutral. Playing, debugger suspension, physical ownership, pending operations and stale identities reject; Step never implicitly pauses. One supplied frame lasts exactly one successful tick and never becomes held native state.
 
@@ -251,9 +251,9 @@ For `behavior_runtime_state`, supply `expected_session_token`, canonical decimal
 
 Application debugger metadata has `object_id:null` and retains its stable binding/source identity. Object metadata retains its ordinary object string. API4 inherits input/spatial queries and adds copied tick-start state reads through scoped Lua host functions. The [F1 decision](../../docs/decisions/0044-owned-creator-runtime-state.md) owns execution, rollback, capacities and version boundaries.
 
-## Initialization and paused Application commands — F2a candidate
+## Initialization and paused Application commands — F2a
 
-Current source discovers75tools. `behavior_command` reads one complete authored definition or null. `behavior_command_set` accepts `binding_id`, `command_id` and `definition`, plus normal session/revision pins. Definition is `{"arguments":{"amount":{"type":"number","value":1}}}` or null to remove. Only Application targets support nonempty catalogs. Each binding has at most16 commands, each command at most16 arguments and16KiB canonical typed argument JSON. Values use Number, Bool, Text or Vec3. Shared Session validation owns names, finite values, types and capacities. Set requires clean authored and transient invocation drafts, contributes ordinary Undo and leaves a running catalog unchanged until Reset.
+F2a extended discovery to75tools. `behavior_command` reads one complete authored definition or null. `behavior_command_set` accepts `binding_id`, `command_id` and `definition`, plus normal session/revision pins. Definition is `{"arguments":{"amount":{"type":"number","value":1}}}` or null to remove. Only Application targets support nonempty catalogs. Each binding has at most16 commands, each command at most16 arguments and16KiB canonical typed argument JSON. Values use Number, Bool, Text or Vec3. Shared Session validation owns names, finite values, types and capacities. Set requires clean authored and transient invocation drafts, contributes ordinary Undo and leaves a running catalog unchanged until Reset.
 
 `behavior_binding` returns command ID/argument-count summaries and `command_schema_hash`, alongside existing bounded property/default pages. A complete catalog is never returned in a summary. `behavior_runtime_inspect.state_owners` reports the captured command catalog hash for an Application owner. Use the authored getter for one complete definition.
 
@@ -261,6 +261,23 @@ Current source discovers75tools. `behavior_command` reads one complete authored 
 
 Runtime inspection exposes `commit_revision`, `commit_revision_required` and `last_step_commit_revision`. State pages accept `expected_commit_revision`. Captured API5 runs require it, including historical reads after live authored data changes. Legacy API1–4-only runs may omit it. Any supplied pin validates. Commands preserve the preceding input/query snapshots, which describe `last_step_commit_revision`. Tick equality alone cannot identify a new simulation observation. Debug stop inspection includes committed/attempted commit revisions.
 
-F2a root-owned checks, native keyboard/MCP/recovery and delivery qualification remain pending. The accepted architecture and version boundaries are recorded in [0045](../../docs/decisions/0045-initialization-and-paused-application-commands.md).
+F2a acceptance and its measured performance tradeoff are recorded in [current status](../../docs/STATUS.md). The accepted architecture and version boundaries are recorded in [0045](../../docs/decisions/0045-initialization-and-paused-application-commands.md).
 
 Runtime inspection's `diagnostic` is the last retained failure until Reset. A later successful Step or command can coexist with that diagnostic. Use the matching operation receipt and committed run/tick/revision to identify the current outcome. The editor labels this retained source context **Last failure details**.
+
+## Creator-authored HUD — F3a
+
+Updated 2026-11-10. Current discovery contains79tools. Four bounded HUD tools share the ordinary editor's Session, Undo/Redo, stale-session/revision checks and human-draft protection. Definitions persist under Scene15 `authoring.hud`. Recovery13 owns the ordinary raw form. Export uses content11 and the exact cumulative `runtime_hud` profile with Descriptor5. [HUD contract](../../docs/decisions/0047-read-only-creator-hud.md).
+
+| Tool | Arguments and result |
+| --- | --- |
+| `hud_inspect` | Optional canonical decimal-string `offset`, default `"0"`. Returns HUD settings and at most one stable label ID across authored, model-resolved and last-prepared views, with session/revision, `total`, `authored_total`, string/null `next_offset` and `next_label_id`. |
+| `hud_settings_set` | Current `expected_session_token`, decimal-string `expected_revision` and partial `settings`. Supplied style/layout fields replace their current values. Omitted settings and labels are retained. |
+| `hud_label_set` | The same pins, `label_id` and `source`. A fresh ID appends, an existing ID keeps its position and explicit null removes it. Duplicate by copying a source to the fresh `next_label_id` returned by inspection. |
+| `hud_label_move` | The same pins, existing `label_id` and integer `index`0–31. The destination must exist in the current ordered group. |
+
+Follow `next_offset` through the ordered union of authored, model and last-prepared label IDs, at most96 IDs. A label deleted from current authoring can remain in an older captured/prepared view and stays inspectable on its own page. `authored_total` counts current definitions. Restart paging when the relevant session/revision or run/commit identity changes. `hud_inspect` remains available during pending human drafts. Mutation replies report revision, changed and dirty state. Each accepted change is one shared Undo transaction. Successful authored edits cancel runtime presentation and return geometry/HUD to explicitly labelled authored defaults; Reset captures the changed document. `last_prepared` records the latest preparation, and does not retain deleted-label history independently.
+
+Static sources use `{"kind":"static","text":"Creator instructions"}`. State sources use `{"kind":"state","binding_id":"controller","field":"score","value_type":"number","prefix":"Score ","suffix":"","precision":0}`. Prefix/suffix and precision are optional. Number/Bool/Text/Vec3, finite style bounds and combined UTF-8 text limits follow the [Scene HUD API](../ruster-scene/README.md#creator-authored-hud-format-15). New/rebound references require an enabled binding, an existing source and matching authored default type. Existing broken references remain saveable and repairable. Use a fresh inspected ID to avoid identities reserved by reversible history.
+
+`hud_definition` describes authored data. `model` resolves either the displayed captured Frame or labelled authored defaults, retaining its own mode, authored revision, run key, tick and commit revision. `last_prepared` is nullable and describes the most recent HUD paint preparation, with its own identity, resolved labels, clipping and painted label IDs. These views may differ. GPU completion and visible desktop presentation require separate evidence. Inspection is read-only and resolves referenced values directly. Existing64KiB bridge and256KiB MCP output bounds apply to the paged results. F3a independent MCP/native/recovery/exact-export qualification is tracked in [current status](../../docs/STATUS.md).

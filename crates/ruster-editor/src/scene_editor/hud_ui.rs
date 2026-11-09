@@ -325,7 +325,7 @@ impl SceneEditor {
         let popup_at_start = egui::Popup::is_any_open(ui.ctx());
         let mut fields = Vec::new();
         ui.label("Screen-space text · one ordered group · up to 32 labels");
-        ui.small("Apply previews authored defaults. Runtime preview keeps its captured HUD and state until Reset.");
+        ui.small("Apply cancels runtime preview and shows authored defaults. Reset captures the HUD and initializes live values.");
         let content = |ui: &mut egui::Ui| {
             fields.push(ui.checkbox(&mut draft.hud.enabled, "Show HUD"));
             ui.horizontal_wrapped(|ui| {
