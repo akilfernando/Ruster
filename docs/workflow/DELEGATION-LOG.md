@@ -889,3 +889,8 @@ Sol/high prepares viewport-directed shaping and full-layout reference tests; Roo
 ## 2026-11-10 — F3a final UX challenge
 
 Astra/high's independent evidence audit identifies unqualified compact/scaled authoring and post-error/reorder traversal while rejecting another performance campaign. Root's native480×320logical form confirms offscreen footer controls. Sol/high prepares one focused actual-Window regression, fixes the initial egui test API under Root direction, then prepares a viewport/header/footer/error budget after Root obtains actual RED. Root's GREEN passes. Root owns all native/process/GPU/capture diagnosis and remaining acceptance. The independent Vulkan-tools control reproduces black compositor capture; Root retains appearance HOLD separately from clean Intel native resize/close. Worker usage metrics remain unknown.
+
+
+## 2026-11-10 — F3a keyboard visibility follow-through
+
+Root's rebuilt native2×check confirms repaired footer/error visibility, then exposes a partly clipped Tab target. Sol/high extends the existing scaled-Window owner for keyboard visibility, using unit focus separately from the actual native acquisition path. Root corrects a stale RawInput API, obtains actual RED and implements a six-line body-local focus-scroll repair. The exact regression passes GREEN. Native final follow-through and graphics appearance HOLD remain explicit. No new test owner, renderer workaround or performance campaign is introduced.

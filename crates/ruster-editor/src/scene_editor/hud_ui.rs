@@ -677,6 +677,11 @@ impl SceneEditor {
                     }
                 }
             }
+            for response in &fields {
+                if response.has_focus() {
+                    response.scroll_to_me(None);
+                }
+            }
         };
         egui::ScrollArea::vertical()
             .id_salt("hud_form_scroll")
@@ -943,6 +948,61 @@ mod tests {
                     assert!(screen.expand(0.5).contains_rect(padded),
                         "HUD footer button {label:?} at {padded:?} outside viewport {screen:?} at scale {scale}");
                 }
+            }
+            let width = egui::Id::unique("hud_width");
+            let margin = egui::Id::unique("hud_margin");
+            // Establish the real TextEdit's keyboard focus without targeting
+            // a field that may already be partly outside the scroll viewport.
+            // Native pointer acquisition is exercised separately.
+            ctx.memory_mut(|memory| memory.request_focus(width));
+            let mut frame = |mut events: Vec<egui::Event>, modifiers| {
+                events.insert(0, egui::Event::ModifiersChanged(modifiers));
+                let mut output = ctx.run_ui(
+                    egui::RawInput {
+                        focused: true,
+                        screen_rect: Some(logical),
+                        events,
+                        ..Default::default()
+                    },
+                    |_| editor.show_hud_editor(&ctx),
+                );
+                output.textures_delta.clear();
+            };
+            for _ in 0..4 {
+                frame(vec![], egui::Modifiers::NONE);
+            }
+            frame(
+                vec![egui::Event::Key {
+                    key: egui::Key::Enter,
+                    physical_key: None,
+                    pressed: true,
+                    repeat: false,
+                    modifiers: egui::Modifiers::NONE,
+                }],
+                egui::Modifiers::NONE,
+            );
+            for (expected, modifiers) in [
+                (margin, egui::Modifiers::NONE),
+                (width, egui::Modifiers::SHIFT),
+            ] {
+                frame(
+                    vec![egui::Event::Key {
+                        key: egui::Key::Tab,
+                        physical_key: None,
+                        pressed: true,
+                        repeat: false,
+                        modifiers,
+                    }],
+                    modifiers,
+                );
+                for _ in 0..4 {
+                    frame(vec![], egui::Modifiers::NONE);
+                }
+                let focused = ctx.read_response(expected).unwrap();
+                assert!(focused.enabled() && focused.has_focus()
+                    && focused.interact_rect.contains_rect(focused.rect),
+                    "HUD keyboard field {expected:?} must remain fully visible after validation and Tab traversal at scale {scale}: rect={:?}, interact={:?}",
+                    focused.rect, focused.interact_rect);
             }
         }
     }
