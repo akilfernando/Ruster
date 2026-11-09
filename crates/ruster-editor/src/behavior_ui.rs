@@ -68,6 +68,15 @@ impl egui::TextBuffer for ByteBuffer<'_> {
     }
 }
 fn text(ui: &mut egui::Ui, value: &mut String, limit: usize) -> egui::Response {
+    let id = ui.next_auto_id();
+    text_with_id(ui, value, limit, id)
+}
+fn text_with_id(
+    ui: &mut egui::Ui,
+    value: &mut String,
+    limit: usize,
+    id: egui::Id,
+) -> egui::Response {
     let mut rejected = false;
     let response = ui.add(
         egui::TextEdit::singleline(&mut ByteBuffer {
@@ -76,6 +85,7 @@ fn text(ui: &mut egui::Ui, value: &mut String, limit: usize) -> egui::Response {
             rejected: &mut rejected,
             removed: None,
         })
+        .id(id)
         .interactive(ui.is_enabled()),
     );
     if rejected {
@@ -339,6 +349,8 @@ pub(super) struct BehaviorUi {
     captured_view: Option<CapturedSource>,
     #[cfg(test)]
     source_footer: Option<egui::Rect>,
+    #[cfg(test)]
+    state_add_name_response: Option<(egui::Id, egui::Rect)>,
 }
 struct CapturedSource {
     id: String,
@@ -966,66 +978,75 @@ impl BehaviorUi {
             self.source_focus = true;
         }
         if let Some(property) = &mut self.property {
-            ui.add_enabled_ui(editable, |ui| {
-                ui.group(|ui| {
-                    ui.strong(format!(
-                        "Edit {}{}",
-                        if property.state_default {
-                            "state default "
-                        } else {
-                            ""
-                        },
-                        property.name
-                    ));
-                    let response = value_ui(
-                        ui,
-                        &mut property.value,
-                        session,
-                        &self.assets,
-                        generation,
-                        &mut self.property_focus,
-                    );
-                    property_changed = response.changed;
-                    if editable
-                        && response.focused
-                        && ui.input_mut(|input| {
-                            input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
-                        })
-                    {
-                        action = Some(Action::ApplyProperty);
-                    }
-                    if editable
-                        && response.focused
-                        && ui.input_mut(|input| {
-                            input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
-                        })
-                    {
-                        action = Some(Action::RevertProperty);
-                    }
-                    if property_changed {
-                        self.property_dirty = true;
-                    }
-                    ui.horizontal_wrapped(|ui| {
-                        if ui
-                            .button(if property.state_default {
-                                "Apply state default"
+            let form_id = egui::Id::unique((
+                "behavior-value-form",
+                generation,
+                property.binding.as_str(),
+                property.name.as_str(),
+                property.state_default,
+            ));
+            ui.scope_builder(egui::UiBuilder::new().scope_id(form_id), |ui| {
+                ui.add_enabled_ui(editable, |ui| {
+                    ui.group(|ui| {
+                        ui.strong(format!(
+                            "Edit {}{}",
+                            if property.state_default {
+                                "state default "
                             } else {
-                                "Apply property value"
+                                ""
+                            },
+                            property.name
+                        ));
+                        let response = value_ui(
+                            ui,
+                            &mut property.value,
+                            session,
+                            &self.assets,
+                            generation,
+                            &mut self.property_focus,
+                        );
+                        property_changed = response.changed;
+                        if editable
+                            && response.focused
+                            && ui.input_mut(|input| {
+                                input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                             })
-                            .clicked()
                         {
                             action = Some(Action::ApplyProperty);
                         }
-                        if ui
-                            .button(if property.state_default {
-                                "Revert state default"
-                            } else {
-                                "Revert property value"
+                        if editable
+                            && response.focused
+                            && ui.input_mut(|input| {
+                                input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
                             })
-                            .clicked()
                         {
                             action = Some(Action::RevertProperty);
                         }
+                        if property_changed {
+                            self.property_dirty = true;
+                        }
+                        ui.horizontal_wrapped(|ui| {
+                            if ui
+                                .button(if property.state_default {
+                                    "Apply state default"
+                                } else {
+                                    "Apply property value"
+                                })
+                                .clicked()
+                            {
+                                action = Some(Action::ApplyProperty);
+                            }
+                            if ui
+                                .button(if property.state_default {
+                                    "Revert state default"
+                                } else {
+                                    "Revert property value"
+                                })
+                                .clicked()
+                            {
+                                action = Some(Action::RevertProperty);
+                            }
+                        });
                     });
                 });
             });
@@ -1172,7 +1193,9 @@ impl BehaviorUi {
                                         let draft = self.state_add.as_mut().expect("current state field form");
                                         let popup_at_start = egui::Popup::is_any_open(ui.ctx());
                                         ui.label("Field name");
-                                        let name = text(ui, &mut draft.name, 128);
+                                        let name_id = egui::Id::unique(("behavior-state-add-name", generation, draft.binding.as_str()));
+                                        let name = text_with_id(ui, &mut draft.name, 128, name_id);
+                                        #[cfg(test)] {self.state_add_name_response=Some((name.id,name.rect));}
                                         if self.state_add_focus && ui.is_enabled() {
                                             name.request_focus();
                                             name.scroll_to_me(Some(egui::Align::Center));
@@ -1386,17 +1409,25 @@ fn value_ui(
     focus: &mut bool,
 ) -> ValueResponse {
     let mut result = ValueResponse::default();
+    let id = ui.make_persistent_id("behavior-value");
     match value {
-        ValueDraft::Number(value) => result.field(text(ui, value, 128), focus),
+        ValueDraft::Number(value) => {
+            result.field(text_with_id(ui, value, 128, id.with("number")), focus)
+        }
         ValueDraft::Bool(value) => result.field(ui.checkbox(value, "Value"), focus),
         ValueDraft::Text(value) => result.field(
-            text(ui, value, ruster_scene::MAX_PROPERTY_TEXT_BYTES),
+            text_with_id(
+                ui,
+                value,
+                ruster_scene::MAX_PROPERTY_TEXT_BYTES,
+                id.with("text"),
+            ),
             focus,
         ),
         ValueDraft::Vec3(value) => {
             for (axis, value) in ["X", "Y", "Z"].into_iter().zip(value) {
                 ui.label(axis);
-                result.field(text(ui, value, 128), focus);
+                result.field(text_with_id(ui, value, 128, id.with(axis)), focus);
             }
         }
         ValueDraft::ObjectRef(value) => {
@@ -2739,6 +2770,186 @@ mod tests {
             }
         }
         assert_ne!(session.snapshot_bytes().unwrap(), before);
+
+        // The pending-state banner appears on the frame after the first text
+        // insertion. Its layout change must preserve actual clicked-field focus.
+        let mut application =
+            Session::new(ruster_scene::Scene::empty("state-field-focus")).unwrap();
+        let mut state_editor = BehaviorUi::default();
+        state_editor
+            .execute(Action::CreateApplication, &mut application)
+            .unwrap();
+        let binding = application
+            .authoring()
+            .bindings
+            .keys()
+            .next()
+            .unwrap()
+            .clone();
+        frame(
+            &mut state_editor,
+            &application,
+            true,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(click(
+            &mut state_editor,
+            &application,
+            visible_text("Application behavior")
+        )
+        .is_none());
+        assert!(click(
+            &mut state_editor,
+            &application,
+            visible_text("Add state field")
+        )
+        .is_none());
+        for _ in 0..12 {
+            frame(&mut state_editor, &application, true, vec![]);
+        }
+        let (name_id, name_rect) = state_editor
+            .state_add_name_response
+            .expect("visible state Name response");
+        assert!(ctx.content_rect().contains_rect(name_rect));
+        assert!(click(&mut state_editor, &application, name_rect.center()).is_none());
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(name_id));
+        let before_add = application.snapshot_bytes().unwrap();
+        frame(
+            &mut state_editor,
+            &application,
+            true,
+            vec![egui::Event::Text("cou".into())],
+        );
+        assert!(state_editor.state_add_dirty);
+        frame(&mut state_editor, &application, true, vec![]);
+        assert_eq!(
+            state_editor.state_add_name_response.unwrap().0,
+            name_id,
+            "the new pending banner must not change the production Name widget ID"
+        );
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(name_id),
+            "typing must keep the clicked Name field focused across the banner transition"
+        );
+        frame(
+            &mut state_editor,
+            &application,
+            true,
+            vec![egui::Event::Text("nt".into())],
+        );
+        assert_eq!(state_editor.state_add.as_ref().unwrap().name, "count");
+        assert_eq!(application.snapshot_bytes().unwrap(), before_add);
+        let action = frame(
+            &mut state_editor,
+            &application,
+            true,
+            key(egui::Key::Enter, egui::Modifiers::NONE),
+        )
+        .expect("Enter submits the typed state Name");
+        assert!(
+            matches!(&action, Action::AddState(id, name, StateValue::Number(value))
+            if id == &binding && name == "count" && *value == 0.0)
+        );
+        state_editor.execute(action, &mut application).unwrap();
+        assert_eq!(
+            application.binding(&binding).unwrap().state_defaults["count"],
+            StateValue::Number(0.0)
+        );
+        assert!(!state_editor.pending());
+
+        frame(
+            &mut state_editor,
+            &application,
+            true,
+            vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let name_rect = state_editor.state_add_name_response.unwrap().1;
+        assert!(click(&mut state_editor, &application, name_rect.center()).is_none());
+        frame(
+            &mut state_editor,
+            &application,
+            true,
+            vec![egui::Event::Text("cancelled".into())],
+        );
+        frame(&mut state_editor, &application, true, vec![]);
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(name_id));
+        let before_cancel = application.snapshot_bytes().unwrap();
+        let action = frame(
+            &mut state_editor,
+            &application,
+            true,
+            key(egui::Key::Escape, egui::Modifiers::NONE),
+        )
+        .expect("Escape cancels the typed state Name");
+        assert!(matches!(action, Action::CancelStateAdd));
+        state_editor.execute(action, &mut application).unwrap();
+        assert!(!state_editor.pending());
+        assert_eq!(application.snapshot_bytes().unwrap(), before_cancel);
+
+        frame(
+            &mut state_editor,
+            &application,
+            true,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        let name_rect = state_editor.state_add_name_response.unwrap().1;
+        assert!(click(&mut state_editor, &application, name_rect.center()).is_none());
+        frame(
+            &mut state_editor,
+            &application,
+            true,
+            vec![egui::Event::Text("recovered".into())],
+        );
+        frame(&mut state_editor, &application, true, vec![]);
+        let drafts =
+            serde_json::from_value(serde_json::to_value(state_editor.snapshot()).unwrap()).unwrap();
+        assert!(click(
+            &mut state_editor,
+            &application,
+            visible_text("Application behavior")
+        )
+        .is_none());
+        assert_ne!(ctx.memory(|memory| memory.focused()), Some(name_id));
+        let mut recovered = BehaviorUi::default();
+        recovered.restore(&application, drafts).unwrap();
+        frame(&mut recovered, &application, true, vec![]);
+        frame(&mut recovered, &application, true, vec![]);
+        assert_eq!(
+            ctx.memory(|memory| memory.focused()),
+            Some(name_id),
+            "the production recovery focus request must reach the stable Name field"
+        );
+        let action = frame(
+            &mut recovered,
+            &application,
+            true,
+            key(egui::Key::Enter, egui::Modifiers::NONE),
+        )
+        .expect("Enter submits the recovered state Name");
+        recovered.execute(action, &mut application).unwrap();
+        assert_eq!(
+            application.binding(&binding).unwrap().state_defaults["recovered"],
+            StateValue::Number(0.0)
+        );
     }
     #[test]
     fn reset_ack_waits_for_matching_frame_and_superseding_reset_discards_old_pair() {
