@@ -903,3 +903,5 @@ Root's dynamic native traversal exposes label Enter also submitting the enclosin
 ### 2026-11-10 F3a keyboard boundary review
 
 Root requests a bounded read-only follow-up from Astra using the existing session routing snapshot. Astra approves stable row/action scopes and deferred keyboard-only handoffs after reviewing actual source and the extended existing owner regression. No builds, desktop actions or writes are delegated. Root owns RED/GREEN, affected gates and final native qualification. Exact-export appearance remains held independently. Worker usage/elapsed metrics are unavailable.
+
+Astra's bounded follow-up approves popup-free/editable HUD Escape ownership after Root reproduces focusless post-Apply failure and repairs it in the existing regression. Final Root/Astra milestone evaluation retains F3a implementation and holds acceptance on both exact exports' appearance. Root collects final build7 native Escape, all-five-definition comparison and default-off normal-close receipts. No additional agent execution is used. Metrics remain unavailable.
