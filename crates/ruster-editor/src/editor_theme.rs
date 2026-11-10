@@ -31,7 +31,7 @@ pub fn configure(ctx: &egui::Context) {
     visuals.warn_fg_color = WARNING;
     visuals.error_fg_color = ERROR;
     visuals.selection.bg_fill = SELECTION;
-    visuals.selection.stroke = Stroke::new(1.0, TEXT);
+    visuals.selection.stroke = Stroke::new(1.5, ACCENT);
     visuals.window_stroke = Stroke::new(1.0, CONTROL_BORDER);
     visuals.window_corner_radius = CornerRadius::same(10);
     visuals.menu_corner_radius = CornerRadius::same(8);
