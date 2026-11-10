@@ -1,6 +1,6 @@
 # 0048 — Authored HUD activation
 
-Date2026-11-10. Status selected implementation contract under the user-approved [F3b slice](../plans/F3B-INTERACTIVE-CONTROLS.md). Qualification is pending. Specific representation, limits and phase choices are agent-selected defaults reviewed by Root/Astra.
+Date2026-11-10. Status accepted after Root/Astra qualification under the user-approved [F3b slice](../plans/F3B-INTERACTIVE-CONTROLS.md). [Executed evidence](../evidence/F3B-INTERACTIVE-CONTROLS.md) records verification and limits. Specific representation, limits and phase choices are agent-selected defaults reviewed by Root/Astra.
 
 ## Context and alternatives
 
@@ -18,7 +18,7 @@ Split shared preparation/interaction/painting and introduce a viewport callback 
 
 This adds one UI-frame latency for interactive generic content while preserving coherent dynamic layout and bounded ownership. Prior admitted gameplay may advance before a newly observed button press. That press's events remain exclusively UI-owned. Held/repeated keys, discarded passes, pointer movement/resize, disabled rows, run changes and focus loss require explicit tests. This choice avoids a second same-frame layout reconciliation mechanism and leaves richer input/UI scheduling separately scoped.
 
-Root/Astra source inspection covers worker ordinary-command-before-due-tick ordering, generic paused dispatch, editor UI admission, pre-layout input sampling and renderer navigation before its old overlay. The [plan](../plans/F3B-INTERACTIVE-CONTROLS.md) owns creator/export/compatibility and frozen cost gates. Source review establishes the selected design, not verification of its implementation. No superseding decision exists.
+Root/Astra source inspection covers worker ordinary-command-before-due-tick ordering, generic paused dispatch, editor UI admission, pre-layout input sampling and renderer navigation before its old overlay. The [plan](../plans/F3B-INTERACTIVE-CONTROLS.md) owns creator/export/compatibility and frozen cost gates. The linked executed evidence separately qualifies implementation, creator interaction and measured costs. No superseding decision exists.
 
 ## Primary references
 

@@ -2,6 +2,8 @@
 
 Approved2026-11-10 after the user says “Approved. Proceed” to Root/Astra's bounded recommendation. [Decision0048](../decisions/0048-authored-hud-activation.md) freezes the selected implementation contract. No Goal-tool goal is created. Accepted F3a and the closed F2a cost investigation remain intact.
 
+Completed2026-11-10. Root/Astra accept this bounded contract after the [complete qualification](../evidence/F3B-INTERACTIVE-CONTROLS.md). [Milestone evaluation](../ROADMAP-REVIEW.md#f3b-interactive-controls-evaluation--2026-11-10) owns the quality assessment.
+
 ## Creator outcome and scope
 
 An ordinary editor creator and an independent native MCP creator each author a button in the existing HUD group, bind it to their own typed Application command, operate it during Play or Pause, observe committed state feedback and export the same interaction. Labels, constant arguments and application rules belong to creator content. Engine code supplies reusable input, presentation and guarded command delivery.
