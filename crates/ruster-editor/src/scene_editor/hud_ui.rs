@@ -837,6 +837,7 @@ impl SceneEditor {
         let body_height =
             (bottom - ui.cursor().min.y - footer_budget - error_budget - disabled_budget - 16.0)
                 .clamp(0.0, 460.0);
+        let body_focus_id = ui.make_persistent_id("hud_body_focus");
         let content = |ui: &mut egui::Ui| {
             fields.push(ui.checkbox(&mut draft.hud.enabled, "Show HUD"));
             focus_after_action =
@@ -1338,7 +1339,6 @@ impl SceneEditor {
                                         if let Some(id) = response.focus_id {
                                             argument_focus.push(id);
                                         }
-                                        ui.scroll_to_rect(ui.min_rect(), None);
                                     }
                                     argument_activation_owned |=
                                         is_bool && keyboard_activation && response.changed;
@@ -1497,11 +1497,42 @@ impl SceneEditor {
             } else {
                 ui.label("Add a panel to arrange text and controls.");
             }
-            for response in &fields {
-                if response.has_focus() {
+            let focused = fields
+                .iter()
+                .find(|response| response.has_focus())
+                .cloned()
+                .or_else(|| {
+                    argument_focus.iter().find_map(|id| {
+                        ui.ctx()
+                            .read_response(*id)
+                            .filter(|response| response.has_focus())
+                    })
+                });
+            let focused_id = focused.as_ref().map(|response| response.id);
+            let previous_focus = ui
+                .ctx()
+                .data(|data| data.get_temp::<Option<egui::Id>>(body_focus_id).flatten());
+            let keyboard_reveal = keyboard_activation
+                || ui.input(|input| {
+                    input.events.iter().any(|event| {
+                        matches!(
+                            event,
+                            egui::Event::Text(_) | egui::Event::Key { pressed: true, .. }
+                        )
+                    })
+                });
+            // Reveal a newly observed owner, including focus requested after
+            // the previous body pass, or keyboard work in the existing owner.
+            // Steady focus permits deliberate scrolling.
+            if focused_id != previous_focus || keyboard_reveal {
+                if let Some(response) = focused {
                     response.scroll_to_me(None);
                 }
             }
+            // Record before the footer. Enter can blur a field here and have
+            // validation restore it below, requiring a reveal on the next pass.
+            ui.ctx()
+                .data_mut(|data| data.insert_temp(body_focus_id, focused_id));
         };
         egui::ScrollArea::vertical()
             .id_salt("hud_form_scroll")
@@ -1893,6 +1924,8 @@ mod tests {
             }
             let width = first_style_id(&editor, "width");
             let margin = first_style_id(&editor, "margin");
+            let authored_before_wheel = editor.session.snapshot_bytes().unwrap();
+            let draft_before_wheel = editor.hud_draft.clone();
             // Establish the real TextEdit's keyboard focus without targeting
             // a field that may already be partly outside the scroll viewport.
             // Native pointer acquisition is exercised separately.
@@ -1946,6 +1979,81 @@ mod tests {
                     "HUD keyboard field {expected:?} must remain fully visible after validation and Tab traversal at scale {scale}: rect={:?}, interact={:?}",
                     focused.rect, focused.interact_rect);
             }
+
+            // Deliberate wheel navigation keeps the text owner while allowing
+            // the body to move away. An idle focused field must not pull it back.
+            let focused_width = ctx.read_response(width).unwrap();
+            let width_before_wheel = focused_width.rect;
+            frame(
+                vec![
+                    egui::Event::PointerMoved(focused_width.interact_rect.center()),
+                    egui::Event::MouseWheel {
+                        unit: egui::MouseWheelUnit::Point,
+                        delta: egui::vec2(0.0, -240.0),
+                        modifiers: egui::Modifiers::NONE,
+                        phase: egui::TouchPhase::Move,
+                        source: egui::MouseWheelSource::Unknown,
+                    },
+                ],
+                egui::Modifiers::NONE,
+            );
+            for _ in 0..24 {
+                frame(vec![], egui::Modifiers::NONE);
+            }
+            let scrolled_width = ctx.read_response(width).unwrap();
+            assert!(
+                scrolled_width.has_focus(),
+                "Wheel retains the Width owner at scale {scale}"
+            );
+            assert!(scrolled_width.rect.top() < width_before_wheel.top() - 24.0,
+                "Focused Width permits persistent downward wheel scrolling at scale {scale}: before={width_before_wheel:?}, after={:?}", scrolled_width.rect);
+            for _ in 0..8 {
+                frame(vec![], egui::Modifiers::NONE);
+            }
+            let idle_width = ctx.read_response(width).unwrap();
+            assert!(idle_width.has_focus());
+            assert!(
+                (idle_width.rect.top() - scrolled_width.rect.top()).abs() <= 2.0,
+                "Idle Width focus must not undo deliberate wheel scrolling at scale {scale}"
+            );
+
+            // Keyboard reentry still reveals the complete field in the small
+            // viewport, including the existing 2x-scale validation case.
+            for (expected, modifiers) in [
+                (margin, egui::Modifiers::NONE),
+                (width, egui::Modifiers::SHIFT),
+            ] {
+                frame(
+                    vec![
+                        egui::Event::Key {
+                            key: egui::Key::Tab,
+                            physical_key: None,
+                            pressed: true,
+                            repeat: false,
+                            modifiers,
+                        },
+                        egui::Event::Key {
+                            key: egui::Key::Tab,
+                            physical_key: None,
+                            pressed: false,
+                            repeat: false,
+                            modifiers,
+                        },
+                    ],
+                    modifiers,
+                );
+                for _ in 0..4 {
+                    frame(vec![], egui::Modifiers::NONE);
+                }
+                let focused = ctx.read_response(expected).unwrap();
+                assert!(focused.has_focus() && focused.interact_rect.contains_rect(focused.rect),
+                    "Tab reentry reveals the whole HUD field after wheel scrolling at scale {scale}: {focused:?}");
+            }
+            assert_eq!(
+                editor.session.snapshot_bytes().unwrap(),
+                authored_before_wheel
+            );
+            assert_eq!(editor.hud_draft, draft_before_wheel);
         }
     }
 
@@ -2801,6 +2909,71 @@ mod tests {
             number_id.is_some(),
             "Tab reaches the shared button argument Number field. {traversal:#?}"
         );
+        let focused_number = context.read_response(number_id.unwrap()).unwrap();
+        assert!(focused_number
+            .interact_rect
+            .contains_rect(focused_number.rect));
+        let number_before_wheel = focused_number.rect;
+        let draft_before_wheel = editor.hud_draft.clone();
+        draw(
+            &mut editor,
+            vec![
+                egui::Event::PointerMoved(focused_number.interact_rect.center()),
+                egui::Event::MouseWheel {
+                    unit: egui::MouseWheelUnit::Point,
+                    delta: egui::vec2(0.0, 240.0),
+                    modifiers: egui::Modifiers::NONE,
+                    phase: egui::TouchPhase::Move,
+                    source: egui::MouseWheelSource::Unknown,
+                },
+            ],
+        );
+        for _ in 0..24 {
+            draw(&mut editor, vec![]);
+        }
+        let scrolled_number = context.read_response(number_id.unwrap()).unwrap();
+        assert!(
+            scrolled_number.has_focus(),
+            "Wheel retains the shared Number owner"
+        );
+        assert!(scrolled_number.rect.top() > number_before_wheel.top() + 24.0,
+            "Focused button Number permits persistent upward wheel scrolling: before={number_before_wheel:?}, after={:?}", scrolled_number.rect);
+        for _ in 0..8 {
+            draw(&mut editor, vec![]);
+        }
+        let idle_number = context.read_response(number_id.unwrap()).unwrap();
+        assert!(idle_number.has_focus());
+        assert!(
+            (idle_number.rect.top() - scrolled_number.rect.top()).abs() <= 2.0,
+            "Idle shared Number focus must not undo deliberate wheel scrolling"
+        );
+        assert_eq!(editor.hud_draft, draft_before_wheel);
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
+        for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
+            let mut pressed = key(egui::Key::Tab);
+            if let egui::Event::Key {
+                modifiers: event_modifiers,
+                ..
+            } = &mut pressed
+            {
+                *event_modifiers = modifiers;
+            }
+            let mut released = pressed.clone();
+            if let egui::Event::Key { pressed, .. } = &mut released {
+                *pressed = false;
+            }
+            draw(
+                &mut editor,
+                vec![egui::Event::ModifiersChanged(modifiers), pressed, released],
+            );
+            for _ in 0..4 {
+                draw(&mut editor, vec![]);
+            }
+        }
+        let reentered_number = context.read_response(number_id.unwrap()).unwrap();
+        assert!(reentered_number.has_focus()
+            && reentered_number.interact_rect.contains_rect(reentered_number.rect),
+            "Tab reentry reveals the entire shared Number after wheel scrolling: {reentered_number:?}");
         draw(&mut editor, vec![key(egui::Key::Enter)]);
         assert!(editor.hud_draft.is_some());
         assert!(!editor.error.is_empty());
