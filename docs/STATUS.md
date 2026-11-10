@@ -2,6 +2,10 @@
 
 Updated2026-11-10. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
+## Development paused — next proposal prepared
+
+2026-11-10. After accepted F3c, the user requests Astra’s next-goal plan and then a pause to conserve weekly usage. Astra/Root propose [F4a Assembly Groups](plans/F4A-ASSEMBLY-GROUPS.md), rebasing the historical C1a candidate onto current source. The creator outcome is a nested articulated task-light assembly with attached lighting/colliders, independent duplication and scripted hinge motion, delivered through ordinary editor and native MCP. Shared transform/query/render semantics and legacy script compatibility require an early runnable gate. Audio, cameras, prefabs and richer animation remain separate. This is a proposal awaiting user review. **Development is paused after the planning handoff.** No implementation, build, native test, Goal-tool activation or new milestone acceptance is authorized by this plan.
+
 ## F2a accepted — initialization and paused Application commands
 
 2026-11-09. The user approves [F2a](plans/F2A-APPLICATION-LIFECYCLE.md) with “Proceed”. [Decision0045](decisions/0045-initialization-and-paused-application-commands.md) selects opt-in API5 initialization and typed paused Application commands, state-only transactions and commit revision separate from simulation tick. Scene14/recovery12/content10 preserve APIs1–4 and Descriptor5. Creator-defined rules remain application content. No Goal-tool goal or substantial integration project is activated.

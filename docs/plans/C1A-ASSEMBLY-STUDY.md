@@ -2,6 +2,10 @@
 
 Proposed2026-11-07 after accepted [V3b](../evidence/V3B-readiness.md), source `2c914a5` (product code `c297b9d`). **Planning only: user approval, goal activation and implementation are pending.** The user requested planning the next goal, not automatic execution. Root/Astra recommend a concrete assembly workflow; all representation choices below remain agent proposals until the early gate.
 
+## Superseded planning contract — 2026-11-10
+
+[F4a Assembly Groups](F4A-ASSEMBLY-GROUPS.md) now owns the proposed post-F3c composition contract. This document retains historical alternatives and measurements proposed against its older source baseline. Its versions, protocols and numerical references do not carry forward automatically. F4a remains unapproved and development is paused.
+
 ## Priority review supersedes the initial recommendation
 
 2026-11-07: after the user challenges priority, root/Astra retain this document as a **candidate**, not the selected highest-priority next goal. The [reassessment](../ROADMAP-REVIEW.md#c1a-priority-challenged-and-reassessed--2026-11-07) favors investigating a creator-authored interactive application/input-action workflow for the broad product ambition. Grouping remains valuable when assembly manipulation is the next creation’s bottleneck. The scope below is unchanged as an alternative; no approval, goal activation or implementation is inferred.
