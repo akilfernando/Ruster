@@ -1,6 +1,12 @@
-# Ruster editor design direction
+# Rusterize editor design direction
 
 Updated2026-11-05. This is a working design specification and source record; implementation/acceptance is reported separately in STATUS. The creator workflow and data-safety contracts remain authoritative.
+
+## Rusterize identity update — 2026-11-10
+
+The user confirms the product name **Rusterize**, supplies a graphite/mint [design brief](branding/RUSTERIZE-UI-BRIEF.md) and [logo concept](branding/rusterize-logo-concept.png), then explicitly resumes a bounded branding/UI slice. The new brief owns the current visual direction. Earlier implementation records below retain their historical palette and evidence. The supplied raster is a concept reference with rough edges. Production logo refinement and full launcher/About integration need separate asset qualification.
+
+The current slice updates the editor name and shared egui theme, primary Save action and main-editor warning/error colors while preserving existing keyboard/workflow contracts. Review actual normal/compact/scaled layouts before accepting the slice. F4a remains a separate unapproved proposal.
 
 ## Confirmed user direction
 

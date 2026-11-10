@@ -2,6 +2,10 @@
 
 Updated 2026-11-09. Working direction adopted under authorization to define the product and start development; see [decision 0001](decisions/0001-product-foundation.md). Specific scope defaults were selected by the agent and remain revisable.
 
+## Product identity — 2026-11-10
+
+The user renames the product **Rusterize**, referring to rasterization, and supplies a mint block/scanline/pixel logo concept plus a [graphite-and-mint editor brief](branding/RUSTERIZE-UI-BRIEF.md). The identity and design work resume under explicit user authorization. Existing repository/package/schema/IPC identities retain their compatibility meaning during the visible-brand transition. [Editor design direction](EDITOR-DESIGN.md) tracks implementation and visual qualification.
+
 ## Promise
 
 An open Rust/Vulkan engine for interactive simulation and visualization, where developers can understand what happened, change it confidently, and reproduce the result through code, visual tools, or an AI assistant. Games are the first proving ground, not the limit of the product.

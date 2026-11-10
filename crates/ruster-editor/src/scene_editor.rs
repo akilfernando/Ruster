@@ -3947,7 +3947,7 @@ impl SceneEditor {
                     }).on_hover_text("This import setting is fixed for this asset. To change it, import the source with a new ID, then assign that mesh. Mesh assignment supports Undo.");
                 }
                 if let Some(error) = &row.info.diagnostic {
-                    ui.colored_label(egui::Color32::YELLOW, error);
+                    ui.colored_label(crate::editor_theme::WARNING, error);
                 }
                 if (self.resolved.contains_key(id) || self.resolved_textures.contains_key(id))
                     && row.info.status != ruster_assets::AssetStatus::Ready
@@ -3978,7 +3978,7 @@ impl SceneEditor {
             .count();
         if missing > 0 {
             ui.horizontal_wrapped(|ui| {
-                        ui.colored_label(egui::Color32::YELLOW, format!("{missing} objects have unresolved mesh references; placeholder cubes shown."));
+                        ui.colored_label(crate::editor_theme::WARNING, format!("{missing} objects have unresolved mesh references; placeholder cubes shown."));
                         if ui.button("Locate missing content").clicked() {
                             let id = self.session.scene().objects.iter().filter_map(|o| o.mesh.as_ref()).find(|id| !self.resolved.contains_key(*id)).cloned();
                             if let Some(id) = id { self.locate_mesh(&id); }
@@ -3997,7 +3997,7 @@ impl SceneEditor {
                     .take(3)
                 {
                     if let Some(error) = &row.info.diagnostic {
-                        ui.colored_label(egui::Color32::YELLOW, error);
+                        ui.colored_label(crate::editor_theme::WARNING, error);
                     }
                 }
             });
@@ -4124,11 +4124,11 @@ impl SceneEditor {
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height() * 0.25).min(180.0)).show(ui, |ui| {
                     for row in &self.content_search.rows {
                         ui.label(&row.label);
-                        if let Some(error) = &row.info.diagnostic { ui.colored_label(egui::Color32::LIGHT_RED, error); }
+                        if let Some(error) = &row.info.diagnostic { ui.colored_label(crate::editor_theme::ERROR, error); }
                     }
                 });
             }
-            if !self.error.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.error).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&self.error); }
+            if !self.error.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.error).color(crate::editor_theme::ERROR)).truncate()).on_hover_text(&self.error); }
             });
             });
             if ui.button("Close assets").clicked() { self.asset_dialog = false; self.asset_focused = false; self.asset_ops.cancel(); }
@@ -4166,7 +4166,7 @@ impl SceneEditor {
                 self.sync_draft();
             }
             if !self.error.is_empty() {
-                ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+                ui.colored_label(crate::editor_theme::ERROR, &self.error);
             }
         });
         if !self.rename_pending {
@@ -4478,7 +4478,7 @@ impl SceneEditor {
                 if !self.error.is_empty() {
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(&self.error).color(egui::Color32::LIGHT_RED),
+                            egui::RichText::new(&self.error).color(crate::editor_theme::ERROR),
                         )
                         .wrap(),
                     );
@@ -4489,14 +4489,17 @@ impl SceneEditor {
                     .filter(|message| *message != self.error)
                 {
                     ui.add(
-                        egui::Label::new(egui::RichText::new(shader).color(egui::Color32::YELLOW))
-                            .wrap(),
+                        egui::Label::new(
+                            egui::RichText::new(shader).color(crate::editor_theme::WARNING),
+                        )
+                        .wrap(),
                     );
                 }
                 if !self.workspace.error.is_empty() {
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(&self.workspace.error).color(egui::Color32::YELLOW),
+                            egui::RichText::new(&self.workspace.error)
+                                .color(crate::editor_theme::WARNING),
                         )
                         .wrap(),
                     );
@@ -4520,7 +4523,7 @@ impl SceneEditor {
                                 },
                                 diagnostic.message
                             ))
-                            .color(egui::Color32::LIGHT_RED),
+                            .color(crate::editor_theme::ERROR),
                         )
                         .wrap(),
                     );
@@ -4743,8 +4746,7 @@ impl SceneEditor {
                     .unwrap_or_else(|| "Unsaved scene".into()),
                 if dirty { "Unsaved changes" } else { "Saved" }
             ));
-            if ui
-                .button("Save")
+            if crate::editor_theme::primary_button(ui, "Save")
                 .on_hover_text(self.workspace.shortcut_text(Action::Save))
                 .clicked()
             {
@@ -4824,6 +4826,12 @@ impl SceneEditor {
         }
     }
     fn ui(&mut self, ui: &mut egui::Ui) {
+        // Keep the supported compact viewport usable while retaining normal-size controls.
+        if ui.max_rect().height() < 600.0 {
+            ui.spacing_mut().interact_size.y = 28.0;
+            ui.spacing_mut().button_padding.y = 5.0;
+            ui.spacing_mut().item_spacing.y = 7.0;
+        }
         let ctx = ui.ctx().clone();
         self.export_context = Some(ctx.clone());
         self.asset_begin_root_frame(&ctx);
@@ -5124,7 +5132,7 @@ impl SceneEditor {
                     self.new_scene_pending = false;
                 }
                 if !self.error.is_empty() {
-                    ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+                    ui.colored_label(crate::editor_theme::ERROR, &self.error);
                 }
             });
         }
@@ -5136,7 +5144,7 @@ impl SceneEditor {
                 if !self.path_focused {edit.request_focus();self.path_focused=true;}
                 let submit=(edit.has_focus()||edit.lost_focus())&&enter_pressed;
                 if open && (self.session.is_dirty()||self.drafts()) {
-                    ui.colored_label(egui::Color32::YELLOW,"Opening discards current unsaved scene and drafts. Cancel to preserve them.");
+                    ui.colored_label(crate::editor_theme::WARNING,"Opening discards current unsaved scene and drafts. Cancel to preserve them.");
                 }
                 ui.horizontal(|ui| {
                     if ui.button(if open {"Open and discard current"}else{"Save to new path"}).clicked()||submit {
@@ -5162,7 +5170,7 @@ impl SceneEditor {
                     }
                     if ui.button("Cancel scene dialog").clicked()||cancel {self.dialog=None;self.path_focused=false;}
                 });
-                if !self.error.is_empty(){ui.colored_label(egui::Color32::LIGHT_RED,&self.error);}
+                if !self.error.is_empty(){ui.colored_label(crate::editor_theme::ERROR,&self.error);}
             });
         }
         self.content_ui(&ctx);
@@ -5257,7 +5265,7 @@ impl SceneEditor {
                     self.close_pending = false;
                 }
                 if !self.error.is_empty() {
-                    ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+                    ui.colored_label(crate::editor_theme::ERROR, &self.error);
                 }
             });
         }
@@ -5347,7 +5355,7 @@ fn run_session(session: Session) -> Result<(), String> {
         ..Default::default()
     };
     eframe::run_native(
-        "Ruster Editor",
+        "Rusterize Editor",
         options,
         Box::new(move |cc| {
             crate::editor_theme::configure(&cc.egui_ctx);

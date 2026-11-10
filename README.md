@@ -1,15 +1,17 @@
-# Ruster
+# Rusterize
+
+![Rusterize logo concept](docs/branding/rusterize-logo-concept.png)
 
 An open-source Rust/Vulkan engine project for interactive simulation and visualization. Games are the first proving ground; the shared scene and tooling are designed to support other interactive applications too.
 
-Ruster's purpose is to help people turn their own ideas into working creations. Its systems and tools should serve that creative process, with understandable workflows, room to extend behavior and ownership of the result. See the [project ethos](docs/DIRECTION.md#project-ethos-serve-the-creator) and the current scope below.
+Rusterize's purpose is to help people turn their own ideas into working creations. Its systems and tools should serve that creative process, with understandable workflows, room to extend behavior and ownership of the result. See the [project ethos](docs/DIRECTION.md#project-ethos-serve-the-creator) and the current scope below.
 
 [![CI](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml/badge.svg)](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
 Familiarity for experienced Unity and Unreal creators, including everyday editor conveniences, is a core requirement. The [editor experience baseline](docs/EDITOR-EXPERIENCE.md) describes the target and the gaps still to close.
 
-**Early development:** milestones M0–M8 provide a small, working Linux foundation. Ruster is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan/editor smoke covers NVIDIA RTX4060 Laptop and Intel Iris Xe on the recorded Linux workstation; Windows and other machines remain unverified. The Unity-experienced user confirms repaired viewport selection and live Transform feedback; broader creator-workflow acceptance remains open. The [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the interaction repairs and remaining adoption/platform limits.
+**Early development:** milestones M0–M8 provide a small, working Linux foundation. Rusterize is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan/editor smoke covers NVIDIA RTX4060 Laptop and Intel Iris Xe on the recorded Linux workstation; Windows and other machines remain unverified. The Unity-experienced user confirms repaired viewport selection and live Transform feedback; broader creator-workflow acceptance remains open. The [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the interaction repairs and remaining adoption/platform limits.
 
 ![Ruster scene editor with command menus, transform inspector and content browser](docs/evidence/m9-editor-overview.png)
 

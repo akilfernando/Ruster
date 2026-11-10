@@ -46,7 +46,7 @@ impl log::Log for Diagnostics {
 
 static DIAGNOSTICS: Diagnostics = Diagnostics;
 
-const HELP: &str = "Ruster Editor — scene authoring\n\nUsage: ruster-editor\n       ruster-editor --scene PATH\n       ruster-editor --scenario PATH\n       ruster-editor --help\n\nDefault: empty generic scene with New/Open and recent project choices.\nLegacy logistics mode: --scenario PATH.\nRequires a desktop session and Vulkan adapter. File → Workspace and shortcuts…\nlists and remaps scene shortcuts. Legacy scenario mode uses Space to run/pause outside text fields.\n";
+const HELP: &str = "Rusterize Editor — scene authoring\n\nUsage: ruster-editor\n       ruster-editor --scene PATH\n       ruster-editor --scenario PATH\n       ruster-editor --help\n\nDefault: empty generic scene with New/Open and recent project choices.\nLegacy logistics mode: --scenario PATH.\nRequires a desktop session and Vulkan adapter. File → Workspace and shortcuts…\nlists and remaps scene shortcuts. Legacy scenario mode uses Space to run/pause outside text fields.\n";
 
 fn arguments(arguments: impl Iterator<Item = String>) -> Result<Option<PathBuf>, String> {
     let mut arguments = arguments;
@@ -149,13 +149,13 @@ fn run() -> Result<(), String> {
         },
         ..Default::default()
     };
-    eframe::run_native("Ruster Editor", options, Box::new(move |cc| {
+    eframe::run_native("Rusterize Editor", options, Box::new(move |cc| {
         ui::configure(&cc.egui_ctx);
         let mut editor = Editor::new(project);
         if let Some(render) = cc.wgpu_render_state.as_ref() {
             let adapter = render.adapter.get_info();
             editor.adapter = format!("{} · {:?}", adapter.name, adapter.backend);
-            eprintln!("Ruster Editor renderer: {}", editor.adapter);
+            eprintln!("Rusterize Editor renderer: {}", editor.adapter);
         }
         #[cfg(unix)]
         let bridge = if std::env::var_os("RUSTER_MCP_ENABLE").as_deref() == Some(std::ffi::OsStr::new("1")) {

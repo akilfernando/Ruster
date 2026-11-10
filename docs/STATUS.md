@@ -2,9 +2,9 @@
 
 Updated2026-11-10. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
-## Development paused — next proposal prepared
+## Rusterize branding/UI slice in progress
 
-2026-11-10. After accepted F3c, the user requests Astra’s next-goal plan and then a pause to conserve weekly usage. Astra/Root propose [F4a Assembly Groups](plans/F4A-ASSEMBLY-GROUPS.md), rebasing the historical C1a candidate onto current source. The creator outcome is a nested articulated task-light assembly with attached lighting/colliders, independent duplication and scripted hinge motion, delivered through ordinary editor and native MCP. Shared transform/query/render semantics and legacy script compatibility require an early runnable gate. Audio, cameras, prefabs and richer animation remain separate. This is a proposal awaiting user review. **Development is paused after the planning handoff.** No implementation, build, native test, Goal-tool activation or new milestone acceptance is authorized by this plan.
+2026-11-10. The user confirms the name Rusterize and supplies a [UI brief](branding/RUSTERIZE-UI-BRIEF.md) and [logo concept](branding/rusterize-logo-concept.png). They explicitly resume bounded branding and UI work. Root applies a first shared graphite/mint theme and visible editor branding slice. The full gate passes331Rust/29Python and strict checks; inspection passes143cases/1existing device ignored plus strict lint. The initial density increase exposes a compact viewport regression, repaired with responsive compact density and the original test GREEN. Focused native review is next under the user’s away authorization. [Evidence and retained failures](evidence/RUSTERIZE-UI-FOUNDATION.md). F4a Assembly Groups remains proposed and unapproved. The previous development pause is superseded for this UI slice. No Goal-tool goal is created.
 
 ## F2a accepted — initialization and paused Application commands
 

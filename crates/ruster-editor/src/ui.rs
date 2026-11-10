@@ -4,29 +4,10 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, RichText, Sense, Stroke, 
 
 use crate::model::{Action, Editor, PathMode, Selection};
 
-const ACCENT: Color32 = Color32::from_rgb(108, 207, 194);
-const MUTED: Color32 = Color32::from_rgb(155, 170, 187);
-const BG: Color32 = Color32::from_rgb(17, 23, 32);
-const CARD: Color32 = Color32::from_rgb(31, 42, 56);
+use crate::editor_theme::{ACCENT, BACKGROUND as BG, RAISED as CARD, SECONDARY as MUTED};
 
 pub fn configure(ctx: &egui::Context) {
-    ctx.set_visuals(egui::Visuals::dark());
-    ctx.style_mut_of(egui::Theme::Dark, |style| {
-        style.spacing.item_spacing = Vec2::new(10.0, 10.0);
-        style.spacing.button_padding = Vec2::new(12.0, 7.0);
-        style.visuals.panel_fill = Color32::from_rgb(23, 30, 40);
-        style.visuals.selection.bg_fill = Color32::from_rgb(40, 95, 93);
-        style.visuals.selection.stroke = Stroke::new(1.0, ACCENT);
-        style
-            .text_styles
-            .insert(egui::TextStyle::Body, FontId::proportional(15.0));
-        style
-            .text_styles
-            .insert(egui::TextStyle::Button, FontId::proportional(14.0));
-        style
-            .text_styles
-            .insert(egui::TextStyle::Heading, FontId::proportional(23.0));
-    });
+    crate::editor_theme::configure(ctx);
 }
 
 impl eframe::App for Editor {
@@ -59,7 +40,7 @@ impl eframe::App for Editor {
         }
         let marker = if self.dirty() { "* " } else { "" };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "{marker}{} — Ruster Editor",
+            "{marker}{} — Rusterize Editor",
             self.project.scenario().id()
         )));
     }
@@ -121,7 +102,7 @@ impl Editor {
         egui::Panel::top("toolbar").show(root, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("RUSTER").strong().size(20.0).color(ACCENT));
+                ui.label(RichText::new("RUSTERIZE").strong().size(20.0).color(ACCENT));
                 ui.label(RichText::new("/  SCENARIO EDITOR").color(MUTED));
                 ui.separator();
                 if ui
