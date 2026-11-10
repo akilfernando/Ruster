@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 16;
+pub const FORMAT_VERSION: u32 = 17;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
@@ -1227,7 +1227,7 @@ impl Document {
         if bytes.len() as u64 > MAX_FILE_BYTES {
             return Err(SceneError::Invalid("file exceeds 1 MiB".into()));
         }
-        let value = strict_json::parse(bytes)?;
+        let mut value = strict_json::parse(bytes)?;
         if value.get("format").and_then(|v| v.as_str()) != Some("ruster-scene") {
             return Err(SceneError::Invalid("expected ruster-scene format; logistics v1 scenarios remain a separate format and are not migrated".into()));
         }
@@ -1235,6 +1235,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..17).contains(&version) {
+            reject_pre_v17_hud_panels(&value)?;
+        }
         if (1..16).contains(&version) {
             reject_pre_v16_hud_buttons(&value)?;
         }
@@ -1268,11 +1271,14 @@ impl Document {
         if (1..9).contains(&version) {
             reject_pre_v9_surface_fields(&value, version)?;
         }
+        if (1..17).contains(&version) {
+            migrate_legacy_document_huds(&mut value)?;
+        }
         let document: Self = match version {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=16 => serde_json::from_value(value)?,
+            5..=17 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1341,6 +1347,60 @@ impl Document {
         }
         Ok(())
     }
+}
+
+fn reject_pre_v17_hud_panels(value: &serde_json::Value) -> Result<(), SceneError> {
+    let has_new = |hud: &serde_json::Value| {
+        hud.get("panels").is_some()
+            || hud.get("visible_when").is_some()
+            || hud["anchor"].as_str() == Some("center")
+            || hud["elements"]
+                .as_array()
+                .is_some_and(|rows| rows.iter().any(|row| row.get("enabled_when").is_some()))
+    };
+    let mut found = has_new(&value["authoring"]["hud"]);
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            found |= has_new(&change["hud"]["before"]) || has_new(&change["hud"]["after"]);
+        }
+    }
+    if found {
+        Err(SceneError::Invalid(
+            "HUD panels and conditions require scene v17".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn migrate_legacy_document_huds(value: &mut serde_json::Value) -> Result<(), SceneError> {
+    let migrate = |value: &mut serde_json::Value| -> Result<(), SceneError> {
+        *value = serde_json::to_value(hud::migrate_legacy_hud(value.take())?)?;
+        Ok(())
+    };
+    if let Some(current) = value
+        .get_mut("authoring")
+        .and_then(|authoring| authoring.get_mut("hud"))
+    {
+        migrate(current)?;
+    }
+    for stack in ["undo", "redo"] {
+        for change in value
+            .get_mut(stack)
+            .and_then(serde_json::Value::as_array_mut)
+            .into_iter()
+            .flatten()
+        {
+            if let Some(delta) = change.get_mut("hud") {
+                for side in ["before", "after"] {
+                    if let Some(hud) = delta.get_mut(side) {
+                        migrate(hud)?;
+                    }
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 // Scene15 retains its exact label schema. Inspect only HUD element owners,
@@ -1849,8 +1909,24 @@ impl Session {
         if self.hud() == &hud {
             return Ok(self.scene().revision);
         }
-        for label in &hud.elements {
-            let previous = self.hud().elements.iter().find(|old| old.id == label.id);
+        for panel in &hud.panels {
+            let previous = self.hud().panels.iter().find(|old| old.id == panel.id);
+            if previous.is_none() && self.contains_hud_panel_id(&panel.id) {
+                return Err(SceneError::Invalid("HUD panel identity is reserved by reversible history; Undo or choose a fresh ID".into()));
+            }
+            if panel.visible_when.as_ref() != previous.and_then(|old| old.visible_when.as_ref()) {
+                if let Some(condition) = &panel.visible_when {
+                    hud::validate_bool_condition(self.authoring(), condition)?;
+                }
+            }
+        }
+        for label in hud.elements() {
+            let previous = self.hud().elements().find(|old| old.id == label.id);
+            if label.enabled_when.as_ref() != previous.and_then(|old| old.enabled_when.as_ref()) {
+                if let Some(condition) = &label.enabled_when {
+                    hud::validate_bool_condition(self.authoring(), condition)?;
+                }
+            }
             if previous.is_none() && self.contains_hud_label_id(&label.id) {
                 return Err(SceneError::Invalid(
                     "HUD label identity is reserved by reversible history; Undo or choose a fresh ID"
@@ -1904,15 +1980,38 @@ impl Session {
         )
     }
 
+    pub fn contains_hud_panel_id(&self, id: &str) -> bool {
+        self.retained_huds()
+            .any(|hud| hud.panels.iter().any(|panel| panel.id == id))
+    }
+
+    pub fn allocate_hud_panel_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        let used: HashSet<_> = self
+            .retained_huds()
+            .flat_map(|hud| hud.panels.iter().map(|panel| panel.id.as_str()))
+            .collect();
+        let next = self
+            .scene()
+            .revision
+            .checked_add(1)
+            .ok_or(SceneError::RevisionOverflow)?;
+        allocate_ids(
+            &format!("hud-panel-{next}"),
+            count,
+            hud::MAX_HUD_PANELS,
+            used,
+        )
+    }
+
     pub fn contains_hud_label_id(&self, id: &str) -> bool {
         self.retained_huds()
-            .any(|hud| hud.elements.iter().any(|label| label.id == id))
+            .any(|hud| hud.elements().any(|label| label.id == id))
     }
 
     pub fn allocate_hud_label_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
         let used: HashSet<_> = self
             .retained_huds()
-            .flat_map(|hud| hud.elements.iter().map(|label| label.id.as_str()))
+            .flat_map(|hud| hud.elements().map(|label| label.id.as_str()))
             .collect();
         let next = self
             .scene()
@@ -3391,19 +3490,22 @@ mod tests {
     // and repairable references across field deletion and binding identity reuse.
     #[test]
     fn hud_history_roundtrip_and_reference_repair_are_atomic() {
-        use hud::{Hud, HudLabel, HudSource, HudValueType};
+        use hud::{HudLabel, HudSource, HudValueType};
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("hud.json");
         let mut session = Session::new(Scene::empty("hud-scene")).unwrap();
-        let mut hud = Hud {
+        let mut hud = crate::hud::Hud {
             enabled: true,
-            elements: vec![HudLabel {
-                id: "instructions".into(),
-                source: HudSource::Static {
-                    text: "Ready".into(),
-                },
+            panels: vec![crate::hud::HudPanel {
+                elements: vec![HudLabel {
+                    enabled_when: None,
+                    id: "instructions".into(),
+                    source: HudSource::Static {
+                        text: "Ready".into(),
+                    },
+                }],
+                ..crate::hud::HudPanel::default()
             }],
-            ..Hud::default()
         };
         assert_eq!(session.set_hud(0, hud.clone()).unwrap(), 1);
         assert_eq!(session.set_hud(1, hud.clone()).unwrap(), 1);
@@ -3418,7 +3520,8 @@ mod tests {
         assert_eq!(reopened.hud(), &hud);
         assert!(Scene::load(&path).is_err());
 
-        hud.elements.push(HudLabel {
+        hud.panels[0].elements.push(HudLabel {
+            enabled_when: None,
             id: "score".into(),
             source: HudSource::State {
                 binding_id: "application".into(),
@@ -3458,7 +3561,7 @@ mod tests {
         reopened
             .set_state_default(5, "application", "score", None)
             .unwrap();
-        hud.margin = 20.0;
+        hud.panels[0].margin = 20.0;
         reopened.set_hud(6, hud.clone()).unwrap();
         reopened.set_binding(7, "application", None).unwrap();
         let broken = reopened.snapshot_bytes().unwrap();
@@ -3477,10 +3580,10 @@ mod tests {
             restored.binding("application").unwrap().state_defaults["score"],
             StateValue::Number(1.0)
         );
-        assert_eq!(restored.hud().margin, 12.0);
+        assert_eq!(restored.hud().panels[0].margin, 12.0);
         restored.set_source(11, "hud-source", None).unwrap();
         let mut repairable = restored.hud().clone();
-        repairable.margin = 24.0;
+        repairable.panels[0].margin = 24.0;
         restored.set_hud(12, repairable.clone()).unwrap();
         restored.save(&path).unwrap();
         assert_eq!(Session::open(&path).unwrap().hud(), &repairable);
@@ -3490,7 +3593,7 @@ mod tests {
     // bindings validate atomically, while broken retained targets remain repairable.
     #[test]
     fn hud_button_history_preserves_broken_targets_and_rejects_changed_constants() {
-        use hud::{Hud, HudCommandBinding, HudLabel, HudSource};
+        use hud::{HudCommandBinding, HudLabel, HudSource};
         let mut session = Session::new(Scene::empty("buttons")).unwrap();
         let mut api5 = source("unfinished API5 source");
         api5.host_api_version = 5;
@@ -3506,24 +3609,27 @@ mod tests {
         session
             .create_behavior(0, "source", api5, "app", application.clone())
             .unwrap();
-        let mut hud = Hud {
+        let mut hud = crate::hud::Hud {
             enabled: true,
-            elements: vec![HudLabel {
-                id: "button".into(),
-                source: HudSource::Button {
-                    caption: "Act".into(),
-                    command: HudCommandBinding {
-                        binding_id: "app".into(),
-                        command_id: "act".into(),
-                        arguments,
+            panels: vec![crate::hud::HudPanel {
+                elements: vec![HudLabel {
+                    enabled_when: None,
+                    id: "button".into(),
+                    source: HudSource::Button {
+                        caption: "Act".into(),
+                        command: HudCommandBinding {
+                            binding_id: "app".into(),
+                            command_id: "act".into(),
+                            arguments,
+                        },
                     },
-                },
+                }],
+                ..crate::hud::HudPanel::default()
             }],
-            ..Hud::default()
         };
         let original = session.snapshot_bytes().unwrap();
         let mut invalid = hud.clone();
-        if let HudSource::Button { command, .. } = &mut invalid.elements[0].source {
+        if let HudSource::Button { command, .. } = &mut invalid.panels[0].elements[0].source {
             command.arguments.clear();
         }
         assert!(session.set_hud(1, invalid).is_err());
@@ -3533,14 +3639,14 @@ mod tests {
         session
             .set_command_definition(2, "app", "act", None)
             .unwrap();
-        hud.margin = 20.0;
-        if let HudSource::Button { caption, .. } = &mut hud.elements[0].source {
+        hud.panels[0].margin = 20.0;
+        if let HudSource::Button { caption, .. } = &mut hud.panels[0].elements[0].source {
             *caption = "Repair command".into();
         }
         session.set_hud(3, hud.clone()).unwrap();
         let broken = session.snapshot_bytes().unwrap();
         let mut changed = hud.clone();
-        if let HudSource::Button { command, .. } = &mut changed.elements[0].source {
+        if let HudSource::Button { command, .. } = &mut changed.panels[0].elements[0].source {
             command
                 .arguments
                 .insert("amount".into(), StateValue::Number(0.0));
@@ -3555,29 +3661,164 @@ mod tests {
         session.save(&path).unwrap();
         let mut reopened = Session::open(&path).unwrap();
         assert_eq!(reopened.hud(), &hud);
-        assert_eq!(reopened.loaded_format_version(), 16);
+        assert_eq!(reopened.loaded_format_version(), FORMAT_VERSION);
         reopened.undo(4).unwrap();
         reopened.undo(5).unwrap();
         let repaired = hud::resolve_hud(reopened.hud(), reopened.authoring(), |_, _| {
             panic!("no VM/state reads")
         });
-        assert_eq!(repaired.labels[0].diagnostic, None);
+        assert_eq!(repaired.panels[0].labels[0].diagnostic, None);
         reopened.set_binding(6, "app", None).unwrap();
         assert!(reopened.contains_binding_id("app"));
         assert!(reopened.set_binding(7, "app", Some(application)).is_err());
         let mut retained = reopened.hud().clone();
-        retained.spacing = 10.0;
+        retained.panels[0].spacing = 10.0;
         reopened.set_hud(7, retained.clone()).unwrap();
         reopened.save(&path).unwrap();
         assert_eq!(Session::open(&path).unwrap().hud(), &retained);
         reopened.undo(8).unwrap();
         reopened.undo(9).unwrap();
         reopened.undo(10).unwrap();
-        assert!(reopened.hud().elements.is_empty());
+        assert!(reopened.hud().elements().next().is_none());
         assert!(
             reopened.set_hud(11, retained).is_err(),
             "button ID remains reserved by redo"
         );
+    }
+
+    // Conditions add two reference owners and a panel identity namespace. Exact
+    // broken references permit repair, while changed targets remain atomic.
+    #[test]
+    fn hud_panel_conditions_reserve_identity_and_preserve_broken_repair() {
+        use hud::{BoolCondition, Hud, HudCommandBinding, HudLabel, HudPanel, HudSource};
+        let mut session = Session::new(Scene::empty("conditions")).unwrap();
+        let mut api5 = source("unfinished conditional application");
+        api5.host_api_version = 5;
+        let mut application = binding("unused", "source");
+        application.target = BindingTarget::Application;
+        application
+            .state_defaults
+            .insert("ready".into(), StateValue::Bool(true));
+        application.commands.insert(
+            "run".into(),
+            CommandDefinition {
+                arguments: StateFields::new(),
+            },
+        );
+        session
+            .create_behavior(0, "source", api5, "app", application.clone())
+            .unwrap();
+        let condition = BoolCondition {
+            binding_id: "app".into(),
+            field: "ready".into(),
+            expected: true,
+        };
+        let mut hud = Hud {
+            enabled: true,
+            panels: vec![HudPanel {
+                id: "start".into(),
+                visible_when: Some(condition.clone()),
+                elements: vec![HudLabel {
+                    id: "continue".into(),
+                    enabled_when: Some(BoolCondition {
+                        expected: false,
+                        ..condition.clone()
+                    }),
+                    source: HudSource::Button {
+                        caption: "Continue".into(),
+                        command: HudCommandBinding {
+                            binding_id: "app".into(),
+                            command_id: "run".into(),
+                            arguments: StateFields::new(),
+                        },
+                    },
+                }],
+                ..HudPanel::default()
+            }],
+        };
+        session.set_hud(1, hud.clone()).unwrap();
+        let admitted = session.snapshot_bytes().unwrap();
+        let mut invalid = hud.clone();
+        invalid.panels.push(HudPanel {
+            id: "new".into(),
+            visible_when: Some(BoolCondition {
+                field: "missing".into(),
+                ..condition.clone()
+            }),
+            ..HudPanel::default()
+        });
+        assert!(session.set_hud(2, invalid).is_err());
+        assert_eq!(session.snapshot_bytes().unwrap(), admitted);
+        session.set_state_default(2, "app", "ready", None).unwrap();
+        hud.panels[0].name = "Repair this screen".into();
+        hud.panels[0].margin = 24.0;
+        if let HudSource::Button { caption, .. } = &mut hud.panels[0].elements[0].source {
+            *caption = "Repair".into();
+        }
+        session.set_hud(3, hud.clone()).unwrap();
+        let broken = session.snapshot_bytes().unwrap();
+        for panel_condition in [true, false] {
+            let mut changed = hud.clone();
+            if panel_condition {
+                changed.panels[0].visible_when.as_mut().unwrap().expected = false;
+            } else {
+                changed.panels[0].elements[0]
+                    .enabled_when
+                    .as_mut()
+                    .unwrap()
+                    .expected = true;
+            }
+            assert!(session.set_hud(4, changed).is_err());
+            assert_eq!(session.snapshot_bytes().unwrap(), broken);
+        }
+        let mut reserved = session.clone();
+        reserved.set_hud(4, Hud::default()).unwrap();
+        assert!(
+            reserved.contains_hud_panel_id("start") && reserved.contains_hud_label_id("continue")
+        );
+        let replacement = Hud {
+            enabled: true,
+            panels: vec![HudPanel {
+                id: "start".into(),
+                ..HudPanel::default()
+            }],
+        };
+        assert!(reserved.set_hud(5, replacement).is_err());
+        let fresh_panel = reserved.allocate_hud_panel_ids(1).unwrap().pop().unwrap();
+        assert_ne!(fresh_panel, "start");
+        let replacement = Hud {
+            enabled: true,
+            panels: vec![HudPanel {
+                id: fresh_panel,
+                elements: vec![HudLabel {
+                    id: "continue".into(),
+                    source: HudSource::Static {
+                        text: String::new(),
+                    },
+                    enabled_when: None,
+                }],
+                ..HudPanel::default()
+            }],
+        };
+        assert!(reserved.set_hud(5, replacement).is_err());
+        let mut restored = Session::from_snapshot_bytes(&broken).unwrap();
+        restored.undo(4).unwrap();
+        restored.undo(5).unwrap();
+        let resolved = hud::resolve_hud(restored.hud(), restored.authoring(), |binding, field| {
+            restored.binding(binding)?.state_defaults.get(field)
+        });
+        assert!(resolved.panels[0].visible);
+        assert!(!resolved.panels[0].labels[0].available);
+        assert_eq!(resolved.panels[0].labels[0].diagnostic, None);
+        restored.set_binding(6, "app", None).unwrap();
+        assert!(restored.contains_binding_id("app"));
+        assert!(restored.set_binding(7, "app", Some(application)).is_err());
+        let mut repair = restored.hud().clone();
+        repair.panels[0].name = "Missing owner".into();
+        restored.set_hud(7, repair.clone()).unwrap();
+        let reopened = Session::from_snapshot_bytes(&restored.snapshot_bytes().unwrap()).unwrap();
+        assert_eq!(reopened.hud(), &repair);
+        assert!(reopened.contains_source_id("source"));
     }
 
     // Future HUD owner fields must fail closed for every prior format, even
@@ -3613,21 +3854,116 @@ mod tests {
         labels
             .set_hud(
                 0,
-                hud::Hud {
+                crate::hud::Hud {
                     enabled: true,
-                    elements: vec![hud::HudLabel {
-                        id: "old".into(),
-                        source: hud::HudSource::Static {
-                            text: "Ready".into(),
-                        },
+                    panels: vec![crate::hud::HudPanel {
+                        elements: vec![hud::HudLabel {
+                            enabled_when: None,
+                            id: "old".into(),
+                            source: hud::HudSource::Static {
+                                text: "Ready".into(),
+                            },
+                        }],
+                        ..crate::hud::HudPanel::default()
                     }],
-                    ..hud::Hud::default()
                 },
             )
             .unwrap();
         let mut v15 = serde_json::to_value(&labels.document).unwrap();
+        let as_legacy = |value: &mut serde_json::Value| {
+            let mut panel = value["panels"]
+                .as_array()
+                .and_then(|panels| panels.first())
+                .cloned()
+                .unwrap_or_else(|| serde_json::to_value(hud::HudPanel::default()).unwrap());
+            let map = panel.as_object_mut().unwrap();
+            for key in ["id", "name", "visible_when"] {
+                map.remove(key);
+            }
+            map.insert("enabled".into(), value["enabled"].clone());
+            *value = panel;
+        };
+        as_legacy(&mut v15["authoring"]["hud"]);
+        for change in v15["undo"].as_array_mut().unwrap() {
+            as_legacy(&mut change["hud"]["before"]);
+            as_legacy(&mut change["hud"]["after"]);
+        }
         v15["format_version"] = 15.into();
         assert!(Document::decode(&serde_json::to_vec(&v15).unwrap()).is_ok());
+        let migrated = Session::from_snapshot_bytes(&serde_json::to_vec(&v15).unwrap()).unwrap();
+        assert_eq!(migrated.loaded_format_version(), 15);
+        assert_eq!(migrated.hud().panels[0].id, hud::LEGACY_HUD_PANEL_ID);
+        assert_eq!(migrated.hud().panels[0].elements[0].id, "old");
+        // Exact default history must agree with an omitted current HUD after
+        // Undo. Keep the original legacy wire, rather than relabeling new JSON.
+        let mut undone = v15.clone();
+        undone["authoring"].as_object_mut().unwrap().remove("hud");
+        undone["redo"] = undone["undo"].clone();
+        undone["undo"] = serde_json::json!([]);
+        undone["scene"]["revision"] = 2.into();
+        let mut redo = Session::from_snapshot_bytes(&serde_json::to_vec(&undone).unwrap()).unwrap();
+        assert!(redo.hud().is_default());
+        redo.redo(2).unwrap();
+        assert_eq!(redo.hud().panels[0].elements[0].id, "old");
+        assert_eq!(
+            serde_json::from_slice::<serde_json::Value>(&redo.snapshot_bytes().unwrap()).unwrap()
+                ["format_version"],
+            17
+        );
+        assert_eq!(
+            hud::migrate_legacy_hud(serde_json::json!({})).unwrap(),
+            hud::Hud::default()
+        );
+        let raw =
+            hud::migrate_legacy_hud_draft(serde_json::json!({"elements":[{"id":"draft", "source":{
+                "kind":"state", "binding_id":"", "field":"", "value_type":"bool"
+            }}]}))
+            .unwrap();
+        assert_eq!(raw.panels[0].id, hud::LEGACY_HUD_PANEL_ID);
+        assert!(raw.validate().is_err());
+        assert_eq!(
+            hud::migrate_legacy_hud_draft(serde_json::json!({}))
+                .unwrap()
+                .panels
+                .len(),
+            1
+        );
+        for version in 1..17 {
+            for location in [
+                "current",
+                "undo-before",
+                "undo-after",
+                "redo-before",
+                "redo-after",
+            ] {
+                for feature in ["panels", "center", "enabled_when"] {
+                    let mut bad = v15.clone();
+                    bad["format_version"] = version.into();
+                    bad["redo"] = bad["undo"].clone();
+                    let owner = match location {
+                        "current" => &mut bad["authoring"]["hud"],
+                        "undo-before" => &mut bad["undo"][0]["hud"]["before"],
+                        "undo-after" => &mut bad["undo"][0]["hud"]["after"],
+                        "redo-before" => &mut bad["redo"][0]["hud"]["before"],
+                        "redo-after" => &mut bad["redo"][0]["hud"]["after"],
+                        _ => unreachable!(),
+                    };
+                    match feature {
+                        "panels" => owner["panels"] = serde_json::Value::Null,
+                        "center" => owner["anchor"] = "center".into(),
+                        "enabled_when" => {
+                            owner["elements"] = serde_json::json!([{"id":"old", "source":{"kind":"static","text":"Ready"}, "enabled_when":null}])
+                        }
+                        _ => unreachable!(),
+                    }
+                    assert!(Document::decode(&serde_json::to_vec(&bad).unwrap())
+                        .unwrap_err()
+                        .to_string()
+                        .contains("scene v17"));
+                }
+            }
+        }
+
         let button = serde_json::json!({"id":"button", "source":{
             "kind":"button", "caption":"Act", "command":{
                 "binding_id":"missing", "command_id":"missing", "arguments":{}
@@ -3669,9 +4005,12 @@ mod tests {
                     .contains("scene v16"));
             }
         }
-        let disabled = hud::Hud {
-            margin: 24.0,
-            ..hud::Hud::default()
+        let disabled = crate::hud::Hud {
+            enabled: false,
+            panels: vec![crate::hud::HudPanel {
+                margin: 24.0,
+                ..crate::hud::HudPanel::default()
+            }],
         };
         let mut retained = session;
         retained.set_hud(0, disabled.clone()).unwrap();

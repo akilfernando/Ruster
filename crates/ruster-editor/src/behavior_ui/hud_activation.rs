@@ -69,9 +69,12 @@ impl RuntimeUi {
         if !worker.accepts(key) || !frame.authoring.hud.enabled {
             return Err("hud_unavailable".into());
         }
-        let label = frame
+        let panel = frame
             .authoring
             .hud
+            .panel_for_label(button_id)
+            .ok_or("button_not_found")?;
+        let label = panel
             .elements
             .iter()
             .find(|label| label.id == button_id)
@@ -79,8 +82,8 @@ impl RuntimeUi {
         let command = label.source.command_binding().ok_or("button_not_found")?;
         ruster_scene::hud::validate_hud_button_command(&frame.authoring, command)
             .map_err(|error| error.to_string())?;
-        let definition_hash =
-            ruster_scene::hud::hud_button_identity(label).map_err(|error| error.to_string())?;
+        let definition_hash = ruster_scene::hud::hud_button_identity(panel, label)
+            .map_err(|error| error.to_string())?;
         let command_schema_hash = frame
             .command_schema_hash
             .clone()

@@ -895,7 +895,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 80);
+        assert_eq!(tools.len(), 83);
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -982,7 +982,10 @@ mod tests {
                 "hud_settings_set",
                 "hud_label_set",
                 "hud_label_move",
-                "hud_activate"
+                "hud_activate",
+                "hud_panel_inspect",
+                "hud_panel_set",
+                "hud_panel_move"
             ]
         );
         for tool in tools {

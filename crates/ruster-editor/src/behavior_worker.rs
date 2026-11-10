@@ -1815,10 +1815,15 @@ mod tests {
             },
         );
         authoring.hud.enabled = true;
-        authoring.hud.elements = ["add", "fail"]
+        authoring
+            .hud
+            .panels
+            .push(ruster_scene::hud::HudPanel::default());
+        authoring.hud.panels[0].elements = ["add", "fail"]
             .into_iter()
             .map(|id| ruster_scene::hud::HudLabel {
                 id: id.into(),
+                enabled_when: None,
                 source: ruster_scene::hud::HudSource::Button {
                     caption: id.into(),
                     command: ruster_scene::hud::HudCommandBinding {
@@ -1836,11 +1841,11 @@ mod tests {
             activation_id: id,
             button_id: button.into(),
             definition_hash: ruster_scene::hud::hud_button_identity(
+                &frame.authoring.hud.panels[0],
                 frame
                     .authoring
                     .hud
-                    .elements
-                    .iter()
+                    .elements()
                     .find(|row| row.id == button)
                     .unwrap(),
             )

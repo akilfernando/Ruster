@@ -1,7 +1,8 @@
 //! Shared bounded HUD preparation, optional interaction and post-viewport painting.
 use crate::egui::{self, Color32, FontId, Painter, Rect, Vec2};
 use ruster_scene::hud::{
-    hud_button_identity, Hud, HudAnchor, HudSource, ResolvedHud, MAX_HUD_LABELS,
+    hud_button_identity, Hud, HudAnchor, HudPanel, HudSource, ResolvedHud, ResolvedHudPanel,
+    MAX_HUD_LABELS, MAX_HUD_PANELS,
 };
 use std::sync::Arc;
 
@@ -32,6 +33,21 @@ pub struct HudPaintReport {
     pub label_indices: Vec<usize>,
     /// Full row rectangles, including at most one partially clipped boundary row.
     pub label_rects: Vec<Rect>,
+    /// Visible nonempty panels in authored paint order. Later panels are above earlier ones.
+    pub panels: Vec<HudPanelPaintReport>,
+}
+
+#[derive(Clone, Debug)]
+pub struct HudPanelPaintReport {
+    pub id: String,
+    pub panel_index: usize,
+    pub rect: Rect,
+    /// Actual visible panel area, used for occlusion irrespective of background alpha.
+    pub clip_rect: Rect,
+    pub clipped: bool,
+    /// Global row indices count all authored panels, including hidden rows.
+    pub label_indices: Vec<usize>,
+    pub label_rects: Vec<Rect>,
 }
 
 fn color(components: [f64; 4]) -> Color32 {
@@ -45,9 +61,15 @@ fn color(components: [f64; 4]) -> Color32 {
 
 /// A frozen HUD layout. Its row geometry, text and diagnostics all describe
 /// the same resolved frame. Preparing never allocates widgets or paints shapes.
-#[derive(Clone)]
+#[derive(Clone, Default)]
 pub struct PreparedHud {
     pub report: HudPaintReport,
+    panels: Vec<PreparedPanel>,
+}
+
+#[derive(Clone)]
+struct PreparedPanel {
+    report: HudPanelPaintReport,
     clip_rect: Rect,
     content_rect: Rect,
     background: Color32,
@@ -55,21 +77,6 @@ pub struct PreparedHud {
     badge: Option<(egui::Pos2, Arc<egui::Galley>)>,
     rows: Vec<PreparedRow>,
     notice: Option<PreparedNotice>,
-}
-
-impl Default for PreparedHud {
-    fn default() -> Self {
-        Self {
-            report: HudPaintReport::default(),
-            clip_rect: Rect::NOTHING,
-            content_rect: Rect::NOTHING,
-            background: Color32::TRANSPARENT,
-            text_color: Color32::WHITE,
-            badge: None,
-            rows: Vec::new(),
-            notice: None,
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -122,9 +129,89 @@ pub fn prepare_hud(
     resolved: &ResolvedHud,
     mode: HudPresentationMode,
 ) -> PreparedHud {
-    if !hud.enabled || resolved.labels.is_empty() || !viewport.is_positive() {
-        return PreparedHud::default();
+    let mut prepared = PreparedHud::default();
+    if !hud.enabled || !viewport.is_positive() {
+        return prepared;
     }
+    let mut row_offset = 0;
+    for (panel_index, panel) in hud.panels.iter().take(MAX_HUD_PANELS).enumerate() {
+        let row_count = panel
+            .elements
+            .len()
+            .min(MAX_HUD_LABELS.saturating_sub(row_offset));
+        let resolved_panel = resolved
+            .panels
+            .iter()
+            .find(|resolved| resolved.id == panel.id);
+        if let Some(resolved_panel) = resolved_panel
+            .filter(|resolved| resolved.visible && row_count != 0 && !resolved.labels.is_empty())
+        {
+            let panel = prepare_panel(
+                painter,
+                viewport,
+                panel,
+                resolved_panel,
+                mode,
+                panel_index,
+                row_offset..row_offset + row_count,
+            );
+            prepared.report.clipped |= panel.report.clipped;
+            prepared.report.panel_rect = Some(
+                prepared
+                    .report
+                    .panel_rect
+                    .map_or(panel.report.rect, |rect| rect.union(panel.report.rect)),
+            );
+            prepared
+                .report
+                .label_indices
+                .extend(&panel.report.label_indices);
+            prepared
+                .report
+                .label_rects
+                .extend(&panel.report.label_rects);
+            prepared.report.panels.push(panel.report.clone());
+            prepared.panels.push(panel);
+        }
+        row_offset += row_count;
+    }
+    // Preserve a disabled hit region over every painted pixel of a partly
+    // covered button. Dropping its region would leak its uncovered pixels.
+    for index in 0..prepared.panels.len().saturating_sub(1) {
+        let (lower, upper) = prepared.panels.split_at_mut(index + 1);
+        let panel = &mut lower[index];
+        let clip = panel.content_rect.intersect(panel.clip_rect);
+        for row in &mut panel.rows {
+            let rect = row.rect.intersect(clip);
+            let Some(button) = &mut row.button else {
+                continue;
+            };
+            if upper
+                .iter()
+                .any(|panel| rect.intersect(panel.report.clip_rect).is_positive())
+            {
+                button.available = false;
+                button
+                    .unavailable_reason
+                    .get_or_insert("Another panel covers this button.");
+                button.opacity = painter.ctx().global_style().visuals.disabled_alpha();
+            }
+        }
+    }
+    prepared
+}
+
+fn prepare_panel(
+    painter: &Painter,
+    viewport: Rect,
+    hud: &HudPanel,
+    resolved: &ResolvedHudPanel,
+    mode: HudPresentationMode,
+    panel_index: usize,
+    row_range: std::ops::Range<usize>,
+) -> PreparedPanel {
+    let row_offset = row_range.start;
+    let row_count = row_range.len();
     let painter = painter.with_clip_rect(viewport.intersect(painter.clip_rect()));
     let margin = (hud.margin as f32).clamp(0.0, viewport.width().min(viewport.height()) * 0.25);
     let available = viewport.shrink(margin);
@@ -152,13 +239,16 @@ pub fn prepare_hud(
         .map_or(0.0, |galley| galley.size().y + spacing);
     let right = matches!(hud.anchor, HudAnchor::TopRight | HudAnchor::BottomRight);
     let bottom = matches!(hud.anchor, HudAnchor::BottomLeft | HudAnchor::BottomRight);
-    let x = if right {
+    let centered = hud.anchor == HudAnchor::Center;
+    let x = if centered {
+        available.center().x - width * 0.5
+    } else if right {
         available.right() - width
     } else {
         available.left()
     };
     let content_height = (available.height() - padding * 2.0 - badge_height).max(0.0);
-    let count = resolved.labels.len().min(MAX_HUD_LABELS);
+    let count = resolved.labels.len().min(row_count);
     let mut rows = Vec::new();
     let mut used_height = 0.0;
     // Walk inward from the anchored edge. Resolving every label is independent
@@ -174,11 +264,11 @@ pub fn prepare_hud(
                 && matches!(label.source, HudSource::Button { .. })
         });
         let button = definition.map(|definition| {
-            let identity = hud_button_identity(definition).ok();
+            let identity = hud_button_identity(hud, definition).ok();
             PreparedButton {
                 id: definition.id.clone(),
                 available: mode == HudPresentationMode::Committed
-                    && resolved.labels[index].diagnostic.is_none()
+                    && resolved.labels[index].available
                     && identity.is_some(),
                 identity: identity.unwrap_or_default(),
                 unavailable_reason: resolved.labels[index]
@@ -187,10 +277,14 @@ pub fn prepare_hud(
                     .or_else(|| {
                         (mode != HudPresentationMode::Committed)
                             .then_some("Reset to initialize this button.")
+                    })
+                    .or_else(|| {
+                        (!resolved.labels[index].available)
+                            .then_some("This button's condition is not satisfied.")
                     }),
                 visuals: painter.ctx().global_style().visuals.widgets.inactive,
                 opacity: if mode == HudPresentationMode::Committed
-                    && resolved.labels[index].diagnostic.is_none()
+                    && resolved.labels[index].available
                 {
                     1.0
                 } else {
@@ -224,7 +318,7 @@ pub fn prepare_hud(
             galley.size()
         };
         rows.push(PreparedRow {
-            index,
+            index: row_offset + index,
             rect: Rect::from_min_size(position, size),
             text_position: position + Vec2::splat(inset),
             galley,
@@ -243,11 +337,20 @@ pub fn prepare_hud(
     } else {
         padding * 2.0 + badge_height + used_height
     };
-    let y = if bottom {
+    let y = if centered {
+        available.center().y - height * 0.5
+    } else if bottom {
         available.bottom() - height
     } else {
         available.top()
     };
+    if centered {
+        let shift = Vec2::new(0.0, y - available.top());
+        for row in &mut rows {
+            row.rect = row.rect.translate(shift);
+            row.text_position += shift;
+        }
+    }
     let panel_rect = Rect::from_min_size(egui::pos2(x, y), Vec2::new(width, height));
     let content_top = (y + padding + badge_height).min(panel_rect.bottom());
     let content_bottom = (panel_rect.bottom() - padding).max(content_top);
@@ -290,10 +393,13 @@ pub fn prepare_hud(
     } else {
         None
     };
-    PreparedHud {
-        report: HudPaintReport {
+    PreparedPanel {
+        report: HudPanelPaintReport {
+            id: hud.id.clone(),
+            panel_index,
+            rect: panel_rect,
+            clip_rect: panel_rect.intersect(painter.clip_rect()),
             clipped,
-            panel_rect: Some(panel_rect),
             label_indices,
             label_rects,
         },
@@ -310,9 +416,14 @@ pub fn prepare_hud(
 /// Draw after the viewport's GPU callback so both the panel and controls remain
 /// visible. Uses the exact prepared geometry, including interaction styling.
 pub fn paint_prepared_hud(painter: &Painter, prepared: &PreparedHud) -> HudPaintReport {
-    let Some(panel_rect) = prepared.report.panel_rect else {
-        return prepared.report.clone();
-    };
+    for panel in &prepared.panels {
+        paint_panel(painter, panel);
+    }
+    prepared.report.clone()
+}
+
+fn paint_panel(painter: &Painter, prepared: &PreparedPanel) {
+    let panel_rect = prepared.report.rect;
     let painter = painter.with_clip_rect(prepared.clip_rect.intersect(painter.clip_rect()));
     painter.rect_filled(panel_rect, 5.0, prepared.background);
     if let Some((position, galley)) = &prepared.badge {
@@ -352,51 +463,90 @@ pub fn paint_prepared_hud(painter: &Painter, prepared: &PreparedHud) -> HudPaint
             Color32::LIGHT_YELLOW,
         );
     }
-    prepared.report.clone()
 }
 
-/// Input ownership for one viewport run. Keep this with the run owner, separate
-/// from frozen presentations. A new run scope cancels the preceding gesture.
+/// Input ownership for one viewport run, independent from frozen presentations.
 #[derive(Default)]
 pub struct HudInteractionState {
     scope: Option<egui::Id>,
     gesture: Option<HudPointerGesture>,
     focused: Option<egui::Id>,
+    activation_keys_blocked: bool,
+    focus_reentry_required: bool,
     last_input_frame: Option<u64>,
     last_pointer_owned: bool,
     last_keyboard_owned: bool,
+    last_cancelled: bool,
+}
+
+impl HudInteractionState {
+    /// Keep routing an empty HUD while its previous physical input drains.
+    pub fn has_input_lease(&self) -> bool {
+        self.gesture.is_some()
+            || self.focused.is_some()
+            || self.activation_keys_blocked
+            || self.last_pointer_owned
+            || self.last_keyboard_owned
+    }
 }
 
 struct HudPointerGesture {
-    id: String,
-    identity: String,
+    /// None captures a cancelled background press in overlapping panels.
+    target: Option<(String, String)>,
     primary: bool,
     cancelled: bool,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct HudInteraction {
-    /// Stable authored element ID. The run owner validates and queues its intent.
+    /// Globally unique authored row ID. The owner validates and queues its intent.
     pub activated: Option<String>,
     pub pointer_owned: bool,
     pub keyboard_owned: bool,
-    /// Escape, window focus loss or a run boundary invalidated pending UI intent.
+    /// Focus/availability loss, Escape or a run boundary invalidated native intent.
     pub cancelled: bool,
 }
 
+struct HudButtonResponse {
+    panel: usize,
+    row: usize,
+    rect: Rect,
+    response: egui::Response,
+    opacity: f32,
+}
+
 impl PreparedHud {
-    fn button_hit_rect(&self, row: &PreparedRow, ui: &egui::Ui) -> Rect {
+    fn button(&self, response: &HudButtonResponse) -> &PreparedButton {
+        self.panels[response.panel].rows[response.row]
+            .button
+            .as_ref()
+            .unwrap()
+    }
+
+    fn button_hit_rect(&self, panel_index: usize, row: &PreparedRow, ui: &egui::Ui) -> Rect {
+        let panel = &self.panels[panel_index];
         row.rect
-            .intersect(self.content_rect)
-            .intersect(self.clip_rect)
+            .intersect(panel.content_rect)
+            .intersect(panel.clip_rect)
             .intersect(ui.clip_rect())
+    }
+
+    fn overlap_at(&self, position: egui::Pos2, ui: &egui::Ui) -> bool {
+        ui.clip_rect().contains(position)
+            && ui.ctx().layer_id_at(position) == Some(ui.layer_id())
+            && self
+                .panels
+                .iter()
+                .filter(|panel| panel.report.clip_rect.contains(position))
+                .take(2)
+                .count()
+                == 2
     }
 }
 
-/// Register genuine stable click-only widgets, without drawing or allocating
-/// parent layout space. Call before viewport navigation and gameplay input.
-/// `enabled` gates actual availability. `pending` preserves real widget focus and
-/// input ownership while suppressing additional activation until acknowledgement.
+/// Register genuine stable click-only widgets without allocating parent layout.
+/// Call for every frame, including empty/hidden HUDs, before gameplay/navigation.
+/// Pending acknowledgements retain focus and ownership but suppress activation.
 pub fn interact_prepared_hud(
     ui: &mut egui::Ui,
     prepared: &mut PreparedHud,
@@ -406,16 +556,41 @@ pub fn interact_prepared_hud(
     state: &mut HudInteractionState,
 ) -> HudInteraction {
     let frame = ui.ctx().cumulative_frame_nr();
+    let events = ui.input(|input| input.events.clone());
+    let previously_owned =
+        state.gesture.is_some() || state.focused.is_some() || state.activation_keys_blocked;
+    // A blur/regain pair can arrive in one physical frame. Its release must
+    // cancel the old gesture even when the final focused flag is true.
+    let focus_lost = events
+        .iter()
+        .any(|event| matches!(event, egui::Event::WindowFocused(false)));
+    let held_activation =
+        ui.input(|input| input.key_down(egui::Key::Enter) || input.key_down(egui::Key::Space));
+    let navigation_requested = events.iter().any(|event| {
+        matches!(
+            event,
+            egui::Event::Key {
+                key: egui::Key::Tab
+                    | egui::Key::ArrowUp
+                    | egui::Key::ArrowDown
+                    | egui::Key::ArrowLeft
+                    | egui::Key::ArrowRight,
+                pressed: true,
+                repeat: false,
+                ..
+            }
+        )
+    });
     let scope_changed = state.scope.is_some_and(|scope| scope != run_scope);
     if scope_changed {
         if let Some(focused) = state.focused.take() {
             ui.memory_mut(|memory| memory.surrender_focus(focused));
         }
-        // Cancel the old target while swallowing its physical gesture through
-        // release. A new run must never inherit an already held press.
         if let Some(gesture) = &mut state.gesture {
             gesture.cancelled = true;
         }
+        state.activation_keys_blocked |= previously_owned && held_activation;
+        state.focus_reentry_required = true;
         state.last_input_frame = None;
     }
     state.scope = Some(run_scope);
@@ -425,85 +600,122 @@ pub fn interact_prepared_hud(
         ..Default::default()
     };
     let mut responses = Vec::new();
-    for index in 0..prepared.rows.len() {
-        let row = &prepared.rows[index];
-        let Some(button) = &row.button else {
-            continue;
-        };
-        let rect = prepared.button_hit_rect(row, ui);
-        if !rect.is_positive() {
-            continue;
+    for (panel_index, panel) in prepared.panels.iter().enumerate() {
+        for (row_index, row) in panel.rows.iter().enumerate() {
+            let Some(button) = &row.button else {
+                continue;
+            };
+            let rect = prepared.button_hit_rect(panel_index, row, ui);
+            if !rect.is_positive() {
+                continue;
+            }
+            let id = run_scope.with(("hud-button", &panel.report.id, &button.id));
+            let available = enabled && button.available;
+            let builder = egui::UiBuilder::new().id_salt(id).max_rect(rect);
+            let mut child = ui.new_child(if available {
+                builder
+            } else {
+                builder.disabled()
+            });
+            child.set_clip_rect(rect);
+            let response = child.interact(rect, id, egui::Sense::click());
+            response.widget_info(|| {
+                egui::WidgetInfo::labeled(egui::Role::Button, available, &row.galley.job.text)
+            });
+            let opacity = if response.enabled() && !pending {
+                1.0
+            } else {
+                child.visuals().disabled_alpha()
+            };
+            let response = if let Some(reason) = button.unavailable_reason {
+                response.on_disabled_hover_text(reason)
+            } else if pending {
+                response.on_hover_text("Waiting for the previous HUD action to finish.")
+            } else {
+                response
+            };
+            responses.push(HudButtonResponse {
+                panel: panel_index,
+                row: row_index,
+                rect,
+                response,
+                opacity,
+            });
         }
-        let id = run_scope.with(("hud-button", &button.id));
-        let available = enabled && button.available;
-        let builder = egui::UiBuilder::new().id_salt(id).max_rect(rect);
-        let mut child = ui.new_child(if available {
-            builder
-        } else {
-            builder.disabled()
-        });
-        child.set_clip_rect(rect);
-        let response = child.interact(rect, id, egui::Sense::click());
-        response.widget_info(|| {
-            egui::WidgetInfo::labeled(egui::Role::Button, available, &row.galley.job.text)
-        });
-        let opacity = if response.enabled() && !pending {
-            1.0
-        } else {
-            child.visuals().disabled_alpha()
-        };
-        let response = if let Some(reason) = button.unavailable_reason {
-            response.on_disabled_hover_text(reason)
-        } else if pending {
-            response.on_hover_text("Waiting for the previous HUD action to finish.")
-        } else {
-            response
-        };
-        responses.push((index, rect, response, opacity));
     }
-    // egui clears real widget focus for Escape in Focus::begin_pass, before
-    // this phase runs. Retain that previous button's ownership only to consume
-    // Escape. Focus stays cleared, and removed/disabled/clipped rows do not own it.
-    let escape_cleared_button_focus = state.focused.is_some_and(|previous| {
-        ui.memory(|memory| memory.focused().is_none())
-            && responses
-                .iter()
-                .any(|(_, _, response, _)| response.id == previous && response.enabled())
+    let primary_focus_request = events.iter().any(|event| match event {
+        egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed: true,
+            ..
+        } => responses.iter().any(|response| {
+            response.response.enabled()
+                && response.rect.contains(*pos)
+                && ui.ctx().layer_id_at(*pos) == Some(ui.layer_id())
+        }),
+        _ => false,
     });
-    let focused = responses
-        .iter()
-        .find(|(_, _, response, _)| response.enabled() && response.has_focus())
-        .map(|(_, _, response, _)| response.id);
-    if state.focused.is_some() && focused.is_none() {
-        if let Some(previous) = state.focused {
-            // A removed, disabled or clipped row must leave real keyboard focus.
-            if ui.memory(|memory| memory.has_focus(previous)) {
-                ui.memory_mut(|memory| memory.surrender_focus(previous));
+    let previous_focus_valid = state.focused.is_some_and(|previous| {
+        responses
+            .iter()
+            .any(|response| response.response.id == previous && response.response.enabled())
+    });
+    // Escape clears egui focus in begin_pass, before this phase. Remember only
+    // actual prior visible/enabled focus as evidence for consuming that Escape.
+    let escape_cleared_focus =
+        previous_focus_valid && ui.memory(|memory| memory.focused().is_none());
+    if state.focused.is_some() && !previous_focus_valid {
+        if let Some(previous) = state.focused.take() {
+            ui.memory_mut(|memory| memory.surrender_focus(previous));
+        }
+        result.cancelled = true;
+        state.focus_reentry_required = true;
+        state.activation_keys_blocked |= held_activation;
+    }
+    if navigation_requested || primary_focus_request {
+        state.focus_reentry_required = false;
+    }
+    if state.focus_reentry_required {
+        for response in &responses {
+            if response.response.has_focus() {
+                response.response.surrender_focus();
             }
         }
     }
-    state.focused = focused;
-    let window_focused = ui.input(|input| input.focused);
-    result.keyboard_owned = focused.is_some() && window_focused;
-    let pointer_over_button = responses
+    state.focused = responses
         .iter()
-        .any(|(_, rect, _, _)| ui.rect_contains_pointer(*rect));
-    result.pointer_owned = pointer_over_button || state.gesture.is_some();
+        .find(|response| response.response.enabled() && response.response.has_focus())
+        .map(|response| response.response.id);
+    let window_focused = ui.input(|input| input.focused);
+    result.keyboard_owned =
+        state.focused.is_some() && window_focused || state.activation_keys_blocked;
+    result.pointer_owned = state.gesture.is_some()
+        || responses
+            .iter()
+            .any(|response| ui.rect_contains_pointer(response.rect))
+        || ui
+            .input(|input| input.pointer.interact_pos())
+            .is_some_and(|position| prepared.overlap_at(position, ui));
     if let Some(gesture) = &mut state.gesture {
-        let target_available = responses.iter().any(|(index, _, response, _)| {
-            let button = prepared.rows[*index].button.as_ref().unwrap();
-            response.enabled()
-                && !pending
-                && button.id == gesture.id
-                && button.identity == gesture.identity
-        });
-        gesture.cancelled |= !target_available;
+        if let Some((id, identity)) = &gesture.target {
+            let target_available = responses.iter().any(|response| {
+                let button = prepared.button(response);
+                response.response.enabled() && button.id == *id && button.identity == *identity
+            });
+            if !target_available && !gesture.cancelled {
+                gesture.cancelled = true;
+                result.cancelled = true;
+            }
+            gesture.cancelled |= pending;
+        }
     }
     if fresh_input {
         state.last_input_frame = Some(frame);
-        let events = ui.input(|input| input.events.clone());
-        let owns_escape =
-            state.focused.is_some() || escape_cleared_button_focus || state.gesture.is_some();
+        let owns_escape = state.focused.is_some()
+            || escape_cleared_focus
+            || state.gesture.is_some()
+            || state.activation_keys_blocked;
         let escape = owns_escape
             && events.iter().any(|event| {
                 matches!(
@@ -515,14 +727,24 @@ pub fn interact_prepared_hud(
                     }
                 )
             });
-        if !window_focused || escape || scope_changed {
+        if !window_focused || focus_lost || escape || scope_changed {
             result.cancelled = true;
-            if let Some(focused) = state.focused.take() {
+            let owned_input = previously_owned || state.focused.is_some() || escape_cleared_focus;
+            // Response::has_focus is false while the window is unfocused, but
+            // egui can still retain that widget's focus identity in memory.
+            if let Some(focused) = ui.memory(|memory| memory.focused()).filter(|focused| {
+                responses
+                    .iter()
+                    .any(|response| response.response.id == *focused)
+            }) {
                 ui.memory_mut(|memory| memory.surrender_focus(focused));
             }
+            state.focused = None;
             if let Some(gesture) = &mut state.gesture {
                 gesture.cancelled = true;
             }
+            state.activation_keys_blocked |= owned_input && held_activation;
+            state.focus_reentry_required = true;
             if escape {
                 ui.input_mut(|input| {
                     input.events.retain(|event| {
@@ -545,28 +767,32 @@ pub fn interact_prepared_hud(
                         button,
                         pressed: true,
                         ..
-                    } => {
-                        if state.gesture.is_none() {
-                            if let Some((index, _, response, _)) =
-                                responses.iter().find(|(_, rect, _, _)| {
-                                    rect.contains(*pos)
-                                        && ui.ctx().layer_id_at(*pos) == Some(ui.layer_id())
-                                })
+                    } if state.gesture.is_none() => {
+                        if let Some(response) = responses.iter().rev().find(|response| {
+                            response.rect.contains(*pos)
+                                && ui.ctx().layer_id_at(*pos) == Some(ui.layer_id())
+                        }) {
+                            let definition = prepared.button(response);
+                            state.gesture = Some(HudPointerGesture {
+                                target: Some((definition.id.clone(), definition.identity.clone())),
+                                primary: *button == egui::PointerButton::Primary,
+                                cancelled: !response.response.enabled() || pending,
+                            });
+                            if response.response.enabled()
+                                && *button == egui::PointerButton::Primary
                             {
-                                let definition = prepared.rows[*index].button.as_ref().unwrap();
-                                state.gesture = Some(HudPointerGesture {
-                                    id: definition.id.clone(),
-                                    identity: definition.identity.clone(),
-                                    primary: *button == egui::PointerButton::Primary,
-                                    cancelled: !response.enabled() || pending,
-                                });
-                                if response.enabled() && *button == egui::PointerButton::Primary {
-                                    response.request_focus();
-                                    state.focused = Some(response.id);
-                                    result.keyboard_owned = true;
-                                }
-                                result.pointer_owned = true;
+                                response.response.request_focus();
+                                state.focused = Some(response.response.id);
+                                result.keyboard_owned = true;
                             }
+                            result.pointer_owned = true;
+                        } else if prepared.overlap_at(*pos, ui) {
+                            state.gesture = Some(HudPointerGesture {
+                                target: None,
+                                primary: false,
+                                cancelled: true,
+                            });
+                            result.pointer_owned = true;
                         }
                     }
                     egui::Event::PointerButton {
@@ -576,28 +802,28 @@ pub fn interact_prepared_hud(
                         ..
                     } => {
                         if let Some(gesture) = &state.gesture {
-                            if gesture.primary && !gesture.cancelled {
-                                if let Some((index, _, _, _)) =
-                                    responses.iter().find(|(index, rect, response, _)| {
-                                        let definition =
-                                            prepared.rows[*index].button.as_ref().unwrap();
-                                        definition.id == gesture.id
-                                            && definition.identity == gesture.identity
-                                            && rect.contains(*pos)
-                                            && response.enabled()
-                                            && !pending
-                                            && response.clicked_by(egui::PointerButton::Primary)
-                                    })
-                                {
-                                    result.activated = Some(
-                                        prepared.rows[*index].button.as_ref().unwrap().id.clone(),
-                                    );
+                            if let Some((id, identity)) = &gesture.target {
+                                if gesture.primary && !gesture.cancelled && !pending {
+                                    if let Some(response) = responses.iter().find(|response| {
+                                        let definition = prepared.button(response);
+                                        definition.id == *id
+                                            && definition.identity == *identity
+                                            && response.rect.contains(*pos)
+                                            && response.response.enabled()
+                                            && response
+                                                .response
+                                                .clicked_by(egui::PointerButton::Primary)
+                                    }) {
+                                        result.activated =
+                                            Some(prepared.button(response).id.clone());
+                                    }
                                 }
                             }
                         }
                     }
                     egui::Event::PointerGone => {
                         if let Some(gesture) = &mut state.gesture {
+                            result.cancelled |= !gesture.cancelled;
                             gesture.cancelled = true;
                         }
                     }
@@ -606,30 +832,32 @@ pub fn interact_prepared_hud(
                         pressed: true,
                         repeat: false,
                         ..
-                    } if state.focused.is_some() && !pending => {
-                        if let Some((index, _, _, _)) =
-                            responses.iter().find(|(_, _, response, _)| {
-                                Some(response.id) == state.focused && response.enabled()
-                            })
-                        {
-                            result.activated.get_or_insert_with(|| {
-                                prepared.rows[*index].button.as_ref().unwrap().id.clone()
-                            });
+                    } if state.focused.is_some() && !pending && !state.activation_keys_blocked => {
+                        if let Some(response) = responses.iter().find(|response| {
+                            Some(response.response.id) == state.focused
+                                && response.response.enabled()
+                        }) {
+                            result
+                                .activated
+                                .get_or_insert_with(|| prepared.button(response).id.clone());
                         }
                     }
                     _ => {}
                 }
             }
         }
+        result.keyboard_owned |= state.activation_keys_blocked;
         if !ui.input(|input| input.pointer.any_down()) {
             state.gesture = None;
         }
+        state.activation_keys_blocked &= held_activation;
         state.last_pointer_owned = result.pointer_owned;
         state.last_keyboard_owned = result.keyboard_owned;
+        state.last_cancelled = result.cancelled;
     } else {
-        // egui may replay a discarded pass with the same physical input.
         result.pointer_owned |= state.last_pointer_owned;
         result.keyboard_owned |= state.last_keyboard_owned;
+        result.cancelled |= state.last_cancelled;
     }
     if result.keyboard_owned {
         ui.input_mut(|input| {
@@ -641,13 +869,16 @@ pub fn interact_prepared_hud(
                         ..
                     }
                 )
-            });
+            })
         });
     }
-    for (index, _, response, opacity) in responses {
-        let button = prepared.rows[index].button.as_mut().unwrap();
-        button.visuals = *ui.style().interact(&response);
-        button.opacity = opacity;
+    for response in responses {
+        let button = prepared.panels[response.panel].rows[response.row]
+            .button
+            .as_mut()
+            .unwrap();
+        button.visuals = *ui.style().interact(&response.response);
+        button.opacity = response.opacity;
     }
     result
 }
@@ -666,6 +897,27 @@ mod tests {
                 arguments: Default::default(),
             },
         }
+    }
+
+    fn paint_single(
+        painter: &Painter,
+        viewport: Rect,
+        panel: &HudPanel,
+        resolved: &ResolvedHudPanel,
+        mode: HudPresentationMode,
+    ) -> HudPaintReport {
+        paint_hud(
+            painter,
+            viewport,
+            &Hud {
+                enabled: true,
+                panels: vec![panel.clone()],
+            },
+            &ResolvedHud {
+                panels: vec![resolved.clone()],
+            },
+            mode,
+        )
     }
 
     struct InteractionHarness {
@@ -689,17 +941,26 @@ mod tests {
                 state: HudInteractionState::default(),
                 hud: Hud {
                     enabled: true,
-                    elements: vec![ruster_scene::hud::HudLabel {
-                        id: "submit".into(),
-                        source: button_source("Submit"),
+                    panels: vec![HudPanel {
+                        elements: vec![ruster_scene::hud::HudLabel {
+                            id: "submit".into(),
+                            source: button_source("Submit"),
+                            enabled_when: None,
+                        }],
+                        ..HudPanel::default()
                     }],
-                    ..Hud::default()
                 },
                 resolved: ResolvedHud {
-                    labels: vec![ResolvedHudLabel {
-                        id: "submit".into(),
-                        text: "Submit".into(),
+                    panels: vec![ResolvedHudPanel {
+                        id: HudPanel::default().id,
+                        visible: true,
                         diagnostic: None,
+                        labels: vec![ResolvedHudLabel {
+                            id: "submit".into(),
+                            text: "Submit".into(),
+                            diagnostic: None,
+                            available: true,
+                        }],
                     }],
                 },
                 viewport: Rect::from_min_size(egui::pos2(30.0, 40.0), Vec2::new(400.0, 300.0)),
@@ -753,6 +1014,39 @@ mod tests {
             );
             output.textures_delta.clear();
             interactions
+        }
+
+        fn add_panel(&mut self, id: &str, anchor: HudAnchor, source: HudSource) -> usize {
+            let text = match &source {
+                HudSource::Button { caption, .. } => caption.clone(),
+                HudSource::Static { text } => text.clone(),
+                _ => unreachable!(),
+            };
+            let row_id = format!("{id}-row");
+            let index = self.hud.panels.len();
+            self.hud.panels.push(HudPanel {
+                id: id.into(),
+                name: id.into(),
+                anchor,
+                elements: vec![ruster_scene::hud::HudLabel {
+                    id: row_id.clone(),
+                    source,
+                    enabled_when: None,
+                }],
+                ..HudPanel::default()
+            });
+            self.resolved.panels.push(ResolvedHudPanel {
+                id: id.into(),
+                visible: true,
+                diagnostic: None,
+                labels: vec![ResolvedHudLabel {
+                    id: row_id,
+                    text,
+                    diagnostic: None,
+                    available: true,
+                }],
+            });
+            index
         }
 
         fn pointer(
@@ -916,6 +1210,24 @@ mod tests {
             .remove(0);
         assert!(lost.cancelled && lost.activated.is_none());
         assert!(harness.context.memory(|memory| memory.focused()).is_none());
+        harness.window_focused = true;
+        harness.frame(vec![egui::Event::WindowFocused(true)]);
+        harness.pointer(inside, egui::PointerButton::Primary, false);
+        harness.pointer(inside, egui::PointerButton::Primary, true);
+        let coalesced = harness
+            .frame(vec![
+                egui::Event::WindowFocused(false),
+                egui::Event::WindowFocused(true),
+                egui::Event::PointerButton {
+                    pos: inside,
+                    button: egui::PointerButton::Primary,
+                    pressed: false,
+                    modifiers: egui::Modifiers::NONE,
+                },
+            ])
+            .remove(0);
+        assert!(coalesced.cancelled && coalesced.pointer_owned && coalesced.activated.is_none());
+        assert!(harness.context.memory(|memory| memory.focused()).is_none());
     }
 
     #[test]
@@ -929,8 +1241,9 @@ mod tests {
         assert!(!clipped.keyboard_owned);
         assert!(harness.context.memory(|memory| memory.focused()).is_none());
         harness.viewport = Rect::from_min_size(egui::pos2(30.0, 40.0), Vec2::new(400.0, 300.0));
-        harness.resolved.labels[0].diagnostic =
+        harness.resolved.panels[0].labels[0].diagnostic =
             Some(ruster_scene::hud::HudDiagnostic::MissingCommand);
+        harness.resolved.panels[0].labels[0].available = false;
         harness.frame(Vec::new());
         let inside = harness.report.label_rects[0].center();
         let disabled = harness.pointer(inside, egui::PointerButton::Primary, true);
@@ -942,13 +1255,195 @@ mod tests {
             .is_none());
     }
 
+    #[test]
+    fn panel_reports_skip_hidden_and_empty_geometry_but_keep_global_indices_and_center() {
+        let mut harness = InteractionHarness::new();
+        harness.resolved.panels[0].visible = false;
+        let center = harness.add_panel(
+            "center",
+            HudAnchor::Center,
+            HudSource::Static {
+                text: "Centered passive screen".into(),
+            },
+        );
+        let empty = harness.add_panel(
+            "empty",
+            HudAnchor::TopRight,
+            HudSource::Static {
+                text: "Unused".into(),
+            },
+        );
+        harness.hud.panels[empty].elements.clear();
+        harness.resolved.panels[empty].labels.clear();
+        harness.frame(Vec::new());
+        assert_eq!(harness.report.panels.len(), 1);
+        assert_eq!(harness.report.panels[0].id, "center");
+        assert_eq!(harness.report.panels[0].panel_index, center);
+        assert_eq!(harness.report.label_indices, vec![1]);
+        assert!(
+            harness.report.panels[0]
+                .rect
+                .center()
+                .distance(harness.viewport.center())
+                < 0.01
+        );
+        let position = harness.report.label_rects[0].center();
+        let passive = harness.pointer(position, egui::PointerButton::Primary, true);
+        assert!(!passive.pointer_owned && !passive.keyboard_owned);
+        assert!(harness
+            .pointer(position, egui::PointerButton::Primary, false)
+            .activated
+            .is_none());
+        harness.hud.panels[center].width = 120.0;
+        let corner = harness.add_panel(
+            "corner",
+            HudAnchor::BottomRight,
+            HudSource::Static {
+                text: "Separate panel".into(),
+            },
+        );
+        harness.hud.panels[corner].width = 120.0;
+        harness.frame(Vec::new());
+        let first = harness.report.panels[0].rect;
+        let second = harness.report.panels[1].rect;
+        let gap = egui::pos2(first.center().x, (first.bottom() + second.top()) * 0.5);
+        assert!(harness.report.panel_rect.unwrap().contains(gap));
+        assert!(!harness.frame(vec![egui::Event::PointerMoved(gap)])[0].pointer_owned);
+        harness.window_focused = false;
+        assert!(!harness.key(egui::Key::Enter, false)[0].keyboard_owned);
+        assert!(!harness.state.has_input_lease());
+        harness.scope = egui::Id::unique("unowned-run-boundary");
+        assert!(!harness.frame(Vec::new())[0].keyboard_owned);
+        assert!(!harness.state.has_input_lease());
+    }
+
+    #[test]
+    fn upper_panels_occlude_controls_and_overlap_background_gestures_survive_hiding() {
+        let mut harness = InteractionHarness::new();
+        let inside = harness.report.label_rects[0].center();
+        let overlay = harness.add_panel(
+            "overlay",
+            HudAnchor::TopLeft,
+            HudSource::Static {
+                text: "Transparent panel".into(),
+            },
+        );
+        harness.hud.panels[overlay].background = [0.0; 4];
+        harness.frame(Vec::new());
+        let background = harness.pointer(inside, egui::PointerButton::Primary, true);
+        assert!(background.pointer_owned && background.activated.is_none());
+        assert!(harness.context.memory(|memory| memory.focused()).is_none());
+        harness.resolved.panels[overlay].visible = false;
+        let outside = harness.viewport.right_bottom() - Vec2::splat(5.0);
+        assert!(harness.frame(vec![egui::Event::PointerMoved(outside)])[0].pointer_owned);
+        harness.replay = true;
+        let release = harness.pointer(outside, egui::PointerButton::Primary, false);
+        assert!(release.pointer_owned && release.activated.is_none());
+        assert!(harness.state.has_input_lease());
+        assert!(!harness.frame(Vec::new())[0].pointer_owned);
+        assert!(!harness.state.has_input_lease());
+        harness.replay = false;
+        harness.resolved.panels[overlay].visible = true;
+        harness.hud.panels[overlay].elements[0].source = button_source("Upper button");
+        harness.resolved.panels[overlay].labels[0].text = "Upper button".into();
+        harness.frame(Vec::new());
+        let upper = harness.report.panels[1].label_rects[0].center();
+        harness.pointer(upper, egui::PointerButton::Primary, true);
+        assert_eq!(
+            harness
+                .pointer(upper, egui::PointerButton::Primary, false)
+                .activated
+                .as_deref(),
+            Some("overlay-row")
+        );
+
+        // Whole-control occlusion still owns the uncovered painted pixels.
+        let mut partial = InteractionHarness::new();
+        let overlay = partial.add_panel(
+            "partial",
+            HudAnchor::TopLeft,
+            HudSource::Static {
+                text: "Upper".into(),
+            },
+        );
+        partial.hud.panels[overlay].width = 100.0;
+        partial.frame(Vec::new());
+        let lower = partial.report.panels[0].label_rects[0];
+        let upper = partial.report.panels[1].clip_rect;
+        let uncovered = lower.right_center() - Vec2::new(2.0, 0.0);
+        assert!(lower.intersect(upper).is_positive() && !upper.contains(uncovered));
+        let blocked = partial.pointer(uncovered, egui::PointerButton::Primary, true);
+        assert!(blocked.pointer_owned && blocked.activated.is_none());
+        assert!(partial.context.memory(|memory| memory.focused()).is_none());
+        partial.resolved.panels[overlay].visible = false;
+        let released = partial.pointer(uncovered, egui::PointerButton::Primary, false);
+        assert!(released.pointer_owned && released.activated.is_none());
+    }
+
+    #[test]
+    fn hidden_disabled_and_covered_focus_swallow_held_activation_until_navigation() {
+        for change in ["hidden", "disabled", "covered"] {
+            let mut harness = InteractionHarness::new();
+            let inside = harness.report.label_rects[0].center();
+            harness.pointer(inside, egui::PointerButton::Primary, true);
+            harness.pointer(inside, egui::PointerButton::Primary, false);
+            assert_eq!(
+                harness.key(egui::Key::Enter, false)[0].activated.as_deref(),
+                Some("submit")
+            );
+            let next = harness.add_panel(
+                "next",
+                if change == "covered" {
+                    HudAnchor::TopLeft
+                } else {
+                    HudAnchor::BottomRight
+                },
+                button_source("Next"),
+            );
+            match change {
+                "hidden" => harness.resolved.panels[0].visible = false,
+                "disabled" => harness.resolved.panels[0].labels[0].available = false,
+                _ => {}
+            }
+            let changed = harness.key(egui::Key::Enter, true).remove(0);
+            assert!(changed.cancelled && changed.keyboard_owned && changed.activated.is_none());
+            assert!(harness.context.memory(|memory| memory.focused()).is_none());
+            assert!(harness.frame(Vec::new())[0].keyboard_owned);
+            harness.frame(vec![egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed: false,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }]);
+            assert!(harness.context.memory(|memory| memory.focused()).is_none());
+            harness.key(egui::Key::Tab, false);
+            harness.frame(Vec::new());
+            assert!(harness.context.memory(|memory| memory.focused()).is_some());
+            assert_eq!(
+                harness.key(egui::Key::Enter, false)[0].activated.as_deref(),
+                Some(harness.hud.panels[next].elements[0].id.as_str())
+            );
+        }
+        let mut harness = InteractionHarness::new();
+        let inside = harness.report.label_rects[0].center();
+        harness.pointer(inside, egui::PointerButton::Primary, true);
+        harness.resolved.panels[0].visible = false;
+        let cancelled = harness.frame(Vec::new()).remove(0);
+        assert!(cancelled.cancelled && cancelled.pointer_owned);
+        assert!(harness
+            .pointer(inside, egui::PointerButton::Primary, false)
+            .activated
+            .is_none());
+    }
+
     // The reference deliberately shapes the entire group. Production must
     // produce the same visible positions while shaping only the intersecting rows.
     fn complete_layout_reference(
         painter: &Painter,
         viewport: Rect,
-        hud: &Hud,
-        resolved: &ResolvedHud,
+        hud: &HudPanel,
+        resolved: &ResolvedHudPanel,
         mode: HudPresentationMode,
     ) -> (bool, Rect, Vec<(usize, Rect)>) {
         let margin = (hud.margin as f32).min(viewport.width().min(viewport.height()) * 0.25);
@@ -1004,12 +1499,16 @@ mod tests {
         let height = natural_height.min(available.height());
         let right = matches!(hud.anchor, HudAnchor::TopRight | HudAnchor::BottomRight);
         let bottom = matches!(hud.anchor, HudAnchor::BottomLeft | HudAnchor::BottomRight);
-        let x = if right {
+        let x = if hud.anchor == HudAnchor::Center {
+            available.center().x - width * 0.5
+        } else if right {
             available.right() - width
         } else {
             available.left()
         };
-        let y = if bottom {
+        let y = if hud.anchor == HudAnchor::Center {
+            available.center().y - height * 0.5
+        } else if bottom {
             available.bottom() - height
         } else {
             available.top()
@@ -1051,7 +1550,10 @@ mod tests {
                     (3, 600.0, true),
                     (32, 180.0, true),
                 ] {
-                    let resolved = ResolvedHud {
+                    let resolved = ResolvedHudPanel {
+                        id: HudPanel::default().id,
+                        visible: true,
+                        diagnostic: None,
                         labels: (0..count)
                             .map(|index| ResolvedHudLabel {
                                 id: format!("row-{index}"),
@@ -1060,6 +1562,7 @@ mod tests {
                                     "Detailed reading ".repeat(index % 3 + 1)
                                 ),
                                 diagnostic: None,
+                                available: true,
                             })
                             .collect(),
                     };
@@ -1070,31 +1573,28 @@ mod tests {
                         HudAnchor::TopRight,
                         HudAnchor::BottomLeft,
                         HudAnchor::BottomRight,
+                        HudAnchor::Center,
                     ] {
-                        let hud = Hud {
-                            enabled: true,
+                        let hud = HudPanel {
                             anchor,
                             width: 180.0,
-                            elements: if buttons {
-                                resolved
-                                    .labels
-                                    .iter()
-                                    .enumerate()
-                                    .map(|(index, label)| ruster_scene::hud::HudLabel {
-                                        id: label.id.clone(),
-                                        source: if index % 2 == 0 {
-                                            button_source(&label.text)
-                                        } else {
-                                            HudSource::Static {
-                                                text: label.text.clone(),
-                                            }
-                                        },
-                                    })
-                                    .collect()
-                            } else {
-                                Vec::new()
-                            },
-                            ..Hud::default()
+                            elements: resolved
+                                .labels
+                                .iter()
+                                .enumerate()
+                                .map(|(index, label)| ruster_scene::hud::HudLabel {
+                                    id: label.id.clone(),
+                                    enabled_when: None,
+                                    source: if buttons && index % 2 == 0 {
+                                        button_source(&label.text)
+                                    } else {
+                                        HudSource::Static {
+                                            text: label.text.clone(),
+                                        }
+                                    },
+                                })
+                                .collect(),
+                            ..HudPanel::default()
                         };
                         for mode in [
                             HudPresentationMode::Committed,
@@ -1108,7 +1608,8 @@ mod tests {
                                 &resolved,
                                 mode,
                             );
-                            let report = paint_hud(ui.painter(), viewport, &hud, &resolved, mode);
+                            let report =
+                                paint_single(ui.painter(), viewport, &hud, &resolved, mode);
                             assert_eq!(report.clipped, clipped);
                             let actual_panel = report.panel_rect.unwrap();
                             assert!(actual_panel.min.distance(panel.min) < 0.01);
@@ -1148,18 +1649,28 @@ mod tests {
     #[test]
     fn anchors_wrap_and_clip_without_resizing_or_taking_input() {
         let context = egui::Context::default();
-        let resolved = ResolvedHud {
+        let resolved = ResolvedHudPanel {
+            id: HudPanel::default().id,
+            visible: true,
+            diagnostic: None,
             labels: vec![ResolvedHudLabel {
                 id: "reading".into(),
                 text: "A wrapped instrument reading with enough words to span lines".into(),
                 diagnostic: None,
+                available: true,
             }],
         };
         let viewport = Rect::from_min_size(egui::pos2(30.0, 40.0), Vec2::new(240.0, 180.0));
-        let mut hud = Hud {
-            enabled: true,
+        let mut hud = HudPanel {
             width: 120.0,
-            ..Hud::default()
+            elements: vec![ruster_scene::hud::HudLabel {
+                id: "reading".into(),
+                source: HudSource::Static {
+                    text: resolved.labels[0].text.clone(),
+                },
+                enabled_when: None,
+            }],
+            ..HudPanel::default()
         };
         for anchor in [
             HudAnchor::TopLeft,
@@ -1181,7 +1692,7 @@ mod tests {
                     let focus = ui.ctx().memory(|memory| memory.focused());
                     let pointer_owned = ui.ctx().egui_wants_pointer_input();
                     let available = ui.available_rect_before_wrap();
-                    let report = paint_hud(
+                    let report = paint_single(
                         ui.painter(),
                         viewport,
                         &hud,
@@ -1214,7 +1725,7 @@ mod tests {
                             viewport.top() + 12.0
                         }
                     );
-                    let compact = paint_hud(
+                    let compact = paint_single(
                         ui.painter(),
                         Rect::from_min_size(viewport.min, Vec2::new(70.0, 35.0)),
                         &hud,

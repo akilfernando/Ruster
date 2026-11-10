@@ -312,13 +312,17 @@ fn commands_consume_revision_and_preserve_state_on_every_rejection() {
 // revisions. Its captured constants and replay identity belong to the runtime owner.
 #[test]
 fn hud_activation_uses_current_commit_and_consumes_failed_vm_admission() {
-    use ruster_scene::hud::{hud_button_identity, HudCommandBinding, HudLabel, HudSource};
+    use ruster_scene::hud::{
+        hud_button_identity, BoolCondition, HudCommandBinding, HudLabel, HudPanel, HudSource,
+    };
     let (scene, mut authoring) = fixture();
     authoring.hud.enabled = true;
-    authoring.hud.elements = ["set", "fail"]
+    authoring.hud.panels.push(HudPanel::default());
+    authoring.hud.panels[0].elements = ["set", "fail"]
         .into_iter()
         .map(|command_id| HudLabel {
             id: command_id.into(),
+            enabled_when: None,
             source: HudSource::Button {
                 caption: command_id.into(),
                 command: HudCommandBinding {
@@ -335,10 +339,10 @@ fn hud_activation_uses_current_commit_and_consumes_failed_vm_admission() {
         activation_id: id,
         button_id: button.into(),
         definition_hash: hud_button_identity(
+            &authoring.hud.panels[0],
             authoring
                 .hud
-                .elements
-                .iter()
+                .elements()
                 .find(|row| row.id == button)
                 .unwrap(),
         )
@@ -411,14 +415,18 @@ fn hud_activation_uses_current_commit_and_consumes_failed_vm_admission() {
     };
     engine.activate_hud(&mut runtime, &last).unwrap();
     let mut incomplete = authoring.clone();
-    if let HudSource::Button { command, .. } = &mut incomplete.hud.elements[0].source {
+    if let HudSource::Button { command, .. } = &mut incomplete.hud.panels[0].elements[0].source {
         command.arguments.clear();
     }
     let mut invalid_runtime = engine.reset(&scene, &incomplete).unwrap();
     let invalid_intent = HudActivation {
         activation_id: 1,
         button_id: "set".into(),
-        definition_hash: hud_button_identity(&incomplete.hud.elements[0]).unwrap(),
+        definition_hash: hud_button_identity(
+            &incomplete.hud.panels[0],
+            &incomplete.hud.panels[0].elements[0],
+        )
+        .unwrap(),
         command_schema_hash: invalid_runtime
             .command_schema_hash("controller")
             .unwrap()
@@ -434,6 +442,81 @@ fn hud_activation_uses_current_commit_and_consumes_failed_vm_admission() {
         ),
         (0, 0)
     );
+    // Conditions read committed values after initialization and again at admission.
+    // The same captured intent can become unavailable while it waits for the owner.
+    for panel_condition in [true, false] {
+        let mut conditional = authoring.clone();
+        conditional
+            .bindings
+            .get_mut("controller")
+            .unwrap()
+            .state_defaults
+            .insert("allowed".into(), StateValue::Bool(false));
+        conditional.sources.get_mut("controller").unwrap().text = r#"return {
+ initialize=function(p,h) return {state={count=p.initial,allowed=true}} end,
+ command=function(name,a,p,h)
+   return {state={count=a.value,allowed=a.value>0}}
+ end,
+ update=function(o,p,dt,h) return {} end
+}"#
+        .into();
+        let condition = BoolCondition {
+            binding_id: "controller".into(),
+            field: "allowed".into(),
+            expected: true,
+        };
+        let panel = &mut conditional.hud.panels[0];
+        if panel_condition {
+            panel.visible_when = Some(condition);
+        } else {
+            panel.elements[0].enabled_when = Some(condition);
+        }
+        if let HudSource::Button { command, .. } = &mut panel.elements[0].source {
+            command
+                .arguments
+                .insert("value".into(), StateValue::Number(-1.0));
+        }
+        let definition_hash = hud_button_identity(panel, &panel.elements[0]).unwrap();
+        let mut current = engine.reset(&scene, &conditional).unwrap();
+        assert_eq!(
+            value(&current, "controller", "allowed"),
+            StateValue::Bool(true)
+        );
+        let captured = HudActivation {
+            activation_id: 1,
+            button_id: "set".into(),
+            definition_hash,
+            command_schema_hash: current.command_schema_hash("controller").unwrap().into(),
+        };
+        engine.activate_hud(&mut current, &captured).unwrap();
+        assert_eq!(
+            value(&current, "controller", "allowed"),
+            StateValue::Bool(false)
+        );
+        let denied = HudActivation {
+            activation_id: 2,
+            ..captured.clone()
+        };
+        let retained = Arc::clone(current.state());
+        let revision = current.commit_revision();
+        assert!(engine.activate_hud(&mut current, &denied).is_err());
+        assert!(Arc::ptr_eq(&retained, current.state()));
+        assert_eq!(
+            (current.commit_revision(), current.last_hud_activation),
+            (revision, 1)
+        );
+        engine
+            .dispatch_command(
+                &mut current,
+                "controller",
+                revision,
+                "set",
+                &StateFields::from([("value".into(), StateValue::Number(1.0))]),
+            )
+            .unwrap();
+        engine.activate_hud(&mut current, &denied).unwrap();
+        assert_eq!(current.last_hud_activation, 2);
+    }
     let mut fresh = engine.reset(&scene, &authoring).unwrap();
     engine
         .activate_hud(

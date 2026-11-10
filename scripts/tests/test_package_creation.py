@@ -733,6 +733,98 @@ class CreationDistributionTests(unittest.TestCase):
                     (content_root/"content.json").write_bytes(package_creation.encoded({**controls_content, "schema": 11}))
                     with self.assertRaisesRegex(ValueError, "schema12 requires Scene16"):
                         package_creation.source_content(content_root, None)
+                # Scene17/content13 retains Descriptor5, including empty content,
+                # and requires panel-aware headless output from the exact new profile.
+                panel_scene = copy.deepcopy(hud_scene)
+                panel_scene["format_version"] = 17
+                panel_scene["authoring"]["bindings"]["application"]["state_defaults"].update({
+                    "show": {"type": "bool", "value": False}, "can": {"type": "bool", "value": False}})
+                panel_source = panel_scene["authoring"]["bindings"]["application"]["source_id"]
+                panel_scene["authoring"]["sources"][panel_source]["text"] = (
+                    "return {initialize=function(p,h) return {state={amount=7,show=true}} end,"
+                    "command=function(n,a,p,h) return {state={amount=a.amount}} end,"
+                    "update=function() return {} end}")
+                visible_when = {"binding_id": "application", "field": "show", "expected": True}
+                panel_hud = package_creation.typed_hud({"enabled": True, "panels": [
+                    {"id": "welcome", "name": "Welcome 世界", "anchor": "center", "visible_when": visible_when,
+                     "elements": [{"id": "title", "source": {"kind": "static", "text": "Welcome"}}]},
+                    {"id": "results", "visible_when": {**visible_when, "expected": False},
+                     "elements": [{**button, "enabled_when": {"binding_id": "application", "field": "can", "expected": True}}]}
+                ]}, panels=True)
+                panel_scene["authoring"]["hud"] = panel_hud
+                for empty_panels in (False, True):
+                    current = copy.deepcopy(panel_scene)
+                    if empty_panels:
+                        current["authoring"].pop("hud")
+                    current_bytes = package_creation.encoded(current)
+                    panel_content = {**lifecycle_content, "schema": 13, "scene_sha256": package_creation.sha256(current_bytes)}
+                    (content_root/"scene.json").write_bytes(current_bytes)
+                    (content_root/"content.json").write_bytes(package_creation.encoded(panel_content))
+                    for old_profile in (package_creation.PROFILE, package_creation.HUD_PROFILE, package_creation.HUD_CONTROLS_PROFILE):
+                        capable["profile"] = old_profile
+                        (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                        with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old panels preflight")), \
+                                patch.object(package_creation.tempfile, "TemporaryDirectory", side_effect=AssertionError("old panels staging")):
+                            with self.assertRaisesRegex(ValueError, "Scene17 runtime_hud_panels"):
+                                package_creation.package(kit, content_root, failed)
+                        self.assertFalse(failed.exists())
+                    capable["profile"] = package_creation.HUD_PANELS_PROFILE
+                    (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                    panel_response = {**copy.deepcopy(lifecycle_response),
+                        "authored_scene": package_creation.typed_scene(current), "runtime_scene": package_creation.typed_scene(current),
+                        "hud_activation_receipts": [], "hud_presentation": "committed", "hud": {"panels": []}}
+                    panel_response["runtime_state"]["application"].update({
+                        "show": {"type": "bool", "value": True}, "can": {"type": "bool", "value": False}})
+                    if not empty_panels:
+                        panel_response["authored_hud"] = panel_hud
+                        panel_response["hud"]["panels"] = [
+                            {"id": "welcome", "visible": True, "diagnostic": None,
+                             "labels": [{"id": "title", "text": "Welcome", "diagnostic": None, "available": True}]},
+                            {"id": "results", "visible": False, "diagnostic": None,
+                             "labels": [{"id": "apply", "text": "Apply 世界", "diagnostic": None, "available": False}]}]
+                    destination = base/f"panels-{empty_panels}.tar.gz"
+                    with patch.object(package_creation, "run_runtime", return_value=panel_response):
+                        package_creation.package(kit, content_root, destination)
+                    with tarfile.open(destination) as archive:
+                        self.assertEqual(json.load(archive.extractfile("application/app.json"))["version"], 5)
+                        self.assertEqual(archive.extractfile("application/resources/scene.json").read(), current_bytes)
+                    bad_panel_reports = [{**panel_response, "hud": {"labels": []}},
+                        {**panel_response, "hud_activation_receipts": [{}]}]
+                    if not empty_panels:
+                        wrong_visibility = copy.deepcopy(panel_response)
+                        wrong_visibility["hud"]["panels"][1]["visible"] = True
+                        wrong_hidden_rows = copy.deepcopy(panel_response)
+                        wrong_hidden_rows["hud"]["panels"][1]["labels"] = []
+                        wrong_availability = copy.deepcopy(panel_response)
+                        wrong_availability["hud"]["panels"][1]["labels"][0]["available"] = 0
+                        bad_panel_reports.extend([wrong_visibility, wrong_hidden_rows, wrong_availability])
+                    for bad_response in bad_panel_reports:
+                        with patch.object(package_creation, "run_runtime", return_value=bad_response), self.assertRaises(ValueError):
+                            package_creation.package(kit, content_root, failed)
+                        self.assertFalse(failed.exists())
+                    (content_root/"content.json").write_bytes(package_creation.encoded({**panel_content, "schema": 12}))
+                    with self.assertRaisesRegex(ValueError, "schema13 requires Scene17"):
+                        package_creation.source_content(content_root, None)
+                # A current kit migrates old HUD output; matching old profiles
+                # above retain their exact flat-label schemas and old wire bytes.
+                for version in (15, 16):
+                    old_scene = copy.deepcopy(hud_scene)
+                    old_scene["format_version"] = version
+                    old_response = copy.deepcopy(hud_response)
+                    old_response["authored_scene"] = package_creation.typed_scene(old_scene)
+                    old_response["runtime_scene"] = package_creation.typed_scene(old_scene)
+                    old_response["authored_hud"] = package_creation.canonical_legacy_hud(authored_hud)
+                    old_response["hud"] = {"panels": [{"id": "hud-default", "visible": True, "diagnostic": None,
+                        "labels": [{**label, "available": label["diagnostic"] is None} for label in hud_response["hud"]["labels"]]}]}
+                    old_response["hud_activation_receipts"] = []
+                    old_bytes = package_creation.encoded(old_scene)
+                    old_content = {**lifecycle_content, "schema": version - 4, "scene_sha256": package_creation.sha256(old_bytes)}
+                    (content_root/"scene.json").write_bytes(old_bytes)
+                    (content_root/"content.json").write_bytes(package_creation.encoded(old_content))
+                    with patch.object(package_creation, "run_runtime", return_value=old_response):
+                        package_creation.package(kit, content_root, base/f"legacy-{version}-with-panels-kit.tar.gz")
+                capable["profile"] = package_creation.HUD_CONTROLS_PROFILE
+                (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
                 for old_button in ({"authoring": {"hud": {"elements": [button]}}},
                                    {"undo": [{"hud": {"before": {}, "after": {"elements": [button]}}}]},
                                    {"redo": [{"hud": {"before": {"elements": [button]}, "after": {}}}]}):
@@ -846,6 +938,9 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.STATE_PROFILE, "capabilities": ["runtime_state", *package_creation.SPATIAL_PROFILE["capabilities"]]},
                         {**package_creation.LIFECYCLE_PROFILE, "descriptor_version": 4},
                         {**package_creation.LIFECYCLE_PROFILE, "capabilities": ["lifecycle_commands", *package_creation.STATE_PROFILE["capabilities"]]},
+                        {**package_creation.HUD_PANELS_PROFILE, "descriptor_version": 4},
+                        {**package_creation.HUD_PANELS_PROFILE, "capabilities": ["runtime_hud_panels", *package_creation.HUD_CONTROLS_PROFILE["capabilities"]]},
+                        {**package_creation.HUD_PANELS_PROFILE, "capabilities": [*package_creation.HUD_PANELS_PROFILE["capabilities"], "unknown"]},
                         {**package_creation.HUD_CONTROLS_PROFILE, "descriptor_version": 4},
                         {**package_creation.HUD_CONTROLS_PROFILE, "capabilities": ["runtime_hud_controls", *package_creation.HUD_PROFILE["capabilities"]]},
                         {**package_creation.HUD_PROFILE, "descriptor_version": 4},
@@ -1228,6 +1323,53 @@ class CreationDistributionTests(unittest.TestCase):
             with self.assertRaises(ProcessLookupError):
                 os.kill(int(marker.read_text()), 0)
 
+    def test_canonical_hud_panel_bounds_and_old_feature_presence(self):
+        """Shared cardinality/string bounds and version positions need a Python owner check."""
+        static = {"id": "row", "source": {"kind": "static", "text": "Ready"}}
+        condition = {"binding_id": "application", "field": "ready", "expected": True}
+        for version in (15, 16):
+            for feature in ({"panels": None}, {"visible_when": None}, {"anchor": "center"},
+                            {"elements": [{**static, "enabled_when": None}]}):
+                for position in ("authoring", "undo", "redo"):
+                    value = ({"authoring": {"hud": feature}} if position == "authoring" else
+                             {position: [{"hud": {"before": {}, "after": feature}}]})
+                    with self.subTest(version=version, feature=feature, position=position), self.assertRaisesRegex(ValueError, "Scene17 runtime_hud_panels"):
+                        package_creation.validate_hud_fields({"format_version": version, **value})
+        normalized = package_creation.typed_hud({"panels": [{"id": "one", "name": "é" * 64,
+            "anchor": "center", "visible_when": None, "elements": [{**static, "enabled_when": None}]}]}, panels=True)
+        self.assertNotIn("visible_when", normalized["panels"][0])
+        self.assertNotIn("enabled_when", normalized["panels"][0]["elements"][0])
+        for invalid in ({"panels": None}, {"panels": [{}]},
+                        {"panels": [{"id": "one", "name": "é" * 65}]},
+                        {"panels": [{"id": "one", "visible_when": {**condition, "expected": 1}}]},
+                        {"panels": [{"id": "one", "visible_when": {**condition, "extra": True}}]},
+                        {"panels": [{"id": "one", "elements": [{**static, "enabled_when": condition}]}]},
+                        {"panels": [{"id": "one"}, {"id": "one"}]},
+                        {"panels": [{"id": "one", "elements": [static]}, {"id": "two", "elements": [static]}]},
+                        {"panels": [{"id": f"panel-{i}"} for i in range(5)]}):
+            with self.subTest(invalid=invalid), self.assertRaises(ValueError):
+                package_creation.typed_hud(invalid, panels=True)
+        capped = {"enabled": True, "panels": [{"id": f"panel-{panel}", "elements": [
+            {"id": f"row-{panel}-{row}", "source": {"kind": "static", "text": "x" * 1024}}
+            for row in range(8)]} for panel in range(4)]}
+        package_creation.typed_hud(capped, panels=True)
+        too_many = copy.deepcopy(capped)
+        too_many["panels"][0]["elements"].append({"id": "extra", "source": {"kind": "static", "text": ""}})
+        with self.assertRaisesRegex(ValueError, "32 aggregate"):
+            package_creation.typed_hud(too_many, panels=True)
+        too_large = copy.deepcopy(capped)
+        too_large["panels"][0]["elements"][0]["source"] = {"kind": "button", "caption": "x" * 1024,
+            "command": {"binding_id": "application", "command_id": "go", "arguments": {}}}
+        with self.assertRaisesRegex(ValueError, "32KiB"):
+            package_creation.typed_hud(too_large, panels=True)
+        metadata = {"panels": [{"id": f"panel-{panel}" + "p" * 121, "name": "\0" * 128,
+            "elements": [{"id": f"row-{panel}-{row}" + "r" * 121,
+                "enabled_when": {"binding_id": "b" * 128, "field": "f" * 128, "expected": True},
+                "source": {"kind": "button", "caption": "", "command": {
+                    "binding_id": "application", "command_id": "go", "arguments": {}}}}
+                for row in range(8)]} for panel in range(4)]}
+        with self.assertRaisesRegex(ValueError, "metadata exceeds16KiB"):
+            package_creation.typed_hud(metadata, panels=True)
 
 if __name__ == "__main__":
     unittest.main()

@@ -30,11 +30,12 @@ pub(super) fn interact(
     blocked: bool,
 ) -> (bool, Option<String>) {
     let hud = &view.authoring.hud;
-    if !hud.enabled
-        || !hud
-            .elements
-            .iter()
-            .any(|row| matches!(row.source, HudSource::Button { .. }))
+    if (!hud.enabled
+        || (hud.panels.len() <= 1
+            && !hud
+                .elements()
+                .any(|row| matches!(row.source, HudSource::Button { .. }))))
+        && !controls.interaction.has_input_lease()
     {
         controls.prepared = None;
         return (false, None);
@@ -77,8 +78,12 @@ pub(super) fn interact(
     if input.cancelled {
         runtime.cancel_native_hud_activation();
     }
-    let error = input
-        .activated
-        .and_then(|id| runtime.queue_hud_activation(&id, true).err());
+    let error = if input.cancelled {
+        None
+    } else {
+        input
+            .activated
+            .and_then(|id| runtime.queue_hud_activation(&id, true).err())
+    };
     (owned, error)
 }

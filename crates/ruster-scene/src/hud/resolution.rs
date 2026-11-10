@@ -4,8 +4,8 @@ use std::fmt::{self, Write};
 use serde::Serialize;
 
 use super::{
-    Hud, HudCommandBinding, HudLabel, HudSource, MAX_HUD_ELEMENT_TEXT_BYTES, MAX_HUD_LABELS,
-    MAX_HUD_RESOLVED_LABEL_BYTES,
+    BoolCondition, Hud, HudCommandBinding, HudLabel, HudSource, MAX_HUD_ELEMENT_TEXT_BYTES,
+    MAX_HUD_LABELS, MAX_HUD_PANELS, MAX_HUD_RESOLVED_LABEL_BYTES,
 };
 use crate::{Authoring, BindingTarget, StateValue};
 
@@ -52,11 +52,82 @@ pub struct ResolvedHudLabel {
     pub id: String,
     pub text: String,
     pub diagnostic: Option<HudDiagnostic>,
+    pub available: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct ResolvedHudPanel {
+    pub id: String,
+    pub visible: bool,
+    pub diagnostic: Option<HudDiagnostic>,
+    pub labels: Vec<ResolvedHudLabel>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize)]
 pub struct ResolvedHud {
-    pub labels: Vec<ResolvedHudLabel>,
+    pub panels: Vec<ResolvedHudPanel>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+pub struct ResolvedCondition {
+    pub permitted: bool,
+    pub diagnostic: Option<HudDiagnostic>,
+}
+
+/// Diagnose only the authored condition target. Admission never reads live state.
+pub fn bool_condition_diagnostic(
+    authoring: &Authoring,
+    condition: &BoolCondition,
+) -> Option<HudDiagnostic> {
+    let Some(binding) = authoring.bindings.get(&condition.binding_id) else {
+        return Some(HudDiagnostic::MissingBinding);
+    };
+    if !binding.enabled {
+        return Some(HudDiagnostic::DisabledBinding);
+    }
+    if !authoring.sources.contains_key(&binding.source_id) {
+        return Some(HudDiagnostic::MissingSource);
+    }
+    match binding.state_defaults.get(&condition.field) {
+        None => Some(HudDiagnostic::MissingField),
+        Some(StateValue::Bool(_)) => None,
+        Some(_) => Some(HudDiagnostic::TypeChanged),
+    }
+}
+
+/// Resolve a typed Bool condition against the same immutable frame as the HUD.
+/// Absence permits; a value mismatch denies quietly; unavailable data denies with a diagnostic.
+pub fn resolve_bool_condition<'s>(
+    authoring: &Authoring,
+    condition: Option<&BoolCondition>,
+    mut lookup: impl FnMut(&str, &str) -> Option<&'s StateValue>,
+) -> ResolvedCondition {
+    let Some(condition) = condition else {
+        return ResolvedCondition {
+            permitted: true,
+            diagnostic: None,
+        };
+    };
+    if let Some(diagnostic) = bool_condition_diagnostic(authoring, condition) {
+        return ResolvedCondition {
+            permitted: false,
+            diagnostic: Some(diagnostic),
+        };
+    }
+    match lookup(&condition.binding_id, &condition.field) {
+        Some(StateValue::Bool(value)) => ResolvedCondition {
+            permitted: *value == condition.expected,
+            diagnostic: None,
+        },
+        Some(_) => ResolvedCondition {
+            permitted: false,
+            diagnostic: Some(HudDiagnostic::TypeChanged),
+        },
+        None => ResolvedCondition {
+            permitted: false,
+            diagnostic: Some(HudDiagnostic::UnavailableState),
+        },
+    }
 }
 
 #[derive(Default)]
@@ -64,6 +135,7 @@ pub struct HudCache {
     entries: Vec<CachedLabel>,
     resolved: ResolvedHud,
     formatted_labels: usize,
+    resolved_changed: bool,
 }
 
 struct CachedLabel {
@@ -74,14 +146,20 @@ struct CachedLabel {
 
 impl HudCache {
     pub fn clear(&mut self) {
+        self.resolved_changed = !self.resolved.panels.is_empty();
         self.entries.clear();
-        self.resolved.labels.clear();
+        self.resolved.panels.clear();
         self.formatted_labels = 0;
     }
 
     /// Number of labels reformatted by the last prepare, excluding cache hits.
     pub fn formatted_labels(&self) -> usize {
         self.formatted_labels
+    }
+
+    /// Any text, panel visibility or row availability changed in the last prepare.
+    pub fn resolved_changed(&self) -> bool {
+        self.resolved_changed
     }
 
     pub fn resolved(&self) -> &ResolvedHud {
@@ -98,65 +176,112 @@ impl HudCache {
         mut lookup: impl FnMut(&str, &str) -> Option<&'s StateValue>,
     ) -> &'a ResolvedHud {
         self.formatted_labels = 0;
-        if !hud.enabled || hud.elements.is_empty() {
+        self.resolved_changed = false;
+        if !hud.enabled || hud.panels.is_empty() {
             self.clear();
             return &self.resolved;
         }
-        let count = hud.elements.len().min(MAX_HUD_LABELS);
-        self.entries.truncate(count);
-        self.resolved.labels.truncate(count);
-        for (index, label) in hud.elements.iter().take(count).enumerate() {
-            let (value, mut diagnostic) = reference(label, authoring, &mut lookup);
-            let bounded_definition = authored_text_bytes(label) <= MAX_HUD_ELEMENT_TEXT_BYTES;
-            let bounded_value = value.is_none_or(|value| match value {
-                StateValue::Text(text) => text.len() <= crate::MAX_PROPERTY_TEXT_BYTES,
-                _ => true,
-            });
-            if !bounded_definition || !bounded_value {
-                diagnostic = Some(HudDiagnostic::OutputOverflow);
+        self.entries
+            .truncate(hud.elements().count().min(MAX_HUD_LABELS));
+        self.resolved_changed |= self.resolved.panels.len() != hud.panels.len().min(MAX_HUD_PANELS);
+        self.resolved
+            .panels
+            .truncate(hud.panels.len().min(MAX_HUD_PANELS));
+        let mut index = 0;
+        for (panel_index, panel) in hud.panels.iter().take(MAX_HUD_PANELS).enumerate() {
+            let visibility =
+                resolve_bool_condition(authoring, panel.visible_when.as_ref(), &mut lookup);
+            if panel_index == self.resolved.panels.len() {
+                self.resolved.panels.push(ResolvedHudPanel {
+                    id: panel.id.clone(),
+                    visible: visibility.permitted,
+                    diagnostic: visibility.diagnostic,
+                    labels: Vec::new(),
+                });
             }
-            let cached = self.entries.get(index);
-            if bounded_definition
-                && bounded_value
-                && cached.is_some_and(|cached| {
-                    cached.definition.as_ref() == Some(label)
-                        && cached.diagnostic == diagnostic
-                        && same_value(cached.value.as_ref(), value)
-                })
-            {
-                continue;
-            }
-            let text = if diagnostic == Some(HudDiagnostic::OutputOverflow)
-                || (diagnostic.is_some() && !matches!(&label.source, HudSource::Button { .. }))
-            {
-                UNAVAILABLE.to_owned()
-            } else {
-                match format_label(label, value) {
-                    Ok(text) => text,
-                    Err(_) => {
-                        diagnostic = Some(HudDiagnostic::OutputOverflow);
-                        UNAVAILABLE.to_owned()
-                    }
+            let resolved_panel = &mut self.resolved.panels[panel_index];
+            self.resolved_changed |= resolved_panel.id != panel.id
+                || resolved_panel.visible != visibility.permitted
+                || resolved_panel.diagnostic != visibility.diagnostic;
+            resolved_panel.id.clone_from(&panel.id);
+            resolved_panel.visible = visibility.permitted;
+            resolved_panel.diagnostic = visibility.diagnostic;
+            let count = panel.elements.len().min(MAX_HUD_LABELS - index);
+            self.resolved_changed |= resolved_panel.labels.len() != count;
+            resolved_panel.labels.truncate(count);
+            for (row_index, label) in panel.elements.iter().take(count).enumerate() {
+                let (value, mut source_diagnostic) = reference(label, authoring, &mut lookup);
+                let condition =
+                    resolve_bool_condition(authoring, label.enabled_when.as_ref(), &mut lookup);
+                let bounded_definition = authored_text_bytes(label) <= MAX_HUD_ELEMENT_TEXT_BYTES;
+                let bounded_value = value.is_none_or(|value| match value {
+                    StateValue::Text(text) => text.len() <= crate::MAX_PROPERTY_TEXT_BYTES,
+                    _ => true,
+                });
+                if !bounded_definition || !bounded_value {
+                    source_diagnostic = Some(HudDiagnostic::OutputOverflow);
                 }
-            };
-            let entry = CachedLabel {
-                definition: bounded_definition.then(|| label.clone()),
-                value: if bounded_value { value.cloned() } else { None },
-                diagnostic,
-            };
-            let resolved = ResolvedHudLabel {
-                id: label.id.clone(),
-                text,
-                diagnostic,
-            };
-            if index < self.entries.len() {
-                self.entries[index] = entry;
-                self.resolved.labels[index] = resolved;
-            } else {
-                self.entries.push(entry);
-                self.resolved.labels.push(resolved);
+                let cached = self.entries.get(index);
+                let reusable = bounded_definition
+                    && bounded_value
+                    && resolved_panel
+                        .labels
+                        .get(row_index)
+                        .is_some_and(|old| old.id == label.id)
+                    && cached.is_some_and(|cached| {
+                        cached.definition.as_ref() == Some(label)
+                            && cached.diagnostic == source_diagnostic
+                            && same_value(cached.value.as_ref(), value)
+                    });
+                if !reusable {
+                    self.resolved_changed = true;
+                    let text = if source_diagnostic == Some(HudDiagnostic::OutputOverflow)
+                        || (source_diagnostic.is_some()
+                            && !matches!(&label.source, HudSource::Button { .. }))
+                    {
+                        UNAVAILABLE.to_owned()
+                    } else {
+                        match format_label(label, value) {
+                            Ok(text) => text,
+                            Err(_) => {
+                                source_diagnostic = Some(HudDiagnostic::OutputOverflow);
+                                UNAVAILABLE.to_owned()
+                            }
+                        }
+                    };
+                    let entry = CachedLabel {
+                        definition: bounded_definition.then(|| label.clone()),
+                        value: if bounded_value { value.cloned() } else { None },
+                        diagnostic: source_diagnostic,
+                    };
+                    if index < self.entries.len() {
+                        self.entries[index] = entry;
+                    } else {
+                        self.entries.push(entry);
+                    }
+                    let resolved = ResolvedHudLabel {
+                        id: label.id.clone(),
+                        text,
+                        diagnostic: None,
+                        available: false,
+                    };
+                    if row_index < resolved_panel.labels.len() {
+                        resolved_panel.labels[row_index] = resolved;
+                    } else {
+                        resolved_panel.labels.push(resolved);
+                    }
+                    self.formatted_labels += 1;
+                }
+                let resolved = &mut resolved_panel.labels[row_index];
+                let diagnostic = source_diagnostic.or(condition.diagnostic);
+                let available =
+                    visibility.permitted && condition.permitted && source_diagnostic.is_none();
+                self.resolved_changed |=
+                    resolved.diagnostic != diagnostic || resolved.available != available;
+                resolved.diagnostic = diagnostic;
+                resolved.available = available;
+                index += 1;
             }
-            self.formatted_labels += 1;
         }
         &self.resolved
     }
@@ -319,20 +444,23 @@ mod tests {
     use std::collections::BTreeMap;
 
     fn bound(value: StateValue, value_type: HudValueType) -> (Hud, Authoring) {
-        let hud = Hud {
+        let hud = crate::hud::Hud {
             enabled: true,
-            elements: vec![HudLabel {
-                id: "reading".into(),
-                source: HudSource::State {
-                    binding_id: "app".into(),
-                    field: "reading".into(),
-                    value_type,
-                    prefix: "Value ".into(),
-                    suffix: " units".into(),
-                    precision: 2,
-                },
+            panels: vec![crate::hud::HudPanel {
+                elements: vec![HudLabel {
+                    enabled_when: None,
+                    id: "reading".into(),
+                    source: HudSource::State {
+                        binding_id: "app".into(),
+                        field: "reading".into(),
+                        value_type,
+                        prefix: "Value ".into(),
+                        suffix: " units".into(),
+                        precision: 2,
+                    },
+                }],
+                ..crate::hud::HudPanel::default()
             }],
-            ..Hud::default()
         };
         let mut authoring = Authoring::default();
         authoring.sources.insert(
@@ -386,7 +514,7 @@ mod tests {
             let (hud, authoring) = bound(value.clone(), value_type);
             let mut cache = HudCache::default();
             assert_eq!(
-                cache.prepare(&hud, &authoring, |_, _| Some(&value)).labels[0].text,
+                cache.prepare(&hud, &authoring, |_, _| Some(&value)).panels[0].labels[0].text,
                 expected
             );
             assert_eq!(cache.formatted_labels(), 1);
@@ -401,6 +529,7 @@ mod tests {
         assert_eq!(
             cache
                 .prepare(&hud, &authoring, |_, _| Some(&negative_zero))
+                .panels[0]
                 .labels[0]
                 .text,
             "Value -0.00 units"
@@ -409,35 +538,39 @@ mod tests {
         let (mut hud, authoring) = bound(StateValue::Vec3([f64::MAX; 3]), HudValueType::Vec3);
         if let HudSource::State {
             prefix, precision, ..
-        } = &mut hud.elements[0].source
+        } = &mut hud.panels[0].elements[0].source
         {
             *prefix = "x".repeat(1018);
             *precision = 6;
         }
         let value = StateValue::Vec3([f64::MAX; 3]);
         let resolved = resolve_hud(&hud, &authoring, |_, _| Some(&value));
-        assert!(resolved.labels[0].text.len() <= MAX_HUD_RESOLVED_LABEL_BYTES);
+        assert!(resolved.panels[0].labels[0].text.len() <= MAX_HUD_RESOLVED_LABEL_BYTES);
         let mut capped = CappedText(String::new());
         capped
             .write_str(&"é".repeat(MAX_HUD_RESOLVED_LABEL_BYTES / 2))
             .unwrap();
         assert!(capped.write_str("é").is_err());
         assert_eq!(capped.0.len(), MAX_HUD_RESOLVED_LABEL_BYTES);
-        let static_hud = Hud {
+        let static_hud = crate::hud::Hud {
             enabled: true,
-            elements: vec![HudLabel {
-                id: "intro".into(),
-                source: HudSource::Static {
-                    text: "Ready".into(),
-                },
+            panels: vec![crate::hud::HudPanel {
+                elements: vec![HudLabel {
+                    enabled_when: None,
+                    id: "intro".into(),
+                    source: HudSource::Static {
+                        text: "Ready".into(),
+                    },
+                }],
+                ..crate::hud::HudPanel::default()
             }],
-            ..Hud::default()
         };
         assert_eq!(
             resolve_hud(&static_hud, &Authoring::default(), |_, _| panic!(
                 "static text must not read state"
             ))
-            .labels[0]
+            .panels[0]
+                .labels[0]
                 .text,
             "Ready"
         );
@@ -446,10 +579,10 @@ mod tests {
         let value = StateValue::Text("x".repeat(10_000));
         let resolved = resolve_hud(&hud, &authoring, |_, _| Some(&value));
         assert_eq!(
-            resolved.labels[0].diagnostic,
+            resolved.panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::OutputOverflow)
         );
-        assert_eq!(resolved.labels[0].text, UNAVAILABLE);
+        assert_eq!(resolved.panels[0].labels[0].text, UNAVAILABLE);
     }
 
     // Button targets are definition-only and require all typed constants. Their
@@ -476,15 +609,15 @@ mod tests {
             arguments,
         };
         super::super::validate_hud_button_command(&authoring, &command).unwrap();
-        hud.elements[0].source = HudSource::Button {
+        hud.panels[0].elements[0].source = HudSource::Button {
             caption: "Activate".into(),
             command: command.clone(),
         };
         let resolve = |authoring: &Authoring| {
             resolve_hud(&hud, authoring, |_, _| panic!("buttons never read state"))
         };
-        assert_eq!(resolve(&authoring).labels[0].text, "Activate");
-        assert_eq!(resolve(&authoring).labels[0].diagnostic, None);
+        assert_eq!(resolve(&authoring).panels[0].labels[0].text, "Activate");
+        assert_eq!(resolve(&authoring).panels[0].labels[0].diagnostic, None);
         for (name, value) in [
             ("unknown", Some(StateValue::Bool(true))),
             ("n", None),
@@ -510,40 +643,159 @@ mod tests {
         super::super::validate_hud_button_command(&authoring, &changed).unwrap();
         authoring.bindings.get_mut("app").unwrap().commands.clear();
         assert_eq!(
-            resolve(&authoring).labels[0].diagnostic,
+            resolve(&authoring).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::MissingCommand)
         );
-        assert_eq!(resolve(&authoring).labels[0].text, "Activate");
+        assert_eq!(resolve(&authoring).panels[0].labels[0].text, "Activate");
         authoring
             .sources
             .get_mut("source")
             .unwrap()
             .host_api_version = 4;
         assert_eq!(
-            resolve(&authoring).labels[0].diagnostic,
+            resolve(&authoring).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::UnsupportedCommandApi)
         );
         authoring.bindings.get_mut("app").unwrap().target = BindingTarget::Object("object".into());
         assert_eq!(
-            resolve(&authoring).labels[0].diagnostic,
+            resolve(&authoring).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::NonApplicationBinding)
         );
         authoring.bindings.get_mut("app").unwrap().target = BindingTarget::Application;
         authoring.sources.clear();
         assert_eq!(
-            resolve(&authoring).labels[0].diagnostic,
+            resolve(&authoring).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::MissingSource)
         );
         authoring.bindings.get_mut("app").unwrap().enabled = false;
         assert_eq!(
-            resolve(&authoring).labels[0].diagnostic,
+            resolve(&authoring).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::DisabledBinding)
         );
         authoring.bindings.clear();
         assert_eq!(
-            resolve(&authoring).labels[0].diagnostic,
+            resolve(&authoring).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::MissingBinding)
         );
+    }
+
+    // Conditions change presentation metadata without text work. Hidden panels
+    // retain ordered rows, and unavailable/retyped data always denies actions.
+    #[test]
+    fn condition_visibility_and_availability_update_without_text_formatting() {
+        use crate::CommandDefinition;
+        let (mut hud, mut authoring) = bound(StateValue::Bool(true), HudValueType::Bool);
+        let condition = BoolCondition {
+            binding_id: "app".into(),
+            field: "reading".into(),
+            expected: true,
+        };
+        super::super::validate_bool_condition(&authoring, &condition).unwrap();
+        let unconditional = resolve_bool_condition(&authoring, None, |_, _| {
+            panic!("absent condition reads no state")
+        });
+        assert!(unconditional.permitted && unconditional.diagnostic.is_none());
+        authoring.bindings.get_mut("app").unwrap().commands.insert(
+            "act".into(),
+            CommandDefinition {
+                arguments: BTreeMap::new(),
+            },
+        );
+        hud.panels[0].visible_when = Some(condition.clone());
+        hud.panels[0].elements[0].enabled_when = Some(condition.clone());
+        hud.panels[0].elements[0].source = HudSource::Button {
+            caption: "Activate".into(),
+            command: HudCommandBinding {
+                binding_id: "app".into(),
+                command_id: "act".into(),
+                arguments: BTreeMap::new(),
+            },
+        };
+        let yes = StateValue::Bool(true);
+        let no = StateValue::Bool(false);
+        let mut cache = HudCache::default();
+        assert!(cache.prepare(&hud, &authoring, |_, _| Some(&yes)).panels[0].labels[0].available);
+        assert!(cache.resolved_changed());
+        cache.prepare(&hud, &authoring, |_, _| Some(&yes));
+        assert_eq!(cache.formatted_labels(), 0);
+        assert!(!cache.resolved_changed());
+        let hidden = cache.prepare(&hud, &authoring, |_, _| Some(&no));
+        assert!(!hidden.panels[0].visible && !hidden.panels[0].labels[0].available);
+        assert_eq!(hidden.panels[0].labels[0].text, "Activate");
+        assert_eq!(hidden.panels[0].diagnostic, None);
+        assert_eq!(hidden.panels[0].labels[0].diagnostic, None);
+        assert_eq!(cache.formatted_labels(), 0);
+        assert!(cache.resolved_changed());
+        cache.prepare(&hud, &authoring, |_, _| Some(&no));
+        assert!(!cache.resolved_changed());
+        hud.panels[0].visible_when.as_mut().unwrap().expected = false;
+        let disabled = cache.prepare(&hud, &authoring, |_, _| Some(&no));
+        assert!(disabled.panels[0].visible && !disabled.panels[0].labels[0].available);
+        assert_eq!(disabled.panels[0].labels[0].diagnostic, None);
+        assert_eq!(cache.formatted_labels(), 0);
+        assert!(cache.resolved_changed());
+        let number = StateValue::Number(1.0);
+        let changed = cache.prepare(&hud, &authoring, |_, _| Some(&number));
+        assert!(!changed.panels[0].visible && !changed.panels[0].labels[0].available);
+        assert_eq!(
+            changed.panels[0].diagnostic,
+            Some(HudDiagnostic::TypeChanged)
+        );
+        assert_eq!(
+            changed.panels[0].labels[0].diagnostic,
+            Some(HudDiagnostic::TypeChanged)
+        );
+        assert_eq!(changed.panels[0].labels[0].text, "Activate");
+        assert_eq!(cache.formatted_labels(), 0);
+        assert_eq!(
+            cache.prepare(&hud, &authoring, |_, _| None).panels[0].diagnostic,
+            Some(HudDiagnostic::UnavailableState)
+        );
+        authoring
+            .bindings
+            .get_mut("app")
+            .unwrap()
+            .state_defaults
+            .clear();
+        assert_eq!(
+            resolve_bool_condition(&authoring, Some(&condition), |_, _| Some(&yes)).diagnostic,
+            Some(HudDiagnostic::MissingField)
+        );
+        assert!(super::super::validate_bool_condition(&authoring, &condition).is_err());
+        authoring
+            .bindings
+            .get_mut("app")
+            .unwrap()
+            .state_defaults
+            .insert("reading".into(), StateValue::Number(0.0));
+        assert_eq!(
+            resolve_bool_condition(&authoring, Some(&condition), |_, _| Some(&yes)).diagnostic,
+            Some(HudDiagnostic::TypeChanged)
+        );
+        authoring.bindings.get_mut("app").unwrap().enabled = false;
+        assert_eq!(
+            resolve_bool_condition(&authoring, Some(&condition), |_, _| Some(&yes)).diagnostic,
+            Some(HudDiagnostic::DisabledBinding)
+        );
+        authoring.bindings.get_mut("app").unwrap().enabled = true;
+        authoring.sources.clear();
+        assert_eq!(
+            resolve_bool_condition(&authoring, Some(&condition), |_, _| Some(&yes)).diagnostic,
+            Some(HudDiagnostic::MissingSource)
+        );
+        authoring.bindings.clear();
+        assert_eq!(
+            resolve_bool_condition(&authoring, Some(&condition), |_, _| Some(&yes)).diagnostic,
+            Some(HudDiagnostic::MissingBinding)
+        );
+        hud.enabled = false;
+        assert!(cache
+            .prepare(&hud, &authoring, |_, _| Some(&yes))
+            .panels
+            .is_empty());
+        assert!(cache.resolved_changed());
+        cache.prepare(&hud, &authoring, |_, _| Some(&yes));
+        assert!(!cache.resolved_changed());
     }
 
     #[test]
@@ -551,7 +803,7 @@ mod tests {
         let value = StateValue::Number(1.0);
         let (hud, mut authoring) = bound(value.clone(), super::super::HudValueType::Number);
         assert_eq!(
-            resolve_hud(&hud, &authoring, |_, _| None).labels[0].diagnostic,
+            resolve_hud(&hud, &authoring, |_, _| None).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::UnavailableState)
         );
         authoring
@@ -562,19 +814,19 @@ mod tests {
             .insert("reading".into(), StateValue::Bool(true));
         let resolved = resolve_hud(&hud, &authoring, |_, _| Some(&value));
         assert_eq!(
-            resolved.labels[0].diagnostic,
+            resolved.panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::TypeChanged)
         );
-        assert_eq!(resolved.labels[0].text, UNAVAILABLE);
+        assert_eq!(resolved.panels[0].labels[0].text, UNAVAILABLE);
         authoring.bindings.get_mut("app").unwrap().enabled = false;
         assert_eq!(
-            resolve_hud(&hud, &authoring, |_, _| Some(&value)).labels[0].diagnostic,
+            resolve_hud(&hud, &authoring, |_, _| Some(&value)).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::DisabledBinding)
         );
         authoring.bindings.get_mut("app").unwrap().enabled = true;
         authoring.sources.clear();
         assert_eq!(
-            resolve_hud(&hud, &authoring, |_, _| Some(&value)).labels[0].diagnostic,
+            resolve_hud(&hud, &authoring, |_, _| Some(&value)).panels[0].labels[0].diagnostic,
             Some(HudDiagnostic::MissingSource)
         );
     }

@@ -4,8 +4,8 @@ use crate::behavior_ui::{state_property, value_ui, ValueDraft};
 use eframe::egui;
 use ruster_app::hud::{paint_hud, HudPresentationMode};
 use ruster_scene::hud::{
-    resolve_hud, Hud, HudAnchor, HudCommandBinding, HudLabel, HudSource, HudValueType,
-    MAX_HUD_LABELS,
+    resolve_hud, BoolCondition, Hud, HudAnchor, HudCommandBinding, HudLabel, HudPanel, HudSource,
+    HudValueType, MAX_HUD_LABELS, MAX_HUD_METADATA_BYTES, MAX_HUD_PANELS,
 };
 use ruster_scene::{BindingTarget, Session, StateFields, StateValue};
 use serde::{Deserialize, Serialize};
@@ -15,17 +15,35 @@ use std::collections::{BTreeMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-pub(super) struct HudDraft {
-    pub(super) revision: u64,
-    pub(super) original_sha256: String,
-    pub(super) hud: Hud,
+pub(super) struct RawPanelStyle {
     pub(super) width: String,
     pub(super) margin: String,
     pub(super) spacing: String,
     pub(super) font_size: String,
+}
+
+impl From<&HudPanel> for RawPanelStyle {
+    fn from(panel: &HudPanel) -> Self {
+        Self {
+            width: panel.width.to_string(),
+            margin: panel.margin.to_string(),
+            spacing: panel.spacing.to_string(),
+            font_size: panel.font_size.to_string(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(super) struct HudDraft {
+    pub(super) revision: u64,
+    pub(super) original_sha256: String,
+    pub(super) hud: Hud,
+    pub(super) panel_styles: BTreeMap<String, RawPanelStyle>,
     pub(super) precision: BTreeMap<String, String>,
     #[serde(default)]
     pub(super) button_arguments: BTreeMap<String, BTreeMap<String, ValueDraft>>,
+    pub(super) selected_panel: Option<String>,
     pub(super) selected: Option<String>,
 }
 
@@ -35,60 +53,92 @@ impl HudDraft {
         Self {
             revision: session.scene().revision,
             original_sha256: hud_fingerprint(&hud),
-            width: hud.width.to_string(),
-            margin: hud.margin.to_string(),
-            spacing: hud.spacing.to_string(),
-            font_size: hud.font_size.to_string(),
-            precision: hud
-                .elements
+            panel_styles: hud
+                .panels
                 .iter()
-                .filter_map(|label| match &label.source {
+                .map(|panel| (panel.id.clone(), RawPanelStyle::from(panel)))
+                .collect(),
+            precision: hud
+                .elements()
+                .filter_map(|row| match &row.source {
                     HudSource::State { precision, .. } => {
-                        Some((label.id.clone(), precision.to_string()))
+                        Some((row.id.clone(), precision.to_string()))
                     }
                     _ => None,
                 })
                 .collect(),
             button_arguments: hud
-                .elements
-                .iter()
-                .filter_map(|label| {
-                    label
-                        .source
+                .elements()
+                .filter_map(|row| {
+                    row.source
                         .command_binding()
-                        .map(|command| (label.id.clone(), argument_drafts(&command.arguments)))
+                        .map(|command| (row.id.clone(), argument_drafts(&command.arguments)))
                 })
                 .collect(),
-            selected: hud.elements.first().map(|label| label.id.clone()),
+            selected_panel: hud.panels.first().map(|panel| panel.id.clone()),
+            selected: hud
+                .panels
+                .first()
+                .and_then(|panel| panel.elements.first())
+                .map(|row| row.id.clone()),
             hud,
         }
     }
 
-    /// Storage bounds deliberately admit unfinished numeric and reference text.
-    /// Applying the draft performs semantic admission through Session::set_hud.
+    /// Preserve unfinished numeric and condition references inside finite raw
+    /// bounds. Applying parses every panel before the shared Session transaction.
     pub(super) fn storage_valid(&self) -> bool {
         if self.original_sha256.len() != 64
             || !self
                 .original_sha256
                 .bytes()
                 .all(|byte| byte.is_ascii_hexdigit())
-            || self.hud.elements.len() > MAX_HUD_LABELS
-            || [&self.width, &self.margin, &self.spacing, &self.font_size]
-                .iter()
-                .any(|raw| raw.len() > 64)
-            || self.precision.len() > MAX_HUD_LABELS
-            || self.button_arguments.len() > MAX_HUD_LABELS
+            || self.hud.panels.len() > MAX_HUD_PANELS
+            || self.hud.elements().count() > MAX_HUD_LABELS
+            || self.panel_styles.len() != self.hud.panels.len()
         {
             return false;
         }
-        let mut ids = HashSet::new();
-        let mut text_bytes = 0_usize;
-        for label in &self.hud.elements {
-            if ruster_scene::validate_id(&label.id).is_err() || !ids.insert(label.id.as_str()) {
+        let condition_valid = |condition: &BoolCondition| {
+            condition.binding_id.len() <= 128 && condition.field.len() <= 128
+        };
+        let mut panel_ids = HashSet::new();
+        for panel in &self.hud.panels {
+            if ruster_scene::validate_id(&panel.id).is_err()
+                || !panel_ids.insert(panel.id.as_str())
+                || panel.name.len() > 128
+                || panel
+                    .visible_when
+                    .as_ref()
+                    .is_some_and(|condition| !condition_valid(condition))
+            {
                 return false;
             }
-            let bytes = match &label.source {
+            let Some(raw) = self.panel_styles.get(&panel.id) else {
+                return false;
+            };
+            if [&raw.width, &raw.margin, &raw.spacing, &raw.font_size]
+                .iter()
+                .any(|value| value.len() > 64)
+            {
+                return false;
+            }
+        }
+        let mut row_ids = HashSet::new();
+        let mut button_ids = HashSet::new();
+        let mut text_bytes = 0;
+        for row in self.hud.elements() {
+            if ruster_scene::validate_id(&row.id).is_err()
+                || !row_ids.insert(row.id.as_str())
+                || row.enabled_when.as_ref().is_some_and(|condition| {
+                    !matches!(row.source, HudSource::Button { .. }) || !condition_valid(condition)
+                })
+            {
+                return false;
+            }
+            let bytes = match &row.source {
                 HudSource::Button { caption, command } => {
+                    button_ids.insert(row.id.as_str());
                     if caption.len() > 1024
                         || command.binding_id.len() > 128
                         || command.command_id.len() > 128
@@ -100,7 +150,7 @@ impl HudDraft {
                     else {
                         return false;
                     };
-                    if let Some(raw) = self.button_arguments.get(&label.id) {
+                    if let Some(raw) = self.button_arguments.get(&row.id) {
                         if raw.len() != command.arguments.len()
                             || raw.iter().any(|(name, value)| {
                                 command.arguments.get(name).is_none_or(|original| {
@@ -110,10 +160,10 @@ impl HudDraft {
                         {
                             return false;
                         }
-                        let Ok(bytes) = serde_json::to_vec(raw) else {
+                        let Ok(raw_bytes) = serde_json::to_vec(raw) else {
                             return false;
                         };
-                        argument_bytes = argument_bytes.max(bytes.len());
+                        argument_bytes = argument_bytes.max(raw_bytes.len());
                     }
                     text_bytes += caption.len()
                         + command.binding_id.len()
@@ -121,7 +171,6 @@ impl HudDraft {
                         + argument_bytes;
                     continue;
                 }
-
                 HudSource::Static { text } => text.len(),
                 HudSource::State {
                     binding_id,
@@ -141,25 +190,45 @@ impl HudDraft {
             }
             text_bytes += bytes;
         }
+        // Legacy drafts can retain inactive precision on a live row, omit a
+        // State precision while unfinished, or omit raw Button constants. Keep
+        // those maps verbatim while enforcing their original bounds/ownership.
         if text_bytes > 32 * 1024
-            || self.button_arguments.keys().any(|id| {
-                !self.hud.elements.iter().any(|label| {
-                    &label.id == id && matches!(label.source, HudSource::Button { .. })
-                })
-            })
+            || self.precision.len() > MAX_HUD_LABELS
+            || self.button_arguments.len() > MAX_HUD_LABELS
             || self
                 .precision
                 .iter()
-                .any(|(id, raw)| !ids.contains(id.as_str()) || raw.len() > 64)
+                .any(|(id, raw)| !row_ids.contains(id.as_str()) || raw.len() > 64)
             || self
-                .selected
+                .button_arguments
+                .keys()
+                .any(|id| !button_ids.contains(id.as_str()))
+            || self
+                .selected_panel
                 .as_ref()
-                .is_some_and(|id| !ids.contains(id.as_str()))
+                .is_some_and(|id| !panel_ids.contains(id.as_str()))
+            || self.selected.as_ref().is_some_and(|id| {
+                self.selected_panel.as_ref().is_none_or(|panel_id| {
+                    !self.hud.panels.iter().any(|panel| {
+                        &panel.id == panel_id && panel.elements.iter().any(|row| &row.id == id)
+                    })
+                })
+            })
+            || self
+                .hud
+                .metadata_payload_bytes()
+                .map_or(true, |bytes| bytes > MAX_HUD_METADATA_BYTES)
         {
             return false;
         }
+        // Typed style validation must not reject intentionally unfinished raw
+        // state/command/condition references stored beside these numeric drafts.
         let mut style = self.hud.clone();
-        style.elements.clear();
+        for panel in &mut style.panels {
+            panel.visible_when = None;
+            panel.elements.clear();
+        }
         style.validate().is_ok()
             && serde_json::to_vec(self).is_ok_and(|bytes| bytes.len() <= 256 * 1024)
     }
@@ -184,52 +253,178 @@ impl HudDraft {
                 })
         };
         let mut hud = self.hud.clone();
-        hud.width = number(&self.width, "Width")?;
-        hud.margin = number(&self.margin, "Margin")?;
-        hud.spacing = number(&self.spacing, "Spacing")?;
-        hud.font_size = number(&self.font_size, "Font size")?;
-        for label in &mut hud.elements {
-            if let HudSource::Button { command, .. } = &mut label.source {
-                if let Some(raw) = self.button_arguments.get(&label.id) {
-                    command.arguments = raw
-                        .iter()
-                        .map(|(name, value)| {
-                            value
-                                .state()
-                                .map(|value| (name.clone(), value))
-                                .map_err(|error| {
-                                    format!("Button {} argument {name}. {error}", label.id)
+        for panel in &mut hud.panels {
+            let raw = &self.panel_styles[&panel.id];
+            panel.width = number(&raw.width, &format!("Panel {} width", panel.id))?;
+            panel.margin = number(&raw.margin, &format!("Panel {} margin", panel.id))?;
+            panel.spacing = number(&raw.spacing, &format!("Panel {} spacing", panel.id))?;
+            panel.font_size = number(&raw.font_size, &format!("Panel {} font size", panel.id))?;
+            for row in &mut panel.elements {
+                if let HudSource::Button { command, .. } = &mut row.source {
+                    if let Some(raw) = self.button_arguments.get(&row.id) {
+                        command.arguments =
+                            raw.iter()
+                                .map(|(name, value)| {
+                                    value.state().map(|value| (name.clone(), value)).map_err(
+                                        |error| {
+                                            format!("Button {} argument {name}. {error}", row.id)
+                                        },
+                                    )
                                 })
-                        })
-                        .collect::<Result<_, _>>()?;
+                                .collect::<Result<_, _>>()?;
+                    }
                 }
-            }
-            if let HudSource::State { precision, .. } = &mut label.source {
-                let raw = self
-                    .precision
-                    .get(&label.id)
-                    .ok_or("HUD label precision is missing.")?;
-                *precision = raw
-                    .trim()
-                    .parse::<u8>()
-                    .ok()
-                    .filter(|value| *value <= 6)
-                    .ok_or(
+                if let HudSource::State { precision, .. } = &mut row.source {
+                    let raw = self
+                        .precision
+                        .get(&row.id)
+                        .ok_or("HUD label precision is missing. Your draft is preserved.")?;
+                    *precision = raw
+                        .trim()
+                        .parse::<u8>()
+                        .ok()
+                        .filter(|value| *value <= 6)
+                        .ok_or(
                         "Decimal places require an integer from 0 to 6. Your draft is preserved.",
                     )?;
+                }
             }
         }
         hud.validate().map_err(|error| error.to_string())?;
         Ok(hud)
     }
 
-    fn fresh_id(&self, session: &Session) -> Result<String, String> {
-        session
+    fn fresh_ids(&self, session: &Session, count: usize) -> Result<Vec<String>, String> {
+        let ids: Vec<_> = session
             .allocate_hud_label_ids(MAX_HUD_LABELS)
             .map_err(|error| error.to_string())?
             .into_iter()
-            .find(|id| !self.hud.elements.iter().any(|label| &label.id == id))
-            .ok_or_else(|| "HUD label identity space is exhausted.".into())
+            .filter(|id| !self.hud.elements().any(|row| &row.id == id))
+            .take(count)
+            .collect();
+        if ids.len() == count {
+            Ok(ids)
+        } else {
+            Err("HUD row identity space is exhausted.".into())
+        }
+    }
+
+    fn fresh_id(&self, session: &Session) -> Result<String, String> {
+        Ok(self.fresh_ids(session, 1)?.remove(0))
+    }
+
+    fn fresh_panel_id(&self, session: &Session) -> Result<String, String> {
+        session
+            .allocate_hud_panel_ids(MAX_HUD_PANELS)
+            .map_err(|error| error.to_string())?
+            .into_iter()
+            .find(|id| !self.hud.panels.iter().any(|panel| &panel.id == id))
+            .ok_or_else(|| "HUD panel identity space is exhausted.".into())
+    }
+
+    fn select_panel(&mut self, id: &str) {
+        self.selected_panel = Some(id.into());
+        self.selected = self
+            .hud
+            .panels
+            .iter()
+            .find(|panel| panel.id == id)
+            .and_then(|panel| panel.elements.first())
+            .map(|row| row.id.clone());
+    }
+
+    fn add_panel(&mut self, session: &Session) -> Result<(), String> {
+        if self.hud.panels.len() >= MAX_HUD_PANELS {
+            return Err("HUD supports up to four panels.".into());
+        }
+        let id = self.fresh_panel_id(session)?;
+        let panel = HudPanel {
+            id: id.clone(),
+            name: format!("Panel {}", self.hud.panels.len() + 1),
+            ..HudPanel::default()
+        };
+        self.panel_styles
+            .insert(id.clone(), RawPanelStyle::from(&panel));
+        self.hud.panels.push(panel);
+        self.select_panel(&id);
+        Ok(())
+    }
+
+    fn duplicate_panel(&mut self, session: &Session, index: usize) -> Result<(), String> {
+        let mut copy = self.hud.panels[index].clone();
+        if self.hud.panels.len() >= MAX_HUD_PANELS
+            || self.hud.elements().count() + copy.elements.len() > MAX_HUD_LABELS
+        {
+            return Err("The panel copy exceeds four panels or 32 total rows.".into());
+        }
+        let id = self.fresh_panel_id(session)?;
+        let ids = self.fresh_ids(session, copy.elements.len())?;
+        let style = self.panel_styles[&copy.id].clone();
+        for (row, new_id) in copy.elements.iter_mut().zip(ids) {
+            if let Some(raw) = self.precision.get(&row.id).cloned() {
+                self.precision.insert(new_id.clone(), raw);
+            }
+            if let Some(raw) = self.button_arguments.get(&row.id).cloned() {
+                self.button_arguments.insert(new_id.clone(), raw);
+            }
+            row.id = new_id;
+        }
+        copy.id = id.clone();
+        if copy.name.len() + 5 <= 128 {
+            copy.name.push_str(" copy");
+        }
+        self.panel_styles.insert(id.clone(), style);
+        self.hud.panels.insert(index + 1, copy);
+        self.select_panel(&id);
+        Ok(())
+    }
+
+    fn remove_panel(&mut self, index: usize) {
+        let panel = self.hud.panels.remove(index);
+        self.panel_styles.remove(&panel.id);
+        for row in panel.elements {
+            self.precision.remove(&row.id);
+            self.button_arguments.remove(&row.id);
+        }
+        self.selected_panel = self
+            .hud
+            .panels
+            .get(index.min(self.hud.panels.len().saturating_sub(1)))
+            .map(|panel| panel.id.clone());
+        self.selected = self
+            .selected_panel
+            .as_ref()
+            .and_then(|id| self.hud.panels.iter().find(|panel| &panel.id == id))
+            .and_then(|panel| panel.elements.first())
+            .map(|row| row.id.clone());
+    }
+
+    fn transfer_row(&mut self, row_id: &str, target_panel: &str) -> Result<(), String> {
+        let origin = self
+            .hud
+            .panels
+            .iter()
+            .position(|panel| panel.elements.iter().any(|row| row.id == row_id))
+            .ok_or("Select an existing row.")?;
+        let target = self
+            .hud
+            .panels
+            .iter()
+            .position(|panel| panel.id == target_panel)
+            .ok_or("Choose an existing panel.")?;
+        if origin == target {
+            return Ok(());
+        }
+        let index = self.hud.panels[origin]
+            .elements
+            .iter()
+            .position(|row| row.id == row_id)
+            .expect("located row");
+        let row = self.hud.panels[origin].elements.remove(index);
+        self.hud.panels[target].elements.push(row);
+        self.selected_panel = Some(target_panel.into());
+        self.selected = Some(row_id.into());
+        Ok(())
     }
 }
 
@@ -240,7 +435,7 @@ fn argument_drafts(arguments: &StateFields) -> BTreeMap<String, ValueDraft> {
         .collect()
 }
 
-fn hud_fingerprint(hud: &Hud) -> String {
+pub(super) fn hud_fingerprint(hud: &Hud) -> String {
     let bytes = serde_json::to_vec(hud).expect("HUD definitions serialize");
     format!("{:x}", Sha256::digest(bytes))
 }
@@ -304,7 +499,199 @@ fn selector<T: Copy + PartialEq>(
     response.response
 }
 
+fn panel_style_id(panel_id: &str, field: &str) -> egui::Id {
+    egui::Id::unique(("hud_panel_style", panel_id, field))
+}
+
+fn condition_ui(
+    ui: &mut egui::Ui,
+    title: &str,
+    scope: egui::Id,
+    condition: &mut Option<BoolCondition>,
+    session: &Session,
+    fields: &mut Vec<egui::Response>,
+) {
+    ui.push_id(scope, |ui| {
+        ui.strong(title);
+        let mut active = condition.is_some();
+        fields.push(ui.checkbox(&mut active, format!("{title} condition")));
+        if active != condition.is_some() {
+            *condition = active.then(|| BoolCondition { binding_id: String::new(), field: String::new(), expected: true });
+        }
+        let Some(condition) = condition else { return; };
+        fields.push(raw_field(ui, &format!("{title} binding ID"), &mut condition.binding_id, 128, scope.with("binding")));
+        let focus = ComboFocus::capture(ui, "condition_binding");
+        let mut selected = false;
+        let response = egui::ComboBox::from_id_salt("condition_binding")
+            .selected_text("Choose enabled Bool binding").show_ui(ui, |ui| {
+                for (id, binding) in &session.authoring().bindings {
+                    if binding.enabled && session.source(&binding.source_id).is_some()
+                        && binding.state_defaults.values().any(|value| matches!(value, StateValue::Bool(_)))
+                        && ui.selectable_label(id == &condition.binding_id, id).clicked() {
+                        if id != &condition.binding_id {
+                            condition.binding_id = id.clone();
+                            condition.field = binding.state_defaults.iter().find(|(_, value)| matches!(value, StateValue::Bool(_)))
+                                .map(|(name, _)| name.clone()).unwrap_or_default();
+                        }
+                        selected = true; ui.close();
+                    }
+                }
+            });
+        focus.restore(ui, &response.response, selected); fields.push(response.response);
+        fields.push(raw_field(ui, &format!("{title} Bool field"), &mut condition.field, 128, scope.with("field")));
+        let focus = ComboFocus::capture(ui, "condition_field");
+        let mut selected = false;
+        let response = egui::ComboBox::from_id_salt("condition_field")
+            .selected_text("Choose Bool field").show_ui(ui, |ui| {
+                if let Some(binding) = session.binding(&condition.binding_id).filter(|binding| binding.enabled) {
+                    for (name, value) in &binding.state_defaults {
+                        if matches!(value, StateValue::Bool(_)) && ui.selectable_label(name == &condition.field, name).clicked() {
+                            condition.field = name.clone(); selected = true; ui.close();
+                        }
+                    }
+                }
+            });
+        focus.restore(ui, &response.response, selected); fields.push(response.response);
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Expected value");
+            fields.push(selector(ui, "condition_expected", &mut condition.expected, &[(true, "True"), (false, "False")]));
+        });
+        if let Some(diagnostic) = ruster_scene::hud::bool_condition_diagnostic(session.authoring(), condition) {
+            ui.colored_label(egui::Color32::YELLOW, diagnostic.message());
+        }
+        ui.small("Uncheck this condition to clear it. Unavailable or differently typed state denies the condition.");
+    });
+}
+
 impl SceneEditor {
+    fn hud_panel_controls(
+        &mut self,
+        ui: &mut egui::Ui,
+        draft: &mut HudDraft,
+        fields: &mut Vec<egui::Response>,
+        keyboard_activation: bool,
+    ) -> Option<egui::Id> {
+        ui.strong("Panels");
+        let mut selected_focus = None;
+        for (index, panel) in draft.hud.panels.iter().enumerate() {
+            let name = if panel.name.is_empty() {
+                &panel.id
+            } else {
+                &panel.name
+            };
+            let response = ui
+                .scope_builder(
+                    egui::UiBuilder::new().scope_id(egui::Id::unique(("hud_panel_row", &panel.id))),
+                    |ui| {
+                        ui.selectable_label(
+                            draft.selected_panel.as_ref() == Some(&panel.id),
+                            format!("{}. {}", index + 1, name),
+                        )
+                    },
+                )
+                .inner;
+            if response.clicked() {
+                draft.selected_panel = Some(panel.id.clone());
+                draft.selected = panel.elements.first().map(|row| row.id.clone());
+            }
+            if draft.selected_panel.as_ref() == Some(&panel.id) {
+                selected_focus = Some(response.id);
+            }
+            fields.push(response);
+        }
+        let selected = draft
+            .selected_panel
+            .as_ref()
+            .and_then(|id| draft.hud.panels.iter().position(|panel| &panel.id == id));
+        let mut handoff = None;
+        ui.scope_builder(
+            egui::UiBuilder::new().scope_id(egui::Id::unique("hud_panel_actions")),
+            |ui| {
+                ui.horizontal_wrapped(|ui| {
+                    let add = ui.add_enabled(
+                        draft.hud.panels.len() < MAX_HUD_PANELS,
+                        egui::Button::new("Add panel"),
+                    );
+                    let add_id = add.id;
+                    let added_keyboard = keyboard_activation && add.clicked() && add.has_focus();
+                    if add.clicked() {
+                        if let Err(error) = draft.add_panel(&self.session) {
+                            self.error = error;
+                        }
+                    }
+                    fields.push(add);
+                    let copy = ui.add_enabled(
+                        selected.is_some_and(|index| {
+                            draft.hud.panels.len() < MAX_HUD_PANELS
+                                && draft.hud.elements().count()
+                                    + draft.hud.panels[index].elements.len()
+                                    <= MAX_HUD_LABELS
+                        }),
+                        egui::Button::new("Duplicate panel"),
+                    );
+                    let copied_keyboard = keyboard_activation && copy.clicked() && copy.has_focus();
+                    if copy.clicked() {
+                        if let Some(index) = selected {
+                            if let Err(error) = draft.duplicate_panel(&self.session, index) {
+                                self.error = error;
+                            }
+                        }
+                    }
+                    fields.push(copy);
+                    let up = ui.add_enabled(
+                        selected.is_some_and(|index| index > 0),
+                        egui::Button::new("Move panel up"),
+                    );
+                    if up.clicked() {
+                        if let Some(index) = selected {
+                            draft.hud.panels.swap(index, index - 1);
+                            if keyboard_activation && up.has_focus() && index == 1 {
+                                handoff = selected_focus;
+                            }
+                        }
+                    }
+                    fields.push(up);
+                    let down = ui.add_enabled(
+                        selected.is_some_and(|index| index + 1 < draft.hud.panels.len()),
+                        egui::Button::new("Move panel down"),
+                    );
+                    if down.clicked() {
+                        if let Some(index) = selected {
+                            draft.hud.panels.swap(index, index + 1);
+                            if keyboard_activation
+                                && down.has_focus()
+                                && index + 2 == draft.hud.panels.len()
+                            {
+                                handoff = selected_focus;
+                            }
+                        }
+                    }
+                    fields.push(down);
+                    let remove =
+                        ui.add_enabled(selected.is_some(), egui::Button::new("Remove panel"));
+                    if remove.clicked() {
+                        if let Some(index) = selected {
+                            draft.remove_panel(index);
+                        }
+                    }
+                    if keyboard_activation
+                        && remove.clicked()
+                        && remove.has_focus()
+                        && draft.hud.panels.is_empty()
+                    {
+                        handoff = Some(add_id);
+                    } else if (added_keyboard || copied_keyboard)
+                        && draft.hud.panels.len() == MAX_HUD_PANELS
+                    {
+                        handoff = Some(remove.id);
+                    }
+                    fields.push(remove);
+                });
+            },
+        );
+        handoff
+    }
+
     pub(super) fn hud_editable(&self) -> bool {
         !self.asset_publishing()
             && !self.asset_loading()
@@ -407,7 +794,7 @@ impl SceneEditor {
         let keyboard_activation = ui.input(|input| {
             input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space)
         });
-        ui.label("Screen-space HUD · one ordered group · up to 32 labels and buttons");
+        ui.label("Screen-space HUD · up to 4 panels and 32 total rows");
         ui.small("Apply cancels runtime preview and shows authored defaults. Reset captures the HUD and initializes live values.");
         // Budget in current logical points after the wrapping header. Only the
         // body scrolls, keeping Apply, Cancel and validation feedback reachable.
@@ -452,547 +839,663 @@ impl SceneEditor {
                 .clamp(0.0, 460.0);
         let content = |ui: &mut egui::Ui| {
             fields.push(ui.checkbox(&mut draft.hud.enabled, "Show HUD"));
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Anchor");
-                fields.push(selector(
-                    ui,
-                    "hud_anchor",
-                    &mut draft.hud.anchor,
-                    &[
-                        (HudAnchor::TopLeft, "Top left"),
-                        (HudAnchor::TopRight, "Top right"),
-                        (HudAnchor::BottomLeft, "Bottom left"),
-                        (HudAnchor::BottomRight, "Bottom right"),
-                    ],
-                ));
-            });
-            for (label, raw, salt) in [
-                ("Width (64–1024)", &mut draft.width, "hud_width"),
-                ("Margin (0–256)", &mut draft.margin, "hud_margin"),
-                ("Spacing (0–64)", &mut draft.spacing, "hud_spacing"),
-                ("Font size (8–48)", &mut draft.font_size, "hud_font_size"),
-            ] {
-                fields.push(raw_field(ui, label, raw, 64, egui::Id::unique(salt)));
-            }
-            ui.horizontal_wrapped(|ui| {
-                ui.label("Text color");
-                let mut text = draft.hud.text_color.map(|value| value as f32);
-                let response = ui.color_edit_button_rgba_unmultiplied(&mut text);
-                if response.changed() {
-                    draft.hud.text_color = text.map(f64::from);
-                }
-                fields.push(response);
-                ui.label("Panel background");
-                let mut background = draft.hud.background.map(|value| value as f32);
-                let response = ui.color_edit_button_rgba_unmultiplied(&mut background);
-                if response.changed() {
-                    draft.hud.background = background.map(f64::from);
-                }
-                fields.push(response);
-            });
-            ui.separator();
-            ui.strong("Labels and buttons in display order");
-            let mut selected_label_focus = None;
-            for (index, label) in draft.hud.elements.iter().enumerate() {
-                let caption = match &label.source {
-                    HudSource::Static { .. } => "Static text",
-                    HudSource::State { .. } => "State value",
-                    HudSource::Button { .. } => "Button",
-                };
-                let response = ui
-                    .scope_builder(
-                        egui::UiBuilder::new()
-                            .scope_id(egui::Id::unique(("hud_label_row", &label.id))),
-                        |ui| {
-                            ui.selectable_label(
-                                draft.selected.as_ref() == Some(&label.id),
-                                format!("{}. {} · {}", index + 1, caption, label.id),
-                            )
-                        },
-                    )
-                    .inner;
-                if response.clicked() {
-                    draft.selected = Some(label.id.clone());
-                }
-                if draft.selected.as_ref() == Some(&label.id) {
-                    selected_label_focus = Some(response.id);
-                }
-                fields.push(response);
-            }
-            let selected_index = draft
-                .selected
+            focus_after_action =
+                self.hud_panel_controls(ui, &mut draft, &mut fields, keyboard_activation);
+            if let Some(panel_index) = draft
+                .selected_panel
                 .as_ref()
-                .and_then(|id| draft.hud.elements.iter().position(|label| &label.id == id));
-            ui.scope_builder(
-                egui::UiBuilder::new().scope_id(egui::Id::unique("hud_label_actions")),
-                |ui| {
-                    ui.horizontal_wrapped(|ui| {
-                        let add = ui.add_enabled(
-                            draft.hud.elements.len() < MAX_HUD_LABELS,
-                            egui::Button::new("Add label"),
-                        );
-                        let add_id = add.id;
-                        let add_keyboard = keyboard_activation && add.clicked() && add.has_focus();
-                        if add.clicked() {
-                            match draft.fresh_id(&self.session) {
-                                Ok(id) => {
-                                    draft.hud.elements.push(HudLabel {
-                                        id: id.clone(),
-                                        source: HudSource::Static {
-                                            text: "New label".into(),
-                                        },
-                                    });
-                                    draft.selected = Some(id);
-                                }
-                                Err(error) => self.error = error,
-                            }
-                        }
-                        fields.push(add);
-                        let duplicate = ui.add_enabled(
-                            selected_index.is_some() && draft.hud.elements.len() < MAX_HUD_LABELS,
-                            egui::Button::new("Duplicate"),
-                        );
-                        let duplicate_keyboard =
-                            keyboard_activation && duplicate.clicked() && duplicate.has_focus();
-                        if duplicate.clicked() {
-                            if let Some(index) = selected_index {
+                .and_then(|id| draft.hud.panels.iter().position(|panel| &panel.id == id))
+            {
+                let panel_id = draft.hud.panels[panel_index].id.clone();
+                ui.separator();
+                fields.push(raw_field(
+                    ui,
+                    "Panel name",
+                    &mut draft.hud.panels[panel_index].name,
+                    128,
+                    egui::Id::unique(("hud_panel_name", &panel_id)),
+                ));
+                condition_ui(
+                    ui,
+                    "Visibility",
+                    egui::Id::unique(("hud_visible_when", &panel_id)),
+                    &mut draft.hud.panels[panel_index].visible_when,
+                    &self.session,
+                    &mut fields,
+                );
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Anchor");
+                    fields.push(selector(
+                        ui,
+                        "hud_anchor",
+                        &mut draft.hud.panels[panel_index].anchor,
+                        &[
+                            (HudAnchor::TopLeft, "Top left"),
+                            (HudAnchor::TopRight, "Top right"),
+                            (HudAnchor::BottomLeft, "Bottom left"),
+                            (HudAnchor::BottomRight, "Bottom right"),
+                            (HudAnchor::Center, "Center"),
+                        ],
+                    ));
+                });
+                let raw_style = draft
+                    .panel_styles
+                    .get_mut(&panel_id)
+                    .expect("selected panel raw style");
+                for (label, raw, field) in [
+                    ("Width (64–1024)", &mut raw_style.width, "width"),
+                    ("Margin (0–256)", &mut raw_style.margin, "margin"),
+                    ("Spacing (0–64)", &mut raw_style.spacing, "spacing"),
+                    ("Font size (8–48)", &mut raw_style.font_size, "font_size"),
+                ] {
+                    fields.push(raw_field(
+                        ui,
+                        label,
+                        raw,
+                        64,
+                        panel_style_id(&panel_id, field),
+                    ));
+                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.label("Text color");
+                    let mut text = draft.hud.panels[panel_index]
+                        .text_color
+                        .map(|value| value as f32);
+                    let response = ui.color_edit_button_rgba_unmultiplied(&mut text);
+                    if response.changed() {
+                        draft.hud.panels[panel_index].text_color = text.map(f64::from);
+                    }
+                    fields.push(response);
+                    ui.label("Panel background");
+                    let mut background = draft.hud.panels[panel_index]
+                        .background
+                        .map(|value| value as f32);
+                    let response = ui.color_edit_button_rgba_unmultiplied(&mut background);
+                    if response.changed() {
+                        draft.hud.panels[panel_index].background = background.map(f64::from);
+                    }
+                    fields.push(response);
+                });
+                ui.separator();
+                ui.strong("Labels and buttons in display order");
+                let mut selected_label_focus = None;
+                for (index, label) in draft.hud.panels[panel_index].elements.iter().enumerate() {
+                    let caption = match &label.source {
+                        HudSource::Static { .. } => "Static text",
+                        HudSource::State { .. } => "State value",
+                        HudSource::Button { .. } => "Button",
+                    };
+                    let response = ui
+                        .scope_builder(
+                            egui::UiBuilder::new()
+                                .scope_id(egui::Id::unique(("hud_label_row", &label.id))),
+                            |ui| {
+                                ui.selectable_label(
+                                    draft.selected.as_ref() == Some(&label.id),
+                                    format!("{}. {} · {}", index + 1, caption, label.id),
+                                )
+                            },
+                        )
+                        .inner;
+                    if response.clicked() {
+                        draft.selected = Some(label.id.clone());
+                    }
+                    if draft.selected.as_ref() == Some(&label.id) {
+                        selected_label_focus = Some(response.id);
+                    }
+                    fields.push(response);
+                }
+                let selected_index = draft.selected.as_ref().and_then(|id| {
+                    draft.hud.panels[panel_index]
+                        .elements
+                        .iter()
+                        .position(|label| &label.id == id)
+                });
+                ui.scope_builder(
+                    egui::UiBuilder::new().scope_id(egui::Id::unique("hud_label_actions")),
+                    |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            let add = ui.add_enabled(
+                                draft.hud.elements().count() < MAX_HUD_LABELS,
+                                egui::Button::new("Add label"),
+                            );
+                            let add_id = add.id;
+                            let add_keyboard =
+                                keyboard_activation && add.clicked() && add.has_focus();
+                            if add.clicked() {
                                 match draft.fresh_id(&self.session) {
                                     Ok(id) => {
-                                        let mut label = draft.hud.elements[index].clone();
-                                        if let Some(raw) = draft.precision.get(&label.id).cloned() {
-                                            draft.precision.insert(id.clone(), raw);
-                                        }
-                                        if let Some(raw) =
-                                            draft.button_arguments.get(&label.id).cloned()
-                                        {
-                                            draft.button_arguments.insert(id.clone(), raw);
-                                        }
-                                        label.id = id.clone();
-                                        draft.hud.elements.insert(index + 1, label);
+                                        draft.hud.panels[panel_index].elements.push(HudLabel {
+                                            enabled_when: None,
+                                            id: id.clone(),
+                                            source: HudSource::Static {
+                                                text: "New label".into(),
+                                            },
+                                        });
                                         draft.selected = Some(id);
                                     }
                                     Err(error) => self.error = error,
                                 }
                             }
-                        }
-                        fields.push(duplicate);
-                        let up = ui.add_enabled(
-                            selected_index.is_some_and(|index| index > 0),
-                            egui::Button::new("Move up"),
-                        );
-                        if up.clicked() {
-                            if let Some(index) = selected_index {
-                                draft.hud.elements.swap(index, index - 1);
-                                if keyboard_activation && up.has_focus() && index == 1 {
-                                    focus_after_action = selected_label_focus;
+                            fields.push(add);
+                            let duplicate = ui.add_enabled(
+                                selected_index.is_some()
+                                    && draft.hud.elements().count() < MAX_HUD_LABELS,
+                                egui::Button::new("Duplicate"),
+                            );
+                            let duplicate_keyboard =
+                                keyboard_activation && duplicate.clicked() && duplicate.has_focus();
+                            if duplicate.clicked() {
+                                if let Some(index) = selected_index {
+                                    match draft.fresh_id(&self.session) {
+                                        Ok(id) => {
+                                            let mut label = draft.hud.panels[panel_index].elements
+                                                [index]
+                                                .clone();
+                                            if let Some(raw) =
+                                                draft.precision.get(&label.id).cloned()
+                                            {
+                                                draft.precision.insert(id.clone(), raw);
+                                            }
+                                            if let Some(raw) =
+                                                draft.button_arguments.get(&label.id).cloned()
+                                            {
+                                                draft.button_arguments.insert(id.clone(), raw);
+                                            }
+                                            label.id = id.clone();
+                                            draft.hud.panels[panel_index]
+                                                .elements
+                                                .insert(index + 1, label);
+                                            draft.selected = Some(id);
+                                        }
+                                        Err(error) => self.error = error,
+                                    }
                                 }
                             }
-                        }
-                        fields.push(up);
-                        let down = ui.add_enabled(
-                            selected_index
-                                .is_some_and(|index| index + 1 < draft.hud.elements.len()),
-                            egui::Button::new("Move down"),
-                        );
-                        if down.clicked() {
-                            if let Some(index) = selected_index {
-                                draft.hud.elements.swap(index, index + 1);
-                                if keyboard_activation
-                                    && down.has_focus()
-                                    && index + 2 == draft.hud.elements.len()
+                            fields.push(duplicate);
+                            let up = ui.add_enabled(
+                                selected_index.is_some_and(|index| index > 0),
+                                egui::Button::new("Move up"),
+                            );
+                            if up.clicked() {
+                                if let Some(index) = selected_index {
+                                    draft.hud.panels[panel_index]
+                                        .elements
+                                        .swap(index, index - 1);
+                                    if keyboard_activation && up.has_focus() && index == 1 {
+                                        focus_after_action = selected_label_focus;
+                                    }
+                                }
+                            }
+                            fields.push(up);
+                            let down = ui.add_enabled(
+                                selected_index.is_some_and(|index| {
+                                    index + 1 < draft.hud.panels[panel_index].elements.len()
+                                }),
+                                egui::Button::new("Move down"),
+                            );
+                            if down.clicked() {
+                                if let Some(index) = selected_index {
+                                    draft.hud.panels[panel_index]
+                                        .elements
+                                        .swap(index, index + 1);
+                                    if keyboard_activation
+                                        && down.has_focus()
+                                        && index + 2 == draft.hud.panels[panel_index].elements.len()
+                                    {
+                                        focus_after_action = selected_label_focus;
+                                    }
+                                }
+                            }
+                            fields.push(down);
+                            let remove = ui
+                                .add_enabled(selected_index.is_some(), egui::Button::new("Remove"));
+                            if remove.clicked() {
+                                if let Some(index) = selected_index {
+                                    let removed =
+                                        draft.hud.panels[panel_index].elements.remove(index);
+                                    draft.precision.remove(&removed.id);
+                                    draft.button_arguments.remove(&removed.id);
+                                    draft.selected = draft.hud.panels[panel_index]
+                                        .elements
+                                        .get(
+                                            index.min(
+                                                draft.hud.panels[panel_index]
+                                                    .elements
+                                                    .len()
+                                                    .saturating_sub(1),
+                                            ),
+                                        )
+                                        .map(|label| label.id.clone());
+                                }
+                            }
+                            if keyboard_activation
+                                && remove.clicked()
+                                && remove.has_focus()
+                                && draft.hud.panels[panel_index].elements.is_empty()
+                            {
+                                focus_after_action = Some(add_id);
+                            } else if (add_keyboard || duplicate_keyboard)
+                                && draft.hud.elements().count() == MAX_HUD_LABELS
+                            {
+                                focus_after_action = Some(remove.id);
+                            }
+                            fields.push(remove);
+                        })
+                    },
+                );
+                if draft.selected.is_some() && draft.hud.panels.len() > 1 {
+                    let focus = ComboFocus::capture(ui, "hud_row_transfer");
+                    let mut destination = None;
+                    let choice = egui::ComboBox::from_id_salt("hud_row_transfer")
+                        .selected_text("Move row to panel…")
+                        .show_ui(ui, |ui| {
+                            for panel in &draft.hud.panels {
+                                let name = if panel.name.is_empty() {
+                                    &panel.id
+                                } else {
+                                    &panel.name
+                                };
+                                if panel.id != panel_id
+                                    && ui
+                                        .selectable_label(false, format!("{} · {}", name, panel.id))
+                                        .clicked()
                                 {
-                                    focus_after_action = selected_label_focus;
+                                    destination = Some(panel.id.clone());
+                                    ui.close();
                                 }
                             }
-                        }
-                        fields.push(down);
-                        let remove =
-                            ui.add_enabled(selected_index.is_some(), egui::Button::new("Remove"));
-                        if remove.clicked() {
-                            if let Some(index) = selected_index {
-                                let removed = draft.hud.elements.remove(index);
-                                draft.precision.remove(&removed.id);
-                                draft.button_arguments.remove(&removed.id);
-                                draft.selected = draft
-                                    .hud
-                                    .elements
-                                    .get(index.min(draft.hud.elements.len().saturating_sub(1)))
-                                    .map(|label| label.id.clone());
+                        });
+                    focus.restore(ui, &choice.response, destination.is_some());
+                    fields.push(choice.response);
+                    if let Some(destination) = destination {
+                        if let Some(row_id) = draft.selected.clone() {
+                            if let Err(error) = draft.transfer_row(&row_id, &destination) {
+                                self.error = error;
                             }
                         }
-                        if keyboard_activation
-                            && remove.clicked()
-                            && remove.has_focus()
-                            && draft.hud.elements.is_empty()
-                        {
-                            focus_after_action = Some(add_id);
-                        } else if (add_keyboard || duplicate_keyboard)
-                            && draft.hud.elements.len() == MAX_HUD_LABELS
-                        {
-                            focus_after_action = Some(remove.id);
-                        }
-                        fields.push(remove);
-                    })
-                },
-            );
-            if let Some(index) = draft
-                .selected
-                .as_ref()
-                .and_then(|id| draft.hud.elements.iter().position(|label| &label.id == id))
-            {
-                ui.separator();
-                let label = &mut draft.hud.elements[index];
-                ui.strong(format!("Edit {}", label.id));
-                let mut source_kind = match label.source {
-                    HudSource::Static { .. } => 0,
-                    HudSource::State { .. } => 1,
-                    HudSource::Button { .. } => 2,
-                };
-                let before_source = source_kind;
-                fields.push(selector(
-                    ui,
-                    "hud_source",
-                    &mut source_kind,
-                    &[(0, "Static text"), (1, "State value"), (2, "Button")],
-                ));
-                if before_source != source_kind {
-                    draft.precision.remove(&label.id);
-                    draft.button_arguments.remove(&label.id);
-                    label.source = if source_kind == 1 {
-                        draft
-                            .precision
-                            .entry(label.id.clone())
-                            .or_insert_with(|| "2".into());
-                        HudSource::State {
-                            binding_id: String::new(),
-                            field: String::new(),
-                            value_type: HudValueType::Number,
-                            prefix: String::new(),
-                            suffix: String::new(),
-                            precision: 2,
-                        }
-                    } else if source_kind == 2 {
-                        let command = HudCommandBinding {
-                            binding_id: String::new(),
-                            command_id: String::new(),
-                            arguments: StateFields::new(),
-                        };
-                        draft
-                            .button_arguments
-                            .insert(label.id.clone(), BTreeMap::new());
-                        HudSource::Button {
-                            caption: "Button".into(),
-                            command,
-                        }
-                    } else {
-                        HudSource::Static {
-                            text: String::new(),
-                        }
-                    };
+                    }
                 }
-                match &mut label.source {
-                    HudSource::Static { text } => fields.push(raw_field(
+                if let Some(index) = draft.selected.as_ref().and_then(|id| {
+                    draft.hud.panels[panel_index]
+                        .elements
+                        .iter()
+                        .position(|label| &label.id == id)
+                }) {
+                    ui.separator();
+                    let label = &mut draft.hud.panels[panel_index].elements[index];
+                    ui.strong(format!("Edit {}", label.id));
+                    let mut source_kind = match label.source {
+                        HudSource::Static { .. } => 0,
+                        HudSource::State { .. } => 1,
+                        HudSource::Button { .. } => 2,
+                    };
+                    let before_source = source_kind;
+                    fields.push(selector(
                         ui,
-                        "Text",
-                        text,
-                        1024,
-                        egui::Id::unique(("hud_text", &label.id)),
-                    )),
-                    HudSource::Button { caption, command } => {
-                        fields.push(raw_field(
+                        "hud_source",
+                        &mut source_kind,
+                        &[(0, "Static text"), (1, "State value"), (2, "Button")],
+                    ));
+                    if before_source != source_kind {
+                        if source_kind != 2 {
+                            label.enabled_when = None;
+                        }
+                        draft.precision.remove(&label.id);
+                        draft.button_arguments.remove(&label.id);
+                        label.source = if source_kind == 1 {
+                            draft
+                                .precision
+                                .entry(label.id.clone())
+                                .or_insert_with(|| "2".into());
+                            HudSource::State {
+                                binding_id: String::new(),
+                                field: String::new(),
+                                value_type: HudValueType::Number,
+                                prefix: String::new(),
+                                suffix: String::new(),
+                                precision: 2,
+                            }
+                        } else if source_kind == 2 {
+                            let command = HudCommandBinding {
+                                binding_id: String::new(),
+                                command_id: String::new(),
+                                arguments: StateFields::new(),
+                            };
+                            draft
+                                .button_arguments
+                                .insert(label.id.clone(), BTreeMap::new());
+                            HudSource::Button {
+                                caption: "Button".into(),
+                                command,
+                            }
+                        } else {
+                            HudSource::Static {
+                                text: String::new(),
+                            }
+                        };
+                    }
+                    match &mut label.source {
+                        HudSource::Static { text } => fields.push(raw_field(
                             ui,
-                            "Caption",
-                            caption,
+                            "Text",
+                            text,
                             1024,
-                            egui::Id::unique(("hud_button_caption", &label.id)),
-                        ));
-                        fields.push(raw_field(
-                            ui,
-                            "Application binding ID",
-                            &mut command.binding_id,
-                            128,
-                            egui::Id::unique(("hud_button_binding", &label.id)),
-                        ));
-                        let focus = ComboFocus::capture(ui, "hud_button_binding_choice");
-                        let mut selected = false;
-                        let mut defaults = None;
-                        let choice = egui::ComboBox::from_id_salt("hud_button_binding_choice")
-                            .selected_text("Choose enabled API5 Application binding")
-                            .show_ui(ui, |ui| {
-                                for (id, binding) in &self.session.authoring().bindings {
-                                    let supported = binding.enabled
+                            egui::Id::unique(("hud_text", &label.id)),
+                        )),
+                        HudSource::Button { caption, command } => {
+                            fields.push(raw_field(
+                                ui,
+                                "Caption",
+                                caption,
+                                1024,
+                                egui::Id::unique(("hud_button_caption", &label.id)),
+                            ));
+                            fields.push(raw_field(
+                                ui,
+                                "Application binding ID",
+                                &mut command.binding_id,
+                                128,
+                                egui::Id::unique(("hud_button_binding", &label.id)),
+                            ));
+                            let focus = ComboFocus::capture(ui, "hud_button_binding_choice");
+                            let mut selected = false;
+                            let mut defaults = None;
+                            let choice = egui::ComboBox::from_id_salt("hud_button_binding_choice")
+                                .selected_text("Choose enabled API5 Application binding")
+                                .show_ui(ui, |ui| {
+                                    for (id, binding) in &self.session.authoring().bindings {
+                                        let supported = binding.enabled
+                                            && binding.target == BindingTarget::Application
+                                            && self.session.source(&binding.source_id).is_some_and(
+                                                |source| {
+                                                    source.host_api_version == 5
+                                                        && source.language_id == "lua54"
+                                                },
+                                            );
+                                        if supported
+                                            && ui
+                                                .selectable_label(id == &command.binding_id, id)
+                                                .clicked()
+                                        {
+                                            if id != &command.binding_id {
+                                                command.binding_id = id.clone();
+                                                defaults = Some(
+                                                    binding
+                                                        .commands
+                                                        .iter()
+                                                        .next()
+                                                        .map(|(name, definition)| {
+                                                            (
+                                                                name.clone(),
+                                                                definition.arguments.clone(),
+                                                            )
+                                                        })
+                                                        .unwrap_or_else(|| {
+                                                            (String::new(), StateFields::new())
+                                                        }),
+                                                );
+                                            }
+                                            selected = true;
+                                            ui.close();
+                                        }
+                                    }
+                                });
+                            focus.restore(ui, &choice.response, selected);
+                            fields.push(choice.response);
+                            if let Some((name, arguments)) = defaults.take() {
+                                command.command_id = name;
+                                command.arguments = arguments;
+                                draft
+                                    .button_arguments
+                                    .insert(label.id.clone(), argument_drafts(&command.arguments));
+                            }
+                            fields.push(raw_field(
+                                ui,
+                                "Command ID",
+                                &mut command.command_id,
+                                128,
+                                egui::Id::unique(("hud_button_command", &label.id)),
+                            ));
+                            let binding =
+                                self.session.binding(&command.binding_id).filter(|binding| {
+                                    binding.enabled
                                         && binding.target == BindingTarget::Application
                                         && self.session.source(&binding.source_id).is_some_and(
                                             |source| {
                                                 source.host_api_version == 5
                                                     && source.language_id == "lua54"
                                             },
-                                        );
-                                    if supported
-                                        && ui
-                                            .selectable_label(id == &command.binding_id, id)
-                                            .clicked()
-                                    {
-                                        if id != &command.binding_id {
-                                            command.binding_id = id.clone();
-                                            defaults = Some(
-                                                binding
-                                                    .commands
-                                                    .iter()
-                                                    .next()
-                                                    .map(|(name, definition)| {
-                                                        (name.clone(), definition.arguments.clone())
-                                                    })
-                                                    .unwrap_or_else(|| {
-                                                        (String::new(), StateFields::new())
-                                                    }),
-                                            );
-                                        }
-                                        selected = true;
-                                        ui.close();
-                                    }
-                                }
-                            });
-                        focus.restore(ui, &choice.response, selected);
-                        fields.push(choice.response);
-                        if let Some((name, arguments)) = defaults.take() {
-                            command.command_id = name;
-                            command.arguments = arguments;
-                            draft
-                                .button_arguments
-                                .insert(label.id.clone(), argument_drafts(&command.arguments));
-                        }
-                        fields.push(raw_field(
-                            ui,
-                            "Command ID",
-                            &mut command.command_id,
-                            128,
-                            egui::Id::unique(("hud_button_command", &label.id)),
-                        ));
-                        let binding = self.session.binding(&command.binding_id).filter(|binding| {
-                            binding.enabled
-                                && binding.target == BindingTarget::Application
-                                && self
-                                    .session
-                                    .source(&binding.source_id)
-                                    .is_some_and(|source| {
-                                        source.host_api_version == 5
-                                            && source.language_id == "lua54"
-                                    })
-                        });
-                        let focus = ComboFocus::capture(ui, "hud_button_command_choice");
-                        let mut selected = false;
-                        let choice = egui::ComboBox::from_id_salt("hud_button_command_choice")
-                            .selected_text("Choose declared command")
-                            .show_ui(ui, |ui| {
-                                if let Some(binding) = binding {
-                                    for (name, definition) in &binding.commands {
-                                        if ui
-                                            .selectable_label(name == &command.command_id, name)
-                                            .clicked()
-                                        {
-                                            if name != &command.command_id {
-                                                defaults = Some((
-                                                    name.clone(),
-                                                    definition.arguments.clone(),
-                                                ));
+                                        )
+                                });
+                            let focus = ComboFocus::capture(ui, "hud_button_command_choice");
+                            let mut selected = false;
+                            let choice = egui::ComboBox::from_id_salt("hud_button_command_choice")
+                                .selected_text("Choose declared command")
+                                .show_ui(ui, |ui| {
+                                    if let Some(binding) = binding {
+                                        for (name, definition) in &binding.commands {
+                                            if ui
+                                                .selectable_label(name == &command.command_id, name)
+                                                .clicked()
+                                            {
+                                                if name != &command.command_id {
+                                                    defaults = Some((
+                                                        name.clone(),
+                                                        definition.arguments.clone(),
+                                                    ));
+                                                }
+                                                selected = true;
+                                                ui.close();
                                             }
-                                            selected = true;
-                                            ui.close();
                                         }
                                     }
-                                }
-                            });
-                        focus.restore(ui, &choice.response, selected);
-                        fields.push(choice.response);
-                        let definition =
-                            binding.and_then(|binding| binding.commands.get(&command.command_id));
-                        let reset = ui.add_enabled(
-                            definition.is_some(),
-                            egui::Button::new("Use command defaults"),
-                        );
-                        if reset.clicked() {
-                            if let Some(definition) = definition {
-                                defaults = Some((
-                                    command.command_id.clone(),
-                                    definition.arguments.clone(),
-                                ));
-                            }
-                        }
-                        fields.push(reset);
-                        if let Some((name, arguments)) = defaults {
-                            command.command_id = name;
-                            command.arguments = arguments;
-                            draft
-                                .button_arguments
-                                .insert(label.id.clone(), argument_drafts(&command.arguments));
-                        }
-                        let raw = draft
-                            .button_arguments
-                            .entry(label.id.clone())
-                            .or_insert_with(|| argument_drafts(&command.arguments));
-                        if raw.is_empty() {
-                            ui.small("This command has no arguments.");
-                        }
-                        for (name, value) in raw {
-                            ui.label(format!("Argument {name}"));
-                            let is_bool = matches!(value, ValueDraft::Bool(_));
-                            ui.push_id(("hud_button_argument", &label.id, name), |ui| {
-                                let response = value_ui(
-                                    ui,
-                                    value,
-                                    &self.session,
-                                    &[],
-                                    self.draft_generation,
-                                    &mut false,
-                                );
-                                if response.focused {
-                                    if let Some(id) = response.focus_id {
-                                        argument_focus.push(id);
-                                    }
-                                    ui.scroll_to_rect(ui.min_rect(), None);
-                                }
-                                argument_activation_owned |=
-                                    is_bool && keyboard_activation && response.changed;
-                            });
-                        }
-                        if let Some(diagnostic) = ruster_scene::hud::hud_button_command_diagnostic(
-                            self.session.authoring(),
-                            command,
-                        ) {
-                            ui.colored_label(
-                                egui::Color32::YELLOW,
-                                format!("Command unavailable. {diagnostic:?}"),
+                                });
+                            focus.restore(ui, &choice.response, selected);
+                            fields.push(choice.response);
+                            let definition = binding
+                                .and_then(|binding| binding.commands.get(&command.command_id));
+                            let reset = ui.add_enabled(
+                                definition.is_some(),
+                                egui::Button::new("Use command defaults"),
                             );
-                        }
-                        ui.small("Choose a binding and command to copy its typed defaults, then edit every argument. Broken targets remain available for caption and layout repair.");
-                    }
-                    HudSource::State {
-                        binding_id,
-                        field,
-                        value_type: expected,
-                        prefix,
-                        suffix,
-                        ..
-                    } => {
-                        fields.push(raw_field(
-                            ui,
-                            "Binding ID",
-                            binding_id,
-                            128,
-                            egui::Id::unique(("hud_binding", &label.id)),
-                        ));
-                        let focus = ComboFocus::capture(ui, "hud_binding_choice");
-                        let mut selected = false;
-                        let choice = egui::ComboBox::from_id_salt("hud_binding_choice")
-                            .selected_text("Choose enabled binding")
-                            .show_ui(ui, |ui| {
-                                for (id, binding) in &self.session.authoring().bindings {
-                                    if binding.enabled
-                                        && self
-                                            .session
-                                            .authoring()
-                                            .sources
-                                            .contains_key(&binding.source_id)
-                                        && !binding.state_defaults.is_empty()
-                                        && ui
-                                            .selectable_label(
-                                                id.as_str() == binding_id.as_str(),
-                                                id,
-                                            )
-                                            .clicked()
-                                    {
-                                        *binding_id = id.clone();
-                                        selected = true;
-                                        ui.close();
-                                    }
+                            if reset.clicked() {
+                                if let Some(definition) = definition {
+                                    defaults = Some((
+                                        command.command_id.clone(),
+                                        definition.arguments.clone(),
+                                    ));
                                 }
-                            });
-                        focus.restore(ui, &choice.response, selected);
-                        fields.push(choice.response);
-                        fields.push(raw_field(
-                            ui,
-                            "Field",
+                            }
+                            fields.push(reset);
+                            if let Some((name, arguments)) = defaults {
+                                command.command_id = name;
+                                command.arguments = arguments;
+                                draft
+                                    .button_arguments
+                                    .insert(label.id.clone(), argument_drafts(&command.arguments));
+                            }
+                            let raw = draft
+                                .button_arguments
+                                .entry(label.id.clone())
+                                .or_insert_with(|| argument_drafts(&command.arguments));
+                            if raw.is_empty() {
+                                ui.small("This command has no arguments.");
+                            }
+                            for (name, value) in raw {
+                                ui.label(format!("Argument {name}"));
+                                let is_bool = matches!(value, ValueDraft::Bool(_));
+                                ui.push_id(("hud_button_argument", &label.id, name), |ui| {
+                                    let response = value_ui(
+                                        ui,
+                                        value,
+                                        &self.session,
+                                        &[],
+                                        self.draft_generation,
+                                        &mut false,
+                                    );
+                                    if response.focused {
+                                        if let Some(id) = response.focus_id {
+                                            argument_focus.push(id);
+                                        }
+                                        ui.scroll_to_rect(ui.min_rect(), None);
+                                    }
+                                    argument_activation_owned |=
+                                        is_bool && keyboard_activation && response.changed;
+                                });
+                            }
+                            if let Some(diagnostic) =
+                                ruster_scene::hud::hud_button_command_diagnostic(
+                                    self.session.authoring(),
+                                    command,
+                                )
+                            {
+                                ui.colored_label(
+                                    egui::Color32::YELLOW,
+                                    format!("Command unavailable. {diagnostic:?}"),
+                                );
+                            }
+                            ui.small("Choose a binding and command to copy its typed defaults, then edit every argument. Broken targets remain available for caption and layout repair.");
+                        }
+                        HudSource::State {
+                            binding_id,
                             field,
-                            128,
-                            egui::Id::unique(("hud_field", &label.id)),
-                        ));
-                        let focus = ComboFocus::capture(ui, "hud_field_choice");
-                        let mut selected = false;
-                        let choice = egui::ComboBox::from_id_salt("hud_field_choice")
-                            .selected_text("Choose state field")
-                            .show_ui(ui, |ui| {
-                                if let Some(binding) = self
-                                    .session
-                                    .authoring()
-                                    .bindings
-                                    .get(binding_id)
-                                    .filter(|binding| binding.enabled)
-                                {
-                                    for (name, value) in &binding.state_defaults {
-                                        if ui
-                                            .selectable_label(
-                                                name.as_str() == field.as_str(),
-                                                format!(
-                                                    "{} · {}",
-                                                    name,
-                                                    type_name(value_type(value))
-                                                ),
-                                            )
-                                            .clicked()
+                            value_type: expected,
+                            prefix,
+                            suffix,
+                            ..
+                        } => {
+                            fields.push(raw_field(
+                                ui,
+                                "Binding ID",
+                                binding_id,
+                                128,
+                                egui::Id::unique(("hud_binding", &label.id)),
+                            ));
+                            let focus = ComboFocus::capture(ui, "hud_binding_choice");
+                            let mut selected = false;
+                            let choice = egui::ComboBox::from_id_salt("hud_binding_choice")
+                                .selected_text("Choose enabled binding")
+                                .show_ui(ui, |ui| {
+                                    for (id, binding) in &self.session.authoring().bindings {
+                                        if binding.enabled
+                                            && self
+                                                .session
+                                                .authoring()
+                                                .sources
+                                                .contains_key(&binding.source_id)
+                                            && !binding.state_defaults.is_empty()
+                                            && ui
+                                                .selectable_label(
+                                                    id.as_str() == binding_id.as_str(),
+                                                    id,
+                                                )
+                                                .clicked()
                                         {
-                                            *field = name.clone();
-                                            *expected = value_type(value);
+                                            *binding_id = id.clone();
                                             selected = true;
                                             ui.close();
                                         }
                                     }
-                                }
-                            });
-                        focus.restore(ui, &choice.response, selected);
-                        fields.push(choice.response);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.label("Expected type");
-                            fields.push(selector(
+                                });
+                            focus.restore(ui, &choice.response, selected);
+                            fields.push(choice.response);
+                            fields.push(raw_field(
                                 ui,
-                                "hud_expected_type",
-                                expected,
-                                &[
-                                    (HudValueType::Number, "Number"),
-                                    (HudValueType::Bool, "Bool"),
-                                    (HudValueType::Text, "Text"),
-                                    (HudValueType::Vec3, "Vec3"),
-                                ],
+                                "Field",
+                                field,
+                                128,
+                                egui::Id::unique(("hud_field", &label.id)),
                             ));
-                        });
-                        fields.push(raw_field(
+                            let focus = ComboFocus::capture(ui, "hud_field_choice");
+                            let mut selected = false;
+                            let choice = egui::ComboBox::from_id_salt("hud_field_choice")
+                                .selected_text("Choose state field")
+                                .show_ui(ui, |ui| {
+                                    if let Some(binding) = self
+                                        .session
+                                        .authoring()
+                                        .bindings
+                                        .get(binding_id)
+                                        .filter(|binding| binding.enabled)
+                                    {
+                                        for (name, value) in &binding.state_defaults {
+                                            if ui
+                                                .selectable_label(
+                                                    name.as_str() == field.as_str(),
+                                                    format!(
+                                                        "{} · {}",
+                                                        name,
+                                                        type_name(value_type(value))
+                                                    ),
+                                                )
+                                                .clicked()
+                                            {
+                                                *field = name.clone();
+                                                *expected = value_type(value);
+                                                selected = true;
+                                                ui.close();
+                                            }
+                                        }
+                                    }
+                                });
+                            focus.restore(ui, &choice.response, selected);
+                            fields.push(choice.response);
+                            ui.horizontal_wrapped(|ui| {
+                                ui.label("Expected type");
+                                fields.push(selector(
+                                    ui,
+                                    "hud_expected_type",
+                                    expected,
+                                    &[
+                                        (HudValueType::Number, "Number"),
+                                        (HudValueType::Bool, "Bool"),
+                                        (HudValueType::Text, "Text"),
+                                        (HudValueType::Vec3, "Vec3"),
+                                    ],
+                                ));
+                            });
+                            fields.push(raw_field(
+                                ui,
+                                "Prefix",
+                                prefix,
+                                1024_usize.saturating_sub(suffix.len()),
+                                egui::Id::unique(("hud_prefix", &label.id)),
+                            ));
+                            fields.push(raw_field(
+                                ui,
+                                "Suffix",
+                                suffix,
+                                1024_usize.saturating_sub(prefix.len()),
+                                egui::Id::unique(("hud_suffix", &label.id)),
+                            ));
+                            let precision = draft
+                                .precision
+                                .entry(label.id.clone())
+                                .or_insert_with(|| "2".into());
+                            fields.push(raw_field(
+                                ui,
+                                "Decimal places (0–6)",
+                                precision,
+                                64,
+                                egui::Id::unique(("hud_precision", &label.id)),
+                            ));
+                            ui.small("Broken references stay visible for repair. A new reference must select an enabled typed state field.");
+                        }
+                    }
+                    if matches!(label.source, HudSource::Button { .. }) {
+                        condition_ui(
                             ui,
-                            "Prefix",
-                            prefix,
-                            1024_usize.saturating_sub(suffix.len()),
-                            egui::Id::unique(("hud_prefix", &label.id)),
-                        ));
-                        fields.push(raw_field(
-                            ui,
-                            "Suffix",
-                            suffix,
-                            1024_usize.saturating_sub(prefix.len()),
-                            egui::Id::unique(("hud_suffix", &label.id)),
-                        ));
-                        let precision = draft
-                            .precision
-                            .entry(label.id.clone())
-                            .or_insert_with(|| "2".into());
-                        fields.push(raw_field(
-                            ui,
-                            "Decimal places (0–6)",
-                            precision,
-                            64,
-                            egui::Id::unique(("hud_precision", &label.id)),
-                        ));
-                        ui.small("Broken references stay visible for repair. A new reference must select an enabled typed state field.");
+                            "Enabled",
+                            egui::Id::unique(("hud_enabled_when", &label.id)),
+                            &mut label.enabled_when,
+                            &self.session,
+                            &mut fields,
+                        );
                     }
                 }
+            } else {
+                ui.label("Add a panel to arrange text and controls.");
             }
             for response in &fields {
                 if response.has_focus() {
@@ -1002,6 +1505,7 @@ impl SceneEditor {
         };
         egui::ScrollArea::vertical()
             .id_salt("hud_form_scroll")
+            .animated(false)
             .max_height(body_height)
             .min_scrolled_height(0.0)
             .show(ui, |ui| {
@@ -1109,7 +1613,7 @@ impl SceneEditor {
         shown_frame: Option<&crate::behavior_worker::Frame>,
     ) {
         let hud = shown_frame.map_or_else(|| self.session.hud(), |frame| &frame.authoring.hud);
-        if !hud.enabled || hud.elements.is_empty() {
+        if !hud.enabled || hud.panels.is_empty() {
             self.hud_cache.clear();
             self.hud_last_prepared = None;
             return;
@@ -1172,21 +1676,20 @@ impl SceneEditor {
             .as_mut()
             .and_then(|previous| previous.get_mut("resolved"))
         {
-            Some(values)
-                if self.hud_cache.formatted_labels() == 0
-                    && values["labels"].as_array().is_some_and(|labels| {
-                        labels.len() == self.hud_cache.resolved().labels.len()
-                    }) =>
-            {
-                values.take()
-            }
+            Some(values) if !self.hud_cache.resolved_changed() => values.take(),
             _ => json!(self.hud_cache.resolved()),
         };
         observation["clipped"] = json!(report.clipped);
         observation["painted_label_ids"] = json!(report
             .label_indices
             .iter()
-            .filter_map(|index| self.hud_cache.resolved().labels.get(*index))
+            .filter_map(|index| self
+                .hud_cache
+                .resolved()
+                .panels
+                .iter()
+                .flat_map(|panel| &panel.labels)
+                .nth(*index))
             .map(|label| label.id.as_str())
             .collect::<Vec<_>>());
         self.hud_last_prepared = Some(observation);
@@ -1196,6 +1699,32 @@ impl SceneEditor {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn draft_with_panel(session: &Session) -> HudDraft {
+        let mut draft = HudDraft::new(session);
+        if draft.hud.panels.is_empty() {
+            draft.add_panel(session).unwrap();
+        }
+        draft
+    }
+
+    fn first_style_mut(draft: &mut HudDraft) -> &mut RawPanelStyle {
+        draft.panel_styles.get_mut(&draft.hud.panels[0].id).unwrap()
+    }
+
+    fn first_style(draft: &HudDraft) -> &RawPanelStyle {
+        &draft.panel_styles[&draft.hud.panels[0].id]
+    }
+
+    fn first_style_id(editor: &SceneEditor, field: &str) -> egui::Id {
+        let id = editor
+            .hud_draft
+            .as_ref()
+            .and_then(|draft| draft.selected_panel.as_ref())
+            .or_else(|| editor.session.hud().panels.first().map(|panel| &panel.id))
+            .unwrap();
+        panel_style_id(id, field)
+    }
 
     fn button_editor() -> SceneEditor {
         use ruster_scene::{BehaviorBinding, BehaviorSource, CommandDefinition};
@@ -1237,18 +1766,21 @@ mod tests {
                 1,
                 Hud {
                     enabled: true,
-                    elements: vec![HudLabel {
-                        id: "button".into(),
-                        source: HudSource::Button {
-                            caption: "Adjust".into(),
-                            command: HudCommandBinding {
-                                binding_id: "application".into(),
-                                command_id: "adjust".into(),
-                                arguments,
+                    panels: vec![HudPanel {
+                        elements: vec![HudLabel {
+                            enabled_when: None,
+                            id: "button".into(),
+                            source: HudSource::Button {
+                                caption: "Adjust".into(),
+                                command: HudCommandBinding {
+                                    binding_id: "application".into(),
+                                    command_id: "adjust".into(),
+                                    arguments,
+                                },
                             },
-                        },
+                        }],
+                        ..HudPanel::default()
                     }],
-                    ..Hud::default()
                 },
             )
             .unwrap();
@@ -1292,23 +1824,29 @@ mod tests {
                 Session::new(ruster_scene::Scene::empty("hud-scaled-footer")).unwrap();
             let hud = Hud {
                 enabled: true,
-                elements: (0..MAX_HUD_LABELS)
-                    .map(|index| HudLabel {
-                        id: format!("instrument-label-{index}"),
-                        source: HudSource::Static {
-                            text: format!("Instrument reading {index}"),
-                        },
-                    })
-                    .collect(),
-                ..Hud::default()
+                panels: vec![HudPanel {
+                    elements: (0..MAX_HUD_LABELS)
+                        .map(|index| HudLabel {
+                            enabled_when: None,
+                            id: format!("instrument-label-{index}"),
+                            source: HudSource::Static {
+                                text: format!("Instrument reading {index}"),
+                            },
+                        })
+                        .collect(),
+                    ..HudPanel::default()
+                }],
             };
             session.set_hud(session.scene().revision, hud).unwrap();
             let mut editor = SceneEditor::new(session);
             editor.select_object(None, false);
-            let mut draft = HudDraft::new(&editor.session);
-            draft.width = "-".into();
-            draft.selected = draft.hud.elements.last().map(|label| label.id.clone());
-            let selected = draft.hud.elements.last_mut().unwrap();
+            let mut draft = draft_with_panel(&editor.session);
+            first_style_mut(&mut draft).width = "-".into();
+            draft.selected = draft.hud.panels[0]
+                .elements
+                .last()
+                .map(|label| label.id.clone());
+            let selected = draft.hud.panels[0].elements.last_mut().unwrap();
             selected.source = HudSource::State {
                 binding_id: "application".into(),
                 field: "instrument_reading".into(),
@@ -1353,8 +1891,8 @@ mod tests {
                         "HUD footer button {label:?} at {padded:?} outside viewport {screen:?} at scale {scale}");
                 }
             }
-            let width = egui::Id::unique("hud_width");
-            let margin = egui::Id::unique("hud_margin");
+            let width = first_style_id(&editor, "width");
+            let margin = first_style_id(&editor, "margin");
             // Establish the real TextEdit's keyboard focus without targeting
             // a field that may already be partly outside the scroll viewport.
             // Native pointer acquisition is exercised separately.
@@ -1414,8 +1952,8 @@ mod tests {
     #[test]
     fn raw_hud_drafts_roundtrip_bound_unfinished_values_and_validate_original_identity() {
         let session = Session::new(ruster_scene::Scene::empty("hud")).unwrap();
-        let mut draft = HudDraft::new(&session);
-        draft.width = "unfinished".into();
+        let mut draft = draft_with_panel(&session);
+        first_style_mut(&mut draft).width = "unfinished".into();
         assert!(draft.storage_valid());
         assert!(draft.validate_snapshot(&session));
         assert!(draft.value().is_err());
@@ -1436,16 +1974,17 @@ mod tests {
         draft.original_sha256 = "z".repeat(64);
         assert!(!draft.storage_valid());
         draft.original_sha256 = baseline_hash;
-        draft.width = "64.0000000001".into();
+        first_style_mut(&mut draft).width = "64.0000000001".into();
         assert!(draft.value().is_ok());
-        draft.margin = "NaN".into();
+        first_style_mut(&mut draft).margin = "NaN".into();
         assert!(draft.value().is_err());
-        draft.margin = "0".into();
-        draft.width = "x".repeat(65);
+        first_style_mut(&mut draft).margin = "0".into();
+        first_style_mut(&mut draft).width = "x".repeat(65);
         assert!(!draft.storage_valid());
-        draft.width = "320".into();
+        first_style_mut(&mut draft).width = "320".into();
         let mut references = draft.clone();
-        references.hud.elements.push(HudLabel {
+        references.hud.panels[0].elements.push(HudLabel {
+            enabled_when: None,
             id: "reading".into(),
             source: HudSource::State {
                 binding_id: "b".repeat(128),
@@ -1459,7 +1998,31 @@ mod tests {
         references.precision.insert("reading".into(), "2".into());
         assert!(references.storage_valid());
         assert!(references.value().is_ok());
-        if let HudSource::State { binding_id, .. } = &mut references.hud.elements[0].source {
+        references.precision.remove("reading");
+        assert!(references.storage_valid());
+        assert!(references
+            .value()
+            .unwrap_err()
+            .contains("precision is missing"));
+        references.precision.insert("reading".into(), "2".into());
+        let mut inactive_precision = references.clone();
+        inactive_precision.hud.panels[0].elements[0].source = HudSource::Static {
+            text: "Retained".into(),
+        };
+        assert!(inactive_precision.storage_valid());
+        assert!(inactive_precision.value().is_ok());
+        assert_eq!(
+            serde_json::from_slice::<HudDraft>(&serde_json::to_vec(&inactive_precision).unwrap())
+                .unwrap(),
+            inactive_precision
+        );
+        inactive_precision
+            .precision
+            .insert("missing-row".into(), "2".into());
+        assert!(!inactive_precision.storage_valid());
+        if let HudSource::State { binding_id, .. } =
+            &mut references.hud.panels[0].elements[0].source
+        {
             binding_id.push('b');
         }
         assert!(!references.storage_valid());
@@ -1475,43 +2038,40 @@ mod tests {
         let mut session = Session::new(ruster_scene::Scene::empty("hud-cap-recovery")).unwrap();
         let hud = Hud {
             enabled: true,
-            elements: (0..MAX_HUD_LABELS)
-                .map(|index| HudLabel {
-                    id: format!("label-{index}"),
-                    source: HudSource::Static {
-                        text: "\u{1}".repeat(1024),
-                    },
-                })
-                .collect(),
-            ..Hud::default()
+            panels: vec![HudPanel {
+                elements: (0..MAX_HUD_LABELS)
+                    .map(|index| HudLabel {
+                        enabled_when: None,
+                        id: format!("label-{index}"),
+                        source: HudSource::Static {
+                            text: "\u{1}".repeat(1024),
+                        },
+                    })
+                    .collect(),
+                ..HudPanel::default()
+            }],
         };
         session
             .set_hud(session.scene().revision, hud.clone())
             .unwrap();
         let mut editor = SceneEditor::new(session);
         editor.select_object(None, false);
-        let mut draft = HudDraft::new(&editor.session);
-        draft.width = "-".into();
+        let mut draft = draft_with_panel(&editor.session);
+        first_style_mut(&mut draft).width = "-".into();
         editor.hud_draft = Some(draft.clone());
         let snapshot = editor.recovery_snapshot().unwrap();
         let drafts = snapshot.drafts().unwrap();
-        assert_eq!(drafts["version"], 14);
-        let mut legacy = drafts.clone();
-        legacy["version"] = json!(13);
-        let mut old_shape = legacy.clone();
-        old_shape["hud"]
-            .as_object_mut()
-            .unwrap()
-            .remove("button_arguments");
-        let mut migrated = SceneEditor::new(
+        assert_eq!(drafts["version"], 15);
+        let mut relabeled = drafts.clone();
+        relabeled["version"] = json!(14);
+        let mut rejected = SceneEditor::new(
             Session::from_snapshot_bytes(&editor.session.snapshot_bytes().unwrap()).unwrap(),
         );
-        migrated.restore_recovery_drafts(old_shape).unwrap();
-        assert_eq!(migrated.hud_draft.as_ref(), Some(&draft));
-        assert!(migrated
-            .restore_recovery_drafts(legacy)
+        assert!(rejected
+            .restore_recovery_drafts(relabeled)
             .unwrap_err()
-            .contains("version14"));
+            .contains("version15"));
+        assert_eq!(rejected.session.hud(), editor.session.hud());
         assert!(serde_json::to_vec(&drafts).unwrap().len() < 256 * 1024);
         assert!(drafts["hud"].get("original").is_none());
         assert_eq!(drafts["hud"]["original_sha256"], draft.original_sha256);
@@ -1536,12 +2096,15 @@ mod tests {
         );
         assert_eq!(restored.hud_draft.as_ref(), Some(&draft));
         assert!(!restored.apply_hud_draft());
-        assert_eq!(restored.hud_draft.as_ref().unwrap().width, "-");
-        restored.hud_draft.as_mut().unwrap().width = "321".into();
+        assert_eq!(first_style(restored.hud_draft.as_ref().unwrap()).width, "-");
+        first_style_mut(restored.hud_draft.as_mut().unwrap()).width = "321".into();
         assert!(restored.apply_hud_draft(), "{}", restored.error);
         assert!(restored.hud_draft.is_none());
-        assert_eq!(restored.session.hud().width, 321.0);
-        assert_eq!(restored.session.hud().elements, hud.elements);
+        assert_eq!(restored.session.hud().panels[0].width, 321.0);
+        assert_eq!(
+            restored.session.hud().panels[0].elements,
+            hud.panels[0].elements
+        );
     }
 
     // Raw Number/Vec3 command constants must survive an actual recovery journal,
@@ -1550,7 +2113,7 @@ mod tests {
     fn hud_button_arguments_restore_unfinished_constants_and_apply_atomically() {
         let mut editor = button_editor();
         let original = editor.session.snapshot_bytes().unwrap();
-        let mut draft = HudDraft::new(&editor.session);
+        let mut draft = draft_with_panel(&editor.session);
         let arguments = draft.button_arguments.get_mut("button").unwrap();
         arguments.insert("number".into(), ValueDraft::Number("-".into()));
         arguments.insert(
@@ -1561,9 +2124,9 @@ mod tests {
         assert!(draft.value().is_err());
         editor.hud_draft = Some(draft.clone());
         let snapshot = editor.recovery_snapshot().unwrap();
-        assert_eq!(snapshot.drafts().unwrap()["version"], 14);
+        assert_eq!(snapshot.drafts().unwrap()["version"], 15);
         let mut relabeled = snapshot.drafts().unwrap();
-        relabeled["version"] = json!(13);
+        relabeled["version"] = json!(14);
         relabeled["hud"]
             .as_object_mut()
             .unwrap()
@@ -1572,7 +2135,7 @@ mod tests {
         assert!(rejected
             .restore_recovery_drafts(relabeled)
             .unwrap_err()
-            .contains("version14"));
+            .contains("version15"));
         assert_eq!(rejected.session.snapshot_bytes().unwrap(), original);
         assert!(
             serde_json::to_vec(&snapshot.drafts().unwrap())
@@ -1607,7 +2170,7 @@ mod tests {
             ValueDraft::Vec3(["1".into(), "2.5".into(), "3".into()]),
         );
         assert!(restored.apply_hud_draft(), "{}", restored.error);
-        let command = restored.session.hud().elements[0]
+        let command = restored.session.hud().panels[0].elements[0]
             .source
             .command_binding()
             .unwrap();
@@ -1644,14 +2207,27 @@ mod tests {
             .insert("number".into(), ValueDraft::Bool(true));
         assert!(!wrong_type.storage_valid());
         let mut bounded = HudDraft::new(&editor.session);
-        let template = bounded.hud.elements[0].clone();
+        let mut without_raw_arguments = bounded.clone();
+        without_raw_arguments.button_arguments.clear();
+        assert!(without_raw_arguments.storage_valid());
+        assert_eq!(
+            without_raw_arguments.value().unwrap(),
+            *editor.session.hud()
+        );
+        assert!(serde_json::from_slice::<HudDraft>(
+            &serde_json::to_vec(&without_raw_arguments).unwrap()
+        )
+        .unwrap()
+        .button_arguments
+        .is_empty());
+        let template = bounded.hud.panels[0].elements[0].clone();
         let raw = bounded.button_arguments["button"].clone();
         let mut crossed = false;
         for index in 1..MAX_HUD_LABELS {
             let id = format!("copy-{index}");
             let mut label = template.clone();
             label.id = id.clone();
-            bounded.hud.elements.push(label);
+            bounded.hud.panels[0].elements.push(label);
             bounded.button_arguments.insert(id, raw.clone());
             if !bounded.storage_valid() {
                 crossed = true;
@@ -1664,15 +2240,168 @@ mod tests {
         );
     }
 
+    // One grouped draft owns hidden panels, per-panel raw style and globally
+    // identified row drafts across transfer, duplication, reorder and recovery.
+    #[test]
+    fn panel_drafts_preserve_raw_styles_conditions_and_global_rows() {
+        let mut editor = button_editor();
+        editor
+            .session
+            .set_state_default(
+                editor.session.scene().revision,
+                "application",
+                "ready",
+                Some(StateValue::Bool(true)),
+            )
+            .unwrap();
+        let original = editor.session.hud().clone();
+        let mut draft = HudDraft::new(&editor.session);
+        let first = draft.hud.panels[0].id.clone();
+        let condition = BoolCondition {
+            binding_id: "application".into(),
+            field: "ready".into(),
+            expected: true,
+        };
+        draft.hud.panels[0].visible_when = Some(condition.clone());
+        draft.hud.panels[0].anchor = HudAnchor::Center;
+        draft.hud.panels[0].elements[0].enabled_when = Some(BoolCondition {
+            expected: false,
+            ..condition.clone()
+        });
+        draft.panel_styles.get_mut(&first).unwrap().width = "-".into();
+        draft
+            .button_arguments
+            .get_mut("button")
+            .unwrap()
+            .insert("number".into(), ValueDraft::Number("-".into()));
+        draft.add_panel(&editor.session).unwrap();
+        let second = draft.selected_panel.clone().unwrap();
+        draft.panel_styles.get_mut(&second).unwrap().margin = "NaN".into();
+        draft.transfer_row("button", &second).unwrap();
+        assert_eq!(draft.selected_panel.as_deref(), Some(second.as_str()));
+        assert_eq!(draft.selected.as_deref(), Some("button"));
+        let reading = draft.fresh_id(&editor.session).unwrap();
+        draft.hud.panels[1].elements.push(HudLabel {
+            id: reading.clone(),
+            enabled_when: None,
+            source: HudSource::State {
+                binding_id: "application".into(),
+                field: "ready".into(),
+                value_type: HudValueType::Bool,
+                prefix: "Ready ".into(),
+                suffix: String::new(),
+                precision: 2,
+            },
+        });
+        draft.precision.insert(reading.clone(), "-".into());
+        draft.duplicate_panel(&editor.session, 1).unwrap();
+        let duplicate = draft.selected_panel.clone().unwrap();
+        let copied_rows: Vec<_> = draft.hud.panels[2]
+            .elements
+            .iter()
+            .map(|row| row.id.clone())
+            .collect();
+        assert_ne!(copied_rows[0], "button");
+        assert_ne!(copied_rows[1], reading);
+        assert_eq!(
+            draft.button_arguments[&copied_rows[0]],
+            draft.button_arguments["button"]
+        );
+        assert_eq!(draft.precision[&copied_rows[1]], "-");
+        assert_eq!(
+            draft.hud.panels[2].elements[0].enabled_when,
+            draft.hud.panels[1].elements[0].enabled_when
+        );
+        draft.hud.panels.swap(0, 2);
+        draft.select_panel(&first);
+        assert_eq!(draft.panel_styles[&first].width, "-");
+        assert_eq!(draft.panel_styles[&second].margin, "NaN");
+        draft.select_panel(&second);
+        assert!(draft.storage_valid());
+        assert!(draft.value().is_err());
+        assert_eq!(
+            serde_json::from_slice::<HudDraft>(&serde_json::to_vec(&draft).unwrap()).unwrap(),
+            draft
+        );
+        let mut bad_selection = draft.clone();
+        bad_selection.selected_panel = Some(first.clone());
+        assert!(!bad_selection.storage_valid());
+        let mut missing_style = draft.clone();
+        missing_style.panel_styles.remove(&first);
+        assert!(!missing_style.storage_valid());
+        let mut unfinished = draft.clone();
+        let condition = unfinished
+            .hud
+            .panels
+            .iter_mut()
+            .find(|panel| panel.id == first)
+            .unwrap()
+            .visible_when
+            .as_mut()
+            .unwrap();
+        condition.binding_id.clear();
+        condition.field.clear();
+        assert!(unfinished.storage_valid());
+        assert!(unfinished.value().is_err());
+        editor.hud_draft = Some(draft.clone());
+        let snapshot = editor.recovery_snapshot().unwrap();
+        assert_eq!(snapshot.drafts().unwrap()["version"], 15);
+        let mut restored = SceneEditor::new(snapshot.restore().unwrap());
+        restored
+            .restore_recovery_drafts(snapshot.drafts().unwrap())
+            .unwrap();
+        assert_eq!(restored.hud_draft.as_ref(), Some(&draft));
+        assert!(!restored.apply_hud_draft());
+        assert_eq!(restored.session.hud(), &original);
+        let raw = restored.hud_draft.as_mut().unwrap();
+        let index = raw
+            .hud
+            .panels
+            .iter()
+            .position(|panel| panel.id == duplicate)
+            .unwrap();
+        raw.remove_panel(index);
+        assert!(!raw.panel_styles.contains_key(&duplicate));
+        assert!(!raw.button_arguments.contains_key(&copied_rows[0]));
+        assert!(!raw.precision.contains_key(&copied_rows[1]));
+        raw.panel_styles.get_mut(&first).unwrap().width = "480".into();
+        raw.panel_styles.get_mut(&second).unwrap().margin = "16".into();
+        raw.button_arguments
+            .get_mut("button")
+            .unwrap()
+            .insert("number".into(), ValueDraft::Number("1.5".into()));
+        raw.precision.insert(reading, "2".into());
+        let revision = restored.session.scene().revision;
+        let undo = restored.session.undo_len();
+        assert!(restored.apply_hud_draft(), "{}", restored.error);
+        assert_eq!(restored.session.scene().revision, revision + 1);
+        assert_eq!(restored.session.undo_len(), undo + 1);
+        assert_eq!(restored.session.hud().panels.len(), 2);
+        assert_eq!(
+            restored
+                .session
+                .hud()
+                .panels
+                .iter()
+                .find(|panel| panel.id == first)
+                .unwrap()
+                .anchor,
+            HudAnchor::Center
+        );
+        restored
+            .session
+            .undo(restored.session.scene().revision)
+            .unwrap();
+        assert_eq!(restored.session.hud(), &original);
+    }
+
     #[test]
     fn hud_owned_enter_keeps_errors_escape_cancels_and_apply_is_one_undo() {
         let session = Session::new(ruster_scene::Scene::empty("hud")).unwrap();
         let mut editor = SceneEditor::new(session);
         editor.select_object(None, false);
-        let mut draft = HudDraft::new(&editor.session);
-        draft.width = "unfinished".into();
-        editor.hud_draft = Some(draft);
         editor.hud_open = true;
+        assert!(editor.session.hud().panels.is_empty());
         let context = egui::Context::default();
         let mut time = 0.0;
         let mut draw = |editor: &mut SceneEditor, events| {
@@ -1701,7 +2430,46 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         draw(&mut editor, vec![]);
-        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("hud_width")));
+        let mut reached_add = false;
+        for _ in 0..8 {
+            let mut released = key(egui::Key::Tab);
+            if let egui::Event::Key { pressed, .. } = &mut released {
+                *pressed = false;
+            }
+            let output = draw(&mut editor, vec![key(egui::Key::Tab), released]);
+            let add = output
+                .shapes
+                .iter()
+                .find_map(|shape| text_rect(&shape.shape, "Add panel"));
+            let focused = context
+                .memory(|memory| memory.focused())
+                .and_then(|id| context.read_response(id));
+            if let (Some(add), Some(focused)) = (add, focused) {
+                if focused.has_focus() && focused.rect.contains_rect(add) {
+                    reached_add = true;
+                    break;
+                }
+            }
+        }
+        assert!(
+            reached_add,
+            "Tab reaches the primary Add panel action in an empty HUD"
+        );
+        let mut released = key(egui::Key::Enter);
+        if let egui::Event::Key { pressed, .. } = &mut released {
+            *pressed = false;
+        }
+        draw(&mut editor, vec![key(egui::Key::Enter), released]);
+        assert_eq!(editor.hud_draft.as_ref().unwrap().hud.panels.len(), 1);
+        assert!(
+            editor.session.hud().panels.is_empty(),
+            "Enter adds the panel to the grouped draft only"
+        );
+        first_style_mut(editor.hud_draft.as_mut().unwrap()).width = "unfinished".into();
+        context.memory_mut(|memory| memory.request_focus(first_style_id(&editor, "width")));
+        for _ in 0..4 {
+            draw(&mut editor, vec![]);
+        }
         let original = editor.session.snapshot_bytes().unwrap();
         draw(&mut editor, vec![key(egui::Key::Enter)]);
         assert!(editor.hud_draft.is_some());
@@ -1709,9 +2477,10 @@ mod tests {
         assert_eq!(editor.session.snapshot_bytes().unwrap(), original);
         draw(&mut editor, vec![key(egui::Key::Escape)]);
         assert!(editor.hud_draft.is_none());
-        let mut draft = HudDraft::new(&editor.session);
+        let mut draft = draft_with_panel(&editor.session);
         draft.hud.enabled = true;
-        draft.hud.elements.push(HudLabel {
+        draft.hud.panels[0].elements.push(HudLabel {
+            enabled_when: None,
             id: "intro".into(),
             source: HudSource::Static {
                 text: "Ready".into(),
@@ -1730,21 +2499,25 @@ mod tests {
         // Enter must not also submit the enclosing grouped HUD transaction.
         let hud = Hud {
             enabled: true,
-            elements: vec![
-                HudLabel {
-                    id: "title".into(),
-                    source: HudSource::Static {
-                        text: "Title".into(),
+            panels: vec![HudPanel {
+                elements: vec![
+                    HudLabel {
+                        enabled_when: None,
+                        id: "title".into(),
+                        source: HudSource::Static {
+                            text: "Title".into(),
+                        },
                     },
-                },
-                HudLabel {
-                    id: "score".into(),
-                    source: HudSource::Static {
-                        text: "Score".into(),
+                    HudLabel {
+                        enabled_when: None,
+                        id: "score".into(),
+                        source: HudSource::Static {
+                            text: "Score".into(),
+                        },
                     },
-                },
-            ],
-            ..Hud::default()
+                ],
+                ..HudPanel::default()
+            }],
         };
         editor
             .session
@@ -1757,7 +2530,7 @@ mod tests {
         let authored = editor.session.snapshot_bytes().unwrap();
         let saved_hud = editor.session.hud().clone();
         let _ = draw(&mut editor, vec![]);
-        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("hud_width")));
+        context.memory_mut(|memory| memory.request_focus(first_style_id(&editor, "width")));
         let _ = draw(&mut editor, vec![]);
         let mut reached_score = false;
         for _ in 0..24 {
@@ -1843,11 +2616,11 @@ mod tests {
                 .as_ref()
                 .expect("Row operations stay in the HUD draft");
             let expected_focus = if target == "Move up" {
-                assert_eq!(draft.hud.elements[0].id, "score");
+                assert_eq!(draft.hud.panels[0].elements[0].id, "score");
                 assert_eq!(draft.selected.as_deref(), Some("score"));
                 "1. Static text · score"
             } else {
-                assert_eq!(draft.hud.elements.len(), 3);
+                assert_eq!(draft.hud.panels[0].elements.len(), 3);
                 "Add label"
             };
             let caption = output
@@ -1873,8 +2646,9 @@ mod tests {
         // long list moves its painted coordinates within the scroll area.
         let add_id = context.memory(|memory| memory.focused()).unwrap();
         let draft = editor.hud_draft.as_mut().unwrap();
-        draft.hud.elements = (0..MAX_HUD_LABELS - 1)
+        draft.hud.panels[0].elements = (0..MAX_HUD_LABELS - 1)
             .map(|index| HudLabel {
+                enabled_when: None,
                 id: format!("boundary-{index}"),
                 source: HudSource::Static {
                     text: format!("Reading {index}"),
@@ -1890,7 +2664,9 @@ mod tests {
         }
         draw(&mut editor, vec![key(egui::Key::Enter), released]);
         assert_eq!(
-            editor.hud_draft.as_ref().unwrap().hud.elements.len(),
+            editor.hud_draft.as_ref().unwrap().hud.panels[0]
+                .elements
+                .len(),
             MAX_HUD_LABELS
         );
         draw(&mut editor, vec![]);
@@ -1905,17 +2681,21 @@ mod tests {
         }
         draw(&mut editor, vec![key(egui::Key::Space), released.clone()]);
         assert_eq!(
-            editor.hud_draft.as_ref().unwrap().hud.elements.len(),
+            editor.hud_draft.as_ref().unwrap().hud.panels[0]
+                .elements
+                .len(),
             MAX_HUD_LABELS - 1
         );
         draw(&mut editor, vec![]);
         assert_eq!(context.memory(|memory| memory.focused()), Some(remove_id));
         let draft = editor.hud_draft.as_mut().unwrap();
-        draft.hud.elements.truncate(1);
-        draft.selected = Some(draft.hud.elements[0].id.clone());
+        draft.hud.panels[0].elements.truncate(1);
+        draft.selected = Some(draft.hud.panels[0].elements[0].id.clone());
         draw(&mut editor, vec![]);
         draw(&mut editor, vec![key(egui::Key::Space), released]);
-        assert!(editor.hud_draft.as_ref().unwrap().hud.elements.is_empty());
+        assert!(editor.hud_draft.as_ref().unwrap().hud.panels[0]
+            .elements
+            .is_empty());
         draw(&mut editor, vec![]);
         assert_eq!(context.memory(|memory| memory.focused()), Some(add_id));
         let mut released = key(egui::Key::Enter);
@@ -1923,11 +2703,16 @@ mod tests {
             *pressed = false;
         }
         draw(&mut editor, vec![key(egui::Key::Enter), released]);
-        assert_eq!(editor.hud_draft.as_ref().unwrap().hud.elements.len(), 1);
+        assert_eq!(
+            editor.hud_draft.as_ref().unwrap().hud.panels[0]
+                .elements
+                .len(),
+            1
+        );
         assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
 
-        editor.hud_draft.as_mut().unwrap().width = "321".into();
-        context.memory_mut(|memory| memory.request_focus(egui::Id::unique("hud_width")));
+        first_style_mut(editor.hud_draft.as_mut().unwrap()).width = "321".into();
+        context.memory_mut(|memory| memory.request_focus(first_style_id(&editor, "width")));
         draw(&mut editor, vec![]);
         let mut released_enter = key(egui::Key::Enter);
         if let egui::Event::Key { pressed, .. } = &mut released_enter {
@@ -1938,7 +2723,7 @@ mod tests {
             editor.hud_draft.is_none(),
             "Enter in a valid text field submits the HUD"
         );
-        assert_eq!(editor.session.hud().width, 321.0);
+        assert_eq!(editor.session.hud().panels[0].width, 321.0);
         if let Some(focused) = context.memory(|memory| memory.focused()) {
             context.memory_mut(|memory| memory.surrender_focus(focused));
         }
@@ -1956,7 +2741,7 @@ mod tests {
 
         editor = button_editor();
         editor.hud_open = true;
-        let mut draft = HudDraft::new(&editor.session);
+        let mut draft = draft_with_panel(&editor.session);
         draft
             .button_arguments
             .get_mut("button")

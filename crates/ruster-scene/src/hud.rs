@@ -15,6 +15,10 @@ mod resolution;
 pub use resolution::*;
 
 pub const MAX_HUD_LABELS: usize = 32;
+pub const MAX_HUD_PANELS: usize = 4;
+pub const MAX_HUD_PANEL_NAME_BYTES: usize = 128;
+pub const MAX_HUD_METADATA_BYTES: usize = 16 * 1024;
+pub const LEGACY_HUD_PANEL_ID: &str = "hud-default";
 pub const MAX_HUD_ELEMENT_TEXT_BYTES: usize = 1024;
 /// Shared authored payload budget. Buttons include typed arguments and target IDs.
 pub const MAX_HUD_AUTHORED_TEXT_BYTES: usize = 32 * 1024;
@@ -29,6 +33,7 @@ pub enum HudAnchor {
     TopRight,
     BottomLeft,
     BottomRight,
+    Center,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -85,15 +90,56 @@ impl HudCommandBinding {
     }
 }
 
-/// Fingerprint one complete immutable button definition for owner-side stale checks.
-/// Run, document and command schema identity remain the caller's responsibility.
-pub fn hud_button_identity(label: &HudLabel) -> Result<String, SceneError> {
+/// Fingerprint an immutable owning panel and button definition. Names and layout
+/// do not change action identity. Run and command schema identity belong to callers.
+pub fn hud_button_identity(panel: &HudPanel, label: &HudLabel) -> Result<String, SceneError> {
+    validate_id(&panel.id)?;
     validate_id(&label.id)?;
     if !matches!(&label.source, HudSource::Button { .. }) {
         return Err(SceneError::Invalid("HUD element is not a button".into()));
     }
-    label.source.validate_text_bytes()?;
-    Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(label)?)))
+    label.validate()?;
+    if let Some(condition) = &panel.visible_when {
+        condition.validate()?;
+    }
+    Ok(format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&(
+            &panel.id,
+            &panel.visible_when,
+            label,
+        ))?)
+    ))
+}
+
+/// A typed equality condition on one captured creator-owned Bool state field.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct BoolCondition {
+    pub binding_id: String,
+    pub field: String,
+    pub expected: bool,
+}
+
+impl BoolCondition {
+    pub fn validate(&self) -> Result<(), SceneError> {
+        validate_id(&self.binding_id)?;
+        validate_id(&self.field)
+    }
+}
+
+/// Admit a new condition reference against authored defaults without a VM.
+pub fn validate_bool_condition(
+    authoring: &Authoring,
+    condition: &BoolCondition,
+) -> Result<(), SceneError> {
+    condition.validate()?;
+    if let Some(diagnostic) = bool_condition_diagnostic(authoring, condition) {
+        return Err(SceneError::Invalid(format!(
+            "HUD condition is unavailable ({diagnostic:?})"
+        )));
+    }
+    Ok(())
 }
 
 /// Validate the immutable authored target without executing application code.
@@ -202,12 +248,31 @@ impl HudSource {
 pub struct HudLabel {
     pub id: String,
     pub source: HudSource,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enabled_when: Option<BoolCondition>,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(default, deny_unknown_fields)]
-pub struct Hud {
-    pub enabled: bool,
+impl HudLabel {
+    fn validate(&self) -> Result<usize, SceneError> {
+        validate_id(&self.id)?;
+        if let Some(condition) = &self.enabled_when {
+            if !matches!(self.source, HudSource::Button { .. }) {
+                return Err(SceneError::Invalid(
+                    "HUD enabled_when requires a button".into(),
+                ));
+            }
+            condition.validate()?;
+        }
+        self.source.validate_text_bytes()
+    }
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct HudPanel {
+    pub id: String,
+    pub name: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub visible_when: Option<BoolCondition>,
     pub anchor: HudAnchor,
     pub width: f64,
     pub margin: f64,
@@ -218,10 +283,12 @@ pub struct Hud {
     pub elements: Vec<HudLabel>,
 }
 
-impl Default for Hud {
+impl Default for HudPanel {
     fn default() -> Self {
         Self {
-            enabled: false,
+            id: LEGACY_HUD_PANEL_ID.into(),
+            name: "HUD".into(),
+            visible_when: None,
             anchor: HudAnchor::TopLeft,
             width: 320.0,
             margin: 12.0,
@@ -234,12 +301,81 @@ impl Default for Hud {
     }
 }
 
-impl Hud {
-    pub fn is_default(&self) -> bool {
-        self == &Self::default()
+impl<'de> Deserialize<'de> for HudPanel {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        // Style defaults remain convenient, while identity is explicit in new wire data.
+        #[derive(Deserialize)]
+        #[serde(default, deny_unknown_fields)]
+        struct Wire {
+            id: Option<String>,
+            name: String,
+            visible_when: Option<BoolCondition>,
+            anchor: HudAnchor,
+            width: f64,
+            margin: f64,
+            spacing: f64,
+            font_size: f64,
+            text_color: [f64; 4],
+            background: [f64; 4],
+            elements: Vec<HudLabel>,
+        }
+        impl Default for Wire {
+            fn default() -> Self {
+                let panel = HudPanel::default();
+                Self {
+                    id: None,
+                    name: panel.name,
+                    visible_when: None,
+                    anchor: panel.anchor,
+                    width: panel.width,
+                    margin: panel.margin,
+                    spacing: panel.spacing,
+                    font_size: panel.font_size,
+                    text_color: panel.text_color,
+                    background: panel.background,
+                    elements: Vec::new(),
+                }
+            }
+        }
+        let wire = Wire::deserialize(deserializer)?;
+        let id = wire
+            .id
+            .ok_or_else(|| serde::de::Error::missing_field("id"))?;
+        Ok(Self {
+            id,
+            name: wire.name,
+            visible_when: wire.visible_when,
+            anchor: wire.anchor,
+            width: wire.width,
+            margin: wire.margin,
+            spacing: wire.spacing,
+            font_size: wire.font_size,
+            text_color: wire.text_color,
+            background: wire.background,
+            elements: wire.elements,
+        })
+    }
+}
+
+impl HudPanel {
+    pub fn validate(&self) -> Result<(), SceneError> {
+        Hud {
+            enabled: true,
+            panels: vec![self.clone()],
+        }
+        .validate()
     }
 
-    pub fn validate(&self) -> Result<(), SceneError> {
+    fn validate_style(&self) -> Result<(), SceneError> {
+        validate_id(&self.id)?;
+        if self.name.len() > MAX_HUD_PANEL_NAME_BYTES {
+            return Err(SceneError::Invalid(
+                "HUD panel name exceeds 128 UTF-8 bytes".into(),
+            ));
+        }
+        if let Some(condition) = &self.visible_when {
+            condition.validate()?;
+        }
         for (name, value, minimum, maximum) in [
             ("width", self.width, 64.0, 1024.0),
             ("margin", self.margin, 0.0, 256.0),
@@ -262,75 +398,249 @@ impl Hud {
                 "HUD color channels must be finite in 0..=1".into(),
             ));
         }
-        if self.elements.len() > MAX_HUD_LABELS {
-            return Err(SceneError::Invalid("HUD exceeds 32 elements".into()));
-        }
-        let mut ids = HashSet::new();
-        let mut text_bytes = 0_usize;
-        for label in &self.elements {
-            validate_id(&label.id)?;
-            if !ids.insert(&label.id) {
-                return Err(SceneError::Invalid("HUD label IDs must be unique".into()));
+        Ok(())
+    }
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+pub struct Hud {
+    pub enabled: bool,
+    pub panels: Vec<HudPanel>,
+}
+
+impl Hud {
+    pub fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+
+    pub fn elements(&self) -> impl Iterator<Item = &HudLabel> {
+        self.panels.iter().flat_map(|panel| &panel.elements)
+    }
+
+    pub fn panel_for_label(&self, label_id: &str) -> Option<&HudPanel> {
+        self.panels
+            .iter()
+            .find(|panel| panel.elements.iter().any(|row| row.id == label_id))
+    }
+
+    /// Canonical JSON bytes for panel headers/styles and row IDs/conditions,
+    /// excluding each row's existing source payload. A separate16KiB bound
+    /// controls this metadata without changing the legacy32KiB source budget.
+    pub fn metadata_payload_bytes(&self) -> Result<usize, SceneError> {
+        let mut value = serde_json::to_value(self)?;
+        for panel in value["panels"].as_array_mut().into_iter().flatten() {
+            for row in panel["elements"].as_array_mut().into_iter().flatten() {
+                row.as_object_mut()
+                    .expect("serialized HUD row")
+                    .remove("source");
             }
-            text_bytes = text_bytes.saturating_add(label.source.validate_text_bytes()?);
+        }
+        Ok(serde_json::to_vec(&value)?.len())
+    }
+
+    pub fn validate(&self) -> Result<(), SceneError> {
+        if self.panels.len() > MAX_HUD_PANELS {
+            return Err(SceneError::Invalid("HUD exceeds 4 panels".into()));
+        }
+        if self.elements().count() > MAX_HUD_LABELS {
+            return Err(SceneError::Invalid(
+                "HUD exceeds 32 aggregate elements".into(),
+            ));
+        }
+        let mut panels = HashSet::new();
+        let mut rows = HashSet::new();
+        let mut text_bytes = 0_usize;
+        for panel in &self.panels {
+            panel.validate_style()?;
+            if !panels.insert(&panel.id) {
+                return Err(SceneError::Invalid("HUD panel IDs must be unique".into()));
+            }
+            for row in &panel.elements {
+                if !rows.insert(&row.id) {
+                    return Err(SceneError::Invalid(
+                        "HUD row IDs must be globally unique".into(),
+                    ));
+                }
+                text_bytes = text_bytes.saturating_add(row.validate()?);
+            }
         }
         if text_bytes > MAX_HUD_AUTHORED_TEXT_BYTES {
             return Err(SceneError::Invalid(
                 "HUD authored payload exceeds 32 KiB".into(),
             ));
         }
+        if self.metadata_payload_bytes()? > MAX_HUD_METADATA_BYTES {
+            return Err(SceneError::Invalid(
+                "HUD panel/condition metadata exceeds 16 KiB".into(),
+            ));
+        }
         Ok(())
     }
 
     pub fn binding_ids(&self) -> impl Iterator<Item = &str> {
-        self.elements
-            .iter()
-            .filter_map(|label| match &label.source {
-                HudSource::State { binding_id, .. } => Some(binding_id.as_str()),
-                HudSource::Button { command, .. } => Some(command.binding_id.as_str()),
-                HudSource::Static { .. } => None,
-            })
+        self.panels.iter().flat_map(|panel| {
+            panel
+                .visible_when
+                .iter()
+                .map(|condition| condition.binding_id.as_str())
+                .chain(panel.elements.iter().flat_map(|row| {
+                    let source = match &row.source {
+                        HudSource::State { binding_id, .. } => Some(binding_id.as_str()),
+                        HudSource::Button { command, .. } => Some(command.binding_id.as_str()),
+                        HudSource::Static { .. } => None,
+                    };
+                    source.into_iter().chain(
+                        row.enabled_when
+                            .iter()
+                            .map(|condition| condition.binding_id.as_str()),
+                    )
+                }))
+        })
     }
+}
+
+/// Normalize the exact Scene15/16 HUD wire shape at a versioned boundary.
+/// Callers retain responsibility for rejecting HUD/buttons in earlier versions.
+/// Exact legacy default collapses to empty canonical HUD to preserve omission
+/// and reversible history. Every nondefault group becomes one ordinary panel.
+fn decode_legacy_hud(value: serde_json::Value) -> Result<(bool, HudPanel), SceneError> {
+    if value.get("panels").is_some()
+        || value["anchor"].as_str() == Some("center")
+        || value["elements"]
+            .as_array()
+            .is_some_and(|rows| rows.iter().any(|row| row.get("enabled_when").is_some()))
+    {
+        return Err(SceneError::Invalid(
+            "HUD panels and conditions require scene v17".into(),
+        ));
+    }
+    #[derive(Deserialize)]
+    #[serde(default, deny_unknown_fields)]
+    struct LegacyHud {
+        enabled: bool,
+        anchor: HudAnchor,
+        width: f64,
+        margin: f64,
+        spacing: f64,
+        font_size: f64,
+        text_color: [f64; 4],
+        background: [f64; 4],
+        elements: Vec<HudLabel>,
+    }
+    impl Default for LegacyHud {
+        fn default() -> Self {
+            let panel = HudPanel::default();
+            Self {
+                enabled: false,
+                anchor: panel.anchor,
+                width: panel.width,
+                margin: panel.margin,
+                spacing: panel.spacing,
+                font_size: panel.font_size,
+                text_color: panel.text_color,
+                background: panel.background,
+                elements: Vec::new(),
+            }
+        }
+    }
+    let legacy: LegacyHud = serde_json::from_value(value)?;
+    let panel = HudPanel {
+        anchor: legacy.anchor,
+        width: legacy.width,
+        margin: legacy.margin,
+        spacing: legacy.spacing,
+        font_size: legacy.font_size,
+        text_color: legacy.text_color,
+        background: legacy.background,
+        elements: legacy.elements,
+        ..HudPanel::default()
+    };
+    Ok((legacy.enabled, panel))
+}
+
+/// Normalize a version-admitted legacy snapshot, validate structural bounds and
+/// collapse its exact disabled/default/empty group to the canonical empty HUD.
+pub fn migrate_legacy_hud(value: serde_json::Value) -> Result<Hud, SceneError> {
+    let (enabled, panel) = decode_legacy_hud(value)?;
+    let hud = if !enabled && panel == HudPanel::default() {
+        Hud::default()
+    } else {
+        Hud {
+            enabled,
+            panels: vec![panel],
+        }
+    };
+    hud.validate()?;
+    Ok(hud)
+}
+
+/// Normalize only a version-admitted legacy raw HUD draft. Unfinished references
+/// remain representable, and its editing group always materializes hud-default.
+/// The recovery owner must validate raw storage and its original fingerprint.
+pub fn migrate_legacy_hud_draft(value: serde_json::Value) -> Result<Hud, SceneError> {
+    let (enabled, panel) = decode_legacy_hud(value)?;
+    Ok(Hud {
+        enabled,
+        panels: vec![panel],
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    // Distinct structural risks are finite f64 admission, UTF-8 byte bounds,
-    // duplicate stable IDs and strict typed JSON at the shared document owner.
-    #[test]
-    fn hud_structural_bounds_and_strict_schema() {
-        assert_eq!(serde_json::from_str::<Hud>("{}").unwrap(), Hud::default());
-        for json in [r#"{"width":null}"#, r#"{"enabled":1}"#, r#"{"extra":true}"#] {
-            assert!(serde_json::from_str::<Hud>(json).is_err());
+    fn row(id: &str, source: HudSource) -> HudLabel {
+        HudLabel {
+            id: id.into(),
+            source,
+            enabled_when: None,
         }
-        let mut hud = Hud::default();
-        for width in [f64::NAN, f64::INFINITY, 63.999, 1024.001] {
-            hud.width = width;
-            assert!(hud.validate().is_err());
-        }
-        hud.width = 64.0;
-        hud.elements = (0..MAX_HUD_LABELS)
-            .map(|index| HudLabel {
-                id: format!("label-{index}"),
-                source: HudSource::Static {
-                    text: "é".repeat(512),
-                },
-            })
-            .collect();
-        hud.validate().unwrap();
-        // Buttons share the existing aggregate budget. Their references and
-        // canonical argument JSON count in addition to the caption.
-        let command = HudCommandBinding {
+    }
+    fn command() -> HudCommandBinding {
+        HudCommandBinding {
             binding_id: "app".into(),
             command_id: "act".into(),
             arguments: StateFields::new(),
-        };
-        let mut buttons = hud.clone();
+        }
+    }
+
+    // Shared structural owner covers aggregate limits, strict canonical wire,
+    // legacy row bytes, typed constants and the new independently bounded metadata.
+    #[test]
+    fn hud_structural_bounds_and_strict_schema() {
+        assert_eq!(serde_json::from_str::<Hud>("{}").unwrap(), Hud::default());
+        for json in [
+            r#"{"width":null}"#,
+            r#"{"enabled":1}"#,
+            r#"{"panels":[],"elements":[]}"#,
+        ] {
+            assert!(serde_json::from_str::<Hud>(json).is_err());
+        }
+        for json in [r#"{}"#, r#"{"id":null}"#, r#"{"id":"p","extra":true}"#] {
+            assert!(serde_json::from_str::<HudPanel>(json).is_err());
+        }
+        let mut panel: HudPanel = serde_json::from_str(r#"{"id":"p"}"#).unwrap();
+        for width in [f64::NAN, f64::INFINITY, 63.999, 1024.001] {
+            panel.width = width;
+            assert!(panel.validate().is_err());
+        }
+        panel.width = 64.0;
+        panel.elements = (0..MAX_HUD_LABELS)
+            .map(|index| {
+                row(
+                    &format!("row-{index}"),
+                    HudSource::Static {
+                        text: "é".repeat(512),
+                    },
+                )
+            })
+            .collect();
+        panel.validate().unwrap();
+        let mut buttons = panel.clone();
         buttons.elements[0].source = HudSource::Button {
             caption: "é".repeat(512),
-            command: command.clone(),
+            command: command(),
         };
         assert!(buttons.validate().is_err());
         buttons.elements.truncate(1);
@@ -339,24 +649,23 @@ mod tests {
             caption.push('x');
         }
         assert!(buttons.validate().is_err());
-        let mut escaped = command.clone();
+        let mut escaped = command();
         escaped.arguments = StateFields::from([
             ("a".into(), StateValue::Text("\0".repeat(1024))),
             ("b".into(), StateValue::Text("\0".repeat(1024))),
         ]);
         buttons.elements = (0..3)
-            .map(|index| HudLabel {
-                id: format!("button-{index}"),
-                source: HudSource::Button {
-                    caption: String::new(),
-                    command: escaped.clone(),
-                },
+            .map(|index| {
+                row(
+                    &format!("button-{index}"),
+                    HudSource::Button {
+                        caption: String::new(),
+                        command: escaped.clone(),
+                    },
+                )
             })
             .collect();
-        assert!(
-            buttons.validate().is_err(),
-            "serialized constant escaping counts"
-        );
+        assert!(buttons.validate().is_err());
         buttons.elements.truncate(2);
         buttons.validate().unwrap();
         for arguments in [
@@ -365,61 +674,107 @@ mod tests {
                 .map(|index| (format!("arg-{index}"), StateValue::Bool(false)))
                 .collect(),
         ] {
-            let mut invalid = command.clone();
+            let mut invalid = command();
             invalid.arguments = arguments;
             assert!(invalid.validate().is_err());
         }
-        let old_json = r#"{"id":"old","source":{"kind":"static","text":"Ready"}}"#;
-        let old: HudLabel = serde_json::from_str(old_json).unwrap();
-        assert_eq!(serde_json::to_string(&old).unwrap(), old_json);
-        assert!(hud_button_identity(&old).is_err());
-        let state_json = r#"{"id":"old-state","source":{"kind":"state","binding_id":"app","field":"score","value_type":"number","prefix":"","suffix":"","precision":2}}"#;
-        let state: HudLabel = serde_json::from_str(state_json).unwrap();
-        assert_eq!(serde_json::to_string(&state).unwrap(), state_json);
-        let button_json = r#"{"id":"button","source":{"kind":"button","caption":"Run","command":{"binding_id":"app","command_id":"act","arguments":{}}}}"#;
-        let button: HudLabel = serde_json::from_str(button_json).unwrap();
-        assert_eq!(serde_json::to_string(&button).unwrap(), button_json);
-        assert_eq!(hud_button_identity(&button).unwrap().len(), 64);
-        let mut renamed = button.clone();
-        if let HudSource::Button { caption, .. } = &mut renamed.source {
-            caption.push('!');
-        }
-        assert_ne!(
-            hud_button_identity(&button).unwrap(),
-            hud_button_identity(&renamed).unwrap()
-        );
         for raw in [
-            button_json.replace("\"arguments\":{}", "\"arguments\":null"),
-            button_json.replace("\"arguments\":{}", "\"extra\":true,\"arguments\":{}"),
-            button_json.replace("\"caption\":\"Run\",", ""),
+            r#"{"id":"old","source":{"kind":"static","text":"Ready"}}"#,
+            r#"{"id":"old-state","source":{"kind":"state","binding_id":"app","field":"score","value_type":"number","prefix":"","suffix":"","precision":2}}"#,
+            r#"{"id":"button","source":{"kind":"button","caption":"Run","command":{"binding_id":"app","command_id":"act","arguments":{}}}}"#,
         ] {
-            assert!(serde_json::from_str::<HudLabel>(&raw).is_err());
+            let label: HudLabel = serde_json::from_str(raw).unwrap();
+            assert_eq!(serde_json::to_string(&label).unwrap(), raw);
         }
-        hud.elements[0].source = HudSource::State {
-            binding_id: "missing-binding".into(),
-            field: "missing-field".into(),
-            value_type: HudValueType::Number,
-            prefix: "é".repeat(256),
-            suffix: "é".repeat(256),
-            precision: 6,
-        };
-        hud.validate().unwrap();
-        if let HudSource::State { prefix, .. } = &mut hud.elements[0].source {
-            prefix.push('x');
-        }
-        assert!(hud.validate().is_err());
-        hud.elements[0].source = HudSource::Static {
-            text: String::new(),
-        };
-        hud.elements[1].id = hud.elements[0].id.clone();
-        assert!(hud.validate().is_err());
-        hud.elements[1].id = "label-1".into();
-        hud.elements.push(HudLabel {
-            id: "extra".into(),
-            source: HudSource::Static {
+        let button = row(
+            "button",
+            HudSource::Button {
+                caption: "Run".into(),
+                command: command(),
+            },
+        );
+        let identity = hud_button_identity(&panel, &button).unwrap();
+        assert_eq!(identity.len(), 64);
+        let mut style = panel.clone();
+        style.name = "Renamed".into();
+        style.margin = 24.0;
+        assert_eq!(hud_button_identity(&style, &button).unwrap(), identity);
+        style.id = "other".into();
+        assert_ne!(hud_button_identity(&style, &button).unwrap(), identity);
+        style.id = panel.id.clone();
+        style.visible_when = Some(BoolCondition {
+            binding_id: "app".into(),
+            field: "screen".into(),
+            expected: true,
+        });
+        assert_ne!(hud_button_identity(&style, &button).unwrap(), identity);
+        let mut conditional = button.clone();
+        conditional.enabled_when = style.visible_when.clone();
+        assert_ne!(hud_button_identity(&panel, &conditional).unwrap(), identity);
+        let mut static_condition = row(
+            "static",
+            HudSource::Static {
                 text: String::new(),
             },
-        });
+        );
+        static_condition.enabled_when = style.visible_when.clone();
+        style.elements = vec![static_condition];
+        assert!(style.validate().is_err());
+        let mut hud = Hud {
+            enabled: true,
+            panels: vec![panel.clone()],
+        };
+        hud.panels[0].name = "é".repeat(64);
+        hud.validate().unwrap();
+        hud.panels[0].name.push('x');
+        assert!(hud.validate().is_err());
+        hud.panels[0].name = "HUD".into();
+        let second = HudPanel {
+            id: "second".into(),
+            elements: vec![panel.elements[0].clone()],
+            ..HudPanel::default()
+        };
+        hud.panels.push(second);
+        assert!(hud.validate().is_err());
+        hud.panels[0].elements.pop();
+        hud.panels[1].elements[0].id = "distinct".into();
+        hud.validate().unwrap();
+        hud.panels[1].id = hud.panels[0].id.clone();
+        assert!(hud.validate().is_err());
+        hud.panels = (0..5)
+            .map(|index| HudPanel {
+                id: format!("panel-{index}"),
+                ..HudPanel::default()
+            })
+            .collect();
+        assert!(hud.validate().is_err());
+        let condition = BoolCondition {
+            binding_id: "b".repeat(128),
+            field: "f".repeat(128),
+            expected: true,
+        };
+        hud.panels = (0..4)
+            .map(|index| HudPanel {
+                id: format!("panel-{index}"),
+                name: "\0".repeat(128),
+                visible_when: Some(condition.clone()),
+                elements: (0..8)
+                    .map(|row_index| {
+                        let mut value = row(
+                            &format!("{}-{index}-{row_index}", "r".repeat(120)),
+                            HudSource::Button {
+                                caption: String::new(),
+                                command: command(),
+                            },
+                        );
+                        value.enabled_when = Some(condition.clone());
+                        value
+                    })
+                    .collect(),
+                ..HudPanel::default()
+            })
+            .collect();
+        assert!(hud.metadata_payload_bytes().unwrap() > MAX_HUD_METADATA_BYTES);
         assert!(hud.validate().is_err());
     }
 }

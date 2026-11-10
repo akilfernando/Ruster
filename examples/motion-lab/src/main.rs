@@ -24,7 +24,7 @@ Usage: ruster-motion-lab [OPTIONS]
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
   --scene PATH     Read a generic Scene16 snapshot (sources, bindings and history retained)
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
-  --creation-info Print the runtime/descriptor compatibility profile and exit
+  --creation-info Print the cumulative runtime profile, including state-driven HUD panels, and exit
   --creation PATH Read an app.json creation descriptor and its relative resources
   --resources PATH Explicit read-only mesh resource directory for generic mode
   --mesh ID=PATH   Map a Scene mesh ID to a relative OBJ resource (repeat, at most 64)
@@ -708,7 +708,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels"],
             })
         );
         return;

@@ -14,6 +14,7 @@ mod display_ui;
 mod export_commands;
 mod hud_commands;
 mod hud_interaction;
+mod hud_recovery;
 mod hud_ui;
 mod lighting_commands;
 mod lighting_ui;
@@ -104,6 +105,9 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "behavior_command",
     "behavior_command_set",
     "hud_inspect",
+    "hud_panel_inspect",
+    "hud_panel_set",
+    "hud_panel_move",
     "hud_settings_set",
     "hud_label_set",
     "hud_label_move",
@@ -927,7 +931,7 @@ impl SceneEditor {
             return Err("Both live and deferred input drafts exist; checkpoint preserved for explicit repair.".into());
         }
         Ok(RecoveryDrafts {
-            version: 14,
+            version: 15,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -964,6 +968,23 @@ impl SceneEditor {
         let material_field = value.get("material").is_some();
         let lighting_field = value.get("lighting").is_some();
         let version = value.get("version").and_then(Value::as_u64);
+        let panel_fields = value.get("hud").is_some_and(|draft| {
+            draft.get("panel_styles").is_some()
+                || draft.get("selected_panel").is_some()
+                || draft.get("hud").is_some_and(|hud| {
+                    hud.get("panels").is_some()
+                        || hud.get("visible_when").is_some()
+                        || hud["anchor"].as_str() == Some("center")
+                        || hud["elements"].as_array().is_some_and(|rows| {
+                            rows.iter().any(|row| row.get("enabled_when").is_some())
+                        })
+                })
+        });
+        if version.is_some_and(|version| version < 15) && panel_fields {
+            return Err(
+                "HUD panel recovery fields require draft version15. Checkpoint preserved.".into(),
+            );
+        }
         let button_fields = value.get("hud").is_some_and(|hud| {
             hud.get("button_arguments").is_some()
                 || hud
@@ -1090,7 +1111,7 @@ impl SceneEditor {
                     && fields_unit != Some(false)
             }
             Some(4) => !lighting_field && manipulation_unit && fields_unit != Some(false),
-            Some(5..=14) => manipulation_unit && fields_unit != Some(false),
+            Some(5..=15) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -1109,6 +1130,12 @@ impl SceneEditor {
                 material.insert("roughness_texture".into(), Value::Null);
             }
         }
+        if matches!(version, Some(13 | 14)) {
+            if let Some(hud) = value.get_mut("hud") {
+                let converted = hud_recovery::upgrade(&self.session, hud.take())?;
+                *hud = serde_json::to_value(converted).map_err(|error| error.to_string())?;
+            }
+        }
         let mut draft: RecoveryDrafts = serde_json::from_value(value)
             .map_err(|e| format!("Unsupported recovery drafts: {e}; checkpoint preserved."))?;
         if draft.version < 6 {
@@ -1118,7 +1145,7 @@ impl SceneEditor {
         }
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((2..=14).contains(&draft.version) && draft.behavior.is_some()))
+            || ((2..=15).contains(&draft.version) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -2859,7 +2886,13 @@ impl SceneEditor {
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
         if matches!(
             op,
-            "hud_inspect" | "hud_settings_set" | "hud_label_set" | "hud_label_move"
+            "hud_inspect"
+                | "hud_settings_set"
+                | "hud_label_set"
+                | "hud_label_move"
+                | "hud_panel_inspect"
+                | "hud_panel_set"
+                | "hud_panel_move"
         ) {
             return self.hud_command(token, op, args);
         }
@@ -6860,7 +6893,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 14);
+        assert_eq!(payload["version"], 15);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -7457,7 +7490,7 @@ mod tests {
         component.collider_draft = Some(raw.clone());
         let snapshot = component.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 14);
+        assert_eq!(payload["version"], 15);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.collider_draft, Some(raw.clone()));
@@ -8524,7 +8557,7 @@ mod tests {
             assert_eq!(candidates.len(), 1);
             let (_journal, snapshot) = store.claim(&candidates[0].id).unwrap();
             let payload = snapshot.drafts().unwrap();
-            assert_eq!(payload["version"], 14);
+            assert_eq!(payload["version"], 15);
             if shadow {
                 assert_eq!(
                     payload["lighting"]["shadow"]["depth_bias_texels"],
@@ -8642,7 +8675,7 @@ mod tests {
         let exact = source.display_draft.clone();
         let snapshot = source.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 14);
+        assert_eq!(payload["version"], 15);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.display_draft, exact);

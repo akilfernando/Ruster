@@ -1,6 +1,6 @@
 # F3c — Creator-authored state-driven screens
 
-Proposed2026-11-10 after accepted [F3b](F3B-INTERACTIVE-CONTROLS.md), documentation checkpoint57b304a. This is Root/Astra's next recommendation in response to “Next?”. Implementation and Goal-tool activation require separate user approval. The panel count, condition representation and placement presets below are agent-selected proposals.
+Approved2026-11-10 with the user’s “Proceed” after accepted [F3b](F3B-INTERACTIVE-CONTROLS.md). Implementation begins from clean checkpoint2bc5c9e. The panel count, condition representation and placement presets are agent-selected engineering choices under this approved outcome. [Decision0049](../decisions/0049-state-driven-hud-panels.md) records the selected contract. No Goal-tool goal is created.
 
 ## Creator outcome
 
@@ -14,7 +14,7 @@ Actual `Hud` in `crates/ruster-scene/src/hud.rs` has one authored `enabled` Bool
 
 Hierarchy remains the strongest alternative because flat scenes constrain assemblies and richer import. Its local/world transforms, picking, colliders, lights and reference semantics require a separate contract. Audio adds another important foundation. Neither removes this existing interface-state bottleneck. Root/Astra recommend completing this bounded UI workflow, then reassessing composition against the broader creator gaps.
 
-## Proposed bounds
+## Approved bounds
 
 - Up to four flat panels, with the existing32total rows and aggregate row/text/argument budgets shared across them. Three panels suffice for the fixture. The fourth allows a persistent status panel.
 - Five preset anchors, explicitly adding Center to the current four corners. Existing style, wrapping and clipping facilities supply presentation.

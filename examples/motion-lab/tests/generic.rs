@@ -36,7 +36,7 @@ fn lifecycle_session() -> Session {
 }
 
 fn hud_session() -> Session {
-    use ruster_scene::hud::{Hud, HudCommandBinding, HudLabel, HudSource, HudValueType};
+    use ruster_scene::hud::{Hud, HudCommandBinding, HudLabel, HudPanel, HudSource, HudValueType};
     use ruster_scene::{StateFields, StateValue};
     let mut session = lifecycle_session();
     let mut source = session.source("controller").unwrap().clone();
@@ -57,6 +57,7 @@ fn hud_session() -> Session {
         .unwrap();
     let mut rows = vec![HudLabel {
         id: "count".into(),
+        enabled_when: None,
         source: HudSource::State {
             binding_id: "application".into(),
             field: "count".into(),
@@ -71,6 +72,7 @@ fn hud_session() -> Session {
             .into_iter()
             .map(|(id, amount)| HudLabel {
                 id: id.into(),
+                enabled_when: None,
                 source: HudSource::Button {
                     caption: id.into(),
                     command: HudCommandBinding {
@@ -89,8 +91,10 @@ fn hud_session() -> Session {
             session.scene().revision,
             Hud {
                 enabled: true,
-                elements: rows,
-                ..Hud::default()
+                panels: vec![HudPanel {
+                    elements: rows,
+                    ..HudPanel::default()
+                }],
             },
         )
         .unwrap();
@@ -369,7 +373,10 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
     );
     assert!(lifecycle.is_running());
     assert_eq!(lifecycle.tick(), 0);
-    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 5");
+    assert_eq!(
+        lifecycle.app().hud_snapshot().panels[0].labels[0].text,
+        "Count 5"
+    );
     assert_eq!(
         lifecycle.app().hud_presentation_mode(),
         HudPresentationMode::Committed
@@ -382,7 +389,10 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
     lifecycle.set_running(false);
     lifecycle.app_mut().activate_hud_button("add").unwrap();
     assert!(!lifecycle.is_running());
-    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 7");
+    assert_eq!(
+        lifecycle.app().hud_snapshot().panels[0].labels[0].text,
+        "Count 7"
+    );
     let state = serde_json::to_value(lifecycle.app().runtime_state_report()).unwrap();
     let scene = lifecycle.app().content().scene().clone();
     for playing in [false, true] {
@@ -409,7 +419,10 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
         lifecycle.app().hud_presentation_mode(),
         HudPresentationMode::Stale
     );
-    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 7");
+    assert_eq!(
+        lifecycle.app().hud_snapshot().panels[0].labels[0].text,
+        "Count 7"
+    );
     assert_eq!(
         serde_json::to_value(lifecycle.app().runtime_state_report()).unwrap(),
         state
@@ -427,7 +440,9 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
     );
     let mut replacement = hud_session();
     let mut hud = replacement.hud().clone();
-    if let ruster_scene::hud::HudSource::State { prefix, .. } = &mut hud.elements[0].source {
+    if let ruster_scene::hud::HudSource::State { prefix, .. } =
+        &mut hud.panels[0].elements[0].source
+    {
         *prefix = "New count ".into();
     }
     replacement
@@ -438,13 +453,19 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
         lifecycle.app().hud_presentation_mode(),
         HudPresentationMode::Stale
     );
-    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 3");
+    assert_eq!(
+        lifecycle.app().hud_snapshot().panels[0].labels[0].text,
+        "Count 3"
+    );
     lifecycle.reset().unwrap();
     assert_eq!(
         lifecycle.app().hud_presentation_mode(),
         HudPresentationMode::Committed
     );
-    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "New count 3");
+    assert_eq!(
+        lifecycle.app().hud_snapshot().panels[0].labels[0].text,
+        "New count 3"
+    );
     assert_eq!(
         (lifecycle.tick(), lifecycle.app().runtime_commit_revision()),
         (0, Some(0))
@@ -466,8 +487,10 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
         broken.reset().unwrap();
         broken.set_running(true);
         let state = serde_json::to_value(broken.app().runtime_state_report()).unwrap();
-        assert!(broken.app().hud_snapshot().labels[1].diagnostic.is_some());
-        assert_eq!(broken.app().hud_snapshot().labels[1].text, "add");
+        assert!(broken.app().hud_snapshot().panels[0].labels[1]
+            .diagnostic
+            .is_some());
+        assert_eq!(broken.app().hud_snapshot().panels[0].labels[1].text, "add");
         assert!(broken.app_mut().activate_hud_button("add").is_err());
         assert!(broken.is_running());
         assert_eq!(
@@ -535,7 +558,8 @@ fn native_hud_hooks_buffer_one_action_and_cancel_focus_loss_or_reset() {
         .unwrap()
         .parse::<u64>()
         .unwrap();
-    let button = egui::Id::unique(("creation-hud", epoch)).with(("hud-button", "add"));
+    let button =
+        egui::Id::unique(("creation-hud", epoch)).with(("hud-button", "hud-default", "add"));
     context.memory_mut(|memory| memory.request_focus(button));
     assert!(frame(lifecycle.app_mut(), &context, true, enter()).keyboard);
     assert_eq!(
@@ -543,10 +567,16 @@ fn native_hud_hooks_buffer_one_action_and_cancel_focus_loss_or_reset() {
         "add"
     );
     assert_eq!(lifecycle.app().runtime_commit_revision(), Some(0));
-    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 3");
+    assert_eq!(
+        lifecycle.app().hud_snapshot().panels[0].labels[0].text,
+        "Count 3"
+    );
     frame(lifecycle.app_mut(), &context, true, vec![]);
     assert_eq!(lifecycle.app().runtime_commit_revision(), Some(1));
-    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 5");
+    assert_eq!(
+        lifecycle.app().hud_snapshot().panels[0].labels[0].text,
+        "Count 5"
+    );
     assert!(lifecycle.is_running());
     assert!(lifecycle.app().hud_activation_report()["pending"].is_null());
     assert_eq!(
@@ -566,7 +596,23 @@ fn native_hud_hooks_buffer_one_action_and_cancel_focus_loss_or_reset() {
     assert_eq!(lifecycle.app().runtime_commit_revision(), Some(1));
     assert!(lifecycle.is_running());
     frame(lifecycle.app_mut(), &context, true, vec![]);
-    context.memory_mut(|memory| memory.request_focus(button));
+    // Reentry after focus loss requires deliberate keyboard navigation.
+    frame(
+        lifecycle.app_mut(),
+        &context,
+        true,
+        [true, false]
+            .into_iter()
+            .map(|pressed| egui::Event::Key {
+                key: egui::Key::Tab,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+            .collect(),
+    );
+    assert_eq!(context.memory(|memory| memory.focused()), Some(button));
     frame(lifecycle.app_mut(), &context, true, enter());
     assert!(!lifecycle.app().hud_activation_report()["pending"].is_null());
     lifecycle.reset().unwrap();
@@ -574,7 +620,10 @@ fn native_hud_hooks_buffer_one_action_and_cancel_focus_loss_or_reset() {
     assert!(lifecycle.app().hud_activation_report()["latest_terminal"].is_null());
     assert_eq!(lifecycle.app().runtime_commit_revision(), Some(0));
     frame(lifecycle.app_mut(), &context, true, vec![]);
-    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 3");
+    assert_eq!(
+        lifecycle.app().hud_snapshot().panels[0].labels[0].text,
+        "Count 3"
+    );
     assert_eq!(lifecycle.app().runtime_commit_revision(), Some(0));
 }
 
@@ -905,5 +954,161 @@ fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
     assert_eq!(
         runtime.app().session().snapshot_bytes().unwrap(),
         remapped_bytes
+    );
+}
+
+// Consumer boundary for authored screens: a real generic runtime resolves three
+// panels from Lua commits, preserves host playback and round-trips the document.
+#[test]
+fn creator_screen_commands_drive_panels_and_retry_without_host_rules() {
+    use ruster_scene::hud::{
+        BoolCondition, Hud, HudAnchor, HudCommandBinding, HudLabel, HudPanel, HudSource,
+        HudValueType,
+    };
+    use ruster_scene::{CommandDefinition, StateFields, StateValue};
+    let mut session = lifecycle_session();
+    let mut source = session.source("controller").unwrap().clone();
+    source.text = r#"return {
+ initialize=function(p,h)
+   return {state={welcome=true,playing=false,finished=false,allowed=true,count=0}}
+ end,
+ command=function(name,a,p,h)
+   if name=='start' then
+     return {state={welcome=false,playing=true,finished=false,count=0}}
+   elseif name=='retry' then
+     return {state={welcome=true,playing=false,finished=false,count=0}}
+   end
+   local count=h.state('count')+1
+   return {state={count=count,playing=count<2,finished=count>=2}}
+ end,
+ update=function(o,p,dt,h) return {} end
+}"#
+    .into();
+    session
+        .set_source(session.scene().revision, "controller", Some(source))
+        .unwrap();
+    let mut binding = session.binding("application").unwrap().clone();
+    binding.state_defaults = StateFields::from([
+        ("welcome".into(), StateValue::Bool(false)),
+        ("playing".into(), StateValue::Bool(false)),
+        ("finished".into(), StateValue::Bool(false)),
+        ("allowed".into(), StateValue::Bool(false)),
+        ("count".into(), StateValue::Number(-1.0)),
+    ]);
+    binding.commands = ["start", "advance", "retry"]
+        .into_iter()
+        .map(|id| {
+            (
+                id.into(),
+                CommandDefinition {
+                    arguments: StateFields::new(),
+                },
+            )
+        })
+        .collect();
+    session
+        .set_binding(session.scene().revision, "application", Some(binding))
+        .unwrap();
+    let condition = |field: &str| BoolCondition {
+        binding_id: "application".into(),
+        field: field.into(),
+        expected: true,
+    };
+    let button = |id: &str| HudLabel {
+        id: id.into(),
+        source: HudSource::Button {
+            caption: id.into(),
+            command: HudCommandBinding {
+                binding_id: "application".into(),
+                command_id: id.into(),
+                arguments: StateFields::new(),
+            },
+        },
+        enabled_when: Some(condition("allowed")),
+    };
+    let panels = [
+        ("welcome", HudAnchor::Center, vec![button("start")]),
+        (
+            "playing",
+            HudAnchor::TopLeft,
+            vec![
+                HudLabel {
+                    id: "progress".into(),
+                    enabled_when: None,
+                    source: HudSource::State {
+                        binding_id: "application".into(),
+                        field: "count".into(),
+                        value_type: HudValueType::Number,
+                        prefix: "Progress ".into(),
+                        suffix: String::new(),
+                        precision: 0,
+                    },
+                },
+                button("advance"),
+            ],
+        ),
+        ("finished", HudAnchor::Center, vec![button("retry")]),
+    ]
+    .into_iter()
+    .map(|(id, anchor, elements)| HudPanel {
+        id: id.into(),
+        name: id.into(),
+        anchor,
+        elements,
+        visible_when: Some(condition(id)),
+        ..HudPanel::default()
+    })
+    .collect();
+    session
+        .set_hud(
+            session.scene().revision,
+            Hud {
+                enabled: true,
+                panels,
+            },
+        )
+        .unwrap();
+    let authored = session.snapshot_bytes().unwrap();
+    let reopened = Session::from_snapshot_bytes(&authored).unwrap();
+    assert_eq!(reopened.snapshot_bytes().unwrap(), authored);
+    let mut lifecycle = runtime(reopened);
+    lifecycle.reset().unwrap();
+    assert!(lifecycle.app().buffered_viewport_input());
+    let visible = |app: &GenericMotionLab| {
+        app.hud_snapshot()
+            .panels
+            .iter()
+            .map(|panel| panel.visible)
+            .collect::<Vec<_>>()
+    };
+    assert_eq!(visible(lifecycle.app()), [true, false, false]);
+    assert!(lifecycle.app().hud_snapshot().panels[0].labels[0].available);
+    for (command, playing, expected, count) in [
+        ("start", true, [false, true, false], 0.0),
+        ("advance", false, [false, true, false], 1.0),
+        ("advance", true, [false, false, true], 2.0),
+        ("retry", false, [true, false, false], 0.0),
+    ] {
+        lifecycle.set_running(playing);
+        lifecycle.app_mut().activate_hud_button(command).unwrap();
+        assert_eq!(lifecycle.is_running(), playing);
+        assert_eq!(visible(lifecycle.app()), expected);
+        let state = serde_json::to_value(lifecycle.app().runtime_state_report()).unwrap();
+        assert_eq!(
+            state["application"]["count"],
+            serde_json::json!({"type":"number","value":count})
+        );
+    }
+    let before = serde_json::to_value(lifecycle.app().runtime_state_report()).unwrap();
+    let commit = lifecycle.app().runtime_commit_revision();
+    assert!(lifecycle.app_mut().activate_hud_button("retry").is_err());
+    assert_eq!(lifecycle.app().runtime_commit_revision(), commit);
+    assert_eq!(
+        serde_json::to_value(lifecycle.app().runtime_state_report()).unwrap(),
+        before
+    );
+    assert_eq!(
+        lifecycle.app().session().snapshot_bytes().unwrap(),
+        authored
     );
 }

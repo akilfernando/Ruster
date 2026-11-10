@@ -385,7 +385,7 @@ impl Application for GenericMotionLab {
     fn reset(&mut self) -> Result<(), String> {
         self.cancel_action_input();
         self.cancel_hud_input();
-        self.hud_controls = HudControls::default();
+        self.hud_controls.reset();
         self.needs_reset = true;
         self.last_input = None;
         self.command_ui = CommandUi::default();
@@ -434,7 +434,7 @@ impl Application for GenericMotionLab {
     }
 
     fn buffered_viewport_input(&self) -> bool {
-        self.has_hud_controls()
+        self.needs_hud_input_phase()
     }
     fn viewport_frame_begin(&mut self, ctx: &egui::Context) -> Result<(), String> {
         self.begin_hud_frame(ctx);

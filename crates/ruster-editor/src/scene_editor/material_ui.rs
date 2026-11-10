@@ -1469,7 +1469,7 @@ mod tests {
         let id = candidates[0].id.clone();
         let (_journal, snapshot) = store.claim(&id).unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 14);
+        assert_eq!(payload["version"], 15);
         assert_eq!(payload["material"]["roughness"], "unfinished roughness");
         assert_eq!(payload["material"]["response_mode"], "dielectric");
         assert_eq!(payload["material"]["roughness_texture"], "pending-map");

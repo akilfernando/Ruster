@@ -95,13 +95,16 @@ impl Engine {
         if !authoring.hud.enabled {
             return Err(invalid("HUD is disabled in this run"));
         }
-        let label = authoring
+        let panel = authoring
             .hud
+            .panel_for_label(&activation.button_id)
+            .ok_or_else(|| invalid("HUD button is unavailable in this run"))?;
+        let label = panel
             .elements
             .iter()
             .find(|label| label.id == activation.button_id)
             .ok_or_else(|| invalid("HUD button is unavailable in this run"))?;
-        let identity = ruster_scene::hud::hud_button_identity(label)
+        let identity = ruster_scene::hud::hud_button_identity(panel, label)
             .map_err(|error| invalid(&error.to_string()))?;
         if identity != activation.definition_hash {
             return Err(invalid("HUD button definition changed"));
@@ -120,6 +123,21 @@ impl Engine {
             != Some(activation.command_schema_hash.as_str())
         {
             return Err(invalid("HUD command schema changed"));
+        }
+        for condition in [panel.visible_when.as_ref(), label.enabled_when.as_ref()]
+            .into_iter()
+            .flatten()
+        {
+            let eligibility = ruster_scene::hud::resolve_bool_condition(
+                &authoring,
+                Some(condition),
+                |binding, field| runtime.state().binding(binding)?.get(field),
+            );
+            if !eligibility.permitted {
+                return Err(invalid(
+                    "HUD button is unavailable in the current committed state",
+                ));
+            }
         }
         runtime.last_hud_activation = activation.activation_id;
         let revision = runtime.commit_revision();

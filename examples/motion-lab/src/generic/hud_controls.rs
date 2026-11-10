@@ -17,16 +17,27 @@ pub(super) struct HudControls {
     interaction: HudInteractionState,
 }
 
+impl HudControls {
+    pub(super) fn reset(&mut self) {
+        let interaction = std::mem::take(&mut self.interaction);
+        *self = Self {
+            interaction,
+            ..Self::default()
+        };
+    }
+}
+
 impl GenericMotionLab {
-    pub(super) fn has_hud_controls(&self) -> bool {
-        self.runtime.as_ref().is_some_and(|runtime| {
-            let hud = &runtime.authoring_snapshot().hud;
-            hud.enabled
-                && hud
-                    .elements
-                    .iter()
-                    .any(|row| matches!(row.source, HudSource::Button { .. }))
-        })
+    pub(super) fn needs_hud_input_phase(&self) -> bool {
+        self.hud_controls.interaction.has_input_lease()
+            || self.runtime.as_ref().is_some_and(|runtime| {
+                let hud = &runtime.authoring_snapshot().hud;
+                hud.enabled
+                    && (hud.panels.len() > 1
+                        || hud
+                            .elements()
+                            .any(|row| matches!(row.source, HudSource::Button { .. })))
+            })
     }
 
     fn new_hud_activation(&mut self, button_id: &str) -> Result<HudActivation, String> {
@@ -38,8 +49,11 @@ impl GenericMotionLab {
             .as_ref()
             .ok_or("Reset before activating HUD buttons")?;
         let authoring = runtime.authoring_snapshot();
-        let row = authoring
+        let panel = authoring
             .hud
+            .panel_for_label(button_id)
+            .ok_or("HUD button is unavailable")?;
+        let row = panel
             .elements
             .iter()
             .find(|row| row.id == button_id)
@@ -58,7 +72,7 @@ impl GenericMotionLab {
         let activation = HudActivation {
             activation_id: id,
             button_id: button_id.into(),
-            definition_hash: hud_button_identity(row).map_err(|error| error.to_string())?,
+            definition_hash: hud_button_identity(panel, row).map_err(|error| error.to_string())?,
             command_schema_hash: runtime
                 .command_schema_hash(&command.binding_id)
                 .ok_or("HUD command schema is unavailable")?
@@ -132,22 +146,23 @@ impl GenericMotionLab {
         ui: &mut egui::Ui,
         rect: egui::Rect,
     ) -> ViewportInputOwnership {
-        if !self.has_hud_controls() {
+        if !self.needs_hud_input_phase() {
             self.hud_controls.prepared = None;
             return ViewportInputOwnership::default();
         }
         let mode = self.hud_presentation_mode();
-        let runtime = self
-            .runtime
-            .as_ref()
-            .expect("captured controls have a runtime");
-        let authoring = runtime.authoring_snapshot();
-        let resolved = self
-            .hud_cache
-            .prepare(&authoring.hud, authoring, |binding, field| {
-                runtime.state().binding(binding)?.get(field)
-            });
-        let mut prepared = prepare_hud(ui.painter(), rect, &authoring.hud, resolved, mode);
+        let has_runtime = self.runtime.is_some();
+        let mut prepared = if let Some(runtime) = &self.runtime {
+            let authoring = runtime.authoring_snapshot();
+            let resolved = self
+                .hud_cache
+                .prepare(&authoring.hud, authoring, |binding, field| {
+                    runtime.state().binding(binding)?.get(field)
+                });
+            prepare_hud(ui.painter(), rect, &authoring.hud, resolved, mode)
+        } else {
+            PreparedHud::default()
+        };
         let interaction = interact_prepared_hud(
             ui,
             &mut prepared,
@@ -156,7 +171,7 @@ impl GenericMotionLab {
             self.hud_controls.pending.is_some(),
             &mut self.hud_controls.interaction,
         );
-        self.hud_controls.prepared = Some(prepared);
+        self.hud_controls.prepared = has_runtime.then_some(prepared);
         if interaction.pointer_owned || interaction.keyboard_owned {
             self.cancel_action_input();
         }
