@@ -1,6 +1,6 @@
 # 0049 — State-driven HUD panels
 
-Date2026-11-10. Status selected engineering contract under the user-approved [F3c outcome](../plans/F3C-STATE-DRIVEN-SCREENS.md), implemented on01fe8f9 with functional/native/cost/resource qualification complete and final acceptance held on matched-camera idle evidence. Root/Astra select these details. Acceptance requires the linked plan’s complete gates and [execution evidence](../evidence/F3C-STATE-DRIVEN-SCREENS.md).
+Date2026-11-10. Status accepted engineering contract under the user-approved [F3c outcome](../plans/F3C-STATE-DRIVEN-SCREENS.md), implemented on01fe8f9 and accepted by Root/Astra after functional/native/cost/resource and matched-camera idle qualification. Root/Astra select these details. Acceptance requires the linked plan’s complete gates and [execution evidence](../evidence/F3C-STATE-DRIVEN-SCREENS.md).
 
 ## Context and alternatives
 
