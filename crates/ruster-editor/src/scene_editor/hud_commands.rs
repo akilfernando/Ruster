@@ -523,15 +523,56 @@ mod tests {
         let mut button_response = response;
         button_response["result"]["activation"] = json!({
             "pending":{"run_id":"9".repeat(62),"activation_id":u64::MAX.to_string(),"button_id":"b".repeat(128),"native":true},
-            "latest_terminal":{"run_id":"9".repeat(62),"activation_id":u64::MAX.to_string(),"button_id":"b".repeat(128),"status":"failed","error":"\0".repeat(1024)}
+            "latest_terminal":{"run_id":"9".repeat(62),"activation_id":u64::MAX.to_string(),"button_id":"b".repeat(128),"status":"failed","error":"\0".repeat(2048)}
         });
+        // Fill the canonical argument budget exactly, without exceeding the
+        // per-Text limit. ASCII padding adds one encoded byte per character.
+        let mut arguments: ruster_scene::StateFields = (0..16)
+            .map(|index| {
+                (
+                    format!("argument-{index}"),
+                    ruster_scene::StateValue::Text(String::new()),
+                )
+            })
+            .collect();
+        let mut remaining = ruster_scene::MAX_COMMAND_ARGUMENT_BYTES
+            - ruster_scene::command_argument_payload_bytes(&arguments).unwrap();
+        for value in arguments.values_mut() {
+            let ruster_scene::StateValue::Text(text) = value else {
+                unreachable!()
+            };
+            let bytes = remaining.min(ruster_scene::MAX_PROPERTY_TEXT_BYTES);
+            *text = "x".repeat(bytes);
+            remaining -= bytes;
+        }
+        assert_eq!(remaining, 0);
+        assert_eq!(arguments.len(), 16);
+        assert_eq!(
+            ruster_scene::command_argument_payload_bytes(&arguments).unwrap(),
+            16 * 1024
+        );
+        // The current button resolves its caption (at most1024bytes), while a
+        // previously prepared label with the same ID may retain2048bytes.
+        // Authored edits hide the older runtime before the current model resolves.
+        button_response["result"]["model"]["resolved"]["labels"][0]["text"] =
+            json!("\0".repeat(1024));
         button_response["result"]["hud_definition"]["elements"][0]["source"] = json!({
             "kind":"button", "caption":"\0".repeat(1024), "command":{
                 "binding_id":"b".repeat(128), "command_id":"c".repeat(128),
-                "arguments": (0..16).map(|index| (format!("argument-{index}"),
-                    json!({"type":"text","value":"\0".repeat(150)}))).collect::<serde_json::Map<_, _>>()
+                "arguments": arguments
             }
         });
+        assert_eq!(
+            button_response["result"]["model"]["resolved"]["labels"][0]["text"],
+            button_response["result"]["hud_definition"]["elements"][0]["source"]["caption"]
+        );
+        assert_eq!(
+            button_response["result"]["last_prepared"]["resolved"]["labels"][0]["text"]
+                .as_str()
+                .unwrap()
+                .len(),
+            2048
+        );
         let command: ruster_scene::hud::HudCommandBinding = serde_json::from_value(
             button_response["result"]["hud_definition"]["elements"][0]["source"]["command"].clone(),
         )
