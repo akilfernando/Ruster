@@ -259,6 +259,9 @@ impl CreationManifest {
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
         let session = ruster_scene::Session::from_snapshot_bytes(&bytes)
             .map_err(|error| error.to_string())?;
+        if session.loaded_format_version() >= 16 && self.version < 5 {
+            return Err("Scene16 runtime_hud_controls requires descriptor version 5".into());
+        }
         if session.loaded_format_version() >= 15 && self.version < 5 {
             return Err("Scene15 runtime_hud requires descriptor version 5".into());
         }
@@ -436,6 +439,17 @@ mod tests {
             .load_session(&root)
             .unwrap_err()
             .contains("Scene15 runtime_hud"));
+        state["format_version"] = serde_json::json!(16);
+        state["authoring"]["hud"]["elements"][0]["source"] = serde_json::json!({
+            "kind":"button","caption":"Restart","command":{
+                "binding_id":"application","command_id":"restart","arguments":{}}
+        });
+        std::fs::write(&scene_path, serde_json::to_vec(&state).unwrap()).unwrap();
+        assert!(loaded.load_session(&root).unwrap().authoring().hud.enabled);
+        assert!(old_spatial
+            .load_session(&root)
+            .unwrap_err()
+            .contains("Scene16 runtime_hud_controls"));
         let mut input_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
         input_scene["format_version"] = serde_json::json!(11);
         std::fs::write(&scene_path, serde_json::to_vec(&input_scene).unwrap()).unwrap();
@@ -590,7 +604,7 @@ mod tests {
             assert!(old
                 .load_session(&root)
                 .unwrap_err()
-                .contains("Scene15 runtime_hud"));
+                .contains("Scene16 runtime_hud_controls"));
             // Genuine old documents still load through old descriptors.
             let mut old_scene: serde_json::Value = serde_json::from_slice(&original).unwrap();
             old_scene["format_version"] = serde_json::json!(9);

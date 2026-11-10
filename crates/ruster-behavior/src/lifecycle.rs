@@ -16,6 +16,25 @@ pub struct CommandReceipt {
     pub tick: u64,
 }
 
+/// An action intent bound to one captured HUD row and command catalog.
+/// The enclosing runtime owner supplies run identity. Arguments are never caller data.
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HudActivation {
+    pub activation_id: u64,
+    pub button_id: String,
+    pub definition_hash: String,
+    pub command_schema_hash: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, serde::Serialize)]
+pub struct HudActivationReceipt {
+    #[serde(serialize_with = "crate::spatial_host::counter_string")]
+    pub activation_id: u64,
+    pub button_id: String,
+    pub command: CommandReceipt,
+}
+
 pub(super) enum Invocation<'a> {
     Initialize,
     Command {
@@ -57,6 +76,67 @@ fn command_error(code: DiagnosticCode, message: &str) -> Diagnostic {
 }
 
 impl Engine {
+    /// Execute an immutable HUD action against the owner's current committed state.
+    /// Admission consumes its monotonically increasing identity before VM evaluation,
+    /// including failed evaluations. Cancelled queued identities may leave gaps.
+    pub fn activate_hud(
+        &mut self,
+        runtime: &mut Runtime,
+        activation: &HudActivation,
+    ) -> Result<HudActivationReceipt, Diagnostic> {
+        let invalid = |message: &str| command_error(DiagnosticCode::InvalidCommand, message);
+        if activation.activation_id == 0 || activation.activation_id <= runtime.last_hud_activation
+        {
+            return Err(invalid(
+                "HUD activation identity was consumed or is invalid",
+            ));
+        }
+        let authoring = Arc::clone(runtime.authoring_snapshot());
+        if !authoring.hud.enabled {
+            return Err(invalid("HUD is disabled in this run"));
+        }
+        let label = authoring
+            .hud
+            .elements
+            .iter()
+            .find(|label| label.id == activation.button_id)
+            .ok_or_else(|| invalid("HUD button is unavailable in this run"))?;
+        let identity = ruster_scene::hud::hud_button_identity(label)
+            .map_err(|error| invalid(&error.to_string()))?;
+        if identity != activation.definition_hash {
+            return Err(invalid("HUD button definition changed"));
+        }
+        let command = label
+            .source
+            .command_binding()
+            .ok_or_else(|| invalid("HUD element is not a button"))?;
+        ruster_scene::hud::validate_hud_button_command(&authoring, command)
+            .map_err(|error| invalid(&error.to_string()))?;
+        let binding = &authoring.bindings[&command.binding_id];
+        if authoring.sources[&binding.source_id].language_id != LANGUAGE_ID {
+            return Err(invalid("HUD command backend is unsupported"));
+        }
+        if runtime.command_schema_hash(&command.binding_id)
+            != Some(activation.command_schema_hash.as_str())
+        {
+            return Err(invalid("HUD command schema changed"));
+        }
+        runtime.last_hud_activation = activation.activation_id;
+        let revision = runtime.commit_revision();
+        let command = self.dispatch_command(
+            runtime,
+            &command.binding_id,
+            revision,
+            &command.command_id,
+            &command.arguments,
+        )?;
+        Ok(HudActivationReceipt {
+            activation_id: activation.activation_id,
+            button_id: activation.button_id.clone(),
+            command,
+        })
+    }
+
     /// Execute one Application state transaction. The caller owns run/pause authority.
     /// Validation precedes VM work. Success consumes the expected revision, including no-ops.
     pub fn dispatch_command(

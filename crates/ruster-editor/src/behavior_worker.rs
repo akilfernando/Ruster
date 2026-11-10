@@ -160,6 +160,11 @@ pub(super) enum Command {
         expected_input_epoch: u64,
         frame: ActionFrame,
     },
+    ActivateHud {
+        key: RunKey,
+        activation: ruster_behavior::HudActivation,
+        native_epoch: Option<u64>,
+    },
     Dispatch {
         key: RunKey,
         binding_id: String,
@@ -182,6 +187,7 @@ impl Command {
             | Self::Pause { key }
             | Self::Step { key }
             | Self::ProgramStep { key, .. }
+            | Self::ActivateHud { key, .. }
             | Self::Dispatch { key, .. }
             | Self::Invalidate { key }
             | Self::Stop { key } => *key,
@@ -193,7 +199,7 @@ impl Command {
             Self::Play { .. } => Operation::Play,
             Self::Pause { .. } => Operation::Pause,
             Self::Step { .. } | Self::ProgramStep { .. } => Operation::Step,
-            Self::Dispatch { .. } => Operation::Command,
+            Self::Dispatch { .. } | Self::ActivateHud { .. } => Operation::Command,
             Self::Invalidate { .. } => Operation::Invalidate,
             Self::Stop { .. } => Operation::Stop,
         }
@@ -204,6 +210,12 @@ impl Command {
 }
 #[derive(Debug)]
 pub(super) enum Event {
+    HudActivation {
+        key: RunKey,
+        activation_id: u64,
+        button_id: String,
+        result: Result<ruster_behavior::HudActivationReceipt, String>,
+    },
     Command {
         key: RunKey,
         receipt: ruster_behavior::CommandReceipt,
@@ -240,6 +252,7 @@ impl Event {
         match self {
             Self::Reset { key, .. }
             | Self::Command { key, .. }
+            | Self::HudActivation { key, .. }
             | Self::Step { key, .. }
             | Self::State { key, .. }
             | Self::Error { key, .. }
@@ -330,6 +343,7 @@ struct Shared {
     cancel: Arc<AtomicBool>,
     shutdown: AtomicBool,
     input_epoch: AtomicU64,
+    hud_epoch: AtomicU64,
     input_enabled: AtomicBool,
     input: Mutex<Option<InputSlot>>,
     latest: Mutex<Option<Frame>>,
@@ -347,6 +361,8 @@ struct Shared {
     admission_gate: Mutex<Option<TestGate>>,
     #[cfg(test)]
     input_gate: Mutex<Option<TestGate>>,
+    #[cfg(test)]
+    hud_gate: Mutex<Option<TestGate>>,
 }
 impl Shared {
     /// Revocation never waits for the slot. Its next reader clears stale held
@@ -419,6 +435,7 @@ impl Worker {
             cancel: Arc::new(AtomicBool::new(false)),
             shutdown: AtomicBool::new(false),
             input_epoch: AtomicU64::new(0),
+            hud_epoch: AtomicU64::new(0),
             input_enabled: AtomicBool::new(false),
             input: Mutex::new(None),
             latest: Mutex::new(None),
@@ -434,6 +451,8 @@ impl Worker {
             admission_gate: Mutex::new(None),
             #[cfg(test)]
             input_gate: Mutex::new(None),
+            #[cfg(test)]
+            hud_gate: Mutex::new(None),
         });
         let state = shared.clone();
         let thread = thread::Builder::new()
@@ -459,6 +478,7 @@ impl Worker {
         authored_revision: u64,
     ) -> Result<RunKey, RequestError> {
         let _ = self.shared.revoke_input(true);
+        self.cancel_native_hud_activation();
         let epoch = self
             .shared
             .epoch
@@ -477,6 +497,22 @@ impl Worker {
         self.shared.cancel.store(true, Ordering::SeqCst);
         self.wake();
         Ok(self.current)
+    }
+    /// Separate from gameplay ownership, which is revoked when a HUD button claims input.
+    pub fn native_hud_epoch(&self) -> Result<u64, String> {
+        let epoch = self.shared.hud_epoch.load(Ordering::SeqCst);
+        (epoch != u64::MAX)
+            .then_some(epoch)
+            .ok_or_else(|| "HUD input identity exhausted".into())
+    }
+    pub fn cancel_native_hud_activation(&self) {
+        let _ = self
+            .shared
+            .hud_epoch
+            .try_update(Ordering::SeqCst, Ordering::SeqCst, |old| {
+                Some(old.saturating_add(1))
+            });
+        self.wake();
     }
     pub fn current_key(&self) -> RunKey {
         self.current
@@ -740,7 +776,10 @@ impl Worker {
         ) {
             let _ = self.shared.revoke_input(true);
         }
-        if matches!(command, Command::Dispatch { .. }) {
+        if matches!(
+            command,
+            Command::Dispatch { .. } | Command::ActivateHud { .. }
+        ) {
             match self.debug_stop(key) {
                 Ok(None) => {}
                 Ok(Some(_)) => {
@@ -1183,6 +1222,63 @@ fn process(
                     last_good: execution.info(),
                 }),
             }
+        }
+        Command::ActivateHud {
+            activation,
+            native_epoch,
+            ..
+        } => {
+            let terminal = |result| {
+                Some(Event::HudActivation {
+                    key,
+                    activation_id: activation.activation_id,
+                    button_id: activation.button_id.clone(),
+                    result,
+                })
+            };
+            if execution.key != Some(key) || shared.cancel.load(Ordering::SeqCst) {
+                return terminal(Err(
+                    "HUD activation requires the current initialized runtime".into(),
+                ));
+            }
+            let debug_stopped = shared
+                .debugger
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .as_ref()
+                .is_some_and(|(run, handle)| *run == key && handle.stop().is_some());
+            if debug_stopped {
+                return terminal(Err(
+                    "HUD activation cannot run while the debugger is stopped".into(),
+                ));
+            }
+            let Some(runtime) = execution.runtime.as_mut() else {
+                return terminal(Err("Reset before activating a HUD button".into()));
+            };
+            #[cfg(test)]
+            test_gate(&shared.hud_gate);
+            // This is the native cancellation admission boundary. Focus/Escape may
+            // revoke queued intent, while an admitted atomic transaction may finish.
+            if native_epoch.is_some_and(|epoch| {
+                epoch == u64::MAX || shared.hud_epoch.load(Ordering::SeqCst) != epoch
+            }) {
+                return terminal(Err(
+                    "Native HUD activation cancelled before execution".into()
+                ));
+            }
+            let result = execution
+                .engine
+                .as_mut()
+                .expect("runtime owns engine")
+                .activate_hud(runtime, &activation)
+                .map_err(|diagnostic| diagnostic.message.to_string());
+            if !active(shared, key) || shared.cancel.load(Ordering::SeqCst) {
+                return None;
+            }
+            if result.is_ok() {
+                frame(shared, execution, repaint, true);
+            }
+            terminal(result)
         }
         Command::Dispatch {
             binding_id,
@@ -1686,6 +1782,232 @@ mod tests {
             Worker::start_with_limits(limits, Some(repaint)).unwrap(),
             pulses,
         )
+    }
+    fn hud_fixture() -> (Arc<Scene>, Arc<Authoring>) {
+        let (scene, _) = fixture(false);
+        let mut authoring = Authoring::default();
+        authoring.sources.insert("app".into(), BehaviorSource {
+            label: None, language_id: LANGUAGE_ID.into(), host_api_version: 5,
+            text: "return { initialize=function(p,h) return {state={count=1}} end, command=function(n,a,p,h) if n=='fail' then error('intent failure') end return {state={count=h.state('count')+1}} end, update=function(o,p,dt,h) return {} end }".into(),
+        });
+        authoring.bindings.insert(
+            "app".into(),
+            BehaviorBinding {
+                target: ruster_scene::BindingTarget::Application,
+                source_id: "app".into(),
+                enabled: true,
+                properties: BTreeMap::new(),
+                state_defaults: BTreeMap::from([(
+                    "count".into(),
+                    ruster_scene::StateValue::Number(0.0),
+                )]),
+                commands: ["add", "fail"]
+                    .into_iter()
+                    .map(|id| {
+                        (
+                            id.into(),
+                            ruster_scene::CommandDefinition {
+                                arguments: BTreeMap::new(),
+                            },
+                        )
+                    })
+                    .collect(),
+            },
+        );
+        authoring.hud.enabled = true;
+        authoring.hud.elements = ["add", "fail"]
+            .into_iter()
+            .map(|id| ruster_scene::hud::HudLabel {
+                id: id.into(),
+                source: ruster_scene::hud::HudSource::Button {
+                    caption: id.into(),
+                    command: ruster_scene::hud::HudCommandBinding {
+                        binding_id: "app".into(),
+                        command_id: id.into(),
+                        arguments: BTreeMap::new(),
+                    },
+                },
+            })
+            .collect();
+        (scene, Arc::new(authoring))
+    }
+    fn hud_intent(frame: &Frame, id: u64, button: &str) -> ruster_behavior::HudActivation {
+        ruster_behavior::HudActivation {
+            activation_id: id,
+            button_id: button.into(),
+            definition_hash: ruster_scene::hud::hud_button_identity(
+                frame
+                    .authoring
+                    .hud
+                    .elements
+                    .iter()
+                    .find(|row| row.id == button)
+                    .unwrap(),
+            )
+            .unwrap(),
+            command_schema_hash: frame.command_schema_hash.clone().unwrap(),
+        }
+    }
+    // Distinct owner boundary: native revocation cancels queued work without
+    // cancelling programmatic intent, and failures preserve running playback.
+    #[test]
+    fn hud_native_revocation_and_failed_running_command_preserve_playback() {
+        let (mut worker, pulses) = worker(Limits::default());
+        let (scene, authoring) = hud_fixture();
+        let key = reset(&mut worker, &pulses, 1, scene, authoring);
+        let displayed = worker.last_good_frame().unwrap();
+        worker.try_request(Command::Play { key }).unwrap();
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::State {
+                state: State::Playing,
+                ..
+            }
+        ));
+        let (reached, release) = gate(&worker.shared.hud_gate);
+        worker
+            .try_request(Command::ActivateHud {
+                key,
+                activation: hud_intent(&displayed, 1, "add"),
+                native_epoch: Some(worker.native_hud_epoch().unwrap()),
+            })
+            .unwrap();
+        reached.recv_timeout(Duration::from_secs(5)).unwrap();
+        worker.cancel_native_hud_activation();
+        release.send(()).unwrap();
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::HudActivation {
+                activation_id: 1,
+                result: Err(_),
+                ..
+            }
+        ));
+        assert!(worker.shared.input_enabled.load(Ordering::SeqCst));
+        worker
+            .try_request(Command::ActivateHud {
+                key,
+                activation: hud_intent(&displayed, 2, "fail"),
+                native_epoch: None,
+            })
+            .unwrap();
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::HudActivation {
+                activation_id: 2,
+                result: Err(_),
+                ..
+            }
+        ));
+        assert!(worker.shared.input_enabled.load(Ordering::SeqCst));
+        worker
+            .try_request(Command::ActivateHud {
+                key,
+                activation: hud_intent(&displayed, 3, "add"),
+                native_epoch: None,
+            })
+            .unwrap();
+        let receipt = match wait_event(&worker, &pulses) {
+            Event::HudActivation {
+                result: Ok(receipt),
+                ..
+            } => receipt,
+            event => panic!("unexpected terminal {event:?}"),
+        };
+        assert!(worker.shared.input_enabled.load(Ordering::SeqCst));
+        assert_eq!(
+            receipt.command.commit_revision,
+            receipt.command.previous_commit_revision + 1
+        );
+        assert_eq!(
+            worker
+                .last_good_frame()
+                .unwrap()
+                .state
+                .binding("app")
+                .unwrap()["count"],
+            ruster_scene::StateValue::Number(2.0)
+        );
+        worker
+            .try_request(Command::ActivateHud {
+                key,
+                activation: hud_intent(&displayed, 3, "add"),
+                native_epoch: None,
+            })
+            .unwrap();
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::HudActivation { result: Err(_), .. }
+        ));
+        let stopped = worker.stop_immediate(1, 0).unwrap();
+        assert!(
+            matches!(wait_event(&worker,&pulses),Event::State {key,state:State::Stopped,..} if key==stopped)
+        );
+        close(&mut worker);
+    }
+    // A terminal HUD reply is mandatory output. Full ack capacity must prevent
+    // further VM effects until the owner drains it, including ordinary HUD FIFO.
+    #[test]
+    fn hud_terminal_backpressure_prevents_later_effects() {
+        let (mut worker, pulses) = worker(Limits::default());
+        let (scene, authoring) = hud_fixture();
+        let key = reset(&mut worker, &pulses, 1, scene, authoring);
+        let displayed = worker.last_good_frame().unwrap();
+        let (full, release) = gate(&worker.shared.ack_full_gate);
+        let deadline = Instant::now() + Duration::from_secs(5);
+        for _ in 0..=EVENT_CAPACITY {
+            loop {
+                match worker.try_request(Command::ActivateHud {
+                    key,
+                    activation: hud_intent(&displayed, 0, "add"),
+                    native_epoch: None,
+                }) {
+                    Ok(()) => break,
+                    Err(RequestError {
+                        kind: RequestErrorKind::Busy,
+                        ..
+                    }) => {
+                        assert!(Instant::now() < deadline);
+                        thread::park_timeout(Duration::from_millis(1));
+                    }
+                    Err(error) => panic!("unexpected admission {error}"),
+                }
+            }
+        }
+        full.recv_timeout(Duration::from_secs(5)).unwrap();
+        worker
+            .try_request(Command::ActivateHud {
+                key,
+                activation: hud_intent(&displayed, 1, "add"),
+                native_epoch: None,
+            })
+            .unwrap();
+        assert_eq!(worker.last_good_frame().unwrap().commit_revision, 0);
+        assert!(matches!(
+            worker.poll_event().unwrap(),
+            Event::HudActivation { result: Err(_), .. }
+        ));
+        release.send(()).unwrap();
+        for _ in 0..EVENT_CAPACITY {
+            assert!(matches!(
+                wait_event(&worker, &pulses),
+                Event::HudActivation {
+                    activation_id: 0,
+                    result: Err(_),
+                    ..
+                }
+            ));
+        }
+        assert!(matches!(
+            wait_event(&worker, &pulses),
+            Event::HudActivation {
+                activation_id: 1,
+                result: Ok(_),
+                ..
+            }
+        ));
+        assert_eq!(worker.last_good_frame().unwrap().commit_revision, 1);
+        close(&mut worker);
     }
     fn wait_event(worker: &Worker, pulses: &Receiver<()>) -> Event {
         let until = Instant::now() + Duration::from_secs(5);

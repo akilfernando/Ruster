@@ -91,6 +91,8 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
             action_claim_frame: None,
             last_control_frame: None,
             last_action_frame: None,
+            last_buffered_frame: None,
+            last_buffered_input_frame: None,
             navigation: ruster_render::NavigationOptions { camera: options.initial_camera, ..Default::default() },
             runtime, metrics, render: Some(render.clone()), options, last_frame: Instant::now(), error: None,
             ui_frames: 0, exit_error: host_error,
@@ -121,6 +123,8 @@ struct Host<A: Application> {
     action_claim_frame: Option<u64>,
     last_control_frame: Option<u64>,
     last_action_frame: Option<u64>,
+    last_buffered_frame: Option<u64>,
+    last_buffered_input_frame: Option<u64>,
 }
 
 impl<A: Application> Host<A> {
@@ -408,10 +412,29 @@ impl<A: Application> Host<A> {
         if self.runtime.app_mut().take_reset_request() {
             self.reset();
         }
-        self.route_keyboard(&ctx);
-        if let Some(elapsed) = input_time {
-            let advanced = self.runtime.advance(elapsed).map(|_| ());
-            self.report(advanced);
+        let buffered = self.runtime.app().buffered_viewport_input();
+        let first_buffered_pass =
+            !buffered || self.last_buffered_frame != Some(ctx.cumulative_frame_nr());
+        if buffered && first_buffered_pass {
+            self.last_buffered_frame = Some(ctx.cumulative_frame_nr());
+            if ctx.input(|input| !input.focused || input.key_pressed(egui::Key::Escape))
+                || egui::Popup::is_any_open(&ctx)
+                || ctx.memory(|memory| memory.top_modal_layer().is_some())
+            {
+                self.release_action_control(&ctx);
+                self.runtime.app_mut().cancel_viewport_input();
+            }
+            let result = self.runtime.app_mut().viewport_frame_begin(&ctx);
+            self.report(result);
+        }
+        if !buffered {
+            self.route_keyboard(&ctx);
+        }
+        if first_buffered_pass {
+            if let Some(elapsed) = input_time {
+                let advanced = self.runtime.advance(elapsed).map(|_| ());
+                self.report(advanced);
+            }
         }
 
         // Application UI/input may have edited scene data. Invalid state never reaches the GPU.
@@ -420,17 +443,40 @@ impl<A: Application> Host<A> {
         self.report(valid);
         egui::CentralPanel::default().show(root, |ui| {
             if can_render {
-                let app = self.runtime.app();
-                let content = app.content();
-                let selected = app.selected();
-                let viewport = ruster_render::viewport_with_materials(
-                    ui,
-                    content.scene(),
-                    selected.as_slice(),
-                    content.meshes(),
-                    content.textures(),
-                    &mut self.navigation,
-                );
+                let mut surface = {
+                    let app = self.runtime.app();
+                    let selected = app.selected();
+                    ruster_render::allocate_viewport(
+                        ui, app.content().scene(), selected.as_slice(), &mut self.navigation,
+                    )
+                };
+                let ownership = self.runtime.app_mut().viewport_interaction(ui, surface.rect);
+                let ownership = match ownership {
+                    Ok(ownership) => ownership,
+                    Err(error) => {
+                        self.report(Err(error));
+                        crate::ViewportInputOwnership { pointer: true, keyboard: true }
+                    }
+                };
+                surface.input_owned = ownership.pointer || ownership.keyboard;
+                if buffered {
+                    let frame = ctx.cumulative_frame_nr();
+                    if surface.input_owned {
+                        self.release_action_control(&ctx);
+                    } else if self.last_buffered_input_frame != Some(frame) {
+                        self.route_keyboard(&ctx);
+                    }
+                    self.last_buffered_input_frame = Some(frame);
+                }
+                let viewport = {
+                    let app = self.runtime.app();
+                    let content = app.content();
+                    let selected = app.selected();
+                    ruster_render::render_viewport_with_materials(
+                        ui, content.scene(), selected.as_slice(), content.meshes(),
+                        content.textures(), &mut self.navigation, surface,
+                    )
+                };
                 if self.runtime.app().keyboard_actions().is_some() {
                     self.action_surface = Some(viewport.response.id);
                     self.action_surface_rect = Some(viewport.rect);
@@ -480,6 +526,14 @@ impl<A: Application> Host<A> {
 
 impl<A: Application> eframe::App for Host<A> {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
+        if !raw.focused
+            || raw
+                .events
+                .iter()
+                .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+        {
+            self.runtime.app_mut().cancel_viewport_input();
+        }
         if self.runtime.app().keyboard_actions().is_some()
             && (!raw.focused
                 || raw
@@ -510,11 +564,12 @@ impl<A: Application> eframe::App for Host<A> {
         let elapsed = now.saturating_duration_since(self.last_frame);
         self.last_frame = now;
         let authored_input = self.runtime.app().keyboard_actions().is_some();
-        if !authored_input {
+        let buffered = self.runtime.app().buffered_viewport_input();
+        if !authored_input && !buffered {
             let advanced = self.runtime.advance(elapsed).map(|_| ());
             self.report(advanced);
         }
-        self.scene_ui_with_input_time(root, authored_input.then_some(elapsed));
+        self.scene_ui_with_input_time(root, (authored_input || buffered).then_some(elapsed));
         if self.runtime.is_running() {
             ctx.request_repaint_after(
                 self.options
@@ -570,6 +625,8 @@ mod tests {
             content: Content,
             tick: u64,
             observed: Vec<u64>,
+            buffered: bool,
+            phases: Vec<(&'static str, u64)>,
         }
         impl Application for OverlayApp {
             fn content(&self) -> &Content {
@@ -577,11 +634,34 @@ mod tests {
             }
             fn tick(&mut self, step: Step) -> Result<(), String> {
                 self.tick = step.tick;
+                self.phases.push(("tick", self.tick));
                 self.content.scene_mut().objects[0].transform.translation[0] = step.tick as f32;
                 Ok(())
             }
             fn reset(&mut self) -> Result<(), String> {
                 Ok(())
+            }
+            fn buffered_viewport_input(&self) -> bool {
+                self.buffered
+            }
+            fn viewport_frame_begin(&mut self, _ctx: &egui::Context) -> Result<(), String> {
+                self.phases.push(("begin", self.tick));
+                Ok(())
+            }
+            fn input(&mut self, _input: &InputFrame) -> Result<(), String> {
+                self.phases.push(("input", self.tick));
+                Ok(())
+            }
+            fn viewport_interaction(
+                &mut self,
+                ui: &mut egui::Ui,
+                _rect: egui::Rect,
+            ) -> Result<crate::ViewportInputOwnership, String> {
+                self.phases.push(("interact", self.tick));
+                if self.buffered && ui.ctx().current_pass_index() == 0 {
+                    ui.ctx().request_discard("verify one physical-frame owner");
+                }
+                Ok(crate::ViewportInputOwnership::default())
             }
             fn viewport_overlay(
                 &mut self,
@@ -595,51 +675,89 @@ mod tests {
                 assert!(rect.is_positive());
                 assert_eq!(painter.clip_rect(), rect);
                 self.observed.push(self.tick);
+                self.phases.push(("paint", self.tick));
                 Ok(())
             }
         }
-        let options = HostOptions::default();
-        let app = OverlayApp {
-            content: Content::new(ruster_scene::Scene::demo(), MeshMap::new()).unwrap(),
-            tick: 0,
-            observed: Vec::new(),
-        };
-        let mut host = Host {
-            action_surface: None,
-            action_surface_rect: None,
-            action_control_owned: false,
-            action_claim_frame: None,
-            last_control_frame: None,
-            last_action_frame: None,
-            navigation: ruster_render::NavigationOptions::default(),
-            runtime: Runtime::new(app, options.tick_duration).unwrap(),
-            options,
-            last_frame: Instant::now(),
-            metrics: Arc::new(Mutex::new(ruster_render::Metrics::default())),
-            render: None,
-            error: None,
-            ui_frames: 0,
-            exit_error: Arc::new(Mutex::new(None)),
-        };
-        host.runtime.set_running(true);
-        let context = egui::Context::default();
-        run_ui(
-            &context,
-            egui::RawInput {
-                screen_rect: Some(egui::Rect::from_min_size(
-                    egui::Pos2::ZERO,
-                    egui::vec2(1200.0, 800.0),
-                )),
-                ..Default::default()
-            },
-            |ui| host.scene_ui_with_input_time(ui, Some(Duration::from_millis(100))),
-        );
-        assert!(host.runtime.tick() > 0);
-        assert_eq!(
-            host.runtime.app().observed.last(),
-            Some(&host.runtime.tick())
-        );
-        assert!(host.error.is_none());
+        for buffered in [false, true] {
+            let options = HostOptions::default();
+            let app = OverlayApp {
+                content: Content::new(ruster_scene::Scene::demo(), MeshMap::new()).unwrap(),
+                tick: 0,
+                observed: Vec::new(),
+                buffered,
+                phases: Vec::new(),
+            };
+            let mut host = Host {
+                action_surface: None,
+                action_surface_rect: None,
+                action_control_owned: false,
+                action_claim_frame: None,
+                last_control_frame: None,
+                last_action_frame: None,
+                last_buffered_frame: None,
+                last_buffered_input_frame: None,
+                navigation: ruster_render::NavigationOptions::default(),
+                runtime: Runtime::new(app, options.tick_duration).unwrap(),
+                options,
+                last_frame: Instant::now(),
+                metrics: Arc::new(Mutex::new(ruster_render::Metrics::default())),
+                render: None,
+                error: None,
+                ui_frames: 0,
+                exit_error: Arc::new(Mutex::new(None)),
+            };
+            host.runtime.set_running(true);
+            let context = egui::Context::default();
+            run_ui(
+                &context,
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1200.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| host.scene_ui_with_input_time(ui, Some(Duration::from_millis(100))),
+            );
+            assert!(host.runtime.tick() > 0);
+            assert_eq!(
+                host.runtime.app().observed.last(),
+                Some(&host.runtime.tick())
+            );
+            assert!(host.error.is_none());
+            let phases = &host.runtime.app().phases;
+            if buffered {
+                assert_eq!(
+                    &phases[..5],
+                    &[
+                        ("begin", 0),
+                        ("tick", 1),
+                        ("interact", 1),
+                        ("input", 1),
+                        ("paint", 1)
+                    ]
+                );
+                assert!(
+                    phases.len() > 5,
+                    "the requested discarded pass must actually run"
+                );
+                assert_eq!(
+                    phases.iter().filter(|(name, _)| *name == "begin").count(),
+                    1
+                );
+                assert_eq!(phases.iter().filter(|(name, _)| *name == "tick").count(), 1);
+                assert_eq!(
+                    phases.iter().filter(|(name, _)| *name == "input").count(),
+                    1
+                );
+            } else {
+                assert_eq!(
+                    phases,
+                    &[("input", 0), ("tick", 1), ("interact", 1), ("paint", 1)]
+                );
+            }
+        }
     }
 
     struct KeyboardApp {
@@ -786,6 +904,8 @@ mod tests {
             action_claim_frame: None,
             last_control_frame: None,
             last_action_frame: None,
+            last_buffered_frame: None,
+            last_buffered_input_frame: None,
             navigation: ruster_render::NavigationOptions::default(),
             runtime: Runtime::new(app, options.tick_duration).unwrap(),
             options,
@@ -1137,6 +1257,8 @@ mod tests {
             action_claim_frame: None,
             last_control_frame: None,
             last_action_frame: None,
+            last_buffered_frame: None,
+            last_buffered_input_frame: None,
             navigation: ruster_render::NavigationOptions::default(),
             runtime: Runtime::new(app, options.tick_duration).unwrap(),
             options,

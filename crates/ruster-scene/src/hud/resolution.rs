@@ -4,10 +4,10 @@ use std::fmt::{self, Write};
 use serde::Serialize;
 
 use super::{
-    Hud, HudLabel, HudSource, MAX_HUD_ELEMENT_TEXT_BYTES, MAX_HUD_LABELS,
+    Hud, HudCommandBinding, HudLabel, HudSource, MAX_HUD_ELEMENT_TEXT_BYTES, MAX_HUD_LABELS,
     MAX_HUD_RESOLVED_LABEL_BYTES,
 };
-use crate::{Authoring, StateValue};
+use crate::{Authoring, BindingTarget, StateValue};
 
 const UNAVAILABLE: &str = "<Unavailable>";
 
@@ -21,6 +21,30 @@ pub enum HudDiagnostic {
     TypeChanged,
     UnavailableState,
     OutputOverflow,
+    NonApplicationBinding,
+    UnsupportedCommandApi,
+    MissingCommand,
+    CommandArgumentsChanged,
+}
+
+impl HudDiagnostic {
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::MissingBinding => "The referenced behavior is missing. Choose a behavior.",
+            Self::DisabledBinding => "The referenced behavior is disabled.",
+            Self::MissingSource => "The referenced behavior source is missing.",
+            Self::MissingField => "The referenced state field is missing.",
+            Self::TypeChanged => "The state field type changed. Update this HUD reference.",
+            Self::UnavailableState => "Initialize the runtime to read this state value.",
+            Self::OutputOverflow => "This value exceeds the HUD text limit.",
+            Self::NonApplicationBinding => "Choose an Application behavior for this button.",
+            Self::UnsupportedCommandApi => "This button requires an API5 Application behavior.",
+            Self::MissingCommand => "The command is missing. Choose a command in the HUD editor.",
+            Self::CommandArgumentsChanged => {
+                "The command arguments changed. Update this button's constants."
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -102,7 +126,9 @@ impl HudCache {
             {
                 continue;
             }
-            let text = if diagnostic.is_some() {
+            let text = if diagnostic == Some(HudDiagnostic::OutputOverflow)
+                || (diagnostic.is_some() && !matches!(&label.source, HudSource::Button { .. }))
+            {
                 UNAVAILABLE.to_owned()
             } else {
                 match format_label(label, value) {
@@ -149,6 +175,7 @@ pub fn resolve_hud<'s>(
 fn authored_text_bytes(label: &HudLabel) -> usize {
     match &label.source {
         HudSource::Static { text } => text.len(),
+        HudSource::Button { caption, .. } => caption.len(),
         HudSource::State { prefix, suffix, .. } => prefix.len().saturating_add(suffix.len()),
     }
 }
@@ -158,6 +185,9 @@ fn reference<'s>(
     authoring: &Authoring,
     lookup: &mut impl FnMut(&str, &str) -> Option<&'s StateValue>,
 ) -> (Option<&'s StateValue>, Option<HudDiagnostic>) {
+    if let HudSource::Button { command, .. } = &label.source {
+        return (None, hud_button_command_diagnostic(authoring, command));
+    }
     let HudSource::State {
         binding_id,
         field,
@@ -191,7 +221,43 @@ fn reference<'s>(
     (Some(value), None)
 }
 
-fn same_value(left: Option<&StateValue>, right: Option<&StateValue>) -> bool {
+/// Resolve availability against immutable authored definitions without a VM.
+/// Structural validation belongs to the authored document's admission owner.
+pub fn hud_button_command_diagnostic(
+    authoring: &Authoring,
+    command: &HudCommandBinding,
+) -> Option<HudDiagnostic> {
+    let Some(binding) = authoring.bindings.get(&command.binding_id) else {
+        return Some(HudDiagnostic::MissingBinding);
+    };
+    if !binding.enabled {
+        return Some(HudDiagnostic::DisabledBinding);
+    }
+    if binding.target != BindingTarget::Application {
+        return Some(HudDiagnostic::NonApplicationBinding);
+    }
+    let Some(source) = authoring.sources.get(&binding.source_id) else {
+        return Some(HudDiagnostic::MissingSource);
+    };
+    if source.host_api_version != 5 {
+        return Some(HudDiagnostic::UnsupportedCommandApi);
+    }
+    let Some(definition) = binding.commands.get(&command.command_id) else {
+        return Some(HudDiagnostic::MissingCommand);
+    };
+    if definition.arguments.len() != command.arguments.len()
+        || !definition.arguments.iter().all(|(name, default)| {
+            command.arguments.get(name).is_some_and(|value| {
+                std::mem::discriminant(default) == std::mem::discriminant(value)
+            })
+        })
+    {
+        return Some(HudDiagnostic::CommandArgumentsChanged);
+    }
+    None
+}
+
+pub(super) fn same_value(left: Option<&StateValue>, right: Option<&StateValue>) -> bool {
     match (left, right) {
         (Some(StateValue::Number(left)), Some(StateValue::Number(right))) => {
             left.to_bits() == right.to_bits()
@@ -219,6 +285,7 @@ fn format_label(label: &HudLabel, value: Option<&StateValue>) -> Result<String, 
     let mut output = CappedText(String::new());
     match &label.source {
         HudSource::Static { text } => output.write_str(text)?,
+        HudSource::Button { caption, .. } => output.write_str(caption)?,
         HudSource::State {
             prefix,
             suffix,
@@ -383,6 +450,100 @@ mod tests {
             Some(HudDiagnostic::OutputOverflow)
         );
         assert_eq!(resolved.labels[0].text, UNAVAILABLE);
+    }
+
+    // Button targets are definition-only and require all typed constants. Their
+    // captions remain available for disabled presentation while references break.
+    #[test]
+    fn button_resolution_requires_complete_typed_command_without_state_lookup() {
+        use crate::CommandDefinition;
+        let (mut hud, mut authoring) = bound(StateValue::Bool(false), HudValueType::Bool);
+        let arguments = BTreeMap::from([
+            ("n".into(), StateValue::Number(-0.0)),
+            ("b".into(), StateValue::Bool(true)),
+            ("t".into(), StateValue::Text("literal".into())),
+            ("v".into(), StateValue::Vec3([1.0, 2.0, 3.0])),
+        ]);
+        authoring.bindings.get_mut("app").unwrap().commands.insert(
+            "act".into(),
+            CommandDefinition {
+                arguments: arguments.clone(),
+            },
+        );
+        let command = HudCommandBinding {
+            binding_id: "app".into(),
+            command_id: "act".into(),
+            arguments,
+        };
+        super::super::validate_hud_button_command(&authoring, &command).unwrap();
+        hud.elements[0].source = HudSource::Button {
+            caption: "Activate".into(),
+            command: command.clone(),
+        };
+        let resolve = |authoring: &Authoring| {
+            resolve_hud(&hud, authoring, |_, _| panic!("buttons never read state"))
+        };
+        assert_eq!(resolve(&authoring).labels[0].text, "Activate");
+        assert_eq!(resolve(&authoring).labels[0].diagnostic, None);
+        for (name, value) in [
+            ("unknown", Some(StateValue::Bool(true))),
+            ("n", None),
+            ("n", Some(StateValue::Bool(true))),
+        ] {
+            let mut changed = command.clone();
+            if let Some(value) = value {
+                changed.arguments.insert(name.into(), value);
+            } else {
+                changed.arguments.remove(name);
+            }
+            assert_eq!(
+                hud_button_command_diagnostic(&authoring, &changed),
+                Some(HudDiagnostic::CommandArgumentsChanged)
+            );
+            assert!(super::super::validate_hud_button_command(&authoring, &changed).is_err());
+        }
+        let mut changed = command.clone();
+        changed
+            .arguments
+            .insert("n".into(), StateValue::Number(0.0));
+        assert_ne!(changed, command, "constant identity retains negative zero");
+        super::super::validate_hud_button_command(&authoring, &changed).unwrap();
+        authoring.bindings.get_mut("app").unwrap().commands.clear();
+        assert_eq!(
+            resolve(&authoring).labels[0].diagnostic,
+            Some(HudDiagnostic::MissingCommand)
+        );
+        assert_eq!(resolve(&authoring).labels[0].text, "Activate");
+        authoring
+            .sources
+            .get_mut("source")
+            .unwrap()
+            .host_api_version = 4;
+        assert_eq!(
+            resolve(&authoring).labels[0].diagnostic,
+            Some(HudDiagnostic::UnsupportedCommandApi)
+        );
+        authoring.bindings.get_mut("app").unwrap().target = BindingTarget::Object("object".into());
+        assert_eq!(
+            resolve(&authoring).labels[0].diagnostic,
+            Some(HudDiagnostic::NonApplicationBinding)
+        );
+        authoring.bindings.get_mut("app").unwrap().target = BindingTarget::Application;
+        authoring.sources.clear();
+        assert_eq!(
+            resolve(&authoring).labels[0].diagnostic,
+            Some(HudDiagnostic::MissingSource)
+        );
+        authoring.bindings.get_mut("app").unwrap().enabled = false;
+        assert_eq!(
+            resolve(&authoring).labels[0].diagnostic,
+            Some(HudDiagnostic::DisabledBinding)
+        );
+        authoring.bindings.clear();
+        assert_eq!(
+            resolve(&authoring).labels[0].diagnostic,
+            Some(HudDiagnostic::MissingBinding)
+        );
     }
 
     #[test]

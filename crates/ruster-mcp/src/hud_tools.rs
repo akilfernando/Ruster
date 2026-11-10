@@ -4,7 +4,7 @@ use serde_json::{json, Value};
 pub fn supported(name: &str) -> bool {
     matches!(
         name,
-        "hud_inspect" | "hud_settings_set" | "hud_label_set" | "hud_label_move"
+        "hud_inspect" | "hud_settings_set" | "hud_label_set" | "hud_label_move" | "hud_activate"
     )
 }
 
@@ -19,6 +19,10 @@ fn text_schema() -> Value {
 
 fn source_schema() -> Value {
     json!({"oneOf":[
+        super::object_schema(json!({"kind":{"const":"button"},"caption":text_schema(),
+            "command":super::object_schema(json!({"binding_id":identifier_schema(),
+                "command_id":identifier_schema(),"arguments":super::behavior_tools::state_arguments_schema()}),
+                vec!["binding_id","command_id","arguments"])}),vec!["kind","caption","command"]),
         super::object_schema(json!({"kind":{"const":"static"},"text":text_schema()}),vec!["kind","text"]),
         super::object_schema(json!({
             "kind":{"const":"state"},"binding_id":identifier_schema(),"field":identifier_schema(),
@@ -56,7 +60,7 @@ pub fn list() -> Vec<Value> {
     for (name, description, fields, required) in [
         ("hud_settings_set", "Update supplied HUD settings, retaining omitted settings and all labels. One shared Undo transaction. Requires current session/revision and clean human drafts. Reset captures edits for runtime presentation.",
             json!({"settings":settings_schema()}),vec!["settings"]),
-        ("hud_label_set", "Set one static or typed state label. Existing label IDs retain their position, fresh IDs append and explicit null removes. At most32 labels and1024 authored UTF-8 bytes per label, including combined prefix/suffix. New/rebound state references require an enabled existing binding, an existing source and a matching authored default type. Existing broken references remain repairable through unrelated edits. Use next_label_id from hud_inspect for creation or duplication. One shared Undo transaction, current session/revision and clean human drafts required. Reset captures edits for runtime presentation.",
+        ("hud_label_set", "Set one static label, typed state label or command button. Buttons require a caption and complete constant typed arguments for an enabled Application/API5 command. The shared scene owner validates canonical argument payload bytes and aggregate authored bounds. Existing label IDs retain their position, fresh IDs append and explicit null removes. At most32 labels and1024 authored UTF-8 bytes per label, including combined prefix/suffix. New/rebound state references require an enabled existing binding, an existing source and a matching authored default type. Existing broken references remain repairable through unrelated edits. Use next_label_id from hud_inspect for creation or duplication. One shared Undo transaction, current session/revision and clean human drafts required. Reset captures edits for runtime presentation.",
             json!({"label_id":identifier_schema(),"source":{"oneOf":[{"type":"null"},source_schema()]}}),vec!["label_id","source"]),
         ("hud_label_move", "Move one existing HUD label to a zero-based index in the current ordered group. The destination must exist. One shared Undo transaction, current session/revision and clean human drafts required. Reset captures edits for runtime presentation.",
             json!({"label_id":identifier_schema(),"index":{"type":"integer","minimum":0,"maximum":31}}),vec!["label_id","index"]),
@@ -70,6 +74,18 @@ pub fn list() -> Vec<Value> {
             "inputSchema":super::object_schema(Value::Object(properties),required),
             "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}}));
     }
+    tools.push(json!({
+        "name":"hud_activate",
+        "description":"Queue one authored HUD button on the current initialized run, preserving Play/Pause. Pin the current authoring session/revision and run ID. No caller-supplied command target or arguments are accepted. Inspect hud_inspect for the terminal activation receipt before submitting another activation, including an unknown outcome.",
+        "inputSchema":super::object_schema(json!({
+            "expected_session_token":{"type":"string","minLength":1,"maxLength":256},
+            "expected_revision":{"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20},
+            "expected_run_id":{"type":"string","pattern":"^(0|[1-9][0-9]*):(0|[1-9][0-9]*):(0|[1-9][0-9]*)$","maxLength":62,
+                "description":"Exact inspected run identity as generation:reset_epoch:authored_revision, with three canonical u64 decimal components."},
+            "button_id":identifier_schema()
+        }),vec!["expected_session_token","expected_revision","expected_run_id","button_id"]),
+        "annotations":{"readOnlyHint":false,"destructiveHint":false,"openWorldHint":false}
+    }));
     tools
 }
 
@@ -80,6 +96,21 @@ fn identifier(value: &Value) -> bool {
             && text
                 .bytes()
                 .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+    })
+}
+
+fn canonical_run_id(value: &Value) -> bool {
+    value.as_str().is_some_and(|run_id| {
+        if run_id.len() > 62 {
+            return false;
+        }
+        let components: Vec<_> = run_id.split(':').collect();
+        components.len() == 3
+            && components.iter().all(|component| {
+                component
+                    .parse::<u64>()
+                    .is_ok_and(|number| number.to_string() == *component)
+            })
     })
 }
 
@@ -97,6 +128,18 @@ fn valid_source(value: &Value) -> bool {
         return false;
     };
     match value["kind"].as_str() {
+        Some("button") => serde_json::from_value::<ruster_scene::hud::HudSource>(value.clone())
+            .is_ok_and(|source| {
+                ruster_scene::hud::Hud {
+                    elements: vec![ruster_scene::hud::HudLabel {
+                        id: "button".into(),
+                        source,
+                    }],
+                    ..Default::default()
+                }
+                .validate()
+                .is_ok()
+            }),
         Some("static") => {
             super::exact_keys(source, &["kind", "text"], &[])
                 && value["text"]
@@ -168,6 +211,12 @@ pub fn valid(name: &str, args: &Value) -> bool {
             && args.get("offset").is_none_or(super::canonical_u64);
     }
     let required = match name {
+        "hud_activate" => vec![
+            "expected_session_token",
+            "expected_revision",
+            "expected_run_id",
+            "button_id",
+        ],
         "hud_settings_set" => vec!["expected_session_token", "expected_revision", "settings"],
         "hud_label_set" => vec![
             "expected_session_token",
@@ -192,6 +241,9 @@ pub fn valid(name: &str, args: &Value) -> bool {
         return false;
     }
     match name {
+        "hud_activate" => {
+            canonical_run_id(&args["expected_run_id"]) && identifier(&args["button_id"])
+        }
         "hud_settings_set" => valid_settings(&args["settings"]),
         "hud_label_set" => identifier(&args["label_id"]) && valid_source(&args["source"]),
         "hud_label_move" => {
@@ -210,7 +262,7 @@ mod tests {
     #[test]
     fn hud_tool_schemas_and_wire_validation_preserve_bounded_typed_edits() {
         let tools = list();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
         assert_eq!(tools[0]["annotations"]["readOnlyHint"], true);
         assert_eq!(
             tools[1]["inputSchema"]["properties"]["settings"]["additionalProperties"],
@@ -240,6 +292,51 @@ mod tests {
         ] {
             args["source"] = source;
             assert!(!valid("hud_label_set", &args));
+        }
+        args["source"] = json!({"kind":"button","caption":"Apply 世界","command":{
+            "binding_id":"app","command_id":"apply","arguments":{"amount":{"type":"number","value":3}}
+        }});
+        assert!(valid("hud_label_set", &args));
+        for source in [
+            json!({"kind":"button","caption":"x","command":{"binding_id":"app","command_id":"apply"}}),
+            json!({"kind":"button","caption":"世".repeat(342),"command":{"binding_id":"app","command_id":"apply","arguments":{}}}),
+            json!({"kind":"button","caption":"x","command":{"binding_id":"app","command_id":"apply","arguments":{"x":{"type":"object_ref","value":null}}}}),
+            json!({"kind":"button","caption":"x","command":{"binding_id":"app","command_id":"apply","arguments":{},"extra":true}}),
+            json!({"kind":"button","caption":"x","command":{"binding_id":"app","command_id":"apply","arguments":(0..16).map(|index|(format!("field-{index}"),json!({"type":"text","value":"\u{0000}".repeat(1024)}))).collect::<serde_json::Map<_,_>>()}}),
+        ] {
+            args["source"] = source;
+            assert!(!valid("hud_label_set", &args));
+        }
+        let activation = json!({"expected_session_token":"session","expected_revision":"7","expected_run_id":"1:4:7","button_id":"apply"});
+        assert!(valid("hud_activate", &activation));
+        for run_id in [
+            "0:0:0",
+            "18446744073709551615:18446744073709551615:18446744073709551615",
+        ] {
+            let mut maximal = activation.clone();
+            maximal["expected_run_id"] = json!(run_id);
+            assert!(valid("hud_activate", &maximal));
+        }
+        for invalid in [
+            json!({"expected_run_id":4}),
+            json!({"expected_run_id":"04"}),
+            json!({"expected_run_id":"1:04:7"}),
+            json!({"expected_run_id":"01:4:7"}),
+            json!({"expected_run_id":"1:4:07"}),
+            json!({"expected_run_id":"1:4"}),
+            json!({"expected_run_id":"1:4:7:9"}),
+            json!({"expected_run_id":"1::7"}),
+            json!({"expected_run_id":"-1:4:7"}),
+            json!({"expected_run_id":"1:4:18446744073709551616"}),
+            json!({"arguments":{}}),
+            json!({"button_id":""}),
+        ] {
+            let mut value = activation.clone();
+            value
+                .as_object_mut()
+                .unwrap()
+                .extend(invalid.as_object().unwrap().clone());
+            assert!(!valid("hud_activate", &value));
         }
         let settings = json!({"expected_session_token":"session","expected_revision":"7","settings":{"width":320,"enabled":true}});
         assert!(valid("hud_settings_set", &settings));

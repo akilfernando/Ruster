@@ -307,3 +307,141 @@ fn commands_consume_revision_and_preserve_state_on_every_rejection() {
         DiagnosticCode::CommitExhausted
     );
 }
+
+// HUD intent must survive intervening ticks without weakening exact paused-command
+// revisions. Its captured constants and replay identity belong to the runtime owner.
+#[test]
+fn hud_activation_uses_current_commit_and_consumes_failed_vm_admission() {
+    use ruster_scene::hud::{hud_button_identity, HudCommandBinding, HudLabel, HudSource};
+    let (scene, mut authoring) = fixture();
+    authoring.hud.enabled = true;
+    authoring.hud.elements = ["set", "fail"]
+        .into_iter()
+        .map(|command_id| HudLabel {
+            id: command_id.into(),
+            source: HudSource::Button {
+                caption: command_id.into(),
+                command: HudCommandBinding {
+                    binding_id: "controller".into(),
+                    command_id: command_id.into(),
+                    arguments: StateFields::from([("value".into(), StateValue::Number(12.0))]),
+                },
+            },
+        })
+        .collect();
+    let mut engine = Engine::new(Limits::default()).unwrap();
+    let mut runtime = engine.reset(&scene, &authoring).unwrap();
+    let intent = |id, button: &str| HudActivation {
+        activation_id: id,
+        button_id: button.into(),
+        definition_hash: hud_button_identity(
+            authoring
+                .hud
+                .elements
+                .iter()
+                .find(|row| row.id == button)
+                .unwrap(),
+        )
+        .unwrap(),
+        command_schema_hash: runtime.command_schema_hash("controller").unwrap().into(),
+    };
+    let first = intent(1, "set");
+    let fail = intent(4, "fail");
+    engine.step(&mut runtime).unwrap();
+    assert_eq!((runtime.tick(), runtime.commit_revision()), (1, 1));
+    let receipt = engine.activate_hud(&mut runtime, &first).unwrap();
+    assert_eq!(
+        (
+            receipt.command.previous_commit_revision,
+            receipt.command.commit_revision,
+            receipt.command.tick
+        ),
+        (1, 2, 1)
+    );
+    assert_eq!(
+        value(&runtime, "controller", "count"),
+        StateValue::Number(12.0)
+    );
+    let state = Arc::clone(runtime.state());
+    for rejected in [
+        first.clone(),
+        HudActivation {
+            activation_id: 0,
+            ..first.clone()
+        },
+        HudActivation {
+            activation_id: 2,
+            definition_hash: "stale".into(),
+            ..first.clone()
+        },
+        HudActivation {
+            activation_id: 2,
+            command_schema_hash: "stale".into(),
+            ..first.clone()
+        },
+        HudActivation {
+            activation_id: 2,
+            button_id: "absent".into(),
+            ..first.clone()
+        },
+    ] {
+        assert!(engine.activate_hud(&mut runtime, &rejected).is_err());
+        assert_eq!(runtime.commit_revision(), 2);
+        assert!(Arc::ptr_eq(runtime.state(), &state));
+    }
+    assert_eq!(runtime.last_hud_activation, 1);
+    assert!(engine.activate_hud(&mut runtime, &fail).is_err());
+    assert_eq!(runtime.last_hud_activation, 4);
+    assert!(Arc::ptr_eq(runtime.state(), &state));
+    assert_eq!(runtime.commit_revision(), 2);
+    assert!(engine.activate_hud(&mut runtime, &fail).is_err());
+    assert!(engine
+        .activate_hud(
+            &mut runtime,
+            &HudActivation {
+                activation_id: 3,
+                ..first.clone()
+            }
+        )
+        .is_err());
+    // Failed preadmission did not consume identity 2, but admitted failure 4 did.
+    let last = HudActivation {
+        activation_id: 5,
+        ..first
+    };
+    engine.activate_hud(&mut runtime, &last).unwrap();
+    let mut incomplete = authoring.clone();
+    if let HudSource::Button { command, .. } = &mut incomplete.hud.elements[0].source {
+        command.arguments.clear();
+    }
+    let mut invalid_runtime = engine.reset(&scene, &incomplete).unwrap();
+    let invalid_intent = HudActivation {
+        activation_id: 1,
+        button_id: "set".into(),
+        definition_hash: hud_button_identity(&incomplete.hud.elements[0]).unwrap(),
+        command_schema_hash: invalid_runtime
+            .command_schema_hash("controller")
+            .unwrap()
+            .into(),
+    };
+    assert!(engine
+        .activate_hud(&mut invalid_runtime, &invalid_intent)
+        .is_err());
+    assert_eq!(
+        (
+            invalid_runtime.last_hud_activation,
+            invalid_runtime.commit_revision()
+        ),
+        (0, 0)
+    );
+    let mut fresh = engine.reset(&scene, &authoring).unwrap();
+    engine
+        .activate_hud(
+            &mut fresh,
+            &HudActivation {
+                activation_id: 1,
+                ..last
+            },
+        )
+        .unwrap();
+}

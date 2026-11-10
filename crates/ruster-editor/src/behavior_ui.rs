@@ -1,5 +1,6 @@
 //! Bounded embedded source/property working copies. Session owns authored data.
 mod command_catalog;
+mod hud_activation;
 use command_catalog::{command_claim, command_clicked, command_field_focus, command_key};
 mod runtime_commands;
 mod runtime_debug;
@@ -140,7 +141,7 @@ fn scroll_line(
         Some(egui::Align::Center),
     );
 }
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
     content = "value",
@@ -167,7 +168,7 @@ impl From<&PropertyValue> for ValueDraft {
         }
     }
 }
-fn state_property(value: &StateValue) -> PropertyValue {
+pub(super) fn state_property(value: &StateValue) -> PropertyValue {
     match value {
         StateValue::Number(value) => PropertyValue::Number(*value),
         StateValue::Bool(value) => PropertyValue::Bool(*value),
@@ -176,7 +177,7 @@ fn state_property(value: &StateValue) -> PropertyValue {
     }
 }
 impl ValueDraft {
-    fn state(&self) -> Result<StateValue, String> {
+    pub(super) fn state(&self) -> Result<StateValue, String> {
         match self.parse()? {
             PropertyValue::Number(value) => Ok(StateValue::Number(value)),
             PropertyValue::Bool(value) => Ok(StateValue::Bool(value)),
@@ -206,7 +207,7 @@ impl ValueDraft {
         value.validate().map_err(|error| error.to_string())?;
         Ok(value)
     }
-    fn validate_draft(&self, original: &PropertyValue) -> bool {
+    pub(super) fn validate_draft(&self, original: &PropertyValue) -> bool {
         match (self, original) {
             (Self::Number(s), PropertyValue::Number(_)) => s.len() <= 128,
             (Self::Bool(_), PropertyValue::Bool(_)) => true,
@@ -1474,10 +1475,10 @@ fn property_summary(value: &PropertyValue) -> String {
     }
 }
 #[derive(Default)]
-struct ValueResponse {
-    changed: bool,
-    focused: bool,
-    focus_id: Option<egui::Id>,
+pub(super) struct ValueResponse {
+    pub(super) changed: bool,
+    pub(super) focused: bool,
+    pub(super) focus_id: Option<egui::Id>,
 }
 impl ValueResponse {
     fn field(&mut self, response: egui::Response, focus: &mut bool) {
@@ -1493,7 +1494,7 @@ impl ValueResponse {
         }
     }
 }
-fn value_ui(
+pub(super) fn value_ui(
     ui: &mut egui::Ui,
     value: &mut ValueDraft,
     session: &Session,
@@ -1683,6 +1684,7 @@ pub(super) struct RuntimeUi {
     control_focus: Option<ControlFocus>,
     debug: runtime_debug::DebugUi,
     input_control: runtime_input::InputControl,
+    hud_activation: hud_activation::HudActivationControl,
     spatial_feedback_index: usize,
     invocation: InvocationDraft,
     command_action_frame: Option<u64>,
@@ -1825,6 +1827,7 @@ impl RuntimeUi {
             return;
         }
         let previous = self.identity.replace(next);
+        self.supersede_hud_activation("Authored scene/content changed");
         self.invocation = InvocationDraft::default();
         self.supersede_operation();
         self.clear_reset();
@@ -1867,6 +1870,7 @@ impl RuntimeUi {
         generation: u64,
     ) -> Result<RunKey, String> {
         self.ensure_worker(ctx)?;
+        self.supersede_hud_activation("Runtime Reset superseded HUD activation");
         self.supersede_operation();
         let worker = self.worker.as_mut().unwrap();
         let key = worker
@@ -1982,8 +1986,18 @@ impl RuntimeUi {
                         continue;
                     }
                     let program_step_pending = self.program_step_pending();
-                    self.accept_operation(&event);
+                    if !matches!(&event, VmEvent::HudActivation { .. }) {
+                        self.accept_operation(&event);
+                    }
                     match event {
+                        VmEvent::HudActivation {
+                            key,
+                            activation_id,
+                            button_id,
+                            result,
+                        } => {
+                            self.accept_hud_activation(key, activation_id, button_id, result);
+                        }
                         VmEvent::Reset { key, run } => self.acknowledge_reset(key, run.tick),
                         VmEvent::Command { receipt, .. } => {
                             self.status = format!(
@@ -2085,6 +2099,7 @@ impl RuntimeUi {
                 }
                 Some(Err(std::sync::mpsc::TryRecvError::Disconnected)) => {
                     self.fail_operation();
+                    self.supersede_hud_activation("Behavior worker disconnected");
                     if !self.shutdown {
                         self.status =
                             "Behavior worker disconnected; authored work remains available.".into();
@@ -2108,11 +2123,12 @@ impl RuntimeUi {
         }
         self.flush();
         self.show_new_debug_stop();
-        if self.pending.is_some() || self.reset_ack.is_some() {
+        if self.pending.is_some() || self.reset_ack.is_some() || self.hud_activation_busy() {
             ctx.request_repaint_after(std::time::Duration::from_millis(16));
         }
     }
     pub fn stop(&mut self, generation: u64, revision: u64) {
+        self.supersede_hud_activation("Runtime Stop superseded HUD activation");
         self.invocation = InvocationDraft::default();
         self.supersede_operation();
         self.clear_reset();
@@ -2141,6 +2157,7 @@ impl RuntimeUi {
         self.flush();
     }
     pub fn shutdown(&mut self) {
+        self.supersede_hud_activation("Runtime shutdown superseded HUD activation");
         self.invocation = InvocationDraft::default();
         if self.shutdown {
             return;
@@ -2197,6 +2214,7 @@ impl RuntimeUi {
                 && !blocked
                 && self.pending.is_none()
                 && self.awaiting.is_none()
+                && !self.hud_activation_busy()
                 && !stopped
                 && !self.shutdown;
             let play_button = ui

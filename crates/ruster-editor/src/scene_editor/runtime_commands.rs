@@ -18,7 +18,8 @@ fn number(value: &Value) -> Option<u64> {
 pub(super) fn supported(op: &str) -> bool {
     matches!(
         op,
-        "behavior_runtime_command"
+        "hud_activate"
+            | "behavior_runtime_command"
             | "behavior_runtime_inspect"
             | "behavior_runtime_state"
             | "behavior_runtime_reset"
@@ -36,6 +37,7 @@ pub(super) fn supported(op: &str) -> bool {
 impl SceneEditor {
     pub(super) fn runtime_command(&mut self, token: &str, op: &str, args: &Value) -> Result<Value> {
         let (fields, optional): (&[&str], &[&str]) = match op {
+            "hud_activate" => (&["expected_run_id", "button_id"], &[]),
             "behavior_runtime_command" => (
                 &[
                     "expected_run_id",

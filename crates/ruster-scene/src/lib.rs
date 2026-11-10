@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 15;
+pub const FORMAT_VERSION: u32 = 16;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
@@ -1235,6 +1235,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..16).contains(&version) {
+            reject_pre_v16_hud_buttons(&value)?;
+        }
         if (1..15).contains(&version) {
             reject_pre_v15_hud_fields(&value)?;
         }
@@ -1269,7 +1272,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=15 => serde_json::from_value(value)?,
+            5..=16 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1336,6 +1339,31 @@ impl Document {
                 .persist(path)
                 .map_err(|e| SceneError::Io(e.error))?;
         }
+        Ok(())
+    }
+}
+
+// Scene15 retains its exact label schema. Inspect only HUD element owners,
+// leaving source strings and arbitrary state/property maps opaque.
+fn reject_pre_v16_hud_buttons(value: &serde_json::Value) -> Result<(), SceneError> {
+    let has_button = |hud: &serde_json::Value| {
+        hud["elements"].as_array().is_some_and(|elements| {
+            elements.iter().any(|element| {
+                element["source"]["kind"].as_str() == Some("button")
+                    || element["source"].get("caption").is_some()
+                    || element["source"].get("command").is_some()
+            })
+        })
+    };
+    let mut found = has_button(&value["authoring"]["hud"]);
+    for stack in ["undo", "redo"] {
+        for change in value[stack].as_array().into_iter().flatten() {
+            found |= has_button(&change["hud"]["before"]) || has_button(&change["hud"]["after"]);
+        }
+    }
+    if found {
+        Err(SceneError::Invalid("HUD buttons require scene v16".into()))
+    } else {
         Ok(())
     }
 }
@@ -1813,7 +1841,8 @@ impl Session {
     }
 
     /// Replace one HUD as an atomic revision and Undo entry. Existing broken
-    /// references remain editable, while new references require a typed field.
+    /// references remain editable, while new references require a typed field
+    /// or an enabled API5 Application command with complete typed arguments.
     pub fn set_hud(&mut self, expected_revision: u64, hud: hud::Hud) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
         hud.validate()?;
@@ -1827,6 +1856,11 @@ impl Session {
                     "HUD label identity is reserved by reversible history; Undo or choose a fresh ID"
                         .into(),
                 ));
+            }
+            if let Some(command) = label.source.command_binding() {
+                if previous.and_then(|old| old.source.command_binding()) != Some(command) {
+                    hud::validate_hud_button_command(self.authoring(), command)?;
+                }
             }
             let Some((binding_id, field, value_type)) = label.source.state_reference() else {
                 continue;
@@ -3452,6 +3486,100 @@ mod tests {
         assert_eq!(Session::open(&path).unwrap().hud(), &repairable);
     }
 
+    // A button adds no code execution authority to scene storage. New constant
+    // bindings validate atomically, while broken retained targets remain repairable.
+    #[test]
+    fn hud_button_history_preserves_broken_targets_and_rejects_changed_constants() {
+        use hud::{Hud, HudCommandBinding, HudLabel, HudSource};
+        let mut session = Session::new(Scene::empty("buttons")).unwrap();
+        let mut api5 = source("unfinished API5 source");
+        api5.host_api_version = 5;
+        let arguments = StateFields::from([("amount".into(), StateValue::Number(-0.0))]);
+        let mut application = binding("unused", "source");
+        application.target = BindingTarget::Application;
+        application.commands.insert(
+            "act".into(),
+            CommandDefinition {
+                arguments: arguments.clone(),
+            },
+        );
+        session
+            .create_behavior(0, "source", api5, "app", application.clone())
+            .unwrap();
+        let mut hud = Hud {
+            enabled: true,
+            elements: vec![HudLabel {
+                id: "button".into(),
+                source: HudSource::Button {
+                    caption: "Act".into(),
+                    command: HudCommandBinding {
+                        binding_id: "app".into(),
+                        command_id: "act".into(),
+                        arguments,
+                    },
+                },
+            }],
+            ..Hud::default()
+        };
+        let original = session.snapshot_bytes().unwrap();
+        let mut invalid = hud.clone();
+        if let HudSource::Button { command, .. } = &mut invalid.elements[0].source {
+            command.arguments.clear();
+        }
+        assert!(session.set_hud(1, invalid).is_err());
+        assert_eq!(session.snapshot_bytes().unwrap(), original);
+        session.set_hud(1, hud.clone()).unwrap();
+        assert_eq!(session.set_hud(2, hud.clone()).unwrap(), 2);
+        session
+            .set_command_definition(2, "app", "act", None)
+            .unwrap();
+        hud.margin = 20.0;
+        if let HudSource::Button { caption, .. } = &mut hud.elements[0].source {
+            *caption = "Repair command".into();
+        }
+        session.set_hud(3, hud.clone()).unwrap();
+        let broken = session.snapshot_bytes().unwrap();
+        let mut changed = hud.clone();
+        if let HudSource::Button { command, .. } = &mut changed.elements[0].source {
+            command
+                .arguments
+                .insert("amount".into(), StateValue::Number(0.0));
+        }
+        assert!(
+            session.set_hud(4, changed).is_err(),
+            "even negative-zero changes require revalidation"
+        );
+        assert_eq!(session.snapshot_bytes().unwrap(), broken);
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("buttons.json");
+        session.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.hud(), &hud);
+        assert_eq!(reopened.loaded_format_version(), 16);
+        reopened.undo(4).unwrap();
+        reopened.undo(5).unwrap();
+        let repaired = hud::resolve_hud(reopened.hud(), reopened.authoring(), |_, _| {
+            panic!("no VM/state reads")
+        });
+        assert_eq!(repaired.labels[0].diagnostic, None);
+        reopened.set_binding(6, "app", None).unwrap();
+        assert!(reopened.contains_binding_id("app"));
+        assert!(reopened.set_binding(7, "app", Some(application)).is_err());
+        let mut retained = reopened.hud().clone();
+        retained.spacing = 10.0;
+        reopened.set_hud(7, retained.clone()).unwrap();
+        reopened.save(&path).unwrap();
+        assert_eq!(Session::open(&path).unwrap().hud(), &retained);
+        reopened.undo(8).unwrap();
+        reopened.undo(9).unwrap();
+        reopened.undo(10).unwrap();
+        assert!(reopened.hud().elements.is_empty());
+        assert!(
+            reopened.set_hud(11, retained).is_err(),
+            "button ID remains reserved by redo"
+        );
+    }
+
     // Future HUD owner fields must fail closed for every prior format, even
     // empty/null history entries. Unrelated source/property names stay opaque.
     #[test]
@@ -3477,6 +3605,68 @@ mod tests {
                     }
                     assert!(Document::decode(&serde_json::to_vec(&bad).unwrap()).is_err());
                 }
+            }
+        }
+        // Scene15 static/state HUD documents remain valid and upgrade normally.
+        // Buttons are rejected at all actual current/history owner locations.
+        let mut labels = Session::new(Scene::empty("v15-hud")).unwrap();
+        labels
+            .set_hud(
+                0,
+                hud::Hud {
+                    enabled: true,
+                    elements: vec![hud::HudLabel {
+                        id: "old".into(),
+                        source: hud::HudSource::Static {
+                            text: "Ready".into(),
+                        },
+                    }],
+                    ..hud::Hud::default()
+                },
+            )
+            .unwrap();
+        let mut v15 = serde_json::to_value(&labels.document).unwrap();
+        v15["format_version"] = 15.into();
+        assert!(Document::decode(&serde_json::to_vec(&v15).unwrap()).is_ok());
+        let button = serde_json::json!({"id":"button", "source":{
+            "kind":"button", "caption":"Act", "command":{
+                "binding_id":"missing", "command_id":"missing", "arguments":{}
+            }
+        }});
+        for version in 1..16 {
+            for owner in [
+                "current",
+                "undo-before",
+                "undo-after",
+                "redo-before",
+                "redo-after",
+            ] {
+                let mut bad = v15.clone();
+                bad["format_version"] = version.into();
+                match owner {
+                    "current" => {
+                        bad["authoring"]["hud"]["elements"] = serde_json::json!([button.clone()])
+                    }
+                    "undo-before" => {
+                        bad["undo"][0]["hud"]["before"]["elements"] =
+                            serde_json::json!([button.clone()])
+                    }
+                    "undo-after" => {
+                        bad["undo"][0]["hud"]["after"]["elements"] =
+                            serde_json::json!([button.clone()])
+                    }
+                    "redo-before" => {
+                        bad["redo"] = serde_json::json!([{"hud":{"before":{"elements":[button.clone()]}, "after":{}}}])
+                    }
+                    "redo-after" => {
+                        bad["redo"] = serde_json::json!([{"hud":{"before":{}, "after":{"elements":[button.clone()]}}}])
+                    }
+                    _ => unreachable!(),
+                }
+                assert!(Document::decode(&serde_json::to_vec(&bad).unwrap())
+                    .unwrap_err()
+                    .to_string()
+                    .contains("scene v16"));
             }
         }
         let disabled = hud::Hud {

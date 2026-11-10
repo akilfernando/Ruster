@@ -3144,6 +3144,7 @@ dependencies = [
 name = "ruster-mcp"
 version = "0.1.0"
 dependencies = [
+ "ruster-scene",
  "serde",
  "serde_json",
 ]
@@ -3185,6 +3186,7 @@ dependencies = [
  "glam 0.30.10",
  "serde",
  "serde_json",
+ "sha2",
  "tempfile",
 ]
 

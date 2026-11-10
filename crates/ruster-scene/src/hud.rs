@@ -1,18 +1,22 @@
-//! Bounded creator-authored screen-space labels and typed state references.
+//! Bounded creator-authored screen-space labels, typed references and command buttons.
 //! Reference availability is diagnosed by the presenter so unfinished definitions
 //! remain saveable when their binding or field is removed or retyped.
 
 use std::collections::HashSet;
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
-use crate::{validate_id, SceneError, StateValue};
+use crate::{
+    command_argument_payload_bytes, validate_id, Authoring, SceneError, StateFields, StateValue,
+};
 
 mod resolution;
 pub use resolution::*;
 
 pub const MAX_HUD_LABELS: usize = 32;
 pub const MAX_HUD_ELEMENT_TEXT_BYTES: usize = 1024;
+/// Shared authored payload budget. Buttons include typed arguments and target IDs.
 pub const MAX_HUD_AUTHORED_TEXT_BYTES: usize = 32 * 1024;
 pub const MAX_HUD_RESOLVED_LABEL_BYTES: usize = 2 * 1024;
 pub const MAX_HUD_RESOLVED_TEXT_BYTES: usize = 64 * 1024;
@@ -52,9 +56,67 @@ fn default_precision() -> u8 {
     2
 }
 
+/// Immutable creator-authored command target and complete typed constant arguments.
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct HudCommandBinding {
+    pub binding_id: String,
+    pub command_id: String,
+    pub arguments: StateFields,
+}
+
+impl PartialEq for HudCommandBinding {
+    fn eq(&self, other: &Self) -> bool {
+        self.binding_id == other.binding_id
+            && self.command_id == other.command_id
+            && self.arguments.len() == other.arguments.len()
+            && self
+                .arguments
+                .iter()
+                .all(|(name, value)| resolution::same_value(Some(value), other.arguments.get(name)))
+    }
+}
+
+impl HudCommandBinding {
+    pub fn validate(&self) -> Result<(), SceneError> {
+        validate_id(&self.binding_id)?;
+        validate_id(&self.command_id)?;
+        command_argument_payload_bytes(&self.arguments).map(|_| ())
+    }
+}
+
+/// Fingerprint one complete immutable button definition for owner-side stale checks.
+/// Run, document and command schema identity remain the caller's responsibility.
+pub fn hud_button_identity(label: &HudLabel) -> Result<String, SceneError> {
+    validate_id(&label.id)?;
+    if !matches!(&label.source, HudSource::Button { .. }) {
+        return Err(SceneError::Invalid("HUD element is not a button".into()));
+    }
+    label.source.validate_text_bytes()?;
+    Ok(format!("{:x}", Sha256::digest(serde_json::to_vec(label)?)))
+}
+
+/// Validate the immutable authored target without executing application code.
+pub fn validate_hud_button_command(
+    authoring: &Authoring,
+    command: &HudCommandBinding,
+) -> Result<(), SceneError> {
+    command.validate()?;
+    if let Some(diagnostic) = hud_button_command_diagnostic(authoring, command) {
+        return Err(SceneError::Invalid(format!(
+            "HUD button command is unavailable ({diagnostic:?})"
+        )));
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum HudSource {
+    Button {
+        caption: String,
+        command: HudCommandBinding,
+    },
     Static {
         text: String,
     },
@@ -81,12 +143,34 @@ impl HudSource {
                 value_type,
                 ..
             } => Some((binding_id, field, *value_type)),
-            Self::Static { .. } => None,
+            Self::Static { .. } | Self::Button { .. } => None,
+        }
+    }
+
+    /// Stable command reference identity excludes caption and HUD layout.
+    pub fn command_binding(&self) -> Option<&HudCommandBinding> {
+        match self {
+            Self::Button { command, .. } => Some(command),
+            _ => None,
         }
     }
 
     fn validate_text_bytes(&self) -> Result<usize, SceneError> {
         let bytes = match self {
+            Self::Button { caption, command } => {
+                command.validate()?;
+                if caption.len() > MAX_HUD_ELEMENT_TEXT_BYTES {
+                    return Err(SceneError::Invalid(
+                        "HUD button caption exceeds 1024 UTF-8 bytes".into(),
+                    ));
+                }
+                // The shared 32 KiB authored budget includes every new constant
+                // argument's canonical typed JSON, including escaped UTF-8 text.
+                return Ok(caption.len()
+                    + command.binding_id.len()
+                    + command.command_id.len()
+                    + command_argument_payload_bytes(&command.arguments)?);
+            }
             Self::Static { text } => text.len(),
             Self::State {
                 binding_id,
@@ -179,7 +263,7 @@ impl Hud {
             ));
         }
         if self.elements.len() > MAX_HUD_LABELS {
-            return Err(SceneError::Invalid("HUD exceeds 32 labels".into()));
+            return Err(SceneError::Invalid("HUD exceeds 32 elements".into()));
         }
         let mut ids = HashSet::new();
         let mut text_bytes = 0_usize;
@@ -192,19 +276,20 @@ impl Hud {
         }
         if text_bytes > MAX_HUD_AUTHORED_TEXT_BYTES {
             return Err(SceneError::Invalid(
-                "HUD authored text exceeds 32 KiB".into(),
+                "HUD authored payload exceeds 32 KiB".into(),
             ));
         }
         Ok(())
     }
 
     pub fn binding_ids(&self) -> impl Iterator<Item = &str> {
-        self.elements.iter().filter_map(|label| {
-            label
-                .source
-                .state_reference()
-                .map(|(binding_id, _, _)| binding_id)
-        })
+        self.elements
+            .iter()
+            .filter_map(|label| match &label.source {
+                HudSource::State { binding_id, .. } => Some(binding_id.as_str()),
+                HudSource::Button { command, .. } => Some(command.binding_id.as_str()),
+                HudSource::Static { .. } => None,
+            })
     }
 }
 
@@ -235,6 +320,81 @@ mod tests {
             })
             .collect();
         hud.validate().unwrap();
+        // Buttons share the existing aggregate budget. Their references and
+        // canonical argument JSON count in addition to the caption.
+        let command = HudCommandBinding {
+            binding_id: "app".into(),
+            command_id: "act".into(),
+            arguments: StateFields::new(),
+        };
+        let mut buttons = hud.clone();
+        buttons.elements[0].source = HudSource::Button {
+            caption: "é".repeat(512),
+            command: command.clone(),
+        };
+        assert!(buttons.validate().is_err());
+        buttons.elements.truncate(1);
+        buttons.validate().unwrap();
+        if let HudSource::Button { caption, .. } = &mut buttons.elements[0].source {
+            caption.push('x');
+        }
+        assert!(buttons.validate().is_err());
+        let mut escaped = command.clone();
+        escaped.arguments = StateFields::from([
+            ("a".into(), StateValue::Text("\0".repeat(1024))),
+            ("b".into(), StateValue::Text("\0".repeat(1024))),
+        ]);
+        buttons.elements = (0..3)
+            .map(|index| HudLabel {
+                id: format!("button-{index}"),
+                source: HudSource::Button {
+                    caption: String::new(),
+                    command: escaped.clone(),
+                },
+            })
+            .collect();
+        assert!(
+            buttons.validate().is_err(),
+            "serialized constant escaping counts"
+        );
+        buttons.elements.truncate(2);
+        buttons.validate().unwrap();
+        for arguments in [
+            StateFields::from([("bad".into(), StateValue::Number(f64::NAN))]),
+            (0..17)
+                .map(|index| (format!("arg-{index}"), StateValue::Bool(false)))
+                .collect(),
+        ] {
+            let mut invalid = command.clone();
+            invalid.arguments = arguments;
+            assert!(invalid.validate().is_err());
+        }
+        let old_json = r#"{"id":"old","source":{"kind":"static","text":"Ready"}}"#;
+        let old: HudLabel = serde_json::from_str(old_json).unwrap();
+        assert_eq!(serde_json::to_string(&old).unwrap(), old_json);
+        assert!(hud_button_identity(&old).is_err());
+        let state_json = r#"{"id":"old-state","source":{"kind":"state","binding_id":"app","field":"score","value_type":"number","prefix":"","suffix":"","precision":2}}"#;
+        let state: HudLabel = serde_json::from_str(state_json).unwrap();
+        assert_eq!(serde_json::to_string(&state).unwrap(), state_json);
+        let button_json = r#"{"id":"button","source":{"kind":"button","caption":"Run","command":{"binding_id":"app","command_id":"act","arguments":{}}}}"#;
+        let button: HudLabel = serde_json::from_str(button_json).unwrap();
+        assert_eq!(serde_json::to_string(&button).unwrap(), button_json);
+        assert_eq!(hud_button_identity(&button).unwrap().len(), 64);
+        let mut renamed = button.clone();
+        if let HudSource::Button { caption, .. } = &mut renamed.source {
+            caption.push('!');
+        }
+        assert_ne!(
+            hud_button_identity(&button).unwrap(),
+            hud_button_identity(&renamed).unwrap()
+        );
+        for raw in [
+            button_json.replace("\"arguments\":{}", "\"arguments\":null"),
+            button_json.replace("\"arguments\":{}", "\"extra\":true,\"arguments\":{}"),
+            button_json.replace("\"caption\":\"Run\",", ""),
+        ] {
+            assert!(serde_json::from_str::<HudLabel>(&raw).is_err());
+        }
         hud.elements[0].source = HudSource::State {
             binding_id: "missing-binding".into(),
             field: "missing-field".into(),

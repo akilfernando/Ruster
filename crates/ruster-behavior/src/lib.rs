@@ -23,7 +23,7 @@ pub mod spatial;
 mod state;
 pub use state::RuntimeState;
 mod lifecycle;
-pub use lifecycle::CommandReceipt;
+pub use lifecycle::{CommandReceipt, HudActivation, HudActivationReceipt};
 mod spatial_host;
 use spatial_host::{install_spatial, QueryInvocation};
 pub use spatial_host::{QueryObservation, QueryResult};
@@ -204,6 +204,7 @@ pub struct Runtime {
     tick: u64,
     commit_revision: u64,
     last_step_commit_revision: Option<u64>,
+    last_hud_activation: u64,
     commit_revision_required: bool,
     command_schema: Option<(String, String)>,
     query_observations: Vec<QueryObservation>,
@@ -610,6 +611,7 @@ impl Engine {
             tick: 0,
             commit_revision: 0,
             last_step_commit_revision: None,
+            last_hud_activation: 0,
             commit_revision_required: authoring.bindings.values().any(|binding| {
                 binding.enabled
                     && authoring

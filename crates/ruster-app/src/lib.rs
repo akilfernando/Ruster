@@ -167,6 +167,13 @@ pub struct InputFrame {
     pub modifiers: egui::Modifiers,
 }
 
+/// Current-frame overlay ownership, established before scene navigation/input.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ViewportInputOwnership {
+    pub pointer: bool,
+    pub keyboard: bool,
+}
+
 /// Application state and rules remain independent from the host and editor.
 /// Callbacks must preserve valid state on error; this host cannot roll back arbitrary state.
 pub trait Application: 'static {
@@ -180,6 +187,27 @@ pub trait Application: 'static {
     fn ui_with_playback(&mut self, ui: &mut egui::Ui, _playing: bool) -> Result<(), String> {
         self.ui(ui)
     }
+    /// Opt in to one completed UI frame of buffered gameplay/viewport actions.
+    /// Legacy applications keep their established input/advance ordering.
+    fn buffered_viewport_input(&self) -> bool {
+        false
+    }
+    /// Safety cancellation and one pending action run before buffered advancement.
+    /// This hook is called once per native UI frame, including discarded passes.
+    fn viewport_frame_begin(&mut self, _ctx: &egui::Context) -> Result<(), String> {
+        Ok(())
+    }
+    /// Register current geometry before navigation/picking, without advancing state.
+    /// Paint the same preparation through viewport_overlay after scene submission.
+    fn viewport_interaction(
+        &mut self,
+        _ui: &mut egui::Ui,
+        _rect: egui::Rect,
+    ) -> Result<ViewportInputOwnership, String> {
+        Ok(ViewportInputOwnership::default())
+    }
+    /// Discard unexecuted native viewport work on a raw focus-loss boundary.
+    fn cancel_viewport_input(&mut self) {}
     /// Passive painting after advancement and viewport creation. The painter is
     /// clipped to the scene viewport. Existing applications need no overlay.
     fn viewport_overlay(

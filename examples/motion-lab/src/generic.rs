@@ -11,8 +11,10 @@ use ruster_scene::input::{
 };
 use ruster_scene::{PropertyValue, Session};
 mod commands;
+mod hud_controls;
 use commands::CommandUi;
 pub use commands::{dispatch_command, CommandRequest};
+use hud_controls::HudControls;
 
 pub const DEMO: &[u8] = include_bytes!("../resources/generic.scene.json");
 pub const FIXED_DT: Duration = Duration::from_millis(100);
@@ -53,6 +55,7 @@ pub struct GenericMotionLab {
     command_ui: CommandUi,
     command_receipt: Option<ruster_behavior::CommandReceipt>,
     hud_cache: HudCache,
+    hud_controls: HudControls,
 }
 
 impl GenericMotionLab {
@@ -94,6 +97,7 @@ impl GenericMotionLab {
             command_ui: CommandUi::default(),
             command_receipt: None,
             hud_cache: HudCache::default(),
+            hud_controls: HudControls::default(),
         })
     }
 
@@ -380,6 +384,8 @@ impl Application for GenericMotionLab {
 
     fn reset(&mut self) -> Result<(), String> {
         self.cancel_action_input();
+        self.cancel_hud_input();
+        self.hud_controls = HudControls::default();
         self.needs_reset = true;
         self.last_input = None;
         self.command_ui = CommandUi::default();
@@ -427,11 +433,33 @@ impl Application for GenericMotionLab {
         Ok(())
     }
 
+    fn buffered_viewport_input(&self) -> bool {
+        self.has_hud_controls()
+    }
+    fn viewport_frame_begin(&mut self, ctx: &egui::Context) -> Result<(), String> {
+        self.begin_hud_frame(ctx);
+        Ok(())
+    }
+    fn viewport_interaction(
+        &mut self,
+        ui: &mut egui::Ui,
+        rect: egui::Rect,
+    ) -> Result<ruster_app::ViewportInputOwnership, String> {
+        Ok(self.interact_hud(ui, rect))
+    }
+    fn cancel_viewport_input(&mut self) {
+        self.cancel_hud_input();
+        self.cancel_action_input();
+    }
+
     fn viewport_overlay(
         &mut self,
         painter: &egui::Painter,
         rect: egui::Rect,
     ) -> Result<(), String> {
+        if self.paint_prepared_controls(painter) {
+            return Ok(());
+        }
         let mode = self.hud_presentation_mode();
         if let Some(runtime) = &self.runtime {
             let authoring = runtime.authoring_snapshot();
@@ -528,6 +556,7 @@ impl Application for GenericMotionLab {
     }
 
     fn ui(&mut self, ui: &mut egui::Ui) -> Result<(), String> {
+        self.hud_action_status(ui);
         if let Some(title) = &self.creation_title {
             ui.heading(title);
             self.action_help(ui);

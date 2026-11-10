@@ -19,9 +19,10 @@ Usage: ruster-motion-lab [OPTIONS]
   --ticks N        Headless ticks, 0–10000 (default 10)
   --input-frames PATH Headless generic/creation JSON array, at most 1 MiB and N frames
   --commands PATH  At most16 typed paused commands after Reset, before ordinary ticks
+  --hud-activations PATH At most32 authored button activations after sorted tick boundaries
   --speed N        Legacy: left property; generic: runtime-only numeric speed override
   --script PATH    Read a regular UTF-8 Rhai script, at most 16 KiB
-  --scene PATH     Read a generic Scene15 snapshot (sources, bindings and history retained)
+  --scene PATH     Read a generic Scene16 snapshot (sources, bindings and history retained)
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
   --creation-info Print the runtime/descriptor compatibility profile and exit
   --creation PATH Read an app.json creation descriptor and its relative resources
@@ -71,6 +72,7 @@ struct Options {
     meshes: Vec<(String, PathBuf)>,
     input_frames: Option<PathBuf>,
     commands: Option<PathBuf>,
+    hud_activations: Option<PathBuf>,
 }
 
 fn parse() -> Result<Option<Options>, String> {
@@ -87,13 +89,18 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
             "--generic-demo" => options.generic_demo = true,
             "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project"
             | "--scene" | "--resources" | "--mesh" | "--creation" | "--input-frames"
-            | "--commands" => {
+            | "--commands" | "--hud-activations" => {
                 let value = args
                     .next()
                     .ok_or_else(|| format!("{arg} requires a value. See --help."))?;
                 match arg.as_str() {
                     "--scene" => options.scene = Some(value.into()),
                     "--creation" => options.creation = Some(value.into()),
+                    "--hud-activations" => {
+                        if options.hud_activations.replace(value.into()).is_some() {
+                            return Err("Use one --hud-activations file".into());
+                        }
+                    }
                     "--commands" => {
                         if options.commands.replace(value.into()).is_some() {
                             return Err("Use one --commands file".into());
@@ -162,9 +169,13 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
     {
         return Err("--ticks requires --headless; --frames requires native mode.".into());
     }
-    if (options.input_frames.is_some() || options.commands.is_some()) && !options.headless {
+    if (options.input_frames.is_some()
+        || options.commands.is_some()
+        || options.hud_activations.is_some())
+        && !options.headless
+    {
         return Err(
-            "--input-frames and --commands require --headless generic or creation mode".into(),
+            "--input-frames, --commands and --hud-activations require --headless generic or creation mode".into(),
         );
     }
     if options.project.is_some() && options.script.is_some() {
@@ -188,12 +199,14 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
     if !options.meshes.is_empty() && options.resources.is_none() {
         return Err("--mesh requires an explicit --resources directory".into());
     }
-    if (options.input_frames.is_some() || options.commands.is_some())
+    if (options.input_frames.is_some()
+        || options.commands.is_some()
+        || options.hud_activations.is_some())
         && !generic
         && (options.project.is_some() || options.script.is_some() || options.save_project.is_some())
     {
         return Err(
-            "--input-frames is unavailable in legacy Rhai mode; use generic or creation mode"
+            "--input-frames, --commands and --hud-activations are unavailable in legacy Rhai mode; use generic or creation mode"
                 .into(),
         );
     }
@@ -214,9 +227,12 @@ fn execute(options: Options) -> Result<(), String> {
     if options.scene.is_some() || options.generic_demo {
         return execute_generic(options);
     }
-    if options.input_frames.is_some() || options.commands.is_some() {
+    if options.input_frames.is_some()
+        || options.commands.is_some()
+        || options.hud_activations.is_some()
+    {
         return Err(
-            "--input-frames/--commands require headless generic or creation mode, not legacy Rhai mode"
+            "--input-frames/--commands/--hud-activations require headless generic or creation mode, not legacy Rhai mode"
                 .into(),
         );
     }
@@ -288,9 +304,13 @@ fn has_explicit_content(options: &Options) -> bool {
 }
 
 fn validate_creation_options(options: &Options) -> Result<(), String> {
-    if (options.input_frames.is_some() || options.commands.is_some()) && !options.headless {
+    if (options.input_frames.is_some()
+        || options.commands.is_some()
+        || options.hud_activations.is_some())
+        && !options.headless
+    {
         return Err(
-            "--input-frames and --commands require --headless generic or creation mode".into(),
+            "--input-frames, --commands and --hud-activations require --headless generic or creation mode".into(),
         );
     }
     if has_explicit_content(options)
@@ -354,22 +374,80 @@ fn read_commands(path: Option<&Path>) -> Result<Vec<generic::CommandRequest>, St
     Ok(commands)
 }
 
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HudActivationRequest {
+    after_tick: String,
+    button_id: String,
+}
+
+/// Parse the whole bounded schedule before Reset. Only authored IDs cross this
+/// entry point. Targets, command arguments and run identity belong to the owner.
+fn read_hud_activations(path: Option<&Path>, ticks: u64) -> Result<Vec<(u64, String)>, String> {
+    let Some(path) = path else {
+        return Ok(Vec::new());
+    };
+    let bytes = ruster_assets::read_regular_file(path, 1024 * 1024)
+        .map_err(|error| format!("HUD activations {}: {error}", path.display()))?;
+    let value = strict_json::parse(&bytes).map_err(|error| format!("HUD activations: {error}"))?;
+    let requests: Vec<HudActivationRequest> = serde_json::from_value(value).map_err(|error| {
+        format!("Expected an array of authored HUD activation requests: {error}")
+    })?;
+    if requests.len() > 32 {
+        return Err("Use at most32 HUD activations".into());
+    }
+    let mut schedule = Vec::with_capacity(requests.len());
+    let mut previous_tick = 0;
+    for request in requests {
+        let tick = request
+            .after_tick
+            .parse::<u64>()
+            .map_err(|_| "HUD activation after_tick requires a canonical u64 decimal string")?;
+        if tick.to_string() != request.after_tick || tick > ticks || tick < previous_tick {
+            return Err("HUD activations require sorted canonical after_tick strings within requested ticks".into());
+        }
+        ruster_scene::validate_id(&request.button_id).map_err(|error| error.to_string())?;
+        schedule.push((tick, request.button_id));
+        previous_tick = tick;
+    }
+    Ok(schedule)
+}
+
+fn activate_scheduled_hud(
+    runtime: &mut Runtime<GenericMotionLab>,
+    schedule: &mut std::iter::Peekable<std::vec::IntoIter<(u64, String)>>,
+    receipts: &mut Vec<ruster_behavior::HudActivationReceipt>,
+) -> Result<(), String> {
+    while schedule
+        .peek()
+        .is_some_and(|(tick, _)| *tick == runtime.tick())
+    {
+        let (_, button_id) = schedule.next().expect("peeked activation");
+        receipts.push(runtime.app_mut().activate_hud_button(&button_id)?);
+    }
+    Ok(())
+}
+
+struct HeadlessRun {
+    runtime: Runtime<GenericMotionLab>,
+    input: serde_json::Value,
+    command_receipts: Vec<serde_json::Value>,
+    hud_activation_receipts: Vec<ruster_behavior::HudActivationReceipt>,
+}
+
 fn headless_runtime(
     app: GenericMotionLab,
     dt: Duration,
     ticks: u64,
     path: Option<&Path>,
     commands_path: Option<&Path>,
-) -> Result<
-    (
-        Runtime<GenericMotionLab>,
-        serde_json::Value,
-        Vec<serde_json::Value>,
-    ),
-    String,
-> {
+    hud_activations_path: Option<&Path>,
+) -> Result<HeadlessRun, String> {
     let frames = read_input_frames(path, ticks, &app.session().authoring().actions)?;
     let commands = read_commands(commands_path)?;
+    let mut hud_activations = read_hud_activations(hud_activations_path, ticks)?
+        .into_iter()
+        .peekable();
     let supplied = frames.len();
     let mut frames = frames.into_iter();
     let mut runtime = Runtime::new(app, dt)?;
@@ -379,6 +457,12 @@ fn headless_runtime(
         generic::dispatch_command(&mut runtime, &command)?;
         command_receipts.push(runtime.app().command_receipt_report());
     }
+    let mut hud_activation_receipts = Vec::new();
+    activate_scheduled_hud(
+        &mut runtime,
+        &mut hud_activations,
+        &mut hud_activation_receipts,
+    )?;
     let mut last_supplied = serde_json::Value::Null;
     for _ in 0..ticks {
         if let Some(frame) = frames.next() {
@@ -388,6 +472,11 @@ fn headless_runtime(
         } else {
             runtime.step()?;
         }
+        activate_scheduled_hud(
+            &mut runtime,
+            &mut hud_activations,
+            &mut hud_activation_receipts,
+        )?;
     }
     let input = serde_json::json!({
         "origin": if supplied == 0 { "neutral" } else { "programmatic" },
@@ -396,7 +485,12 @@ fn headless_runtime(
         "last_committed_input": input_observation(runtime.app()),
         "last_committed_supplied_input": last_supplied,
     });
-    Ok((runtime, input, command_receipts))
+    Ok(HeadlessRun {
+        runtime,
+        input,
+        command_receipts,
+        hud_activation_receipts,
+    })
 }
 
 /// Only an absent descriptor permits the embedded legacy application fallback.
@@ -455,12 +549,18 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
     )?;
     app.set_creation_presentation(manifest.title.clone());
     if options.headless {
-        let (runtime, input, command_receipts) = headless_runtime(
+        let HeadlessRun {
+            runtime,
+            input,
+            command_receipts,
+            hud_activation_receipts,
+        } = headless_runtime(
             app,
             tick_duration,
             options.ticks.unwrap_or(10),
             options.input_frames.as_deref(),
             options.commands.as_deref(),
+            options.hud_activations.as_deref(),
         )?;
         let app = runtime.app();
         let mut output = serde_json::json!({
@@ -482,6 +582,7 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
                 "captured_commands": app.command_report(),
                 "command_receipt": app.command_receipt_report(),
                 "command_receipts": command_receipts,
+                "hud_activation_receipts": hud_activation_receipts,
             "query_observations": app.query_observations(),
             "runtime_scene": app.content().scene(),
             "input": input,
@@ -537,12 +638,18 @@ fn execute_generic(options: Options) -> Result<(), String> {
     let mut app = GenericMotionLab::new(session, meshes, tick_duration)?;
     app.set_speed_override(options.speed)?;
     if options.headless {
-        let (runtime, input, command_receipts) = headless_runtime(
+        let HeadlessRun {
+            runtime,
+            input,
+            command_receipts,
+            hud_activation_receipts,
+        } = headless_runtime(
             app,
             tick_duration,
             options.ticks.unwrap_or(10),
             options.input_frames.as_deref(),
             options.commands.as_deref(),
+            options.hud_activations.as_deref(),
         )?;
         let app = runtime.app();
         let mut output = serde_json::json!({
@@ -563,6 +670,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
             "captured_commands": app.command_report(),
             "command_receipt": app.command_receipt_report(),
             "command_receipts": command_receipts,
+                "hud_activation_receipts": hud_activation_receipts,
             "query_observations": app.query_observations(),
             "runtime_scene": app.content().scene(),
             "input": input,
@@ -600,7 +708,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls"],
             })
         );
         return;
@@ -763,6 +871,68 @@ mod tests {
         .unwrap()
         .is_some());
         assert!(options(&["--generic-demo", "--commands", "commands.json"]).is_err());
+        let activations = directory.path().join("activations.json");
+        std::fs::write(
+            &activations,
+            r#"[{"after_tick":"0","button_id":"apply"},{"after_tick":"2","button_id":"apply"}]"#,
+        )
+        .unwrap();
+        assert_eq!(
+            read_hud_activations(Some(&activations), 2).unwrap().len(),
+            2
+        );
+        for bytes in [
+            r#"[{"after_tick":0,"button_id":"apply"}]"#,
+            r#"[{"after_tick":"00","button_id":"apply"}]"#,
+            r#"[{"after_tick":"3","button_id":"apply"}]"#,
+            r#"[{"after_tick":"2","button_id":"apply"},{"after_tick":"1","button_id":"apply"}]"#,
+            r#"[{"after_tick":"0","button_id":"apply","arguments":{}}]"#,
+            r#"[{"after_tick":"0","after_tick":"0","button_id":"apply"}]"#,
+            r#"[{"after_tick":"0","button_id":"bad id"}]"#,
+        ] {
+            std::fs::write(&activations, bytes).unwrap();
+            assert!(read_hud_activations(Some(&activations), 2).is_err());
+        }
+        std::fs::write(
+            &activations,
+            serde_json::to_vec(&vec![
+                serde_json::json!({
+                    "after_tick":"0", "button_id":"apply"
+                });
+                33
+            ])
+            .unwrap(),
+        )
+        .unwrap();
+        assert!(read_hud_activations(Some(&activations), 2).is_err());
+        assert!(options(&[
+            "--generic-demo",
+            "--headless",
+            "--hud-activations",
+            "activations.json"
+        ])
+        .unwrap()
+        .is_some());
+        for flags in [
+            vec!["--generic-demo", "--hud-activations", "activations.json"],
+            vec![
+                "--script",
+                "legacy.rhai",
+                "--headless",
+                "--hud-activations",
+                "activations.json",
+            ],
+            vec![
+                "--generic-demo",
+                "--headless",
+                "--hud-activations",
+                "a.json",
+                "--hud-activations",
+                "b.json",
+            ],
+        ] {
+            assert!(options(&flags).is_err());
+        }
         let default = Options::default();
         assert!(select_creation(&default, &executable).unwrap().is_none());
         // Selection must not parse content or silently fall back when it is corrupt.

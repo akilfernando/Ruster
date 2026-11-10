@@ -13,6 +13,7 @@ mod combo_focus;
 mod display_ui;
 mod export_commands;
 mod hud_commands;
+mod hud_interaction;
 mod hud_ui;
 mod lighting_commands;
 mod lighting_ui;
@@ -118,6 +119,7 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "scene_transform_many",
     "scene_delete_many",
     "scene_duplicate_many",
+    "hud_activate",
     "scene_undo",
     "scene_redo",
     "scene_replay",
@@ -410,6 +412,7 @@ pub struct SceneEditor {
     hud_open: bool,
     hud_draft: Option<hud_ui::HudDraft>,
     hud_cache: ruster_scene::hud::HudCache,
+    hud_controls: hud_interaction::HudControls,
     hud_last_prepared: Option<Value>,
     external: crate::behavior_external::External,
     external_focused: bool,
@@ -600,6 +603,7 @@ impl SceneEditor {
             hud_open: false,
             hud_draft: None,
             hud_cache: ruster_scene::hud::HudCache::default(),
+            hud_controls: hud_interaction::HudControls::default(),
             hud_last_prepared: None,
             external: crate::behavior_external::External::default(),
             external_focused: false,
@@ -923,7 +927,7 @@ impl SceneEditor {
             return Err("Both live and deferred input drafts exist; checkpoint preserved for explicit repair.".into());
         }
         Ok(RecoveryDrafts {
-            version: 13,
+            version: 14,
             revision: self.session.scene().revision,
             selection: self.manipulation.ids.clone(),
             fields: self.draft.clone(),
@@ -960,6 +964,22 @@ impl SceneEditor {
         let material_field = value.get("material").is_some();
         let lighting_field = value.get("lighting").is_some();
         let version = value.get("version").and_then(Value::as_u64);
+        let button_fields = value.get("hud").is_some_and(|hud| {
+            hud.get("button_arguments").is_some()
+                || hud
+                    .pointer("/hud/elements")
+                    .and_then(Value::as_array)
+                    .is_some_and(|rows| {
+                        rows.iter().any(|row| {
+                            row.pointer("/source/kind").and_then(Value::as_str) == Some("button")
+                        })
+                    })
+        });
+        if version.is_some_and(|version| version < 14) && button_fields {
+            return Err(
+                "HUD button recovery fields require draft version14; checkpoint preserved.".into(),
+            );
+        }
         if version.is_some_and(|version| version < 13) && value.get("hud").is_some() {
             return Err(
                 "HUD recovery fields require draft version13; checkpoint preserved.".into(),
@@ -1070,7 +1090,7 @@ impl SceneEditor {
                     && fields_unit != Some(false)
             }
             Some(4) => !lighting_field && manipulation_unit && fields_unit != Some(false),
-            Some(5..=13) => manipulation_unit && fields_unit != Some(false),
+            Some(5..=14) => manipulation_unit && fields_unit != Some(false),
             _ => false,
         } {
             return Err(
@@ -1098,7 +1118,7 @@ impl SceneEditor {
         }
         let scene = self.session.scene();
         if !((draft.version == 1 && !behavior_field)
-            || ((2..=13).contains(&draft.version) && draft.behavior.is_some()))
+            || ((2..=14).contains(&draft.version) && draft.behavior.is_some()))
             || draft.revision != scene.revision
             || draft.selection.len() > ruster_scene::MAX_OBJECTS
             || draft.selection.iter().enumerate().any(|(i, id)| {
@@ -4813,6 +4833,18 @@ impl SceneEditor {
             || self.guard().is_err()
             || self.manipulation.offset_pending()
             || self.asset_busy();
+        if input_blocked
+            || ctx.input(|input| {
+                !input.focused
+                    || input.key_pressed(egui::Key::Escape)
+                    || input
+                        .events
+                        .iter()
+                        .any(|event| matches!(event, egui::Event::WindowFocused(false)))
+            })
+        {
+            self.runtime.cancel_native_hud_activation();
+        }
         self.runtime.input_begin(&ctx, input_blocked);
         self.route_shortcuts(&ctx);
         egui::Panel::top("scene_top").show(ui, |ui| self.scene_menus(ui));
@@ -4897,6 +4929,7 @@ impl SceneEditor {
             self.navigation.keyboard_enabled=self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
             self.navigation.movement_speed=self.workspace.prefs.movement_speed;
             let authored_view = transient.as_ref().unwrap_or(self.session.scene());
+            let shown_frame = self.runtime.displayed_frame().cloned();
             let mut mixed_fit_error = None;
             let mut mixed_fit_succeeded = false;
             if self.navigation.frame_selected
@@ -4929,21 +4962,24 @@ impl SceneEditor {
                 self.error = error.into();
                 ui.colored_label(ui.visuals().warn_fg_color, error);
             }
-            let viewport = ruster_render::viewport_with_materials(
-                ui,
-                if self.runtime.visible {
-                    self.runtime.displayed_frame().map(|frame|frame.scene.as_ref()).unwrap_or(self.session.scene())
-                } else {
-                    authored_view
-                },
-                &selected,
-                if self.runtime.visible {
-                    &self.preview_assets
-                } else {
-                    &self.resolved
-                },
+            let shown_scene = shown_frame.as_ref().map_or(authored_view, |frame| frame.scene.as_ref());
+            let mut surface = ruster_render::allocate_viewport(ui, shown_scene, &selected, &mut self.navigation);
+            let authoring = shown_frame.as_ref().map_or(self.session.authoring(), |frame| frame.authoring.as_ref());
+            let scope = shown_frame.as_ref().map_or_else(
+                || egui::Id::unique(("hud-preview", self.generation, self.session.scene().revision)),
+                |frame| egui::Id::unique(("hud-runtime", frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision)),
+            );
+            let (hud_owns, hud_error) = hud_interaction::interact(
+                ui, hud_interaction::HudViewport { rect: surface.rect, frame: shown_frame.as_ref(), authoring, scope },
+                &mut self.hud_cache, &mut self.hud_controls, &mut self.runtime, blocked,
+            );
+            if let Some(error) = hud_error { self.error = error; }
+            surface.input_owned = hud_owns;
+            let viewport = ruster_render::render_viewport_with_materials(
+                ui, shown_scene, &selected,
+                if self.runtime.visible { &self.preview_assets } else { &self.resolved },
                 if self.runtime.visible { &self.preview_textures } else { &self.resolved_textures },
-                &mut self.navigation,
+                &mut self.navigation, surface,
             );
             if let Some(error) = viewport.fit_error.filter(|_| viewport.fit_attempted) {
                 self.error = error.into();
@@ -4951,7 +4987,7 @@ impl SceneEditor {
                 && self.error == ruster_render::FIT_ERROR {
                 self.error.clear();
             }
-            self.runtime.input_finish(&ctx, &viewport.response, blocked);
+            self.runtime.input_finish(&ctx, &viewport.response, blocked || hud_owns);
             self.captures.rect = Some(viewport.rect);
             self.captures.receipt = Some(viewport.receipt.clone());
             self.view_state.input_active = ui.input(|input| input.pointer.any_down());
@@ -4963,7 +4999,7 @@ impl SceneEditor {
                 && !self.close_approved
                 && !self.new_scene_pending
                 && !self.rename_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none();
-            let can_pick = self.navigation.enabled && !self.manipulation.active();
+            let can_pick = self.navigation.enabled && !self.manipulation.active() && !hud_owns;
             if !self.runtime.visible {
                 let active = self.selected.as_slice();
                 collider_viewport::paint(ui, &viewport, authored_view, active);
@@ -5014,7 +5050,7 @@ impl SceneEditor {
                     ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 self.queued_selection=Some((id,additive));
             }
-            self.paint_hud_overlay(ui, viewport.rect);
+            self.paint_hud_overlay(ui, viewport.rect, shown_frame.as_ref());
         });
         self.process_queued_selection();
         self.observe_view();
@@ -6824,7 +6860,7 @@ mod tests {
         assert_eq!(rejected["error"]["code"], "drafts_pending");
         let snapshot = editor.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 13);
+        assert_eq!(payload["version"], 14);
         let mut recovered = SceneEditor::new(snapshot.restore().unwrap());
         recovered.restore_recovery_drafts(payload).unwrap();
         assert!(recovered.behavior.pending());
@@ -7421,7 +7457,7 @@ mod tests {
         component.collider_draft = Some(raw.clone());
         let snapshot = component.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 13);
+        assert_eq!(payload["version"], 14);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.collider_draft, Some(raw.clone()));
@@ -8488,7 +8524,7 @@ mod tests {
             assert_eq!(candidates.len(), 1);
             let (_journal, snapshot) = store.claim(&candidates[0].id).unwrap();
             let payload = snapshot.drafts().unwrap();
-            assert_eq!(payload["version"], 13);
+            assert_eq!(payload["version"], 14);
             if shadow {
                 assert_eq!(
                     payload["lighting"]["shadow"]["depth_bias_texels"],
@@ -8606,7 +8642,7 @@ mod tests {
         let exact = source.display_draft.clone();
         let snapshot = source.recovery_snapshot().unwrap();
         let payload = snapshot.drafts().unwrap();
-        assert_eq!(payload["version"], 13);
+        assert_eq!(payload["version"], 14);
         let mut restored = SceneEditor::new(snapshot.restore().unwrap());
         restored.restore_recovery_drafts(payload.clone()).unwrap();
         assert_eq!(restored.display_draft, exact);

@@ -754,6 +754,22 @@ pub fn viewport_with_navigation(
 
 /// Shared material route. Hosts retain immutable accepted texture snapshots and expose
 /// missing-content diagnostics; faithful runtime content must validate its dependency closure.
+/// Allocated viewport with no borrowed scene data. Hosts register overlay input
+/// after allocation and before camera/picking, then finish the same viewport.
+pub struct ViewportSurface {
+    pub rect: egui::Rect,
+    pub response: egui::Response,
+    pub input_owned: bool,
+    camera_id: egui::Id,
+    error_id: egui::Id,
+    camera: Camera,
+    preserved_camera: Camera,
+    fitted: bool,
+    selected_fit: bool,
+    fit_error: Option<&'static str>,
+    navigation_enabled: bool,
+}
+
 pub fn viewport_with_materials(
     ui: &mut egui::Ui,
     scene: &Scene,
@@ -762,6 +778,17 @@ pub fn viewport_with_materials(
     textures: &BTreeMap<String, Arc<ruster_assets::Texture>>,
     navigation: &mut NavigationOptions,
 ) -> ViewportInteraction {
+    let surface = allocate_viewport(ui, scene, selected, navigation);
+    render_viewport_with_materials(ui, scene, selected, meshes, textures, navigation, surface)
+}
+
+/// Allocate scene chrome and the actual interaction rectangle before overlay input.
+pub fn allocate_viewport(
+    ui: &mut egui::Ui,
+    scene: &Scene,
+    selected: &[&str],
+    navigation: &mut NavigationOptions,
+) -> ViewportSurface {
     let navigation_enabled = navigation.enabled;
     let camera_id = ui.scope_id().with(("ruster-3d-camera", &scene.id));
     let error_id = camera_id.with("fit-error");
@@ -857,6 +884,44 @@ pub fn viewport_with_materials(
         ui.available_size().max(egui::vec2(1.0, 1.0)),
         egui::Sense::click_and_drag(),
     );
+    ViewportSurface {
+        rect,
+        response,
+        input_owned: false,
+        camera_id,
+        error_id,
+        camera,
+        preserved_camera,
+        fitted,
+        selected_fit,
+        fit_error,
+        navigation_enabled,
+    }
+}
+
+/// Finish an allocated viewport after the host has registered overlay ownership.
+pub fn render_viewport_with_materials(
+    ui: &mut egui::Ui,
+    scene: &Scene,
+    selected: &[&str],
+    meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+    textures: &BTreeMap<String, Arc<ruster_assets::Texture>>,
+    navigation: &mut NavigationOptions,
+    surface: ViewportSurface,
+) -> ViewportInteraction {
+    let ViewportSurface {
+        rect,
+        response,
+        input_owned,
+        camera_id,
+        error_id,
+        mut camera,
+        preserved_camera,
+        fitted,
+        selected_fit,
+        mut fit_error,
+        navigation_enabled,
+    } = surface;
     if fitted {
         let fit = if selected_fit {
             Camera::fit_objects(
@@ -889,7 +954,10 @@ pub fn viewport_with_materials(
     let speed = navigation.movement_speed.clamp(0.05, 1000.0);
     let pan = response.dragged_by(egui::PointerButton::Middle)
         || (response.dragged_by(egui::PointerButton::Secondary) && ui.input(|i| i.modifiers.shift));
-    if navigation_enabled && (pan || response.dragged_by(egui::PointerButton::Secondary)) {
+    if navigation_enabled
+        && !input_owned
+        && (pan || response.dragged_by(egui::PointerButton::Secondary))
+    {
         camera.navigate(
             ui.input(|input| input.pointer.delta()),
             pan,
@@ -897,7 +965,7 @@ pub fn viewport_with_materials(
             rect.height(),
         );
     }
-    if navigation_enabled && response.hovered() {
+    if navigation_enabled && !input_owned && response.hovered() {
         let scroll = ui.input(|input| input.smooth_scroll_delta.y);
         if scroll != 0.0 {
             camera.distance = (camera.distance * (-scroll * 0.002).exp()).clamp(0.01, 1.0e7);
@@ -941,7 +1009,7 @@ pub fn viewport_with_materials(
     ui.ctx()
         .data_mut(|data| data.insert_temp(error_id, fit_error));
     let view_projection = projection * view;
-    let picked = if response.clicked() {
+    let picked = if !input_owned && response.clicked() {
         response.interact_pointer_pos().and_then(|p| {
             pick(
                 scene,

@@ -35,6 +35,68 @@ fn lifecycle_session() -> Session {
     session
 }
 
+fn hud_session() -> Session {
+    use ruster_scene::hud::{Hud, HudCommandBinding, HudLabel, HudSource, HudValueType};
+    use ruster_scene::{StateFields, StateValue};
+    let mut session = lifecycle_session();
+    let mut source = session.source("controller").unwrap().clone();
+    source.text = r#"return {
+        initialize=function(p,h) return {state={count=3}} end,
+        update=function(o,p,dt,h)
+            if h.state('count') >= 7 then return {state={count='invalid'}} end
+            return {}
+        end,
+        command=function(n,a,p,h)
+            if a.amount < 0 then return {state={count=99,missing=true}} end
+            return {state={count=h.state('count')+a.amount}}
+        end
+    }"#
+    .into();
+    session
+        .set_source(session.scene().revision, "controller", Some(source))
+        .unwrap();
+    let mut rows = vec![HudLabel {
+        id: "count".into(),
+        source: HudSource::State {
+            binding_id: "application".into(),
+            field: "count".into(),
+            value_type: HudValueType::Number,
+            prefix: "Count ".into(),
+            suffix: String::new(),
+            precision: 0,
+        },
+    }];
+    rows.extend(
+        [("add", 2.0), ("reject", -1.0)]
+            .into_iter()
+            .map(|(id, amount)| HudLabel {
+                id: id.into(),
+                source: HudSource::Button {
+                    caption: id.into(),
+                    command: HudCommandBinding {
+                        binding_id: "application".into(),
+                        command_id: "add".into(),
+                        arguments: StateFields::from([(
+                            "amount".into(),
+                            StateValue::Number(amount),
+                        )]),
+                    },
+                },
+            }),
+    );
+    session
+        .set_hud(
+            session.scene().revision,
+            Hud {
+                enabled: true,
+                elements: rows,
+                ..Hud::default()
+            },
+        )
+        .unwrap();
+    session
+}
+
 // Consumer boundary: fixed host dt/tick must match the backend before any motion commits;
 // runtime overrides must leave the complete authored snapshot/history and resource file intact.
 #[test]
@@ -270,6 +332,250 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
     lifecycle.reset().unwrap();
     assert_eq!(lifecycle.app().runtime_commit_revision(), Some(0));
     assert!(lifecycle.app().command_receipt_report().is_null());
+}
+
+// The generic app joins captured HUD definitions to outer playback and state
+// presentation. Its failures and reload boundaries must retain that same commit.
+#[test]
+fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
+    use ruster_app::hud::HudPresentationMode;
+    use ruster_motion_lab::generic::{dispatch_command, CommandRequest};
+    use ruster_scene::{CommandDefinition, StateFields, StateValue};
+    let mut lifecycle = runtime(hud_session());
+    assert_eq!(
+        lifecycle.app().hud_presentation_mode(),
+        HudPresentationMode::AuthoredPreview
+    );
+    assert!(lifecycle.app_mut().activate_hud_button("add").is_err());
+    lifecycle.reset().unwrap();
+    let authored = lifecycle.app().session().snapshot_bytes().unwrap();
+    lifecycle.set_running(true);
+    let command = CommandRequest {
+        binding_id: "application".into(),
+        command_id: "add".into(),
+        expected_commit_revision: "0".into(),
+        args: StateFields::new(),
+    };
+    assert!(dispatch_command(&mut lifecycle, &command).is_err());
+    assert!(lifecycle.is_running());
+    let receipt = lifecycle.app_mut().activate_hud_button("add").unwrap();
+    assert_eq!(
+        (
+            receipt.command.previous_commit_revision,
+            receipt.command.commit_revision,
+            receipt.command.tick
+        ),
+        (0, 1, 0)
+    );
+    assert!(lifecycle.is_running());
+    assert_eq!(lifecycle.tick(), 0);
+    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 5");
+    assert_eq!(
+        lifecycle.app().hud_presentation_mode(),
+        HudPresentationMode::Committed
+    );
+    lifecycle.step().unwrap();
+    assert_eq!(
+        (lifecycle.tick(), lifecycle.app().runtime_commit_revision()),
+        (1, Some(2))
+    );
+    lifecycle.set_running(false);
+    lifecycle.app_mut().activate_hud_button("add").unwrap();
+    assert!(!lifecycle.is_running());
+    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 7");
+    let state = serde_json::to_value(lifecycle.app().runtime_state_report()).unwrap();
+    let scene = lifecycle.app().content().scene().clone();
+    for playing in [false, true] {
+        lifecycle.set_running(playing);
+        assert!(lifecycle.app_mut().activate_hud_button("reject").is_err());
+        assert_eq!(lifecycle.is_running(), playing);
+        assert_eq!(
+            serde_json::to_value(lifecycle.app().runtime_state_report()).unwrap(),
+            state
+        );
+        assert_eq!(lifecycle.app().content().scene(), &scene);
+        assert_eq!(
+            (lifecycle.tick(), lifecycle.app().runtime_commit_revision()),
+            (1, Some(3))
+        );
+        assert_eq!(
+            lifecycle.app().hud_activation_report()["latest_terminal"]["status"],
+            "failed"
+        );
+    }
+    assert!(lifecycle.step().is_err());
+    assert!(!lifecycle.is_running());
+    assert_eq!(
+        lifecycle.app().hud_presentation_mode(),
+        HudPresentationMode::Stale
+    );
+    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 7");
+    assert_eq!(
+        serde_json::to_value(lifecycle.app().runtime_state_report()).unwrap(),
+        state
+    );
+    assert!(lifecycle.app_mut().activate_hud_button("add").is_err());
+    assert_eq!(
+        lifecycle.app().session().snapshot_bytes().unwrap(),
+        authored
+    );
+
+    lifecycle.reset().unwrap();
+    assert_eq!(
+        lifecycle.app().hud_presentation_mode(),
+        HudPresentationMode::Committed
+    );
+    let mut replacement = hud_session();
+    let mut hud = replacement.hud().clone();
+    if let ruster_scene::hud::HudSource::State { prefix, .. } = &mut hud.elements[0].source {
+        *prefix = "New count ".into();
+    }
+    replacement
+        .set_hud(replacement.scene().revision, hud)
+        .unwrap();
+    lifecycle.app_mut().replace_session(replacement).unwrap();
+    assert_eq!(
+        lifecycle.app().hud_presentation_mode(),
+        HudPresentationMode::Stale
+    );
+    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 3");
+    lifecycle.reset().unwrap();
+    assert_eq!(
+        lifecycle.app().hud_presentation_mode(),
+        HudPresentationMode::Committed
+    );
+    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "New count 3");
+    assert_eq!(
+        (lifecycle.tick(), lifecycle.app().runtime_commit_revision()),
+        (0, Some(0))
+    );
+    assert!(lifecycle.app().hud_activation_report()["pending"].is_null());
+    assert!(lifecycle.app().hud_activation_report()["latest_terminal"].is_null());
+
+    for definition in [
+        None,
+        Some(CommandDefinition {
+            arguments: StateFields::from([("amount".into(), StateValue::Bool(false))]),
+        }),
+    ] {
+        let mut broken = hud_session();
+        broken
+            .set_command_definition(broken.scene().revision, "application", "add", definition)
+            .unwrap();
+        let mut broken = runtime(broken);
+        broken.reset().unwrap();
+        broken.set_running(true);
+        let state = serde_json::to_value(broken.app().runtime_state_report()).unwrap();
+        assert!(broken.app().hud_snapshot().labels[1].diagnostic.is_some());
+        assert_eq!(broken.app().hud_snapshot().labels[1].text, "add");
+        assert!(broken.app_mut().activate_hud_button("add").is_err());
+        assert!(broken.is_running());
+        assert_eq!(
+            serde_json::to_value(broken.app().runtime_state_report()).unwrap(),
+            state
+        );
+        assert_eq!(broken.app().runtime_commit_revision(), Some(0));
+        assert!(broken.app().hud_activation_report()["pending"].is_null());
+    }
+}
+
+// Real egui widgets feed the generic owner's buffered hook. A click's intent
+// commits on the next frame, and raw focus loss or Reset discards pending work.
+#[test]
+fn native_hud_hooks_buffer_one_action_and_cancel_focus_loss_or_reset() {
+    use ruster_app::{egui, ViewportInputOwnership};
+    fn frame(
+        app: &mut GenericMotionLab,
+        context: &egui::Context,
+        focused: bool,
+        events: Vec<egui::Event>,
+    ) -> ViewportInputOwnership {
+        let mut ownership = ViewportInputOwnership::default();
+        let mut output = context.run_ui(
+            egui::RawInput {
+                focused,
+                events,
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(800.0, 600.0),
+                )),
+                ..Default::default()
+            },
+            |ui| {
+                app.viewport_frame_begin(ui.ctx()).unwrap();
+                let rect =
+                    egui::Rect::from_min_size(egui::pos2(20.0, 20.0), egui::vec2(500.0, 400.0));
+                ownership = app.viewport_interaction(ui, rect).unwrap();
+                app.viewport_overlay(ui.painter(), rect).unwrap();
+            },
+        );
+        output.textures_delta.clear();
+        ownership
+    }
+    let enter = || {
+        [true, false]
+            .into_iter()
+            .map(|pressed| egui::Event::Key {
+                key: egui::Key::Enter,
+                physical_key: None,
+                pressed,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            })
+            .collect()
+    };
+    let mut lifecycle = runtime(hud_session());
+    lifecycle.reset().unwrap();
+    lifecycle.set_running(true);
+    assert!(lifecycle.app().buffered_viewport_input());
+    let context = egui::Context::default();
+    frame(lifecycle.app_mut(), &context, true, vec![]);
+    let epoch = lifecycle.app().hud_activation_report()["run_epoch"]
+        .as_str()
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    let button = egui::Id::unique(("creation-hud", epoch)).with(("hud-button", "add"));
+    context.memory_mut(|memory| memory.request_focus(button));
+    assert!(frame(lifecycle.app_mut(), &context, true, enter()).keyboard);
+    assert_eq!(
+        lifecycle.app().hud_activation_report()["pending"]["button_id"],
+        "add"
+    );
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(0));
+    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 3");
+    frame(lifecycle.app_mut(), &context, true, vec![]);
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(1));
+    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 5");
+    assert!(lifecycle.is_running());
+    assert!(lifecycle.app().hud_activation_report()["pending"].is_null());
+    assert_eq!(
+        lifecycle.app().hud_activation_report()["latest_terminal"]["status"],
+        "committed"
+    );
+    frame(lifecycle.app_mut(), &context, true, vec![]);
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(1));
+    frame(lifecycle.app_mut(), &context, true, enter());
+    assert!(!lifecycle.app().hud_activation_report()["pending"].is_null());
+    frame(lifecycle.app_mut(), &context, false, vec![]);
+    assert_eq!(
+        lifecycle.app().hud_activation_report()["latest_terminal"]["status"],
+        "cancelled"
+    );
+    assert!(lifecycle.app().hud_activation_report()["pending"].is_null());
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(1));
+    assert!(lifecycle.is_running());
+    frame(lifecycle.app_mut(), &context, true, vec![]);
+    context.memory_mut(|memory| memory.request_focus(button));
+    frame(lifecycle.app_mut(), &context, true, enter());
+    assert!(!lifecycle.app().hud_activation_report()["pending"].is_null());
+    lifecycle.reset().unwrap();
+    assert!(lifecycle.app().hud_activation_report()["pending"].is_null());
+    assert!(lifecycle.app().hud_activation_report()["latest_terminal"].is_null());
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(0));
+    frame(lifecycle.app_mut(), &context, true, vec![]);
+    assert_eq!(lifecycle.app().hud_snapshot().labels[0].text, "Count 3");
+    assert_eq!(lifecycle.app().runtime_commit_revision(), Some(0));
 }
 
 // Actual CLI/resource wiring is not covered by Engine tests. Reject missing resources,

@@ -89,6 +89,7 @@ impl SceneEditor {
             "session_token":token,
             "revision":self.session.scene().revision.to_string(),
             "hud_definition":definition,
+            "activation":self.runtime.hud_activation_observation(),
             "total":total,
             "authored_total":self.session.hud().elements.len(),
             "next_offset":(end < total).then(|| end.to_string()),
@@ -284,6 +285,10 @@ mod tests {
             1
         );
         assert_eq!(inspected["next_offset"], "1");
+        assert_eq!(
+            inspected["activation"],
+            json!({"pending":null,"latest_terminal":null})
+        );
         assert_eq!(editor.session.undo_len(), 4);
         let before = editor.session.snapshot_bytes().unwrap();
         settings["expected_revision"] = "4".into();
@@ -319,6 +324,125 @@ mod tests {
         );
         editor.session.undo(4).unwrap();
         assert_eq!(editor.session.hud().elements[0].id, "first");
+
+        let arguments = ruster_scene::StateFields::from([
+            ("amount".into(), ruster_scene::StateValue::Number(1.0)),
+            ("active".into(), ruster_scene::StateValue::Bool(true)),
+            (
+                "caption".into(),
+                ruster_scene::StateValue::Text("literal".into()),
+            ),
+            (
+                "offset".into(),
+                ruster_scene::StateValue::Vec3([1.0, 2.0, 3.0]),
+            ),
+        ]);
+        let definition = ruster_scene::CommandDefinition {
+            arguments: arguments.clone(),
+        };
+        editor
+            .session
+            .create_behavior(
+                5,
+                "source",
+                ruster_scene::BehaviorSource {
+                    label: None,
+                    language_id: "lua54".into(),
+                    host_api_version: 5,
+                    text: String::new(),
+                },
+                "application",
+                ruster_scene::BehaviorBinding {
+                    target: ruster_scene::BindingTarget::Application,
+                    source_id: "source".into(),
+                    enabled: true,
+                    properties: std::collections::BTreeMap::new(),
+                    state_defaults: ruster_scene::StateFields::new(),
+                    commands: std::collections::BTreeMap::from([(
+                        "adjust".into(),
+                        definition.clone(),
+                    )]),
+                },
+            )
+            .unwrap();
+        editor.sync_draft();
+        let source = json!({"kind":"button","caption":"Adjust", "command":{
+            "binding_id":"application","command_id":"adjust","arguments":arguments
+        }});
+        let original = editor.session.snapshot_bytes().unwrap();
+        for mutation in ["missing", "unknown", "wrong_type"] {
+            let mut invalid = source.clone();
+            let values = invalid["command"]["arguments"].as_object_mut().unwrap();
+            match mutation {
+                "missing" => {
+                    values.remove("amount");
+                }
+                "unknown" => {
+                    values.insert("extra".into(), json!({"type":"bool","value":true}));
+                }
+                "wrong_type" => {
+                    values.insert("amount".into(), json!({"type":"bool","value":false}));
+                }
+                _ => unreachable!(),
+            }
+            let mut args = pre(6);
+            args["label_id"] = "button".into();
+            args["source"] = invalid;
+            assert_eq!(
+                editor
+                    .hud_command("token", "hud_label_set", &args)
+                    .unwrap_err()
+                    .0,
+                "invalid_arguments"
+            );
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), original);
+        }
+        let mut args = pre(6);
+        args["label_id"] = "button".into();
+        args["source"] = source.clone();
+        editor.hud_command("token", "hud_label_set", &args).unwrap();
+        let observed = editor
+            .hud_command("token", "hud_inspect", &json!({"offset":"2"}))
+            .unwrap();
+        assert_eq!(observed["hud_definition"]["elements"][0]["source"], source);
+        assert_eq!(observed["model"]["resolved"]["labels"][0]["text"], "Adjust");
+        assert_eq!(
+            observed["model"]["resolved"]["labels"][0]["diagnostic"],
+            Value::Null
+        );
+        editor
+            .session
+            .set_command_definition(7, "application", "adjust", None)
+            .unwrap();
+        editor.sync_draft();
+        args["expected_revision"] = "8".into();
+        args["source"]["caption"] = "Repair command".into();
+        editor.hud_command("token", "hud_label_set", &args).unwrap();
+        let observed = editor
+            .hud_command("token", "hud_inspect", &json!({"offset":"2"}))
+            .unwrap();
+        assert_eq!(
+            observed["model"]["resolved"]["labels"][0]["text"],
+            "Repair command"
+        );
+        assert_eq!(
+            observed["model"]["resolved"]["labels"][0]["diagnostic"],
+            "missing_command"
+        );
+        editor
+            .session
+            .set_command_definition(9, "application", "adjust", Some(definition))
+            .unwrap();
+        let observed = editor
+            .hud_command("token", "hud_inspect", &json!({"offset":"2"}))
+            .unwrap();
+        assert_eq!(
+            observed["model"]["resolved"]["labels"][0]["diagnostic"],
+            Value::Null
+        );
+        let snapshot = editor.session.snapshot_bytes().unwrap();
+        let reopened = ruster_scene::Session::from_snapshot_bytes(&snapshot).unwrap();
+        assert_eq!(reopened.hud(), editor.session.hud());
     }
 
     #[test]
@@ -396,6 +520,24 @@ mod tests {
             "next_label_id":"n".repeat(128)
         }});
         assert!(serde_json::to_vec(&response).unwrap().len() + 1 < 64 * 1024);
+        let mut button_response = response;
+        button_response["result"]["activation"] = json!({
+            "pending":{"run_id":"9".repeat(62),"activation_id":u64::MAX.to_string(),"button_id":"b".repeat(128),"native":true},
+            "latest_terminal":{"run_id":"9".repeat(62),"activation_id":u64::MAX.to_string(),"button_id":"b".repeat(128),"status":"failed","error":"\0".repeat(1024)}
+        });
+        button_response["result"]["hud_definition"]["elements"][0]["source"] = json!({
+            "kind":"button", "caption":"\0".repeat(1024), "command":{
+                "binding_id":"b".repeat(128), "command_id":"c".repeat(128),
+                "arguments": (0..16).map(|index| (format!("argument-{index}"),
+                    json!({"type":"text","value":"\0".repeat(150)}))).collect::<serde_json::Map<_, _>>()
+            }
+        });
+        let command: ruster_scene::hud::HudCommandBinding = serde_json::from_value(
+            button_response["result"]["hud_definition"]["elements"][0]["source"]["command"].clone(),
+        )
+        .unwrap();
+        command.validate().unwrap();
+        assert!(serde_json::to_vec(&button_response).unwrap().len() + 1 < 64 * 1024);
 
         let union_definition = Hud {
             elements: (0..32)

@@ -12,6 +12,7 @@ fs2 = "0.4"
 glam = "0.30"
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10.9"
 tempfile = "3"
 
 [lints]

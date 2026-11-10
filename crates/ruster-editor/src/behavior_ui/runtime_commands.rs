@@ -20,6 +20,7 @@ impl RuntimeUi {
             || self.stale
             || self.pending.is_some()
             || self.awaiting.is_some()
+            || self.hud_activation_busy()
         {
             return Err("runtime_busy".into());
         }
@@ -118,6 +119,7 @@ impl RuntimeUi {
             && !self.playing
             && self.pending.is_none()
             && self.awaiting.is_none()
+            && !self.hud_activation_busy()
             && self.debug_snapshot().is_none();
         let mut submit = false;
         let mut cancel = false;

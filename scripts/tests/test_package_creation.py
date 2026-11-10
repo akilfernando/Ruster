@@ -685,6 +685,66 @@ class CreationDistributionTests(unittest.TestCase):
                     (content_root/"content.json").write_bytes(package_creation.encoded({**current_content, "schema": 10}))
                     with self.assertRaisesRegex(ValueError, "schema11 requires Scene15"):
                         package_creation.source_content(content_root, None)
+                # Controls add a capability without changing Descriptor5. Old
+                # HUD kits must fail before staging even when no button is authored.
+                button = {"id": "apply", "source": {"kind": "button", "caption": "Apply 世界",
+                    "command": {"binding_id": "application", "command_id": "set",
+                        "arguments": {"amount": {"type": "number", "value": 2}}}}}
+                for empty_controls in (False, True):
+                    controls_scene = copy.deepcopy(hud_scene)
+                    controls_scene["format_version"] = 16
+                    if empty_controls:
+                        controls_scene["authoring"].pop("hud")
+                    else:
+                        controls_scene["authoring"]["hud"]["elements"].append(button)
+                    controls_bytes = package_creation.encoded(controls_scene)
+                    controls_content = {**lifecycle_content, "schema": 12,
+                        "scene_sha256": package_creation.sha256(controls_bytes)}
+                    (content_root/"scene.json").write_bytes(controls_bytes)
+                    (content_root/"content.json").write_bytes(package_creation.encoded(controls_content))
+                    capable["profile"] = package_creation.HUD_PROFILE
+                    (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                    with patch.object(package_creation, "run_runtime", side_effect=AssertionError("old controls preflight")), \
+                            patch.object(package_creation.tempfile, "TemporaryDirectory", side_effect=AssertionError("old controls staging")):
+                        with self.assertRaisesRegex(ValueError, "Scene16 runtime_hud_controls"):
+                            package_creation.package(kit, content_root, failed)
+                    capable["profile"] = package_creation.HUD_CONTROLS_PROFILE
+                    (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                    controls_response = {**hud_response,
+                        "authored_scene": package_creation.typed_scene(controls_scene),
+                        "runtime_scene": package_creation.typed_scene(controls_scene),
+                        "hud_activation_receipts": []}
+                    if empty_controls:
+                        controls_response.pop("authored_hud")
+                        controls_response["hud"] = {"labels": []}
+                    else:
+                        controls_response["authored_hud"] = controls_scene["authoring"]["hud"]
+                        controls_response["hud"] = {"labels": [*hud_response["hud"]["labels"],
+                            {"id": "apply", "text": "Apply 世界", "diagnostic": None}]}
+                    with patch.object(package_creation, "run_runtime", return_value=controls_response):
+                        package_creation.package(kit, content_root, base/f"controls-{empty_controls}.tar.gz")
+                    with tarfile.open(base/f"controls-{empty_controls}.tar.gz") as archive:
+                        self.assertEqual(json.load(archive.extractfile("application/app.json"))["version"], 5)
+                        self.assertEqual(archive.extractfile("application/resources/scene.json").read(), controls_bytes)
+                    for receipts in (None, [{}]):
+                        with patch.object(package_creation, "run_runtime", return_value={**controls_response, "hud_activation_receipts": receipts}):
+                            with self.assertRaisesRegex(ValueError, "activation history"):
+                                package_creation.package(kit, content_root, failed)
+                    (content_root/"content.json").write_bytes(package_creation.encoded({**controls_content, "schema": 11}))
+                    with self.assertRaisesRegex(ValueError, "schema12 requires Scene16"):
+                        package_creation.source_content(content_root, None)
+                for old_button in ({"authoring": {"hud": {"elements": [button]}}},
+                                   {"undo": [{"hud": {"before": {}, "after": {"elements": [button]}}}]},
+                                   {"redo": [{"hud": {"before": {"elements": [button]}, "after": {}}}]}):
+                    with self.subTest(old_button=old_button), self.assertRaisesRegex(ValueError, "Scene16 runtime_hud_controls"):
+                        package_creation.validate_hud_fields({"format_version": 15, **old_button})
+                for bad_source in (
+                        {**button["source"], "caption": "世" * 342},
+                        {**button["source"], "command": {"binding_id": "application", "command_id": "set"}},
+                        {**button["source"], "command": {"binding_id": "application", "command_id": "set", "arguments": {"x": {"type": "object_ref", "value": None}}}},
+                        {**button["source"], "command": {"binding_id": "application", "command_id": "set", "arguments": {f"field-{i}": {"type": "text", "value": "\0" * 1024} for i in range(16)}}}):
+                    with self.subTest(bad_source=bad_source), self.assertRaises(ValueError):
+                        package_creation.typed_hud({"elements": [{"id": "apply", "source": bad_source}]})
                 for old_hud in ({"authoring": {"hud": {}}},
                                 {"undo": [{"hud": {"before": {}, "after": {}}}]}):
                     with self.subTest(old_hud=old_hud), self.assertRaisesRegex(ValueError, "Scene15 runtime_hud"):
@@ -697,6 +757,8 @@ class CreationDistributionTests(unittest.TestCase):
                 # Keep historical fixtures intact and reuse the existing older
                 # content branches under the newest cumulative runtime profile.
                 for old_content, old_scene, old_response, name in (
+                        ({**lifecycle_content, "schema": 11, "scene_sha256": package_creation.sha256(package_creation.encoded(hud_scene))},
+                            package_creation.encoded(hud_scene), {**hud_response, "authored_scene": package_creation.typed_scene(hud_scene), "runtime_scene": package_creation.typed_scene(hud_scene)}, "hud-with-controls-kit"),
                         (lifecycle_content, lifecycle_bytes, lifecycle_response, "lifecycle-with-hud-kit"),
                         (state_content, state_bytes, state_response, "state-with-hud-kit"),
                         (spatial_content, spatial_bytes, spatial_response, "spatial-with-state-kit"),
@@ -784,6 +846,8 @@ class CreationDistributionTests(unittest.TestCase):
                         {**package_creation.STATE_PROFILE, "capabilities": ["runtime_state", *package_creation.SPATIAL_PROFILE["capabilities"]]},
                         {**package_creation.LIFECYCLE_PROFILE, "descriptor_version": 4},
                         {**package_creation.LIFECYCLE_PROFILE, "capabilities": ["lifecycle_commands", *package_creation.STATE_PROFILE["capabilities"]]},
+                        {**package_creation.HUD_CONTROLS_PROFILE, "descriptor_version": 4},
+                        {**package_creation.HUD_CONTROLS_PROFILE, "capabilities": ["runtime_hud_controls", *package_creation.HUD_PROFILE["capabilities"]]},
                         {**package_creation.HUD_PROFILE, "descriptor_version": 4},
                         {**package_creation.HUD_PROFILE, "capabilities": ["runtime_hud", *package_creation.LIFECYCLE_PROFILE["capabilities"]]},
                         {**package_creation.HUD_PROFILE, "capabilities": [*package_creation.HUD_PROFILE["capabilities"], "widgets"]},

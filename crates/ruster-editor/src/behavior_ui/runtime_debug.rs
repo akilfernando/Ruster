@@ -166,6 +166,7 @@ impl RuntimeUi {
             self.cancel_control_focus();
         }
         let operation = match event {
+            VmEvent::HudActivation { .. } => return,
             VmEvent::Reset { .. } => Operation::Reset,
             VmEvent::Command { .. } => Operation::Command,
             VmEvent::Step { .. } => Operation::Step,
@@ -225,6 +226,7 @@ impl RuntimeUi {
             || !self.ready
             || self.pending.is_some()
             || self.awaiting.is_some()
+            || self.hud_activation_busy()
             || self.debug_snapshot().is_some()
         {
             return Err(
@@ -252,6 +254,7 @@ impl RuntimeUi {
             || self.stale
             || self.pending.is_some()
             || self.awaiting.is_some()
+            || self.hud_activation_busy()
         {
             return Err("Runtime is busy or not ready; inspect it before supplying input.".into());
         }
@@ -591,7 +594,7 @@ impl RuntimeUi {
                 .as_ref()
                 .map_or(0, |frame| frame.state.binding_ids().count());
             return Ok(
-                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
+                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some()||self.hud_activation_busy(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
                 "state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())}),
             );
         }
@@ -627,6 +630,12 @@ impl RuntimeUi {
             && args["expected_run_id"].as_str() != current.map(run_id).as_deref()
         {
             return Err("stale_run".into());
+        }
+        if op == "hud_activate" {
+            let button_id = args["button_id"].as_str().ok_or("invalid_arguments")?;
+            let (key, id) = self.queue_hud_activation(button_id, false)?;
+            return Ok(json!({"run_id":run_id(key),"activation_id":id.to_string(),
+                "button_id":button_id,"status":"queued"}));
         }
         if op.starts_with("behavior_debug_") {
             let stop = self.debug_snapshot().ok_or("stale_stop")?;
