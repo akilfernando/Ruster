@@ -116,3 +116,38 @@ Root freezes the unchanged proposed8MiB settled-PSS-growth and+1percentage-point
 **Handoff at user-active qualification hold.** Source remainsba6728e with documentary updates only. Background builds, functional kit/sandbox checks and finite harness preparation are complete. Actual ordinary/MCP creation, native keyboard/appearance/overlap, current raw recovery,24final export-prefix cases,30candidate CPU processes and finite resource/idle observations remain required. Wait for an actual suitable desktop/idle opportunity. No test window, owned native child or desktop lease is created during this background phase, and the clipboard remains untouched. Do not start another capability or replay unchanged Rust gates while waiting.
 
 Final documentary gate `python3 scripts/check.py --base ba6728e` selects Markdown-only changes and passes in0.12seconds. `git diff --check` passes. Product source/dependencies are unchanged, so prior full/inspection evidence remains applicable. No additional Rust or native test is claimed.
+
+## Away-authorized execution resumed
+
+2026-11-10. The user explicitly confirms they are off the computer and authorizes remaining focused tests/performance, recommending empty workspace1. Fresh inventory verifies workspace1empty, Edge/ChatGPT protected on2, DP-3at2560×1440/scale1/origin0and unlocked desktop. The current phase-local parent launches exact default editor on silent workspace2, floats it without protected-window changes, then focuses only that owned window on1under lease `f3c-root-away-20261110`. `.studio/mcp-creator-1/ready.json` captures its original desktop/configuration/cursor/protected identities. No clipboard operation occurs.
+
+The first fixed candidate-cost execution stops at child2before it produces output. Child1empty completes0. Child2is immediately observed as `/usr/bin/python3.14`, then deliberately killed/reaped−9under the harness guard. Final seals and affinity restoration pass. `.studio/candidate-cost-1` is invalid comparison evidence and remains preserved. Installed subprocess excludes posix_spawn for this runner's cwd/session options. Exact exec/procfs visibility mechanism is unresolved. Astra recommends a bounded same-PID/start-ticks observation repair. Root creates a separate runner-v2, preserving every observation, allowing only the launching interpreter transiently for at most50ms with1ms yields and retaining expected-executable, unexpected-executable, existing30second deadline, exit/protocol/correctness/seal requirements. Short-lived unconfirmed identity remains explicit. SHA256 `359bcc122dfb7de402a1b59681274d70c33cdf166cf257f9922e7f24e3e3184f` passes AST and Astra's read-only repair review. No schedule, timer, binary or numerical reference changes. Rerun awaits completion/closure of the native editor to match baseline conditions.
+
+The actual83tool SDK journey starts from ordinary blank `untitled` revision0. All22changed authoring transactions complete. Initialization, paused Start/Record, unavailable Finish rejection and unchanged complete six-field state pass. An extra paused direct Finish reaches the deliberately failing creator branch. The fixture incorrectly expects a custom `error()` message even though the allowlist omits that global, a limitation also retained in F3b. Actual source/hash/line35/command-phase diagnostic reports nil-global `error`, failed operation2and no command receipt. This is failed-VM atomicity evidence, without custom-message support. The original failed `.studio/mcp-journey-1` remains unchanged.
+
+Root qualifies that actual diagnostic before continuing. An initial continuation reads existing operation2but stops on a Root wrapper's incorrect nested observation lookup before any mutation. A separate corrected continuation inspects that same terminal operation without replay, verifies tick0/commit2and all six unchanged fields, then executes running Record2, Pause, running Finish, Pause and paused Retry. Complete panel/hidden-row/availability/receipt/state/source/cube oracles pass. Guarded SaveAs preserves22revision/history and writes canonical Scene17, SHA256 `4a8c04130bb08c41281a3d57e2319b634858e3e8b3fd45e371c0d5600268b911`. Actual editor export with the current kit completes. `.studio/mcp-journey-continuation-2/summary.json` retains complete results and qualified failure scope. Lua custom-rejection ergonomics remain a separate known gap, with no product allowlist expansion.
+
+Root pins that immutable canonical project and launches the frozen37cycle default/MCP-on resource probe on a fresh working SaveAs destination. Its exact inputs SHA256 is `2aa033c8b0288901b258763363aeef4c81e623d3e6ed247792ab1bce32e2368c`. Results remain in progress until the original process completes. No concurrent native input or CPU benchmark is permitted during that probe.
+
+## Finite resource and candidate component results
+
+The original37cycle resource process completes normally with all per-cycle six-field, panel/hidden-row, activation receipt, saved document, canonical protection and independently predicted history checks. Warm endpoint revision56and final96have identical complete32Undo/emptyRedo/authoring/nonrevision Scene section hashes. Settled PSS246213→246277KiB (+64) stays below the frozen8192KiB investigation reference. RSS288532→288596KiB, threads/task counts16→16and FDs63→63remain descriptive endpoints. The measured20cycle wall interval725.817seconds includes public correctness inspection, SDK observer overhead, Save and settling. Process CPU2.935percent of one core describes that whole workload, without idle/activation latency or leak claims. `.studio/native-resource-1/summary.json` retains complete observations. The same owned editor closes0/Vulkan scan0and restores its original desktop under its parent. Canonical22project remains immutable.
+
+After closing the editor, Root runs the approved separate candidate-cost-runner-v2once with the exact four-variable environment and fresh `.studio/candidate-cost-2`. The fixed30process comparison passes every correctness check, all frozen median/p95 investigation envelopes, final seals, normal child reap and affinity restoration. Tool wall1.334seconds is whole harness duration. The original invalid run remains retained. No probe/timer/reference/source change occurs. Median-of-process-medians and median-of-process-p95 inµs follow.
+
+| Component | Median | p95 |
+| --- | --- | --- |
+| Empty passive |2.445 |2.507 |
+| Four changing labels |57.173 |60.269 |
+| Useful interactive |33.626 |36.133 |
+|32buttons |101.349 |104.958 |
+| Owner increment |11.042 |19.604 |
+| Owner no-op |10.122 |18.479 |
+| Conditional owner increment |11.777 |20.397 |
+| Conditional owner no-op |10.554 |18.535 |
+| Useful screen transitions |26.482 |28.719 |
+| Four panels/all32rows visible |21.893 |23.694 |
+| Four panels/all32rows hidden |5.099 |5.967 |
+| Four panels/32row transitions |215.438 |222.632 |
+
+Every raw sample/tail remains. Negative deltas are retained as noise. These CPU-only component spans exclude GPU/native presentation/Step/allocator peaks. Component thresholds are engineering references, without a whole-frame guarantee or broader hardware claim. F2a's accepted dense changed-state Step tradeoff remains closed. Default observer-off idle and actual native/manual qualification remain pending.
