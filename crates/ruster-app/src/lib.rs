@@ -197,8 +197,10 @@ pub trait Application: 'static {
     fn viewport_frame_begin(&mut self, _ctx: &egui::Context) -> Result<(), String> {
         Ok(())
     }
-    /// Register current geometry before navigation/picking, without advancing state.
-    /// Paint the same preparation through viewport_overlay after scene submission.
+    /// Register current geometry before navigation/picking, without advancing state
+    /// or changing the captured scene. Interactive implementations must opt into
+    /// buffered_viewport_input. Paint this same preparation through viewport_overlay
+    /// after scene submission; queue actions for viewport_frame_begin.
     fn viewport_interaction(
         &mut self,
         _ui: &mut egui::Ui,
