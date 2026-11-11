@@ -1,12 +1,12 @@
 # Model routing
 
-Checked 2026-11-04 at 04:52 UTC for the current root session. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
+Checked 2026-11-11 for the current root session. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
 
 ## Current routing
 
 | Role | Available model | Effort guidance |
 | --- | --- | --- |
-| Main developer | `gpt-6.1-sol` | Client-supported default; adjust to task difficulty |
+| Main developer | `gpt-6.1-sol` | Project default low; medium/high for justified complexity |
 | Deep reasoning | `gpt-6-astra` | Official starting point low; increase for demanding synthesis/review |
 | Economical worker | `gpt-6-luna` | Official starting point high; adjust to bounded task |
 | Visual and computer use | `gpt-6.1-terra` | Medium starting candidate; confirm tool availability |
@@ -22,6 +22,16 @@ Official sources fetched 2026-11-04:
 The local CLI model cache was dated 2026-11-04 and desktop cache 2026-11-03; both were supporting evidence only. They expose additional entries not offered by this session's delegation tool, which were excluded. No account identifiers were persisted.
 
 Relative role guidance is supported by official documentation. Actual subscription cost, task latency and quality improvements are unmeasured. No numerical pricing assumptions are used. The current root model was not independently verified or switched; this is the recommended selection, not proof of the active root model.
+
+## Usage-informed routing revision — 2026-11-11
+
+The user approves updating the skills after reviewing a seven-day snapshot showing 257.31% of weekly allowance, model shares Sol57%/Astra41%/Terra2%/Luna0%, and effort shares high62%/medium38%/light0%. These rounded aggregate shares do not identify task counts, main-agent versus worker usage, quality per task or savings. The delegation log contains useful specialist findings and repeated high-effort reviews, with per-task usage mostly unavailable.
+
+The canonical development skill now starts routine work at Sol low, escalates by task risk, distinguishes deeper coding analysis on Sol high from architectural judgment on Astra low, and consolidates specialist reviews. Luna receives bounded mechanical trials; Terra remains capability-driven. Whole-roadmap review retains the user's Astra preference. The next two resumed bounded slices will assess acceptance, repairs, useful findings and available usage without model-share quotas or a benchmark campaign. Actual savings and Sol-high/Astra-low relative cost remain unmeasured.
+
+Official [Models](https://learn.chatgpt.com/docs/models?surface=app), [Subagents](https://learn.chatgpt.com/docs/agent-configuration/subagents), [Model selection](https://learn.chatgpt.com/docs/model-selection) and [Pricing](https://learn.chatgpt.com/docs/pricing) pages were fetched on2026-11-11. Official guidance starts Sol at the client default with task-specific adjustment; Sol low as the project default is an accepted working choice. Published Standard credits price Astra uncached input/output at5times Sol and cached input at10times; total task usage also depends on context, reasoning and retries. Credit rates do not directly determine included subscription allowance consumption.
+
+The active collaboration schema still exposes the five model IDs listed above, four total slots, and explicit overrides only with minimal-context forks. Sol6.1/Terra6.1 support low through ultra with low defaults in this tool; Astra supports low through ultra with medium default; Luna supports low through max with medium default. Explicit assignments take precedence. No main model, global configuration or engine implementation is changed.
 
 ## Activation and portability
 

@@ -29,11 +29,21 @@ This skill does not change the running main model. Recommend the resolved balanc
 
 For whole-roadmap reviews and long-horizon product/architecture strategy, the user explicitly prefers a deep-reasoning specialist (currently Astra in the routing snapshot). When the main agent is Sol or another balanced model, delegate the strategic assessment to that role; the main agent gathers implementation evidence, reconciles findings and owns documentation. Do not treat these reviews as routine solo implementation merely because the main model can attempt them. This does not require specialist delegation for a status recap or minor roadmap wording change. If the main agent already fills the deep-reasoning role, it may perform the assessment directly; independent review remains useful when consequential. If that role is unavailable, disclose the limitation and provide a clearly qualified review with available capabilities. Resolve future model versions through the session snapshot rather than pinning them here.
 
-Choose model and effort together using current guidance and task risk. Start at a suitable supported effort; maximum effort is not a default. Reserve escalation for uncertainty, failed validation, or consequential decisions. After one focused repair attempt fails, reassess the approach or escalate rather than repeat cheap attempts indefinitely.
+Choose model and effort together using current guidance and task risk. Apply the following user-approved project starting policy from 2026-11-11.
+
+- Balanced developer at low effort (currently Sol6.1) for routine implementation, focused fixes, documentation and status. This is a project choice to evaluate through outcomes; official guidance recommends the client's default effort and task-specific adjustment.
+- Balanced developer at medium for multi-system changes or debugging with meaningful uncertainty; high for well-defined problems requiring deeper tracing, ownership analysis or edge-case reasoning.
+- Deep-reasoning specialist at low (currently Astra) for consequential architectural judgment, competing approaches or a stalled diagnosis. Raise effort when the problem warrants it. Sol high and Astra low are task-dependent alternatives with unmeasured relative project cost; never assume equal effort labels imply equal capability or expense.
+- Economical workers (currently Luna) for bounded mechanical work with explicit acceptance criteria. Use the session snapshot's model-specific starting effort and assess repair overhead before expanding their responsibilities.
+- Visual specialists (currently Terra) for concrete image/UI work where their capabilities add value.
+
+Select justified higher effort immediately for known difficult or high-consequence work. After one focused repair attempt fails, reassess the diagnosis, context and approach or escalate rather than repeat cheap attempts indefinitely. Do not route merely to meet model-share quotas. These instructions select child settings; they do not change the running main model or effort.
 
 ## Delegate with a contract
 
 Give each child: objective, exact relevant paths/context, confirmed requirements versus proposals, permitted actions, exclusive write scope (or read-only), acceptance checks, expected output, and stopping condition. Use minimal context for explicit model overrides; obey the tool's context rules. In the current collaboration harness, explicit overrides require `fork_turns="none"`.
+
+Keep small coupled tasks in the main agent. Delegate when an independent assignment is substantial enough to justify briefing, review and integration. Prefer a fresh minimal-context assignment when an existing worker's accumulated history is mostly irrelevant; retain a worker when its relevant context avoids rediscovery. Return concise findings, changed paths and evidence references instead of large copied logs.
 
 Default to one delegation layer. Children return findings or request escalation rather than spawning further agents unless the root explicitly grants a bounded exception. Use only as much concurrency as independently useful work warrants, within host limits. Never assign concurrent writers to the same files, lockfiles, shared generated outputs, or UI session. Root owns shared status and decision records; readers can work in parallel with disjoint writers. Do not revert another agent's changes.
 
@@ -41,8 +51,10 @@ For research require primary sources, dates, competing alternatives and explicit
 
 ## Integrate and learn
 
-The main agent inspects actual diffs and evidence, resolves disagreements, and follows `skills/ruster-testing/SKILL.md` and `docs/TESTING.md` for appropriate verification before accepting work. Reuse valid final-state worker results; do not automatically rerun them. Specialist confidence is not verification. Use independent review for high-consequence changes; avoid mandatory premium review for every edit.
+The main agent inspects actual diffs and evidence, resolves disagreements, and follows `skills/ruster-testing/SKILL.md` and `docs/TESTING.md` for appropriate verification before accepting work. Reuse valid final-state worker results; do not automatically rerun them. Specialist confidence is not verification. Use independent review for high-consequence changes; avoid mandatory premium review for every edit. Consolidate specialist review around a coherent implementation and evidence package. Request follow-up when a repair changes the assessed risk, new evidence creates uncertainty or a material question remains; an unchanged evidence package does not itself justify another specialist pass.
 
 Maintain current state and decisions according to AGENTS.md. Record meaningful delegation outcomes in `docs/workflow/DELEGATION-LOG.md`: task, role/model/effort, reason, result, repair/escalation, and observed elapsed/usage data if available. Mark unavailable metrics unknown. Assess cost per accepted result, including review and rework; do not optimize solely for cheap calls or number of parallel agents.
+
+For the next two bounded development slices after resumption, record model/effort, acceptance or repair count, useful review findings and available elapsed/usage data in the existing delegation log. Evaluate total consumption alongside accepted work and regressions. Aggregate model shares cannot attribute main-agent versus worker consumption or establish savings; credit rates do not directly establish included weekly allowance usage. Keep unavailable metrics unknown and avoid a separate telemetry project.
 
 Update routing based on repeated relevant outcomes. A new model can be tried on a bounded real task before taking consequential work; do not launch benchmark swarms or billable API jobs merely to refresh the catalog.
