@@ -69,6 +69,8 @@ pub fn configure(ctx: &egui::Context) {
     visuals.widgets.open = visuals.widgets.active;
     ctx.set_visuals(visuals);
     ctx.style_mut_of(egui::Theme::Dark, |style| {
+        // Keep editor chrome transitions immediate for reduced-motion users.
+        style.animation_time = 0.0;
         style.spacing.item_spacing = Vec2::new(8.0, 8.0);
         style.spacing.button_padding = Vec2::new(10.0, 6.0);
         style.spacing.interact_size = Vec2::new(32.0, 30.0);
@@ -88,15 +90,17 @@ pub fn configure(ctx: &egui::Context) {
 /// A local primary action with explicit hover, pressed and keyboard-focus states.
 pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     ui.scope(|ui| {
-        let widgets = &mut ui.visuals_mut().widgets;
-        for (widget, fill) in [
-            (&mut widgets.inactive, ACCENT),
-            (&mut widgets.hovered, ACCENT_HOVER),
-            (&mut widgets.active, ACCENT_PRESSED),
-        ] {
-            widget.bg_fill = fill;
-            widget.weak_bg_fill = fill;
-            widget.fg_stroke = Stroke::new(1.0, ON_ACCENT);
+        if ui.is_enabled() {
+            let widgets = &mut ui.visuals_mut().widgets;
+            for (widget, fill) in [
+                (&mut widgets.inactive, ACCENT),
+                (&mut widgets.hovered, ACCENT_HOVER),
+                (&mut widgets.active, ACCENT_PRESSED),
+            ] {
+                widget.bg_fill = fill;
+                widget.weak_bg_fill = fill;
+                widget.fg_stroke = Stroke::new(1.0, ON_ACCENT);
+            }
         }
         ui.button(label)
     })

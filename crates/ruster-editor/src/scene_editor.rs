@@ -3341,10 +3341,11 @@ impl SceneEditor {
         let count = self.hierarchy_search.rows.len();
         let visible = self.hierarchy_search.visible.len();
         let selected_count = self.manipulation.ids.len();
+        let item_label = if count == 1 { "item" } else { "items" };
         let mut summary = if visible == count {
-            format!("{count} items")
+            format!("{count} {item_label}")
         } else {
-            format!("{visible} of {count} items")
+            format!("{visible} of {count} {item_label}")
         };
         if selected_count > 0 {
             summary.push_str(&format!(" · {selected_count} selected"));
@@ -3523,7 +3524,9 @@ impl SceneEditor {
             let title_width = if width >= 210.0 { width - 148.0 } else { width };
             ui.add_sized(
                 [title_width, ui.spacing().interact_size.y],
-                egui::Label::new(egui::RichText::new(&title).heading()).truncate(),
+                egui::Label::new(egui::RichText::new(&title).heading())
+                    .halign(egui::Align::Min)
+                    .truncate(),
             )
             .on_hover_text(&title);
             ui.menu_button("Actions", |ui| {
@@ -3843,10 +3846,11 @@ impl SceneEditor {
         } else if visible == 0 {
             ui.small("No assets match this search.");
         } else {
+            let asset_label = if count == 1 { "asset" } else { "assets" };
             let summary = if visible == count {
-                format!("{count} assets")
+                format!("{count} {asset_label}")
             } else {
-                format!("{visible} of {count} assets")
+                format!("{visible} of {count} {asset_label}")
             };
             ui.label(egui::RichText::new(summary).small().weak());
         }
