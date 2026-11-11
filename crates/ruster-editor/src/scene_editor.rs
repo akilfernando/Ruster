@@ -3522,13 +3522,15 @@ impl SceneEditor {
         ui.horizontal_wrapped(|ui| {
             let width = ui.available_width();
             let title_width = if width >= 210.0 { width - 148.0 } else { width };
-            ui.add_sized(
-                [title_width, ui.spacing().interact_size.y],
-                egui::Label::new(egui::RichText::new(&title).heading())
-                    .halign(egui::Align::Min)
-                    .truncate(),
-            )
-            .on_hover_text(&title);
+            ui.allocate_ui_with_layout(
+                egui::vec2(title_width, ui.spacing().interact_size.y),
+                egui::Layout::left_to_right(egui::Align::Center),
+                |ui| {
+                    ui.set_min_width(title_width);
+                    ui.add(egui::Label::new(egui::RichText::new(&title).heading()).truncate())
+                        .on_hover_text(&title);
+                },
+            );
             ui.menu_button("Actions", |ui| {
                 if ui
                     .add_enabled(self.selected.is_some(), egui::Button::new("Rename object"))
