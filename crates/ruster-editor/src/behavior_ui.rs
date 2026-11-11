@@ -110,7 +110,7 @@ pub(super) fn text_with_id(
     );
     if rejected {
         ui.colored_label(
-            egui::Color32::LIGHT_RED,
+            ui.visuals().error_fg_color,
             format!("Insertion rejected: maximum {limit} UTF-8 bytes; previous text preserved."),
         );
     }
@@ -1115,13 +1115,15 @@ impl BehaviorUi {
                             self.property_dirty = true;
                         }
                         ui.horizontal_wrapped(|ui| {
-                            if ui
-                                .button(if property.state_default {
+                            if crate::editor_theme::primary_button(
+                                ui,
+                                if property.state_default {
                                     "Apply state default"
                                 } else {
                                     "Apply property value"
-                                })
-                                .clicked()
+                                },
+                            )
+                            .clicked()
                             {
                                 action = Some(Action::ApplyProperty);
                             }
@@ -1161,10 +1163,10 @@ impl BehaviorUi {
         };
         let Some(target) = target else {
             if !self.pending() {
-                ui.label("Select an object to add a behavior.");
+                ui.weak("Select an object to add a behavior.");
             }
             if !self.error.is_empty() {
-                ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+                ui.colored_label(ui.visuals().error_fg_color, &self.error);
             }
             return action;
         };
@@ -1204,8 +1206,8 @@ impl BehaviorUi {
                 });
                 if let Some(source)=session.source(&binding.source_id) {
 
-                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION,ruster_behavior::LIFECYCLE_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(egui::Color32::YELLOW,"This script version may not run here. Its data is preserved and can still be edited.");}
-                } else {ui.colored_label(egui::Color32::YELLOW,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION,ruster_behavior::LIFECYCLE_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(ui.visuals().warn_fg_color,"This script version may not run here. Its data is preserved and can still be edited.");}
+                } else {ui.colored_label(ui.visuals().warn_fg_color,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
                 ui.label("Properties");
                 for (name,summary) in &self.property_rows {
                     ui.push_id((id,name),|ui| {
@@ -1340,7 +1342,7 @@ impl BehaviorUi {
             }
         });
         if !self.error.is_empty() {
-            ui.colored_label(egui::Color32::LIGHT_RED, &self.error);
+            ui.colored_label(ui.visuals().error_fg_color, &self.error);
         }
         action
     }
@@ -1401,7 +1403,7 @@ impl BehaviorUi {
                 ui.set_max_height((ctx.content_rect().height()-64.0).max(160.0));
                 let Some(source)=&mut self.source else {ui.label("No embedded source selected.");return;};
                 ui.add(egui::Label::new(format!("{} · base {}",source.id,&source.base_hash[..12])).truncate()).on_hover_text(&source.id);
-                if let Some(line)=self.source_line {ui.label(format!("Diagnostic line {line}"));}
+                if let Some(line)=self.source_line {ui.weak(format!("Diagnostic line {line}"));}
                 ui.small("Apply stores unfinished code without compiling. Ctrl+Enter Apply · Ctrl+S Apply and Save · Escape hide/keep draft.");
                 egui::ScrollArea::vertical().id_salt("embedded_source_scroll").max_height((ctx.content_rect().height()-250.0).max(48.0)).show(ui,|ui| {
                     ui.add_enabled_ui(editable,|ui| {
@@ -1417,10 +1419,10 @@ impl BehaviorUi {
                         if let Some(line)=self.source_line.take() {scroll_line(ui,&mut output,&source.text,line);}
                         if let Some(cursor)=output.cursor_range {self.source_cursor=cursor.primary.index.0;}
                         changed|=output.response.changed();
-                        if rejected {ui.colored_label(egui::Color32::LIGHT_RED,"Insertion rejected: field byte limit exceeded; previous text preserved.");}
+                        if rejected {ui.colored_label(ui.visuals().error_fg_color,"Insertion rejected: field byte limit exceeded; previous text preserved.");}
                     });
                 });
-                if !self.error.is_empty() {ui.add(egui::Label::new(egui::RichText::new(&self.error).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&self.error);}
+                if !self.error.is_empty() {ui.add(egui::Label::new(egui::RichText::new(&self.error).color(ui.visuals().error_fg_color)).truncate()).on_hover_text(&self.error);}
                 ui.horizontal_wrapped(|ui| {
                     let apply_button=ui.add_enabled(editable,egui::Button::new("Apply source data"));self.source_footer_ids[0]=Some(apply_button.id);
                     if apply_button.clicked()||apply {action=Some(Action::ApplySource);}
@@ -1554,7 +1556,7 @@ pub(super) fn value_ui(
                         result.changed = true;
                     } else {
                         ui.colored_label(
-                            egui::Color32::LIGHT_RED,
+                            ui.visuals().error_fg_color,
                             "Stale/foreign object drag rejected; drag again from this scene.",
                         );
                     }
@@ -1568,7 +1570,7 @@ pub(super) fn value_ui(
                     .iter()
                     .any(|object| &object.id == id)
             }) {
-                ui.colored_label(egui::Color32::YELLOW,"Unresolved object reference; preserved until you choose a replacement or None.");
+                ui.colored_label(ui.visuals().warn_fg_color,"Unresolved object reference; preserved until you choose a replacement or None.");
             }
             ui.small("Choose an object or drop its hierarchy row here.");
         }
@@ -1585,7 +1587,7 @@ pub(super) fn value_ui(
                 .response;
             result.field(response, focus);
             if value.as_ref().is_some_and(|id| !assets.contains(id)) {
-                ui.colored_label(egui::Color32::YELLOW,"Unresolved catalog reference; preserved without rebasing until explicitly changed.");
+                ui.colored_label(ui.visuals().warn_fg_color,"Unresolved catalog reference; preserved without rebasing until explicitly changed.");
             }
         }
     }
@@ -2270,7 +2272,7 @@ impl RuntimeUi {
                 if let Some(diagnostic)=&self.diagnostic {ui.collapsing("Last failure details",|ui| {
                     ui.set_max_width(360.0);
                     egui::ScrollArea::vertical().id_salt("runtime_diagnostic_details").max_height(160.0).show(ui,|ui| {
-                    ui.colored_label(egui::Color32::LIGHT_RED,&diagnostic.message);
+                    ui.colored_label(ui.visuals().error_fg_color,&diagnostic.message);
                     ui.label(format!("Source {} · hash {} · line {} · object {} · binding {}",diagnostic.source_id.as_deref().unwrap_or("—"),diagnostic.source_hash.as_deref().unwrap_or("—"),diagnostic.line.map(|line|line.to_string()).as_deref().unwrap_or("—"),diagnostic.object_id.as_deref().unwrap_or("—"),diagnostic.binding_id.as_deref().unwrap_or("—")));
                     });
                 });}
@@ -2287,7 +2289,7 @@ impl RuntimeUi {
             } else { None };
             if let Some((label, detail)) = status {
                 ui.add_sized(egui::vec2(ui.available_width().max(0.0), ui.spacing().interact_size.y),
-                    egui::Label::new(egui::RichText::new(label).color(egui::Color32::YELLOW)).truncate())
+                    egui::Label::new(egui::RichText::new(label).color(ui.visuals().warn_fg_color)).truncate())
                     .on_hover_text(detail);
             } else {
                 self.spatial_feedback_summary(ui);

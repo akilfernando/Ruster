@@ -73,12 +73,12 @@ fn transform_rows(ui: &mut egui::Ui, transform: &Transform) {
         ui.label(row);
         let width = crate::manipulation::component_group_width(ui);
         ui.horizontal_wrapped(|ui| {
-            for (axis, value) in ["X", "Y", "Z"].into_iter().zip(values) {
+            for (index, (axis, value)) in ["X", "Y", "Z"].into_iter().zip(values).enumerate() {
                 ui.allocate_ui_with_layout(
                     egui::vec2(width, ui.spacing().interact_size.y),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        ui.label(axis);
+                        ui.colored_label(crate::editor_theme::AXIS_COLORS[index], axis);
                         let mut text = value.to_string();
                         ui.add_sized(
                             [ui.available_width().max(48.0), ui.spacing().interact_size.y],

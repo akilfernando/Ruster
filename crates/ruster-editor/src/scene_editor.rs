@@ -273,7 +273,10 @@ impl HierarchySearch {
                     id: object.id.clone(),
                     name: object.display_name().to_string(),
                     search: format!("{}\n{}", object.id, object.display_name()).to_lowercase(),
-                    tooltip:format!("Stable ID: {}\nRight-click for object actions. Drop a project mesh to assign it to this object only.",object.id),
+                    tooltip: format!(
+                        "{}\nStable ID: {}\nRight-click for actions. Drop a project mesh to assign it.",
+                        object.display_name(), object.id
+                    ),
                     light: false,
                 })
                 .collect();
@@ -286,7 +289,7 @@ impl HierarchySearch {
                     id: id.into(),
                     name: light.display_name(id).into(),
                     search: format!("{id}\n{}\n{kind}", light.display_name(id)).to_lowercase(),
-                    tooltip: format!("{kind}\nStable ID: {id}"),
+                    tooltip: format!("{}\n{kind}\nStable ID: {id}", light.display_name(id)),
                     light: true,
                 }
             }));
@@ -3335,15 +3338,33 @@ impl SceneEditor {
                     .any(|i| &self.hierarchy_search.rows[*i].id == *id)
             })
             .count();
-        ui.small(format!(
-            "{} / {} items · {} selected · {hidden} hidden selected",
-            self.hierarchy_search.visible.len(),
-            self.hierarchy_search.rows.len(),
-            self.manipulation.ids.len()
-        ));
+        let count = self.hierarchy_search.rows.len();
+        let visible = self.hierarchy_search.visible.len();
+        let selected_count = self.manipulation.ids.len();
+        let mut summary = if visible == count {
+            format!("{count} items")
+        } else {
+            format!("{visible} of {count} items")
+        };
+        if selected_count > 0 {
+            summary.push_str(&format!(" · {selected_count} selected"));
+        }
+        if hidden > 0 {
+            summary.push_str(&format!(" · {hidden} hidden"));
+        }
+        if visible > 0 || selected_count > 0 {
+            ui.label(egui::RichText::new(summary).small().weak());
+        }
         if !self.hierarchy_query.is_empty() && ui.button("Clear object search").clicked() {
             self.hierarchy_query.clear();
             self.hierarchy_search.update(self.session.scene(), "");
+        }
+        if self.hierarchy_search.visible.is_empty() {
+            ui.label(if self.hierarchy_query.is_empty() {
+                "Create a cube or light to populate this scene."
+            } else {
+                "No objects or lights match."
+            });
         }
         let mut clicked = None;
         let mut context = None;
@@ -3351,6 +3372,9 @@ impl SceneEditor {
         egui::ScrollArea::vertical()
             .id_salt("scene_object_scroll")
             .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 4.0;
+                ui.spacing_mut().interact_size.y = 26.0;
+                ui.spacing_mut().button_padding.y = 3.0;
                 let mut lights_heading = false;
                 for index in &self.hierarchy_search.visible {
                     let row = &self.hierarchy_search.rows[*index];
@@ -3359,15 +3383,22 @@ impl SceneEditor {
                         ui.strong("Lights");
                         lights_heading = true;
                     }
+                    let selected = self.manipulation.ids.contains(&row.id);
                     let response = ui
                         .add(
-                            egui::Button::selectable(
-                                self.manipulation.ids.contains(&row.id),
-                                &row.name,
-                            )
-                            .sense(egui::Sense::click_and_drag()),
+                            egui::Button::selectable(selected, &row.name)
+                                .truncate()
+                                .sense(egui::Sense::click_and_drag()),
                         )
                         .on_hover_text(&row.tooltip);
+                    if selected && ui.is_rect_visible(response.rect) {
+                        let start = response.rect.left_top() + egui::vec2(2.0, 5.0);
+                        let end = response.rect.left_bottom() + egui::vec2(2.0, -5.0);
+                        ui.painter().line_segment(
+                            [start, end],
+                            egui::Stroke::new(2.0, crate::editor_theme::ACCENT),
+                        );
+                    }
                     if response.drag_started() && !row.light {
                         response.dnd_set_drag_payload(crate::behavior_ui::ObjectDrag {
                             generation: self.generation,
@@ -3478,16 +3509,6 @@ impl SceneEditor {
             .command_controls(ui, &self.session, command_editable);
     }
     fn inspector_contents_inner(&mut self, ui: &mut egui::Ui) {
-        if ui
-            .add_enabled(
-                self.hud_draft.is_some() || self.hud_editable(),
-                egui::Button::new("HUD…"),
-            )
-            .clicked()
-        {
-            self.hud_open = true;
-            self.runtime.release_input(ui.ctx());
-        }
         let title = if self.manipulation.ids.len() > 1 {
             format!("{} selected", self.manipulation.ids.len())
         } else {
@@ -3498,7 +3519,13 @@ impl SceneEditor {
                 .unwrap_or_else(|| "Inspector".into())
         };
         ui.horizontal_wrapped(|ui| {
-            ui.heading(title);
+            let width = ui.available_width();
+            let title_width = if width >= 210.0 { width - 148.0 } else { width };
+            ui.add_sized(
+                [title_width, ui.spacing().interact_size.y],
+                egui::Label::new(egui::RichText::new(&title).heading()).truncate(),
+            )
+            .on_hover_text(&title);
             ui.menu_button("Actions", |ui| {
                 if ui
                     .add_enabled(self.selected.is_some(), egui::Button::new("Rename object"))
@@ -3525,15 +3552,28 @@ impl SceneEditor {
                     ui.close();
                 }
             });
+            if ui
+                .add_enabled(
+                    self.hud_draft.is_some() || self.hud_editable(),
+                    egui::Button::new("HUD…"),
+                )
+                .on_hover_text("Edit the creation's screen-space HUD")
+                .clicked()
+            {
+                self.hud_open = true;
+                self.runtime.release_input(ui.ctx());
+            }
         });
         if self.selected.is_none() {
+            ui.label(
+                egui::RichText::new("Select an object or light to edit its properties.").weak(),
+            );
             if self.runtime.visible {
                 ui.strong("Authored components");
-                ui.label("Changes affect the authored scene. Reset preview to use them.");
+                ui.small("Reset preview to use authored changes.");
             }
             self.ambient_inspector_ui(ui);
             self.display_inspector_ui(ui);
-            ui.label("Select an object or light to edit its properties.");
             if self.manipulation.offset_pending() {
                 ui.add_enabled_ui(
                     self.color_draft.is_none()
@@ -3581,8 +3621,10 @@ impl SceneEditor {
                     });
             }
             ui.add_enabled_ui((self.hud_draft.is_none() && self.color_draft.is_none() && self.material_draft.is_none() && self.lighting_draft.is_none() && self.display_draft.is_none() && self.collider_draft.is_none()) && self.draft == self.baseline_fields && !self.behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none() && !self.manipulation.ids.is_empty(), |ui| {
+                    let precision_pending = self.manipulation.precision_pending();
                     match self.manipulation.precision_ui(ui,&mut self.session,self.dialog.is_none()&&!self.close_approved&&!self.rename_pending&&!self.new_scene_pending&&!self.close_pending&&!self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none()) {
                         Ok(true)=>{self.sync_draft();self.error.clear();self.notice="Edited transform components applied to the selection; one Undo restores them.".into();},
+                        Ok(false) if precision_pending && !self.manipulation.precision_pending() => self.error.clear(),
                         Ok(false)=>{},Err(error)=>self.error=error,
                     }
                 });
@@ -3603,7 +3645,7 @@ impl SceneEditor {
         if self.runtime.visible {
             ui.separator();
             ui.strong("Authored components");
-            ui.label("Changes affect the authored scene. Reset preview to use them.");
+            ui.small("Reset preview to use authored changes.");
         }
         self.light_inspector_ui(ui);
         ui.separator();
@@ -3734,7 +3776,9 @@ impl SceneEditor {
                 self.asset_normal_policy = ruster_assets::MeshNormalPolicy::AuthoredWhenComplete;
                 self.asset_texture_role = ruster_assets::TextureRole::BaseColor;
             }
-            ui.menu_button("Tools", |ui| self.shader_tools_ui(ui));
+            ui.menu_button("Tools", |ui| self.shader_tools_ui(ui))
+                .response
+                .on_hover_text("Shader and content tools");
             if ui.button("Hide Content").clicked() {
                 self.workspace.prefs.content_visible = false;
                 self.workspace.changed();
@@ -3789,14 +3833,23 @@ impl SceneEditor {
                     }
                 }
             }
-            ui.label("Save or open a scene to use its project-relative content catalog.");
+            ui.label("Save or open a scene to use its content catalog.");
             return;
         }
-        ui.small(format!(
-            "{} / {} assets · drag meshes onto objects; use textures in the Material inspector",
-            self.content_search.visible.len(),
-            self.content_search.rows.len()
-        ));
+        let visible = self.content_search.visible.len();
+        let count = self.content_search.rows.len();
+        if count == 0 {
+            ui.small("Import a mesh or texture to add it to this project.");
+        } else if visible == 0 {
+            ui.small("No assets match this search.");
+        } else {
+            let summary = if visible == count {
+                format!("{count} assets")
+            } else {
+                format!("{visible} of {count} assets")
+            };
+            ui.label(egui::RichText::new(summary).small().weak());
+        }
         let mut selected = None;
         let mut assign = None;
         let mut use_texture = None;
@@ -3814,17 +3867,20 @@ impl SceneEditor {
                             self.resolved_textures.contains_key(&row.info.id)
                         }
                     };
-                    let response = ui.add(
-                        egui::Button::selectable(
-                            self.content_selected.as_ref() == Some(&row.info.id),
-                            &row.label,
+                    let response = ui
+                        .add(
+                            egui::Button::selectable(
+                                self.content_selected.as_ref() == Some(&row.info.id),
+                                &row.label,
+                            )
+                            .truncate()
+                            .sense(if available {
+                                egui::Sense::click_and_drag()
+                            } else {
+                                egui::Sense::click()
+                            }),
                         )
-                        .sense(if available {
-                            egui::Sense::click_and_drag()
-                        } else {
-                            egui::Sense::click()
-                        }),
-                    );
+                        .on_hover_text(&row.label);
                     if response.clicked() {
                         selected = Some(row.info.id.clone());
                     }
@@ -4243,6 +4299,7 @@ impl SceneEditor {
     fn route_shortcuts(&mut self, ctx: &egui::Context) {
         let blocked = self.runtime.input_owned()
             || egui::Popup::is_any_open(ctx)
+            || crate::branding::is_about_open(ctx)
             || self.input_actions_open
             || self.hud_open
             || self.manipulation.active()
@@ -4547,8 +4604,48 @@ impl SceneEditor {
                 }
             });
     }
-    fn scene_menus(&mut self, ui: &mut egui::Ui) {
+    fn recent_scenes_menu(&mut self, ui: &mut egui::Ui, label: &str) {
+        ui.menu_button(label, |ui| {
+            if self.workspace.prefs.recent.is_empty() {
+                ui.label("No recent scenes.");
+            }
+            for path in &self.workspace.prefs.recent {
+                if ui.button(path.display().to_string()).clicked() {
+                    self.path_text = path.display().to_string();
+                    self.queued_action = Some(Action::Open);
+                    ui.close();
+                }
+            }
+        });
+    }
+
+    fn scene_welcome(&mut self, ui: &mut egui::Ui) {
+        let full_lockup = ui.available_width() >= 510.0 && ui.available_height() >= 390.0;
         ui.horizontal_wrapped(|ui| {
+            if full_lockup {
+                crate::branding::lockup(ui);
+            } else {
+                crate::branding::mark(ui, 24.0);
+            }
+            if crate::editor_theme::primary_button(ui, "Open a scene…").clicked() {
+                self.queued_action = Some(Action::Open);
+            }
+            if ui.button("Add a cube").clicked() {
+                self.queued_context = Some((None, ContextAction::Create));
+            }
+            if full_lockup {
+                self.recent_scenes_menu(ui, "Recent");
+            }
+        });
+    }
+
+    fn scene_menus(&mut self, ui: &mut egui::Ui) {
+        let compact = ui.available_width() < 460.0;
+        let mut open_about = false;
+        ui.horizontal_wrapped(|ui| {
+            if !compact {
+                crate::branding::mark(ui, 22.0);
+            }
             ui.menu_button("File", |ui| {
                 for (label, action) in [
                     ("New scene", Action::New),
@@ -4559,18 +4656,7 @@ impl SceneEditor {
                 ] {
                     self.command_menu_item(ui, label, action);
                 }
-                ui.menu_button("Recent scenes", |ui| {
-                    if self.workspace.prefs.recent.is_empty() {
-                        ui.label("No recent scenes.");
-                    }
-                    for path in self.workspace.prefs.recent.clone() {
-                        if ui.button(path.display().to_string()).clicked() {
-                            self.path_text = path.display().to_string();
-                            self.queued_action = Some(Action::Open);
-                            ui.close();
-                        }
-                    }
-                });
+                self.recent_scenes_menu(ui, "Recent scenes");
                 ui.separator();
                 if ui.button("Recovery checkpoints…").clicked() {
                     self.recovery.show_picker();
@@ -4579,6 +4665,10 @@ impl SceneEditor {
                 }
                 if ui.button("Workspace and shortcuts…").clicked() {
                     self.workspace.settings_open = true;
+                    ui.close();
+                }
+                if compact && ui.button("About Rusterize").clicked() {
+                    open_about = true;
                     ui.close();
                 }
                 self.command_menu_item(ui, "Close window", Action::Quit);
@@ -4710,6 +4800,14 @@ impl SceneEditor {
                 }
                 self.shader_tools_ui(ui);
             });
+            if !compact {
+                ui.menu_button("Help", |ui| {
+                    if ui.button("About Rusterize").clicked() {
+                        open_about = true;
+                        ui.close();
+                    }
+                });
+            }
             ui.separator();
             let dirty = self.session.is_dirty() || self.pending_recovery_drafts();
             let mode = if self.runtime.frame.is_some() {
@@ -4753,6 +4851,12 @@ impl SceneEditor {
                 self.queued_action = Some(Action::Save);
             }
         });
+        if open_about {
+            self.runtime.release_input(ui.ctx());
+            self.runtime.cancel_control_focus();
+            self.runtime.cancel_native_hud_activation();
+            crate::branding::open_about(ui.ctx());
+        }
     }
     fn scene_sidebars(&mut self, ui: &mut egui::Ui) {
         let (constrained, hierarchy_width, inspector_width) = sidebar_budget(
@@ -4856,8 +4960,10 @@ impl SceneEditor {
                 self.request_close();
             }
         }
+        let about_open_at_start = crate::branding::is_about_open(&ctx);
         if self.manipulation.active()
             && (ctx.input(|i| !i.focused || i.key_pressed(egui::Key::Escape))
+                || about_open_at_start
                 || self.dialog.is_some()
                 || self.asset_dialog
                 || self.close_pending
@@ -4871,6 +4977,7 @@ impl SceneEditor {
         }
         let input_blocked = self.hud_open
             || self.input_actions_open
+            || about_open_at_start
             || self.guard().is_err()
             || self.manipulation.offset_pending()
             || self.asset_busy();
@@ -4889,6 +4996,8 @@ impl SceneEditor {
         self.runtime.input_begin(&ctx, input_blocked);
         self.route_shortcuts(&ctx);
         egui::Panel::top("scene_top").show(ui, |ui| self.scene_menus(ui));
+        let about_open = crate::branding::is_about_open(&ctx);
+        crate::branding::show_about(&ctx);
         egui::Panel::bottom("scene_status").show(ui, |ui| self.asset_status_ui(ui));
         if self.workspace.prefs.content_visible {
             let remaining = ui.available_height();
@@ -4933,10 +5042,14 @@ impl SceneEditor {
             self.shader_revision,
         );
         egui::CentralPanel::default().show(ui, |ui| {
-            if self.workspace.welcome && self.session.scene().objects.is_empty() {
-                ui.heading("Start creating");ui.label("Create a cube in the hierarchy, open a scene, or choose a recent scene. Your last project is never opened automatically.");
-                ui.horizontal(|ui| {if ui.button("Open a scene…").clicked(){self.dialog=Some(true);}
-                if ui.button("Workspace settings…").clicked(){self.workspace.settings_open=true;}});
+            if self.workspace.welcome
+                && self.session.path().is_none()
+                && self.session.scene().revision == 0
+                && self.session.scene().objects.is_empty()
+                && !self.runtime.visible
+                && !self.asset_loading()
+            {
+                self.scene_welcome(ui);
             }
             if self.asset_loading() {
                 self.runtime.cancel_control_focus();
@@ -4947,18 +5060,31 @@ impl SceneEditor {
                 // Stop remains available for an older retained runtime while
                 // Reset and playback edits wait for content authority.
                 let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
-                let _ = self.runtime.controls(ui, &self.session, self.generation, true, &shortcut);
+                let _ = self
+                    .runtime
+                    .controls(ui, &self.session, self.generation, true, &shortcut);
                 return;
             }
             self.manipulation_tools_ui(ui);
-            let document_blocked=self.guard().is_err() || self.manipulation.offset_pending();
+            let document_blocked =
+                about_open || self.guard().is_err() || self.manipulation.offset_pending();
             if document_blocked || self.input_actions_open {
                 self.runtime.cancel_control_focus();
             }
-            let blocked=document_blocked || self.asset_busy();
+            let blocked = document_blocked || self.asset_busy();
             let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
-            if let Some(key)=self.runtime.controls(ui,&self.session,self.generation,blocked,&shortcut) {self.capture_reset_assets(key);}
-            self.runtime.observe(self.generation,self.session.scene().revision,self.assets.as_ref().map(|store|store.revision()),self.shader_revision);
+            if let Some(key) =
+                self.runtime
+                    .controls(ui, &self.session, self.generation, blocked, &shortcut)
+            {
+                self.capture_reset_assets(key);
+            }
+            self.runtime.observe(
+                self.generation,
+                self.session.scene().revision,
+                self.assets.as_ref().map(|store| store.revision()),
+                self.shader_revision,
+            );
             self.asset_mark_callback_owners();
             let transient = if !self.runtime.visible {
                 self.manipulation.transient_scene(self.session.scene())
@@ -4966,15 +5092,32 @@ impl SceneEditor {
                 None
             };
             let selected: Vec<_> = self.manipulation.ids.iter().map(String::as_str).collect();
-            self.navigation.enabled=!self.runtime.input_owned() && !self.export_dialog && !self.close_approved && !self.manipulation.active() && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none() && !self.asset_dialog && self.dialog.is_none() && !self.rename_pending && !self.new_scene_pending && !self.close_pending;
-            self.navigation.keyboard_enabled=self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
-            self.navigation.movement_speed=self.workspace.prefs.movement_speed;
+            self.navigation.enabled = !about_open
+                && !self.runtime.input_owned()
+                && !self.export_dialog
+                && !self.close_approved
+                && !self.manipulation.active()
+                && !self.workspace.settings_open
+                && !self.recovery.open
+                && self.recovery_transition.is_none()
+                && !self.asset_dialog
+                && self.dialog.is_none()
+                && !self.rename_pending
+                && !self.new_scene_pending
+                && !self.close_pending;
+            self.navigation.keyboard_enabled =
+                self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
+            self.navigation.movement_speed = self.workspace.prefs.movement_speed;
             let authored_view = transient.as_ref().unwrap_or(self.session.scene());
             let shown_frame = self.runtime.displayed_frame().cloned();
             let mut mixed_fit_error = None;
             let mut mixed_fit_succeeded = false;
             if self.navigation.frame_selected
-                && self.manipulation.ids.iter().any(|id| authored_view.lighting.light(id).is_some())
+                && self
+                    .manipulation
+                    .ids
+                    .iter()
+                    .any(|id| authored_view.lighting.light(id).is_some())
             {
                 // The shared runtime renderer frames geometry. Editor light
                 // anchors participate only in the authored view, never its runtime.
@@ -5003,53 +5146,110 @@ impl SceneEditor {
                 self.error = error.into();
                 ui.colored_label(ui.visuals().warn_fg_color, error);
             }
-            let shown_scene = shown_frame.as_ref().map_or(authored_view, |frame| frame.scene.as_ref());
-            let mut surface = ruster_render::allocate_viewport(ui, shown_scene, &selected, &mut self.navigation);
-            let authoring = shown_frame.as_ref().map_or(self.session.authoring(), |frame| frame.authoring.as_ref());
+            let shown_scene = shown_frame
+                .as_ref()
+                .map_or(authored_view, |frame| frame.scene.as_ref());
+            let mut surface =
+                ruster_render::allocate_viewport(ui, shown_scene, &selected, &mut self.navigation);
+            let authoring = shown_frame
+                .as_ref()
+                .map_or(self.session.authoring(), |frame| frame.authoring.as_ref());
             let scope = shown_frame.as_ref().map_or_else(
-                || egui::Id::unique(("hud-preview", self.generation, self.session.scene().revision)),
-                |frame| egui::Id::unique(("hud-runtime", frame.key.generation, frame.key.reset_epoch, frame.key.authored_revision)),
+                || {
+                    egui::Id::unique((
+                        "hud-preview",
+                        self.generation,
+                        self.session.scene().revision,
+                    ))
+                },
+                |frame| {
+                    egui::Id::unique((
+                        "hud-runtime",
+                        frame.key.generation,
+                        frame.key.reset_epoch,
+                        frame.key.authored_revision,
+                    ))
+                },
             );
             let (hud_owns, hud_error) = hud_interaction::interact(
-                ui, hud_interaction::HudViewport { rect: surface.rect, frame: shown_frame.as_ref(), authoring, scope },
-                &mut self.hud_cache, &mut self.hud_controls, &mut self.runtime, blocked,
+                ui,
+                hud_interaction::HudViewport {
+                    rect: surface.rect,
+                    frame: shown_frame.as_ref(),
+                    authoring,
+                    scope,
+                },
+                &mut self.hud_cache,
+                &mut self.hud_controls,
+                &mut self.runtime,
+                blocked,
             );
-            if let Some(error) = hud_error { self.error = error; }
+            if let Some(error) = hud_error {
+                self.error = error;
+            }
             surface.input_owned = hud_owns;
             let viewport = ruster_render::render_viewport_with_materials(
-                ui, shown_scene, &selected,
-                if self.runtime.visible { &self.preview_assets } else { &self.resolved },
-                if self.runtime.visible { &self.preview_textures } else { &self.resolved_textures },
-                &mut self.navigation, surface,
+                ui,
+                shown_scene,
+                &selected,
+                if self.runtime.visible {
+                    &self.preview_assets
+                } else {
+                    &self.resolved
+                },
+                if self.runtime.visible {
+                    &self.preview_textures
+                } else {
+                    &self.resolved_textures
+                },
+                &mut self.navigation,
+                surface,
             );
             if let Some(error) = viewport.fit_error.filter(|_| viewport.fit_attempted) {
                 self.error = error.into();
-            } else if (mixed_fit_succeeded || viewport.fit_attempted) && mixed_fit_error.is_none()
-                && self.error == ruster_render::FIT_ERROR {
+            } else if (mixed_fit_succeeded || viewport.fit_attempted)
+                && mixed_fit_error.is_none()
+                && self.error == ruster_render::FIT_ERROR
+            {
                 self.error.clear();
             }
-            self.runtime.input_finish(&ctx, &viewport.response, blocked || hud_owns);
+            self.runtime
+                .input_finish(&ctx, &viewport.response, blocked || hud_owns);
             self.captures.rect = Some(viewport.rect);
             self.captures.receipt = Some(viewport.receipt.clone());
             self.view_state.input_active = ui.input(|input| input.pointer.any_down());
-            let may_draw = !self.asset_publishing() && !self.asset_loading() && !self.runtime.visible
+            let may_draw = !about_open
+                && !self.asset_publishing()
+                && !self.asset_loading()
+                && !self.runtime.visible
                 && !self.drafts()
                 && self.dialog.is_none()
                 && !self.asset_dialog
                 && !self.close_pending
                 && !self.close_approved
                 && !self.new_scene_pending
-                && !self.rename_pending && !self.workspace.settings_open && !self.recovery.open && self.recovery_transition.is_none();
+                && !self.rename_pending
+                && !self.workspace.settings_open
+                && !self.recovery.open
+                && self.recovery_transition.is_none();
             let can_pick = self.navigation.enabled && !self.manipulation.active() && !hud_owns;
             if !self.runtime.visible {
                 let active = self.selected.as_slice();
                 collider_viewport::paint(ui, &viewport, authored_view, active);
             } else if !self.runtime.stale {
-                if let Some(frame) = self.runtime.displayed_frame()
+                if let Some(frame) = self
+                    .runtime
+                    .displayed_frame()
                     .filter(|frame| Some(frame.key) == self.runtime.current_run())
                 {
                     if let Some(observations) = &frame.query_observations {
-                        collider_viewport::paint_contacts(ui, &viewport, frame.scene.as_ref(), frame.tick, observations);
+                        collider_viewport::paint_contacts(
+                            ui,
+                            &viewport,
+                            frame.scene.as_ref(),
+                            frame.tick,
+                            observations,
+                        );
                     }
                 }
             }
@@ -5084,12 +5284,16 @@ impl SceneEditor {
                 false
             };
             if viewport.response.clicked() && !overlay_owns && can_pick {
-                let id = light_pick
-                    .or(viewport.picked)
-                    .filter(|id| lighting_viewport::selectable_target(self.session.scene(), id, !self.runtime.visible));
+                let id = light_pick.or(viewport.picked).filter(|id| {
+                    lighting_viewport::selectable_target(
+                        self.session.scene(),
+                        id,
+                        !self.runtime.visible,
+                    )
+                });
                 let additive =
                     ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
-                self.queued_selection=Some((id,additive));
+                self.queued_selection = Some((id, additive));
             }
             self.paint_hud_overlay(ui, viewport.rect, shown_frame.as_ref());
         });
@@ -5346,7 +5550,8 @@ fn run_session(session: Session) -> Result<(), String> {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1280., 800.])
-            .with_app_id("org.ruster.editor"),
+            .with_app_id("org.ruster.editor")
+            .with_icon(crate::branding::window_icon()),
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             wgpu_setup: WgpuSetup::CreateNew(setup),

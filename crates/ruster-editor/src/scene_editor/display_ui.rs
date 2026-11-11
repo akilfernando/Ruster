@@ -184,51 +184,73 @@ impl SceneEditor {
         let mut submitting = None;
         ui.add_enabled_ui(editable, |ui| {
             let before = draft.profile;
-            let profile = ui.horizontal_wrapped(|ui| {
-                ui.label("Profile");
-                let focus = combo_focus::ComboFocus::capture(ui, "display_profile");
-                let mut selected = false;
-                let response = egui::ComboBox::from_id_salt("display_profile")
-                    .width(142.0)
-                    .selected_text(match draft.profile {
-                        DisplayMode::Legacy => "Legacy SDR",
-                        DisplayMode::Surface => "Surface HDR",
-                    })
-                    .show_ui(ui, |ui| {
-                        for (mode, label) in [(DisplayMode::Legacy, "Legacy SDR"), (DisplayMode::Surface, "Surface HDR")] {
-                            if ui.selectable_value(&mut draft.profile, mode, label).clicked() {
-                                selected = true;
-                                ui.close();
+            let profile = ui
+                .horizontal_wrapped(|ui| {
+                    ui.label("Profile");
+                    let focus = combo_focus::ComboFocus::capture(ui, "display_profile");
+                    let mut selected = false;
+                    let response = egui::ComboBox::from_id_salt("display_profile")
+                        .width(142.0)
+                        .selected_text(match draft.profile {
+                            DisplayMode::Legacy => "Legacy SDR",
+                            DisplayMode::Surface => "Surface HDR",
+                        })
+                        .show_ui(ui, |ui| {
+                            for (mode, label) in [
+                                (DisplayMode::Legacy, "Legacy SDR"),
+                                (DisplayMode::Surface, "Surface HDR"),
+                            ] {
+                                if ui
+                                    .selectable_value(&mut draft.profile, mode, label)
+                                    .clicked()
+                                {
+                                    selected = true;
+                                    ui.close();
+                                }
                             }
-                        }
-                    });
-                focus.restore(ui, &response.response, selected);
-                response.response
-            }).inner;
+                        });
+                    focus.restore(ui, &response.response, selected);
+                    response.response
+                })
+                .inner;
             discrete_changed = before != draft.profile;
             let mut fields = vec![profile];
             if draft.profile == DisplayMode::Surface {
-                ui.label("Adjust brightness with manual exposure. The display output is SDR.");
-                let response = ui.horizontal_wrapped(|ui| {
-                    ui.label("Exposure (EV)");
-                    ui.add(egui::TextEdit::singleline(&mut draft.exposure_stops)
-                        .id(egui::Id::unique("display_exposure"))
-                        .char_limit(64).desired_width(82.0))
-                        .on_hover_text("-8 to 8 stops. Zero is neutral; +1 doubles exposure and -1 halves it.")
-                }).inner;
+                ui.weak("Adjust brightness in exposure stops. The display outputs SDR.");
+                let response = ui
+                    .horizontal_wrapped(|ui| {
+                        ui.label("Exposure (EV)");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut draft.exposure_stops)
+                                .id(egui::Id::unique("display_exposure"))
+                                .char_limit(64)
+                                .desired_width(82.0),
+                        )
+                        .on_hover_text(
+                            "-8 to 8 stops. Zero is neutral; +1 doubles exposure and -1 halves it.",
+                        )
+                    })
+                    .inner;
                 raw_changed = response.changed();
                 fields.push(response);
             } else {
-                ui.label("Legacy SDR preserves the earlier display response. Surface material highlights and roughness are inactive.");
+                ui.weak("Choose Surface HDR to preview material highlights and roughness.");
             }
             for response in &fields {
-                let owned = editable && (response.has_focus() || response.lost_focus() || ui.memory(|memory| memory.had_focus_last_frame(response.id)));
+                let owned = editable
+                    && (response.has_focus()
+                        || response.lost_focus()
+                        || ui.memory(|memory| memory.had_focus_last_frame(response.id)));
                 if owned && !popup_at_start && !egui::Popup::is_any_open(ui.ctx()) {
-                    if ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)) {
+                    if ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
+                    }) {
                         enter = true;
                         submitting = Some(response.id);
                     }
-                    escape |= ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                    escape |= ui.input_mut(|input| {
+                        input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
+                    });
                 }
             }
         });

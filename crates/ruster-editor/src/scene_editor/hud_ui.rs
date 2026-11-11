@@ -557,9 +557,9 @@ fn condition_ui(
             fields.push(selector(ui, "condition_expected", &mut condition.expected, &[(true, "True"), (false, "False")]));
         });
         if let Some(diagnostic) = ruster_scene::hud::bool_condition_diagnostic(session.authoring(), condition) {
-            ui.colored_label(egui::Color32::YELLOW, diagnostic.message());
+            ui.colored_label(ui.visuals().warn_fg_color, diagnostic.message());
         }
-        ui.small("Uncheck this condition to clear it. Unavailable or differently typed state denies the condition.");
+        ui.small("Clear the checkbox to remove the condition. Unavailable or differently typed state blocks it.");
     });
 }
 
@@ -794,8 +794,8 @@ impl SceneEditor {
         let keyboard_activation = ui.input(|input| {
             input.key_pressed(egui::Key::Enter) || input.key_pressed(egui::Key::Space)
         });
-        ui.label("Screen-space HUD · up to 4 panels and 32 total rows");
-        ui.small("Apply cancels runtime preview and shows authored defaults. Reset captures the HUD and initializes live values.");
+        ui.weak("Screen-space HUD · up to 4 panels and 32 total rows");
+        ui.small("Apply stops preview and shows authored defaults. Reset initializes live values.");
         // Budget in current logical points after the wrapping header. Only the
         // body scrolls, keeping Apply, Cancel and validation feedback reachable.
         let spacing = ui.spacing().item_spacing.y;
@@ -1351,7 +1351,7 @@ impl SceneEditor {
                                 )
                             {
                                 ui.colored_label(
-                                    egui::Color32::YELLOW,
+                                    ui.visuals().warn_fg_color,
                                     format!("Command unavailable. {diagnostic:?}"),
                                 );
                             }
@@ -1578,10 +1578,11 @@ impl SceneEditor {
         }
         ui.separator();
         ui.horizontal_wrapped(|ui| {
-            let apply = ui.add_enabled(
-                editable && self.hud_draft.is_some(),
-                egui::Button::new("Apply HUD"),
-            );
+            let apply = ui
+                .add_enabled_ui(editable && self.hud_draft.is_some(), |ui| {
+                    crate::editor_theme::primary_button(ui, "Apply HUD")
+                })
+                .inner;
             let cancel = ui.add_enabled(editable, egui::Button::new("Cancel"));
             if keys_available && (apply.clicked() || enter) && !self.apply_hud_draft() {
                 if let Some(id) = submitting {

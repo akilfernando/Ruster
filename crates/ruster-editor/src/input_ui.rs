@@ -636,7 +636,7 @@ impl InputUi {
             .default_open(true)
             .open(self.pending().then_some(true))
             .show(ui, |ui| {
-                ui.label("Named keyboard controls. Shared keys drive every matching action.");
+                ui.weak("Shared keys trigger every matching action.");
                 if !self.pending() {
                     ui.add_enabled_ui(editable, |ui| {
                         ui.horizontal_wrapped(|ui| {
@@ -664,17 +664,17 @@ impl InputUi {
                         });
                         {
                             if session.authoring().actions.is_empty() {
-                                ui.label("No actions defined.");
+                                ui.weak("Add a Button or Axis to define keyboard controls.");
                             }
                             for (id, action) in &session.authoring().actions {
                                 ui.separator();
-                                ui.label(format!(
+                                ui.strong(format!(
                                     "{} · {id}",
                                     action.label.as_deref().unwrap_or(id)
                                 ));
-                                ui.label(hint(&action.kind));
+                                ui.weak(hint(&action.kind));
                                 for conflict in conflicts(session, id, &action.kind) {
-                                    ui.colored_label(egui::Color32::YELLOW, conflict);
+                                    ui.colored_label(ui.visuals().warn_fg_color, conflict);
                                 }
                                 ui.horizontal_wrapped(|ui| {
                                     if ui.button("Edit").clicked() && self.claim_frame(ui.ctx()) {
@@ -723,7 +723,7 @@ impl InputUi {
                     );
                 }
                 if !form_drawn && !self.message.is_empty() {
-                    ui.colored_label(egui::Color32::LIGHT_RED, &self.message);
+                    ui.colored_label(ui.visuals().error_fg_color, &self.message);
                 }
             });
         if !form_drawn {
@@ -779,7 +779,7 @@ impl InputUi {
                 let feedback = (!capturing && !self.message.is_empty()).then(|| {
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(&self.message).color(egui::Color32::LIGHT_RED),
+                            egui::RichText::new(&self.message).color(ui.visuals().error_fg_color),
                         )
                         .wrap(),
                     )
@@ -868,16 +868,16 @@ impl InputUi {
                     let mut rows = Vec::new();
                     match &mut draft.kind {
                         ActionKind::Button { keys } => {
-                            ui.label("Button keys");
+                            ui.strong("Button keys");
                             let used = keys.clone();
                             rows.push(key_rows(ui, Side::Button, keys, &used, admit));
                         }
                         ActionKind::Axis1d { negative, positive } => {
-                            ui.label("Negative keys (−1)");
+                            ui.strong("Negative keys (−1)");
                             let used: Vec<_> =
                                 negative.iter().chain(positive.iter()).copied().collect();
                             rows.push(key_rows(ui, Side::Negative, negative, &used, admit));
-                            ui.label("Positive keys (+1)");
+                            ui.strong("Positive keys (+1)");
                             let used: Vec<_> =
                                 negative.iter().chain(positive.iter()).copied().collect();
                             rows.push(key_rows(ui, Side::Positive, positive, &used, admit));
@@ -891,9 +891,9 @@ impl InputUi {
                             next_capture = row.capture;
                         }
                     }
-                    ui.label("Up to four total keys. Empty bindings keep the action neutral.");
+                    ui.weak("Assign up to four keys total. Empty bindings stay neutral.");
                     for conflict in conflicts(session, &draft.id, &draft.kind) {
-                        ui.colored_label(egui::Color32::YELLOW, conflict);
+                        ui.colored_label(ui.visuals().warn_fg_color, conflict);
                     }
                 }
                 let keys_available = admit
@@ -980,7 +980,7 @@ impl InputUi {
                 if self.capture.is_some() && !self.message.is_empty() {
                     let feedback = ui.add(
                         egui::Label::new(
-                            egui::RichText::new(&self.message).color(egui::Color32::LIGHT_RED),
+                            egui::RichText::new(&self.message).color(ui.visuals().error_fg_color),
                         )
                         .wrap(),
                     );

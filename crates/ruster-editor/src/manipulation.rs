@@ -639,7 +639,7 @@ impl Manipulation {
         let enter_pressed = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
         let escape_pressed =
             ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
-        let mut focused = false;
+        let mut focused_field = None;
         let mut field_has_focus = false;
         if mixed.iter().any(|mixed| *mixed) {
             ui.label("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected targets; other components keep their individual values.");
@@ -654,7 +654,7 @@ impl Manipulation {
                 for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
                     let i = row * 3 + axis;
                     ui.allocate_ui_with_layout(egui::vec2(group_width,ui.spacing().interact_size.y),egui::Layout::left_to_right(egui::Align::Center),|ui| {
-                        ui.label(label);
+                        ui.colored_label(crate::editor_theme::AXIS_COLORS[axis], label);
                         let response = ui.add_sized([ui.available_width().max(48.0),ui.spacing().interact_size.y],
                             egui::TextEdit::singleline(if let Some((text,_))=&mut preview {&mut text[i]} else {&mut self.precision[i]}).char_limit(1024).interactive(!previewing && ui.is_enabled() && (row != 2 || scale_allowed))
                                 .hint_text(if mixed[i] { "—" } else { "" }));
@@ -663,7 +663,9 @@ impl Manipulation {
                             if !value.is_empty() && value.chars().count()<=128 {ui.label(value);}
                             ui.label("Editing changes only this component for selected targets. Long input stays in the field; use the cursor to scroll through it.");
                         });
-                        focused |= response.has_focus() || response.lost_focus();
+                        if response.has_focus() || response.lost_focus() {
+                            focused_field = Some(response.id);
+                        }
                         field_has_focus |= response.has_focus();
                         if response.changed() && !previewing {
                             self.draft_changed();
@@ -678,11 +680,11 @@ impl Manipulation {
             ui.small("Drag preview · release to apply · Escape to cancel");
             return Ok(false);
         }
-        let mut apply = focused && enter_pressed;
+        let mut apply = focused_field.is_some() && enter_pressed;
         apply |=
             auto_commit && self.precision_had_focus && !field_has_focus && self.precision_pending();
         self.precision_had_focus = field_has_focus;
-        let mut cancel = focused && escape_pressed;
+        let mut cancel = focused_field.is_some() && escape_pressed;
         if self.precision_pending() {
             ui.horizontal_wrapped(|ui| {
                 apply |= ui
@@ -704,7 +706,14 @@ impl Manipulation {
             return Ok(false);
         }
         if apply {
-            self.apply_precision(session)?;
+            if let Err(error) = self.apply_precision(session) {
+                // TextEdit surrenders focus on Enter. Keep keyboard editing
+                // available when validation leaves the raw draft pending.
+                if let Some(field) = focused_field.filter(|_| enter_pressed) {
+                    ui.memory_mut(|memory| memory.request_focus(field));
+                }
+                return Err(error);
+            }
             return Ok(true);
         }
         Ok(false)
@@ -1357,6 +1366,49 @@ mod tests {
             m.precision_pending(),
             "modal focus loss preserves the draft instead of committing or discarding it"
         );
+    }
+
+    #[test]
+    fn rejected_precision_enter_keeps_keyboard_cancellation_available() {
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let mut manipulation = Manipulation {
+            ids: vec!["left".into()],
+            ..Default::default()
+        };
+        let ctx = egui::Context::default();
+        let key = |key| egui::Event::Key {
+            key,
+            physical_key: None,
+            pressed: true,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut frame = |events| {
+            let mut result = Ok(false);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(Rect::from_min_size(Pos2::ZERO, egui::vec2(440.0, 500.0))),
+                    events,
+                    ..Default::default()
+                },
+                |ui| result = manipulation.precision_ui(ui, &mut session, true),
+            );
+            output.textures_delta.clear();
+            result
+        };
+        frame(vec![]).unwrap();
+        frame(vec![key(egui::Key::Tab)]).unwrap();
+        frame(vec![]).unwrap();
+        let field = ctx
+            .memory(|memory| memory.focused())
+            .expect("Tab focuses a field");
+        frame(vec![egui::Event::Text("-".into())]).unwrap();
+        assert!(frame(vec![key(egui::Key::Enter)]).is_err());
+        assert_eq!(ctx.memory(|memory| memory.focused()), Some(field));
+        frame(vec![key(egui::Key::Escape)]).unwrap();
+        assert!(!manipulation.precision_pending());
+        assert_eq!(session.undo_len(), 0);
     }
 
     // Unique new boundary: mixed geometry/light transforms share one transaction,

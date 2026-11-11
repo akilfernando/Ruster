@@ -311,7 +311,10 @@ impl SceneEditor {
                 error_rect = Some(ui.colored_label(ui.visuals().error_fg_color, message).rect);
             }
             if draft.mode == ColliderMode::None {
-                ui.label("Apply removes the component. Undo restores it.");
+                ui.colored_label(
+                    ui.visuals().warn_fg_color,
+                    "Apply removes the component. Undo restores it.",
+                );
             } else {
                 let response = ui.checkbox(&mut draft.enabled, "Enabled");
                 discrete_handled |= response.clicked();
@@ -388,7 +391,9 @@ impl SceneEditor {
                             )
                             .or(error_rect);
                         }
-                        ui.label("0.002–2000 each. Object Scale and rotation apply to the box.");
+                        ui.weak(
+                            "Each dimension accepts 0.002–2000. Object scale and rotation apply.",
+                        );
                     }
                     ColliderMode::None => {}
                 }
@@ -482,7 +487,13 @@ fn collider_field(
     let mut error_rect = None;
     let response = ui
         .horizontal(|ui| {
-            ui.label(label);
+            let label = egui::RichText::new(label);
+            ui.label(match field {
+                Field::Offset(index) | Field::Size(index) => {
+                    label.color(crate::editor_theme::AXIS_COLORS[index])
+                }
+                _ => label,
+            });
             ui.add(
                 egui::TextEdit::singleline(text)
                     .id(field.id())

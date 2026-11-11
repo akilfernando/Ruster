@@ -270,7 +270,7 @@ impl RuntimeUi {
                         for (id, definition) in &session.authoring().actions {
                             ui.separator();
                             ui.strong(format!("{} · {id}", definition.label.as_deref().unwrap_or(id)));
-                            ui.label(action_hint(&definition.kind));
+                            ui.weak(action_hint(&definition.kind));
                         }
                         ui.separator();
                         ui.heading("Preview state");
@@ -303,7 +303,7 @@ impl RuntimeUi {
                                 InputOrigin::Programmatic => "programmatic step",
                             };
                             ui.strong(format!("Last committed input · tick {} · {origin}", input.receipt.tick));
-                            ui.label("Values describe the committed tick. Current physical-key state is separate.");
+                            ui.weak("These values describe input at the committed tick.");
                             for (id, value) in &input.frame.0 {
                                 ui.label(match value {
                                     ActionValue::Button(value) => format!("{id} · Held {} · Pressed {} · Released {}", value.held, value.pressed, value.released),

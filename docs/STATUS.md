@@ -1,6 +1,10 @@
 # Current project status
 
-Updated2026-11-10. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
+Updated 2026-11-11. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
+
+## Rusterize editor overhaul and installation
+
+2026-11-11. The user approves the first theme pass and requests the remaining UI overhaul, production logo integration and local installation for hands-on testing. The editor now has a clean bundled mark, branded startup/About, desktop entry, consolidated panel hierarchy, semantic form states and consistent axis labels. Rejected numeric Enter preserves focus for Escape cancellation. The full 333 Rust/29 Python gate and supplemental 145 inspection cases with strict checks pass. Native review and installation are in progress. [Overhaul evidence](evidence/RUSTERIZE-UI-OVERHAUL.md).
 
 ## Rusterize identity and UI foundation — first slice verified
 

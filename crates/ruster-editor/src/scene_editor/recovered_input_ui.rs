@@ -122,7 +122,7 @@ impl SceneEditor {
                                     "The scene changed after this draft, but its action definition still matches. Resume keeps your recovered values and opens them against the current scene."
                                 });
                             }
-                            Err(_) => { ui.colored_label(egui::Color32::LIGHT_RED, "The saved action no longer matches this scene. Your recovered values are preserved. Keep them for later or discard this draft."); }
+                            Err(_) => { ui.colored_label(ui.visuals().error_fg_color, "The saved action no longer matches this scene. Your recovered values are preserved. Keep them for later or discard this draft."); }
                         }
                         ui.label("The original checkpoint stays preserved.");
                         egui::CollapsingHeader::new("Technical details")

@@ -2355,7 +2355,7 @@ impl SceneEditor {
                 }
                 if self.status_diagnostics() {
                     let label = if busy {
-                        egui::RichText::new("Details").color(egui::Color32::YELLOW)
+                        egui::RichText::new("Details").color(ui.visuals().warn_fg_color)
                     } else {
                         egui::RichText::new("Details")
                     };
@@ -2384,15 +2384,15 @@ impl SceneEditor {
                         )
                     }
                 } else if !self.error.is_empty() {
-                    (self.error.as_str(), egui::Color32::LIGHT_RED)
+                    (self.error.as_str(), ui.visuals().error_fg_color)
                 } else if !self.recovery.warning.is_empty() {
-                    (self.recovery.warning.as_str(), egui::Color32::YELLOW)
+                    (self.recovery.warning.as_str(), ui.visuals().warn_fg_color)
                 } else if let Some(shader) = self.shader_problem() {
-                    (shader, egui::Color32::YELLOW)
+                    (shader, ui.visuals().warn_fg_color)
                 } else if !self.workspace.error.is_empty() {
-                    (self.workspace.error.as_str(), egui::Color32::YELLOW)
+                    (self.workspace.error.as_str(), ui.visuals().warn_fg_color)
                 } else if let Some(diagnostic) = &self.runtime.diagnostic {
-                    (diagnostic.message.as_str(), egui::Color32::LIGHT_RED)
+                    (diagnostic.message.as_str(), ui.visuals().error_fg_color)
                 } else if !self.runtime.status.is_empty() {
                     (self.runtime.status.as_str(), ui.visuals().text_color())
                 } else if !self.external.status.is_empty() {

@@ -85,7 +85,7 @@ impl RuntimeUi {
                 frame.key.reset_epoch,frame.key.authored_revision,frame.tick));
             ui.label(format!("Commit revision {} · last Step {:?}",frame.commit_revision,frame.last_step_commit_revision));
             if self.stale || !self.ready || Some(frame.key) != self.current_run() {
-                ui.colored_label(egui::Color32::YELLOW,"Historical snapshot. Reset to inspect current authored defaults.");
+                ui.colored_label(ui.visuals().warn_fg_color,"Historical snapshot. Reset to inspect current authored defaults.");
             }
             if frame.state.binding(&self.state_binding).is_none() {
                 self.state_binding=frame.state.binding_ids().next().unwrap_or("").into();

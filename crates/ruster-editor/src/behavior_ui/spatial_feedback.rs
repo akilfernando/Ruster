@@ -118,7 +118,7 @@ impl RuntimeUi {
                 ui.label(format!("Committed tick {}", frame.tick));
                 if retained {
                     ui.colored_label(
-                        egui::Color32::YELLOW,
+                        ui.visuals().warn_fg_color,
                         "Previous scene snapshot · Reset required",
                     );
                 }

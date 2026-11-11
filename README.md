@@ -1,6 +1,6 @@
 # Rusterize
 
-![Rusterize logo concept](docs/branding/rusterize-logo-concept.png)
+![Rusterize mark](crates/ruster-editor/assets/org.ruster.editor.png)
 
 An open-source Rust/Vulkan engine project for interactive simulation and visualization. Games are the first proving ground; the shared scene and tooling are designed to support other interactive applications too.
 

@@ -231,7 +231,9 @@ impl BehaviorUi {
         let mut action = None;
         ui.separator();
         ui.strong("Application command definitions");
-        ui.label("Authored typed arguments supply defaults. Reset captures this catalog for paused invocation.");
+        ui.weak(
+            "Typed arguments supply defaults. Reset captures this catalog for paused invocation.",
+        );
         for (id, definition) in &binding.commands {
             ui.push_id(("command-definition", binding_id, id), |ui| {
                 ui.horizontal_wrapped(|ui| {
@@ -407,7 +409,7 @@ impl BehaviorUi {
                 self.changed();
             }
             ui.colored_label(
-                egui::Color32::YELLOW,
+                ui.visuals().warn_fg_color,
                 "Unapplied authored command draft. Apply or Cancel before other changes.",
             );
         }

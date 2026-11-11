@@ -422,7 +422,7 @@ impl RecoveryUi {
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 600.0));
             let now = SystemTime::now().duration_since(UNIX_EPOCH).ok().map(|time| time.as_secs());
             ui.heading("Recover unfinished work");
-            ui.label("Restore opens an unsaved copy. The source checkpoint is kept for later. Discard removes only the selected recovery checkpoint.");
+            ui.label("Restore opens an unsaved copy and retains its checkpoint. Discard removes the selected checkpoint.");
             egui::ScrollArea::vertical().max_height((ctx.content_rect().height()-170.0).max(64.0)).show(ui, |ui| {
                 for candidate in &self.candidates {
                     ui.separator();
@@ -436,7 +436,7 @@ impl RecoveryUi {
                         Some(seconds) => format!("Saved {} days ago", seconds / 86400),
                         None => "Recorded time is later than the system clock".into(),
                     };
-                    ui.label(saved);
+                    ui.weak(saved);
                     egui::CollapsingHeader::new("Checkpoint details").id_salt(&candidate.id).show(ui, |ui| {
                         if let Some(path) = &candidate.origin { ui.add(egui::Label::new(path.display().to_string()).wrap()); }
                         if let Some(scene_id) = &candidate.scene_id { ui.label(format!("Scene ID {scene_id}")); }
@@ -445,7 +445,7 @@ impl RecoveryUi {
                         if let Some(sequence) = candidate.sequence { ui.label(format!("Sequence {sequence} within this checkpoint journal")); }
                         if let Some(revision) = candidate.revision { ui.label(format!("Scene revision {revision}")); }
                     });
-                    if let Some(error) = &candidate.error { ui.colored_label(egui::Color32::LIGHT_RED, error); }
+                    if let Some(error) = &candidate.error { ui.colored_label(ui.visuals().error_fg_color, error); }
                     ui.horizontal_wrapped(|ui| {
                         let restore=ui.add_enabled(candidate.error.is_none(), egui::Button::new("Restore as unsaved copy"));
                         if !self.focused && candidate.error.is_none() { restore.request_focus(); self.focused=true; }
@@ -455,7 +455,7 @@ impl RecoveryUi {
                 }
                 if self.candidates.is_empty() { ui.label("No unowned checkpoints found. Other open windows keep their own checkpoints private."); }
             });
-            if !self.warning.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.warning).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&self.warning); }
+            if !self.warning.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.warning).color(ui.visuals().warn_fg_color)).truncate()).on_hover_text(&self.warning); }
             ui.horizontal_wrapped(|ui| {
                 if ui.button("Refresh recovery list").clicked() { self.refresh(); }
                 let keep=ui.button("Keep for later");
@@ -468,8 +468,10 @@ impl RecoveryUi {
     pub fn warning_ui(&mut self, ui: &mut egui::Ui) {
         if !self.warning.is_empty() {
             ui.add(
-                egui::Label::new(egui::RichText::new(&self.warning).color(egui::Color32::YELLOW))
-                    .wrap(),
+                egui::Label::new(
+                    egui::RichText::new(&self.warning).color(ui.visuals().warn_fg_color),
+                )
+                .wrap(),
             )
             .on_hover_text(&self.warning);
             if ui.button("Retry recovery checkpoint").clicked() {

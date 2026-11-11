@@ -453,7 +453,7 @@ impl SceneEditor {
         ui.separator();
         ui.horizontal(|ui| {
             ui.strong("Material");
-            ui.label("Opaque").on_hover_text(
+            ui.weak("Opaque").on_hover_text(
                 "Base-color PNGs render as opaque surfaces; texture alpha is not used.",
             );
         });
@@ -558,12 +558,12 @@ impl SceneEditor {
                 .iter()
                 .filter(|other| other.material == draft.original_assignment)
                 .count();
-            ui.label(format!(
+            ui.weak(format!(
                 "Shared by {users} {}",
                 if users == 1 { "object" } else { "objects" }
             ));
         } else {
-            ui.label(if draft.intent == MaterialIntent::Create {
+            ui.strong(if draft.intent == MaterialIntent::Create {
                 "New material"
             } else {
                 "Independent material copy"

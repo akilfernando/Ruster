@@ -35,6 +35,7 @@ impl eframe::App for Editor {
         }
         self.viewport(ui);
         self.dialogs(&ctx);
+        crate::branding::show_about(&ctx);
         if self.close_approved {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
@@ -48,7 +49,11 @@ impl eframe::App for Editor {
 
 impl Editor {
     fn shortcuts(&mut self, ctx: &egui::Context) {
-        if self.pending.is_some() || self.path_mode.is_some() || self.identity_mode.is_some() {
+        if self.pending.is_some()
+            || self.path_mode.is_some()
+            || self.identity_mode.is_some()
+            || crate::branding::is_about_open(ctx)
+        {
             return;
         }
         let consumed = |key, shift| {
@@ -102,7 +107,14 @@ impl Editor {
         egui::Panel::top("toolbar").show(root, |ui| {
             ui.add_space(5.0);
             ui.horizontal(|ui| {
-                ui.label(RichText::new("RUSTERIZE").strong().size(20.0).color(ACCENT));
+                crate::branding::mark(ui, 24.0);
+                if ui
+                    .button("Rusterize")
+                    .on_hover_text("About Rusterize")
+                    .clicked()
+                {
+                    crate::branding::open_about(ui.ctx());
+                }
                 ui.label(RichText::new("/  SCENARIO EDITOR").color(MUTED));
                 ui.separator();
                 if ui
@@ -115,8 +127,7 @@ impl Editor {
                 if ui.button("Open…").on_hover_text("Ctrl+O").clicked() {
                     self.open_dialog();
                 }
-                if ui
-                    .button("Save")
+                if crate::editor_theme::primary_button(ui, "Save")
                     .on_hover_text("Apply valid fields and save · Ctrl+S")
                     .clicked()
                 {

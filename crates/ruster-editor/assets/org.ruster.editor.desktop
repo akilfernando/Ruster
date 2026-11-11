@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Rusterize
+Comment=Create and simulate interactive 3D scenes
+Exec=ruster-editor
+Icon=org.ruster.editor
+Terminal=false
+Categories=Graphics;3DGraphics;
+StartupWMClass=org.ruster.editor

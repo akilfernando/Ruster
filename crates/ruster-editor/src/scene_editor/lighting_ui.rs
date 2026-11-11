@@ -437,7 +437,7 @@ impl SceneEditor {
         };
         ui.separator();
         ui.strong("Light");
-        ui.label(
+        ui.weak(
             match self.session.scene().lighting.light(&id).unwrap().kind {
                 LightKind::Directional { .. } => "Directional · rotation sets emitted direction",
                 LightKind::Point { .. } => "Point · position sets source; range is in scene units",
@@ -511,7 +511,7 @@ impl SceneEditor {
                     let response = ui.checkbox(enabled, "Enabled"); changed |= response.changed(); discrete_changed |= response.changed(); fields.push(response);
                     (color, intensity)
                 }
-                LightingDraft::Ambient { color, intensity, .. } => { ui.label("Ambient light"); (color, intensity) }
+                LightingDraft::Ambient { color, intensity, .. } => { ui.strong("Ambient light"); (color, intensity) }
             };
             // Use the editor's familiar color picker while retaining exact raw
             // numeric text for keyboard entry and invalid-draft recovery.

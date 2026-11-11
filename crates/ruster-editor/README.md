@@ -1,4 +1,4 @@
-# Ruster Editor
+# Rusterize Editor
 
 The native editor opens a blank generic scene by default. Run `cargo run --locked -p ruster-editor` to start creating without a sample project. It has two modes: generic 3D scenes with M6 content iteration, and the legacy v1 logistics scenario. Start the current content example with:
 
@@ -8,7 +8,22 @@ cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
 
 See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-content-and-shader-iteration-m6) below for their controls. The [editor experience baseline](../../docs/EDITOR-EXPERIENCE.md) records required usability still to deliver.
 
-Current source saves Scene17 and raw drafts in Recovery15. F3c adds state-driven panels with content13, the cumulative `runtime_hud_panels` profile and Descriptor5. F3a/F3b retain their accepted checkpoints. F3c qualification is in progress. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
+Current source saves Scene17 and raw drafts in Recovery15. F3c adds state-driven panels with content13, the cumulative `runtime_hud_panels` profile and Descriptor5. F3a/F3b retain their accepted checkpoints. F3c has passed its bounded qualification. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
+
+## Branding and desktop launcher
+
+Start the editor without a scene argument to see the Rusterize start screen. **Help → About Rusterize** shows the version and source link. Compact menus place it under **File**. The editor also supplies the bundled mark as its window icon.
+
+On Linux, install the desktop entry and icon to make the same mark available to the application menu. The entry expects `ruster-editor` on the desktop session's PATH.
+
+```sh
+cargo install --locked --path crates/ruster-editor
+rusterize_data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
+install -Dm644 crates/ruster-editor/assets/org.ruster.editor.desktop \
+  "$rusterize_data_dir/applications/org.ruster.editor.desktop"
+install -Dm644 crates/ruster-editor/assets/org.ruster.editor.png \
+  "$rusterize_data_dir/icons/hicolor/128x128/apps/org.ruster.editor.png"
+```
 
 ## Creator-authored screens — F3c
 

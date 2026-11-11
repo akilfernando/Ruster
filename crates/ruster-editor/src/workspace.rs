@@ -1009,7 +1009,7 @@ impl Workspace {
                     }
                 });
             if !self.error.is_empty() {
-                ui.add(egui::Label::new(egui::RichText::new(&self.error).color(egui::Color32::LIGHT_RED)).truncate()).on_hover_text(&self.error);
+                ui.add(egui::Label::new(egui::RichText::new(&self.error).color(ui.visuals().error_fg_color)).truncate()).on_hover_text(&self.error);
             }
             let mut footer=[egui::Rect::NOTHING;3];
             ui.horizontal_wrapped(|ui| {

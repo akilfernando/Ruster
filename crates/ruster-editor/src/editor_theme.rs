@@ -17,10 +17,16 @@ const ON_ACCENT: Color32 = Color32::from_rgb(0x10, 0x23, 0x1e);
 const SELECTION: Color32 = Color32::from_rgb(0x20, 0x3f, 0x3a);
 pub const WARNING: Color32 = Color32::from_rgb(0xff, 0xc0, 0x78);
 pub const ERROR: Color32 = Color32::from_rgb(0xff, 0x82, 0x91);
+pub const AXIS_COLORS: [Color32; 3] = [
+    Color32::from_rgb(0xff, 0xa2, 0xa7),
+    Color32::from_rgb(0x9b, 0xdd, 0xab),
+    Color32::from_rgb(0xa7, 0xca, 0xff),
+];
 
 pub fn configure(ctx: &egui::Context) {
     let mut visuals = egui::Visuals::dark();
     visuals.panel_fill = SURFACE;
+    visuals.disabled_alpha = 0.58;
     visuals.window_fill = RAISED;
     visuals.faint_bg_color = BACKGROUND;
     visuals.extreme_bg_color = FIELD;
