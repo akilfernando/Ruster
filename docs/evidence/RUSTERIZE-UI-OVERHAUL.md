@@ -45,3 +45,9 @@ A later focus change to ChatGPT blocks another focused check. The final installe
 The focused interaction evidence uses app-scoped injected events with real OS focus. Final installation and startup are verified. Hands-on user feedback, broader accessibility coverage and UI latency benchmarking remain open. The audit preserves exact native and tool receipts at /home/akilf/Projects/Ruster-Audits/rusterize-ui-20261111/.studio.
 
 The documentation-only check against eb1d9c6 passes Markdown links and whitespace in 0.12 seconds. Git diff --check passes.
+
+## Launcher workspace correction — 2026-11-11
+
+The user reports that ordinary Rusterize launches open on workspace 2. The local Hyprland development rule matched the same startup title as the installed launcher. Root backs up the configuration, removes the title-wide rule and reloads successfully. Hyprland reports no configuration errors and the desktop entry passes validation.
+
+The installed entry launches the editor directly. Disposable tests now request workspace 2 and no initial focus on each launch, following the [Hyprland dispatcher reference](https://wiki.hypr.land/0.57.0/configuring/core/dispatchers/). The running compositor accepts the per-launch options with a no-window command. Workspace 2 is occupied, so the owned-window test stops before launching. The normal graphical relaunch is left for the user. Archived native helpers that assume the removed title rule need the per-launch routing update before reuse.

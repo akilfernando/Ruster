@@ -10,6 +10,8 @@ The full source gate passes 333 Rust and 29 Python cases with strict checks. Fin
 
 Three focused test windows close normally and restore the original workspace/window while preserving the user’s last pointer move. The final silent launch preserves current focus, starts with zero owned listeners, and needs scoped termination after a pending hidden close. All owned children are reaped and the protected project and clipboard are untouched. The installed build is ready for hands-on feedback. Broader accessibility and UI latency benchmarking remain open.
 
+The user subsequently reports normal startup opening on workspace 2. The local Hyprland title rule is removed and configuration reload and launcher validation pass. Disposable tests use explicit per-launch routing. [Workspace correction](evidence/RUSTERIZE-UI-OVERHAUL.md#launcher-workspace-correction--2026-11-11).
+
 ## Rusterize identity and UI foundation — first slice verified
 
 2026-11-10. The user confirms the product name Rusterize, supplies a [graphite/mint UI brief](branding/RUSTERIZE-UI-BRIEF.md) and [logo concept](branding/rusterize-logo-concept.png), and explicitly resumes bounded branding/UI work. Productd955dc2updates visible editor branding, shared generic/legacy egui theme, neutral/selected/focus/error states and primary Save. The full331Rust/29Python gate and final141default/143inspection cases with strict checks pass, with3existing workspace/1inspection device cases ignored. An initial compact viewport regression is repaired through responsive density and the original test RED/GREEN. [Evidence, deviations and retained failures](evidence/RUSTERIZE-UI-FOUNDATION.md).
