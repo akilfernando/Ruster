@@ -1,8 +1,21 @@
 # Model routing
 
-Checked 2026-11-11 for the current root session. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
+Checked 2026-11-12 for the current root session. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
 
-## Current routing
+## Current routing — Claude Code host, 2026-11-12
+
+The user starts this root session in Claude Code and selects `claude-fable-5-2` as the main model. The earlier Codex/OpenAI table below is a historical snapshot for that host; its model IDs are unavailable through this session's delegation tool.
+
+| Role | Available model (Agent tool alias) | Effort guidance |
+| --- | --- | --- |
+| Main developer and deep reasoning | Root `claude-fable-5-2` (`fable`) | Root owns scope, strategy, integration, verification and documentation |
+| Balanced developer | `opus` | Medium for multi-system changes; high for ownership/edge-case tracing |
+| Economical worker | `sonnet`, `haiku` for purely mechanical work | Low/medium with explicit acceptance criteria |
+| Visual and computer use | No separate specialist; root reads images directly | Native UI checks stay with root |
+
+Evidence: the active Agent tool schema exposes model aliases `sonnet`, `opus`, `haiku` and `fable`, efforts low/medium/high/xhigh/max, agent types including general-purpose, Explore and Plan, and optional worktree isolation. Children start with only their brief unless forked. The host states the current family as Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5. No external model documentation was fetched for this refresh; the source is the host's own tool schema and session description. Concurrency limits are not stated by the tool. Relative cost and quality per role on this project are unmeasured. Because the root fills the deep-reasoning role, whole-roadmap assessment is performed by the root directly under the skill's existing allowance, with independent review reserved for consequential decisions.
+
+## Previous routing — Codex host, 2026-11-11
 
 | Role | Available model | Effort guidance |
 | --- | --- | --- |
