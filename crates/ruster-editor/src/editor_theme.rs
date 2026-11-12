@@ -1,44 +1,210 @@
 //! Shared Rusterize editor presentation, configured once with bundled fonts.
-use eframe::egui::{self, Color32, CornerRadius, FontId, Stroke, Vec2};
+//!
+//! One [`Palette`] per theme owns every chrome color. Call sites ask for the
+//! active palette through [`colors`]/[`palette`] so labels, warnings and axis
+//! tints stay readable after the creator switches themes.
+use eframe::egui::{self, Color32, CornerRadius, FontId, Stroke, Theme, Vec2};
 
-pub const BACKGROUND: Color32 = Color32::from_rgb(0x10, 0x15, 0x1b);
-const SURFACE: Color32 = Color32::from_rgb(0x18, 0x1f, 0x28);
-pub const RAISED: Color32 = Color32::from_rgb(0x20, 0x2a, 0x35);
-const HOVER: Color32 = Color32::from_rgb(0x29, 0x35, 0x41);
-const FIELD: Color32 = Color32::from_rgb(0x12, 0x1a, 0x22);
-const DIVIDER: Color32 = Color32::from_rgb(0x2c, 0x39, 0x46);
-const CONTROL_BORDER: Color32 = Color32::from_rgb(0x64, 0x79, 0x8b);
-const TEXT: Color32 = Color32::from_rgb(0xe8, 0xef, 0xf4);
-pub const SECONDARY: Color32 = Color32::from_rgb(0xa6, 0xb5, 0xc2);
-pub const ACCENT: Color32 = Color32::from_rgb(0x72, 0xe6, 0xc0);
-const ACCENT_HOVER: Color32 = Color32::from_rgb(0x95, 0xf0, 0xd3);
-const ACCENT_PRESSED: Color32 = Color32::from_rgb(0x50, 0xcb, 0xa6);
-const ON_ACCENT: Color32 = Color32::from_rgb(0x10, 0x23, 0x1e);
-const SELECTION: Color32 = Color32::from_rgb(0x20, 0x3f, 0x3a);
-pub const WARNING: Color32 = Color32::from_rgb(0xff, 0xc0, 0x78);
-pub const ERROR: Color32 = Color32::from_rgb(0xff, 0x82, 0x91);
-pub const AXIS_COLORS: [Color32; 3] = [
-    Color32::from_rgb(0xff, 0xa2, 0xa7),
-    Color32::from_rgb(0x9b, 0xdd, 0xab),
-    Color32::from_rgb(0xa7, 0xca, 0xff),
-];
+/// The creator's theme preference. `System` follows the platform report and
+/// falls back to Dark when the platform reports nothing.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThemeChoice {
+    System,
+    #[default]
+    Dark,
+    Light,
+    /// Pure-black dark variant offered for evaluation on OLED panels.
+    OledBlack,
+}
+
+impl ThemeChoice {
+    pub const ALL: [Self; 4] = [Self::System, Self::Dark, Self::Light, Self::OledBlack];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::System => "System",
+            Self::Dark => "Dark",
+            Self::Light => "Light",
+            Self::OledBlack => "OLED black (dark)",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::System => "system",
+            Self::Dark => "dark",
+            Self::Light => "light",
+            Self::OledBlack => "oled-black",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|choice| choice.name() == name)
+    }
+}
+
+/// Chrome colors for one theme. `accent` is also used as text, so it must
+/// remain readable on every surface; `on_accent` is the primary button label.
+#[derive(Debug, PartialEq)]
+pub struct Palette {
+    pub background: Color32,
+    pub surface: Color32,
+    pub raised: Color32,
+    pub hover: Color32,
+    pub field: Color32,
+    pub divider: Color32,
+    pub control_border: Color32,
+    pub text: Color32,
+    pub secondary: Color32,
+    pub accent: Color32,
+    pub accent_hover: Color32,
+    pub accent_pressed: Color32,
+    pub on_accent: Color32,
+    pub selection: Color32,
+    pub warning: Color32,
+    pub error: Color32,
+    pub axis: [Color32; 3],
+}
+
+const fn rgb(hex: u32) -> Color32 {
+    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
+}
+
+pub const DARK: Palette = Palette {
+    background: rgb(0x10151b),
+    surface: rgb(0x181f28),
+    raised: rgb(0x202a35),
+    hover: rgb(0x293541),
+    field: rgb(0x121a22),
+    divider: rgb(0x2c3946),
+    control_border: rgb(0x64798b),
+    text: rgb(0xe8eff4),
+    secondary: rgb(0xa6b5c2),
+    accent: rgb(0x72e6c0),
+    accent_hover: rgb(0x95f0d3),
+    accent_pressed: rgb(0x50cba6),
+    on_accent: rgb(0x10231e),
+    selection: rgb(0x203f3a),
+    warning: rgb(0xffc078),
+    error: rgb(0xff8291),
+    axis: [rgb(0xffa2a7), rgb(0x9bddab), rgb(0xa7caff)],
+};
+
+/// Dark text and accents on pure-black panels; raised controls stay lifted.
+pub const OLED_BLACK: Palette = Palette {
+    background: rgb(0x000000),
+    surface: rgb(0x000000),
+    raised: rgb(0x121820),
+    hover: rgb(0x1c242d),
+    field: rgb(0x000000),
+    divider: rgb(0x222b34),
+    control_border: rgb(0x5f7384),
+    selection: rgb(0x16362f),
+    ..DARK
+};
+
+/// Light chrome uses graphite text and the logo's deep teal for accents.
+pub const LIGHT: Palette = Palette {
+    background: rgb(0xe4eaef),
+    surface: rgb(0xf2f5f8),
+    raised: rgb(0xffffff),
+    hover: rgb(0xe0e7ed),
+    field: rgb(0xffffff),
+    divider: rgb(0xc7d1da),
+    control_border: rgb(0x6a7b8a),
+    text: rgb(0x10151b),
+    secondary: rgb(0x475563),
+    accent: rgb(0x176554),
+    accent_hover: rgb(0x1f7a66),
+    accent_pressed: rgb(0x0f4d40),
+    on_accent: rgb(0xffffff),
+    selection: rgb(0xcfeae1),
+    warning: rgb(0x8a5300),
+    error: rgb(0xb3261e),
+    axis: [rgb(0xb42318), rgb(0x2b7a0b), rgb(0x1f5fbf)],
+};
+
+fn choice_id() -> egui::Id {
+    egui::Id::unique("rusterize_editor_theme_choice")
+}
+
+/// The active palette after resolving `System` through egui's reported theme.
+pub fn palette(ctx: &egui::Context) -> &'static Palette {
+    match ctx.theme() {
+        Theme::Light => &LIGHT,
+        Theme::Dark
+            if ctx.data(|data| data.get_temp::<ThemeChoice>(choice_id()))
+                == Some(ThemeChoice::OledBlack) =>
+        {
+            &OLED_BLACK
+        }
+        Theme::Dark => &DARK,
+    }
+}
+
+pub fn colors(ui: &egui::Ui) -> &'static Palette {
+    palette(ui.ctx())
+}
 
 pub fn configure(ctx: &egui::Context) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.panel_fill = SURFACE;
+    apply(ctx, ThemeChoice::default());
+}
+
+/// Installs both egui theme styles; egui then follows runtime system changes.
+pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
+    let dark = if choice == ThemeChoice::OledBlack {
+        &OLED_BLACK
+    } else {
+        &DARK
+    };
+    for (theme, palette) in [(Theme::Dark, dark), (Theme::Light, &LIGHT)] {
+        let visuals = visuals(palette, theme);
+        ctx.style_mut_of(theme, |style| {
+            style.visuals = visuals;
+            // Keep editor chrome transitions immediate for reduced-motion users.
+            style.animation_time = 0.0;
+            style.spacing.item_spacing = Vec2::new(8.0, 8.0);
+            style.spacing.button_padding = Vec2::new(10.0, 6.0);
+            style.spacing.interact_size = Vec2::new(32.0, 30.0);
+            style.spacing.indent = 16.0;
+            for (kind, font) in [
+                (egui::TextStyle::Body, FontId::proportional(14.0)),
+                (egui::TextStyle::Button, FontId::proportional(14.0)),
+                (egui::TextStyle::Heading, FontId::proportional(18.0)),
+                (egui::TextStyle::Small, FontId::proportional(12.0)),
+                (egui::TextStyle::Monospace, FontId::monospace(13.0)),
+            ] {
+                style.text_styles.insert(kind, font);
+            }
+        });
+    }
+    ctx.options_mut(|options| {
+        options.fallback_theme = Theme::Dark;
+        options.theme_preference = match choice {
+            ThemeChoice::System => egui::ThemePreference::System,
+            ThemeChoice::Dark | ThemeChoice::OledBlack => egui::ThemePreference::Dark,
+            ThemeChoice::Light => egui::ThemePreference::Light,
+        };
+    });
+    ctx.data_mut(|data| data.insert_temp(choice_id(), choice));
+}
+
+fn visuals(p: &Palette, theme: Theme) -> egui::Visuals {
+    let mut visuals = theme.default_visuals();
+    visuals.panel_fill = p.surface;
     visuals.disabled_alpha = 0.58;
-    visuals.window_fill = RAISED;
-    visuals.faint_bg_color = BACKGROUND;
-    visuals.extreme_bg_color = FIELD;
-    visuals.text_edit_bg_color = Some(FIELD);
-    visuals.code_bg_color = FIELD;
-    visuals.weak_text_color = Some(SECONDARY);
-    visuals.hyperlink_color = ACCENT;
-    visuals.warn_fg_color = WARNING;
-    visuals.error_fg_color = ERROR;
-    visuals.selection.bg_fill = SELECTION;
-    visuals.selection.stroke = Stroke::new(1.5, ACCENT);
-    visuals.window_stroke = Stroke::new(1.0, CONTROL_BORDER);
+    visuals.window_fill = p.raised;
+    visuals.faint_bg_color = p.background;
+    visuals.extreme_bg_color = p.field;
+    visuals.text_edit_bg_color = Some(p.field);
+    visuals.code_bg_color = p.field;
+    visuals.weak_text_color = Some(p.secondary);
+    visuals.hyperlink_color = p.accent;
+    visuals.warn_fg_color = p.warning;
+    visuals.error_fg_color = p.error;
+    visuals.selection.bg_fill = p.selection;
+    visuals.selection.stroke = Stroke::new(1.5, p.accent);
+    visuals.window_stroke = Stroke::new(1.0, p.control_border);
     visuals.window_corner_radius = CornerRadius::same(10);
     visuals.menu_corner_radius = CornerRadius::same(8);
     visuals.collapsing_header_frame = false;
@@ -51,58 +217,105 @@ pub fn configure(ctx: &egui::Context) {
         &mut visuals.widgets.open,
     ] {
         widget.corner_radius = CornerRadius::same(5);
-        widget.fg_stroke = Stroke::new(1.0, TEXT);
-        widget.bg_stroke = Stroke::new(1.0, CONTROL_BORDER);
+        widget.fg_stroke = Stroke::new(1.0, p.text);
+        widget.bg_stroke = Stroke::new(1.0, p.control_border);
         widget.expansion = 0.0;
     }
-    visuals.widgets.noninteractive.bg_fill = SURFACE;
-    visuals.widgets.noninteractive.weak_bg_fill = SURFACE;
-    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, DIVIDER);
-    visuals.widgets.inactive.bg_fill = RAISED;
-    visuals.widgets.inactive.weak_bg_fill = RAISED;
-    visuals.widgets.hovered.bg_fill = HOVER;
-    visuals.widgets.hovered.weak_bg_fill = HOVER;
-    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, SECONDARY);
-    visuals.widgets.active.bg_fill = SELECTION;
-    visuals.widgets.active.weak_bg_fill = SELECTION;
-    visuals.widgets.active.bg_stroke = Stroke::new(1.5, ACCENT);
+    visuals.widgets.noninteractive.bg_fill = p.surface;
+    visuals.widgets.noninteractive.weak_bg_fill = p.surface;
+    visuals.widgets.noninteractive.bg_stroke = Stroke::new(1.0, p.divider);
+    visuals.widgets.inactive.bg_fill = p.raised;
+    visuals.widgets.inactive.weak_bg_fill = p.raised;
+    visuals.widgets.hovered.bg_fill = p.hover;
+    visuals.widgets.hovered.weak_bg_fill = p.hover;
+    visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, p.secondary);
+    visuals.widgets.active.bg_fill = p.selection;
+    visuals.widgets.active.weak_bg_fill = p.selection;
+    visuals.widgets.active.bg_stroke = Stroke::new(1.5, p.accent);
     visuals.widgets.open = visuals.widgets.active;
-    ctx.set_visuals(visuals);
-    ctx.style_mut_of(egui::Theme::Dark, |style| {
-        // Keep editor chrome transitions immediate for reduced-motion users.
-        style.animation_time = 0.0;
-        style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-        style.spacing.button_padding = Vec2::new(10.0, 6.0);
-        style.spacing.interact_size = Vec2::new(32.0, 30.0);
-        style.spacing.indent = 16.0;
-        for (kind, font) in [
-            (egui::TextStyle::Body, FontId::proportional(14.0)),
-            (egui::TextStyle::Button, FontId::proportional(14.0)),
-            (egui::TextStyle::Heading, FontId::proportional(18.0)),
-            (egui::TextStyle::Small, FontId::proportional(12.0)),
-            (egui::TextStyle::Monospace, FontId::monospace(13.0)),
-        ] {
-            style.text_styles.insert(kind, font);
-        }
-    });
+    visuals
 }
 
 /// A local primary action with explicit hover, pressed and keyboard-focus states.
 pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
+    let p = colors(ui);
     ui.scope(|ui| {
         if ui.is_enabled() {
             let widgets = &mut ui.visuals_mut().widgets;
             for (widget, fill) in [
-                (&mut widgets.inactive, ACCENT),
-                (&mut widgets.hovered, ACCENT_HOVER),
-                (&mut widgets.active, ACCENT_PRESSED),
+                (&mut widgets.inactive, p.accent),
+                (&mut widgets.hovered, p.accent_hover),
+                (&mut widgets.active, p.accent_pressed),
             ] {
                 widget.bg_fill = fill;
                 widget.weak_bg_fill = fill;
-                widget.fg_stroke = Stroke::new(1.0, ON_ACCENT);
+                widget.fg_stroke = Stroke::new(1.0, p.on_accent);
             }
         }
         ui.button(label)
     })
     .inner
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn luminance(color: Color32) -> f64 {
+        let channel = |value: u8| {
+            let c = f64::from(value) / 255.0;
+            if c <= 0.04045 {
+                c / 12.92
+            } else {
+                ((c + 0.055) / 1.055).powf(2.4)
+            }
+        };
+        0.2126 * channel(color.r()) + 0.7152 * channel(color.g()) + 0.0722 * channel(color.b())
+    }
+
+    fn contrast(a: Color32, b: Color32) -> f64 {
+        let (a, b) = (luminance(a), luminance(b));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    // Unreadable theme: every theme must keep WCAG reading/interaction contrast
+    // for the text, accent, status and control-border pairs the chrome paints.
+    #[test]
+    fn every_theme_meets_reading_and_control_contrast() {
+        for (name, p) in [("dark", &DARK), ("oled", &OLED_BLACK), ("light", &LIGHT)] {
+            let panels = [p.surface, p.background, p.raised, p.field];
+            let mut pairs = vec![];
+            for surface in panels.into_iter().chain([p.hover, p.selection]) {
+                pairs.push(("text", p.text, surface, 7.0));
+            }
+            for surface in panels.into_iter().chain([p.hover]) {
+                pairs.push(("secondary", p.secondary, surface, 4.5));
+            }
+            for surface in panels {
+                pairs.push(("control border", p.control_border, surface, 3.0));
+                for (role, color) in [
+                    ("accent", p.accent),
+                    ("warning", p.warning),
+                    ("error", p.error),
+                ] {
+                    pairs.push((role, color, surface, 4.5));
+                }
+            }
+            for axis in p.axis {
+                pairs.push(("axis", axis, p.surface, 4.5));
+                pairs.push(("axis", axis, p.raised, 4.5));
+            }
+            pairs.push(("selection stroke", p.accent, p.selection, 3.0));
+            for fill in [p.accent, p.accent_hover, p.accent_pressed] {
+                pairs.push(("primary label", p.on_accent, fill, 4.5));
+            }
+            for (role, foreground, background, minimum) in pairs {
+                let ratio = contrast(foreground, background);
+                assert!(
+                    ratio >= minimum,
+                    "{name} {role} {foreground:?} on {background:?}: {ratio:.2} < {minimum}"
+                );
+            }
+        }
+    }
 }

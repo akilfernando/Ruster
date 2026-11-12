@@ -12,7 +12,11 @@ Current source saves Scene17 and raw drafts in Recovery15. F3c adds state-driven
 
 ## Branding and desktop launcher
 
-Start the editor without a scene argument to see the Rusterize start screen. **Help → About Rusterize** shows the version and source link. Compact menus place it under **File**. The editor also supplies the bundled mark as its window icon.
+Start the editor without a scene argument to see the Rusterize start screen. **Help → About Rusterize** shows the version and source link. Compact menus place it under **File**. The editor also supplies the bundled dark app tile as its window icon.
+
+**View → Theme** and **File → Workspace and shortcuts…** select **System**, **Dark**, **Light** or **OLED black (dark)**. The choice applies immediately and is saved with workspace preferences; files without a theme keep Dark. System follows the platform's reported light/dark mode and falls back to Dark when none is reported. The 3D viewport and its overlays are not themed.
+
+The in-app mark and lockup switch between the dark and light [logo v2](../../docs/branding/logo-v2/README.md) variants. The bundled PNGs were rasterized from its SVGs with `rsvg-convert` (marks at 64 px, lockups at 96 px tall); the launcher icon is its `rusterize-dark-128.png`. The lockup wordmark is outlined DejaVu Sans Bold, so [`assets/DEJAVU-LICENSE.txt`](assets/DEJAVU-LICENSE.txt) travels with those assets.
 
 On Linux, install the desktop entry and icon to make the same mark available to the application menu. The entry expects `ruster-editor` on the desktop session's PATH.
 

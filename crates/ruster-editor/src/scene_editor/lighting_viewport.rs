@@ -240,8 +240,9 @@ pub(super) fn paint_and_pick(
         } else {
             egui::Color32::from_gray(125)
         };
+        // The 3D viewport is not themed; overlays keep the dark-chrome ink.
         let ink = if marker.light.enabled {
-            ui.visuals().strong_text_color()
+            crate::editor_theme::DARK.text
         } else {
             egui::Color32::from_gray(125)
         };
@@ -283,7 +284,11 @@ pub(super) fn paint_and_pick(
             }
         };
         if chosen {
-            painter.circle_stroke(center, HIT_RADIUS, ui.visuals().selection.stroke);
+            painter.circle_stroke(
+                center,
+                HIT_RADIUS,
+                egui::Stroke::new(1.5, crate::editor_theme::DARK.accent),
+            );
         }
         let name: String = marker
             .light
@@ -299,11 +304,7 @@ pub(super) fn paint_and_pick(
                 if marker.light.enabled { "" } else { " (off)" }
             ),
             egui::TextStyle::Body.resolve(ui.style()),
-            if chosen {
-                ui.visuals().strong_text_color()
-            } else {
-                ui.visuals().text_color()
-            },
+            crate::editor_theme::DARK.text,
         );
     }
     if !pointer_allowed || !viewport.response.clicked() {

@@ -78,7 +78,7 @@ fn transform_rows(ui: &mut egui::Ui, transform: &Transform) {
                     egui::vec2(width, ui.spacing().interact_size.y),
                     egui::Layout::left_to_right(egui::Align::Center),
                     |ui| {
-                        ui.colored_label(crate::editor_theme::AXIS_COLORS[index], axis);
+                        ui.colored_label(crate::editor_theme::colors(ui).axis[index], axis);
                         let mut text = value.to_string();
                         ui.add_sized(
                             [ui.available_width().max(48.0), ui.spacing().interact_size.y],

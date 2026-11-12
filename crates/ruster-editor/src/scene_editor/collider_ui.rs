@@ -490,7 +490,7 @@ fn collider_field(
             let label = egui::RichText::new(label);
             ui.label(match field {
                 Field::Offset(index) | Field::Size(index) => {
-                    label.color(crate::editor_theme::AXIS_COLORS[index])
+                    label.color(crate::editor_theme::colors(ui).axis[index])
                 }
                 _ => label,
             });

@@ -468,6 +468,7 @@ pub struct SceneEditor {
     content_scroll_to: bool,
     content_search: ContentSearch,
     scale_applied: f32,
+    theme_applied: Option<crate::editor_theme::ThemeChoice>,
     preview: Preview,
     generation: u64,
     error: String,
@@ -657,6 +658,7 @@ impl SceneEditor {
             content_scroll_to: false,
             content_search: ContentSearch::default(),
             scale_applied: 0.0,
+            theme_applied: None,
             draft,
             preview,
             generation: GENERATION.fetch_add(1, Ordering::Relaxed),
@@ -3397,7 +3399,7 @@ impl SceneEditor {
                         let end = response.rect.left_bottom() + egui::vec2(2.0, -5.0);
                         ui.painter().line_segment(
                             [start, end],
-                            egui::Stroke::new(2.0, crate::editor_theme::ACCENT),
+                            egui::Stroke::new(2.0, crate::editor_theme::colors(ui).accent),
                         );
                     }
                     if response.drag_started() && !row.light {
@@ -4009,7 +4011,7 @@ impl SceneEditor {
                     }).on_hover_text("This import setting is fixed for this asset. To change it, import the source with a new ID, then assign that mesh. Mesh assignment supports Undo.");
                 }
                 if let Some(error) = &row.info.diagnostic {
-                    ui.colored_label(crate::editor_theme::WARNING, error);
+                    ui.colored_label(crate::editor_theme::colors(ui).warning, error);
                 }
                 if (self.resolved.contains_key(id) || self.resolved_textures.contains_key(id))
                     && row.info.status != ruster_assets::AssetStatus::Ready
@@ -4040,7 +4042,7 @@ impl SceneEditor {
             .count();
         if missing > 0 {
             ui.horizontal_wrapped(|ui| {
-                        ui.colored_label(crate::editor_theme::WARNING, format!("{missing} objects have unresolved mesh references; placeholder cubes shown."));
+                        ui.colored_label(crate::editor_theme::colors(ui).warning, format!("{missing} objects have unresolved mesh references; placeholder cubes shown."));
                         if ui.button("Locate missing content").clicked() {
                             let id = self.session.scene().objects.iter().filter_map(|o| o.mesh.as_ref()).find(|id| !self.resolved.contains_key(*id)).cloned();
                             if let Some(id) = id { self.locate_mesh(&id); }
@@ -4059,7 +4061,7 @@ impl SceneEditor {
                     .take(3)
                 {
                     if let Some(error) = &row.info.diagnostic {
-                        ui.colored_label(crate::editor_theme::WARNING, error);
+                        ui.colored_label(crate::editor_theme::colors(ui).warning, error);
                     }
                 }
             });
@@ -4186,11 +4188,11 @@ impl SceneEditor {
                 egui::ScrollArea::vertical().max_height((ctx.content_rect().height() * 0.25).min(180.0)).show(ui, |ui| {
                     for row in &self.content_search.rows {
                         ui.label(&row.label);
-                        if let Some(error) = &row.info.diagnostic { ui.colored_label(crate::editor_theme::ERROR, error); }
+                        if let Some(error) = &row.info.diagnostic { ui.colored_label(crate::editor_theme::colors(ui).error, error); }
                     }
                 });
             }
-            if !self.error.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.error).color(crate::editor_theme::ERROR)).truncate()).on_hover_text(&self.error); }
+            if !self.error.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.error).color(crate::editor_theme::colors(ui).error)).truncate()).on_hover_text(&self.error); }
             });
             });
             if ui.button("Close assets").clicked() { self.asset_dialog = false; self.asset_focused = false; self.asset_ops.cancel(); }
@@ -4228,7 +4230,7 @@ impl SceneEditor {
                 self.sync_draft();
             }
             if !self.error.is_empty() {
-                ui.colored_label(crate::editor_theme::ERROR, &self.error);
+                ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
             }
         });
         if !self.rename_pending {
@@ -4541,7 +4543,8 @@ impl SceneEditor {
                 if !self.error.is_empty() {
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(&self.error).color(crate::editor_theme::ERROR),
+                            egui::RichText::new(&self.error)
+                                .color(crate::editor_theme::colors(ui).error),
                         )
                         .wrap(),
                     );
@@ -4553,7 +4556,8 @@ impl SceneEditor {
                 {
                     ui.add(
                         egui::Label::new(
-                            egui::RichText::new(shader).color(crate::editor_theme::WARNING),
+                            egui::RichText::new(shader)
+                                .color(crate::editor_theme::colors(ui).warning),
                         )
                         .wrap(),
                     );
@@ -4562,7 +4566,7 @@ impl SceneEditor {
                     ui.add(
                         egui::Label::new(
                             egui::RichText::new(&self.workspace.error)
-                                .color(crate::editor_theme::WARNING),
+                                .color(crate::editor_theme::colors(ui).warning),
                         )
                         .wrap(),
                     );
@@ -4586,7 +4590,7 @@ impl SceneEditor {
                                 },
                                 diagnostic.message
                             ))
-                            .color(crate::editor_theme::ERROR),
+                            .color(crate::editor_theme::colors(ui).error),
                         )
                         .wrap(),
                     );
@@ -4792,6 +4796,18 @@ impl SceneEditor {
                     self.navigation.reset = true;
                     ui.close();
                 }
+                ui.separator();
+                ui.menu_button("Theme", |ui| {
+                    for choice in crate::editor_theme::ThemeChoice::ALL {
+                        if ui
+                            .radio_value(&mut self.workspace.prefs.theme, choice, choice.label())
+                            .clicked()
+                        {
+                            self.workspace.changed();
+                            ui.close();
+                        }
+                    }
+                });
             });
             ui.menu_button("Content", |ui| {
                 if ui.button("Assets / import…").clicked() {
@@ -4935,6 +4951,17 @@ impl SceneEditor {
             }
         }
     }
+    /// Applies a changed theme preference; the next frame paints it everywhere.
+    fn apply_theme(&mut self, ctx: &egui::Context) {
+        let theme = self.workspace.prefs.theme;
+        if self.theme_applied != Some(theme) {
+            crate::editor_theme::apply(ctx, theme);
+            if self.theme_applied.is_some() {
+                ctx.request_repaint();
+            }
+            self.theme_applied = Some(theme);
+        }
+    }
     fn ui(&mut self, ui: &mut egui::Ui) {
         // Keep the supported compact viewport usable while retaining normal-size controls.
         if ui.max_rect().height() < 600.0 {
@@ -4960,6 +4987,7 @@ impl SceneEditor {
             ctx.set_zoom_factor(self.workspace.prefs.scale);
             self.scale_applied = self.workspace.prefs.scale;
         }
+        self.apply_theme(&ctx);
         if ctx.input(|i| i.viewport().close_requested()) && !self.close_ready_to_exit {
             ctx.send_viewport_cmd(egui::ViewportCommand::CancelClose);
             if !self.close_approved {
@@ -5342,7 +5370,7 @@ impl SceneEditor {
                     self.new_scene_pending = false;
                 }
                 if !self.error.is_empty() {
-                    ui.colored_label(crate::editor_theme::ERROR, &self.error);
+                    ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
                 }
             });
         }
@@ -5354,7 +5382,7 @@ impl SceneEditor {
                 if !self.path_focused {edit.request_focus();self.path_focused=true;}
                 let submit=(edit.has_focus()||edit.lost_focus())&&enter_pressed;
                 if open && (self.session.is_dirty()||self.drafts()) {
-                    ui.colored_label(crate::editor_theme::WARNING,"Opening discards current unsaved scene and drafts. Cancel to preserve them.");
+                    ui.colored_label(crate::editor_theme::colors(ui).warning,"Opening discards current unsaved scene and drafts. Cancel to preserve them.");
                 }
                 ui.horizontal(|ui| {
                     if ui.button(if open {"Open and discard current"}else{"Save to new path"}).clicked()||submit {
@@ -5380,7 +5408,7 @@ impl SceneEditor {
                     }
                     if ui.button("Cancel scene dialog").clicked()||cancel {self.dialog=None;self.path_focused=false;}
                 });
-                if !self.error.is_empty(){ui.colored_label(crate::editor_theme::ERROR,&self.error);}
+                if !self.error.is_empty(){ui.colored_label(crate::editor_theme::colors(ui).error,&self.error);}
             });
         }
         self.content_ui(&ctx);
@@ -5475,7 +5503,7 @@ impl SceneEditor {
                     self.close_pending = false;
                 }
                 if !self.error.is_empty() {
-                    ui.colored_label(crate::editor_theme::ERROR, &self.error);
+                    ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
                 }
             });
         }
@@ -5596,6 +5624,8 @@ fn run_session(session: Session) -> Result<(), String> {
                         editor.workspace.welcome = false;
                     }
                     editor.render = cc.wgpu_render_state.clone();
+                    // Paint the saved theme from the first frame.
+                    editor.apply_theme(&cc.egui_ctx);
                     editor
                 },
                 #[cfg(unix)]

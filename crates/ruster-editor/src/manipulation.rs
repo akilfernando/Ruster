@@ -654,7 +654,7 @@ impl Manipulation {
                 for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
                     let i = row * 3 + axis;
                     ui.allocate_ui_with_layout(egui::vec2(group_width,ui.spacing().interact_size.y),egui::Layout::left_to_right(egui::Align::Center),|ui| {
-                        ui.colored_label(crate::editor_theme::AXIS_COLORS[axis], label);
+                        ui.colored_label(crate::editor_theme::colors(ui).axis[axis], label);
                         let response = ui.add_sized([ui.available_width().max(48.0),ui.spacing().interact_size.y],
                             egui::TextEdit::singleline(if let Some((text,_))=&mut preview {&mut text[i]} else {&mut self.precision[i]}).char_limit(1024).interactive(!previewing && ui.is_enabled() && (row != 2 || scale_allowed))
                                 .hint_text(if mixed[i] { "—" } else { "" }));

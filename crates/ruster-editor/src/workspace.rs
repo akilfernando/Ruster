@@ -164,6 +164,7 @@ pub(super) struct Preferences {
     pub cameras: Vec<(PathBuf, ruster_render::CameraState)>,
     pub bindings: Vec<Binding>,
     pub external_editor: crate::behavior_files::LaunchSpec,
+    pub theme: crate::editor_theme::ThemeChoice,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -208,6 +209,7 @@ impl Default for Preferences {
             hierarchy_visible: true,
             inspector_visible: true,
             content_visible: true,
+            theme: Default::default(),
             scale: 1.0,
             movement_speed: 4.0,
             recent: Vec::new(),
@@ -231,7 +233,7 @@ impl Default for Preferences {
 }
 impl Preferences {
     fn json(&self) -> Value {
-        json!({"format":"ruster-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
+        json!({"format":"ruster-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"theme":self.theme.name(),"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
     }
     fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() > 64 * 1024 {
@@ -258,9 +260,11 @@ impl Preferences {
             "cameras",
             "bindings",
             "external_editor",
+            "theme",
         ];
         let map = v.as_object().ok_or("Preferences must be an object.")?;
-        if !(keys.len() - 2..=keys.len()).contains(&map.len())
+        // content_visible, external_editor and theme are optional later fields.
+        if !(keys.len() - 3..=keys.len()).contains(&map.len())
             || map.keys().any(|k| !keys.contains(&k.as_str()))
             || v["format"] != "ruster-editor-preferences"
             || v["version"] != 1
@@ -430,6 +434,14 @@ impl Preferences {
                 Some(value) => value
                     .as_bool()
                     .ok_or("Invalid content visibility preference.")?,
+            },
+            // Files from before theme selection keep their dark editor.
+            theme: match v.get("theme") {
+                None => Default::default(),
+                Some(value) => value
+                    .as_str()
+                    .and_then(crate::editor_theme::ThemeChoice::from_name)
+                    .ok_or("Invalid theme preference.")?,
             },
             scale: number("ui_scale", 0.75, 2.0)?,
             movement_speed: number("movement_speed", 0.05, 1000.0)?,
@@ -943,6 +955,12 @@ impl Workspace {
                 .max_height(body_height)
                 .show(ui, |ui| {
                     let before = self.prefs.clone();
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Theme");
+                        for choice in crate::editor_theme::ThemeChoice::ALL {
+                            ui.selectable_value(&mut self.prefs.theme, choice, choice.label());
+                        }
+                    });
                     ui.horizontal(|ui| {
                         ui.label("UI scale");
                         ui.add(egui::Slider::new(&mut self.prefs.scale, 0.75..=2.0));
@@ -1125,6 +1143,7 @@ mod tests {
         w.prefs.scale = 1.25;
         w.prefs.inspector_side = Side::Left;
         w.prefs.hierarchy_visible = false;
+        w.prefs.theme = crate::editor_theme::ThemeChoice::OledBlack;
         w.persist().unwrap();
         let before_lock = std::fs::read(&path).unwrap();
         let lock = PreferenceLock::acquire(&path).unwrap();
@@ -1167,6 +1186,9 @@ mod tests {
         assert_eq!(reopened.prefs.recent[0], batched);
         assert_eq!(reopened.camera_for(&batched), Some(camera));
         assert_eq!(reopened.camera_for(&recent), Some(camera));
+        let mut invalid_theme = w.prefs.json();
+        invalid_theme["theme"] = "sepia".into();
+        assert!(Preferences::parse(&serde_json::to_vec(&invalid_theme).unwrap()).is_err());
         let mut invalid_camera = w.prefs.json();
         invalid_camera["cameras"][0]["distance"] = (-1).into();
         assert!(Preferences::parse(&serde_json::to_vec(&invalid_camera).unwrap()).is_err());
@@ -1493,6 +1515,7 @@ mod tests {
         let mut previous = w.prefs.json();
         previous.as_object_mut().unwrap().remove("content_visible");
         previous.as_object_mut().unwrap().remove("external_editor");
+        previous.as_object_mut().unwrap().remove("theme");
         previous["bindings"]
             .as_array_mut()
             .unwrap()
@@ -1510,6 +1533,7 @@ mod tests {
             });
         let upgraded = Preferences::parse(&serde_json::to_vec(&previous).unwrap()).unwrap();
         assert!(upgraded.content_visible);
+        assert_eq!(upgraded.theme, crate::editor_theme::ThemeChoice::Dark);
         assert_eq!(
             upgraded.external_editor,
             Preferences::default().external_editor

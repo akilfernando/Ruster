@@ -4,7 +4,11 @@ use eframe::egui::{self, Align2, Color32, FontId, Key, RichText, Sense, Stroke, 
 
 use crate::model::{Action, Editor, PathMode, Selection};
 
-use crate::editor_theme::{ACCENT, BACKGROUND as BG, RAISED as CARD, SECONDARY as MUTED};
+// Legacy scenario mode has no preference file and always uses the dark theme.
+const ACCENT: Color32 = crate::editor_theme::DARK.accent;
+const BG: Color32 = crate::editor_theme::DARK.background;
+const CARD: Color32 = crate::editor_theme::DARK.raised;
+const MUTED: Color32 = crate::editor_theme::DARK.secondary;
 
 pub fn configure(ctx: &egui::Context) {
     crate::editor_theme::configure(ctx);
