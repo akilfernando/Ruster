@@ -24,6 +24,10 @@ Use one actual chosen client with isolated configuration and disposable projects
 
 **User decision, 2026-11-13:** the finite bounded integration spike is approved with **Hermes, our current working agent, as the first and only client**. The user reports **Claude Code access unavailable until they notify us otherwise**; do not invoke it or probe authentication. Astra's earlier Claude Code preference is superseded. The historical branch name does not imply access. This authorizes disposable compatibility experiments and reversible isolated registration, not E2a production implementation, onboarding UI, global configuration changes or a client sweep. Compatibility remains to be demonstrated.
 
+## Spike outcome — 2026-11-13
+
+The approved Hermes-only spike is **complete, verdict PARTIAL**: [standalone evidence/harness](../../spikes/001-hermes-mcp/README.md). Actual isolated Hermes0.23.1/native stdio discovers84tools, inspects the disposable project, performs guarded edit/stale-revision rejection/shared Undo with exact object readback, then a fresh CLI/session repeats inspection after scoped MCP reload. CLI registration requires running-profile reconciliation; one diagnosed correction was consumed. Registration removal, all owned client sessions/processes/socket cleanup, disposable profile deletion and default configuration/source preservation are verified. The final dirty document blocks normal close; scoped termination is retained rather than claiming a graceful close. Explicit environment-variable startup does **not** prove normal-startup/terminal-free attachment; secure project binding, editor/adapter-process restart and production lifecycle remain missing. No E2a implementation or UI follows automatically. Recommend Astra lifecycle review of these finite results; stop experiments here.
+
 ## Proposed production checkpoints after spike approval
 
 1. **Attachment/lifecycle:** opt-in bridge; bind to one editor incarnation/project generation; revoke on project change/restart. Two-editor tests must never retarget silently.
@@ -46,4 +50,4 @@ Wrong-project access, unsafe configuration isolation, unclear publication owners
 
 ## Decisions to surface
 
-First approve or decline the finite spike and select its one client. Before production, approve session-only/project-bound authority, separately consented in-app Save/export grants, and companion-adapter delivery with one reversible registration. Lifecycle details need a reviewed decision record after feasibility is proven. F4a schema/product decisions wait until that phase is selected.
+The user has approved and completed the finite Hermes-only spike described above. Before production, approve session-only/project-bound authority, separately consented in-app Save/export grants, and companion-adapter delivery with one reversible registration. Lifecycle details need Astra review and a reviewed decision record after this PARTIAL feasibility result. F4a schema/product decisions wait until that phase is selected.

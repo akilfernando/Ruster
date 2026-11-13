@@ -1,0 +1,152 @@
+{
+  "date": "2026-11-13",
+  "source_head": "08b69dfaa4ca843188037f85bf97be4ac94a14d3",
+  "client": {
+    "name": "Hermes Agent",
+    "version": "0.23.1",
+    "release_date": "2026.9.24",
+    "checkout": "3b4215785882",
+    "python": "3.14.9",
+    "openai_sdk": "2.54.0",
+    "provider": "openai-codex",
+    "model": "gpt-6.1-sol",
+    "requested_reasoning": "low",
+    "actual_wire_reasoning": "low",
+    "profile": "e2-hermes-spike"
+  },
+  "build": [
+    {
+      "target": "ruster-editor",
+      "src_path": "/home/akilf/Projects/Rusterize/crates/ruster-editor/src/main.rs",
+      "features": [],
+      "fresh": true,
+      "sha256": "0f839f357bbfd3a8959d369318c6a36fbf0e17ce8ebf371efbecccb01b39b2fa"
+    },
+    {
+      "target": "ruster-mcp",
+      "src_path": "/home/akilf/Projects/Rusterize/crates/ruster-mcp/src/main.rs",
+      "features": [],
+      "fresh": false,
+      "sha256": "d4fbd9c37f3a92c2342bef6869553edb79520aee692f6e792e8e096de97ee3ee"
+    }
+  ],
+  "workflow": {
+    "verdict": "PARTIAL",
+    "transport_workflow_verified": true,
+    "inspection_revisions": [
+      "0",
+      "1",
+      "1",
+      "2"
+    ],
+    "objects_restored_exactly": true,
+    "preview_unchanged": true,
+    "stale_error": "stale_revision",
+    "editor_token_sha256": "96ed874857247a5b815190da756a542fbc0d5150d6dc61b34cd929628588d149",
+    "same_editor_identity_after_client_restart": true,
+    "normal_terminal_free_startup_proven": false,
+    "secure_project_binding_proven": false,
+    "final_dirty": true,
+    "tool_calls": [
+      {
+        "name": "tool_describe",
+        "handle": "call_c26294a0ee3b43248f19bfbd5f94dc00"
+      },
+      {
+        "name": "mcp__rusterize__scene_inspect",
+        "handle": "call_89102f83bbb1475595863d35e1943dad"
+      },
+      {
+        "name": "mcp__rusterize__scene_transform",
+        "handle": "call_74f16ef5facc4c5c9a79f57101acc168"
+      },
+      {
+        "name": "mcp__rusterize__scene_inspect",
+        "handle": "call_26e4a0701367442d82b29c66cfd3340e"
+      },
+      {
+        "name": "mcp__rusterize__scene_transform",
+        "handle": "call_a1a53c756bdd4d37b422b1347c50763a"
+      },
+      {
+        "name": "mcp__rusterize__scene_inspect",
+        "handle": "call_9c6502903e0c452e819de7ba959d691f"
+      },
+      {
+        "name": "mcp__rusterize__scene_undo",
+        "handle": "call_482de0efa9f04bb9b5e2ad3f22fc2e84"
+      },
+      {
+        "name": "mcp__rusterize__scene_inspect",
+        "handle": "call_45cc7eaa88674eed9ffd7031361c695c"
+      }
+    ],
+    "sessions": [
+      {
+        "id": "local-3187b9bce4e60f5a26d9403fc1574f0979c592a34a67fd8fd8b013b2743e5fbd",
+        "duration_ms": 35064,
+        "tokens": {
+          "input": 64677,
+          "output": 652,
+          "total": 65329,
+          "cache_read": 44800,
+          "cache_write": 0
+        }
+      },
+      {
+        "id": "local-1df216fa07015c52ee2dff6c873d426eeea05dbe2bf61ced8d93d98ae52ab142",
+        "duration_ms": 10184,
+        "tokens": {
+          "input": 14070,
+          "output": 148,
+          "total": 14218,
+          "cache_read": 8576,
+          "cache_write": 0
+        }
+      }
+    ]
+  },
+  "cleanup": {
+    "non_markdown_source_changed": [],
+    "default_configuration_pins": {
+      "/home/akilf/.hermes/config.yaml": true,
+      "/home/akilf/.hermes/.env": true,
+      "/home/akilf/.hermes/auth.json": true
+    },
+    "owned_binaries_remaining": [],
+    "registration_removed": true,
+    "client_sessions_deleted": true,
+    "clipboard_operations": 0,
+    "profile_deleted": true,
+    "default_gateway_remains_running": true,
+    "desktop_runs": [
+      {
+        "pid": 348908,
+        "process_gone": true,
+        "workspace_restored": true,
+        "window_restored": true,
+        "pointer_restored": true,
+        "no_fresh_input": true,
+        "retired_socket_removed": true
+      },
+      {
+        "pid": 350897,
+        "process_gone": true,
+        "workspace_restored": true,
+        "window_restored": true,
+        "pointer_restored": true,
+        "no_fresh_input": true,
+        "retired_socket_removed": true
+      }
+    ],
+    "remaining_owned_processes": [],
+    "installed_editor_sha256": "3f1665b11179b95685e515c58b1c530a2a1af3f2481f3b45e0b1fd9b597a08d4"
+  },
+  "limitations": [
+    "No normal-startup or terminal-free proof",
+    "No secure project binding or editor/adapter-process restart proof",
+    "Normal close failed at final dirty=true; exact owned processes terminated",
+    "One configuration-reconciliation correction; original no-tool session retained"
+  ],
+  "private_audit": "/home/akilf/Projects/Ruster-Audits/e2-hermes-mcp-20261113"
+}

@@ -1,6 +1,8 @@
 # E2 — Terminal-free MCP onboarding
 
-Proposed 2026-11-12 by the root session from a read-only design pass (balanced-developer agent, medium effort). **Proposal only. Implementation has not started.** It answers the user's 2026-11-11 feedback rejecting launch commands and manual socket/configuration work as the normal connection process.
+Proposed 2026-11-12 by the root session from a read-only design pass (balanced-developer agent, medium effort). **Historical proposal, not implementation authority.** It answers the user's 2026-11-11 feedback rejecting launch commands and manual socket/configuration work as the normal connection process.
+
+**Superseding user decision/result, 2026-11-13:** Hermes is the selected first/only spike client. The user reports Claude Code access **unavailable until they notify us otherwise**; never invoke it or probe authentication. Installed binaries and the branch name do not establish access. The [bounded Hermes compatibility spike](../../spikes/001-hermes-mcp/README.md) is complete with verdict **PARTIAL**: real opt-in transport works, terminal-free startup and secure project binding do not yet exist. The [post-E1 recommendation](POST-E1-E2A-RECOMMENDATION.md) supersedes this document's Claude-first slice, per-call active-editor retargeting and deferred complete-journey grants. Below is retained design history, not a current executable plan. No E2a implementation has been approved.
 
 ## Current attach mechanism (verified by reading source 2026-11-12)
 
