@@ -28,6 +28,7 @@ struct Vertex {
     @location(9) color: vec4<f32>,
     @location(10) uv: vec2<f32>,
     @location(11) base_color: vec4<f32>,
+    @location(12) response: vec4<f32>,
 };
 struct Output {
     @builtin(position) position: vec4<f32>,
@@ -36,6 +37,7 @@ struct Output {
     @location(2) uv: vec2<f32>,
     @location(3) base_color: vec4<f32>,
     @location(4) world_position: vec3<f32>,
+    @location(5) @interpolate(flat) editor_selection: f32,
 };
 @vertex fn vs(v: Vertex) -> Output {
     var o: Output;
@@ -47,6 +49,7 @@ struct Output {
     // OBJ V grows upward; decoded PNG rows grow downward. Convert once here.
     o.uv = vec2<f32>(v.uv.x, 1.0 - v.uv.y);
     o.base_color = v.base_color;
+    o.editor_selection = v.response.w;
     o.world_position = (model * vec4<f32>(v.position, 1.0)).xyz;
     return o;
 }
@@ -56,10 +59,11 @@ struct Output {
     let albedo = sampled * v.base_color.rgb;
     // Opaque target alpha carries visible editor selection, not transparency.
     // Depth/MSAA determine its coverage alongside the actual shaded geometry.
-    let selection_alpha = select(1.0, 0.0, v.base_color.a > 0.0);
+    let selection_alpha = select(1.0, 0.0, v.editor_selection > 0.5);
+    let highlighted = mix(albedo, vec3<f32>(1.0), select(v.base_color.a, 0.0, v.editor_selection > 0.5));
     if lighting.mode_counts.x == 0u {
         // Preserve V1 arithmetic; zero authored lights never select this path.
-        return vec4<f32>(albedo * (0.28 + 0.72 * diffuse), selection_alpha);
+        return vec4<f32>(highlighted * (0.28 + 0.72 * diffuse), selection_alpha);
     }
     let n = v.normal / sqrt(max(dot(v.normal, v.normal), 1e-8));
     var light_sum = lighting.ambient.rgb;
@@ -79,5 +83,5 @@ struct Output {
         light_sum += point.color_intensity.rgb * (max(dot(n, direction), 0.0) * attenuation);
     }
     // Relative diffuse output in the existing SDR target; no HDR/exposure claim.
-    return vec4<f32>(clamp(albedo * light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), selection_alpha);
+    return vec4<f32>(clamp(highlighted * light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), selection_alpha);
 }

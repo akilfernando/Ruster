@@ -399,6 +399,9 @@ pub enum ViewPreset {
 /// and RMB held; frontends must disable it while text, modal or gesture owns input.
 #[derive(Clone, Debug)]
 pub struct NavigationOptions {
+    /// Opt-in editor contour. Default-off so application selection retains its
+    /// existing appearance; this is transient presentation, never scene content.
+    pub selection_feedback: bool,
     pub enabled: bool,
     pub keyboard_enabled: bool,
     pub frame_selected: bool,
@@ -414,6 +417,7 @@ pub struct NavigationOptions {
 impl Default for NavigationOptions {
     fn default() -> Self {
         Self {
+            selection_feedback: false,
             enabled: true,
             keyboard_enabled: false,
             frame_selected: false,
@@ -1111,9 +1115,18 @@ pub fn render_viewport_with_materials(
                     f32::from(u8::from(
                         material.is_some_and(|m| m.roughness_texture.is_some()),
                     )),
-                    0.,
+                    f32::from(u8::from(
+                        navigation.selection_feedback && selected.contains(&object.id.as_str()),
+                    )),
                 ],
-                _ => [0.; 4],
+                _ => [
+                    0.,
+                    0.,
+                    0.,
+                    f32::from(u8::from(
+                        navigation.selection_feedback && selected.contains(&object.id.as_str()),
+                    )),
+                ],
             },
         });
     }
@@ -2309,7 +2322,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 group
                     .instances
                     .iter()
-                    .any(|instance| instance.base_color[3] > 0.)
+                    .any(|instance| instance.response[3] > 0.)
             });
         let display_packet = [
             f32::from(u8::from(applied_hdr)),

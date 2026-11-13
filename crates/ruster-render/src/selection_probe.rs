@@ -36,7 +36,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
         resources.insert(r);
         let mut images = Vec::new();
         let mut initial_uploads = None;
-        for selected in [false, true, false] {
+        for (selected, editor) in [(false, false), (true, true), (false, false), (true, false)] {
             context
                 .run_pass(egui::RawInput::default(), |_| {})
                 .drop_without_applying_deltas();
@@ -83,7 +83,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                                 color[2],
                                 if selected && index < 3 { 0.35 } else { 0. },
                             ],
-                            response: [1., 0.5, 0., 0.],
+                            response: [1., 0.5, 0., f32::from(u8::from(editor && index < 3))],
                         }],
                     }
                 })
@@ -121,6 +121,12 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
         let pixel = |image: usize, x: usize, y: usize| {
             &images[image][(y * 256 + x) * 4..(y * 256 + x + 1) * 4]
         };
+        if name == "legacy" {
+            assert!(
+                pixel(3, 112, 96)[0] > 100,
+                "runtime selection must retain legacy whitening without editor opt-in"
+            );
+        }
         // White, black and mint all receive the same exposure-independent mint
         // contour; their centers and the nearer occluder remain pixel-identical.
         for x in [14, 96, 178] {

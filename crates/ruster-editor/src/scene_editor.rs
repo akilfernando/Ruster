@@ -5238,6 +5238,7 @@ impl SceneEditor {
                 None
             };
             let selected: Vec<_> = self.manipulation.ids.iter().map(String::as_str).collect();
+            self.navigation.selection_feedback = true;
             self.navigation.enabled = !about_open
                 && !self.runtime.input_owned()
                 && !self.export_dialog
