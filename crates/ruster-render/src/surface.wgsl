@@ -99,18 +99,19 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
         response.y = clamp(response.y * textureSampleGrad(roughness_texture, base_color_sampler, v.uv, uv_dx, uv_dy).r, 0.08, 1.0);
     }
     let albedo = sampled * v.base_color.rgb;
-    let highlighted = mix(albedo, vec3<f32>(1.0), v.base_color.a);
+    let selection_alpha = select(1.0, 0.0, v.base_color.a > 0.0);
     let n = safe_unit(v.normal);
     // w=1: eye position, w=0: parallel orthographic direction to camera.
     let view = safe_unit(camera.eye_mode.xyz - v.world_position * camera.eye_mode.w);
     let ambient_scale = select(1.0, 0.96, response.x > 0.5);
     if lighting.mode_counts.x == 0u {
         let incoming = normalize(vec3<f32>(0.4, 0.8, 0.6));
-        return hdr_storage(highlighted * (0.28 * ambient_scale) + 0.72 * direct_response(highlighted, n, view, incoming, response));
+        let stored = hdr_storage(albedo * (0.28 * ambient_scale) + 0.72 * direct_response(albedo, n, view, incoming, response));
+        return vec4<f32>(stored.rgb, selection_alpha);
     }
-    var result = highlighted * lighting.ambient.rgb * ambient_scale;
+    var result = albedo * lighting.ambient.rgb * ambient_scale;
     if lighting.mode_counts.z != 0u {
-        var direct = lighting.directional_color_intensity.rgb * direct_response(highlighted, n, view, lighting.direction_to_light.xyz, response);
+        var direct = lighting.directional_color_intensity.rgb * direct_response(albedo, n, view, lighting.direction_to_light.xyz, response);
         // Shadow attenuates the entire Sun contribution, including specular.
         if sun_shadow.parameters.x > 0.5 { direct *= sun_visibility(v.world_position, n); }
         result += direct;
@@ -123,7 +124,7 @@ fn hdr_storage(radiance: vec3<f32>) -> vec4<f32> {
         let q = min(d2 * point.position_inverse_range_squared.w, 1.0);
         let smooth_range = 1.0 - q * q;
         let attenuation = smooth_range * smooth_range / (1.0 + d2);
-        result += point.color_intensity.rgb * direct_response(highlighted, n, view, direction, response) * attenuation;
+        result += point.color_intensity.rgb * direct_response(albedo, n, view, direction, response) * attenuation;
     }
-    return hdr_storage(result);
+    return vec4<f32>(hdr_storage(result).rgb, selection_alpha);
 }

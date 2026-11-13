@@ -8,6 +8,8 @@ mod primitives;
 pub use primitives::builtin_mesh;
 #[cfg(test)]
 mod material_probe;
+#[cfg(test)]
+mod selection_probe;
 mod shadow_gpu;
 mod shadow_math;
 pub use shadow_gpu::ShadowStatus;
@@ -2299,11 +2301,26 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             );
             return Vec::new();
         }
-        let display_packet = if applied_hdr {
-            [1., requested_exposure, 0., 0.]
-        } else {
-            [0.; 4]
-        };
+        // Reuse the opaque target's alpha as a visible-selection mask only for
+        // built-in editor draws. Runtime callers pass no selection; custom WGSL
+        // retains its existing alpha/color ABI and is never interpreted as a mask.
+        let selection = r.builtin_appearance
+            && self.groups.iter().any(|group| {
+                group
+                    .instances
+                    .iter()
+                    .any(|instance| instance.base_color[3] > 0.)
+            });
+        let display_packet = [
+            f32::from(u8::from(applied_hdr)),
+            if applied_hdr { requested_exposure } else { 0. },
+            f32::from(u8::from(selection)),
+            if selection {
+                screen.pixels_per_point
+            } else {
+                0.
+            },
+        ];
         if display_packet != r.display_packet {
             r.invalidate_image();
             queue.write_buffer(&r.display_uniform, 0, bytemuck::cast_slice(&display_packet));
@@ -3578,6 +3595,7 @@ mod tests {
         let (device, queue) =
             pollster::block_on(adapter.request_device(&descriptor)).expect("Vulkan device");
         eprintln!("GPU probe adapter: {:?}", adapter.get_info());
+        selection_probe::verify(&device, &queue);
         geometry_probe::verify(&device, &queue);
         for samples in [1, 2, 4] {
             if supported_samples(&adapter, &device, samples) != samples {

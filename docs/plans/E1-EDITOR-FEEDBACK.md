@@ -2,11 +2,11 @@
 
 Started 2026-11-12. The user asks the root session to "complete the current phase and then continue the next phase". The root interprets the current phase as the [2026-11-11 feedback batch](../STATUS.md) collected while development was paused, and the next phase as [F4a Assembly Groups](F4A-ASSEMBLY-GROUPS.md). This reading is the root's interpretation of that instruction, recorded so the user can correct it.
 
-## Current bounded authorization — 2026-11-13
+## Current bounded authorization — 2026-11-13 selection slice
 
-The user explicitly asks to finish the current Rusterize WIP. The current Hermes/Sol root selects only primitive delivery, authoring and qualification (P1–P3), not the unstarted selection highlight, spacing/icons, E2 or F4a. Earlier next-phase interpretations below are historical and do not authorize new milestones. No automatic commit, install or publication is authorized. The architecture below remains an agent-selected contract.
+The user explicitly requests the next E1 viewport-selection slice after primitive closure. One implementation owner works on `claude/e1-editor-feedback`, starting at `35ecebef6b340c30bc3bcff323c37024fb7de198`. Frequent explicit-path checkpoint commits/pushes are authorized; installation, merge/release, E2/F4a and wide-layout/icons are not. Root independent rendering review remains required before acceptance. Earlier stop/no-publication entries are historical and superseded only within this authorization.
 
-P1/P2 are implemented and pass the recorded source/transport gates. P3 has actual native keyboard/save/reopen/export, shadow framebuffer and exact source-hidden standalone runs, but **driver-validation acceptance is held**: this machine has no Khronos Vulkan validation layer. Approval to provision `vulkan-validation-layers` (or an approved existing layer path) is needed before the required validation/synchronization rerun. [Evidence and exact artifacts](../evidence/E1-PRIMITIVES-2026-11-13.md). Root fresh review remains outstanding.
+Primitives are committed/pushed and bounded qualification is complete, including three actual Vulkan probes and native editor/runtime with the verified user-local Khronos core/synchronization layer. Parent fresh-context review passed. [Evidence and exact artifacts](../evidence/E1-PRIMITIVES-2026-11-13.md).
 
 ## Scope
 
@@ -14,12 +14,20 @@ P1/P2 are implemented and pass the recorded source/transport gates. P3 has actua
 | --- | --- | --- |
 | Light/dark themes, optional OLED black | Implemented in HEAD; separate qualification/user decision | System/Dark/Light plus a labelled OLED variant for evaluation. Keeping OLED remains the user's decision |
 | Logo v2 integration | Implemented in HEAD; separate qualification | Theme-appropriate marks, window and launcher icon, DejaVu notice review |
-| Sphere and capsule primitives, Create menu | Implemented; validation-layer acceptance hold | P1/P2 source and native transport pass; P3 bounded journeys run, required driver-layer qualification and root fresh review remain |
-| Viewport selection highlight | Not started | Existing highlight is a faint white mix in the scene shaders |
+| Sphere and capsule primitives, Create menu | Bounded qualification complete; committed/pushed | Source/native/export and actual core/synchronization validation pass; parent review passed |
+| Viewport selection highlight | Implementation checkpoint; qualification/review pending | Two-tone visible-fragment inner contour, using the existing opaque alpha/composite seam; no new target/pass |
 | Wide-window layout spacing | Not started | Top bar and viewport tool groups |
 | Selective icons | Not started | With tooltips and accessible names |
 | Terminal-free MCP onboarding | Proposed separately as [E2](E2-MCP-ONBOARDING.md) | Needs user decisions before implementation |
 | Reopen lands on the focused workspace | User to confirm | Hyprland rule was already corrected on 2026-11-11 |
+
+## Selection creator acceptance contract (agent-selected, 2026-11-13)
+
+- Clicking a visible cube, sphere, capsule or imported mesh clearly identifies that geometry directly in the viewport; white, black and mint materials remain distinguishable. Multi-selection marks visible selected surfaces, not unselected occluders or empty/background pixels. Picking, camera and selection ownership stay unchanged.
+- A static mint inner contour with a charcoal backing replaces built-in material whitening. Existing scene alpha carries the depth-tested/MSAA-resolved mask into the existing composite pass. The contour is applied after display mapping, before output transfer, and scales with UI pixel density. No new targets, passes, pipelines, mesh expansion, wireframe or animation; no PBR, authored color or runtime flag/serialization changes.
+- Verify supported System/Dark/Light/OLED theme choices, Legacy SDR/Surface HDR (including exposure extremes), perspective/orthographic, compact/wide and multiple separated objects. A touching/overlapping selected silhouette is a shared visible contour, not a per-object ID outline; do not claim hidden edges or wireframe. Custom project WGSL retains its existing appearance/alpha contract rather than interpreting arbitrary custom alpha as a selection mask.
+- Add one focused visible-fragment regression to the existing opt-in Vulkan probe: selected contour across white/black/mint, occlusion, unchanged interiors and exact clearing restoration, both output conventions and no selection-triggered target/mesh/texture allocations. Preserve actual RED/GREEN and all failed preparations.
+- Fresh-source native before/after evidence plus actual core/synchronization validation, resize/shutdown, matched release fixed-workload measurements, and before/after unselected offscreen/runtime pixel equivalence are required. Independent parent rendering review is pending. Broader hardware/human familiarity and custom-shader outline support are not inferred.
 
 ## Primitive design (agent-selected, from a read-only design pass 2026-11-12)
 

@@ -1561,7 +1561,7 @@ fn verify_unstored_grazing_radiance(device: &wgpu::Device, queue: &wgpu::Queue) 
 // These headless pixel fixtures submit and wait after every callback. Match the
 // native host's subsequent owner-maintenance boundary before changing inputs;
 // no callback-resource borrow spans delivery of queue callbacks.
-fn complete_submitted_assets(
+pub(super) fn complete_submitted_assets(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     context: &egui::Context,

@@ -2,7 +2,11 @@
 
 Updated 2026-11-13. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
-## Current WIP: primitives validated, qualification hold lifted — 2026-11-13
+## Current WIP: E1 viewport selection — 2026-11-13
+
+The user explicitly selects the next bounded E1 feedback slice and authorizes frequent explicit-path checkpoint commits/pushes on `claude/e1-editor-feedback`. Starting source `35ecebef6b340c30bc3bcff323c37024fb7de198` is clean except private attachments (excluded). The [creator acceptance contract](plans/E1-EDITOR-FEEDBACK.md#selection-creator-acceptance-contract-agent-selected-2026-11-13) uses a two-tone visible-fragment inner contour in the existing opaque-alpha/composite seam; no new render targets/passes or material/runtime serialization changes. The existing actual Vulkan probe has observed RED on old whitening, then GREEN with verified Khronos core/synchronization activation. The12ordinary renderer cases pass; three GPU cases remain default-ignored. Native/current-source builds, matched release cost, offscreen runtime equivalence and independent parent rendering review are still pending. Primitive closure below is historical; its no-commit/stop wording is superseded only by this slice. Wide-layout/icons, E2/F4a and installation remain out of scope.
+
+## Primitives validated, qualification hold lifted — 2026-11-13
 
 The user explicitly resumes only the current Rusterize WIP. One Hermes/Sol writer closes E1 P1/P2: Scene18→content14/exact cumulative `builtin_primitives`, Descriptor5/Recovery15 unchanged; owner/history-aware packager admission; shared sphere/capsule texture eligibility; Create in four contexts with unbound remappable actions; procedural Inspector kind; optional `scene_create.primitive` and guarded `scene_primitive` on the84-tool surface. Geometry remains559/592vertices,960/1024triangles with60,640bytes added fixed shape payload. Existing dirty source/docs and untracked `primitives.rs` are preserved with a secure complete source/diff/index backup. No stage/commit/system install/publication or paused automation change occurs; the later explicitly approved validation layer is installed only in a versioned user-local prefix.
 

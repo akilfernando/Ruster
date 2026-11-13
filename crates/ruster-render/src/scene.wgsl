@@ -54,10 +54,12 @@ struct Output {
     let diffuse = max(dot(normalize(v.normal), normalize(vec3<f32>(0.4, 0.8, 0.6))), 0.0);
     let sampled = textureSample(base_color_texture, base_color_sampler, v.uv).rgb;
     let albedo = sampled * v.base_color.rgb;
-    let highlighted = mix(albedo, vec3<f32>(1.0), v.base_color.a);
+    // Opaque target alpha carries visible editor selection, not transparency.
+    // Depth/MSAA determine its coverage alongside the actual shaded geometry.
+    let selection_alpha = select(1.0, 0.0, v.base_color.a > 0.0);
     if lighting.mode_counts.x == 0u {
         // Preserve V1 arithmetic; zero authored lights never select this path.
-        return vec4<f32>(highlighted * (0.28 + 0.72 * diffuse), 1.0);
+        return vec4<f32>(albedo * (0.28 + 0.72 * diffuse), selection_alpha);
     }
     let n = v.normal / sqrt(max(dot(v.normal, v.normal), 1e-8));
     var light_sum = lighting.ambient.rgb;
@@ -77,5 +79,5 @@ struct Output {
         light_sum += point.color_intensity.rgb * (max(dot(n, direction), 0.0) * attenuation);
     }
     // Relative diffuse output in the existing SDR target; no HDR/exposure claim.
-    return vec4<f32>(clamp(highlighted * light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    return vec4<f32>(clamp(albedo * light_sum, vec3<f32>(0.0), vec3<f32>(1.0)), selection_alpha);
 }

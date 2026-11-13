@@ -44,10 +44,36 @@ fn pbr_neutral(input_color: vec3<f32>) -> vec3<f32> {
     let g = 1.0 - 1.0 / (desaturation * (peak - new_peak) + 1.0);
     return mix(color, vec3<f32>(new_peak), g);
 }
+// The opaque scene's resolved alpha is 0 on selected visible fragments, 1
+// elsewhere. Sample only inward: never paint an occluded object through its
+// occluder, inflate a silhouette, expose triangle edges, or change material RGB.
+// Bilinear/MSAA coverage provides subpixel antialiasing without animated dashes.
+fn selection_contour(uv: vec2<f32>, color: vec3<f32>, alpha: f32) -> vec3<f32> {
+    let texel = vec2<f32>(max(display.parameters.w, 1.0)) / vec2<f32>(textureDimensions(image));
+    var near_edge = 0.0;
+    var far_edge = 0.0;
+    for (var i = 0u; i < 4u; i++) {
+        let direction = array<vec2<f32>, 4>(vec2<f32>(1.0, 0.0), vec2<f32>(-1.0, 0.0), vec2<f32>(0.0, 1.0), vec2<f32>(0.0, -1.0))[i];
+        near_edge = max(near_edge, textureSampleLevel(image, image_sampler, uv + direction * texel * 2.0, 0.0).a);
+        far_edge = max(far_edge, textureSampleLevel(image, image_sampler, uv + direction * texel * 3.5, 0.0).a);
+    }
+    let coverage = 1.0 - alpha;
+    let backed = mix(color, vec3<f32>(0.012, 0.018, 0.022), coverage * far_edge);
+    return mix(backed, vec3<f32>(0.18, 0.85, 0.57), coverage * near_edge);
+}
 fn displayed_color(uv: vec2<f32>) -> vec4<f32> {
     let color = textureSample(image, image_sampler, uv);
-    if display.parameters.x < 0.5 { return color; }
-    return vec4<f32>(pbr_neutral(max(color.rgb, vec3<f32>(0.0)) * exp2(display.parameters.y)), color.a);
+    var result = color;
+    if display.parameters.x >= 0.5 {
+        result = vec4<f32>(pbr_neutral(max(color.rgb, vec3<f32>(0.0)) * exp2(display.parameters.y)), color.a);
+    }
+    if display.parameters.z > 0.5 {
+        // Overlay after display mapping: readable even at +/-8 stops. The final
+        // viewport stays opaque; internal selection alpha never reaches egui.
+        if color.a < 1.0 { result = vec4<f32>(selection_contour(uv, result.rgb, color.a), 1.0); }
+        result.a = 1.0;
+    }
+    return result;
 }
 @fragment fn fs_display(v: Output) -> @location(0) vec4<f32> {
     return displayed_color(v.uv);
