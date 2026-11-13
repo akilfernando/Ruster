@@ -86,6 +86,27 @@ fn bounded_hermes_owner_fixture() {
 }
 
 #[test]
+fn save_root_rebase_is_a_new_project_authority_generation() {
+    let ctx = egui::Context::default();
+    let mut host = host("save-root");
+    host.connect_adapter(&ctx).unwrap();
+    let (owner, _) = approved(host.bridge.as_ref().unwrap());
+    let old = host.editor.connection_generation.clone();
+    let authority = host.editor.connection_authority.clone().unwrap();
+    let destination = tempfile::tempdir().unwrap();
+    host.editor
+        .save_scene(destination.path().join("saved.json"))
+        .unwrap();
+    assert!(
+        !authority.live(),
+        "root-rebased Save must not carry a binding into its new generation"
+    );
+    assert_ne!(host.editor.connection_generation, old);
+    drop(owner);
+    retire(&mut host, &ctx);
+}
+
+#[test]
 fn real_hosts_never_disclose_or_adopt_across_canceled_transitions_and_restart() {
     let ctx = egui::Context::default();
     let mut a = host("project-a");

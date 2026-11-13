@@ -55,7 +55,7 @@ fn same_asset_snapshots<T>(
 }
 use ruster_scene::{Object, Preview, Scene, Session, Transform};
 use serde_json::{json, Value};
-const SCENE_CAPABILITIES: &[&str] = &[
+pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "lighting_inspect",
     "scene_light_create",
     "scene_light_set",

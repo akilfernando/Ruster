@@ -40,7 +40,7 @@ impl eframe::App for Editor {
         self.viewport(ui);
         self.dialogs(&ctx);
         crate::branding::show_about(&ctx);
-        if self.close_approved {
+        if self.close_approved && !self.mcp_draining() {
             ctx.send_viewport_cmd(egui::ViewportCommand::Close);
         }
         let marker = if self.dirty() { "* " } else { "" };
@@ -373,6 +373,7 @@ impl Editor {
     }
 
     fn open_dialog(&mut self) {
+        self.revoke_mcp_authority();
         self.running = false;
         self.path_text = self
             .project
@@ -384,6 +385,7 @@ impl Editor {
     }
 
     fn identity_dialog(&mut self, duplicate: bool) {
+        self.revoke_mcp_authority();
         self.running = false;
         self.identity_text = if duplicate {
             format!("{}-copy", self.project.scenario().id())

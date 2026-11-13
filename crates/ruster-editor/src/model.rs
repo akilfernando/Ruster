@@ -76,6 +76,8 @@ pub enum PathMode {
 static NEXT_PROJECT_GENERATION: AtomicU64 = AtomicU64::new(1);
 
 pub struct Editor {
+    #[cfg(unix)]
+    pub connection_authority: Option<crate::bridge::Authority>,
     /// Changes for each successful project replacement, including same-ID reopen.
     pub project_generation: u64,
     pub project: ProjectSession,
@@ -102,6 +104,8 @@ impl Editor {
     pub fn new(project: ProjectSession) -> Self {
         let config = project.scenario().config();
         Self {
+            #[cfg(unix)]
+            connection_authority: None,
             project_generation: NEXT_PROJECT_GENERATION
                 .try_update(Ordering::Relaxed, Ordering::Relaxed, |value| {
                     value.checked_add(1)
@@ -210,6 +214,7 @@ impl Editor {
     }
 
     pub fn request(&mut self, action: Action) {
+        self.revoke_mcp_authority();
         self.running = false;
         if self.dirty() {
             self.pending = Some(action);
@@ -219,6 +224,7 @@ impl Editor {
     }
 
     pub fn execute(&mut self, action: Action) {
+        self.revoke_mcp_authority();
         let result = match action {
             Action::Close => {
                 self.close_approved = true;
@@ -249,6 +255,24 @@ impl Editor {
         }
     }
 
+    pub fn revoke_mcp_authority(&self) {
+        #[cfg(unix)]
+        if let Some(authority) = &self.connection_authority {
+            authority.revoke();
+        }
+    }
+    pub fn mcp_draining(&self) -> bool {
+        #[cfg(unix)]
+        {
+            self.connection_authority
+                .as_ref()
+                .is_some_and(crate::bridge::Authority::draining)
+        }
+        #[cfg(not(unix))]
+        {
+            false
+        }
+    }
     pub fn save(&mut self, save_as: bool) {
         if !self.apply() {
             return;

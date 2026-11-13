@@ -498,6 +498,9 @@ mod tests {
         assert_eq!(inspect(&mut recovered)["can_save"], false);
         rejected(save(&mut recovered, None), "save_permission_required");
         let prior_token = inspect(&mut recovered)["session_token"].clone();
+        // A root-changing Save revokes the old project's grant. This return
+        // SaveAs is a new explicit human-selected destination grant.
+        recovered.save_grant = Some(SaveGrant::new(&root).unwrap());
         let returned = save(&mut recovered, Some("Returned.json"));
         assert_eq!(returned["ok"], true, "{returned}");
         let returned_state = inspect(&mut recovered);
@@ -580,7 +583,13 @@ mod tests {
             editor.shader_revision, 3,
             "failed reset must not report a built-in shader as active"
         );
-        assert_eq!(save(&mut editor, None)["ok"], true); // baseline remains usable through worker after warning
+        assert_eq!(
+            inspect(&mut editor)["grant_valid"],
+            false,
+            "first Save established a new project root"
+        );
+        editor.save_grant = Some(SaveGrant::new(dir.path()).unwrap());
+        assert_eq!(save(&mut editor, None)["ok"], true); // captured baseline remains usable after fresh consent
         assert!(inspect(&mut editor)["last_committed_save"]["warning"].is_null());
     }
 }

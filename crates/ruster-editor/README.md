@@ -174,25 +174,30 @@ status/evidence for verified environments and remaining milestone limitations.
 
 ## Native MCP attachment (Linux)
 
-Build `cargo build --locked -p ruster-editor -p ruster-mcp`, then launch the editor
-on a disposable project with `RUSTER_MCP_ENABLE=1 cargo run --locked -p
-ruster-editor -- --scenario /absolute/path/demo.json`. Normal launches have no
-bridge. The editor prints a private socket path to stderr. Configure a stdio
-client with the absolute `target/debug/ruster-mcp` executable and that path in
-`RUSTER_MCP_SOCKET`; see the [adapter guide](../ruster-mcp/README.md).
+Build `cargo build --locked -p ruster-editor -p ruster-mcp`. E2a CP1 supplies
+explicit local Host Connect/approve-owner/Disconnect/state APIs with default-off
+listener creation. It does **not** yet supply normal-startup Connect UI or safe
+production profile registration; those are CP2 after fresh lifecycle/security
+review. `RUSTER_MCP_ENABLE=1` is retained only as an **unbound** developer startup
+path, never implicit consent. No capability/socket path is printed to logs.
 
-The tested real client is the official Python MCP SDK 2.3.0:
+The matched adapter uses one immutable nonsecret `RUSTER_MCP_LOCATOR` and explicit
+human approval of its connected owner, then keeps a private capability and one
+persistent socket in memory. Old `RUSTER_MCP_SOCKET` adapters fail closed. Every
+project read/mutation is authenticated; revisions remain concurrency guards, not
+secrets. New/Open/Restore initiation, cancellation, disconnect, owner loss/restart
+and editor restart revoke. Root-changing Save also rotates project authority;
+already authorized completion still owns adoption/cleanup/receipt. Destination
+grants never transfer to replacement projects.
 
-```sh
-RUSTER_MCP_SOCKET=/absolute/private-directory/editor.sock \
-  uv run --with mcp==2.3.0 scripts/mcp_demo.py
-```
-
-Run from the repository root. The demo inspects, replays ten ticks, changes
-capacity to 4, compares replay, checks stale/invalid/oversized requests, then
-undoes its edit through shared history. Use the default example configuration
-(capacity 2) on a disposable copy; the demo intentionally does not save. Set
-`RUSTER_MCP_DEMO_KEEP=1` to leave the edit for inspection and human Undo.
+The actual matched-wire client is **Hermes** in a disposable profile. Unbound
+discovery and denial, explicit owner approval, guarded create/stale rejection/Undo,
+frontend sharing, scoped removal and owner-EOF retirement are recorded in
+[CP1 evidence](../../docs/evidence/E2A-CP1-2026-11-14.md). The core qualification uses
+the real Host/transport without a native window; it is not terminal-free onboarding
+or a complete Save/export journey. Historical SDK demo scripts below require an
+approved bound owner and are not current CP1 setup instructions. See the
+[adapter guide](../ruster-mcp/README.md) for compatibility and authority details.
 
 Agent edits appear as authored unsaved changes with a before/after notice.
 Inspector drafts or recovery dialogs block mutations; the client must inspect

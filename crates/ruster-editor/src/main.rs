@@ -99,8 +99,15 @@ struct EditorApp {
 }
 
 impl eframe::App for EditorApp {
+    fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        self.retire_bridge(ctx);
+        if self.editor.close_approved && !self.editor.mcp_draining() {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+    }
     fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
         eframe::App::ui(&mut self.editor, ui, frame);
+        self.retire_bridge(ui.ctx());
         #[cfg(unix)]
         if let Some(bridge) = &mut self.bridge {
             if bridge.dispatch(&mut self.editor) {
@@ -108,6 +115,23 @@ impl eframe::App for EditorApp {
             }
             // Dispatch may update fields/notice after this frame's layout.
             // Repaint only when external requests arrive (bridge wakes context).
+        }
+    }
+}
+
+impl EditorApp {
+    fn retire_bridge(&mut self, ctx: &egui::Context) {
+        #[cfg(unix)]
+        if let Some(bridge) = &mut self.bridge {
+            if !bridge.authority().live() {
+                bridge.disconnect();
+            }
+            if bridge.poll_retired() {
+                self.bridge.take();
+                self.editor.connection_authority = None;
+            } else if !bridge.authority().live() {
+                ctx.request_repaint_after(connection::POLL);
+            }
         }
     }
 }
@@ -169,6 +193,8 @@ fn run() -> Result<(), String> {
         let bridge = if std::env::var_os("RUSTER_MCP_ENABLE").as_deref() == Some(std::ffi::OsStr::new("1")) {
             Some(bridge::Bridge::start(cc.egui_ctx.clone())?)
         } else { None };
+        #[cfg(unix)]
+        { editor.connection_authority = bridge.as_ref().map(bridge::Bridge::authority); }
         Ok(Box::new(EditorApp { editor, #[cfg(unix)] bridge }))
     })).map_err(|error| format!("desktop/Vulkan initialization failed: {error}. Verify the desktop session and Vulkan driver."))
 }

@@ -193,6 +193,11 @@ impl Worker {
         Ok((worker, barrier))
     }
 
+    #[cfg(test)]
+    pub fn with_event_hook_for_test(repaint: Repaint) -> std::io::Result<Self> {
+        Self::spawn(repaint)
+    }
+
     fn spawn(repaint: Repaint) -> std::io::Result<Self> {
         let (commands, receiver) = mpsc::sync_channel(1);
         let (sender, events) = mpsc::sync_channel(1);

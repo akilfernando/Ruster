@@ -1,6 +1,6 @@
 # 0050 — Session-bound MCP authority and owned retirement
 
-2026-11-14. **Accepted product decisions; CP1 implementation and verification pending.** Supersedes the planning-only restriction in the [E2a proposal](../plans/E2A-HERMES-LIFECYCLE-PROPOSAL.md), not its sequential acceptance gates.
+2026-11-14. **Accepted product decisions; CP1 implemented candidate, parent security review pending.** Supersedes the planning-only restriction in the [E2a proposal](../plans/E2A-HERMES-LIFECYCLE-PROPOSAL.md), not its sequential acceptance gates.
 
 ## User decisions
 
@@ -25,6 +25,12 @@ Selected engineering choices, **not yet measured proof**:
 - Revocation races final authorization deterministically. RequestLease remains cancellable; CommitLease retains acknowledgment, old-owner adoption, cleanup and terminal receipts after authorization/timeout. Replacement must not adopt an old result into a new project. No unknown-outcome replay or unauthenticated receipt exception.
 - Transition revokes agent destination grants. Stop/wakeup and owned listener handle support nonblocking retirement/drain observation; fully disconnected means no owned listener/service thread.
 - Matched editor/adapter wire compatibility fails closed, including legacy opt-in startup. No scene/content/recovery format bump.
+
+## CP1 implementation reconciliation
+
+The [CP1 evidence](../evidence/E2A-CP1-2026-11-14.md) separates actual proof from selected limits. The selected bounded ownership mechanism is one persistent peer-credential-checked adapter socket, not PID-existence authentication, a heartbeat/discovery daemon or a frontend-chat lifetime. EOF/restart retires that owner with no automatic reclaim. All84operations cross one unconditional admission/dispatch/publication gate. Root-changing Save also advances authority, because existing source treats root rebasing as a new project generation; its entropy is reserved before publication. The first Save of an unsaved project can therefore require fresh connection/destination consent afterward.
+
+Normal retirement retains and nonblockingly polls/joins its listener. Abnormal owner Drop transfers that actual JoinHandle to one finite asynchronous join job; a blocked-service RED/GREEN case prevents UI-thread joining. Preparing leases and authorized adoption/cleanup remain draining until their owners release them. Retained local terminal responses are bounded by count8 and frame bytes; this is not crash durability or an unauthenticated receipt route. These are implementation engineering selections, not added product bundles or measured cost budgets. CP2 UI/registration and stable installation remain gated.
 
 ## Alternatives and consequences
 

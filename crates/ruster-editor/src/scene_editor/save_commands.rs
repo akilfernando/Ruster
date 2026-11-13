@@ -19,6 +19,7 @@ pub(super) struct AfterSave {
 }
 pub(super) struct Pin {
     generation: u64,
+    connection_generation: String,
     revision: u64,
     association: Option<PathBuf>,
     sequence: u64,
@@ -64,6 +65,14 @@ impl SceneEditor {
         let accepted_root = self.canonical_asset_root();
         let pin = Pin {
             generation: self.generation,
+            // Reserve entropy before any publication; adoption must not fail
+            // merely because randomness becomes unavailable after the write.
+            connection_generation: crate::connection::unpredictable().map_err(|_| {
+                (
+                    "save_error".into(),
+                    "Cannot reserve a fresh project authority generation".into(),
+                )
+            })?,
             revision: self.session.scene().revision,
             association: self.session.path().map(PathBuf::from),
             sequence: self.save_sequence,
@@ -219,6 +228,8 @@ impl SceneEditor {
         self.save_warning = None;
         let changed_root = pin.accepted_root.as_deref() != Some(root.as_path());
         if changed_root {
+            self.revoke_connection();
+            self.connection_generation = pin.connection_generation.clone();
             self.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
             self.creation_export.cancel();
             retired.store = std::mem::replace(&mut self.assets, destination_store);

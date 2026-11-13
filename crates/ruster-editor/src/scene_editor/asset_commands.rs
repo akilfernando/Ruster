@@ -2818,6 +2818,125 @@ mod tests {
         )
         .drop_without_applying_deltas();
     }
+    #[test]
+    fn authorized_save_drains_before_replacement_and_never_adopts_into_new_project() {
+        let ctx = egui::Context::default();
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("old.json");
+        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        editor.save_scene(path.clone()).unwrap();
+        editor.object_action("create");
+        let objects = editor.session.scene().objects.clone();
+        let generation = editor.generation;
+        editor.save_grant = Some(persistence_commands::SaveGrant::new(root.path()).unwrap());
+        let (ready, observed) = std::sync::mpsc::sync_channel(1);
+        let barrier = Arc::new(std::sync::Barrier::new(2));
+        let worker_barrier = barrier.clone();
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        editor.asset_shutdown();
+        until(&mut editor, &ctx, SceneEditor::asset_finished);
+        editor.asset_ops = Controller::default();
+        editor.asset_ops.worker = Some(
+            Worker::with_event_hook_for_test(Arc::new(move || {
+                if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+                    ready.send(()).unwrap();
+                    worker_barrier.wait();
+                }
+            }))
+            .unwrap(),
+        );
+        let mut bridge = crate::bridge::Bridge::start_for(
+            ctx.clone(),
+            editor.connection_incarnation.clone(),
+            editor.connection_generation.clone(),
+        )
+        .unwrap();
+        let (owner, handshake) = crate::bridge::tests::approved(&bridge);
+        let nonce = handshake["binding"]["incarnation"].as_str().unwrap();
+        let inspected =
+            editor.command(nonce, "scene_persistence_inspect", json!({}))["result"].clone();
+        let authority = bridge.authority();
+        editor.connection_authority = Some(authority.clone());
+        let request = crate::bridge::tests::frame(
+            &handshake,
+            "scene_save",
+            json!({"expected_session_token":inspected["session_token"],"expected_revision":inspected["revision"],"expected_persistence_token":inspected["persistence_token"]}),
+        );
+        let mut socket = owner.try_clone().unwrap();
+        let client = std::thread::spawn(move || {
+            crate::connection::send(&mut socket, &request).unwrap();
+            crate::bridge::tests::receive(&mut socket)
+        });
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while editor.asset_ops.saving.is_none() {
+            bridge.dispatch_request(|nonce, op, args, lease| {
+                assert_eq!(op, "scene_save");
+                editor.dispatch_save_request(&ctx, nonce, &args, lease);
+            });
+            assert!(Instant::now() < deadline);
+            std::thread::yield_now();
+        }
+        editor.asset_frame(&ctx, true);
+        observed.recv_timeout(Duration::from_secs(3)).unwrap();
+        until(&mut editor, &ctx, |e| {
+            e.asset_ops
+                .saving
+                .as_ref()
+                .is_some_and(|s| s.phase == Phase::Prepared)
+        });
+        editor.asset_frame(&ctx, true); // Final authorization wins before revoke.
+        assert!(editor.asset_publishing());
+        // The real socket deadline elapses while the real Save worker remains
+        // behind its Prepared barrier. No injected clock or mutation replay.
+        let timeout = client.join().unwrap();
+        assert_eq!(timeout["error"]["code"], "outcome_unknown");
+        editor.queued_action = Some(Action::New);
+        editor.process_queued_action(); // The real human entrypoint queues behind publication.
+        assert_eq!(editor.queued_action, Some(Action::New));
+        editor.recovery.poll(&ctx);
+        editor.process_recovery_ack();
+        assert_eq!(
+            editor.generation, generation,
+            "replacement must retain the old adoption owner"
+        );
+        assert!(authority.draining());
+        bridge.disconnect();
+        assert!(
+            !bridge.poll_retired(),
+            "authorized adoption outlives listener retirement"
+        );
+        barrier.wait();
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while editor.session.scene().id != "untitled" {
+            editor.asset_frame(&ctx, false);
+            editor.recovery.poll(&ctx);
+            editor.process_recovery_ack();
+            if editor.asset_ops.publishing() {
+                editor.asset_frame(&ctx, true);
+            }
+            bridge.poll_retired();
+            editor.process_queued_action();
+            assert!(
+                Instant::now() < deadline,
+                "replacement did not drain authorized Save"
+            );
+            std::thread::yield_now();
+        }
+        assert!(editor.session.scene().objects.is_empty());
+        assert_eq!(Session::open(&path).unwrap().scene().objects, objects);
+        let receipts = bridge.take_terminal_receipts();
+        assert_eq!(receipts.len(), 1);
+        assert_eq!(
+            receipts[0]["result"]["receipt"]["committed"], true,
+            "old owner lost its terminal receipt: {receipts:?}"
+        );
+        assert!(bridge.poll_retired());
+        drop(owner);
+        assert!(!authority.draining());
+        editor.asset_shutdown();
+        until(&mut editor, &ctx, SceneEditor::asset_finished);
+    }
+
     fn exercise_save_case(
         editor: &mut SceneEditor,
         ctx: &egui::Context,

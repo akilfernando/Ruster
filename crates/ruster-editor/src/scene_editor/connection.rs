@@ -66,6 +66,10 @@ impl Host {
             bridge.disconnect();
         }
     }
+    /// Local human-owner receipt access; no unauthenticated MCP exception.
+    pub(super) fn terminal_connection_receipts(&self) -> &std::collections::VecDeque<Value> {
+        &self.editor.retired_connection_receipts
+    }
     pub(super) fn connection_state(&self) -> &'static str {
         match &self.bridge {
             None => "retired",
@@ -81,7 +85,10 @@ impl Host {
                 self.editor.revoke_connection();
                 bridge.disconnect();
             }
-            if bridge.poll_retired() {
+            if bridge.poll_retired()
+                && !self.editor.asset_ops.busy()
+                && !self.editor.creation_export.busy()
+            {
                 for receipt in bridge.take_terminal_receipts() {
                     self.editor.retired_connection_receipts.push_back(receipt);
                     if self.editor.retired_connection_receipts.len() > 8 {
