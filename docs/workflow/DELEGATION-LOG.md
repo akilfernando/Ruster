@@ -972,3 +972,20 @@ Sol/high final read-only review accepts the bounded first slice, finds no concre
 ## Rusterize logo, editor rollout and local install — 2026-11-11
 
 Two bounded Sol workers own disjoint source changes. The shell worker owns scene_editor.rs, integrating startup/About, compact hierarchy/content/inspector organization and precision-cancel status. The forms worker owns specialized panel modules, aligning semantic colors, headings, primary actions and axis labels. Both return layout/focus risks for Root and execute no builds or native input. Root draws and integrates the logo, owns keyboard regression tests, validates every integration, repairs the scaled footer and final visual states, and completes the user-requested local installation. Root’s focused and silent native tests and their cleanup limits are recorded in the overhaul evidence. Usage metrics unavailable.
+
+
+## E1 primitive closure — Hermes single writer, 2026-11-13
+
+User authorization is now “Let's finish up the current WIP on Rusterize then”, limited by the root to existing primitive P1/P2/P3, not the whole roadmap. Root delegates one exclusive coherent writer, inheriting `gpt-6.1-sol`; reasoning effort and per-call usage are not exposed to the child and remain unknown. No recursive agents or purported independent self-review run. Root will freshly review the returned artifact. The current Hermes delegation schema has no per-task model/effort/fork knobs; historical Claude aliases are contracts, not active routing controls.
+
+| Slice | Implementation/result | Repairs and available metrics |
+| --- | --- | --- |
+| P1 delivery/texture closure | Scene18/content14/exact primitive profile, Descriptor5/recovery15 unchanged; old-kit pre-stage rejection; owner/history/exclusivity validation; shared texture eligibility. Focused regressions and final broad gate pass. Root acceptance pending. | Export/texture gaps are baseline defects. Integration exposes obsolete schema fixture assertions, generator lint and yard Object literal; all repaired. No token/cost data or savings attribution available. |
+| P2 editor/MCP authoring | Four-context Create, four remappable unbound actions, procedural kind, optional create primitive and guarded shape tool; actual transport and native keyboard journeys pass. Root acceptance pending. | One compact-layout regression and one missed independent MCP wire allowlist are caught; each has a focused RED/GREEN repair. Harness-only selector/interpreter/name issues are retained separately, not product defects. |
+| P3 qualification |335Rust/30Python full gate,146inspection tests,3separate actual device probes; native Save/reopen/export, MCP guards, two exact source-hidden default applications and actual shadow images. | Full final source gate53.07s; editor builds17.258s/17.237s; release runtime14.80s. Required driver-validation layer unavailable: acceptance hold, no install/diagnostic suppression. First standalone sandbox loses compositor routing token; guard stops, finite child settles, token-preserving bounded rerun passes on workspace2. |
+
+Whole single-writer elapsed time is available from the audit timestamps (started16:52local); per-slice timing/usage is not measured separately. [Evidence and exact audit/build receipts](../evidence/E1-PRIMITIVES-2026-11-13.md). No claims of efficiency savings, completed primitive acceptance, full theme qualification or next-milestone authority.
+
+## External Fable orchestration — 2026-11-12
+
+Explicit user selection: Claude Code `claude-fable-5-2`, high effort, read-only current/next-phase review. Completed in 228 seconds/65 turns with no denied tools; CLI list-price estimate $2.472045, actual billing/subscription impact unknown. Source-based findings identify primitive delivery and texture admission gaps plus stale E1 status. Root confirms Scene 18/export mapping mismatch. No repairs, builds or desktop actions performed; no claim of phase acceptance. [Handoff and bounded worker contracts](../plans/CLAUDE-ORCHESTRATION-2026-11-12.md). External Claude aliases are not Codex spawn options.

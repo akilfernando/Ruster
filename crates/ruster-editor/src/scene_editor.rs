@@ -117,6 +117,7 @@ const SCENE_CAPABILITIES: &[&str] = &[
     "scene_inspect",
     "scene_transform",
     "scene_create",
+    "scene_primitive",
     "scene_rename",
     "scene_duplicate",
     "scene_delete",
@@ -240,7 +241,8 @@ pub(super) struct AssetDrag {
 }
 #[derive(Clone, Copy)]
 enum ContextAction {
-    Create,
+    Create(Action),
+    DirectionalLight,
     Rename,
     Duplicate,
     Delete,
@@ -2037,7 +2039,8 @@ impl SceneEditor {
         }
         let revision = self.session.scene().revision;
         let selected = self.selected.clone();
-        let new_id = if action == "create" {
+        let creating = matches!(action, "create" | "create_sphere" | "create_capsule");
+        let new_id = if creating {
             match crate::manipulation::Manipulation::fresh_ids(&self.session, 1) {
                 Ok(mut ids) => ids.remove(0),
                 Err(error) => {
@@ -2049,9 +2052,18 @@ impl SceneEditor {
             String::new()
         };
         let result = match action {
-            "create" => self
-                .session
-                .create(revision, Object::cube(new_id.clone(), Some("Cube".into()))),
+            "create" | "create_sphere" | "create_capsule" => {
+                let primitive = match action {
+                    "create_sphere" => Some(ruster_scene::Primitive::Sphere),
+                    "create_capsule" => Some(ruster_scene::Primitive::Capsule),
+                    _ => None,
+                };
+                let name = primitive.map_or("Cube", ruster_scene::Primitive::label);
+                self.session.create(
+                    revision,
+                    Object::procedural(new_id.clone(), Some(name.into()), primitive),
+                )
+            }
             "duplicate" => {
                 let new_ids = match crate::manipulation::Manipulation::fresh_ids(
                     &self.session,
@@ -2089,7 +2101,7 @@ impl SceneEditor {
         };
         match result {
             Ok(_) => {
-                if action == "create" {
+                if creating {
                     self.manipulation.select_only(Some(new_id));
                     self.selected = self.manipulation.selected();
                 }
@@ -2384,6 +2396,36 @@ impl SceneEditor {
         object_id: &str,
         mesh: &Option<String>,
     ) -> Result<(), String> {
+        self.validate_shape_material_compatibility(object_id, mesh.clone(), None)
+    }
+    fn parse_primitive(
+        value: Option<&Value>,
+    ) -> Result<Option<ruster_scene::Primitive>, (String, String)> {
+        match value {
+            None | Some(Value::Null) => Ok(None),
+            Some(value) => serde_json::from_value(value.clone())
+                .map(Some)
+                .map_err(|_| {
+                    (
+                        "invalid_arguments".into(),
+                        "primitive must be sphere, capsule or null (cube)".into(),
+                    )
+                }),
+        }
+    }
+    fn validate_primitive_material_compatibility(
+        &self,
+        object_id: &str,
+        primitive: Option<ruster_scene::Primitive>,
+    ) -> Result<(), String> {
+        self.validate_shape_material_compatibility(object_id, None, primitive)
+    }
+    fn validate_shape_material_compatibility(
+        &self,
+        object_id: &str,
+        mesh: Option<String>,
+        primitive: Option<ruster_scene::Primitive>,
+    ) -> Result<(), String> {
         let object = self
             .session
             .scene()
@@ -2391,7 +2433,7 @@ impl SceneEditor {
             .iter()
             .find(|object| object.id == object_id)
             .ok_or_else(|| format!("Object {object_id} does not exist"))?;
-        if object.mesh == *mesh {
+        if object.mesh == mesh && object.primitive == primitive {
             return Ok(());
         }
         let textured = object
@@ -2401,12 +2443,12 @@ impl SceneEditor {
             .is_some_and(|material| {
                 material.base_color_texture.is_some() || material.roughness_texture.is_some()
             });
-        if textured
-            && !mesh
-                .as_ref()
-                .and_then(|id| self.resolved.get(id))
-                .is_some_and(|mesh| mesh.has_complete_uvs())
-        {
+        let candidate = Object {
+            mesh,
+            primitive,
+            ..object.clone()
+        };
+        if textured && !ruster_render::object_has_complete_uvs(&candidate, &self.resolved) {
             return Err("A textured material requires complete mesh UVs; assign a UV-mapped mesh or clear the material first.".into());
         }
         Ok(())
@@ -2534,7 +2576,12 @@ impl SceneEditor {
                 return;
             }
             match action {
-                ContextAction::Create => self.object_action("create"),
+                ContextAction::Create(action) => self.queued_action = Some(action),
+                ContextAction::DirectionalLight => {
+                    self.create_light_ui(ruster_scene::LightKind::Directional {
+                        shadow: Default::default(),
+                    });
+                }
                 ContextAction::Rename => {
                     if self.manipulation.ids.len() == 1 {
                         self.rename_pending = true;
@@ -2962,7 +3009,20 @@ impl SceneEditor {
                 "object_id",
                 "transform",
             ],
-            "scene_create" | "scene_rename" => &[
+            "scene_create" => &[
+                "expected_session_token",
+                "expected_revision",
+                "object_id",
+                "name",
+                "primitive",
+            ],
+            "scene_primitive" => &[
+                "expected_session_token",
+                "expected_revision",
+                "object_id",
+                "primitive",
+            ],
+            "scene_rename" => &[
                 "expected_session_token",
                 "expected_revision",
                 "object_id",
@@ -3075,8 +3135,26 @@ impl SceneEditor {
                 let name = args["name"]
                     .as_str()
                     .ok_or_else(|| err("invalid_arguments"))?;
-                self.session
-                    .create(revision, Object::cube(id, Some(name.into())))
+                self.session.create(
+                    revision,
+                    Object::procedural(
+                        id,
+                        Some(name.into()),
+                        Self::parse_primitive(args.get("primitive"))?,
+                    ),
+                )
+            }
+            "scene_primitive" => {
+                let id = args["object_id"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                if args.get("primitive").is_none() {
+                    return Err(err("invalid_arguments"));
+                }
+                let primitive = Self::parse_primitive(args.get("primitive"))?;
+                self.validate_primitive_material_compatibility(id, primitive)
+                    .map_err(|message| ("invalid_arguments".into(), message))?;
+                self.session.set_primitive(revision, id, primitive)
             }
             "scene_rename" => {
                 let id = args["object_id"]
@@ -3263,6 +3341,37 @@ impl SceneEditor {
             json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"light_diff":light_diff,"lighting_changed":lighting_changed,"lighting":self.session.scene().lighting,"changed_target_count":diff_count+light_diff.len(),"dirty":self.session.is_dirty()}),
         )
     }
+    fn create_entries(ui: &mut egui::Ui) -> Option<ContextAction> {
+        let mut selected = None;
+        for (label, action) in [
+            ("Cube", Action::CreateCube),
+            ("Sphere", Action::CreateSphere),
+            ("Capsule", Action::CreateCapsule),
+        ] {
+            if ui.button(label).clicked() {
+                selected = Some(ContextAction::Create(action));
+                ui.close();
+            }
+        }
+        ui.menu_button("Light", |ui| {
+            if ui.button("Point light").clicked() {
+                selected = Some(ContextAction::Create(Action::CreateLight));
+                ui.close();
+            }
+            if ui.button("Directional light").clicked() {
+                selected = Some(ContextAction::DirectionalLight);
+                ui.close();
+            }
+        });
+        selected
+    }
+    fn create_menu(&mut self, ui: &mut egui::Ui) {
+        ui.menu_button("Create", |ui| {
+            if let Some(action) = Self::create_entries(ui) {
+                self.queued_context = Some((None, action));
+            }
+        });
+    }
     fn hierarchy_contents(&mut self, ui: &mut egui::Ui) {
         ui.heading("Objects");
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
@@ -3294,21 +3403,7 @@ impl SceneEditor {
             }
         }
         ui.horizontal_wrapped(|ui| {
-            if ui.button("Create cube").clicked() {
-                self.queued_context = Some((None, ContextAction::Create));
-            }
-            ui.menu_button("Create light", |ui| {
-                if ui.button("Point light").clicked() {
-                    self.create_light_ui(ruster_scene::LightKind::Point { range: 5.0 });
-                    ui.close();
-                }
-                if ui.button("Directional light").clicked() {
-                    self.create_light_ui(ruster_scene::LightKind::Directional {
-                        shadow: Default::default(),
-                    });
-                    ui.close();
-                }
-            });
+            self.create_menu(ui);
             if ui
                 .add_enabled(
                     !self.manipulation.ids.is_empty(),
@@ -3418,8 +3513,12 @@ impl SceneEditor {
                         ));
                     }
                     response.context_menu(|ui| {
+                        ui.menu_button("Create", |ui| {
+                            if let Some(action) = Self::create_entries(ui) {
+                                context = Some((None, action));
+                            }
+                        });
                         for (label, action) in [
-                            ("Create cube", ContextAction::Create),
                             ("Rename object", ContextAction::Rename),
                             ("Duplicate", ContextAction::Duplicate),
                             ("Delete", ContextAction::Delete),
@@ -3705,19 +3804,24 @@ impl SceneEditor {
         let Some(id) = self.selected.clone() else {
             return;
         };
-        let Some(mesh) = self
+        let Some((mesh, primitive)) = self
             .session
             .scene()
             .objects
             .iter()
             .find(|object| object.id == id)
-            .map(|object| object.mesh.clone())
+            .map(|object| (object.mesh.clone(), object.primitive))
         else {
             return;
         };
         let response = egui::Frame::group(ui.style())
             .show(ui, |ui| {
-                ui.label(mesh.as_deref().unwrap_or("Procedural cube"));
+                ui.label(mesh.as_deref().unwrap_or_else(|| {
+                    primitive.map_or("Procedural cube", |shape| match shape {
+                        ruster_scene::Primitive::Sphere => "Procedural sphere",
+                        ruster_scene::Primitive::Capsule => "Procedural capsule",
+                    })
+                }));
                 if let Some(mesh) = &mesh {
                     if ui.button("Locate mesh in Content").clicked() {
                         self.locate_mesh(mesh);
@@ -4362,6 +4466,12 @@ impl SceneEditor {
         }
         match action {
             Action::New => self.request_new(),
+            Action::CreateCube => self.object_action("create"),
+            Action::CreateSphere => self.object_action("create_sphere"),
+            Action::CreateCapsule => self.object_action("create_capsule"),
+            Action::CreateLight => {
+                self.create_light_ui(ruster_scene::LightKind::Point { range: 5.0 });
+            }
             Action::Quit => self.request_close(),
             Action::Open => self.dialog = Some(true),
             Action::Save => self.save(),
@@ -4640,9 +4750,7 @@ impl SceneEditor {
             if crate::editor_theme::primary_button(ui, "Open a scene…").clicked() {
                 self.queued_action = Some(Action::Open);
             }
-            if ui.button("Add a cube").clicked() {
-                self.queued_context = Some((None, ContextAction::Create));
-            }
+            self.create_menu(ui);
             if full_lockup {
                 self.recent_scenes_menu(ui, "Recent");
             }
@@ -4653,6 +4761,12 @@ impl SceneEditor {
         let compact = ui.available_width() < 460.0;
         let mut open_about = false;
         ui.horizontal_wrapped(|ui| {
+            // Keep the additional top-level Create menu on the supported narrow
+            // menu row instead of consuming the status/viewport height.
+            if compact {
+                ui.spacing_mut().button_padding.x = 3.0;
+                ui.spacing_mut().item_spacing.x = 3.0;
+            }
             if !compact {
                 crate::branding::mark(ui, 22.0);
             }
@@ -4683,6 +4797,7 @@ impl SceneEditor {
                 }
                 self.command_menu_item(ui, "Close window", Action::Quit);
             });
+            self.create_menu(ui);
             ui.menu_button("Edit", |ui| {
                 if ui
                     .add_enabled(
@@ -4724,10 +4839,7 @@ impl SceneEditor {
                     }
                 });
                 ui.separator();
-                if ui.button("Create cube").clicked() {
-                    self.queued_context = Some((None, ContextAction::Create));
-                    ui.close();
-                }
+
                 ui.menu_button("Assign mesh…", |ui| {
                     if ui.button("Procedural cube").clicked() {
                         if let Err(error) = self.assign_mesh(None) {
@@ -5761,7 +5873,7 @@ mod tests {
                 if editor.error.contains('\n') && editor.error == editor.shader_notice {
                     let summary = editor.error.lines().next().unwrap();
                     let summary_count=output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==summary)).count();
-                    assert_eq!(summary_count,1,"identical multiline error/shader messages must share one concise footer summary");
+                    assert_eq!(summary_count,1,"identical multiline error/shader messages must share one concise footer summary at {size:?}");
                     full_problem_count.set(output.shapes.iter().filter(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text==editor.error)).count());
                 }
                 asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("triangle · Mesh · Ready") && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
@@ -8367,6 +8479,45 @@ mod tests {
     // shared human/agent history and selection repair rather than zipped vectors.
     #[test]
     fn object_commands_share_history_guards_and_preserve_preview() {
+        let mut shapes = SceneEditor::new(Session::new(Scene::empty("shapes")).unwrap());
+        let shape_token =
+            shapes.command("test", "scene_inspect", json!({}))["result"]["session_token"].clone();
+        let create = json!({"expected_session_token":shape_token,"expected_revision":"0","object_id":"shape","name":"Sphere","primitive":"sphere"});
+        assert_eq!(shapes.command("test", "scene_create", create)["ok"], true);
+        assert_eq!(shapes.session.undo_len(), 1);
+        assert_eq!(
+            shapes.session.scene().objects[0].primitive,
+            Some(ruster_scene::Primitive::Sphere)
+        );
+        let mut set = json!({"expected_session_token":shape_token,"expected_revision":"1","object_id":"shape","primitive":"capsule"});
+        shapes.draft.as_mut().unwrap().translation[0] = "-".into();
+        assert_eq!(
+            shapes.command("test", "scene_primitive", set.clone())["error"]["code"],
+            "drafts_pending"
+        );
+        shapes.sync_draft();
+        assert_eq!(
+            shapes.command("test", "scene_primitive", set.clone())["ok"],
+            true
+        );
+        assert_eq!(shapes.session.undo_len(), 2);
+        assert_eq!(
+            shapes.command("test", "scene_primitive", set.clone())["error"]["code"],
+            "stale_revision"
+        );
+        set["expected_session_token"] = "old".into();
+        assert_eq!(
+            shapes.command("test", "scene_primitive", set)["error"]["code"],
+            "stale_session"
+        );
+        shapes.history(false);
+        assert_eq!(
+            shapes.session.scene().objects[0].primitive,
+            Some(ruster_scene::Primitive::Sphere)
+        );
+        shapes.history(false);
+        assert!(shapes.session.scene().objects.is_empty());
+        assert!(shapes.preview.scene.objects.is_empty());
         let mut e = SceneEditor::new(Session::new(Scene::empty("created")).unwrap());
         let initial = e.command("test", "scene_inspect", json!({}))["result"].clone();
         let token = initial["session_token"].clone();

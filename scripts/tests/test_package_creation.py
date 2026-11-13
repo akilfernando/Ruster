@@ -22,6 +22,36 @@ import package_creation
 
 
 class CreationDistributionTests(unittest.TestCase):
+    def test_primitive_owners_and_history_are_versioned_not_assets(self):
+        obj = {"id": "shape", "primitive": "sphere"}
+        document = {"format": "ruster-scene", "format_version": 18,
+                    "scene": {"objects": [obj]}, "undo": [], "redo": []}
+        self.assertEqual(package_creation.scene_dependencies(document), (set(), set()))
+        for bad in ("cube", "torus", {}, 1):
+            altered = copy.deepcopy(document)
+            altered["scene"]["objects"][0]["primitive"] = bad
+            with self.assertRaisesRegex(ValueError, "primitive"):
+                package_creation.scene_dependencies(altered)
+        altered = copy.deepcopy(document)
+        altered["scene"]["objects"][0]["mesh"] = "asset"
+        with self.assertRaisesRegex(ValueError, "primitive"):
+            package_creation.scene_dependencies(altered)
+        for version, stack, delta in (
+                (17, "undo", {"kind": "create", "object": {"primitive": None}}),
+                (4, "redo", {"kind": "delete", "object": obj}),
+                (17, "redo", {"kind": "objects", "created": [], "deleted": [{"object": obj}]}),
+                (17, "undo", {"kind": "primitive", "id": "shape", "before": None, "after": "capsule"})):
+            altered = copy.deepcopy(document)
+            altered["format_version"] = version
+            altered["scene"]["objects"] = []
+            altered[stack] = [delta if version <= 4 else {"scene": [delta]}]
+            with self.assertRaisesRegex(ValueError, "primitive"):
+                package_creation.scene_dependencies(altered)
+        document["format_version"] = 17
+        document["scene"]["objects"] = [{"id": "shape"}]
+        document["authoring"] = {"sources": {}, "bindings": {}}
+        self.assertEqual(package_creation.scene_dependencies(document), (set(), set()))
+
     @unittest.skipUnless(sys.platform == "linux" and shutil.which("readelf"), "Linux ELF tooling required")
     def test_reusable_kit_and_creation_boundary(self):
         """One real-ELF fixture crosses kit preparation, relocation and bounded publication."""
@@ -805,6 +835,33 @@ class CreationDistributionTests(unittest.TestCase):
                     (content_root/"content.json").write_bytes(package_creation.encoded({**panel_content, "schema": 12}))
                     with self.assertRaisesRegex(ValueError, "schema13 requires Scene17"):
                         package_creation.source_content(content_root, None)
+                # Scene18 adds shapes without any asset mappings or Descriptor bump.
+                primitives = copy.deepcopy(current)
+                primitives["format_version"] = 18
+                template = primitives["scene"]["objects"][0]
+                for shape in ("sphere", "capsule"):
+                    owner = copy.deepcopy(template)
+                    owner.update(id=shape, primitive=shape)
+                    owner.pop("mesh", None)
+                    owner.pop("material", None)
+                    primitives["scene"]["objects"].append(owner)
+                primitive_bytes = package_creation.encoded(primitives)
+                primitive_content = {**panel_content, "schema": 14, "scene_sha256": package_creation.sha256(primitive_bytes)}
+                (content_root/"scene.json").write_bytes(primitive_bytes)
+                (content_root/"content.json").write_bytes(package_creation.encoded(primitive_content))
+                with patch.object(package_creation.tempfile, "TemporaryDirectory", side_effect=AssertionError("old primitive staging")):
+                    with self.assertRaisesRegex(ValueError, "Scene18 builtin_primitives"):
+                        package_creation.package(kit, content_root, failed)
+                capable["profile"] = package_creation.PRIMITIVE_PROFILE
+                (kit/"runtime.json").write_bytes(package_creation.encoded(capable))
+                primitive_response = {**panel_response, "authored_scene": package_creation.typed_scene(primitives), "runtime_scene": package_creation.typed_scene(primitives)}
+                with patch.object(package_creation, "run_runtime", return_value=primitive_response):
+                    package_creation.package(kit, content_root, base/"primitives.tar.gz")
+                with tarfile.open(base/"primitives.tar.gz") as archive:
+                    descriptor = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(descriptor["version"], 5)
+                    self.assertEqual(set(descriptor["meshes"]), set(primitive_content["meshes"]))
+                    self.assertEqual(archive.extractfile("application/resources/scene.json").read(), primitive_bytes)
                 # A current kit migrates old HUD output; matching old profiles
                 # above retain their exact flat-label schemas and old wire bytes.
                 for version in (15, 16):

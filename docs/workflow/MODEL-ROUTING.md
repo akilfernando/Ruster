@@ -1,8 +1,18 @@
 # Model routing
 
-Checked 2026-11-12 for the current root session. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
+Checked 2026-11-13 for the current Hermes root session. Historical host snapshots below are retained, not active controls. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
 
-## Current routing — Claude Code host, 2026-11-12
+## Current routing — Hermes host, 2026-11-13
+
+Root refreshed official [client model guidance](https://learn.chatgpt.com/docs/models.md) and [subagent guidance](https://learn.chatgpt.com/docs/agent-configuration/subagents.md) in this session; children reuse its setup evidence at `/home/akilf/.hermes/cache/develop-setup-20261113/`. Main and the exclusive E1 implementation child run the inherited balanced `gpt-6.1-sol` route. The current Hermes `delegate_task` schema has no per-task model, effort or fork controls; old Codex four-slot/`fork_turns` examples and Claude aliases are not valid Hermes options. Actual Luna/Terra invocations are retained in the root setup evidence; access is distinct from application acceptance.
+
+The one E1 writer performs the coherent primitive closure without recursive delegation or an independent self-review agent. Root owns subsequent fresh review. Screenshots are loaded through `vision_analyze`; this is actual image inspection, not a Terra invocation or human familiarity study. No global model settings, scheduler/configuration, installed editor or paused Commons work is changed. Concrete per-call reasoning effort is not exposed to this child and is recorded as unknown, not invented. Consumption/savings remain unknown.
+
+## Historical Codex bridge to user-selected Fable — 2026-11-12
+
+This root is hosted in Codex, whose collaboration schema exposes GPT-6.1 Sol/Terra, GPT-6 Astra/Sol/Luna with four total slots and minimal-context forks for explicit overrides. It cannot spawn Claude through that schema. The user explicitly selects `claude-fable-5-2` for orchestration; local Claude Code 2.1.322 successfully executes that exact model at high effort through existing OAuth login. [Actual session and limits](../plans/CLAUDE-ORCHESTRATION-2026-11-12.md). The root model and global settings are unchanged. The Claude-host snapshot below belongs to the earlier session and does not describe this Codex host. Official [Fable model documentation](https://platform.claude.com/docs/en/models/fable-5-2/overview) was opened 2026-11-12 and confirms the exact ID and high default effort. Other role assignments are retained as historical guidance, not newly benchmarked.
+
+## Historical routing — Claude Code host, 2026-11-12
 
 The user starts this root session in Claude Code and selects `claude-fable-5-2` as the main model. The earlier Codex/OpenAI table below is a historical snapshot for that host; its model IDs are unavailable through this session's delegation tool.
 

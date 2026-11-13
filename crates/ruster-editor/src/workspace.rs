@@ -38,9 +38,13 @@ pub(super) enum Action {
     Rename,
     SelectAll,
     FocusRuntime,
+    CreateCube,
+    CreateSphere,
+    CreateCapsule,
+    CreateLight,
 }
 impl Action {
-    pub const ALL: [Self; 30] = [
+    pub const ALL: [Self; 34] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -71,6 +75,10 @@ impl Action {
         Self::Rename,
         Self::SelectAll,
         Self::FocusRuntime,
+        Self::CreateCube,
+        Self::CreateSphere,
+        Self::CreateCapsule,
+        Self::CreateLight,
     ];
     pub fn name(self) -> &'static str {
         match self {
@@ -104,6 +112,10 @@ impl Action {
             Self::Rename => "Rename active object",
             Self::SelectAll => "Select all scene objects",
             Self::FocusRuntime => "Focus runtime controls",
+            Self::CreateCube => "Create cube",
+            Self::CreateSphere => "Create sphere",
+            Self::CreateCapsule => "Create capsule",
+            Self::CreateLight => "Create light",
         }
     }
 }
@@ -227,6 +239,22 @@ impl Default for Preferences {
                     shift,
                     alt: false,
                 })
+                .chain(
+                    [
+                        Action::CreateCube,
+                        Action::CreateSphere,
+                        Action::CreateCapsule,
+                        Action::CreateLight,
+                    ]
+                    .into_iter()
+                    .map(|action| Binding {
+                        action,
+                        key: None,
+                        ctrl: false,
+                        shift: false,
+                        alt: false,
+                    }),
+                )
                 .collect(),
         }
     }

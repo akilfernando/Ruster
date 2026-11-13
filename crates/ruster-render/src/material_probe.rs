@@ -295,6 +295,7 @@ fn verify_mesh_budget_swap(device: &wgpu::Device, queue: &wgpu::Queue) {
     let mut groups = (0..15)
         .map(|index| DrawGroup {
             key: Some(format!("mesh-{index:02}")),
+            primitive: None,
             binding: BindingKey::default(),
             texture: None,
             roughness: None,
@@ -745,6 +746,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         let callback = SceneCallback {
             groups: vec![DrawGroup {
                 key: Some("lighting-plane".into()),
+                primitive: None,
                 binding: key.clone(),
                 texture: Some(texture.clone()),
                 roughness: None,
@@ -1179,6 +1181,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
                 groups: (0..if mapped_case { 2 } else { 1 })
                     .map(|index| DrawGroup {
                         key: Some("surface-plane".into()),
+                        primitive: None,
                         binding: BindingKey {
                             roughness: mapped_case.then(|| "surface-map".into()),
                             missing_roughness: name == "map-missing-uv" && index == 1,

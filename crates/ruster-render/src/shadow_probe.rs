@@ -325,13 +325,13 @@ impl Probe {
             });
             pass.set_pipeline(&self.shadow_depth);
             pass.set_bind_group(0, &self.depth_bind, &[]);
-            pass.set_vertex_buffer(0, self.resources.cube.vertices.slice(..));
+            pass.set_vertex_buffer(0, self.resources.builtins.cube.vertices.slice(..));
             pass.set_vertex_buffer(1, self.resources.instances.slice(..));
             pass.set_index_buffer(
-                self.resources.cube.indices.slice(..),
+                self.resources.builtins.cube.indices.slice(..),
                 wgpu::IndexFormat::Uint32,
             );
-            pass.draw_indexed(0..self.resources.cube.count, 0, 0..2);
+            pass.draw_indexed(0..self.resources.builtins.cube.count, 0, 0..2);
         }
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -360,7 +360,7 @@ impl Probe {
             } else {
                 &self.baseline_color
             };
-            pass.set_pipeline(pipelines.for_mesh(&self.resources.cube));
+            pass.set_pipeline(pipelines.for_mesh(&self.resources.builtins.cube));
             pass.set_bind_group(0, &self.resources.camera_bind, &[]);
             pass.set_bind_group(
                 1,
@@ -369,11 +369,12 @@ impl Probe {
             );
             pass.set_bind_group(2, &self.resources.lighting.bind, &[]);
             pass.set_bind_group(3, &self.shadow_bind, &[]);
-            pass.set_vertex_buffer(0, self.resources.cube.vertices.slice(..));
+            pass.set_vertex_buffer(0, self.resources.builtins.cube.vertices.slice(..));
             pass.set_vertex_buffer(1, self.resources.instances.slice(..));
             pass.set_vertex_buffer(
                 2,
                 self.resources
+                    .builtins
                     .cube
                     .uvs
                     .as_ref()
@@ -381,10 +382,10 @@ impl Probe {
                     .slice(..),
             );
             pass.set_index_buffer(
-                self.resources.cube.indices.slice(..),
+                self.resources.builtins.cube.indices.slice(..),
                 wgpu::IndexFormat::Uint32,
             );
-            pass.draw_indexed(0..self.resources.cube.count, 0, 0..2);
+            pass.draw_indexed(0..self.resources.builtins.cube.count, 0, 0..2);
         }
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {

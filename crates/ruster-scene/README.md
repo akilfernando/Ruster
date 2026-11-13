@@ -1,5 +1,11 @@
 # Generic authored scenes
 
+## Built-in geometry (format 18)
+
+`Object.primitive: Option<Primitive>` stores `"sphere"` or `"capsule"`. Absent/null remains the unit cube when no mesh is assigned; `None` is omitted from output. A non-null primitive and mesh asset cannot coexist. `Object::procedural` constructs a shape. `Session::set_primitive(revision, object_id, Option<Primitive>)` clears a mesh; `set_mesh` clears the primitive, even when setting `None`. Coupled deltas use one Undo entry. Stale, invalid and equal edits preserve the established transaction/no-op rules.
+
+Scene1–17 reject the new key (including null) and primitive deltas at actual current/history object owners. Opaque behavior property/source text is unaffected. Scene17 cubes migrate without gaining a primitive field. Current saves emit Scene18; raw recovery stays15 because it carries snapshot bytes. Delivery uses content14/exact cumulative `builtin_primitives`, Descriptor5. Built-ins do not consume asset identities, catalog capacity or admitted asset bytes. They do not imply a collider component. [E1 evidence](../../docs/evidence/E1-PRIMITIVES-2026-11-13.md).
+
 ## Creator-authored HUD (format 17)
 
 Updated2026-11-10. `Authoring.hud` contains the canonical `Hud { enabled, panels }`. Up to4 ordered flat `HudPanel` definitions share32 globally identified rows. Every panel owns `id`, `name`, optional `visible_when`, anchor/style and `elements`. Every row owns `id`, `source` and optional `enabled_when`. Panel IDs are explicit in new JSON and unique within the HUD. Row IDs are unique across all panels. Panel names accept up to128 UTF-8 bytes. `Hud::default()` is disabled with no panels and remains omitted from empty authoring.
@@ -24,7 +30,7 @@ The existing source-payload budget is32KiB across every panel. Static text and c
 
 ### Scene15/16 migration
 
-New saves and snapshots emit Scene17. Supported older documents keep their original `loaded_format_version()` until Save/encode. Legacy current HUD and both sides of HUD history normalize at the versioned document boundary. Every nondefault old group becomes one ordinary `hud-default`/`HUD` panel with the same row IDs, ordering and style. The exact old disabled/default/empty HUD collapses to canonical empty HUD. This exception preserves omission and makes an omitted current HUD agree with explicit default history sides after Undo/Redo.
+New saves and snapshots emit Scene18. Supported older documents keep their original `loaded_format_version()` until Save/encode. Legacy current HUD and both sides of HUD history normalize at the versioned document boundary. Every nondefault old group becomes one ordinary `hud-default`/`HUD` panel with the same row IDs, ordering and style. The exact old disabled/default/empty HUD collapses to canonical empty HUD. This exception preserves omission and makes an omitted current HUD agree with explicit default history sides after Undo/Redo.
 
 `migrate_legacy_hud(Value)` exposes that strict wire normalization and structural validation for version-aware callers. `migrate_legacy_hud_draft(Value)` shares its decoder, preserves unfinished raw references and always materializes the editing panel, including the exact old default. Recovery owns the old-version provenance, raw storage and original-fingerprint checks before accepting its result. Canonical `Hud` serde accepts only the new shape. Both helpers reject mixed panel/legacy fields, Center and row-condition fields in legacy data.
 
@@ -55,7 +61,7 @@ Added 2026-11-09 under [decision0045](../../docs/decisions/0045-initialization-a
 
 `inspect_commands(binding_id, offset, limit)` returns bounded `CommandSummary` values containing only ID and `argument_count`. `command_definition(binding_id, command_id)` borrows one complete definition. Binding summaries add only `command_count`. A full 16-definition catalog can exceed a 64 KiB transport frame, so consumers should retain the summary/single-definition split. Validated public Serialize types and sorted maps provide canonical hash input for backend/editor SHA256 owners. HUD button definitions use SHA256 identity, while command catalog owners retain their existing hashes and the geometry fingerprint keeps its existing purpose.
 
-Scene1–13 rejects any `commands` field in current bindings or either side of Undo/Redo binding deltas, including null/empty maps. Property names, source text and positive opaque source API metadata retain their existing meaning. Scene14 introduced strict catalog fields, rejecting null catalogs and malformed/unknown definition fields. Existing supported documents without command fields remain readable. Current Save and snapshot output writes Scene17. F2a acceptance is recorded in [current status](../../docs/STATUS.md).
+Scene1–13 rejects any `commands` field in current bindings or either side of Undo/Redo binding deltas, including null/empty maps. Property names, source text and positive opaque source API metadata retain their existing meaning. Scene14 introduced strict catalog fields, rejecting null catalogs and malformed/unknown definition fields. Existing supported documents without command fields remain readable. Current Save and snapshot output writes Scene18. F2a acceptance is recorded in [current status](../../docs/STATUS.md).
 
 ## Application bindings and authored state defaults (format 13)
 

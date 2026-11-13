@@ -262,9 +262,9 @@ impl SceneEditor {
                         .objects
                         .iter()
                         .find(|object| object.id == draft.object_id)
-                        .and_then(|object| object.mesh.as_ref())
-                        .and_then(|id| self.resolved.get(id))
-                        .is_some_and(|mesh| mesh.has_complete_uvs())
+                        .is_some_and(|object| {
+                            ruster_render::object_has_complete_uvs(object, &self.resolved)
+                        })
                 {
                     return Err(
                         "Assign a mesh with complete UVs before using a textured material.".into(),
@@ -413,11 +413,7 @@ impl SceneEditor {
         }
         self.validate_material_candidate(&id, &candidate)?;
         if draft.intent != MaterialIntent::EditShared
-            && !object
-                .mesh
-                .as_ref()
-                .and_then(|id| self.resolved.get(id))
-                .is_some_and(|mesh| mesh.has_complete_uvs())
+            && !ruster_render::object_has_complete_uvs(object, &self.resolved)
         {
             return Err(
                 "Assign a mesh with complete UVs before choosing a material texture.".into(),
@@ -662,18 +658,10 @@ impl SceneEditor {
                     .iter()
                     .filter(|object| object.material == draft.original_assignment)
                     .all(|object| {
-                        object
-                            .mesh
-                            .as_ref()
-                            .and_then(|id| self.resolved.get(id))
-                            .is_some_and(|mesh| mesh.has_complete_uvs())
+                        ruster_render::object_has_complete_uvs(object, &self.resolved)
                     })
             } else {
-                object
-                    .mesh
-                    .as_ref()
-                    .and_then(|id| self.resolved.get(id))
-                    .is_some_and(|mesh| mesh.has_complete_uvs())
+                ruster_render::object_has_complete_uvs(&object, &self.resolved)
             };
             if !uv_ready {
                 ui.label(if draft.intent == MaterialIntent::EditShared {

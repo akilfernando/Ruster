@@ -235,6 +235,7 @@ fn block(id: &str, position: [f32; 3], scale: [f32; 3], color: [f32; 4]) -> Obje
         },
         color,
         mesh: None,
+        primitive: None,
     }
 }
 

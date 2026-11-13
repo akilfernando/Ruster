@@ -204,8 +204,17 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
         if name == "scene_duplicate" {
             keys.push("new_object_id");
         }
-        return exact_keys(args, &keys, &[])
-            && canonical_u64(&args["expected_revision"])
+        return exact_keys(
+            args,
+            &keys,
+            if name == "scene_create" {
+                &["primitive"]
+            } else {
+                &[]
+            },
+        ) && args.get("primitive").is_none_or(|value| {
+            value.is_null() || matches!(value.as_str(), Some("sphere" | "capsule"))
+        }) && canonical_u64(&args["expected_revision"])
             && keys.iter().filter(|k| **k != "expected_revision").all(|k| {
                 args[*k].as_str().is_some_and(|s| {
                     !s.is_empty()
@@ -217,6 +226,26 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                             }
                 })
             });
+    }
+    if name == "scene_primitive" {
+        return exact_keys(
+            args,
+            &[
+                "expected_session_token",
+                "expected_revision",
+                "object_id",
+                "primitive",
+            ],
+            &[],
+        ) && args["expected_session_token"]
+            .as_str()
+            .is_some_and(|s| !s.is_empty() && s.len() <= 256)
+            && canonical_u64(&args["expected_revision"])
+            && args["object_id"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty() && s.len() <= 128)
+            && (args["primitive"].is_null()
+                || matches!(args["primitive"].as_str(), Some("sphere" | "capsule")));
     }
     if name == "asset_inspect" {
         return exact_keys(args, &[], &["offset"]) && args.get("offset").is_none_or(canonical_u64);
@@ -361,7 +390,8 @@ fn tools() -> Value {
         ("scene_mesh", "Assign a registered mesh ID or null for procedural cube to one scene object; revisioned shared authored undo. A changed mesh beneath a textured material requires complete UVs; clear the material first to repair. Preview snapshot unchanged."),
         ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
-        ("scene_create", "Create one procedural cube with a new immutable object ID and display name. Revisioned, unsaved and shares human undo; preview unchanged."),
+        ("scene_create", "Create one procedural cube (default/null primitive), sphere or capsule with a new immutable object ID and display name. Revisioned, unsaved and shares human undo; preview unchanged."),
+        ("scene_primitive", "Set one object's built-in shape: sphere, capsule or null for cube. Clears a mesh asset in the same Undo entry. Session/revision and pending-human-draft guards apply; preview unchanged."),
         ("scene_rename", "Change an object's display name without changing its stable ID. Shares authored undo; preview unchanged."),
         ("scene_duplicate", "Duplicate one object with a fresh stable ID and display name. Preserves its transform and mesh; shares authored undo."),
         ("scene_delete", "Delete one object, retaining its data and position in bounded authored undo. Preview unchanged."),
@@ -406,6 +436,13 @@ fn tools() -> Value {
             if name == "scene_duplicate" {
                 properties.insert("new_object_id".into(), json!({"type":"string","minLength":1,"maxLength":128}));
                 required.push("new_object_id");
+            }
+        }
+        if matches!(name, "scene_create" | "scene_primitive") {
+            properties.insert("primitive".into(), json!({"enum":["sphere","capsule",null],"description":"Built-in geometry, not a collider or asset. Null means cube."}));
+            if name == "scene_primitive" {
+                properties.insert("object_id".into(), json!({"type":"string","minLength":1,"maxLength":128}));
+                required.extend(["object_id", "primitive"]);
             }
         }
         if matches!(name, "scene_transform_many" | "scene_duplicate_many" | "scene_delete_many") {
@@ -563,6 +600,7 @@ impl Server {
                         "scene_duplicate_many",
                         "scene_delete_many",
                         "scene_create",
+                        "scene_primitive",
                         "scene_rename",
                         "scene_duplicate",
                         "scene_delete",
@@ -895,7 +933,9 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 83);
+        assert_eq!(tools.len(), 84);
+        let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
+        assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
@@ -916,6 +956,7 @@ mod tests {
                 "shader_refresh",
                 "scene_inspect",
                 "scene_create",
+                "scene_primitive",
                 "scene_rename",
                 "scene_duplicate",
                 "scene_delete",
@@ -1065,6 +1106,14 @@ mod tests {
 
     #[test]
     fn scene_shapes_are_strict_and_semantic_validation_stays_with_owner() {
+        let mut server = ready();
+        let shape_args = json!({"expected_session_token":"s","expected_revision":"0","object_id":"shape","primitive":"sphere"});
+        let response = server.handle(&serde_json::to_vec(&json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"scene_primitive","arguments":shape_args}})).unwrap(), |name, actual| {
+            assert_eq!(name, "scene_primitive");
+            assert_eq!(actual, &shape_args);
+            json!({"ok":true,"result":{}})
+        }).unwrap();
+        assert_eq!(response["result"]["isError"], false);
         // Collider wire admission protects strict variants and original f64
         // bounds. Scale compatibility remains with the owning Scene transaction.
         let base = json!({"expected_session_token":"s","expected_revision":"9007199254740993","object_id":"probe"});

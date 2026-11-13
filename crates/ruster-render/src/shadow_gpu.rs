@@ -58,16 +58,12 @@ struct Retired {
 pub(super) struct Geometry<'a> {
     pub groups: &'a [DrawGroup],
     pub meshes: &'a BTreeMap<String, GpuMesh>,
-    pub cube: &'a GpuMesh,
+    pub builtins: &'a BuiltinMeshes,
     pub instances: &'a wgpu::Buffer,
 }
 impl Geometry<'_> {
     fn mesh(&self, group: &DrawGroup) -> &GpuMesh {
-        group
-            .key
-            .as_ref()
-            .and_then(|id| self.meshes.get(id))
-            .unwrap_or(self.cube)
+        self.builtins.group_mesh(group, self.meshes)
     }
     fn corners(&self) -> impl Iterator<Item = Vec3> + '_ {
         self.groups.iter().flat_map(|group| {

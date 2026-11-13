@@ -83,6 +83,7 @@ fn verify_case(
             );
             DrawGroup {
                 key: Some(format!("boundary-{index:02}")),
+                primitive: None,
                 binding: BindingKey::default(),
                 texture: None,
                 roughness: None,
@@ -225,7 +226,7 @@ fn verify_case(
     assert_eq!(actual_bytes, cpu_bytes as u64);
     assert_eq!(
         metrics.mesh_bytes,
-        actual_bytes + r.cube.bytes + r.zero_uv.size()
+        actual_bytes + r.builtins.bytes() + r.zero_uv.size()
     );
     // Each fully visible triangle reaches the left edge of its cell. A cube
     // fallback covers only the central half, so this observes actual geometry.

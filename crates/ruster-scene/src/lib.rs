@@ -12,7 +12,7 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-pub const FORMAT_VERSION: u32 = 17;
+pub const FORMAT_VERSION: u32 = 18;
 pub const MAX_MATERIALS: usize = 64;
 
 mod authoring;
@@ -145,6 +145,35 @@ impl OpaqueMaterial {
     }
 }
 
+/// Built-in procedural geometry beyond the default unit cube. Built-ins are
+/// engine-owned shapes, not assets: they never consume asset capacity.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Primitive {
+    /// Radius 0.5 UV sphere centred on the origin.
+    Sphere,
+    /// Radius 0.5, total height 2 along local Y (Unity default proportions).
+    Capsule,
+}
+impl Primitive {
+    pub const ALL: [Self; 2] = [Self::Sphere, Self::Capsule];
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Sphere => "sphere",
+            Self::Capsule => "capsule",
+        }
+    }
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|p| p.as_str() == value)
+    }
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Sphere => "Sphere",
+            Self::Capsule => "Capsule",
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Object {
@@ -159,6 +188,9 @@ pub struct Object {
     /// Asset existence is checked by the asset/editor boundary, not this crate.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub mesh: Option<String>,
+    /// Built-in procedural shape; None with no mesh is the unit cube. Exclusive with `mesh`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub primitive: Option<Primitive>,
     /// Scene-owned material identity; None preserves legacy object color.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub material: Option<String>,
@@ -175,8 +207,20 @@ impl Object {
             transform: Transform::default(),
             color: [0.6, 0.6, 0.6, 1.0],
             mesh: None,
+            primitive: None,
             material: None,
             collider: None,
+        }
+    }
+    /// A default-colored object with the given built-in shape; None is the cube.
+    pub fn procedural(
+        id: impl Into<String>,
+        name: Option<String>,
+        primitive: Option<Primitive>,
+    ) -> Self {
+        Self {
+            primitive,
+            ..Self::cube(id, name)
         }
     }
     pub fn display_name(&self) -> &str {
@@ -192,6 +236,12 @@ impl Object {
         }
         if let Some(mesh) = &self.mesh {
             validate_id(mesh)?;
+            if self.primitive.is_some() {
+                return Err(SceneError::Invalid(format!(
+                    "object {} cannot have both a mesh asset and a built-in primitive",
+                    self.id
+                )));
+            }
         }
         if let Some(id) = &self.material {
             validate_id(id)?;
@@ -269,6 +319,7 @@ impl Scene {
                 },
                 color,
                 mesh: None,
+                primitive: None,
                 material: None,
                 collider: None,
             })
@@ -539,6 +590,11 @@ enum SceneDelta {
         before: Option<String>,
         after: Option<String>,
     },
+    Primitive {
+        id: String,
+        before: Option<Primitive>,
+        after: Option<Primitive>,
+    },
     Collider {
         id: String,
         before: Option<Collider>,
@@ -578,6 +634,7 @@ impl SceneDelta {
             | Self::Transform { id: old, .. }
             | Self::Color { id: old, .. }
             | Self::Mesh { id: old, .. }
+            | Self::Primitive { id: old, .. }
             | Self::Material { id: old, .. }
             | Self::Collider { id: old, .. } => old == id,
             Self::Transforms { changes } => changes.iter().any(|e| e.id == id),
@@ -813,6 +870,24 @@ impl SceneDelta {
                 }
                 object.mesh = replacement.clone();
             }
+            Self::Primitive { id, before, after } => {
+                validate_id(id)?;
+                let object = scene
+                    .objects
+                    .iter_mut()
+                    .find(|o| &o.id == id)
+                    .ok_or_else(inconsistent)?;
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &object.primitive != expected {
+                    return Err(inconsistent());
+                }
+                // Mesh/primitive exclusivity is validated for the whole Change.
+                object.primitive = *replacement;
+            }
         }
         Ok(())
     }
@@ -1045,6 +1120,7 @@ impl From<LegacyDocument> for Document {
                         transform: o.transform,
                         color: o.color,
                         mesh: None,
+                        primitive: None,
                         material: None,
                         collider: None,
                     })
@@ -1133,6 +1209,7 @@ impl From<V2Document> for Document {
                         transform: o.transform,
                         color: o.color,
                         mesh: o.mesh,
+                        primitive: None,
                         material: None,
                         collider: None,
                     })
@@ -1235,6 +1312,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..18).contains(&version) {
+            reject_pre_v18_primitive_fields(&value, version)?;
+        }
         if (1..17).contains(&version) {
             reject_pre_v17_hud_panels(&value)?;
         }
@@ -1278,7 +1358,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=17 => serde_json::from_value(value)?,
+            5..=18 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1494,16 +1574,18 @@ fn reject_pre_v13_binding_fields(value: &serde_json::Value) -> Result<(), SceneE
     }
 }
 
-// Inspect actual Object owners and collider deltas only. Behavior properties
-// and JSON-looking source strings named collider retain their existing meaning.
-fn reject_pre_v12_collider_fields(
+// Inspect actual Object owners and the named delta kind only. Behavior
+// properties and JSON-looking source strings retain their existing meaning.
+fn has_object_field_or_delta(
     value: &serde_json::Value,
     version: u64,
-) -> Result<(), SceneError> {
-    let has_collider = |object: &serde_json::Value| object.get("collider").is_some();
+    field: &str,
+    delta_kind: &str,
+) -> bool {
+    let has_field = |object: &serde_json::Value| object.get(field).is_some();
     let mut found = value["scene"]["objects"]
         .as_array()
-        .is_some_and(|objects| objects.iter().any(has_collider));
+        .is_some_and(|objects| objects.iter().any(has_field));
     for stack in ["undo", "redo"] {
         for change in value[stack].as_array().into_iter().flatten() {
             let deltas = if version <= 4 {
@@ -1513,11 +1595,11 @@ fn reject_pre_v12_collider_fields(
             };
             for delta in deltas {
                 found |= match delta["kind"].as_str() {
-                    Some("collider") => true,
-                    Some("create" | "delete") => has_collider(&delta["object"]),
+                    Some(kind) if kind == delta_kind => true,
+                    Some("create" | "delete") => has_field(&delta["object"]),
                     Some("objects") => ["created", "deleted"].into_iter().any(|section| {
                         delta[section].as_array().is_some_and(|entries| {
-                            entries.iter().any(|entry| has_collider(&entry["object"]))
+                            entries.iter().any(|entry| has_field(&entry["object"]))
                         })
                     }),
                     _ => false,
@@ -1525,9 +1607,29 @@ fn reject_pre_v12_collider_fields(
             }
         }
     }
-    if found {
+    found
+}
+
+fn reject_pre_v12_collider_fields(
+    value: &serde_json::Value,
+    version: u64,
+) -> Result<(), SceneError> {
+    if has_object_field_or_delta(value, version, "collider", "collider") {
         Err(SceneError::Invalid(
             "primitive colliders require scene v12".into(),
+        ))
+    } else {
+        Ok(())
+    }
+}
+
+fn reject_pre_v18_primitive_fields(
+    value: &serde_json::Value,
+    version: u64,
+) -> Result<(), SceneError> {
+    if has_object_field_or_delta(value, version, "primitive", "primitive") {
+        Err(SceneError::Invalid(
+            "built-in sphere and capsule primitives require scene v18".into(),
         ))
     } else {
         Ok(())
@@ -2509,6 +2611,7 @@ impl Session {
                     | SceneDelta::Transform { id, .. }
                     | SceneDelta::Color { id, .. }
                     | SceneDelta::Mesh { id, .. }
+                    | SceneDelta::Primitive { id, .. }
                     | SceneDelta::Material { id, .. }
                     | SceneDelta::Collider { id, .. } => {
                         used.insert(id);
@@ -3271,12 +3374,34 @@ impl Session {
     }
 
     /// Assign a syntactically valid stable asset ID, or None for a cube.
+    /// Any built-in primitive is cleared in the same Undo entry.
     /// Registry lookup belongs to the caller; failed/no-op commands preserve history.
     pub fn set_mesh(
         &mut self,
         expected_revision: u64,
         object_id: &str,
         mesh: Option<String>,
+    ) -> Result<u64, SceneError> {
+        self.set_shape(expected_revision, object_id, mesh, None)
+    }
+
+    /// Select a built-in primitive, or None for the unit cube. Any mesh asset is
+    /// cleared in the same Undo entry; failed/no-op commands preserve history.
+    pub fn set_primitive(
+        &mut self,
+        expected_revision: u64,
+        object_id: &str,
+        primitive: Option<Primitive>,
+    ) -> Result<u64, SceneError> {
+        self.set_shape(expected_revision, object_id, None, primitive)
+    }
+
+    fn set_shape(
+        &mut self,
+        expected_revision: u64,
+        object_id: &str,
+        mesh: Option<String>,
+        primitive: Option<Primitive>,
     ) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
         if let Some(id) = &mesh {
@@ -3289,13 +3414,27 @@ impl Session {
             .iter()
             .find(|o| o.id == object_id)
             .ok_or_else(|| SceneError::ObjectNotFound(object_id.into()))?;
-        if object.mesh == mesh {
+        let mut scene = Vec::new();
+        if object.mesh != mesh {
+            scene.push(SceneDelta::Mesh {
+                id: object_id.into(),
+                before: object.mesh.clone(),
+                after: mesh,
+            });
+        }
+        if object.primitive != primitive {
+            scene.push(SceneDelta::Primitive {
+                id: object_id.into(),
+                before: object.primitive,
+                after: primitive,
+            });
+        }
+        if scene.is_empty() {
             return Ok(self.document.scene.revision);
         }
-        self.commit_change(SceneDelta::Mesh {
-            id: object_id.into(),
-            before: object.mesh.clone(),
-            after: mesh,
+        self.commit_change(Change {
+            scene,
+            ..Change::default()
         })
     }
 
@@ -3908,7 +4047,7 @@ mod tests {
         assert_eq!(
             serde_json::from_slice::<serde_json::Value>(&redo.snapshot_bytes().unwrap()).unwrap()
                 ["format_version"],
-            17
+            18
         );
         assert_eq!(
             hud::migrate_legacy_hud(serde_json::json!({})).unwrap(),
@@ -6362,74 +6501,109 @@ mod tests {
         corrupt["undo"][0]["scene"][0]["after"]["shape"]["radius"] = json!(0.5);
         assert!(Session::from_snapshot_bytes(&serde_json::to_vec(&corrupt).unwrap()).is_err());
 
+        // Scene12 colliders and Scene18 built-in primitives share the owner-only
+        // guard: old labels reject the field on actual objects (including null)
+        // and the new delta kind in both stacks, never property/source text.
         let baseline = serde_json::to_value(Document::new(Scene::demo())).unwrap();
-        for version in 1..=11 {
-            let mut old = baseline.clone();
-            old["format_version"] = json!(version);
-            let loaded = Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
-            assert_eq!(loaded.scene(), &Scene::demo());
-            assert_eq!(loaded.loaded_format_version(), version);
-            for payload in [
-                Value::Null,
+        for (field, last_old, message, payload) in [
+            (
+                "collider",
+                11,
+                "colliders require scene v12",
                 serde_json::to_value(Collider::default()).unwrap(),
+            ),
+            (
+                "primitive",
+                17,
+                "primitives require scene v18",
+                json!("sphere"),
+            ),
+        ] {
+            for version in 1..=last_old {
+                let mut old = baseline.clone();
+                old["format_version"] = json!(version);
+                let loaded =
+                    Session::from_snapshot_bytes(&serde_json::to_vec(&old).unwrap()).unwrap();
+                assert_eq!(loaded.scene(), &Scene::demo());
+                assert_eq!(loaded.loaded_format_version(), version);
+                for payload in [Value::Null, payload.clone()] {
+                    let mut bad = old.clone();
+                    bad["scene"]["objects"][0][field] = payload;
+                    assert!(
+                        matches!(Document::decode(&serde_json::to_vec(&bad).unwrap()),
+                        Err(SceneError::Invalid(error)) if error.contains(message)),
+                        "{field}/{version}"
+                    );
+                }
+            }
+            // Representative scalar/grouped envelopes cover both stacks and both
+            // lifecycle payload lists. Null remains a field-presence violation.
+            let mut object = serde_json::to_value(Object::cube("held", None)).unwrap();
+            object[field] = Value::Null;
+            for (version, stack, delta) in [
+                (
+                    3,
+                    "undo",
+                    json!({"kind":"create","object":object,"index":0}),
+                ),
+                (
+                    4,
+                    "redo",
+                    json!({"kind":"delete","object":object,"index":0}),
+                ),
+                (
+                    4,
+                    "undo",
+                    json!({"kind":"objects","created":[{"object":object,"index":0}],"deleted":[]}),
+                ),
+                (
+                    5,
+                    "redo",
+                    json!({"kind":"objects","created":[],"deleted":[{"object":object,"index":0}]}),
+                ),
+                (
+                    last_old,
+                    "undo",
+                    json!({"kind":field,"id":"left","before":null,"after":null}),
+                ),
+                (
+                    last_old,
+                    "redo",
+                    json!({"kind":field,"id":"left","before":null,"after":null}),
+                ),
             ] {
-                let mut bad = old.clone();
-                bad["scene"]["objects"][0]["collider"] = payload;
+                let mut bad = baseline.clone();
+                bad["format_version"] = json!(version);
+                bad[stack] = if version <= 4 {
+                    json!([delta])
+                } else {
+                    json!([{"scene":[delta]}])
+                };
                 assert!(
                     matches!(Document::decode(&serde_json::to_vec(&bad).unwrap()),
-                    Err(SceneError::Invalid(message)) if message.contains("colliders require scene v12"))
+                    Err(SceneError::Invalid(error)) if error.contains(message)),
+                    "{field}/{version}/{stack}"
                 );
             }
         }
-        // Representative scalar/grouped envelopes cover both stacks and both
-        // lifecycle payload lists. Null remains a field-presence violation.
-        let mut object = serde_json::to_value(Object::cube("held", None)).unwrap();
-        object["collider"] = Value::Null;
-        for (version, stack, delta) in [
-            (
-                3,
-                "undo",
-                json!({"kind":"create","object":object,"index":0}),
-            ),
-            (
-                4,
-                "redo",
-                json!({"kind":"delete","object":object,"index":0}),
-            ),
-            (
-                4,
-                "undo",
-                json!({"kind":"objects","created":[{"object":object,"index":0}],"deleted":[]}),
-            ),
-            (
-                5,
-                "redo",
-                json!({"kind":"objects","created":[],"deleted":[{"object":object,"index":0}]}),
-            ),
-            (
-                11,
-                "undo",
-                json!({"kind":"collider","id":"left","before":null,"after":null}),
-            ),
-            (
-                11,
-                "redo",
-                json!({"kind":"collider","id":"left","before":null,"after":null}),
-            ),
-        ] {
-            let mut bad = baseline.clone();
-            bad["format_version"] = json!(version);
-            bad[stack] = if version <= 4 {
-                json!([delta])
-            } else {
-                json!([{"scene":[delta]}])
-            };
-            assert!(
-                matches!(Document::decode(&serde_json::to_vec(&bad).unwrap()),
-                Err(SceneError::Invalid(message)) if message.contains("colliders require scene v12")),
-                "{version}/{stack}"
-            );
-        }
+        // A Scene17 cube document keeps its meaning and gains no primitive key
+        // when re-encoded at the current version.
+        let mut v17 = baseline;
+        v17["format_version"] = json!(17);
+        let upgraded: Value = serde_json::from_slice(
+            &Document::decode(&serde_json::to_vec(&v17).unwrap())
+                .unwrap()
+                .encode()
+                .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(upgraded["format_version"], json!(FORMAT_VERSION));
+        assert_eq!(FORMAT_VERSION, 18);
+        assert!(upgraded["scene"]["objects"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|object| object.get("primitive").is_none()));
     }
 
     // Unique risk: mesh and transform edits share one chronological persisted
@@ -6500,6 +6674,69 @@ mod tests {
         // Persisted mesh chains must match the current field, just like transforms.
         bounded.document.scene.objects[0].mesh = None;
         assert!(bounded.document.validate().is_err());
+
+        // Mesh <-> built-in primitive switches are one Undo entry each way;
+        // save/reopen preserves the coupled delta and redo restores both fields.
+        let mut shapes = Session::new(Scene::demo()).unwrap();
+        shapes.set_mesh(0, "left", mesh.clone()).unwrap();
+        shapes
+            .set_primitive(1, "left", Some(Primitive::Sphere))
+            .unwrap();
+        assert_eq!(shapes.undo_len(), 2);
+        let object = &shapes.scene().objects[0];
+        assert_eq!(
+            (&object.mesh, object.primitive),
+            (&None, Some(Primitive::Sphere))
+        );
+        let before = shapes.document.clone();
+        assert_eq!(
+            shapes
+                .set_primitive(2, "left", Some(Primitive::Sphere))
+                .unwrap(),
+            2
+        );
+        assert!(matches!(
+            shapes.set_primitive(1, "left", None),
+            Err(SceneError::StaleRevision { .. })
+        ));
+        assert!(matches!(
+            shapes.set_primitive(2, "absent", None),
+            Err(SceneError::ObjectNotFound(_))
+        ));
+        assert_eq!(shapes.document, before);
+        let path = dir.path().join("shapes.json");
+        shapes.save(&path).unwrap();
+        let mut shapes = Session::open(&path).unwrap();
+        shapes.undo(2).unwrap();
+        let object = &shapes.scene().objects[0];
+        assert_eq!((&object.mesh, object.primitive), (&mesh, None));
+        shapes.redo(3).unwrap();
+        shapes.set_mesh(4, "left", mesh.clone()).unwrap();
+        assert_eq!(shapes.undo_len(), 3);
+        shapes.undo(5).unwrap();
+        assert_eq!(shapes.scene().objects[0].primitive, Some(Primitive::Sphere));
+        // set_mesh(None) still means "cube" and clears the primitive.
+        shapes.set_mesh(6, "left", None).unwrap();
+        let object = &shapes.scene().objects[0];
+        assert_eq!((&object.mesh, object.primitive), (&None, None));
+        shapes
+            .set_primitive(7, "left", Some(Primitive::Capsule))
+            .unwrap();
+        shapes.save(&path).unwrap();
+        let reopened = Session::open(&path).unwrap();
+        assert_eq!(reopened.document, shapes.document);
+        // Exclusivity is a scene invariant, including replayed corrupt history.
+        let mut both = Scene::demo();
+        both.objects[0].mesh = mesh.clone();
+        both.objects[0].primitive = Some(Primitive::Capsule);
+        assert!(both.validate().is_err());
+        let mut corrupt = serde_json::to_value(&shapes.document).unwrap();
+        let last = corrupt["undo"].as_array().unwrap().len() - 1;
+        corrupt["undo"][last]["scene"] = serde_json::json!([
+            {"kind":"primitive","id":"left","before":null,"after":"capsule"}
+        ]);
+        corrupt["scene"]["objects"][0]["mesh"] = "owned_mesh.01".into();
+        assert!(Session::from_snapshot_bytes(&serde_json::to_vec(&corrupt).unwrap()).is_err());
     }
 
     // Unique risk: public code-first values bypass constructor validation.

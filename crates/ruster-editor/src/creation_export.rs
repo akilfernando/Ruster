@@ -811,7 +811,21 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!("runtime_hud_panels"));
-    let profile = &manifest["profile"];
+    let mut primitive_profile = hud_panels_profile.clone();
+    primitive_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!("builtin_primitives"));
+    let supplied_profile = &manifest["profile"];
+    if scene_version >= 18 && supplied_profile != &primitive_profile {
+        return Err("runtime kit does not support Scene18 builtin_primitives; prepare a current Linux runtime kit".into());
+    }
+    // The exact new profile is backward compatible with the panel-aware runtime.
+    let profile = if supplied_profile == &primitive_profile {
+        &hud_panels_profile
+    } else {
+        supplied_profile
+    };
     if scene_version >= 17 && profile != &hud_panels_profile {
         return Err("runtime kit does not support Scene17 runtime_hud_panels; prepare a current Linux runtime kit".into());
     }
@@ -1164,13 +1178,14 @@ fn prepare(
         15 => 11,
         16 => 12,
         17 => 13,
-        _ => return Err("export requires a supported Scene1–17 document".into()),
+        18 => 14,
+        _ => return Err("export requires a supported Scene1–18 document".into()),
     };
     let tick_nanos = u64::try_from(ruster_behavior::DEFAULT_FIXED_TICK.as_nanos())
         .map_err(|_| "Default fixed tick exceeds the descriptor nanosecond range")?;
     let mut content_manifest = json!({"schema":schema, "title":request.title,
         "scene_sha256":scene_hash, "meshes":meshes});
-    if matches!(schema, 7..=13) {
+    if matches!(schema, 7..=14) {
         content_manifest["tick_nanos"] = json!(tick_nanos);
     } else {
         content_manifest["tick_millis"] = json!(100);
@@ -1793,6 +1808,17 @@ mod tests {
         for version in 1..=17 {
             verify_helpers(root.path(), true, version).unwrap();
         }
+        assert!(verify_helpers(root.path(), false, 18)
+            .unwrap_err()
+            .contains("Scene18 builtin_primitives"));
+        manifest["profile"]["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("builtin_primitives"));
+        write(&manifest);
+        for version in 1..=18 {
+            verify_helpers(root.path(), true, version).unwrap();
+        }
         manifest["profile"]["capabilities"]
             .as_array_mut()
             .unwrap()
@@ -1831,10 +1857,10 @@ args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
 content=pathlib.Path(args['--content'])
 kit=pathlib.Path(args['--runtime-kit'])
 value=json.loads((content/'content.json').read_bytes())
-assert value['schema']==13
+assert value['schema']==14
 assert value['tick_nanos']==16666667 and 'tick_millis' not in value
 scene=json.loads((content/'scene.json').read_bytes())
-assert scene['format_version']==17
+assert scene['format_version']==18
 assert scene['scene']['objects'][0]['collider']==dict(enabled=False,role='blocker',offset=[0,0,0],shape=dict(type='box',half_extents=[.5,.5,.5]))
 assert scene['authoring']['actions']=={'home':{'kind':{'type':'button','keys':[]}}}
 assert scene['authoring']['hud']['enabled'] is True
@@ -1874,7 +1900,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             "helper":"scripts/package_creation.py","files":records,
             "profile":{"format":"ruster-runtime","version":1,"descriptor_format":"ruster-application",
                 "descriptor_version":5,"os":"linux","arch":"x86_64",
-                "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials","roughness_maps","input_actions","spatial_queries","runtime_state","lifecycle_commands","runtime_hud","runtime_hud_controls","runtime_hud_panels"]}})).unwrap()).unwrap();
+                "capabilities":["initial_camera","opaque_materials","authored_lighting","sun_shadows","surface_materials","roughness_maps","input_actions","spatial_queries","runtime_state","lifecycle_commands","runtime_hud","runtime_hud_controls","runtime_hud_panels","builtin_primitives"]}})).unwrap()).unwrap();
         let mesh = b"v 0 0 0\nv 1 0 0\nv 0 1 0\nvt 0 0\nvt 1 0\nvt 0 1\nf 1/1 2/2 3/3\n";
         fs::write(root.path().join("source.obj"), mesh).unwrap();
         fs::write(root.path().join("unused.obj"), mesh).unwrap();
@@ -1972,7 +1998,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         )
         .unwrap();
         let staged: Value = serde_json::from_slice(&fs::read(&prepared.archive).unwrap()).unwrap();
-        assert_eq!(staged["schema"], 13);
+        assert_eq!(staged["schema"], 14);
         assert_eq!(staged["tick_nanos"], 16_666_667);
         assert!(staged.get("tick_millis").is_none());
         assert_eq!(staged["meshes"]["mesh"]["normal_policy"], "flat");

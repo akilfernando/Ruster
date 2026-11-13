@@ -4,6 +4,8 @@ mod asset_gpu;
 mod geometry_probe;
 mod lighting_gpu;
 mod material_gpu;
+mod primitives;
+pub use primitives::builtin_mesh;
 #[cfg(test)]
 mod material_probe;
 mod shadow_gpu;
@@ -1027,10 +1029,12 @@ pub fn render_viewport_with_materials(
         Ok(packet) => (packet, false),
         Err(_) => (LightingPacket::authored_dark(), true),
     };
-    let mut grouped = BTreeMap::<(Option<String>, BindingKey), DrawGroup>::new();
+    let mut grouped =
+        BTreeMap::<(Option<String>, Option<ruster_scene::Primitive>, BindingKey), DrawGroup>::new();
     for object in &scene.objects {
         let mesh = object_mesh(object, meshes);
         let key = mesh.and_then(|_| object.mesh.clone());
+        let primitive = object.mesh.is_none().then_some(object.primitive).flatten();
         let material = object
             .material
             .as_ref()
@@ -1060,9 +1064,10 @@ pub fn render_viewport_with_materials(
             0.0
         };
         let group = grouped
-            .entry((key.clone(), binding.clone()))
+            .entry((key.clone(), primitive, binding.clone()))
             .or_insert_with(|| DrawGroup {
                 key,
+                primitive,
                 texture: binding
                     .texture
                     .as_ref()
@@ -1191,11 +1196,27 @@ pub fn render_viewport_with_materials(
     }
 }
 
+// Built-in primitives resolve to shared engine geometry. The cube stays None so
+// it keeps exact slab picking and box Fit bounds; a missing asset falls back to it.
 fn object_mesh<'a>(
     object: &Object,
     meshes: &'a BTreeMap<String, Arc<ruster_assets::Mesh>>,
 ) -> Option<&'a Arc<ruster_assets::Mesh>> {
-    object.mesh.as_ref().and_then(|id| meshes.get(id))
+    match (&object.mesh, object.primitive) {
+        (Some(id), _) => meshes.get(id),
+        (None, Some(primitive)) => Some(builtin_mesh(primitive)),
+        (None, None) => None,
+    }
+}
+
+/// Whether textured materials can sample this object: a resolved mesh asset
+/// with a complete UV set, or a built-in sphere/capsule. The procedural cube
+/// keeps its existing missing-texture marker.
+pub fn object_has_complete_uvs(
+    object: &Object,
+    meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+) -> bool {
+    object_mesh(object, meshes).is_some_and(|mesh| mesh.has_complete_uvs())
 }
 
 fn pick(
@@ -1320,35 +1341,6 @@ struct Instance {
     base_color: [f32; 4],
     response: [f32; 4],
 }
-fn cube() -> ruster_assets::Mesh {
-    let mut vertices = Vec::new();
-    let mut texcoords = Vec::new();
-    let mut indices = Vec::new();
-    for (normal, u, v) in [
-        (Vec3::X, -Vec3::Z, Vec3::Y),
-        (-Vec3::X, Vec3::Z, Vec3::Y),
-        (Vec3::Y, Vec3::X, -Vec3::Z),
-        (-Vec3::Y, Vec3::X, Vec3::Z),
-        (Vec3::Z, Vec3::X, Vec3::Y),
-        (-Vec3::Z, -Vec3::X, Vec3::Y),
-    ] {
-        let base = vertices.len() as u32;
-        for (x, y) in [(-1.0, -1.0), (1.0, -1.0), (1.0, 1.0), (-1.0, 1.0)] {
-            vertices.push(ruster_assets::Vertex {
-                position: ((normal + u * x + v * y) * 0.5).to_array(),
-                normal: normal.to_array(),
-            });
-            texcoords.push([x * 0.5 + 0.5, y * 0.5 + 0.5]);
-        }
-        indices.extend([base, base + 1, base + 2, base, base + 2, base + 3]);
-    }
-    ruster_assets::Mesh {
-        vertices,
-        indices,
-        texcoords: Some(texcoords),
-    }
-}
-
 fn choose_samples(
     color: wgpu::TextureFormatFeatureFlags,
     depth: wgpu::TextureFormatFeatureFlags,
@@ -1505,7 +1497,7 @@ struct Resources {
     requested_samples: u32,
     pipeline: ScenePipelines,
     composite: wgpu::RenderPipeline,
-    cube: GpuMesh,
+    builtins: BuiltinMeshes,
     zero_uv: wgpu::Buffer,
     meshes: BTreeMap<String, GpuMesh>,
     pipeline_layout: wgpu::PipelineLayout,
@@ -1594,7 +1586,11 @@ impl Resources {
             multiview_mask: None,
             cache: None,
         });
-        let cube = GpuMesh::new(device, None, &cube());
+        let builtins = BuiltinMeshes {
+            cube: GpuMesh::new(device, None, &primitives::cube()),
+            sphere: GpuMesh::new(device, None, builtin_mesh(ruster_scene::Primitive::Sphere)),
+            capsule: GpuMesh::new(device, None, builtin_mesh(ruster_scene::Primitive::Capsule)),
+        };
         // One constant attribute serves every mesh without authored UVs. This
         // fixed renderer overhead is separate from imported mesh admission.
         let zero_uv = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
@@ -1602,7 +1598,7 @@ impl Resources {
             contents: bytemuck::bytes_of(&[0.0_f32; 2]),
             usage: wgpu::BufferUsages::VERTEX,
         });
-        let mesh_bytes = cube.bytes + zero_uv.size();
+        let mesh_bytes = builtins.bytes() + zero_uv.size();
         let camera = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("scene camera"),
             size: 80,
@@ -1649,7 +1645,7 @@ impl Resources {
             });
         let metrics = Arc::new(Mutex::new(Metrics {
             mesh_bytes,
-            mesh_uploads: 1,
+            mesh_uploads: 3,
             mesh_upload_bytes: mesh_bytes,
             lighting_bytes: LIGHTING_BYTES,
             lighting_uploads: 1,
@@ -1665,7 +1661,7 @@ impl Resources {
             requested_samples: sample_count,
             pipeline,
             composite,
-            cube,
+            builtins,
             zero_uv,
             meshes: BTreeMap::new(),
             pipeline_layout,
@@ -2018,6 +2014,38 @@ fn scene_pipeline_format(
     }
 }
 
+/// Engine-owned geometry: fixed renderer overhead outside the 48 MiB asset
+/// admission total and the 64-asset closure.
+struct BuiltinMeshes {
+    cube: GpuMesh,
+    sphere: GpuMesh,
+    capsule: GpuMesh,
+}
+impl BuiltinMeshes {
+    fn get(&self, primitive: Option<ruster_scene::Primitive>) -> &GpuMesh {
+        match primitive {
+            None => &self.cube,
+            Some(ruster_scene::Primitive::Sphere) => &self.sphere,
+            Some(ruster_scene::Primitive::Capsule) => &self.capsule,
+        }
+    }
+    // An asset key that is not resident falls back to the cube, never to a
+    // built-in, matching the missing-asset contract.
+    fn group_mesh<'a>(
+        &'a self,
+        group: &DrawGroup,
+        meshes: &'a BTreeMap<String, GpuMesh>,
+    ) -> &'a GpuMesh {
+        match &group.key {
+            Some(id) => meshes.get(id).unwrap_or(&self.cube),
+            None => self.get(group.primitive),
+        }
+    }
+    fn bytes(&self) -> u64 {
+        self.cube.bytes + self.sphere.bytes + self.capsule.bytes
+    }
+}
+
 #[derive(Clone)]
 struct GpuMesh {
     source: Option<Weak<ruster_assets::Mesh>>,
@@ -2130,6 +2158,8 @@ fn prepare_mesh(
 }
 struct DrawGroup {
     key: Option<String>,
+    /// Built-in shape when `key` is None; None with no key draws the cube.
+    primitive: Option<ruster_scene::Primitive>,
     binding: BindingKey,
     texture: Option<Arc<ruster_assets::Texture>>,
     roughness: Option<Arc<ruster_assets::Texture>>,
@@ -2318,7 +2348,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             shadow_gpu::Geometry {
                 groups: &self.groups,
                 meshes: &r.meshes,
-                cube: &r.cube,
+                builtins: &r.builtins,
                 instances: &r.instances,
             },
             shadow_gpu::Request {
@@ -2364,11 +2394,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
             pass.set_vertex_buffer(1, r.instances.slice(..));
             for group in &self.groups {
                 pass.set_bind_group(1, r.materials.bind(&group.binding), &[]);
-                let mesh = group
-                    .key
-                    .as_ref()
-                    .and_then(|id| r.meshes.get(id))
-                    .unwrap_or(&r.cube);
+                let mesh = r.builtins.group_mesh(group, &r.meshes);
                 pass.set_pipeline(pipelines.for_mesh(mesh));
                 pass.set_vertex_buffer(0, mesh.vertices.slice(..));
                 pass.set_vertex_buffer(2, mesh.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
@@ -2451,8 +2477,9 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.texture_bytes = r.materials.bytes();
         metrics.draw_calls = self.groups.len();
         metrics.objects = instance_count;
-        metrics.mesh_bytes =
-            r.cube.bytes + r.zero_uv.size() + r.meshes.values().map(|mesh| mesh.bytes).sum::<u64>();
+        metrics.mesh_bytes = r.builtins.bytes()
+            + r.zero_uv.size()
+            + r.meshes.values().map(|mesh| mesh.bytes).sum::<u64>();
         metrics.instance_capacity_bytes = (r.capacity * size_of::<Instance>()) as u64;
         metrics.target_bytes = format_target_bytes(size, samples, format);
         metrics.sample_count = samples;
@@ -3295,6 +3322,41 @@ mod tests {
     }
     #[test]
     fn imported_triangle_controls_pick_and_exact_fit_bounds() {
+        for shape in ruster_scene::Primitive::ALL {
+            let mut builtins = Scene::empty("builtin");
+            builtins
+                .objects
+                .push(Object::procedural("shape", None, Some(shape)));
+            let meshes = BTreeMap::new();
+            let fit = Camera::fit(&builtins, &meshes, 1.0).unwrap();
+            let height = if shape == ruster_scene::Primitive::Capsule {
+                2.0
+            } else {
+                1.0
+            };
+            assert!(fit.target.length() < 1.0e-5);
+            assert!((fit.distance - Vec3::new(1.0, height, 1.0).length() * 1.5).abs() < 1.0e-5);
+            let camera = Camera {
+                target: Vec3::ZERO,
+                yaw: 0.0,
+                pitch: 0.0,
+                distance: 6.0,
+                orthographic: true,
+            };
+            let (view, projection, _) = camera.matrices(1.6);
+            let vp = projection * view;
+            for (point, expected) in [
+                (Vec3::ZERO, true),
+                (Vec3::new(0.49, height * 0.49, 0.0), false),
+            ] {
+                let ndc = vp.project_point3(point);
+                assert_eq!(
+                    pick(&builtins, &meshes, vp, ndc.x, ndc.y).is_some(),
+                    expected,
+                    "{shape:?}"
+                );
+            }
+        }
         let mut scene = Scene::demo();
         scene.objects.truncate(1);
         let object = &mut scene.objects[0];
@@ -3591,16 +3653,22 @@ mod tests {
                         }),
                         ..Default::default()
                     });
-                    pass.set_pipeline(r.pipeline.for_mesh(&r.cube));
+                    pass.set_pipeline(r.pipeline.for_mesh(&r.builtins.cube));
                     pass.set_bind_group(0, &r.camera_bind, &[]);
                     pass.set_bind_group(1, r.materials.bind(&BindingKey::default()), &[]);
                     pass.set_bind_group(2, &r.lighting.bind, &[]);
                     pass.set_bind_group(3, r.shadows.bind(), &[]);
-                    pass.set_vertex_buffer(0, r.cube.vertices.slice(..));
+                    pass.set_vertex_buffer(0, r.builtins.cube.vertices.slice(..));
                     pass.set_vertex_buffer(1, r.instances.slice(..));
-                    pass.set_vertex_buffer(2, r.cube.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
-                    pass.set_index_buffer(r.cube.indices.slice(..), wgpu::IndexFormat::Uint32);
-                    pass.draw_indexed(0..r.cube.count, 0, 0..1);
+                    pass.set_vertex_buffer(
+                        2,
+                        r.builtins.cube.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..),
+                    );
+                    pass.set_index_buffer(
+                        r.builtins.cube.indices.slice(..),
+                        wgpu::IndexFormat::Uint32,
+                    );
+                    pass.draw_indexed(0..r.builtins.cube.count, 0, 0..1);
                 }
                 queue.submit([encoder.finish()]);
             }

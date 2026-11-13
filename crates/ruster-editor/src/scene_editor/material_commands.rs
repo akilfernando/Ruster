@@ -172,12 +172,7 @@ impl SceneEditor {
             .iter()
             .find(|object| object.id == object_id)
             .ok_or_else(|| format!("Object {object_id} does not exist"))?;
-        if !object
-            .mesh
-            .as_ref()
-            .and_then(|id| self.resolved.get(id))
-            .is_some_and(|mesh| mesh.has_complete_uvs())
-        {
+        if !ruster_render::object_has_complete_uvs(object, &self.resolved) {
             return Err(format!(
                 "Object {object_id} requires an accepted mesh with complete UVs before using a texture"
             ));
@@ -515,6 +510,25 @@ mod tests {
     // drafts and independent revisions must protect one real history/preview.
     #[test]
     fn material_commands_guard_shared_assets_and_preserve_repairable_history() {
+        let mut builtins =
+            SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
+        assert!(builtins.validate_material_object_uvs("left").is_err());
+        for (revision, shape) in [
+            ruster_scene::Primitive::Sphere,
+            ruster_scene::Primitive::Capsule,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            builtins
+                .session
+                .set_primitive(revision as u64, "left", Some(shape))
+                .unwrap();
+            assert!(
+                builtins.validate_material_object_uvs("left").is_ok(),
+                "{shape:?}"
+            );
+        }
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path();
         std::fs::write(

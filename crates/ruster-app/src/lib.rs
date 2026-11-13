@@ -126,12 +126,7 @@ impl Content {
                             object.id
                         ));
                     }
-                    if !object
-                        .mesh
-                        .as_ref()
-                        .and_then(|id| self.meshes.get(id))
-                        .is_some_and(|mesh| mesh.has_complete_uvs())
-                    {
+                    if !ruster_render::object_has_complete_uvs(object, &self.meshes) {
                         return Err(format!(
                             "object {} needs a mesh with complete UVs for its textured material",
                             object.id
