@@ -148,5 +148,13 @@
     "Normal close failed at final dirty=true; exact owned processes terminated",
     "One configuration-reconciliation correction; original no-tool session retained"
   ],
+  "post_cleanup_qualification": {
+    "config_yaml_and_env_still_match": true,
+    "auth_matched_at_owned_cleanup_but_changed_later": true,
+    "auth_mtime_host_local": "2026-11-13T21:11:11.930968",
+    "cleanup_receipt_mtime_host_local": "2026-11-13T21:09:45.500937",
+    "cause": "unproven; isolated profile and owned clients already deleted",
+    "auth_copied_or_restored": false
+  },
   "private_audit": "/home/akilf/Projects/Ruster-Audits/e2-hermes-mcp-20261113"
 }
