@@ -28,6 +28,10 @@ Use one actual chosen client with isolated configuration and disposable projects
 
 The approved Hermes-only spike is **complete, verdict PARTIAL**: [standalone evidence/harness](../../spikes/001-hermes-mcp/README.md). Actual isolated Hermes0.23.1/native stdio discovers84tools, inspects the disposable project, performs guarded edit/stale-revision rejection/shared Undo with exact object readback, then a fresh CLI/session repeats inspection after scoped MCP reload. CLI registration requires running-profile reconciliation; one diagnosed correction was consumed. Registration removal, all owned client sessions/processes/socket cleanup, disposable profile deletion and default configuration/source preservation are verified. The final dirty document blocks normal close; scoped termination is retained rather than claiming a graceful close. Explicit environment-variable startup does **not** prove normal-startup/terminal-free attachment; secure project binding, editor/adapter-process restart and production lifecycle remain missing. No E2a implementation or UI follows automatically. Recommend Astra lifecycle review of these finite results; stop experiments here.
 
+## Lifecycle review follow-up — 2026-11-13
+
+The subsequently requested actual Astra lifecycle review is complete: [current compact E2a proposal](E2A-HERMES-LIFECYCLE-PROPOSAL.md). It supersedes the provisional checkpoint detail below, not the retained PARTIAL evidence. Recommendation is coherent for user approval, with binding/retirement and supported registration concurrency as finite implementation gates. No E2a production authority follows from the review; user selection and authority/delivery choices remain pending.
+
 ## Proposed production checkpoints after spike approval
 
 1. **Attachment/lifecycle:** opt-in bridge; bind to one editor incarnation/project generation; revoke on project change/restart. Two-editor tests must never retarget silently.
