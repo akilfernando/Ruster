@@ -12,8 +12,8 @@ Primitives are committed/pushed and bounded qualification is complete, including
 
 | Item | State | Notes |
 | --- | --- | --- |
-| Light/dark themes, optional OLED black | Implemented in HEAD; separate qualification/user decision | System/Dark/Light plus a labelled OLED variant for evaluation. Keeping OLED remains the user's decision |
-| Logo v2 integration | Implemented in HEAD; separate qualification | Theme-appropriate marks, window and launcher icon, DejaVu notice review |
+| Light/dark themes, optional OLED black | Source/test audit verified; fresh native closeout blocked | Existing Light/Dark/OLED captures inspected; active workspace2 prevents isolated preferences/startup/About/fresh-reopen matrix. OLED keep/remove remains the user's decision. [Evidence](../evidence/E1-THEME-LOGO-2026-11-13.md) |
+| Logo v2 integration | Asset origins/notices verified; fresh startup/About qualification blocked | Four exact SVG→PNG matches, full DejaVu notice and source-package inventory; installed launcher/icon read-only checked, not replaced or represented as current E1 |
 | Sphere and capsule primitives, Create menu | Bounded qualification complete; committed/pushed | Source/native/export and actual core/synchronization validation pass; parent review passed |
 | Viewport selection highlight | Accepted bounded rendering after fresh parent review | Default-off editor opt-in, two-tone visible-fragment inner contour; source/native/Vulkan/cost/runtime compatibility pass with explicit injected-input limitations. [Evidence](../evidence/E1-SELECTION-2026-11-13.md) |
 | Wide-window layout spacing | Accepted bounded qualification after fresh parent review | Actual-width responsive top bar and viewport groups. [Evidence](../evidence/E1-LAYOUT-2026-11-13.md) |

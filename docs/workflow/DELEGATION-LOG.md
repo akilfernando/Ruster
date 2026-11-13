@@ -2,6 +2,12 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
+## 2026-11-13 — E1 theme/logo source audit; native desktop-isolation blocker
+
+One Hermes/Sol owner (`gpt-6.1-sol`, effort not exposed), no child/model switch, production repair or new phase. Parent layout acceptance at `3fc1418` after fresh `deleg_2d12e1c1` review passed is recorded/pushed in `978ad6e`, superseding pending-parent wording below;13sessions are explicitly not13complete journeys. [Theme/logo audit and exact unfinished boundary](../evidence/E1-THEME-LOGO-2026-11-13.md).
+
+All non-Markdown inputs match accepted layout final-source pins. Reuse335Rust/30Python,144default/146inspection editor/strict and unchanged GPU/runtime evidence rather than replaying it. Fresh canonical default-feature build passes8.73seconds; four fresh supplied SVG rasterizations byte-match bundled assets; full DejaVu notices and Cargo source-package inventory pass. Three existing native Light/Dark/OLED captures are actually image-loaded and inspected by the owner. Installed binary/entry/icon read-only hashes are unchanged and are not represented as the current E1 build. No fresh System/startup/About/persistence/default-listener native proof: the existing guard refuses before launch because workspace2 is active. Zero new owned editor sessions/listeners; one retained preflight refusal. Cost/tokens/whole-task elapsed unavailable; no savings claim. Next is the bounded isolated native theme/preferences/reopen matrix when workspace2 is safely hidden, not E2/F4a. OLED keep/remove and user ordinary-workspace reopen confirmation remain separate decisions. No confirmed product defect or speculative redesign is introduced.
+
 ## 2026-11-13 — E1 wide-window spacing/selective icons, qualified for parent review
 
 One canonical Hermes worker (`gpt-6.1-sol`; effort not exposed) owns this reversible editor-only slice using the parent snapshot; no child agents/model/global/QA-helper changes. Parent selection acceptance is recorded/pushed as `e04d6ba`; layout working checkpoint `b0e4b9a` is pushed and remote verified. [Complete evidence, exact builds/screens/commands and retained failures](../evidence/E1-LAYOUT-2026-11-13.md). Final parent acceptance remains pending.
