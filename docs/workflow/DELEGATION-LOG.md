@@ -2,7 +2,15 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
-## 2026-11-13 — E1 viewport-selection feedback, review-ready
+## 2026-11-13 — E1 wide-window spacing/selective icons, qualified for parent review
+
+One canonical Hermes worker (`gpt-6.1-sol`; effort not exposed) owns this reversible editor-only slice using the parent snapshot; no child agents/model/global/QA-helper changes. Parent selection acceptance is recorded/pushed as `e04d6ba`; layout working checkpoint `b0e4b9a` is pushed and remote verified. [Complete evidence, exact builds/screens/commands and retained failures](../evidence/E1-LAYOUT-2026-11-13.md). Final parent acceptance remains pending.
+
+The supplied user image and fresh native before/after captures ground actual-width toolbar grouping and original vector transport icons. Existing compact geometry test gets RED→GREEN; one wrapping-row budgeting repair and a painted-leading-space test correction are explicit. Existing runtime focus case changes from obsolete painted-label lookup to real AccessKit named bounds while retaining focus/disabled/worker/clipping assertions. Full runner's successful earlier work is reused; only corrected editor and unreached checks complete335Rust/30Python, with144default/146inspection editor cases and strict checks. No duplicate full gate or unchanged renderer GPU campaign.
+
+Actual normal/compact keyboard/playback/Create/numeric/Save/fresh-reopen and Dark/Light/OLED captures qualify app-scoped behavior only.13owned sessions gone,11normal close/2retained harness-failure cleanups;13core/synchronization-active logs scan clean. One wrong interpreter and one pointer-focus harness assumption are retained, corrected using existing tools/menu focus, without production input repairs or fake focus. Fresh final build2.83seconds is byte-identical to the driven candidate; initial before/after builds10.78/6.30seconds. Reviewer findings not yet available; total model tokens/credits/cost/elapsed and comparative savings unknown. Next parent gate: reconcile bounded layout acceptance, then remaining E1 theme/logo qualification and OLED retention/product decisions; no E2/F4a starts.
+
+## 2026-11-13 — E1 viewport-selection feedback, accepted bounded rendering
 
 One bounded Hermes worker (`gpt-6.1-sol`, balanced implementation role; reasoning effort not exposed in this worker context) owns canonical source and qualification on `claude/e1-editor-feedback`, using the root's existing routing snapshot. No child delegation, model/global configuration change or Terra call occurs; actual images are loaded through `vision_analyze` for direct inspection. Parent accepts bounded rendering at `869063f7a8f260e0949612e08a88ac9affcb6937` after fresh independent review `deleg_2b4cc899` passed with no identified security/logic blocker; all input/rendering qualifications remain. Review model/effort and usage metrics not exposed in this handoff remain unknown. [Contract/evidence and retained failures](../evidence/E1-SELECTION-2026-11-13.md).
 
