@@ -10,7 +10,7 @@ The user explicitly answered **“Approve all 3”** to these three bundles:
 2. Approve separate in-app Save/export destination grants and human-selected executable runtime kits, with explicit immediate asset-catalog-persistence disclosure. Opening a project conveys no agent destination grant.
 3. Approve companion-adapter packaging and one previewed reversible Hermes-profile registration, allowing inert registration and manual restart when safe scoped reload is unavailable. Never automatically restart shared infrastructure.
 
-The subsequent explicit implementation instruction selects **Checkpoint 1 only**: connection authority and clean listener/publication retirement before onboarding UI. These approvals are not measured security, resource, compatibility or complete creator-journey proof.
+The first implementation instruction selected **Checkpoint 1 only**: connection authority and clean listener/publication retirement before onboarding UI. Parent subsequently accepted bounded CP1 after actual Astra review and authorized CP2 with an early supported-registration gate. That gate now [holds unsafe automatic registration](../evidence/E2A-CP2-2026-11-14.md); no decision to weaken its contract is implied. These approvals are not measured security, resource, compatibility or complete creator-journey proof.
 
 ## Context and selected engineering contract
 
@@ -38,6 +38,6 @@ Reject implicit only/active-editor discovery, revision-as-secret authentication,
 
 ## Scope and acceptance
 
-CP1 requires actual two-editor transport, missing/wrong authority reads and mutations, canceled transitions/restart/owner loss, deterministic queued/prepared versus authorized publication ordering, stale/replaced/symlink endpoints and listener/thread/FD drain evidence. Existing default/inspection wire/persistence/concurrency checks apply. CP1 remains WIP/review-pending until these are recorded and the parent performs fresh actual Astra lifecycle/security review.
+CP1 requires actual two-editor transport, missing/wrong authority reads and mutations, canceled transitions/restart/owner loss, deterministic queued/prepared versus authorized publication ordering, stale/replaced/symlink endpoints and listener/thread/FD drain evidence. Existing default/inspection wire/persistence/concurrency checks apply. Those bounded CP1 proofs and fresh actual Astra review are recorded; parent accepts CP1 with the qualifications in its evidence. CP2 remains incomplete at the concrete supported-registration hold.
 
 CP2 Connect UI/registration, CP3 complete Save/export journey and CP4 packaging/resource qualification remain sequential later gates. No stable installed app replacement, second client, recursive agents, shared gateway restart, QA/Commons changes or new roadmap scope is authorized by CP1. Renderer/runtime qualification may be reused for unchanged inputs.

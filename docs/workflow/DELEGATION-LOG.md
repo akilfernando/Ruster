@@ -2,6 +2,12 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
+## 2026-11-14 — CP2 single-writer early registration safety hold
+
+Inherited `gpt-6.1-sol` writer, effective effort/tokens/cost unknown; no children, routing changes or Claude probes. First records parent CP1 acceptance with all14 seal hashes recomputed, documentation checkpoint `6cf02e1` pushed/remote-verified. One nonblocking Astra P3 guard is fixed via existing test extension RED→GREEN; checkpoint `b4c78ca` pushed/remote-verified. No repair loop. Final347Rust/30Python/full strict gate34.36s; owning inspection7cases and strict lint pass. Parent changed-guard review remains separate from CP1 acceptance.
+
+One finite supported CLI path proves real unbound discovery but fails all three required concurrent safety boundaries: same-name create overwritten, unrelated update lost, changed removal target deleted. Three line-traced disposable CLI processes manipulate scheduling only; actual installed handlers and supported concurrent CLI writers perform every write. No config editor/runtime patch/correction workaround. [Evidence and precise parent alternatives](../evidence/E2A-CP2-2026-11-14.md). Test profile/entries removed, traced processes reaped, zero matched adapter processes; default config unchanged. Native UI, gateway reload, actual model sessions and full CP2 journey intentionally not launched after the early gate failure. No installation, QA/Commons or desktop changes; no CP3 continuation past this genuine blocker. Whole-task wall/usage unknown.
+
 ## E2a CP1 parent acceptance; CP2 authorized — 2026-11-14
 
 Parent accepts bounded CP1 candidate `385b3b273491d4808a79e16caf735f1dbef2596a`, product `67e6116bbf169f0f530c59a2461a167a25f92f18`, following actual Astra review `local-148a06becdcd8e4d7866e4c5dcfb0327e0912f5d03093766b5369c14912821ff` (`passed: true`, no blocking security/logic findings). Parent independently recomputed all14 sealed artifact hashes and verified product diff unchanged; the CP2 writer also recomputed all14 successfully. Review JSON: `/home/akilf/.hermes/plans/audit/e2a-cp1-review-20261114/astra-review.json`; seal: `/home/akilf/Projects/Ruster-Audits/e2a-cp1-20261114/handoff-seal.json`.
