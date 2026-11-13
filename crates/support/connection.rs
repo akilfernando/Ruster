@@ -60,6 +60,21 @@ pub struct Locator {
     pub socket_ino: u64,
 }
 impl Locator {
+    pub fn validate_file(&self, path: &Path, dev: u64, ino: u64) -> io::Result<()> {
+        no_symlinks(path)?;
+        let meta = fs::symlink_metadata(path)?;
+        if !meta.is_file()
+            || meta.dev() != dev
+            || meta.ino() != ino
+            || meta.mode() & 0o777 != 0o600
+            || meta.uid() != self.uid
+            || meta.len() > 4096
+            || serde_json::from_slice::<Locator>(&fs::read(path)?)? != *self
+        {
+            return Err(io::Error::other("locator replaced"));
+        }
+        self.validate_socket(&path.with_file_name("editor.sock"))
+    }
     pub fn capture(path: &Path, incarnation: String, generation: String) -> io::Result<Self> {
         let dir =
             fs::symlink_metadata(path.parent().ok_or_else(|| io::Error::other("no parent"))?)?;
@@ -115,12 +130,16 @@ impl Locator {
 pub struct Framing {
     bytes: Vec<u8>,
     started: Option<Instant>,
+    last_deadline: Option<Instant>,
 }
 impl Framing {
+    pub fn deadline(&self) -> Instant {
+        self.last_deadline.expect("complete frame")
+    }
     pub fn poll(&mut self, stream: &mut UnixStream) -> io::Result<Option<Value>> {
         stream.set_read_timeout(Some(POLL))?;
         let mut byte = [0u8; 1];
-        loop {
+        for _ in 0..1024 {
             if self
                 .started
                 .is_some_and(|start| start.elapsed() >= DEADLINE)
@@ -139,6 +158,7 @@ impl Framing {
                         let value = crate::strict_json::parse(&self.bytes)
                             .map_err(|_| io::Error::other("invalid frame"))?;
                         self.bytes.clear();
+                        self.last_deadline = self.started.map(|start| start + DEADLINE);
                         self.started = None;
                         return Ok(Some(value));
                     }
@@ -154,6 +174,7 @@ impl Framing {
                 Err(e) => return Err(e),
             }
         }
+        Ok(None)
     }
 }
 
@@ -163,10 +184,20 @@ pub fn send(stream: &mut UnixStream, value: &Value) -> io::Result<()> {
         return Err(io::Error::other("oversized reply"));
     }
     bytes.push(b'\n');
-    stream.set_write_timeout(Some(POLL))?;
-    // One bounded frame/write. A partial write failure makes this transport
-    // unusable; callers close it, never replay a potentially committed request.
-    stream.write_all(&bytes)
+    let deadline = Instant::now() + POLL;
+    let mut remaining = bytes.as_slice();
+    while !remaining.is_empty() {
+        let timeout = deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| io::Error::other("write deadline"))?;
+        stream.set_write_timeout(Some(timeout))?;
+        let written = stream.write(remaining)?;
+        if written == 0 {
+            return Err(io::Error::other("closed writer"));
+        }
+        remaining = &remaining[written..];
+    }
+    Ok(())
 }
 
 /// One adapter instance, one immutable locator and one socket. Discovery never
@@ -207,17 +238,8 @@ impl Client {
         })
     }
     fn validate(&self) -> io::Result<()> {
-        no_symlinks(&self.locator_path)?;
-        let meta = fs::symlink_metadata(&self.locator_path)?;
-        if meta.dev() != self.locator_dev
-            || meta.ino() != self.locator_ino
-            || meta.mode() & 0o777 != 0o600
-            || serde_json::from_slice::<Locator>(&fs::read(&self.locator_path)?)? != self.locator
-        {
-            return Err(io::Error::other("locator replaced"));
-        }
         self.locator
-            .validate_socket(&self.locator_path.with_file_name("editor.sock"))
+            .validate_file(&self.locator_path, self.locator_dev, self.locator_ino)
     }
     fn exchange(stream: &mut UnixStream, request: Value) -> io::Result<Value> {
         send(stream, &request)?;

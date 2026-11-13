@@ -3090,8 +3090,16 @@ mod tests {
             } else {
                 Instant::now() + Duration::from_secs(2)
             };
-            let (lease, receiver) = crate::bridge::preparing_test_lease(deadline);
-            observe = Some(Box::new(receiver));
+            let (lease, receiver): (_, Box<dyn FnMut() -> Option<Value>>) =
+                if case.starts_with("save_authority_") {
+                    let (lease, receiver, authority) = crate::bridge::owned_test_lease(deadline);
+                    editor.connection_authority = Some(authority);
+                    (lease, Box::new(receiver))
+                } else {
+                    let (lease, receiver) = crate::bridge::preparing_test_lease(deadline);
+                    (lease, Box::new(receiver))
+                };
+            observe = Some(receiver);
             let mut args = json!({"expected_session_token":format!("test:scene:{generation}"),
                 "expected_revision":revision.to_string(),"expected_persistence_token":editor.persistence_token()});
             if case == "save_symlink_root" {
@@ -3152,6 +3160,7 @@ mod tests {
                 }
                 "save_cancel" => editor.cancel_asset_work(),
                 "save_close_prepared" => editor.request_close(),
+                "save_authority_prepared" => editor.revoke_connection(),
                 "save_reply_loss" => {
                     observe = None;
                 }
@@ -3185,10 +3194,14 @@ mod tests {
                     | "save_draft"
                     | "save_cancel"
                     | "save_close_prepared"
+                    | "save_authority_prepared"
                     | "save_human_offset_cancel"
             ) {
                 assert!(editor.asset_publishing());
                 assert_eq!(editor.guard().unwrap_err(), "asset_busy");
+                if case == "save_authority_publishing" {
+                    editor.revoke_connection();
+                }
                 assert!(!editor.behavior_editable());
                 if case == "save_close_publishing" {
                     editor.request_close();
@@ -3289,6 +3302,7 @@ mod tests {
                 | "save_draft"
                 | "save_cancel"
                 | "save_close_prepared"
+                | "save_authority_prepared"
                 | "save_human_offset_cancel"
         );
         let adopted = committed && case != "save_stale_after_commit";
@@ -3303,7 +3317,7 @@ mod tests {
         }
         if let Some(observe) = &mut observe {
             let reply = observe();
-            if case == "save_expired" {
+            if matches!(case, "save_expired" | "save_authority_prepared") {
                 assert!(reply.is_none());
             } else {
                 assert_eq!(reply.as_ref().unwrap()["ok"], adopted, "{reply:?}");
@@ -4166,6 +4180,8 @@ mod tests {
             "save_agent",
             "save_expired",
             "save_reply_loss",
+            "save_authority_prepared",
+            "save_authority_publishing",
             "save_stale",
             "save_draft",
             "save_cancel",

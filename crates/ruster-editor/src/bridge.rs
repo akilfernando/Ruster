@@ -32,16 +32,38 @@ struct AuthorityState {
     approved: bool,
     owner: Option<(String, u32)>,
     commits: usize,
+    listener_owned: bool,
     receipts: std::collections::VecDeque<Value>,
+    endpoint: Option<(Locator, std::path::PathBuf, u64, u64)>,
+}
+impl AuthorityState {
+    fn admitted(&self) -> bool {
+        self.live
+            && self.approved
+            && self
+                .endpoint
+                .as_ref()
+                .is_none_or(|(locator, path, dev, ino)| {
+                    locator.validate_file(path, *dev, *ino).is_ok()
+                })
+    }
 }
 impl Authority {
+    #[cfg(test)]
+    pub(crate) fn test_approved() -> Self {
+        let authority = Self::new();
+        authority.0.lock().unwrap().approved = true;
+        authority
+    }
     fn new() -> Self {
         Self(Arc::new(Mutex::new(AuthorityState {
             live: true,
             approved: false,
             owner: None,
             commits: 0,
+            listener_owned: false,
             receipts: Default::default(),
+            endpoint: None,
         })))
     }
     pub fn revoke(&self) {
@@ -53,10 +75,25 @@ impl Authority {
         self.0.lock().is_ok_and(|s| s.live)
     }
     fn authorized(&self) -> bool {
-        self.0.lock().is_ok_and(|s| s.live && s.approved)
+        self.0.lock().is_ok_and(|s| s.admitted())
     }
     pub fn draining(&self) -> bool {
-        self.0.lock().map_or(true, |s| s.commits != 0)
+        self.0
+            .lock()
+            .map_or(true, |s| s.commits != 0 || s.listener_owned)
+    }
+    /// Async operations acknowledge preparation separately. Their final
+    /// publication still races revocation through the same lease gate.
+    pub fn authorize_publication(&self) -> Option<CommitLease> {
+        let (pending, state, _) = new_pending_authorized(
+            json!({}),
+            Instant::now() + connection::DEADLINE,
+            Some(self.clone()),
+        );
+        if !state.begin_prepare() {
+            return None;
+        }
+        pending.lease.try_commit().ok()
     }
 }
 
@@ -122,7 +159,7 @@ impl RequestState {
         let authority = self.authority.as_ref().map(|a| a.0.lock());
         if authority
             .as_ref()
-            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.live || !s.approved))
+            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.admitted()))
         {
             return false;
         }
@@ -182,7 +219,7 @@ impl RequestLease {
         let authority = self.shared.authority.as_ref().map(|a| a.0.lock());
         if authority
             .as_ref()
-            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.live || !s.approved))
+            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.admitted()))
         {
             return false;
         }
@@ -212,7 +249,7 @@ impl RequestLease {
         let mut authority = self.shared.authority.as_ref().map(|a| a.0.lock());
         if authority
             .as_ref()
-            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.live || !s.approved))
+            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.admitted()))
         {
             return Err(Expired);
         }
@@ -323,10 +360,13 @@ impl Bridge {
         incarnation: String,
         generation: String,
     ) -> std::io::Result<Self> {
-        let directory = tempfile::Builder::new()
+        let mut directory = tempfile::Builder::new()
             .prefix("ruster-mcp-")
             .rand_bytes(24)
             .tempdir()?;
+        // Cleanup is identity-scoped below, never recursive deletion of a path
+        // another cooperating process may have replaced.
+
         std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
         let path = directory.path().join("editor.sock");
         let listener = UnixListener::bind(&path)?;
@@ -341,9 +381,18 @@ impl Bridge {
             .mode(0o600)
             .open(&locator_path)?;
         file.write_all(&serde_json::to_vec(&locator)?)?;
+        use std::os::unix::fs::MetadataExt;
+        let file_identity = (file.metadata()?.dev(), file.metadata()?.ino());
         let (sender, receiver) = mpsc::sync_channel(1);
         let (wake, wake_receiver) = mpsc::sync_channel(1);
         let authority = Authority::new();
+        authority.0.lock().unwrap().listener_owned = true;
+        authority.0.lock().unwrap().endpoint = Some((
+            locator.clone(),
+            locator_path.clone(),
+            file_identity.0,
+            file_identity.1,
+        ));
         let worker_authority = authority.clone();
         let stop = Arc::new(AtomicBool::new(false));
         let worker_stop = stop.clone();
@@ -352,7 +401,7 @@ impl Bridge {
         let worker = std::thread::Builder::new().name("ruster-mcp-owner".into()).spawn(move || {
             let run = || -> std::io::Result<()> {
                 while !worker_stop.load(Ordering::Acquire) && worker_authority.live() {
-                    worker_locator.validate_socket(&path)?;
+                    worker_locator.validate_file(&locator_path, file_identity.0, file_identity.1)?;
                     let (mut stream, _) = match listener.accept() {
                         Ok(connection) => connection,
                         Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
@@ -367,7 +416,7 @@ impl Bridge {
                     let hello_deadline = Instant::now() + connection::DEADLINE;
                     let hello = loop {
                         if worker_stop.load(Ordering::Acquire) || !worker_authority.live() { return Ok(()); }
-                        worker_locator.validate_socket(&path)?;
+                        worker_locator.validate_file(&locator_path, file_identity.0, file_identity.1)?;
                         if let Some(value) = framing.poll(&mut stream)? { break value; }
                         if Instant::now() >= hello_deadline { return Ok(()); }
                     };
@@ -388,7 +437,7 @@ impl Bridge {
                     // A single persistent owner socket. EOF, protocol failure or
                     // stop retires the whole connection; there is no takeover.
                     while !worker_stop.load(Ordering::Acquire) && worker_authority.live() {
-                        worker_locator.validate_socket(&path)?;
+                        worker_locator.validate_file(&locator_path, file_identity.0, file_identity.1)?;
                         let Some(request) = framing.poll(&mut stream)? else { continue; };
                         if request == json!({"wire":connection::WIRE,"bind":owner}) {
                             let approved = worker_authority.authorized();
@@ -403,7 +452,7 @@ impl Bridge {
                             connection::send(&mut stream, &denied("unauthorized"))?;
                             continue;
                         }
-                        let deadline = Instant::now() + connection::DEADLINE;
+                        let deadline = framing.deadline();
                         let value = json!({"operation":request["operation"],"arguments":request["arguments"]});
                         let (pending, state, result) = new_pending_authorized(value, deadline, Some(worker_authority.clone()));
                         if sender.try_send(pending).is_err() { connection::send(&mut stream, &denied("busy"))?; continue; }
@@ -442,6 +491,7 @@ impl Bridge {
             if worker_locator.validate_socket(&path).is_ok() { let _ = std::fs::remove_file(&path); }
             ctx.request_repaint();
         })?;
+        directory.disable_cleanup(true);
         Ok(Self {
             receiver,
             directory,
@@ -456,6 +506,17 @@ impl Bridge {
 
     pub fn authority(&self) -> Authority {
         self.authority.clone()
+    }
+    pub fn approved(&self) -> bool {
+        self.authority.authorized()
+    }
+    /// Local owner only; no unauthenticated transport receipt exception.
+    pub fn take_terminal_receipts(&self) -> Vec<Value> {
+        self.authority
+            .0
+            .lock()
+            .map(|mut s| s.receipts.drain(..).collect())
+            .unwrap_or_default()
     }
     pub fn locator_path(&self) -> std::path::PathBuf {
         self.directory.path().join("connection.json")
@@ -484,8 +545,43 @@ impl Bridge {
     pub fn poll_retired(&mut self) -> bool {
         if self.worker.as_ref().is_some_and(JoinHandle::is_finished) {
             let _ = self.worker.take().unwrap().join();
+            if let Ok(mut state) = self.authority.0.lock() {
+                state.listener_owned = false;
+            }
         }
-        self.worker.is_none() && !self.authority.live() && !self.authority.draining()
+        let retired = self.worker.is_none() && !self.authority.live() && !self.authority.draining();
+        if retired {
+            self.cleanup_endpoint();
+        }
+        retired
+    }
+
+    fn cleanup_endpoint(&self) {
+        use std::os::unix::fs::MetadataExt;
+        let Some(locator) = &self.locator else {
+            return;
+        };
+        let Ok(dir) = std::fs::symlink_metadata(self.directory.path()) else {
+            return;
+        };
+        if !dir.is_dir() || dir.dev() != locator.directory_dev || dir.ino() != locator.directory_ino
+        {
+            return;
+        }
+        let socket = self.directory.path().join("editor.sock");
+        if locator.validate_socket(&socket).is_ok() {
+            let _ = std::fs::remove_file(socket);
+        }
+        if let Ok(state) = self.authority.0.lock() {
+            if let Some((_, path, dev, ino)) = &state.endpoint {
+                if std::fs::symlink_metadata(path)
+                    .is_ok_and(|meta| meta.is_file() && meta.dev() == *dev && meta.ino() == *ino)
+                {
+                    let _ = std::fs::remove_file(path);
+                }
+            }
+        }
+        let _ = std::fs::remove_dir(self.directory.path()); // Empty original only.
     }
 
     pub fn dispatch(&mut self, editor: &mut crate::model::Editor) -> bool {
@@ -548,6 +644,7 @@ impl Drop for Bridge {
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
         }
+        self.cleanup_endpoint();
     }
 }
 
@@ -588,11 +685,188 @@ pub(crate) fn preparing_test_lease(
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) fn owned_test_lease(
+    deadline: Instant,
+) -> (RequestLease, impl FnMut() -> Option<Value>, Authority) {
+    let authority = Authority::test_approved();
+    let (pending, state, _) = new_pending_authorized(json!({}), deadline, Some(authority.clone()));
+    assert!(state.begin_prepare());
+    (
+        pending.lease,
+        move || state.take_reply_or_expire(),
+        authority,
+    )
+}
+
+#[cfg(test)]
+pub(crate) mod tests {
     use super::*;
     use std::io::BufReader;
 
-    fn receive(stream: &mut std::os::unix::net::UnixStream) -> Value {
+    #[test]
+    #[ignore = "isolated proc FD/thread accounting; run exact with --ignored --test-threads=1"]
+    fn retirement_returns_owned_listener_threads_and_fds_after_twenty_cycles() {
+        let ctx = egui::Context::default();
+        let count = |path| std::fs::read_dir(path).unwrap().count();
+        let baseline = (count("/proc/self/fd"), count("/proc/self/task"));
+        for cycle in 0..20 {
+            let mut bridge = Bridge::start(ctx.clone()).unwrap();
+            let path = bridge.directory.path().to_path_buf();
+            let mut owner = if cycle % 3 != 0 {
+                Some(approved(&bridge).0)
+            } else {
+                None
+            };
+            if cycle % 3 == 2 {
+                owner.as_mut().unwrap().write_all(b"{").unwrap();
+            }
+            bridge.disconnect();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !bridge.poll_retired() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            drop(owner);
+            drop(bridge);
+            assert!(!path.exists(), "original runtime directory was not cleaned");
+            assert!(!std::fs::read_to_string("/proc/net/unix")
+                .unwrap()
+                .contains(path.to_str().unwrap()));
+            assert_eq!(
+                (count("/proc/self/fd"), count("/proc/self/task")),
+                baseline,
+                "cycle {cycle}"
+            );
+        }
+        println!(
+            "20 retired cycles; FD/thread baseline {:?}; final {:?}; owned listeners=0",
+            baseline,
+            (count("/proc/self/fd"), count("/proc/self/task"))
+        );
+    }
+
+    #[test]
+    fn revocation_and_publication_have_barrier_controlled_terminal_ownership() {
+        use std::sync::Barrier;
+        for ordering in ["queued", "prepared", "authorized"] {
+            let authority = Authority::new();
+            authority.0.lock().unwrap().approved = true;
+            let deadline = Instant::now() + Duration::from_secs(30);
+            let (pending, state, receiver) =
+                new_pending_authorized(json!({}), deadline, Some(authority.clone()));
+            if ordering == "queued" {
+                authority.revoke();
+                assert!(!state.begin_prepare());
+                assert!(pending.lease.try_commit().is_err());
+                continue;
+            }
+            assert!(state.begin_prepare());
+            let barrier = Arc::new(Barrier::new(2));
+            let worker_barrier = barrier.clone();
+            let (ready, observed) = mpsc::sync_channel(1);
+            let worker = std::thread::spawn(move || {
+                if ordering == "prepared" {
+                    ready.send(()).unwrap();
+                    worker_barrier.wait();
+                }
+                let commit = pending.lease.try_commit();
+                if ordering == "authorized" {
+                    assert!(commit.is_ok());
+                    ready.send(()).unwrap();
+                    worker_barrier.wait();
+                }
+                if let Ok(commit) = commit {
+                    commit.complete(
+                        json!({"ok":true,"result":{"old_generation":"adopted_then_cleaned"}}),
+                    );
+                    true
+                } else {
+                    false
+                }
+            });
+            observed.recv_timeout(Duration::from_secs(2)).unwrap();
+            authority.revoke();
+            assert_eq!(authority.draining(), ordering == "authorized");
+            assert!(state.take_reply_or_expire_with(|| deadline).is_none());
+            drop(receiver); // Lost reply never releases authorized adoption.
+            barrier.wait();
+            assert_eq!(worker.join().unwrap(), ordering == "authorized");
+            assert!(!authority.draining());
+            assert_eq!(
+                state.take_reply_or_expire_with(|| deadline).is_some(),
+                ordering == "authorized"
+            );
+            assert_eq!(
+                authority.0.lock().unwrap().receipts.len(),
+                usize::from(ordering == "authorized")
+            );
+        }
+    }
+
+    #[test]
+    fn pinned_endpoint_replacement_revokes_prepared_publication_and_stale_clients() {
+        use std::os::unix::fs::symlink;
+        for replacement in ["socket", "socket_symlink", "locator", "directory_symlink"] {
+            let mut bridge = Bridge::start(egui::Context::default()).unwrap();
+            let (owner, _) = approved(&bridge);
+            let mut client = connection::Client::open(bridge.locator_path()).unwrap();
+            let authority = bridge.authority();
+            let (pending, state, _) = new_pending_authorized(
+                json!({}),
+                Instant::now() + Duration::from_secs(30),
+                Some(authority),
+            );
+            assert!(state.begin_prepare());
+            let path = bridge.directory.path().join("editor.sock");
+            let mut other_listener = None;
+            let moved = bridge.directory.path().with_extension("moved");
+            match replacement {
+                "socket" => {
+                    std::fs::remove_file(&path).unwrap();
+                    other_listener = Some(UnixListener::bind(&path).unwrap());
+                    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
+                        .unwrap();
+                }
+                "socket_symlink" => {
+                    std::fs::rename(&path, path.with_extension("original")).unwrap();
+                    symlink(path.with_extension("original"), &path).unwrap();
+                }
+                "locator" => {
+                    let original = bridge.locator_path();
+                    std::fs::rename(&original, original.with_extension("original")).unwrap();
+                    std::fs::copy(original.with_extension("original"), &original).unwrap();
+                }
+                _ => {
+                    std::fs::rename(bridge.directory.path(), &moved).unwrap();
+                    symlink(&moved, bridge.directory.path()).unwrap();
+                }
+            }
+            assert!(
+                pending.lease.try_commit().is_err(),
+                "{replacement} must fail final authorization"
+            );
+            assert_eq!(client.call("scene_inspect", &json!({}))["ok"], false);
+            assert!(
+                connection::Client::open(bridge.locator_path()).is_err()
+                    || replacement == "locator",
+                "symlinks cannot bind"
+            );
+            bridge.disconnect();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !bridge.poll_retired() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            drop(owner);
+            drop(other_listener);
+            if replacement == "directory_symlink" {
+                std::fs::remove_file(bridge.directory.path()).unwrap();
+                std::fs::rename(&moved, bridge.directory.path()).unwrap();
+            }
+        }
+    }
+
+    pub(crate) fn receive(stream: &mut std::os::unix::net::UnixStream) -> Value {
         let mut framing = connection::Framing::default();
         let deadline = Instant::now() + Duration::from_secs(3);
         loop {
@@ -602,7 +876,7 @@ mod tests {
             assert!(Instant::now() < deadline, "reply deadline");
         }
     }
-    fn approved(bridge: &Bridge) -> (std::os::unix::net::UnixStream, Value) {
+    pub(crate) fn approved(bridge: &Bridge) -> (std::os::unix::net::UnixStream, Value) {
         let mut stream =
             std::os::unix::net::UnixStream::connect(bridge.directory.path().join("editor.sock"))
                 .unwrap();
@@ -620,7 +894,7 @@ mod tests {
         assert!(handshake["capability"].is_string());
         (stream, handshake)
     }
-    fn frame(handshake: &Value, operation: &str, arguments: Value) -> Value {
+    pub(crate) fn frame(handshake: &Value, operation: &str, arguments: Value) -> Value {
         json!({"wire":connection::WIRE,"binding":handshake["binding"],"capability":handshake["capability"],"operation":operation,"arguments":arguments})
     }
     fn roundtrip(
@@ -728,55 +1002,48 @@ mod tests {
     #[test]
     fn raw_socket_duplicates_never_dispatch_and_string_payload_is_opaque() {
         use std::io::BufRead;
-        use std::os::unix::net::UnixStream;
-        let mut bridge = Bridge::start(egui::Context::default()).unwrap();
-        let path = bridge.directory.path().join("editor.sock");
-        let opaque = "return {update=function(o) return o end} -- {\"key\":1,\"key\":2}";
-        let arguments = json!({"expected_session_token":"session","expected_revision":"0","binding_id":"binding","name":"script","value":{"type":"text","value":opaque}});
-        let valid =
-            serde_json::to_vec(&json!({"operation":"behavior_property_set","arguments":arguments}))
-                .unwrap();
-        let mut observed = Vec::new();
-        for (request, expected) in [
-            (&br#"{"operation":"behavior_runtime_step","arguments":{"input_frame":{"fire":{"type":"axis1d","value":0},"fire":{"type":"axis1d","value":1}}}}"#[..], None),
-            (&br#"{"operation":"behavior_runtime_step","arguments":{"input_frame":{"fire":{"type":"axis1d","value":0,"value":1}}}}"#[..], None),
-            (valid.as_slice(), Some(&arguments)),
+        for raw in [
+            r#"{"input_frame":{"fire":{"type":"axis1d","value":0},"fire":{"type":"axis1d","value":1}}}"#,
+            r#"{"input_frame":{"fire":{"type":"axis1d","value":0,"value":1}}}"#,
+            r#"{"value":{"type":"text","value":"-- {\"key\":1,\"key\":2}"}}"#,
         ] {
-            let path = path.clone();
-            let mut bytes = request.to_vec();
-            bytes.push(b'\n');
-            let (send, reply) = mpsc::sync_channel(1);
-            let client = std::thread::spawn(move || {
-                let mut stream = UnixStream::connect(path).unwrap();
-                stream.set_read_timeout(Some(Duration::from_secs(4))).unwrap();
-                stream.write_all(&bytes).unwrap();
-                let mut wire = String::new();
-                BufReader::new(stream).read_line(&mut wire).unwrap();
-                send.send(serde_json::from_str::<Value>(&wire).unwrap()).unwrap();
+            let mut bridge = Bridge::start(egui::Context::default()).unwrap();
+            let (mut stream, handshake) = approved(&bridge);
+            let mut request = frame(&handshake, "behavior_property_set", json!({})).to_string();
+            request = request.replacen("\"arguments\":{}", &format!("\"arguments\":{raw}"), 1);
+            let valid = crate::strict_json::parse(request.as_bytes()).is_ok();
+            let worker = std::thread::spawn(move || {
+                writeln!(stream, "{request}").unwrap();
+                let mut line = String::new();
+                let _ = BufReader::new(stream).read_line(&mut line);
+                line
             });
-            let count = observed.len();
-            let deadline = Instant::now() + Duration::from_secs(5);
-            let response = loop {
-                match reply.try_recv() {
-                    Ok(response) => break response,
-                    Err(mpsc::TryRecvError::Empty) => {}
-                    Err(error) => panic!("socket client failed: {error}"),
-                }
-                assert!(Instant::now() < deadline, "socket boundary deadline");
-                bridge.dispatch_command(|_, operation, arguments| {
-                    observed.push((operation.to_owned(), arguments));
+            let mut observed = Vec::new();
+            let deadline = Instant::now() + Duration::from_secs(4);
+            while !worker.is_finished() {
+                bridge.dispatch_command(|_, _, arguments| {
+                    observed.push(arguments);
                     json!({"ok":true,"result":{}})
                 });
-                std::thread::park_timeout(Duration::from_millis(1));
-            };
-            client.join().unwrap();
-            if let Some(expected) = expected {
-                assert_eq!(response["ok"], true);
-                assert_eq!(observed.len(), count + 1);
-                assert_eq!(observed.last().unwrap(), &("behavior_property_set".into(), expected.clone()));
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let response = worker.join().unwrap();
+            if valid {
+                assert_eq!(
+                    serde_json::from_str::<Value>(&response).unwrap()["ok"],
+                    true
+                );
+                assert_eq!(observed, vec![serde_json::from_str::<Value>(raw).unwrap()]);
             } else {
-                assert_eq!(response["error"]["code"], "bridge_unavailable");
-                assert_eq!(observed.len(), count, "duplicate raw input reached editor dispatch");
+                assert!(
+                    response.is_empty(),
+                    "invalid raw frame closes the owner transport"
+                );
+                assert!(
+                    observed.is_empty(),
+                    "duplicate raw input reached editor dispatch"
+                );
             }
         }
     }

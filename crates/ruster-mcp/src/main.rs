@@ -16,7 +16,7 @@ mod runtime_tools;
 mod strict_json;
 mod view_tools;
 use serde_json::{json, Map, Value};
-use std::io::{self, BufRead, BufReader, Write};
+use std::io::{self, BufRead, Write};
 
 const PROTOCOL: &str = "2025-06-18";
 const MAX_FRAME: usize = 64 * 1024;

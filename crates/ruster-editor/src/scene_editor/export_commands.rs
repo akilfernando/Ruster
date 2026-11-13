@@ -120,6 +120,11 @@ impl SceneEditor {
             initial_camera,
         };
         let accepted = self.creation_export.start(&ctx, request)?;
+        #[cfg(unix)]
+        if mcp_scope {
+            self.creation_export
+                .attach_agent_authority(self.connection_authority.clone());
+        }
         self.notice =
             "Exporting application… You can keep editing; changed work cancels this export.".into();
         // MCP already receives the operation/receipt through inspection. Do not

@@ -10,6 +10,7 @@ mod collider_ui;
 mod collider_viewport;
 mod color_commands;
 mod combo_focus;
+mod connection;
 mod display_ui;
 mod export_commands;
 mod hud_commands;
@@ -393,6 +394,11 @@ enum RecoveryTransition {
 
 pub struct SceneEditor {
     session: Session,
+    #[cfg(unix)]
+    connection_authority: Option<crate::bridge::Authority>,
+    connection_incarnation: String,
+    connection_generation: String,
+    retired_connection_receipts: std::collections::VecDeque<Value>,
     save_grant: Option<persistence_commands::SaveGrant>,
     save_sequence: u64,
     save_receipt: Option<Value>,
@@ -585,6 +591,13 @@ impl SceneEditor {
         let seen_history_evictions = session.history_evictions();
         Self {
             session,
+            #[cfg(unix)]
+            connection_authority: None,
+            connection_incarnation: crate::connection::unpredictable()
+                .expect("editor incarnation entropy unavailable"),
+            connection_generation: crate::connection::unpredictable()
+                .expect("project generation entropy unavailable"),
+            retired_connection_receipts: Default::default(),
             save_grant: None,
             save_sequence: 0,
             save_receipt: None,
@@ -1446,6 +1459,7 @@ impl SceneEditor {
         Ok(())
     }
     fn restore_checkpoint(&mut self, id: &str) -> Result<(), String> {
+        self.revoke_connection();
         if self.asset_loading() {
             self.cancel_asset_work();
         }
@@ -1589,6 +1603,7 @@ impl SceneEditor {
         clipboard: bool,
         shader: bool,
     ) {
+        self.revoke_connection();
         self.creation_export.scene_replaced();
         self.remember_camera();
         self.runtime
@@ -1613,7 +1628,7 @@ impl SceneEditor {
         if matches!(
             self.recovery_transition,
             Some(RecoveryTransition::Replace { .. })
-        ) && self.asset_ops.busy()
+        ) && (self.asset_ops.busy() || self.creation_export.busy() || self.connection_draining())
         {
             return;
         }
@@ -1633,10 +1648,11 @@ impl SceneEditor {
                 clipboard,
                 shader,
             } if request == id => {
-                // Directory authority belongs to this process's explicit startup
-                // grant. Human New/Open/Restore changes the scene incarnation,
-                // never the granted root; move it only when replacement commits.
-                next.save_grant = self.save_grant.take();
+                // Destination grants are revoked at initiation, never inherited.
+                // Old publications/adoption have drained before this boundary.
+                next.connection_incarnation = self.connection_incarnation.clone();
+                next.retired_connection_receipts =
+                    std::mem::take(&mut self.retired_connection_receipts);
                 next.creation_export = std::mem::replace(
                     &mut self.creation_export,
                     crate::creation_export::Controller::disabled(),
@@ -1808,6 +1824,7 @@ impl SceneEditor {
                 && self.external.finished()
                 && self.creation_export.finished()
                 && self.asset_finished()
+                && !self.connection_draining()
             {
                 self.close_ready_to_exit = true;
                 self.remember_camera();
@@ -4370,6 +4387,7 @@ impl SceneEditor {
                     && self.session.redo_len() == 0))
     }
     fn request_close(&mut self) {
+        self.revoke_connection();
         if !self.asset_close_guard() {
             return;
         }
@@ -4399,6 +4417,7 @@ impl SceneEditor {
         }
     }
     fn request_new(&mut self) {
+        self.revoke_connection();
         self.save_continuation = None;
         if self.asset_loading() {
             self.cancel_asset_work();
@@ -4439,6 +4458,9 @@ impl SceneEditor {
         let Some(action) = self.queued_action.take() else {
             return;
         };
+        if matches!(action, Action::New | Action::Open) {
+            self.revoke_connection();
+        }
         if matches!(action, Action::New | Action::Open) && self.asset_loading() {
             self.cancel_asset_work();
         }
@@ -5728,13 +5750,7 @@ fn run_session(session: Session) -> Result<(), String> {
                 ruster_render::install(render);
                 eprintln!("Scene editor adapter: {:?}", render.adapter.get_info());
             }
-            #[cfg(unix)]
-            let bridge = if mcp_enabled {
-                Some(crate::bridge::Bridge::start(cc.egui_ctx.clone())?)
-            } else {
-                None
-            };
-            Ok(Box::new(Host {
+            let mut host = Host {
                 input: Default::default(),
                 editor: {
                     let mut editor = SceneEditor::new(session);
@@ -5752,8 +5768,16 @@ fn run_session(session: Session) -> Result<(), String> {
                     editor
                 },
                 #[cfg(unix)]
-                bridge,
-            }))
+                bridge: None,
+            };
+            // Legacy opt-in creates only an unbound matched-wire listener. It
+            // never approves an adapter or bypasses the explicit owner API.
+            #[cfg(unix)]
+            if mcp_enabled {
+                host.connect_adapter(&cc.egui_ctx)
+                    .map_err(std::io::Error::other)?;
+            }
+            Ok(Box::new(host))
         }),
     )
     .map_err(|e| e.to_string())
@@ -5762,6 +5786,33 @@ fn run_session(session: Session) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn document_transition_initiation_revokes_destination_even_when_cancelled() {
+        let directory = tempfile::tempdir().unwrap();
+        for action in ["new", "open", "restore"] {
+            let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+            editor.save_grant =
+                Some(persistence_commands::SaveGrant::new(directory.path()).unwrap());
+            match action {
+                "new" => {
+                    editor.request_new();
+                    editor.new_scene_pending = false;
+                }
+                "open" => {
+                    editor.queued_action = Some(Action::Open);
+                    editor.process_queued_action();
+                    editor.dialog = None;
+                }
+                _ => {
+                    assert!(editor.restore_checkpoint("missing-checkpoint").is_err());
+                }
+            }
+            assert!(
+                editor.save_grant.is_none(),
+                "{action} initiation must revoke, including cancellation/failure"
+            );
+        }
+    }
     // A small window must constrain only its temporary panel instances, not
     // erase preferred widths or leave the actual viewport behind the chrome.
     #[test]
@@ -7660,7 +7711,7 @@ mod tests {
         let source_bytes = std::fs::read(&source_record).unwrap();
         std::fs::write(&path, "external project replacement").unwrap();
         let mut restored = SceneEditor::new(Session::new(Scene::empty("untitled")).unwrap());
-        // Explicit process startup grant precedes the human-owned Restore.
+        // Restore initiation revokes even an explicit prior startup grant.
         restored.save_grant = Some(persistence_commands::SaveGrant::new(&project).unwrap());
         let before_restore = inspect(&mut restored);
         restored.recovery = crate::recovery_ui::RecoveryUi::at(store.clone());
@@ -7670,11 +7721,8 @@ mod tests {
         restored.wait_recovery();
         restored.test_finish_asset_work();
         let after_restore = inspect(&mut restored);
-        assert_eq!(after_restore["grant_valid"], true);
-        assert_eq!(
-            after_restore["granted_directory"],
-            before_restore["granted_directory"]
-        );
+        assert_eq!(after_restore["grant_valid"], false);
+        assert!(after_restore["granted_directory"].is_null());
         assert_ne!(
             after_restore["session_token"],
             before_restore["session_token"]
@@ -7771,6 +7819,12 @@ mod tests {
             final_copy.recovery_source.is_some(),
             "failed cleanup keeps the read-only source lease"
         );
+        let repaired = inspect(&mut final_copy);
+        assert_eq!(
+            repaired["grant_valid"], false,
+            "Restore does not inherit destination authority"
+        );
+        final_copy.save_grant = Some(persistence_commands::SaveGrant::new(&project).unwrap());
         let repaired = inspect(&mut final_copy);
         assert_eq!(repaired["grant_valid"], true);
         assert_eq!(repaired["can_save_as"], true);

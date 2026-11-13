@@ -510,14 +510,14 @@ mod tests {
             returned["result"]["persistence_token"],
             returned_state["persistence_token"]
         );
-        // Human replacement keeps the process grant, but starts a new scene
-        // incarnation with no save association or committed receipt.
+        // CP1: human replacement revokes the destination grant as well as the
+        // association. Fresh explicit consent is required for the new project.
         let old = arguments(&mut recovered, None);
         recovered.replace_with_empty();
         recovered.wait_recovery();
         let replaced = inspect(&mut recovered);
-        assert_eq!(replaced["grant_valid"], true);
-        assert_eq!(replaced["granted_directory"], root.display().to_string());
+        assert_eq!(replaced["grant_valid"], false);
+        assert!(replaced["granted_directory"].is_null());
         assert!(replaced["last_committed_save"].is_null());
         assert!(replaced["associated_path"].is_null());
         rejected(

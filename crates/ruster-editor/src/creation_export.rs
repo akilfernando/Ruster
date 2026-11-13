@@ -268,6 +268,11 @@ enum Phase {
 
 struct Job {
     identity: Identity,
+    agent: bool,
+    #[cfg(unix)]
+    authority: Option<crate::bridge::Authority>,
+    #[cfg(unix)]
+    publication: Option<crate::bridge::CommitLease>,
     cancel: Arc<AtomicBool>,
     receiver: Receiver<Event>,
     // Dropping this endpoint releases worker-owned staging after publication,
@@ -374,6 +379,23 @@ impl Controller {
         self.output_directory.as_ref().map(DirectoryGrant::root)
     }
 
+    /// Only future agent writes lose their grant; an authorized publication
+    /// retains its captured directory and cleanup owner until drained.
+    pub(crate) fn revoke_agent_destination(&mut self) {
+        self.output_directory = None;
+        if self.job.as_ref().is_some_and(|job| job.agent) {
+            self.cancel();
+        }
+    }
+    #[cfg(unix)]
+    pub(crate) fn attach_agent_authority(&mut self, authority: Option<crate::bridge::Authority>) {
+        if let Some(job) = &mut self.job {
+            if job.agent {
+                job.authority = authority;
+            }
+        }
+    }
+
     pub(crate) fn mcp_destination(&self, filename: &str) -> Result<PathBuf, String> {
         validate_filename(filename)?;
         let directory = self
@@ -452,6 +474,7 @@ impl Controller {
             destination,
             ..request
         };
+        let agent = request.mcp_scope;
         let operation = self.next_operation;
         self.next_operation = self
             .next_operation
@@ -477,6 +500,11 @@ impl Controller {
         }
         self.status = Some(status.clone());
         self.job = Some(Job {
+            agent,
+            #[cfg(unix)]
+            authority: None,
+            #[cfg(unix)]
+            publication: None,
             identity,
             cancel,
             receiver,
@@ -508,7 +536,16 @@ impl Controller {
         let status = self.status.as_mut().expect("active export has status");
         match job.receiver.try_recv() {
             Ok(Event::Prepared(publication)) => {
-                if job.cancel.load(Ordering::Acquire) || current != &job.identity {
+                #[cfg(unix)]
+                let authorization = job
+                    .authority
+                    .as_ref()
+                    .map(crate::bridge::Authority::authorize_publication);
+                #[cfg(unix)]
+                let revoked = authorization.as_ref().is_some_and(Option::is_none);
+                #[cfg(not(unix))]
+                let revoked = false;
+                if job.cancel.load(Ordering::Acquire) || current != &job.identity || revoked {
                     status["state"] = json!("cancelled");
                 } else {
                     match publish(publication, current, &job.cancel) {
@@ -523,6 +560,10 @@ impl Controller {
                     }
                 }
                 status["cleanup_pending"] = json!(true);
+                #[cfg(unix)]
+                if let Some(Some(commit)) = authorization {
+                    job.publication = Some(commit);
+                }
                 job.phase = Phase::Cleaning;
                 job.release_staging.take();
                 changed = true;
@@ -570,6 +611,10 @@ impl Controller {
         }
         if job.phase == Phase::Finished {
             if job.worker.is_finished() {
+                #[cfg(unix)]
+                if let Some(commit) = job.publication.take() {
+                    commit.complete(json!({"ok":true,"result":{"export":self.status}}));
+                }
                 self.job.take();
                 self.terminals
                     .push_back(self.status.take().expect("completed export has status"));
@@ -2063,6 +2108,11 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         });
         Job {
             identity: identity(),
+            agent: false,
+            #[cfg(unix)]
+            authority: None,
+            #[cfg(unix)]
+            publication: None,
             cancel: Arc::new(AtomicBool::new(false)),
             receiver,
             release_staging: Some(release_staging),
@@ -2094,7 +2144,14 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
     // through the same bounded handoff used by the real export worker.
     #[test]
     fn staging_cleanup_stays_on_export_worker() {
-        for outcome in ["commit", "cancel", "stale", "collision", "buffered_drop"] {
+        for outcome in [
+            "commit",
+            "cancel",
+            "stale",
+            "collision",
+            "buffered_drop",
+            "owner_revoked",
+        ] {
             let root = tempfile::tempdir().unwrap();
             let mut artifact = prepared(root.path(), identity());
             let staging = artifact._temporary.path().to_owned();
@@ -2106,6 +2163,13 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             controller.status = Some(json!({"operation_id":"1","state":"running"}));
             controller.job = Some(test_job(Ok(artifact)));
             let worker_thread = controller.job.as_ref().unwrap().worker.thread().id();
+            #[cfg(unix)]
+            if outcome == "owner_revoked" {
+                let authority = crate::bridge::Authority::test_approved();
+                controller.job.as_mut().unwrap().agent = true;
+                controller.attach_agent_authority(Some(authority.clone()));
+                authority.revoke();
+            }
             ready_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
             assert!(staging.exists());
             assert!(observed.try_recv().is_err());
@@ -2364,10 +2428,25 @@ while True:
         assert_ne!(controller.configuration_token(), old_configuration);
         controller.status = Some(json!({"operation_id":"7","state":"running"}));
         controller.job = Some(test_job(Ok(artifact)));
+        #[cfg(unix)]
+        let authority = crate::bridge::Authority::test_approved();
+        #[cfg(unix)]
+        {
+            controller.job.as_mut().unwrap().agent = true;
+            controller.attach_agent_authority(Some(authority.clone()));
+        }
         assert!(controller.configure_runtime_kit(root.path()).is_err());
         ready_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
         assert!(controller.poll(&identity()));
         let pending = controller.inspect(Some(7)).unwrap();
+        #[cfg(unix)]
+        {
+            authority.revoke();
+            assert!(
+                authority.draining(),
+                "authorized export owns cleanup after revocation"
+            );
+        }
         assert_eq!(pending["operation"]["state"], "committed");
         assert_eq!(pending["operation"]["cleanup_pending"], true);
         assert!(controller.busy());
@@ -2385,6 +2464,11 @@ while True:
         cleanup_sender.send(()).unwrap();
         wait_finished(&mut controller, &changed_identity);
         let receipt = controller.inspect(Some(7)).unwrap();
+        #[cfg(unix)]
+        assert!(
+            !authority.draining(),
+            "publication owner retires only after worker exit"
+        );
         assert_eq!(receipt["operation"]["state"], "committed");
         assert_eq!(
             receipt["operation"]["receipt"],
@@ -2432,6 +2516,11 @@ while True:
         drop(sender);
         controller.job = Some(Job {
             identity: identity(),
+            agent: false,
+            #[cfg(unix)]
+            authority: None,
+            #[cfg(unix)]
+            publication: None,
             cancel: Arc::new(AtomicBool::new(false)),
             receiver,
             release_staging: None,
@@ -2465,6 +2554,11 @@ while True:
         });
         controller.job = Some(Job {
             identity: identity(),
+            agent: false,
+            #[cfg(unix)]
+            authority: None,
+            #[cfg(unix)]
+            publication: None,
             cancel: Arc::new(AtomicBool::new(false)),
             receiver,
             release_staging: None,

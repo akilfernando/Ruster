@@ -232,6 +232,8 @@ impl InputGate {
 
 impl Host {
     pub(super) fn logic_tick(&mut self, ctx: &egui::Context) {
+        #[cfg(unix)]
+        self.poll_connection(ctx);
         // The preceding eframe paint attempt has submitted its uploads, even
         // when surface acquisition failed. Hidden logic can retire GPU owners.
         if let Some(render) = &self.editor.render {
@@ -267,6 +269,8 @@ impl Host {
     }
 
     pub(super) fn service_bridge(&mut self, ctx: &egui::Context) {
+        #[cfg(unix)]
+        self.poll_connection(ctx);
         if self.input.bridge_serviced || self.input.human_pending || self.input.close_requested {
             return;
         }
