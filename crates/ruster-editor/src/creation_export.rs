@@ -542,9 +542,10 @@ impl Controller {
                     .as_ref()
                     .map(crate::bridge::Authority::authorize_publication);
                 #[cfg(unix)]
-                let revoked = authorization.as_ref().is_some_and(Option::is_none);
+                let revoked = (job.agent && authorization.is_none())
+                    || authorization.as_ref().is_some_and(Option::is_none);
                 #[cfg(not(unix))]
-                let revoked = false;
+                let revoked = job.agent;
                 if job.cancel.load(Ordering::Acquire) || current != &job.identity || revoked {
                     status["state"] = json!("cancelled");
                 } else {
@@ -2151,6 +2152,8 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             "collision",
             "buffered_drop",
             "owner_revoked",
+            "missing_agent_authority",
+            "authorized_agent",
         ] {
             let root = tempfile::tempdir().unwrap();
             let mut artifact = prepared(root.path(), identity());
@@ -2164,11 +2167,16 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             controller.job = Some(test_job(Ok(artifact)));
             let worker_thread = controller.job.as_ref().unwrap().worker.thread().id();
             #[cfg(unix)]
-            if outcome == "owner_revoked" {
+            if matches!(outcome, "owner_revoked" | "authorized_agent") {
                 let authority = crate::bridge::Authority::test_approved();
                 controller.job.as_mut().unwrap().agent = true;
                 controller.attach_agent_authority(Some(authority.clone()));
-                authority.revoke();
+                if outcome == "owner_revoked" {
+                    authority.revoke();
+                }
+            }
+            if outcome == "missing_agent_authority" {
+                controller.job.as_mut().unwrap().agent = true;
             }
             ready_receiver.recv_timeout(Duration::from_secs(2)).unwrap();
             assert!(staging.exists());
@@ -2190,7 +2198,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
                 assert_eq!(
                     controller.inspect(Some(1)).unwrap()["operation"]["state"],
                     match outcome {
-                        "commit" => "committed",
+                        "commit" | "authorized_agent" => "committed",
                         "collision" => "failed",
                         _ => "cancelled",
                     }
@@ -2204,7 +2212,7 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
             assert!(!staging.exists());
             assert_eq!(
                 root.path().join("My Creation.tar.gz").exists(),
-                matches!(outcome, "commit" | "collision")
+                matches!(outcome, "commit" | "authorized_agent" | "collision")
             );
             if outcome == "collision" {
                 assert_eq!(
