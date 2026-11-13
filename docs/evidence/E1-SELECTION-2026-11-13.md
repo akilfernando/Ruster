@@ -1,6 +1,6 @@
 # E1 viewport-selection feedback — review-ready implementation
 
-2026-11-13. One implementation owner; independent root rendering review and final acceptance remain pending. Base `35ecebef6b340c30bc3bcff323c37024fb7de198`, branch `claude/e1-editor-feedback`. [Creator contract](../plans/E1-EDITOR-FEEDBACK.md#selection-creator-acceptance-contract-agent-selected-2026-11-13).
+2026-11-13. Parent accepts bounded rendering at `869063f7a8f260e0949612e08a88ac9affcb6937` after fresh independent review `deleg_2b4cc899` passed with no identified security/logic blocker. All evidence limitations below remain binding: no physical-human/native Shift-click or unrestricted continuous-picking claim; touching silhouettes share a contour and custom WGSL is unchanged. One implementation owner. Base `35ecebef6b340c30bc3bcff323c37024fb7de198`, branch `claude/e1-editor-feedback`. [Creator contract](../plans/E1-EDITOR-FEEDBACK.md#selection-creator-acceptance-contract-agent-selected-2026-11-13).
 
 ## Outcome and scope
 

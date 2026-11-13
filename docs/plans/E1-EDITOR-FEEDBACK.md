@@ -4,7 +4,7 @@ Started 2026-11-12. The user asks the root session to "complete the current phas
 
 ## Current bounded authorization — 2026-11-13 selection slice
 
-The user explicitly requests the next E1 viewport-selection slice after primitive closure. One implementation owner works on `claude/e1-editor-feedback`, starting at `35ecebef6b340c30bc3bcff323c37024fb7de198`. Frequent explicit-path checkpoint commits/pushes are authorized; installation, merge/release, E2/F4a and wide-layout/icons are not. Root independent rendering review remains required before acceptance. Earlier stop/no-publication entries are historical and superseded only within this authorization.
+The user explicitly requests the next E1 viewport-selection slice after primitive closure. One implementation owner works on `claude/e1-editor-feedback`, starting at `35ecebef6b340c30bc3bcff323c37024fb7de198`. Frequent explicit-path checkpoint commits/pushes are authorized; installation, merge/release and E2/F4a are not. Parent accepts bounded selection at `869063f7a8f260e0949612e08a88ac9affcb6937` after fresh independent review `deleg_2b4cc899` passed without identified security/logic blockers, retaining all documented injected-input, touching-silhouette and custom-WGSL qualifications. The next explicit authorization is bounded wide-window spacing/selective icons; no new architecture or runtime behavior. Earlier stop/no-publication entries are historical and superseded only within this authorization.
 
 Primitives are committed/pushed and bounded qualification is complete, including three actual Vulkan probes and native editor/runtime with the verified user-local Khronos core/synchronization layer. Parent fresh-context review passed. [Evidence and exact artifacts](../evidence/E1-PRIMITIVES-2026-11-13.md).
 
@@ -15,7 +15,7 @@ Primitives are committed/pushed and bounded qualification is complete, including
 | Light/dark themes, optional OLED black | Implemented in HEAD; separate qualification/user decision | System/Dark/Light plus a labelled OLED variant for evaluation. Keeping OLED remains the user's decision |
 | Logo v2 integration | Implemented in HEAD; separate qualification | Theme-appropriate marks, window and launcher icon, DejaVu notice review |
 | Sphere and capsule primitives, Create menu | Bounded qualification complete; committed/pushed | Source/native/export and actual core/synchronization validation pass; parent review passed |
-| Viewport selection highlight | Implemented; bounded qualification ready for root review | Default-off editor opt-in, two-tone visible-fragment inner contour; source/native/Vulkan/cost/runtime compatibility pass with explicit injected-input limitations. [Evidence](../evidence/E1-SELECTION-2026-11-13.md) |
+| Viewport selection highlight | Accepted bounded rendering after fresh parent review | Default-off editor opt-in, two-tone visible-fragment inner contour; source/native/Vulkan/cost/runtime compatibility pass with explicit injected-input limitations. [Evidence](../evidence/E1-SELECTION-2026-11-13.md) |
 | Wide-window layout spacing | Not started | Top bar and viewport tool groups |
 | Selective icons | Not started | With tooltips and accessible names |
 | Terminal-free MCP onboarding | Proposed separately as [E2](E2-MCP-ONBOARDING.md) | Needs user decisions before implementation |
