@@ -715,7 +715,9 @@ mod tests {
         let mut time = 0.;
         let width = std::cell::Cell::new(1000.0);
         let height = std::cell::Cell::new(800.0);
+        ctx.enable_accesskit();
         let rendered = std::cell::RefCell::new(Vec::new());
+        let accessible_buttons = std::cell::RefCell::new(std::collections::BTreeMap::new());
         let controls_blocked = std::cell::Cell::new(false);
         let reset_admissions = std::cell::RefCell::new(Vec::new());
         let mut draw = |runtime: &mut RuntimeUi, events, discard: bool| {
@@ -769,6 +771,16 @@ mod tests {
                     _ => None,
                 })
                 .unwrap();
+            *accessible_buttons.borrow_mut() = output
+                .platform_output
+                .accesskit_update
+                .as_ref()
+                .unwrap()
+                .nodes
+                .iter()
+                .filter(|(_, node)| node.role() == egui::accesskit::Role::Button)
+                .filter_map(|(_, node)| Some((node.label()?.to_owned(), node.bounds()?)))
+                .collect();
             *rendered.borrow_mut() = output.shapes;
             button
         };
@@ -1043,8 +1055,15 @@ mod tests {
             modifiers: egui::Modifiers::NONE,
         };
         let focused_control = |label: &str| {
-            assert!(visible_label(&rendered.borrow(), label));
-            let point = label_point(&rendered.borrow(), label);
+            // Transport icons preserve real named button bounds, not painted
+            // text glyphs. Keep the same enabled/focus/clipping ownership checks.
+            let bounds = accessible_buttons.borrow()[label];
+            let rect = egui::Rect::from_min_max(
+                egui::pos2(bounds.x0 as f32, bounds.y0 as f32),
+                egui::pos2(bounds.x1 as f32, bounds.y1 as f32),
+            );
+            assert!(ctx.content_rect().contains_rect(rect));
+            let point = rect.center();
             let response = ctx
                 .memory(|memory| memory.focused())
                 .and_then(|id| ctx.read_response(id))

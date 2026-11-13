@@ -16,8 +16,8 @@ Primitives are committed/pushed and bounded qualification is complete, including
 | Logo v2 integration | Implemented in HEAD; separate qualification | Theme-appropriate marks, window and launcher icon, DejaVu notice review |
 | Sphere and capsule primitives, Create menu | Bounded qualification complete; committed/pushed | Source/native/export and actual core/synchronization validation pass; parent review passed |
 | Viewport selection highlight | Accepted bounded rendering after fresh parent review | Default-off editor opt-in, two-tone visible-fragment inner contour; source/native/Vulkan/cost/runtime compatibility pass with explicit injected-input limitations. [Evidence](../evidence/E1-SELECTION-2026-11-13.md) |
-| Wide-window layout spacing | Not started | Top bar and viewport tool groups |
-| Selective icons | Not started | With tooltips and accessible names |
+| Wide-window layout spacing | Working checkpoint; final qualification/review pending | Actual-width responsive top bar and viewport groups. [Evidence](../evidence/E1-LAYOUT-2026-11-13.md) |
+| Selective icons | Working checkpoint; final qualification/review pending | Original vector transport icons; named focusable buttons and enabled/disabled tooltips, other labels retained |
 | Terminal-free MCP onboarding | Proposed separately as [E2](E2-MCP-ONBOARDING.md) | Needs user decisions before implementation |
 | Reopen lands on the focused workspace | User to confirm | Hyprland rule was already corrected on 2026-11-11 |
 

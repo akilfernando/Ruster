@@ -2292,6 +2292,11 @@ impl SceneEditor {
                         .response
                         .on_hover_text("Tool options · Space, Pivot and Snap");
                 } else {
+                    // Budget against the viewport after sidebars, not the screen.
+                    // Leave room for Snap values and the scale explanation.
+                    if ui.max_rect().width() >= 1100.0 {
+                        ui.add_space((ui.available_size_before_wrap().x - 640.0).max(16.0));
+                    }
                     ui.separator();
                     self.tool_options_ui(ui);
                 }
@@ -4965,7 +4970,12 @@ impl SceneEditor {
                 mode,
                 self.document_label()
             );
-            let width = (ui.available_width() - 64.0).clamp(48.0, 240.0);
+            // Keep menus leading and document/Save trailing only when the
+            // measured remaining row can afford both; compact keeps wrapping.
+            if !compact && ui.available_size_before_wrap().x > 400.0 {
+                ui.add_space(ui.available_size_before_wrap().x - 304.0);
+            }
+            let width = (ui.available_size_before_wrap().x - 64.0).clamp(48.0, 240.0);
             ui.add_sized(
                 [width, ui.spacing().interact_size.y],
                 egui::Label::new(&title).truncate(),
@@ -5791,6 +5801,7 @@ mod tests {
             let asset_row_visible = std::cell::Cell::new(false);
             let focused_response = std::cell::Cell::new(None);
             let reset_label = std::cell::Cell::new(None);
+            let chrome = std::cell::RefCell::new(std::collections::BTreeMap::new());
             let mut time = 0.0;
             let mut frame = |editor: &mut SceneEditor, size| {
                 time += 0.1;
@@ -5827,6 +5838,28 @@ mod tests {
                     },
                 );
                 output.textures_delta.clear();
+                *chrome.borrow_mut() = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| {
+                        let egui::epaint::Shape::Text(text) = &shape.shape else {
+                            return None;
+                        };
+                        let label = text.galley.job.text.as_str();
+                        ["Save", "Move", "Space", "Reset"]
+                            .contains(&label)
+                            .then_some((
+                                label.to_owned(),
+                                text.galley
+                                    .rows
+                                    .iter()
+                                    .fold(egui::Rect::NOTHING, |rect, row| {
+                                        rect.union(row.rect_without_leading_space())
+                                    })
+                                    .translate(text.pos.to_vec2()),
+                            ))
+                    })
+                    .collect();
                 reset_label.set(output.shapes.iter().find_map(|shape| match &shape.shape {
                     egui::epaint::Shape::Text(text) if text.galley.job.text == "Reset" => Some((
                         egui::Rect::from_min_size(text.pos, text.galley.size()),
@@ -5880,6 +5913,28 @@ mod tests {
                 asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("triangle · Mesh · Ready") && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
                 viewport.expect("production viewport callback must remain present")
             };
+            // A wide actual viewport must use spare width to separate tool
+            // options and center playback, without changing compact contracts.
+            let wide_size = egui::vec2(2554.0, 1390.0);
+            frame(&mut editor, wide_size);
+            let wide_viewport = frame(&mut editor, wide_size);
+            {
+                let chrome = chrome.borrow();
+                assert!(
+                    chrome["Save"].right() > wide_size.x - 80.0,
+                    "wide Save stays at the document end, not packed beside menus: {:?}",
+                    *chrome
+                );
+                assert!(
+                    chrome["Space"].left() - chrome["Move"].right() > 300.0,
+                    "wide tool options form a separate trailing group: {:?}",
+                    *chrome
+                );
+                assert!(
+                    (chrome["Reset"].left() - wide_viewport.center().x).abs() < 180.0,
+                    "wide playback forms a central group"
+                );
+            }
             let normal_size = egui::vec2(1280.0, 800.0);
             frame(&mut editor, normal_size);
             frame(&mut editor, normal_size);

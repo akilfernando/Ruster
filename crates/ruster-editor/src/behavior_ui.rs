@@ -2192,6 +2192,11 @@ impl RuntimeUi {
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x=4.0;
             ui.spacing_mut().button_padding.x=6.0;
+            // Playback is one central group on a genuinely roomy viewport.
+            // Compact rows retain their leading alignment and wrapping.
+            if ui.available_width() >= 760.0 {
+                ui.add_space((ui.available_width() - 260.0) * 0.5);
+            }
             let reset_button = ui
                 .add_enabled(
                     !blocked && !self.shutdown,
@@ -2219,11 +2224,8 @@ impl RuntimeUi {
                 && !self.hud_activation_busy()
                 && !stopped
                 && !self.shutdown;
-            let play_button = ui
-                .add_enabled(
-                    ready,
-                    egui::Button::new(if self.playing { "Pause" } else { "Play" }),
-                );
+            let play_button = crate::editor_theme::playback_button(ui, ready,
+                if self.playing { crate::editor_theme::PlaybackIcon::Pause } else { crate::editor_theme::PlaybackIcon::Play });
             self.restore_control_focus(&play_button);
             if play_button.clicked() {
                 let key = self.worker.as_ref().unwrap().current_key();
@@ -2235,20 +2237,14 @@ impl RuntimeUi {
                 });
                 self.arm_control_focus(&play_button, key, operation);
             }
-            let step_button = ui
-                .add_enabled(ready && !self.playing, egui::Button::new("Step"))
-                ;
+            let step_button = crate::editor_theme::playback_button(ui, ready && !self.playing, crate::editor_theme::PlaybackIcon::Step);
             self.restore_control_focus(&step_button);
             if step_button.clicked() {
                 let key = self.worker.as_ref().unwrap().current_key();
                 self.pending = Some(Request::Step(key));
                 self.arm_control_focus(&step_button, key, Operation::Step);
             }
-            let stop_button = ui
-                .add_enabled(
-                    self.worker.is_some() && !self.shutdown,
-                    egui::Button::new("Stop"),
-                );
+            let stop_button = crate::editor_theme::playback_button(ui, self.worker.is_some() && !self.shutdown, crate::editor_theme::PlaybackIcon::Stop);
             self.restore_control_focus(&stop_button);
             if stop_button.clicked() {
                 self.stop(generation, session.scene().revision);

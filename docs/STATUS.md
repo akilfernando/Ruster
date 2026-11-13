@@ -2,7 +2,11 @@
 
 Updated 2026-11-13. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
-## E1 viewport selection accepted; wide-layout/icons next — 2026-11-13
+## Current WIP: E1 wide-window spacing/selective icons — 2026-11-13
+
+The parent explicitly authorizes one reversible editor-only slice following bounded selection acceptance. Leading menus/Create and trailing document/Save, separated wide manipulation options and centered wide playback use actual available logical widths; compact wrapping is retained. Only familiar transport actions use original vector icons with real named buttons/tooltips. Fresh native before/after Dark/Light/OLED captures and focused source checks pass; final common-action journey/log scan/parent review are pending. [Working evidence and retained failures](evidence/E1-LAYOUT-2026-11-13.md). No runtime/render/persistence change, new dependency, installation or E2/F4a; OLED retention remains the user's decision.
+
+## E1 viewport selection accepted — 2026-11-13
 
 The user explicitly selects this bounded E1 slice and frequent explicit-path checkpoint commits/pushes on `claude/e1-editor-feedback`, starting at `35ecebef6b340c30bc3bcff323c37024fb7de198`. **Parent accepts bounded selection rendering at `869063f7a8f260e0949612e08a88ac9affcb6937` following fresh independent review `deleg_2b4cc899` (passed; no identified security/logic blocker). All qualifications below remain part of acceptance.** [Contract](plans/E1-EDITOR-FEEDBACK.md#selection-creator-acceptance-contract-agent-selected-2026-11-13), [complete evidence, source/binary pins and retained limitations](evidence/E1-SELECTION-2026-11-13.md). A static mint/charcoal visible-fragment inner contour reuses existing opaque alpha/composite resources. `NavigationOptions.selection_feedback` is transient/default-off; only the editor opts in through reserved instance response W. Actual RED/GREEN protects contour behavior and runtime isolation; exact release offscreen RGBA matches base for Legacy/HDR with application selection both off/on. No material/PBR/picking/persistence/export-format change or new render target/pass occurs.
 

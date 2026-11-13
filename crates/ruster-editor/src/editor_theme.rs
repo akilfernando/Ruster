@@ -257,6 +257,89 @@ pub fn primary_button(ui: &mut egui::Ui, label: &str) -> egui::Response {
     .inner
 }
 
+/// Familiar transport symbols, drawn with existing egui vectors. Original
+/// project artwork (MIT OR Apache-2.0), not a font or third-party asset.
+#[derive(Clone, Copy)]
+pub enum PlaybackIcon {
+    Play,
+    Pause,
+    Step,
+    Stop,
+}
+
+/// A normal focusable button owns all interaction; only its paint is symbolic.
+/// Names remain real accessibility metadata and tooltips, including disabled.
+pub fn playback_button(ui: &mut egui::Ui, enabled: bool, icon: PlaybackIcon) -> egui::Response {
+    let label = match icon {
+        PlaybackIcon::Play => "Play",
+        PlaybackIcon::Pause => "Pause",
+        PlaybackIcon::Step => "Step",
+        PlaybackIcon::Stop => "Stop",
+    };
+    let response = ui.add_enabled(
+        enabled,
+        egui::Button::new("").min_size(egui::vec2(28.0, ui.spacing().interact_size.y)),
+    );
+    response
+        .widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, response.enabled(), label));
+    if ui.is_rect_visible(response.rect) {
+        let color = if response.enabled() {
+            ui.style().interact(&response).fg_stroke.color
+        } else {
+            ui.visuals().weak_text_color()
+        };
+        let c = response.rect.center();
+        let p = ui.painter();
+        let point = |x, y| c + egui::vec2(x, y);
+        match icon {
+            PlaybackIcon::Play | PlaybackIcon::Step => {
+                let offset = if matches!(icon, PlaybackIcon::Step) {
+                    -2.0
+                } else {
+                    0.0
+                };
+                p.add(egui::Shape::convex_polygon(
+                    vec![
+                        point(-4.0 + offset, -6.0),
+                        point(6.0 + offset, 0.0),
+                        point(-4.0 + offset, 6.0),
+                    ],
+                    color,
+                    Stroke::NONE,
+                ));
+                if matches!(icon, PlaybackIcon::Step) {
+                    p.line_segment([point(6.0, -6.0), point(6.0, 6.0)], Stroke::new(2.0, color));
+                }
+            }
+            PlaybackIcon::Pause => {
+                for x in [-4.0, 3.0] {
+                    p.rect_filled(
+                        egui::Rect::from_min_size(point(x, -6.0), egui::vec2(3.0, 12.0)),
+                        0.0,
+                        color,
+                    );
+                }
+            }
+            PlaybackIcon::Stop => {
+                p.rect_filled(
+                    egui::Rect::from_center_size(c, egui::vec2(10.0, 10.0)),
+                    0.0,
+                    color,
+                );
+            }
+        }
+    }
+    let tooltip = match icon {
+        PlaybackIcon::Play => "Play · run the captured scene",
+        PlaybackIcon::Pause => "Pause · retain the current runtime state",
+        PlaybackIcon::Step => "Step · advance one simulation tick while paused",
+        PlaybackIcon::Stop => "Stop · return to the authored scene",
+    };
+    response
+        .on_hover_text(tooltip)
+        .on_disabled_hover_text(tooltip)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
