@@ -3,6 +3,9 @@ mod behavior_tools;
 mod capture_tools;
 mod collider_tools;
 mod color_tools;
+#[allow(dead_code)]
+#[path = "../../support/connection.rs"]
+mod connection;
 mod export_tools;
 mod hud_tools;
 mod lighting_tools;
@@ -643,110 +646,32 @@ impl Server {
     }
 }
 
-#[cfg(target_os = "linux")]
-fn call_bridge(name: &str, arguments: &Value) -> Value {
-    use std::fs;
-    use std::os::unix::fs::{FileTypeExt, MetadataExt};
-    use std::os::unix::net::UnixStream;
-    use std::path::PathBuf;
-    use std::time::{Duration, Instant};
-
-    struct DeadlineReader {
-        stream: UnixStream,
-        deadline: Instant,
-    }
-
-    impl io::Read for DeadlineReader {
-        fn read(&mut self, output: &mut [u8]) -> io::Result<usize> {
-            let remaining = self.deadline.saturating_duration_since(Instant::now());
-            if remaining.is_zero() {
-                return Err(io::Error::new(
-                    io::ErrorKind::TimedOut,
-                    "Editor response deadline elapsed",
-                ));
-            }
-            self.stream.set_read_timeout(Some(remaining))?;
-            io::Read::read(&mut self.stream, output)
-        }
-    }
-
-    fn exchange(name: &str, arguments: &Value) -> io::Result<Value> {
-        let path = std::env::var_os("RUSTER_MCP_SOCKET")
-            .map(PathBuf::from)
-            .ok_or_else(|| {
-                io::Error::other("Set RUSTER_MCP_SOCKET to the explicitly enabled editor socket")
-            })?;
-        if !path.is_absolute() {
-            return Err(io::Error::other("RUSTER_MCP_SOCKET must be absolute"));
-        }
-        let parent = path
-            .parent()
-            .ok_or_else(|| io::Error::other("Socket has no parent directory"))?;
-        let dir = fs::symlink_metadata(parent)?;
-        let socket = fs::symlink_metadata(&path)?;
-        let own_uid = fs::metadata("/proc/self")?.uid();
-        if !dir.is_dir()
-            || dir.mode() & 0o777 != 0o700
-            || dir.uid() != own_uid
-            || !socket.file_type().is_socket()
-            || socket.mode() & 0o777 != 0o600
-            || socket.uid() != own_uid
-        {
-            return Err(io::Error::other(
-                "Require same-user socket0600 inside a private directory0700 (no symlinks)",
-            ));
-        }
-        let mut stream = UnixStream::connect(&path)?;
-        stream.set_write_timeout(Some(Duration::from_secs(3)))?;
-        let frame = json!({"operation":name,"arguments":arguments}).to_string();
-        if frame.len() + 1 > MAX_FRAME {
-            return Err(io::Error::other("Bridge request exceeds byte limit"));
-        }
-        stream.write_all(frame.as_bytes())?;
-        stream.write_all(b"\n")?;
-        let reader = DeadlineReader {
-            stream,
-            deadline: Instant::now() + Duration::from_secs(3),
-        };
-        let response = read_frame(&mut BufReader::new(reader), MAX_FRAME)?.ok_or_else(|| {
-            io::Error::other("Editor closed without a response; inspect before retrying")
-        })?;
-        let result: Value = serde_json::from_slice(&response)?;
-        if !result.is_object()
-            || !result["ok"].is_boolean()
-            || (result["ok"] == true && !result["result"].is_object())
-            || (result["ok"] == false
-                && (!result["error"]["code"].is_string()
-                    || !result["error"]["message"].is_string()))
-        {
-            return Err(io::Error::other(
-                "Malformed editor response; inspect before retrying",
-            ));
-        }
-        Ok(result)
-    }
-    exchange(name, arguments).unwrap_or_else(|error| {
-        domain_error(
-            "bridge_unavailable",
-            &format!(
-                "{error}. Commit status may be unknown after dispatch; inspect before any retry."
-            ),
-        )
-    })
+/// Snapshot the locator exactly once per adapter process, lazily on its first
+/// project call. initialize/tools/list do not open or consume owner authority.
+#[derive(Default)]
+struct Adapter {
+    attempted: bool,
+    client: Option<connection::Client>,
 }
-
-#[cfg(not(target_os = "linux"))]
-fn call_bridge(_: &str, _: &Value) -> Value {
-    domain_error(
-        "bridge_unavailable",
-        "This adapter currently supports local Linux editor attachment only",
-    )
+impl Adapter {
+    fn call(&mut self, name: &str, arguments: &Value) -> Value {
+        if !self.attempted {
+            self.attempted = true;
+            self.client = std::env::var_os("RUSTER_MCP_LOCATOR")
+                .and_then(|path| connection::Client::open(path.into()).ok());
+        }
+        self.client.as_mut().map_or_else(
+            || domain_error("bridge_unavailable", "A matched private RUSTER_MCP_LOCATOR and explicit editor owner approval are required. Legacy socket-only attachment is unsupported; no fallback."),
+            |client| client.call(name, arguments),
+        )
+    }
 }
 
 fn run(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
     let mut server = Server::default();
+    let mut adapter = Adapter::default();
     while let Some(frame) = read_frame(reader, MAX_FRAME)? {
-        if let Some(response) = server.handle(&frame, call_bridge) {
+        if let Some(response) = server.handle(&frame, |op, args| adapter.call(op, args)) {
             let serialized = response.to_string();
             if serialized.len() + 1 > MAX_OUTPUT {
                 return Err(io::Error::other(

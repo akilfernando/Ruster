@@ -27,6 +27,7 @@ sha2 = "0.10.9"
 base64 = "0.22.1"
 png = "0.18.1"
 tempfile = "3"
+rustix = { version = "0.38.44", features = ["net", "process"] }
 
 [lints]
 workspace = true

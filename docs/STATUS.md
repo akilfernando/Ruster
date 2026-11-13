@@ -2,7 +2,9 @@
 
 Updated 2026-11-14. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
-## E2a CP1 authorized — implementation pending, 2026-11-14
+## E2a CP1 WIP — security review pending, 2026-11-14
+
+First focused transport core is implemented, **not CP1 acceptance**: private fixed locator, matched wire handshake, explicit selected-owner approval, persistent adapter-owner socket, central admission gate and revocation-aware request/commit leases, stop/wakeup and owned listener handle. Actual unapproved-access regression fails on baseline (`red-unapproved.log`) then passes; the two-editor real Unix transport test passes missing/wrong/other-editor capability reads and mutations plus owner-EOF retirement. Raw logs are in the CP1 audit below. This is not full project-transition/publication/FD/Hermes proof; Host integration, extended adversarial checks and normal nonblocking shutdown remain WIP. No stable installation or CP2 UI. The core checkpoint is deliberately labelled WIP/review-pending.
 
 The user explicitly answered **“Approve all 3”**: session-only project-bound adapter authority (possibly shared across frontend chats, fresh consent after revocation); separate in-app Save/export grants/human-selected executable kits/immediate asset-persistence disclosure; companion packaging/one previewed reversible profile registration/manual restart fallback. [Accepted decision0050](decisions/0050-session-bound-mcp-authority.md) records the exact bundles and selected CP1 engineering contract, not measured proof. The current instruction authorizes **CP1 only**, authority and clean listener/publication retirement before Connect UI. No complete normal-startup onboarding claim, stable installation replacement, shared-gateway restart or second client. Parent fresh actual Astra review gates CP2.
 

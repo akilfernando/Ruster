@@ -1,9 +1,10 @@
 //! Explicit opt-in, same-user local bridge. Never owns mutable editor state.
-#[path = "../../support/strict_json.rs"]
-mod strict_json;
-use std::io::{BufReader, Write};
+use crate::connection::{self, Locator};
+use std::io::Write;
 use std::os::unix::{fs::PermissionsExt, net::UnixListener};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 
 use eframe::egui;
@@ -20,6 +21,43 @@ struct RequestState {
     deadline: Instant,
     phase: Mutex<Phase>,
     wake_reply: mpsc::SyncSender<()>,
+    authority: Option<Authority>,
+}
+
+/// One lock orders revocation against final publication authorization.
+#[derive(Clone)]
+pub struct Authority(Arc<Mutex<AuthorityState>>);
+struct AuthorityState {
+    live: bool,
+    approved: bool,
+    owner: Option<(String, u32)>,
+    commits: usize,
+    receipts: std::collections::VecDeque<Value>,
+}
+impl Authority {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(AuthorityState {
+            live: true,
+            approved: false,
+            owner: None,
+            commits: 0,
+            receipts: Default::default(),
+        })))
+    }
+    pub fn revoke(&self) {
+        if let Ok(mut state) = self.0.lock() {
+            state.live = false;
+        }
+    }
+    pub fn live(&self) -> bool {
+        self.0.lock().is_ok_and(|s| s.live)
+    }
+    fn authorized(&self) -> bool {
+        self.0.lock().is_ok_and(|s| s.live && s.approved)
+    }
+    pub fn draining(&self) -> bool {
+        self.0.lock().map_or(true, |s| s.commits != 0)
+    }
 }
 
 enum Phase {
@@ -47,15 +85,24 @@ pub struct CommitLease {
 #[derive(Debug)]
 pub struct Expired;
 
+#[cfg(test)]
 fn new_pending(
     request: Value,
     deadline: Instant,
+) -> (Pending, Arc<RequestState>, mpsc::Receiver<()>) {
+    new_pending_authorized(request, deadline, None)
+}
+fn new_pending_authorized(
+    request: Value,
+    deadline: Instant,
+    authority: Option<Authority>,
 ) -> (Pending, Arc<RequestState>, mpsc::Receiver<()>) {
     let (wake_reply, receiver) = mpsc::sync_channel(1);
     let shared = Arc::new(RequestState {
         deadline,
         phase: Mutex::new(Phase::Queued),
         wake_reply,
+        authority,
     });
     let pending = Pending {
         request,
@@ -72,6 +119,13 @@ impl RequestState {
     }
 
     fn begin_prepare_with(&self, now: impl FnOnce() -> Instant) -> bool {
+        let authority = self.authority.as_ref().map(|a| a.0.lock());
+        if authority
+            .as_ref()
+            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.live || !s.approved))
+        {
+            return false;
+        }
         let Ok(mut phase) = self.phase.lock() else {
             return false;
         };
@@ -109,6 +163,14 @@ impl RequestState {
 impl RequestLease {
     /// Advisory only; try_commit performs the authoritative locked check.
     pub fn is_expired(&self) -> bool {
+        if self
+            .shared
+            .authority
+            .as_ref()
+            .is_some_and(|a| !a.authorized())
+        {
+            return true;
+        }
         self.shared.phase.lock().map_or(true, |phase| {
             matches!(*phase, Phase::Expired) || Instant::now() >= self.shared.deadline
         })
@@ -117,6 +179,13 @@ impl RequestLease {
     /// Complete a rejection or read-only result before publication. This method
     /// grants no mutation authority; mutating callbacks must use run_immediate.
     pub fn respond(self, response: Value) -> bool {
+        let authority = self.shared.authority.as_ref().map(|a| a.0.lock());
+        if authority
+            .as_ref()
+            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.live || !s.approved))
+        {
+            return false;
+        }
         let completed = {
             let Ok(mut phase) = self.shared.phase.lock() else {
                 return false;
@@ -140,6 +209,13 @@ impl RequestLease {
     }
 
     fn try_commit_with(self, now: impl FnOnce() -> Instant) -> Result<CommitLease, Expired> {
+        let mut authority = self.shared.authority.as_ref().map(|a| a.0.lock());
+        if authority
+            .as_ref()
+            .is_some_and(|s| s.as_ref().map_or(true, |s| !s.live || !s.approved))
+        {
+            return Err(Expired);
+        }
         {
             let mut phase = self.shared.phase.lock().map_err(|_| Expired)?;
             if !matches!(*phase, Phase::Preparing) {
@@ -152,6 +228,9 @@ impl RequestLease {
                 return Err(Expired);
             }
             *phase = Phase::Committing;
+            if let Some(Ok(state)) = &mut authority {
+                state.commits += 1;
+            }
         }
         Ok(CommitLease {
             shared: self.shared.clone(),
@@ -187,6 +266,14 @@ impl CommitLease {
     /// Completion remains valid after the request deadline; a lost reply never
     /// reverses publication or authorizes an automatic retry.
     pub fn complete(self, response: Value) {
+        if let Some(authority) = &self.shared.authority {
+            if let Ok(mut state) = authority.0.lock() {
+                state.receipts.push_back(response.clone());
+                if state.receipts.len() > 8 {
+                    state.receipts.pop_front();
+                }
+            }
+        }
         {
             let Ok(mut phase) = self.shared.phase.lock() else {
                 return;
@@ -200,14 +287,42 @@ impl CommitLease {
     }
 }
 
+impl Drop for CommitLease {
+    fn drop(&mut self) {
+        if let Some(authority) = &self.shared.authority {
+            if let Ok(mut state) = authority.0.lock() {
+                state.commits = state.commits.saturating_sub(1);
+            }
+        }
+    }
+}
+
 pub struct Bridge {
     receiver: mpsc::Receiver<Pending>,
     directory: tempfile::TempDir,
     nonce: String,
+    authority: Authority,
+    stop: Arc<AtomicBool>,
+    wake: mpsc::SyncSender<()>,
+    worker: Option<JoinHandle<()>>,
+    locator: Option<Locator>,
 }
 
 impl Bridge {
+    /// Creates an unbound listener, never project authority. The Host owns the
+    /// incarnation/generation; every Connect gets a new never-reused locator.
     pub fn start(ctx: egui::Context) -> std::io::Result<Self> {
+        Self::start_for(
+            ctx,
+            connection::unpredictable()?,
+            connection::unpredictable()?,
+        )
+    }
+    pub fn start_for(
+        ctx: egui::Context,
+        incarnation: String,
+        generation: String,
+    ) -> std::io::Result<Self> {
         let directory = tempfile::Builder::new()
             .prefix("ruster-mcp-")
             .rand_bytes(24)
@@ -217,75 +332,160 @@ impl Bridge {
         let listener = UnixListener::bind(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
+        let locator = Locator::capture(&path, incarnation, generation)?;
+        let locator_path = directory.path().join("connection.json");
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .mode(0o600)
+            .open(&locator_path)?;
+        file.write_all(&serde_json::to_vec(&locator)?)?;
         let (sender, receiver) = mpsc::sync_channel(1);
-        let nonce = directory
-            .path()
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .into_owned();
-        eprintln!(
-            "Ruster MCP bridge: {} (private same-user capability; opt-in)",
-            path.display()
-        );
-        let lifetime = path.clone();
-        std::thread::spawn(move || {
-            while lifetime.exists() {
-                let (mut stream, _) = match listener.accept() {
-                    Ok(connection) => connection,
-                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                        std::thread::sleep(Duration::from_millis(20));
+        let (wake, wake_receiver) = mpsc::sync_channel(1);
+        let authority = Authority::new();
+        let worker_authority = authority.clone();
+        let stop = Arc::new(AtomicBool::new(false));
+        let worker_stop = stop.clone();
+        let worker_locator = locator.clone();
+        let capability = connection::unpredictable()?;
+        let worker = std::thread::Builder::new().name("ruster-mcp-owner".into()).spawn(move || {
+            let run = || -> std::io::Result<()> {
+                while !worker_stop.load(Ordering::Acquire) && worker_authority.live() {
+                    worker_locator.validate_socket(&path)?;
+                    let (mut stream, _) = match listener.accept() {
+                        Ok(connection) => connection,
+                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                            let _ = wake_receiver.recv_timeout(connection::POLL);
+                            continue;
+                        }
+                        Err(e) => return Err(e),
+                    };
+                    let (uid, pid) = connection::peer(&stream)?;
+                    if uid != worker_locator.uid { continue; }
+                    let mut framing = connection::Framing::default();
+                    let hello_deadline = Instant::now() + connection::DEADLINE;
+                    let hello = loop {
+                        if worker_stop.load(Ordering::Acquire) || !worker_authority.live() { return Ok(()); }
+                        worker_locator.validate_socket(&path)?;
+                        if let Some(value) = framing.poll(&mut stream)? { break value; }
+                        if Instant::now() >= hello_deadline { return Ok(()); }
+                    };
+                    if hello["wire"] != connection::WIRE || hello["binding"] != worker_locator.binding()
+                        || hello.as_object().is_none_or(|m| m.len() != 3)
+                        || hello["hello"].as_str().is_none_or(|s| s.len() != 64) {
+                        let _ = connection::send(&mut stream, &denied("wire_incompatible"));
                         continue;
                     }
-                    Err(_) => break,
-                };
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-                let _ = stream.set_write_timeout(Some(Duration::from_secs(2)));
-                let mut bytes = Vec::new();
-                let deadline = Instant::now() + Duration::from_secs(2);
-                let result = (|| {
-                    use std::io::Read;
-                    let mut reader = BufReader::new((&stream).take(LIMIT + 1));
-                    loop {
-                        let remaining = deadline.checked_duration_since(Instant::now())?;
-                        stream.set_read_timeout(Some(remaining)).ok()?;
-                        // Read one byte per call to enforce a total framing deadline.
-                        let mut byte = [0u8; 1];
-                        if reader.read(&mut byte).ok()? == 0 { return None; }
-                        bytes.push(byte[0]);
-                        if byte[0] == b'\n' || bytes.len() as u64 > LIMIT { break; }
+                    let owner = hello["hello"].as_str().unwrap().to_string();
+                    {
+                        let mut state = worker_authority.0.lock().map_err(|_| std::io::Error::other("authority poisoned"))?;
+                        if !state.live || state.owner.is_some() { return Ok(()); }
+                        state.owner = Some((owner.clone(), pid));
                     }
-                    if bytes.len() as u64 > LIMIT || bytes.last() != Some(&b'\n') { return None; }
-                    let value: Value = strict_json::parse(&bytes).ok()?;
-                    let (pending, state, result) = new_pending(value, deadline);
-                    sender.try_send(pending).ok()?;
                     ctx.request_repaint();
-                    // Framing, queueing and preparation share the original
-                    // absolute deadline; dequeue never grants another two seconds.
-                    let remaining = deadline.saturating_duration_since(Instant::now());
-                    let _ = result.recv_timeout(remaining);
-                    state.take_reply_or_expire()
-                })().unwrap_or_else(|| json!({"ok":false,"error":{"code":"bridge_unavailable","message":"Invalid, busy or expired bridge request; commit status may be unknown after dispatch. Inspect before retrying."}}));
-                let result = if serde_json::to_vec(&result)
-                    .map_or(true, |v| v.len() as u64 >= LIMIT)
-                {
-                    json!({"ok":false,"error":{"code":"response_too_large","message":"Response exceeds bridge limit; use bounded inspection pages."}})
-                } else {
-                    result
-                };
-                if let Ok(mut bytes) = serde_json::to_vec(&result) {
-                    if (bytes.len() as u64) < LIMIT {
-                        bytes.push(b'\n');
-                        let _ = stream.write_all(&bytes);
+                    connection::send(&mut stream, &json!({"binding":worker_locator.binding(),"state":"approval_required"}))?;
+                    // A single persistent owner socket. EOF, protocol failure or
+                    // stop retires the whole connection; there is no takeover.
+                    while !worker_stop.load(Ordering::Acquire) && worker_authority.live() {
+                        worker_locator.validate_socket(&path)?;
+                        let Some(request) = framing.poll(&mut stream)? else { continue; };
+                        if request == json!({"wire":connection::WIRE,"bind":owner}) {
+                            let approved = worker_authority.authorized();
+                            let reply = if approved { json!({"binding":worker_locator.binding(),"capability":capability}) }
+                                else { json!({"state":"approval_required"}) };
+                            connection::send(&mut stream, &reply)?;
+                            continue;
+                        }
+                        if !worker_authority.authorized() || request["wire"] != connection::WIRE
+                            || request["binding"] != worker_locator.binding() || request["capability"] != capability
+                            || request.as_object().is_none_or(|m| m.len() != 5) {
+                            connection::send(&mut stream, &denied("unauthorized"))?;
+                            continue;
+                        }
+                        let deadline = Instant::now() + connection::DEADLINE;
+                        let value = json!({"operation":request["operation"],"arguments":request["arguments"]});
+                        let (pending, state, result) = new_pending_authorized(value, deadline, Some(worker_authority.clone()));
+                        if sender.try_send(pending).is_err() { connection::send(&mut stream, &denied("busy"))?; continue; }
+                        ctx.request_repaint();
+                        loop {
+                            if let Some(reply) = state.take_reply_or_expire() {
+                                let reply = if serde_json::to_vec(&reply).map_or(true, |v| v.len() as u64 >= LIMIT) { denied("response_too_large") } else { reply };
+                                connection::send(&mut stream, &reply)?;
+                                break;
+                            }
+                            if Instant::now() >= deadline { connection::send(&mut stream, &denied("outcome_unknown"))?; break; }
+                            if worker_stop.load(Ordering::Acquire) || !worker_authority.live() { return Ok(()); }
+                            // Detect owner EOF even while preparation/publication
+                            // is pending, without admitting pipelined requests.
+                            use std::io::Read;
+                            stream.set_nonblocking(true)?;
+                            let mut byte = [0];
+                            let probe = stream.read(&mut byte);
+                            stream.set_nonblocking(false)?;
+                            match probe {
+                                Ok(_) => return Ok(()),
+                                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => (),
+                                Err(e) => return Err(e),
+                            }
+                            let _ = result.recv_timeout(connection::POLL);
+                        }
                     }
+                    return Ok(());
                 }
-            }
-        });
+                Ok(())
+            };
+            let _ = run();
+            worker_authority.revoke();
+            drop(listener);
+            // Only our original private endpoint is eligible for unlinking.
+            if worker_locator.validate_socket(&path).is_ok() { let _ = std::fs::remove_file(&path); }
+            ctx.request_repaint();
+        })?;
         Ok(Self {
             receiver,
             directory,
-            nonce,
+            nonce: locator.incarnation.clone(),
+            authority,
+            stop,
+            wake,
+            worker: Some(worker),
+            locator: Some(locator),
         })
+    }
+
+    pub fn authority(&self) -> Authority {
+        self.authority.clone()
+    }
+    pub fn locator_path(&self) -> std::path::PathBuf {
+        self.directory.path().join("connection.json")
+    }
+    pub fn pending_owner(&self) -> Option<(String, u32)> {
+        self.authority.0.lock().ok()?.owner.clone()
+    }
+    /// This API is human-owner-only, never reachable through MCP. CP2 supplies UI.
+    pub fn approve_owner(&self, owner: &(String, u32)) -> bool {
+        let Ok(mut state) = self.authority.0.lock() else {
+            return false;
+        };
+        if !state.live || state.approved || state.owner.as_ref() != Some(owner) {
+            return false;
+        }
+        state.approved = true;
+        true
+    }
+    pub fn disconnect(&mut self) {
+        self.authority.revoke();
+        self.stop.store(true, Ordering::Release);
+        let _ = self.wake.try_send(());
+    }
+    /// Never join a running thread on the UI. Revoked may still be draining
+    /// authorized publication; retired requires both owned obligations gone.
+    pub fn poll_retired(&mut self) -> bool {
+        if self.worker.as_ref().is_some_and(JoinHandle::is_finished) {
+            let _ = self.worker.take().unwrap().join();
+        }
+        self.worker.is_none() && !self.authority.live() && !self.authority.draining()
     }
 
     pub fn dispatch(&mut self, editor: &mut crate::model::Editor) -> bool {
@@ -342,8 +542,17 @@ impl Bridge {
 
 impl Drop for Bridge {
     fn drop(&mut self) {
-        let _ = std::fs::remove_file(self.directory.path().join("editor.sock"));
+        self.disconnect();
+        // Host normal shutdown polls before drop. Last-resort unwind teardown
+        // also retains the join obligation; no detached listener survives Drop.
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
     }
+}
+
+fn denied(code: &str) -> Value {
+    json!({"ok":false,"error":{"code":code,"message":"Unapproved, retired or incompatible owner transport; no automatic replay."}})
 }
 
 #[cfg(test)]
@@ -359,6 +568,11 @@ pub(crate) fn queued_test_bridge(
             receiver,
             directory: tempfile::tempdir().unwrap(),
             nonce: "test".into(),
+            authority: Authority::new(),
+            stop: Arc::new(AtomicBool::new(false)),
+            wake: mpsc::sync_channel(1).0,
+            worker: None,
+            locator: None,
         },
         move || state.take_reply_or_expire(),
     )
@@ -376,6 +590,138 @@ pub(crate) fn preparing_test_lease(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::io::BufReader;
+
+    fn receive(stream: &mut std::os::unix::net::UnixStream) -> Value {
+        let mut framing = connection::Framing::default();
+        let deadline = Instant::now() + Duration::from_secs(3);
+        loop {
+            if let Some(reply) = framing.poll(stream).unwrap() {
+                return reply;
+            }
+            assert!(Instant::now() < deadline, "reply deadline");
+        }
+    }
+    fn approved(bridge: &Bridge) -> (std::os::unix::net::UnixStream, Value) {
+        let mut stream =
+            std::os::unix::net::UnixStream::connect(bridge.directory.path().join("editor.sock"))
+                .unwrap();
+        let locator = bridge.locator.as_ref().unwrap();
+        let owner = connection::unpredictable().unwrap();
+        connection::send(
+            &mut stream,
+            &json!({"wire":connection::WIRE,"hello":owner,"binding":locator.binding()}),
+        )
+        .unwrap();
+        assert_eq!(receive(&mut stream)["state"], "approval_required");
+        assert!(bridge.approve_owner(&bridge.pending_owner().unwrap()));
+        connection::send(&mut stream, &json!({"wire":connection::WIRE,"bind":owner})).unwrap();
+        let handshake = receive(&mut stream);
+        assert!(handshake["capability"].is_string());
+        (stream, handshake)
+    }
+    fn frame(handshake: &Value, operation: &str, arguments: Value) -> Value {
+        json!({"wire":connection::WIRE,"binding":handshake["binding"],"capability":handshake["capability"],"operation":operation,"arguments":arguments})
+    }
+    fn roundtrip(
+        bridge: &mut Bridge,
+        stream: &std::os::unix::net::UnixStream,
+        request: Value,
+    ) -> (Value, usize) {
+        let mut stream = stream.try_clone().unwrap();
+        let worker = std::thread::spawn(move || {
+            connection::send(&mut stream, &request).unwrap();
+            receive(&mut stream)
+        });
+        let mut calls = 0;
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while !worker.is_finished() {
+            bridge.dispatch_command(|_, op, _| {
+                calls += 1;
+                json!({"ok":true,"result":{"operation":op}})
+            });
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        (worker.join().unwrap(), calls)
+    }
+
+    #[test]
+    fn two_editor_transport_authenticates_reads_mutations_and_owner_loss() {
+        let mut a = Bridge::start(egui::Context::default()).unwrap();
+        let mut b = Bridge::start(egui::Context::default()).unwrap();
+        let (owner_a, handshake_a) = approved(&a);
+        let (owner_b, handshake_b) = approved(&b);
+        assert_ne!(handshake_a["binding"], handshake_b["binding"]);
+        for op in [
+            "scene_inspect",
+            "scene_create",
+            "asset_inspect",
+            "creation_export_inspect",
+            "scene_save",
+        ] {
+            for bad in ["missing", "wrong", "other_editor"] {
+                let mut request = frame(&handshake_b, op, json!({}));
+                match bad {
+                    "missing" => {
+                        request.as_object_mut().unwrap().remove("capability");
+                    }
+                    "wrong" => request["capability"] = json!("not-a-capability"),
+                    _ => {
+                        request["binding"] = handshake_a["binding"].clone();
+                        request["capability"] = handshake_a["capability"].clone();
+                    }
+                }
+                let (reply, calls) = roundtrip(&mut b, &owner_b, request);
+                assert_eq!(reply["error"]["code"], "unauthorized");
+                assert_eq!(calls, 0, "wrong-project access for {op}/{bad}");
+            }
+            let (reply, calls) = roundtrip(&mut b, &owner_b, frame(&handshake_b, op, json!({})));
+            assert_eq!(reply["ok"], true);
+            assert_eq!(calls, 1);
+        }
+        drop(owner_a);
+        drop(owner_b);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !a.poll_retired() || !b.poll_retired() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(!a.directory.path().join("editor.sock").exists());
+        assert!(!b.directory.path().join("editor.sock").exists());
+        assert!(
+            !a.approve_owner(&a.pending_owner().unwrap()),
+            "no restart reclaim"
+        );
+    }
+
+    #[test]
+    fn unapproved_transport_never_discloses_project_or_mutates() {
+        use std::io::BufRead;
+        use std::os::unix::net::UnixStream;
+        let mut bridge = Bridge::start(egui::Context::default()).unwrap();
+        for operation in ["scene_inspect", "scene_create"] {
+            let mut stream =
+                UnixStream::connect(bridge.directory.path().join("editor.sock")).unwrap();
+            stream
+                .set_read_timeout(Some(Duration::from_secs(3)))
+                .unwrap();
+            writeln!(stream, "{}", json!({"operation":operation,"arguments":{}})).unwrap();
+            let client = std::thread::spawn(move || {
+                let mut reply = String::new();
+                BufReader::new(stream).read_line(&mut reply).unwrap();
+                reply
+            });
+            while !client.is_finished() {
+                bridge.dispatch_command(|_, _, _| {
+                    panic!("unapproved project access reached dispatch")
+                });
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            let reply: Value = serde_json::from_str(&client.join().unwrap()).unwrap();
+            assert_eq!(reply["ok"], false);
+        }
+    }
 
     // Raw same-user socket frames must reject before a mutable editor callback;
     // testing normalized Values alone cannot detect duplicate-key loss.
@@ -443,6 +789,11 @@ mod tests {
             receiver,
             directory,
             nonce: "test".into(),
+            authority: Authority::new(),
+            stop: Arc::new(AtomicBool::new(false)),
+            wake: mpsc::sync_channel(1).0,
+            worker: None,
+            locator: None,
         };
         let mut editor = crate::model::Editor::new(
             ruster_core::ProjectSession::new("expiry", ruster_core::Config::default()).unwrap(),

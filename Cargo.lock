@@ -3132,6 +3132,7 @@ dependencies = [
  "ruster-core",
  "ruster-render",
  "ruster-scene",
+ "rustix 0.38.44",
  "serde",
  "serde_json",
  "sha2",
@@ -3145,6 +3146,7 @@ name = "ruster-mcp"
 version = "0.1.0"
 dependencies = [
  "ruster-scene",
+ "rustix 0.38.44",
  "serde",
  "serde_json",
 ]

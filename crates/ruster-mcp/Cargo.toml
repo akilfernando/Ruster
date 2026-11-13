@@ -11,6 +11,7 @@ repository.workspace = true
 ruster-scene = { path = "../ruster-scene" }
 serde = "1"
 serde_json = { version = "1", features = ["float_roundtrip"] }
+rustix = { version = "0.38.44", features = ["net", "process"] }
 
 [lints]
 workspace = true

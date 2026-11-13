@@ -8,7 +8,11 @@ mod behavior_worker;
 mod branding;
 #[cfg(unix)]
 mod bridge;
+// Shared wire primitives; each binary uses only its own side.
 mod commands;
+#[allow(dead_code)]
+#[path = "../../support/connection.rs"]
+mod connection;
 mod creation_export;
 mod directory_grant;
 mod editor_theme;
@@ -19,6 +23,8 @@ mod recovery;
 mod recovery_ui;
 mod recovery_worker;
 mod scene_editor;
+#[path = "../../support/strict_json.rs"]
+mod strict_json;
 mod ui;
 mod workspace;
 
