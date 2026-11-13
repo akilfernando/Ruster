@@ -18,7 +18,15 @@ Left-click selects the nearest visible transformed surface, using inverse-model 
 
 `builtin_mesh(Primitive)` shares immutable generated triangles for draw, triangle picking and exact Fit bounds. Sphere: radius0.5,32longitude segments/16latitude steps,559vertices/960triangles/29,408payload bytes. Capsule: radius0.5, total Y height2,592vertices/1024triangles/31,232bytes. Interior rows duplicate the longitude seam; pole UVs are per-segment midpoints. Normals are analytic and winding is outward counter-clockwise. Capsule V follows profile arc length.
 
-Both shapes participate in the existing color and Sun-depth passes, instanced by shape/material binding. All three built-ins initialize once per renderer:61,560payload bytes including cube and the eight-byte constant UV attribute. They are fixed overhead outside the64asset/48MiB admission closure, not per-object uploads. `object_has_complete_uvs` is the shared renderer/editor/runtime eligibility rule: generated sphere/capsule or a resolved complete-UV imported mesh. The procedural cube retains its previous missing-texture behavior. [Evidence and driver-validation hold](../../docs/evidence/E1-PRIMITIVES-2026-11-13.md).
+Both shapes participate in the existing color and Sun-depth passes, instanced by shape/material binding. All three built-ins initialize once per renderer:61,560payload bytes including cube and the eight-byte constant UV attribute. They are fixed overhead outside the64asset/48MiB admission closure, not per-object uploads. `object_has_complete_uvs` is the shared renderer/editor/runtime eligibility rule: generated sphere/capsule or a resolved complete-UV imported mesh. The procedural cube retains its previous missing-texture behavior. [Evidence and completed bounded validation](../../docs/evidence/E1-PRIMITIVES-2026-11-13.md).
+
+## Editor-only selection feedback — E1
+
+`NavigationOptions::selection_feedback` is a transient, default-off opt-in. The editor sets it; the application host and convenience APIs retain their previous selection whitening and exact unselected appearance. No saved Scene/material, export capability or runtime document field changes.
+
+For built-in shaders, the existing instance response packet's reserved W component carries the editor flag. Selected visible fragments write a mask into the existing opaque scene target's alpha; its RGB retains the actual material/lighting result. The existing composite adds a static mint inner contour with a charcoal backing after HDR display mapping and before output transfer. Width scales with UI pixel density. Depth testing and resolved MSAA/bilinear coverage remain authoritative; no extra target/pass, expanded mesh, wireframe or hidden-edge rendering is introduced. Final viewport alpha stays opaque.
+
+Multi-selection shares the contour of the visible selected region; touching/overlapping selected silhouettes are not separated by object-ID edges. Custom project WGSL retains its existing appearance/alpha interpretation and is not treated as a selection mask. [Qualification, exact native evidence, costs and limitations](../../docs/evidence/E1-SELECTION-2026-11-13.md).
 
 ## Embedding and ownership
 

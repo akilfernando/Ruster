@@ -2,6 +2,17 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
+## 2026-11-13 — E1 viewport-selection feedback, review-ready
+
+One bounded Hermes worker (`gpt-6.1-sol`, balanced implementation role; reasoning effort not exposed in this worker context) owns canonical source and qualification on `claude/e1-editor-feedback`, using the root's existing routing snapshot. No child delegation, model/global configuration change or Terra call occurs; actual images are loaded through `vision_analyze` for direct inspection. Root's fresh rendering review/acceptance remains pending. [Contract/evidence and retained failures](../evidence/E1-SELECTION-2026-11-13.md).
+
+The existing scene/composite seam supports a two-tone visible-fragment inner contour without new GPU targets/passes/owners. Self-review finds shared application selection must not inherit editor behavior; a second RED/GREEN introduces a default-off transient editor opt-in and exact Legacy/HDR runtime selected/unselected image equivalence. That is one consequential implementation repair, not an independent review finding. Test setup/style and native-driver preparation failures remain retained; no test suppression, generic performance win or broad input qualification is claimed. Hidden injected continuous picking fails identically before/after and native Shift-click remains unqualified; parent must reconcile these explicit limits.
+
+The final full gate passes335Rust/30Python/strict checks in41.92s; inspection strict lint2.58s and146tests/1existing device ignored in8.73s. Three actual Vulkan probes, final native Legacy/HDR/wide and28release cost/runtime processes produce34complete core/synchronization-active logs, scanner clean. Final inspection build including scoped invalidation12.55s; release harness builds3.74/3.76s. Matched24-process/12warmup+60frame observations add10.240µs Legacy/8.704µs HDR GPU scene+composite for the12selected-object fixture, without resource-counter growth or unselected median change. These are named-workload costs, not measured model savings. Actual token/credit/cost totals and total worker elapsed are unavailable; no savings claim.
+
+Explicit-path WIP checkpoints `8e985e1` and `fb68ade` are pushed and remote-SHA read back; the current checkpoint adds final evidence/test-lint only. Attachments/unrelated index entries are excluded. All17owned native sessions are gone; accepted final sessions close normally. The existing QA gate serializes heavy work; helpers/scheduling, clipboard, protected user windows and paused systems are unchanged. Root should review this package, then surface the already-requested wide-layout/icons item rather than silently idle; no new capability/product decision is authorized by this handoff.
+
+
 ## 2026-11-04 initial setup
 
 - Market research assigned to `gpt-6-astra`, high reasoning: ambiguous synthesis and competing market hypotheses. Read-only, no nested delegation requested. Completed ranked opportunities with competing products, primary sources and a validation proposal; root synthesized into MARKET-OPPORTUNITIES.md. No repair required.

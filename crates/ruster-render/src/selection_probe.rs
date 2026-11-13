@@ -109,7 +109,13 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
             if let Some(dir) = std::env::var_os("RUSTER_SELECTION_PROBE_OUTPUT") {
                 let path = std::path::Path::new(&dir).join(format!("{name}-{}.ppm", images.len()));
                 let mut ppm = b"P6\n256 192\n255\n".to_vec();
-                ppm.extend(bytes.chunks_exact(4).flat_map(|p| p[..3].iter().copied()));
+                ppm.extend(
+                    bytes
+                        .as_chunks::<4>()
+                        .0
+                        .iter()
+                        .flat_map(|p| p[..3].iter().copied()),
+                );
                 std::fs::write(path, ppm).unwrap();
             }
             images.push(bytes);
@@ -145,7 +151,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
         for y in 0..192 {
             for x in 0..256 {
                 // Far outside the geometry and inside the nearer occluder.
-                if y < 30 || y > 162 || (129..151).contains(&x) {
+                if !(30..=162).contains(&y) || (129..151).contains(&x) {
                     assert_eq!(
                         pixel(0, x, y),
                         pixel(1, x, y),
