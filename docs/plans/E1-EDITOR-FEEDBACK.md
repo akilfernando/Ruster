@@ -12,14 +12,16 @@ Primitives are committed/pushed and bounded qualification is complete, including
 
 | Item | State | Notes |
 | --- | --- | --- |
-| Light/dark themes, optional OLED black | Source/test audit verified; fresh native closeout blocked | Existing Light/Dark/OLED captures inspected; active workspace2 prevents isolated preferences/startup/About/fresh-reopen matrix. OLED keep/remove remains the user's decision. [Evidence](../evidence/E1-THEME-LOGO-2026-11-13.md) |
-| Logo v2 integration | Asset origins/notices verified; fresh startup/About qualification blocked | Four exact SVG→PNG matches, full DejaVu notice and source-package inventory; installed launcher/icon read-only checked, not replaced or represented as current E1 |
+| Light/dark themes, optional OLED black | Bounded native technical qualification complete | Four actual View/settings→Save preferences→fresh-process reopen pairs, selected-radio/About-focus readbacks and meaningful Light/Dark/OLED images pass. User explicitly keeps OLED optional; Dark default/migration unchanged. System observed only on this host. [Evidence](../evidence/E1-THEME-LOGO-2026-11-13.md) |
+| Logo v2 integration | Origins/notices and native startup/About qualified | Four exact SVG→PNG matches/full DejaVu inventory plus fresh Light/Dark welcome/About and default-feature compositor startup pass. Installed older payloads unchanged; not represented as current E1 |
 | Sphere and capsule primitives, Create menu | Bounded qualification complete; committed/pushed | Source/native/export and actual core/synchronization validation pass; parent review passed |
 | Viewport selection highlight | Accepted bounded rendering after fresh parent review | Default-off editor opt-in, two-tone visible-fragment inner contour; source/native/Vulkan/cost/runtime compatibility pass with explicit injected-input limitations. [Evidence](../evidence/E1-SELECTION-2026-11-13.md) |
 | Wide-window layout spacing | Accepted bounded qualification after fresh parent review | Actual-width responsive top bar and viewport groups. [Evidence](../evidence/E1-LAYOUT-2026-11-13.md) |
 | Selective icons | Accepted bounded qualification after fresh parent review | Original vector transport icons; named focusable buttons and enabled/disabled tooltips, other labels retained |
 | Terminal-free MCP onboarding | Proposed separately as [E2](E2-MCP-ONBOARDING.md) | Needs user decisions before implementation |
-| Reopen lands on the focused workspace | User to confirm | Hyprland rule was already corrected on 2026-11-11 |
+| Reopen lands on the focused workspace | Scoped current-candidate launch verified; user ordinary confirmation pending | Candidate default launch without workspace rule lands on focused workspace2; installed older launcher/build unchanged. Human ordinary confirmation remains separate |
+
+The bounded implementation tasks above have technical evidence; parent reconciliation is next, not E2/F4a or M9 acceptance. User explicitly keeps optional OLED/default Dark on2026-11-13. Preserve selection's hidden continuous-picking/native Shift-click and primitive texture/seam limits, plus broader physical-human/remapped/accessibility exclusions. All12theme/logo processes are gone (9accepted normal closes,3retained harness cleanups), original desktop identity restored and zero default listeners verified. [Exact closeout](../evidence/E1-THEME-LOGO-2026-11-13.md).
 
 ## Selection creator acceptance contract (agent-selected, 2026-11-13)
 

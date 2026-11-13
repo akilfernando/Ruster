@@ -2,7 +2,13 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
-## 2026-11-13 — E1 theme/logo source audit; native desktop-isolation blocker
+## 2026-11-13 — E1 theme/logo native completion after explicit away/OLED decisions
+
+One bounded child `gpt-6.1-sol` (effort not exposed) uses the parent's established routing snapshot, with no children/model switch or production change. User explicitly approves away/workspace2 tests and keeping OLED optional/default unchanged. [Complete evidence](../evidence/E1-THEME-LOGO-2026-11-13.md). Four actual View/settings→Save preferences→fresh-process reopen pairs pass with persisted JSON, settings/radio readbacks, real About Close focus and Enter dismissal. Eight new actual `vision_analyze` image loads inspect Light/Dark welcome/About, OLED contrast/selection, host-specific System output and exact default compositor startup. The exact `features=[]` candidate has zero PID-owned TCP/TCP6/Unix listeners and normally closes; candidate without a workspace rule opens on the focused workspace. This is not the unchanged older installed build or physical-user launcher confirmation.
+
+Audit-local away adapter retains exact original window identity, bounded compositor launch leases, unlocked/focus/pointer/PID/binary/listener guards and input-only Wayland idle monitoring; shared private helpers/configuration/clipboard remain untouched. All12launched processes are gone:9accepted normal closes and3scoped cleanup-only preparations;9accepted core/sync-active logs and all12scanner-clean logs. Retained preparations cover a general-idle observer resume, wrong audit Lua focus call and unavailable PATH capture command; fixes use input-only observer/correct existing Lua route/hash-pinned private capture binary, not weakened product guards. Initial per-node focus export is empty; retained real serialized tree focus IDs prove Close ownership and corrected readback is documented. No production repair/review change. Reuse335Rust/30Python,144default/146inspection, strict and unchanged GPU/runtime proofs. Parent evidence-only reconciliation is next; no new review agent, E2/F4a, install or M9 claim. Cost/tokens/whole-task elapsed unknown; no savings claim.
+
+## 2026-11-13 — E1 theme/logo source audit; native desktop-isolation blocker (historical; resolved above)
 
 One Hermes/Sol owner (`gpt-6.1-sol`, effort not exposed), no child/model switch, production repair or new phase. Parent layout acceptance at `3fc1418` after fresh `deleg_2d12e1c1` review passed is recorded/pushed in `978ad6e`, superseding pending-parent wording below;13sessions are explicitly not13complete journeys. [Theme/logo audit and exact unfinished boundary](../evidence/E1-THEME-LOGO-2026-11-13.md).
 
