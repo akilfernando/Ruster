@@ -2,6 +2,14 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
+## E2a CP1 parent acceptance; CP2 authorized — 2026-11-14
+
+Parent accepts bounded CP1 candidate `385b3b273491d4808a79e16caf735f1dbef2596a`, product `67e6116bbf169f0f530c59a2461a167a25f92f18`, following actual Astra review `local-148a06becdcd8e4d7866e4c5dcfb0327e0912f5d03093766b5369c14912821ff` (`passed: true`, no blocking security/logic findings). Parent independently recomputed all14 sealed artifact hashes and verified product diff unchanged; the CP2 writer also recomputed all14 successfully. Review JSON: `/home/akilf/.hermes/plans/audit/e2a-cp1-review-20261114/astra-review.json`; seal: `/home/akilf/Projects/Ruster-Audits/e2a-cp1-20261114/handoff-seal.json`.
+
+Acceptance retains the distinction between all84 central-gate operations and individual domain journeys; actual Hermes smoke ran `20c54f8`, while final-source process/core proofs ran `67e6116`. Retained checks:347Rust/30Python,158inspection plus strict lint;20cycles FD/thread `(4,2)`→`(4,2)`, zero owned listeners. CPU/PSS/foreground/request latency remain UNMEASURED CP4 work. Cooperating-same-UID scope is not a hostile-same-UID sandbox, and bounded terminal receipts are not crash durability. All18 owned PIDs/profile locators were cleaned. No native onboarding/full Save/export journey or stable installation acceptance is implied.
+
+Nonblocking P3: fail closed when an agent export lacks attached authority; production currently attaches authority, so no reachable bypass was established. CP2 starts with focused RED/GREEN hardening preserving already-authorized completion, then a finite isolated supported-CLI registration gate before large UI work. Unsafe non-atomic registration is a genuine stop condition, not permission for direct config editing. User authorizes CP2 Connect/status/Disconnect only after that gate; CP3 destination/kit workflows and CP4 packaging/cost remain later. Installed stable E1 remains unchanged, and no default-profile write/reload, shared restart, QA/Commons change or second client is authorized.
+
 ## 2026-11-14 — E2a CP1 single-writer authority/retirement candidate
 
 One bounded Hermes child, `gpt-6.1-sol`, inherited parent route (effective worker effort/whole-task tokens/cost unknown), owns canonical CP1 only. No recursive agents, routing campaign, Claude probe or second client. [Accepted decision0050](../decisions/0050-session-bound-mcp-authority.md), [proof and retained failures](../evidence/E2A-CP1-2026-11-14.md). Explicit-path approval/WIP checkpoints are pushed and remote-SHA verified; fresh actual Astra review remains the parent's next gate, not an acceptance this worker may infer. Boundary REDs and source/preparation corrections remain in the audit; total subjective repair count and subscription savings are not measurable here.

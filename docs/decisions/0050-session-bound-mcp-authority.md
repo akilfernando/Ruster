@@ -1,6 +1,6 @@
 # 0050 — Session-bound MCP authority and owned retirement
 
-2026-11-14. **Accepted product decisions; CP1 implemented candidate, parent security review pending.** Supersedes the planning-only restriction in the [E2a proposal](../plans/E2A-HERMES-LIFECYCLE-PROPOSAL.md), not its sequential acceptance gates.
+2026-11-14. **Accepted product decisions; bounded CP1 parent-accepted after actual Astra review; CP2 authorized with early registration safety gate.** Supersedes the planning-only restriction in the [E2a proposal](../plans/E2A-HERMES-LIFECYCLE-PROPOSAL.md), not its sequential acceptance gates.
 
 ## User decisions
 
