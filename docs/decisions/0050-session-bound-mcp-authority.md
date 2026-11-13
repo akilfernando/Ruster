@@ -16,7 +16,7 @@ The subsequent explicit implementation instruction selects **Checkpoint 1 only**
 
 The current per-call socket transport has no adapter-owner lifetime and the listener lacks an owned join. Revision tokens guard concurrency, not authority. Startup destination grants currently survive project replacement. The PARTIAL [Hermes spike](../../spikes/001-hermes-mcp/README.md) does not qualify these properties.
 
-Selected engineering choices, **not yet measured proof**:
+Selected engineering contract; **verification is separately recorded below, not implied by selection**:
 
 - Runtime/default-off owner API; immutable unpredictable editor incarnation, project generation and connection capability; explicit human approval of one adapter principal.
 - Fixed private nonsecret locator; no active-editor fallback or retarget. Unbound initialize/tools/list disclose no project data or authority. Capabilities never enter persistent client configuration, arguments, scene/history/recovery or logs.
