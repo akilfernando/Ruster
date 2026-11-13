@@ -1,6 +1,6 @@
 # Post-E1 recommendation: E2a project-bound AI onboarding
 
-2026-11-13. **Proposal only. Neither the integration spike nor E2a production implementation is authorized by this planning document.** E1 technical closeout is accepted and its release is now installed/verified; the planning session's earlier installation-pending observation is superseded by [installation evidence](../evidence/E1-INSTALL-2026-11-13.md).
+2026-11-13. **Planning proposal; the user subsequently approved only the bounded Hermes integration spike below. E2a production implementation remains unauthorized.** E1 technical closeout is accepted and its release is now installed/verified; the planning session's earlier installation-pending observation is superseded by [installation evidence](../evidence/E1-INSTALL-2026-11-13.md).
 
 ## Planning provenance
 
@@ -22,7 +22,7 @@ Non-goals: embedded chat/accounts, remote access, automatic client installation,
 
 Use one actual chosen client with isolated configuration and disposable projects. Prove adapter initialization/tool discovery, attachment to the intended editor, one inspection and reversible guarded edit, restart/reload behavior, and registration removal without damaging unrelated entries. Stop after one path and at most one diagnosed correction. No production Connect UI or broad client sweep.
 
-Astra recommends Claude Code first, following the existing candidate path; compatibility remains unproven. **The user must select the first client.** Hermes is also a user-workflow candidate that Astra did not evaluate; choosing it requires the same real-client feasibility proof, not an assumption of compatibility.
+**User decision, 2026-11-13:** the finite bounded integration spike is approved with **Hermes, our current working agent, as the first and only client**. The user reports **Claude Code access unavailable until they notify us otherwise**; do not invoke it or probe authentication. Astra's earlier Claude Code preference is superseded. The historical branch name does not imply access. This authorizes disposable compatibility experiments and reversible isolated registration, not E2a production implementation, onboarding UI, global configuration changes or a client sweep. Compatibility remains to be demonstrated.
 
 ## Proposed production checkpoints after spike approval
 
