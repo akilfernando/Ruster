@@ -1,5 +1,7 @@
 # Architecture and project decisions
 
+- [0050 Session-bound MCP authority and owned retirement](0050-session-bound-mcp-authority.md) records the three approved E2a product bundles and CP1-only scope; implementation/security proof remains gated.
+
 Decisions record context, alternatives, rationale, consequences and status. Read [current status](../STATUS.md) and the individual decision's status before treating an old choice as current.
 
 | Record | Decision |

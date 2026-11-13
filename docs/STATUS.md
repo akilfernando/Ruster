@@ -1,8 +1,14 @@
 # Current project status
 
-Updated 2026-11-13. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
+Updated 2026-11-14. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
-## E2a lifecycle review complete — planning only, 2026-11-13
+## E2a CP1 authorized — implementation pending, 2026-11-14
+
+The user explicitly answered **“Approve all 3”**: session-only project-bound adapter authority (possibly shared across frontend chats, fresh consent after revocation); separate in-app Save/export grants/human-selected executable kits/immediate asset-persistence disclosure; companion packaging/one previewed reversible profile registration/manual restart fallback. [Accepted decision0050](decisions/0050-session-bound-mcp-authority.md) records the exact bundles and selected CP1 engineering contract, not measured proof. The current instruction authorizes **CP1 only**, authority and clean listener/publication retirement before Connect UI. No complete normal-startup onboarding claim, stable installation replacement, shared-gateway restart or second client. Parent fresh actual Astra review gates CP2.
+
+Baseline source `beca41c25cd003e78c0b0094529861c66f0b4c4f`, existing branch `claude/e1-editor-feedback`, original index empty; only private attachments untracked, never opened/staged. Source/index preservation manifest is `/home/akilf/Projects/Ruster-Audits/e2a-cp1-20261114/baseline.json`. Runner dry-run conservatively selects full because of those protected attachments; this first documentation checkpoint instead uses direct explicit-path Markdown validation, not a broad build. CP1 implementation/proof is pending; approved product choices do not establish security or measured resource acceptance. Historical planning-only restrictions below are superseded within this bounded authority.
+
+## E2a lifecycle review complete — historical planning, 2026-11-13
 
 **PROPOSED / NOT APPROVED.** Actual `openai-codex/gpt-6-astra` read-only review completed exit0, requested low effort (wire/effective effort not emitted), session `local-f29c0b67889f92d7a262ce30fca6494112e81acc7f1e797069b91e2ebf206b95`,104.308s;12targeted sections, no implementation or experiments. Root technical sanity read reconciles the [1,677-word lifecycle proposal](plans/E2A-HERMES-LIFECYCLE-PROPOSAL.md). Recommendation: coherent for user approval, not production-ready. Existing startup grants deliberately survive scene replacement and Bridge Drop lacks an owned join/drain; these are explicit proposed changes, not already-satisfied guarantees. No evidence requires broad authentication redesign or F4a fallback today.
 

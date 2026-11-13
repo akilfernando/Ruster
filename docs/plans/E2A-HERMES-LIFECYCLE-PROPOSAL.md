@@ -1,6 +1,6 @@
 # E2a — Hermes lifecycle and authority proposal
 
-2026-11-13. **PROPOSED / NOT APPROVED — PLANNING ONLY.** No production implementation or further spike experiments are authorized.
+2026-11-13 proposal; approval recorded2026-11-14. **USER APPROVED three product bundles; sequential implementation gates retained.** [Decision0050](../decisions/0050-session-bound-mcp-authority.md) records “Approve all 3” and the subsequent CP1-only instruction. The historical planning/recommendation wording below describes the pre-approval review, not current implementation authority or measured acceptance. CP1 authority/retirement precedes onboarding UI; parent fresh actual Astra review gates CP2.
 
 ## Actual review provenance and root reconciliation
 
