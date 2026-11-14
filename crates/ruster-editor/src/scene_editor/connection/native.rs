@@ -9,8 +9,22 @@ pub(super) struct NativeUi {
     notice: String,
 }
 
+/// Local human-visible readback only. These are concurrency guards, never the
+/// private Bridge capability. Observing before launch does not select an owner.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct SceneObservation {
+    pub(super) session_token: String,
+    pub(super) revision: String,
+    pub(super) scene_id: String,
+    pub(super) incarnation: String,
+    pub(super) project_generation: String,
+    pub(super) owner: Option<(String, u32)>,
+    pub(super) connection_state: &'static str,
+}
+
 #[derive(Clone)]
 struct Preview {
+    observation: SceneObservation,
     incarnation: String,
     generation: String,
     locator: Option<PathBuf>,
@@ -18,8 +32,46 @@ struct Preview {
 }
 
 impl Host {
+    /// Supported local observation, including when no listener/adapter exists.
+    /// Does not dispatch a tool, start a listener, approve or claim an owner.
+    pub(super) fn native_scene_observation(&self) -> SceneObservation {
+        SceneObservation {
+            session_token: self
+                .editor
+                .scene_guard_token(&self.editor.connection_incarnation),
+            revision: self.editor.session.scene().revision.to_string(),
+            scene_id: self.editor.session.scene().id.clone(),
+            incarnation: self.editor.connection_incarnation.clone(),
+            project_generation: self.editor.connection_generation.clone(),
+            owner: self.pending_adapter(),
+            connection_state: self.connection_state(),
+        }
+    }
+
+    fn scene_observation_ui(ui: &mut egui::Ui, observation: &SceneObservation, prefix: &str) {
+        ui.label(format!(
+            "{prefix}Scene guard session_token: {}",
+            observation.session_token
+        ));
+        ui.label(format!(
+            "{prefix}Scene guard revision: {}",
+            observation.revision
+        ));
+        ui.label(format!(
+            "{prefix}Observation owner: {} · {}",
+            observation.connection_state,
+            observation.owner.as_ref().map_or_else(
+                || "No adapter owner observed; prelaunch observation does not bind a future owner"
+                    .into(),
+                |(owner, pid)| format!("{owner} · local PID {pid}")
+            )
+        ));
+        ui.label("Scene guards are read-only concurrency identifiers, not connection session labels or approval capabilities.");
+    }
+
     fn binding_preview(&self) -> Preview {
         Preview {
+            observation: self.native_scene_observation(),
             incarnation: self.editor.connection_incarnation.clone(),
             generation: self.editor.connection_generation.clone(),
             locator: self
@@ -31,7 +83,8 @@ impl Host {
     }
 
     fn confirm_binding(&mut self, preview: Preview, ctx: &egui::Context) -> bool {
-        if preview.incarnation != self.editor.connection_incarnation
+        if preview.observation != self.native_scene_observation()
+            || preview.incarnation != self.editor.connection_incarnation
             || preview.generation != self.editor.connection_generation
             || preview.locator
                 != self
@@ -91,6 +144,7 @@ impl Host {
             "Project generation: {}",
             self.editor.connection_generation
         ));
+        Self::scene_observation_ui(ui, &self.native_scene_observation(), "");
         if let Some(bridge) = &self.bridge {
             ui.label(format!(
                 "Nonsecret locator: {}",
@@ -128,6 +182,8 @@ impl Host {
                 ui.heading(if preview.owner.is_some() { "Approve this exact adapter?" } else { "Start a project-local listener?" });
                 ui.label(format!("Project: {} · Scene: {}", self.editor.document_label(), self.editor.session.scene().id));
                 ui.label(format!("Session: {}\nGeneration: {}", preview.incarnation, preview.generation));
+                Self::scene_observation_ui(ui, &preview.observation, "Frozen ");
+                ui.label(format!("Frozen scene: {}", preview.observation.scene_id));
                 if let Some((owner, pid)) = &preview.owner { ui.label(format!("Adapter: {owner} · local PID {pid}")); }
                 ui.label("Approval grants this adapter authority over this project/session only. No automatic retargeting or reconnect.");
                 ui.label("Asset catalog changes can persist immediately, before Save. Save/export destinations require separate grants.");
@@ -280,6 +336,66 @@ mod tests {
         super::super::tests::retire(&mut host, &ctx);
         assert!(!locator_path.exists());
         assert_eq!(before, host.editor.session.snapshot_bytes().unwrap());
+    }
+
+    #[test]
+    fn prelaunch_scene_observation_matches_tool_guards_and_paints_without_authority() {
+        let ctx = egui::Context::default();
+        let mut host = super::super::tests::host("scene-observation");
+        let before = host.editor.session.snapshot_bytes().unwrap();
+        let observation = host.native_scene_observation();
+        assert!(observation.owner.is_none());
+        assert_eq!(observation.connection_state, "retired");
+        assert_ne!(observation.session_token, observation.incarnation);
+        let nonce = host.editor.connection_incarnation.clone();
+        let inspected = host.editor.command(&nonce, "scene_inspect", json!({}));
+        assert_eq!(
+            inspected["result"]["session_token"],
+            observation.session_token
+        );
+        assert_eq!(inspected["result"]["revision"], observation.revision);
+        let mut state = NativeUi::default();
+        click(&mut host, &ctx, &mut state, "Connect AI");
+        let painted = paint(&mut host, &ctx, &mut state, vec![]);
+        for prefix in ["", "Frozen "] {
+            assert!(painted.iter().any(|(text, _)| text
+                == &format!(
+                    "{prefix}Scene guard session_token: {}",
+                    observation.session_token
+                )));
+            assert!(painted.iter().any(|(text, _)| text
+                == &format!("{prefix}Scene guard revision: {}", observation.revision)));
+        }
+        assert!(host.bridge.is_none());
+        assert!(host.editor.connection_authority.is_none());
+        assert_eq!(before, host.editor.session.snapshot_bytes().unwrap());
+    }
+
+    #[test]
+    fn scene_guard_changes_discard_frozen_binding_consent() {
+        let ctx = egui::Context::default();
+        let mut host = super::super::tests::host("scene-stale");
+        let preview = host.binding_preview();
+        host.editor.generation += 1;
+        assert_ne!(
+            preview.observation.session_token,
+            host.native_scene_observation().session_token
+        );
+        assert!(!host.confirm_binding(preview, &ctx));
+        let preview = host.binding_preview();
+        let nonce = host.editor.connection_incarnation.clone();
+        let result = host.editor.command(
+            &nonce,
+            "scene_create",
+            json!({
+                "expected_session_token":preview.observation.session_token,
+                "expected_revision":preview.observation.revision,
+                "object_id":"observation-probe","name":"Probe"
+            }),
+        );
+        assert_eq!(result["ok"], true, "{result}");
+        assert!(!host.confirm_binding(preview, &ctx));
+        assert!(host.bridge.is_none());
     }
 
     #[test]

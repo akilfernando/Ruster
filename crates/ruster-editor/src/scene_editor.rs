@@ -2901,6 +2901,11 @@ impl SceneEditor {
         Err(err("unsupported_operation", op.into()))
     }
 
+    /// Optimistic-concurrency identity, not the socket authorization capability.
+    fn scene_guard_token(&self, nonce: &str) -> String {
+        format!("{nonce}:scene:{}", self.generation)
+    }
+
     pub fn command(&mut self, nonce: &str, op: &str, args: Value) -> Value {
         #[cfg(feature = "inspection")]
         let observed = if matches!(
@@ -2921,7 +2926,7 @@ impl SceneEditor {
         } else {
             None
         };
-        let token = format!("{nonce}:scene:{}", self.generation);
+        let token = self.scene_guard_token(nonce);
         let outcome = self.execute(&token, op, &args);
         let response = self.finish_command(nonce, outcome);
         #[cfg(feature = "inspection")]
@@ -2937,7 +2942,7 @@ impl SceneEditor {
     fn finish_command(&mut self, nonce: &str, outcome: Result<Value, (String, String)>) -> Value {
         // A committed cross-root Save As changes the content incarnation.
         // Replies must describe the resulting state, not the admitted request.
-        let token = format!("{nonce}:scene:{}", self.generation);
+        let token = self.scene_guard_token(nonce);
         match outcome {
             Ok(mut value) => {
                 if let Some(result) = value.as_object_mut() {
