@@ -1,0 +1,13 @@
+CURRENT-VALIDATION-ENABLED ] | MessageID = 0xfd7b2292
+vkCreateInstance(): Current Validation Enabled:
+  - Core Checks
+  - Synchronization
+  - Stateless Parameter
+  - Object lifetime
+  - Thread Safety
+  - Handle Wrapping
+
+Objects: 1
+    [0] VkInstance 0x5598ea298310
+
+{"adapter":"NVIDIA GeForce RTX 4060 Laptop GPU","authority":{"ok":true,"result":{"asset_operation":{"busy":false,"loading":false,"paint_cleanup_pending":false,"phase":"idle"},"asset_revision":null,"capabilities":["lighting_inspect","scene_light_create","scene_light_set","scene_ambient_set","scene_display_set","material_inspect","scene_material_set","scene_material_assign","scene_material_copy","scene_material_remove","scene_color","scene_collider_set","viewport_inspect","viewport_camera","scene_select","viewport_capture_start","viewport_capture_inspect","creation_export_inspect","creation_export_start","creation_export_cancel","scene_persistence_inspect","scene_save","behavior_runtime_inspect","behavior_runtime_state","beha

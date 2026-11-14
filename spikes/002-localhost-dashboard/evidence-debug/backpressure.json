@@ -1,0 +1,6 @@
+{
+  "attempts": 20,
+  "before": 11,
+  "after": 12,
+  "scope": "client single-flight suppression; no revision coalescing claim"
+}

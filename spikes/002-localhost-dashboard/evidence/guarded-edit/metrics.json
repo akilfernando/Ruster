@@ -1,0 +1,323 @@
+{
+  "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "authority": {
+    "ok": true,
+    "result": {
+      "asset_operation": {
+        "busy": false,
+        "loading": false,
+        "paint_cleanup_pending": false,
+        "phase": "idle"
+      },
+      "asset_revision": null,
+      "capabilities": [
+        "lighting_inspect",
+        "scene_light_create",
+        "scene_light_set",
+        "scene_ambient_set",
+        "scene_display_set",
+        "material_inspect",
+        "scene_material_set",
+        "scene_material_assign",
+        "scene_material_copy",
+        "scene_material_remove",
+        "scene_color",
+        "scene_collider_set",
+        "viewport_inspect",
+        "viewport_camera",
+        "scene_select",
+        "viewport_capture_start",
+        "viewport_capture_inspect",
+        "creation_export_inspect",
+        "creation_export_start",
+        "creation_export_cancel",
+        "scene_persistence_inspect",
+        "scene_save",
+        "behavior_runtime_inspect",
+        "behavior_runtime_state",
+        "behavior_runtime_command",
+        "behavior_runtime_reset",
+        "behavior_runtime_play",
+        "behavior_runtime_pause",
+        "behavior_runtime_step",
+        "behavior_runtime_stop",
+        "behavior_breakpoints",
+        "behavior_breakpoint_set",
+        "behavior_debug_inspect",
+        "behavior_debug_next",
+        "behavior_debug_continue",
+        "behavior_inspect",
+        "behavior_source",
+        "behavior_source_set",
+        "behavior_source_remove",
+        "behavior_create",
+        "behavior_binding",
+        "behavior_binding_set",
+        "behavior_binding_remove",
+        "behavior_property",
+        "behavior_property_set",
+        "behavior_state_default",
+        "behavior_state_default_set",
+        "behavior_command",
+        "behavior_command_set",
+        "hud_inspect",
+        "hud_panel_inspect",
+        "hud_panel_set",
+        "hud_panel_move",
+        "hud_settings_set",
+        "hud_label_set",
+        "hud_label_move",
+        "behavior_action",
+        "behavior_action_set",
+        "behavior_action_remove",
+        "scene_inspect",
+        "scene_transform",
+        "scene_create",
+        "scene_primitive",
+        "scene_rename",
+        "scene_duplicate",
+        "scene_delete",
+        "scene_transform_many",
+        "scene_delete_many",
+        "scene_duplicate_many",
+        "hud_activate",
+        "scene_undo",
+        "scene_redo",
+        "scene_replay",
+        "asset_inspect",
+        "asset_import",
+        "asset_refresh",
+        "asset_rename",
+        "scene_mesh",
+        "shader_refresh"
+      ],
+      "dirty": true,
+      "document_label": "procedural-demo",
+      "drafts_pending": false,
+      "history_evictions": 0,
+      "light_count": 0,
+      "lighting_mode": "legacy",
+      "loaded_format_version": 18,
+      "next_offset": null,
+      "object_count": 3,
+      "objects": [
+        {
+          "color": [
+            0.11999999731779099,
+            0.5799999833106995,
+            0.8500000238418579,
+            1.0
+          ],
+          "id": "left",
+          "transform": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              -2.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "color": [
+            0.8999999761581421,
+            0.4000000059604645,
+            0.1599999964237213,
+            1.0
+          ],
+          "id": "center",
+          "transform": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          }
+        },
+        {
+          "color": [
+            0.30000001192092896,
+            0.75,
+            0.44999998807907104,
+            1.0
+          ],
+          "id": "right",
+          "transform": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              2.0,
+              0.0,
+              0.0
+            ]
+          }
+        }
+      ],
+      "preview_fingerprint": "c8f582038015666b",
+      "preview_stale": true,
+      "preview_tick": "0",
+      "recovery_pending": false,
+      "revision": "4",
+      "scene_id": "procedural-demo",
+      "session_token": "localhost-fixture-1040495:scene:1",
+      "shader_revision": "0",
+      "target_count": 3,
+      "undo_len": 0,
+      "unresolved_assets": []
+    }
+  },
+  "backend": "Vulkan",
+  "command": {
+    "ok": true,
+    "result": {
+      "changed": true,
+      "changed_target_count": 1,
+      "diff": [
+        {
+          "after": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              -2.0,
+              0.0,
+              0.0
+            ]
+          },
+          "after_mesh": null,
+          "after_object": {
+            "color": [
+              0.11999999731779099,
+              0.5799999833106995,
+              0.8500000238418579,
+              1.0
+            ],
+            "id": "left",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                -2.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          "before": {
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ],
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ]
+          },
+          "before_mesh": null,
+          "before_object": {
+            "color": [
+              0.11999999731779099,
+              0.5799999833106995,
+              0.8500000238418579,
+              1.0
+            ],
+            "id": "left",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          "object_id": "left"
+        }
+      ],
+      "diff_count": 1,
+      "diff_truncated": false,
+      "dirty": true,
+      "history_evictions": 0,
+      "light_diff": [],
+      "lighting": {
+        "mode": "legacy"
+      },
+      "lighting_changed": false,
+      "revision": "4",
+      "session_token": "localhost-fixture-1040495:scene:1"
+    }
+  },
+  "command_to_commit_ms": 0.060781,
+  "draw_calls": 1,
+  "frames": 14,
+  "height": 512,
+  "native_total_ms": 6.666570999999999,
+  "objects": 3,
+  "passes": 1,
+  "png_encode_ms": 3.274273,
+  "read_only": false,
+  "render_cpu_ms": 0.17436000000000001,
+  "render_only": false,
+  "revision": 4,
+  "submit_to_mapped_ms": 2.947389,
+  "width": 768,
+  "host_roundtrip_ms": 6.936443009180948
+}

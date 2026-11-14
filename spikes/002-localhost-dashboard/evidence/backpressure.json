@@ -1,0 +1,7 @@
+{
+  "attempts": 20,
+  "before": 11,
+  "after": 12,
+  "stale_status": "Native frame 11 \u00b7 age 116.6s \u00b7 on-demand, not live motion",
+  "scope": "one in-flight client request, no revision coalescing claim"
+}

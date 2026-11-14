@@ -1,0 +1,6 @@
+{
+  "exit": 0,
+  "activation_message": true,
+  "core_and_synchronization_reported": true,
+  "scope": "separate direct-layer logging run; not included in timing cohort"
+}

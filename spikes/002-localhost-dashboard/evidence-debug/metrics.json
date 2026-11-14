@@ -1,0 +1,18 @@
+{
+  "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+  "backend": "Vulkan",
+  "draw_calls": 1,
+  "frames": 25,
+  "height": 512,
+  "native_total_ms": 115.32187300000001,
+  "objects": 3,
+  "passes": 1,
+  "png_encode_ms": 109.324282,
+  "read_only": true,
+  "render_cpu_ms": 1.882446,
+  "render_only": false,
+  "revision": 0,
+  "submit_to_mapped_ms": 3.713604,
+  "width": 768,
+  "host_roundtrip_ms": 115.48497597686946
+}

@@ -1,0 +1,75 @@
+Diff in /home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/src/../../../spikes/002-localhost-dashboard/src/authority.rs:1:
+ //! Disposable startup grant, not production consent or a public command bypass.
+ use super::*;
+-pub struct Owner { editor: SceneEditor, nonce: String }
++pub struct Owner {
++    editor: SceneEditor,
++    nonce: String,
++}
+ impl Owner {
+     pub fn new() -> Self {
+-        let editor = SceneEditor::with_workspace(Session::new(Scene::demo()).unwrap(), Workspace::detached());
+-        Self { editor, nonce: format!("localhost-fixture-{}", std::process::id()) }
++        let editor = SceneEditor::with_workspace(
++            Session::new(Scene::demo()).unwrap(),
++            Workspace::detached(),
++        );
++        Self {
++            editor,
++            nonce: format!("localhost-fixture-{}", std::process::id()),
++        }
+     }
+-    pub fn scene(&self) -> Scene { self.editor.session.scene().clone() }
++    pub fn scene(&self) -> Scene {
++        self.editor.session.scene().clone()
++    }
+     pub fn inspect(&mut self) -> Value {
+         let mut result = self.editor.command(&self.nonce, "scene_inspect", json!({}));
+         result["result"]["undo_len"] = json!(self.editor.session.undo_len());
+Diff in /home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/src/../../../spikes/002-localhost-dashboard/src/authority.rs:17:
+         if !matches!(op, "scene_transform" | "scene_undo") {
+             return json!({"ok":false,"error":{"code":"fixture_operation_denied"}});
+         }
+-        self.editor.command(&self.nonce, op, request["arguments"].clone())
++        self.editor
++            .command(&self.nonce, op, request["arguments"].clone())
+     }
+ }
+ 
+Diff in /home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/src/main.rs:49:
+ #[allow(dead_code)]
+ mod workspace;
+ 
+-
+ // Actual native owner + production renderer; explicit disposable startup grant.
+ use eframe::{egui, egui_wgpu};
+ use std::io::{BufRead, Write};
+Diff in /home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/src/main.rs:80:
+     assert_eq!(render.adapter.get_info().backend, wgpu::Backend::Vulkan);
+     eprintln!("native adapter: {:?}", render.adapter.get_info());
+     let metrics = ruster_render::install(&render);
+-    assert_eq!(std::env::args().nth(2).as_deref(), Some("--grant-disposable-edit-undo"), "explicit startup fixture grant required");
++    assert_eq!(
++        std::env::args().nth(2).as_deref(),
++        Some("--grant-disposable-edit-undo"),
++        "explicit startup fixture grant required"
++    );
+     let mut owner = scene_editor::localhost_fixture::Owner::new();
+     let scene = owner.scene();
+     scene.validate().unwrap();
+Diff in /home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/src/main.rs:100:
+             let request: serde_json::Value = serde_json::from_str(&line).unwrap();
+             command = owner.command(&request);
+         }
+-        let command_to_commit_ms = commit_started.elapsed().as_secs_f64()*1000.;
++        let command_to_commit_ms = commit_started.elapsed().as_secs_f64() * 1000.;
+         let scene = owner.scene();
+-        std::fs::write(out.join("scene.json"), serde_json::to_vec_pretty(&scene).unwrap()).unwrap();
++        std::fs::write(
++            out.join("scene.json"),
++            serde_json::to_vec_pretty(&scene).unwrap(),
++        )
++        .unwrap();
+         let authority = owner.inspect();
+         let render_only = line == "native";
+         if line != "render" && !render_only && command.is_null() {

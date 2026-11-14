@@ -1,0 +1,1936 @@
+warning: /home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui/Cargo.toml: `lints.clippy.large-types-passed-by-value` is deprecated in favor of `lints.clippy.large_types_passed_by_value` and will not work in a future edition
+warning: /home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui/Cargo.toml: duplicate lint `large-types-passed-by-value` in `[lints.clippy]`, conflicts with `large_types_passed_by_value` and will not work in a future edition
+warning: /home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui/Cargo.toml: `lints.clippy.needless-pass-by-value` is deprecated in favor of `lints.clippy.needless_pass_by_value` and will not work in a future edition
+warning: /home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui/Cargo.toml: duplicate lint `needless-pass-by-value` in `[lints.clippy]`, conflicts with `needless_pass_by_value` and will not work in a future edition
+warning: `transform-gizmo-egui` (manifest) generated 4 warnings
+     Locking 104 packages to highest compatible versions
+      Adding accesskit_atspi_common v0.21.1
+      Adding accesskit_consumer v0.39.2
+      Adding accesskit_ios v0.2.2
+      Adding accesskit_macos v0.27.2
+      Adding accesskit_unix v0.24.1
+      Adding accesskit_windows v0.35.2
+      Adding accesskit_winit v0.34.2
+      Adding approx v0.5.1
+      Adding async-broadcast v0.7.2
+      Adding async-channel v2.5.0
+      Adding async-executor v1.14.1
+      Adding async-io v2.6.0
+      Adding async-lock v3.5.0
+      Adding async-process v2.5.0
+      Adding async-recursion v1.2.0
+      Adding async-signal v0.2.14
+      Adding async-task v4.7.1
+      Adding async-trait v0.1.92
+      Adding atspi v0.29.0
+      Adding atspi-common v0.13.0
+      Adding atspi-proxies v0.13.0
+      Adding base64 v0.22.1
+      Adding blocking v1.7.0
+      Adding bstr v1.13.1
+      Adding byteorder v1.5.0
+      Adding calloop v0.14.5
+      Adding calloop-wayland-source v0.4.1
+      Adding darling v0.21.3
+      Adding darling_core v0.21.3
+      Adding darling_macro v0.21.3
+      Adding downcast-rs v2.0.2
+      Adding egui_inspection v0.37.0
+      Adding ena v0.14.4
+      Adding endi v1.1.1
+      Adding enum_dispatch v0.3.13
+      Adding enumflags2 v0.7.12
+      Adding enumflags2_derive v0.7.12
+      Adding enumn v0.1.14
+      Adding enumset v1.1.15
+      Adding enumset_derive v0.15.1
+      Adding event-listener v5.4.2
+      Adding event-listener-strategy v0.5.4
+      Adding fnv v1.0.7
+      Adding futures-io v0.3.34
+      Adding futures-lite v2.6.1
+      Adding futures-macro v0.3.34
+      Adding glam v0.32.0
+      Adding glam v0.33.12
+      Adding glamx v0.3.1
+      Adding hash32 v0.3.1
+      Adding heapless v0.8.0
+      Adding hex v0.4.3
+      Adding ident_case v1.0.1
+      Adding lua-src v551.0.2
+      Adding luajit-src v210.7.4+c6ffc14
+      Adding memoffset v0.9.1
+      Adding mint v0.5.9
+      Adding mlua v0.12.2 (/home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/mlua)
+      Adding mlua-sys v0.13.0
+      Adding num-complex v0.4.6
+      Adding num-derive v0.5.1
+      Adding ordered-stream v0.2.0
+      Adding parking v2.2.1
+      Adding parry3d-f64 v0.31.1
+      Adding phf v0.14.0
+      Adding phf_generator v0.14.0
+      Adding phf_macros v0.14.0
+      Adding phf_shared v0.14.0
+      Adding piper v0.2.5
+      Adding rmp v0.8.15
+      Adding rmp-serde v1.3.1
+      Adding robust v1.2.0
+      Adding rstar v0.13.1
+      Adding ruster-app v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-app)
+      Adding ruster-behavior v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-behavior)
+      Adding ruster-core v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-core)
+      Adding safe_arch v1.2.0
+      Adding serde_bytes v0.11.19
+      Adding serde_repr v0.1.21
+      Adding signal-hook-registry v1.4.8
+      Adding simba v0.10.2
+      Adding siphasher v1.0.4
+      Adding smithay-client-toolkit v0.20.0
+      Adding smithay-clipboard v0.7.3
+      Adding spade v2.15.1
+      Adding stable_deref_trait v1.2.1
+      Adding tracing-attributes v0.1.31
+      Adding transform-gizmo v0.11.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo)
+      Adding transform-gizmo-egui v0.11.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui)
+      Adding uds_windows v1.2.1
+      Adding wayland-protocols-experimental v20250721.0.1
+      Adding wayland-protocols-misc v0.3.12
+      Adding which v8.0.6
+      Adding wide v1.7.1
+      Adding zbus v5.19.0
+      Adding zbus-lockstep v0.5.2
+      Adding zbus-lockstep-macros v0.5.2
+      Adding zbus_macros v5.19.0
+      Adding zbus_names v4.3.5
+      Adding zbus_xml v5.2.1
+      Adding zcheapstr v1.2.0
+      Adding zvariant v5.15.1
+      Adding zvariant_derive v5.15.1
+      Adding zvariant_utils v4.2.0
+   Compiling num-traits v0.2.19
+   Compiling serde_core v1.0.229
+   Compiling serde v1.0.229
+   Compiling winnow v1.0.4
+   Compiling wayland-sys v0.31.11
+   Compiling equivalent v1.0.3
+   Compiling hashbrown v0.17.1
+   Compiling toml_datetime v1.1.2+spec-1.1.0
+   Compiling wayland-backend v0.3.17
+   Compiling syn v3.0.9
+   Compiling syn v2.0.119
+   Compiling arrayvec v0.7.8
+   Compiling parking v2.2.1
+   Compiling futures-core v0.3.34
+   Compiling crossbeam-utils v0.8.23
+   Compiling proc-macro2 v1.0.107
+   Compiling tracing-core v0.1.36
+   Compiling quote v1.0.47
+   Compiling futures-io v0.3.34
+   Compiling lock_api v0.4.14
+   Compiling endi v1.1.1
+   Compiling uuid v1.29.0
+   Compiling event-listener v5.4.2
+   Compiling async-io v2.6.0
+   Compiling memchr v2.8.3
+   Compiling futures-lite v2.6.1
+   Compiling errno v0.3.14
+   Compiling async-task v4.7.1
+   Compiling signal-hook-registry v1.4.8
+   Compiling polycool v0.4.0
+   Compiling parking_lot v0.12.5
+   Compiling event-listener-strategy v0.5.4
+   Compiling atomic-waker v1.1.2
+   Compiling kurbo v0.13.1
+   Compiling piper v0.2.5
+   Compiling concurrent-queue v2.5.0
+   Compiling indexmap v2.14.2
+   Compiling async-lock v3.5.0
+   Compiling async-channel v2.5.0
+   Compiling rustix v0.38.44
+   Compiling euclid v0.22.14
+   Compiling async-broadcast v0.7.2
+   Compiling accesskit v0.25.2
+   Compiling toml_parser v1.1.5+spec-1.1.0
+   Compiling wayland-client v0.31.15
+   Compiling async-executor v1.14.1
+   Compiling blocking v1.7.0
+   Compiling ordered-stream v0.2.0
+   Compiling siphasher v1.0.4
+   Compiling guillotiere v0.7.0
+   Compiling either v1.19.0
+   Compiling hex v0.4.3
+   Compiling linux-raw-sys v0.4.15
+   Compiling wayland-csd-frame v0.3.0
+   Compiling toml_edit v0.25.18+spec-1.1.0
+   Compiling async-signal v0.2.14
+   Compiling phf_shared v0.14.0
+   Compiling ordered-float v5.5.1
+   Compiling async-process v2.5.0
+   Compiling fastrand v2.5.0
+   Compiling foldhash v0.1.5
+   Compiling libc v0.2.191
+   Compiling serde_json v1.0.154
+   Compiling fixedbitset v0.5.7
+   Compiling phf_generator v0.14.0
+   Compiling hashbrown v0.15.5
+   Compiling itertools v0.15.0
+   Compiling accesskit_consumer v0.39.2
+   Compiling nom v8.0.0
+   Compiling ident_case v1.0.1
+   Compiling futures-task v0.3.34
+   Compiling smithay-client-toolkit v0.20.0
+   Compiling fnv v1.0.7
+   Compiling proc-macro-crate v3.5.0
+   Compiling moxcms v0.8.1
+   Compiling os_pipe v1.2.3
+   Compiling approx v0.5.1
+   Compiling wayland-protocols v0.32.13
+   Compiling wayland-cursor v0.31.14
+   Compiling petgraph v0.8.3
+   Compiling lua-src v551.0.2
+   Compiling heapless v0.8.0
+   Compiling which v8.0.6
+   Compiling cfg-if v1.0.5
+   Compiling byteorder v1.5.0
+   Compiling num-complex v0.4.6
+   Compiling stable_deref_trait v1.2.1
+   Compiling glam v0.33.12
+   Compiling darling_core v0.21.3
+   Compiling luajit-src v210.7.4+c6ffc14
+   Compiling hash32 v0.3.1
+   Compiling once_cell v1.21.4
+   Compiling mlua-sys v0.13.0
+   Compiling mint v0.5.9
+   Compiling bstr v1.13.1
+   Compiling glam v0.32.0
+   Compiling ena v0.14.4
+   Compiling rstar v0.13.1
+   Compiling downcast-rs v2.0.2
+   Compiling base64 v0.22.1
+   Compiling enumflags2_derive v0.7.12
+   Compiling zerocopy-derive v0.8.63
+   Compiling tracing-attributes v0.1.31
+   Compiling thiserror-impl v1.0.69
+   Compiling bytemuck_derive v1.12.1
+   Compiling serde_derive v1.0.229
+   Compiling thiserror-impl v2.0.21
+   Compiling serde_repr v0.1.21
+   Compiling async-recursion v1.2.0
+   Compiling async-trait v0.1.92
+   Compiling phf_macros v0.14.0
+   Compiling futures-macro v0.3.34
+   Compiling tree_magic_mini v3.2.2
+   Compiling num-derive v0.5.1
+   Compiling thiserror v1.0.69
+   Compiling bytemuck v1.25.2
+   Compiling enum_dispatch v0.3.13
+   Compiling tracing v0.1.44
+   Compiling phf v0.14.0
+   Compiling darling_macro v0.21.3
+   Compiling thiserror v2.0.21
+   Compiling zerocopy v0.8.63
+   Compiling color v0.3.3
+   Compiling font-types v0.12.7
+   Compiling emath v0.37.0
+   Compiling naga-types v30.0.1
+   Compiling gpu-allocator v0.28.0
+   Compiling calloop v0.14.5
+   Compiling wgpu-types v30.0.1
+   Compiling futures-util v0.3.34
+   Compiling read-fonts v0.41.0
+   Compiling peniko v0.6.1
+   Compiling ecolor v0.37.0
+   Compiling image v0.25.10
+   Compiling vello_common v0.2.0
+   Compiling calloop-wayland-source v0.4.1
+   Compiling safe_arch v1.2.0
+   Compiling darling v0.21.3
+   Compiling enumset_derive v0.15.1
+   Compiling calloop v0.13.0
+   Compiling wide v1.7.1
+   Compiling enumset v1.1.15
+   Compiling vello_cpu v0.2.0
+   Compiling calloop-wayland-source v0.3.0
+   Compiling zvariant_utils v4.2.0
+   Compiling zcheapstr v1.2.0
+   Compiling enumflags2 v0.7.12
+   Compiling wayland-protocols-wlr v0.3.12
+   Compiling wayland-protocols-plasma v0.3.12
+   Compiling zvariant_derive v5.15.1
+   Compiling wayland-protocols-experimental v20250721.0.1
+   Compiling wayland-protocols-misc v0.3.12
+   Compiling zvariant v5.15.1
+   Compiling ahash v0.8.12
+   Compiling half v2.7.1
+   Compiling naga v30.0.1
+   Compiling smithay-client-toolkit v0.19.2
+   Compiling wl-clipboard-rs v0.9.5
+   Compiling zbus_names v4.3.5
+   Compiling ruster-scene v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-scene)
+   Compiling zbus_xml v5.2.1
+   Compiling zbus-lockstep v0.5.2
+   Compiling zbus_macros v5.19.0
+   Compiling zbus-lockstep-macros v0.5.2
+   Compiling skrifa v0.44.0
+   Compiling harfrust v0.12.0
+   Compiling winit v0.30.13
+   Compiling smithay-clipboard v0.7.3
+   Compiling arboard v3.7.0
+   Compiling simba v0.10.2
+   Compiling ruster-assets v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-assets)
+   Compiling mlua v0.12.2 (/home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/mlua)
+   Compiling zbus v5.19.0
+   Compiling ruster-core v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-core)
+   Compiling epaint v0.37.0
+   Compiling wgpu-naga-bridge v30.0.1
+   Compiling wgpu-hal v30.0.1 (/home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/wgpu-hal)
+   Compiling glamx v0.3.1
+   Compiling parry3d-f64 v0.31.1
+   Compiling egui v0.37.0
+   Compiling transform-gizmo v0.11.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo)
+   Compiling wgpu-core-deps-windows-linux-android v30.0.1
+   Compiling wgpu-core v30.0.1
+   Compiling ruster-behavior v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-behavior)
+   Compiling atspi-common v0.13.0
+   Compiling transform-gizmo-egui v0.11.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui)
+   Compiling atspi-proxies v0.13.0
+   Compiling accesskit_atspi_common v0.21.1
+   Compiling atspi v0.29.0
+   Compiling accesskit_unix v0.24.1
+   Compiling wgpu v30.0.1
+   Compiling accesskit_winit v0.34.2
+   Compiling egui-wgpu v0.37.0
+   Compiling egui-winit v0.37.0
+   Compiling eframe v0.37.0
+   Compiling ruster-render v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-render)
+   Compiling ruster-app v0.1.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/crates/ruster-app)
+   Compiling ruster-localhost-spike v0.0.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard)
+error[E0753]: expected outer doc comment
+  --> src/main.rs:53:1
+   |
+53 | //! Read-only spike: actual production Scene + renderer, no command bypass.
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+54 | use eframe::{egui, egui_wgpu};
+   | ------------------------------ the inner doc comment doesn't annotate this `use` import
+   |
+help: to annotate the `use` import, change the doc comment from inner to outer style
+   |
+53 - //! Read-only spike: actual production Scene + renderer, no command bypass.
+53 + /// Read-only spike: actual production Scene + renderer, no command bypass.
+   |
+
+error[E0583]: file not found for module `command_catalog`
+ --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2:1
+  |
+2 | mod command_catalog;
+  | ^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `command_catalog`, create file "src/../../../crates/ruster-editor/src/command_catalog.rs" or "src/../../../crates/ruster-editor/src/command_catalog/mod.rs"
+  = note: if there is a `mod command_catalog` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `hud_activation`
+ --> src/../../../crates/ruster-editor/src/behavior_ui.rs:3:1
+  |
+3 | mod hud_activation;
+  | ^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `hud_activation`, create file "src/../../../crates/ruster-editor/src/hud_activation.rs" or "src/../../../crates/ruster-editor/src/hud_activation/mod.rs"
+  = note: if there is a `mod hud_activation` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `runtime_commands`
+ --> src/../../../crates/ruster-editor/src/behavior_ui.rs:5:1
+  |
+5 | mod runtime_commands;
+  | ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `runtime_commands`, create file "src/../../../crates/ruster-editor/src/runtime_commands.rs" or "src/../../../crates/ruster-editor/src/runtime_commands/mod.rs"
+  = note: if there is a `mod runtime_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `runtime_debug`
+ --> src/../../../crates/ruster-editor/src/behavior_ui.rs:6:1
+  |
+6 | mod runtime_debug;
+  | ^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `runtime_debug`, create file "src/../../../crates/ruster-editor/src/runtime_debug.rs" or "src/../../../crates/ruster-editor/src/runtime_debug/mod.rs"
+  = note: if there is a `mod runtime_debug` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `runtime_input`
+ --> src/../../../crates/ruster-editor/src/behavior_ui.rs:7:1
+  |
+7 | mod runtime_input;
+  | ^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `runtime_input`, create file "src/../../../crates/ruster-editor/src/runtime_input.rs" or "src/../../../crates/ruster-editor/src/runtime_input/mod.rs"
+  = note: if there is a `mod runtime_input` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `runtime_state`
+ --> src/../../../crates/ruster-editor/src/behavior_ui.rs:8:1
+  |
+8 | mod runtime_state;
+  | ^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `runtime_state`, create file "src/../../../crates/ruster-editor/src/runtime_state.rs" or "src/../../../crates/ruster-editor/src/runtime_state/mod.rs"
+  = note: if there is a `mod runtime_state` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `spatial_feedback`
+  --> src/../../../crates/ruster-editor/src/behavior_ui.rs:10:1
+   |
+10 | mod spatial_feedback;
+   | ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `spatial_feedback`, create file "src/../../../crates/ruster-editor/src/spatial_feedback.rs" or "src/../../../crates/ruster-editor/src/spatial_feedback/mod.rs"
+   = note: if there is a `mod spatial_feedback` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `asset_commands`
+ --> src/../../../crates/ruster-editor/src/scene_editor.rs:2:1
+  |
+2 | mod asset_commands;
+  | ^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `asset_commands`, create file "src/../../../crates/ruster-editor/src/asset_commands.rs" or "src/../../../crates/ruster-editor/src/asset_commands/mod.rs"
+  = note: if there is a `mod asset_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `asset_inspection`
+ --> src/../../../crates/ruster-editor/src/scene_editor.rs:3:1
+  |
+3 | mod asset_inspection;
+  | ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `asset_inspection`, create file "src/../../../crates/ruster-editor/src/asset_inspection.rs" or "src/../../../crates/ruster-editor/src/asset_inspection/mod.rs"
+  = note: if there is a `mod asset_inspection` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `behavior_commands`
+ --> src/../../../crates/ruster-editor/src/scene_editor.rs:6:1
+  |
+6 | mod behavior_commands;
+  | ^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `behavior_commands`, create file "src/../../../crates/ruster-editor/src/behavior_commands.rs" or "src/../../../crates/ruster-editor/src/behavior_commands/mod.rs"
+  = note: if there is a `mod behavior_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `capture_commands`
+ --> src/../../../crates/ruster-editor/src/scene_editor.rs:7:1
+  |
+7 | mod capture_commands;
+  | ^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `capture_commands`, create file "src/../../../crates/ruster-editor/src/capture_commands.rs" or "src/../../../crates/ruster-editor/src/capture_commands/mod.rs"
+  = note: if there is a `mod capture_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `collider_commands`
+ --> src/../../../crates/ruster-editor/src/scene_editor.rs:8:1
+  |
+8 | mod collider_commands;
+  | ^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `collider_commands`, create file "src/../../../crates/ruster-editor/src/collider_commands.rs" or "src/../../../crates/ruster-editor/src/collider_commands/mod.rs"
+  = note: if there is a `mod collider_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `collider_ui`
+ --> src/../../../crates/ruster-editor/src/scene_editor.rs:9:1
+  |
+9 | mod collider_ui;
+  | ^^^^^^^^^^^^^^^^
+  |
+  = help: to create the module `collider_ui`, create file "src/../../../crates/ruster-editor/src/collider_ui.rs" or "src/../../../crates/ruster-editor/src/collider_ui/mod.rs"
+  = note: if there is a `mod collider_ui` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `collider_viewport`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:10:1
+   |
+10 | mod collider_viewport;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `collider_viewport`, create file "src/../../../crates/ruster-editor/src/collider_viewport.rs" or "src/../../../crates/ruster-editor/src/collider_viewport/mod.rs"
+   = note: if there is a `mod collider_viewport` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `color_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:11:1
+   |
+11 | mod color_commands;
+   | ^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `color_commands`, create file "src/../../../crates/ruster-editor/src/color_commands.rs" or "src/../../../crates/ruster-editor/src/color_commands/mod.rs"
+   = note: if there is a `mod color_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `combo_focus`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:12:1
+   |
+12 | mod combo_focus;
+   | ^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `combo_focus`, create file "src/../../../crates/ruster-editor/src/combo_focus.rs" or "src/../../../crates/ruster-editor/src/combo_focus/mod.rs"
+   = note: if there is a `mod combo_focus` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `connection`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:13:1
+   |
+13 | mod connection;
+   | ^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `connection`, create file "src/../../../crates/ruster-editor/src/connection.rs" or "src/../../../crates/ruster-editor/src/connection/mod.rs"
+   = note: if there is a `mod connection` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `display_ui`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:14:1
+   |
+14 | mod display_ui;
+   | ^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `display_ui`, create file "src/../../../crates/ruster-editor/src/display_ui.rs" or "src/../../../crates/ruster-editor/src/display_ui/mod.rs"
+   = note: if there is a `mod display_ui` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `export_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:15:1
+   |
+15 | mod export_commands;
+   | ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `export_commands`, create file "src/../../../crates/ruster-editor/src/export_commands.rs" or "src/../../../crates/ruster-editor/src/export_commands/mod.rs"
+   = note: if there is a `mod export_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `hud_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:16:1
+   |
+16 | mod hud_commands;
+   | ^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `hud_commands`, create file "src/../../../crates/ruster-editor/src/hud_commands.rs" or "src/../../../crates/ruster-editor/src/hud_commands/mod.rs"
+   = note: if there is a `mod hud_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `hud_interaction`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:17:1
+   |
+17 | mod hud_interaction;
+   | ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `hud_interaction`, create file "src/../../../crates/ruster-editor/src/hud_interaction.rs" or "src/../../../crates/ruster-editor/src/hud_interaction/mod.rs"
+   = note: if there is a `mod hud_interaction` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `hud_recovery`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:18:1
+   |
+18 | mod hud_recovery;
+   | ^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `hud_recovery`, create file "src/../../../crates/ruster-editor/src/hud_recovery.rs" or "src/../../../crates/ruster-editor/src/hud_recovery/mod.rs"
+   = note: if there is a `mod hud_recovery` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `hud_ui`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:19:1
+   |
+19 | mod hud_ui;
+   | ^^^^^^^^^^^
+   |
+   = help: to create the module `hud_ui`, create file "src/../../../crates/ruster-editor/src/hud_ui.rs" or "src/../../../crates/ruster-editor/src/hud_ui/mod.rs"
+   = note: if there is a `mod hud_ui` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `lighting_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:20:1
+   |
+20 | mod lighting_commands;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `lighting_commands`, create file "src/../../../crates/ruster-editor/src/lighting_commands.rs" or "src/../../../crates/ruster-editor/src/lighting_commands/mod.rs"
+   = note: if there is a `mod lighting_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `lighting_ui`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:21:1
+   |
+21 | mod lighting_ui;
+   | ^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `lighting_ui`, create file "src/../../../crates/ruster-editor/src/lighting_ui.rs" or "src/../../../crates/ruster-editor/src/lighting_ui/mod.rs"
+   = note: if there is a `mod lighting_ui` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `lighting_viewport`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:22:1
+   |
+22 | mod lighting_viewport;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `lighting_viewport`, create file "src/../../../crates/ruster-editor/src/lighting_viewport.rs" or "src/../../../crates/ruster-editor/src/lighting_viewport/mod.rs"
+   = note: if there is a `mod lighting_viewport` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `material_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:23:1
+   |
+23 | mod material_commands;
+   | ^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `material_commands`, create file "src/../../../crates/ruster-editor/src/material_commands.rs" or "src/../../../crates/ruster-editor/src/material_commands/mod.rs"
+   = note: if there is a `mod material_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `material_ui`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:24:1
+   |
+24 | mod material_ui;
+   | ^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `material_ui`, create file "src/../../../crates/ruster-editor/src/material_ui.rs" or "src/../../../crates/ruster-editor/src/material_ui/mod.rs"
+   = note: if there is a `mod material_ui` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `nonvisual`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:27:1
+   |
+27 | mod nonvisual;
+   | ^^^^^^^^^^^^^^
+   |
+   = help: to create the module `nonvisual`, create file "src/../../../crates/ruster-editor/src/nonvisual.rs" or "src/../../../crates/ruster-editor/src/nonvisual/mod.rs"
+   = note: if there is a `mod nonvisual` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `persistence_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:28:1
+   |
+28 | mod persistence_commands;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `persistence_commands`, create file "src/../../../crates/ruster-editor/src/persistence_commands.rs" or "src/../../../crates/ruster-editor/src/persistence_commands/mod.rs"
+   = note: if there is a `mod persistence_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `recovered_input_ui`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:29:1
+   |
+29 | mod recovered_input_ui;
+   | ^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `recovered_input_ui`, create file "src/../../../crates/ruster-editor/src/recovered_input_ui.rs" or "src/../../../crates/ruster-editor/src/recovered_input_ui/mod.rs"
+   = note: if there is a `mod recovered_input_ui` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `runtime_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:30:1
+   |
+30 | mod runtime_commands;
+   | ^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `runtime_commands`, create file "src/../../../crates/ruster-editor/src/runtime_commands.rs" or "src/../../../crates/ruster-editor/src/runtime_commands/mod.rs"
+   = note: if there is a `mod runtime_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `runtime_transform_ui`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:31:1
+   |
+31 | mod runtime_transform_ui;
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `runtime_transform_ui`, create file "src/../../../crates/ruster-editor/src/runtime_transform_ui.rs" or "src/../../../crates/ruster-editor/src/runtime_transform_ui/mod.rs"
+   = note: if there is a `mod runtime_transform_ui` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `save_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:32:1
+   |
+32 | mod save_commands;
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `save_commands`, create file "src/../../../crates/ruster-editor/src/save_commands.rs" or "src/../../../crates/ruster-editor/src/save_commands/mod.rs"
+   = note: if there is a `mod save_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `shadow_feedback`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:33:1
+   |
+33 | mod shadow_feedback;
+   | ^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `shadow_feedback`, create file "src/../../../crates/ruster-editor/src/shadow_feedback.rs" or "src/../../../crates/ruster-editor/src/shadow_feedback/mod.rs"
+   = note: if there is a `mod shadow_feedback` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0583]: file not found for module `view_commands`
+  --> src/../../../crates/ruster-editor/src/scene_editor.rs:34:1
+   |
+34 | mod view_commands;
+   | ^^^^^^^^^^^^^^^^^^
+   |
+   = help: to create the module `view_commands`, create file "src/../../../crates/ruster-editor/src/view_commands.rs" or "src/../../../crates/ruster-editor/src/view_commands/mod.rs"
+   = note: if there is a `mod view_commands` elsewhere in the crate already, import it with `use crate::...` instead
+
+error[E0599]: no method named `apply_command` found for mutable reference `&mut BehaviorUi` in the current scope
+   --> src/../../../crates/ruster-editor/src/behavior_ui.rs:735:18
+    |
+735 |             self.apply_command(session)?;
+    |                  ^^^^^^^^^^^^^
+    |
+help: there is a method `apply_all` with a similar name
+    |
+735 -             self.apply_command(session)?;
+735 +             self.apply_all(session)?;
+    |
+
+error[E0599]: no method named `apply_command` found for mutable reference `&mut BehaviorUi` in the current scope
+   --> src/../../../crates/ruster-editor/src/behavior_ui.rs:772:42
+    |
+772 |             Action::ApplyCommand => self.apply_command(session)?,
+    |                                          ^^^^^^^^^^^^^
+    |
+help: there is a method `apply_all` with a similar name
+    |
+772 -             Action::ApplyCommand => self.apply_command(session)?,
+772 +             Action::ApplyCommand => self.apply_all(session)?,
+    |
+
+error[E0599]: no method named `command_catalog` found for mutable reference `&mut BehaviorUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1325:50
+     |
+1325 |                 if let Some(command_action)=self.command_catalog(ui,session,id,binding,generation) {action=Some(command_action);}
+     |                                                  ^^^^^^^^^^^^^^^ method not found in `&mut BehaviorUi`
+
+error[E0599]: no method named `input_owned` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1772:21
+     |
+1772 |             || self.input_owned()
+     |                     ^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `current_run` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1774:21
+     |
+1774 |             || self.current_run() != Some(request.key)
+     |                     ^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `debug_snapshot` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1775:21
+     |
+1775 |             || self.debug_snapshot().is_some()
+     |                     ^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `supersede_hud_activation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1832:14
+     |
+1832 |         self.supersede_hud_activation("Authored scene/content changed");
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `supersede_operation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1834:14
+     |
+1834 |         self.supersede_operation();
+     |              ^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `clear_debug_document` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1853:18
+     |
+1853 |             self.clear_debug_document();
+     |                  ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `supersede_hud_activation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1875:14
+     |
+1875 |         self.supersede_hud_activation("Runtime Reset superseded HUD activation");
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `supersede_operation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1876:14
+     |
+1876 |         self.supersede_operation();
+     |              ^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `fail_operation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1974:22
+     |
+1974 |                 self.fail_operation();
+     |                      ^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `program_step_pending` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1990:53
+     |
+1990 |                     let program_step_pending = self.program_step_pending();
+     |                                                     ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `accept_operation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:1992:30
+     |
+1992 |                         self.accept_operation(&event);
+     |                              ^^^^^^^^^^^^^^^^
+     |
+help: there is a method `accept_frame` with a similar name
+     |
+1992 -                         self.accept_operation(&event);
+1992 +                         self.accept_frame(&event);
+     |
+
+error[E0599]: no method named `accept_hud_activation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2001:34
+     |
+2001 | ...                   self.accept_hud_activation(key, activation_id, button_id, result);
+     |                            ^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `fail_operation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2103:26
+     |
+2103 |                     self.fail_operation();
+     |                          ^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `supersede_hud_activation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2104:26
+     |
+2104 |                     self.supersede_hud_activation("Behavior worker disconnected");
+     |                          ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `show_new_debug_stop` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2127:14
+     |
+2127 |         self.show_new_debug_stop();
+     |              ^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `hud_activation_busy` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2128:71
+     |
+2128 |         if self.pending.is_some() || self.reset_ack.is_some() || self.hud_activation_busy() {
+     |                                                                       ^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `supersede_hud_activation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2133:14
+     |
+2133 |         self.supersede_hud_activation("Runtime Stop superseded HUD activation");
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `supersede_operation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2135:14
+     |
+2135 |         self.supersede_operation();
+     |              ^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `supersede_hud_activation` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2162:14
+     |
+2162 |         self.supersede_hud_activation("Runtime shutdown superseded HUD activation");
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `debug_snapshot` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2219:32
+     |
+2219 |             let stopped = self.debug_snapshot().is_some();
+     |                                ^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `hud_activation_busy` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2224:26
+     |
+2224 |                 && !self.hud_activation_busy()
+     |                          ^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `open_input_help` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2263:68
+     |
+2263 |                 if ui.button("Runtime input help…").clicked(){self.open_input_help(ui.ctx());ui.close();}
+     |                                                                    ^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `spatial_feedback_menu` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2265:22
+     |
+2265 |                 self.spatial_feedback_menu(ui);
+     |                      ^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `input_help_menu_response` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2276:18
+     |
+2276 |             self.input_help_menu_response(&runtime_menu.response);
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `input_control_button` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2280:18
+     |
+2280 |             self.input_control_button(ui, blocked, !session.authoring().actions.is_empty());
+     |                  ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `debug_snapshot` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2281:34
+     |
+2281 |             let status = if self.debug_snapshot().is_some() {
+     |                                  ^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `spatial_feedback_summary` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2291:22
+     |
+2291 |                 self.spatial_feedback_summary(ui);
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `input_help_window` found for mutable reference `&mut RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2295:14
+     |
+2295 |         self.input_help_window(ui.ctx(), session, generation);
+     |              ^^^^^^^^^^^^^^^^^ method not found in `&mut RuntimeUi`
+
+error[E0599]: no method named `command_draft_pending` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:728:29
+     |
+ 728 |             || self.runtime.command_draft_pending()
+     |                             ^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `command_draft_pending` not found for this struct
+
+error[E0599]: no method named `command_draft_pending` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:739:30
+     |
+ 739 |             && !self.runtime.command_draft_pending()
+     |                              ^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `command_draft_pending` not found for this struct
+
+error[E0599]: no method named `command_draft_pending` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:745:30
+     |
+ 745 |             && !self.runtime.command_draft_pending()
+     |                              ^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `command_draft_pending` not found for this struct
+
+error[E0599]: no method named `asset_publishing` found for reference `&scene_editor::SceneEditor` in the current scope
+   --> src/../../../crates/ruster-editor/src/scene_editor.rs:752:22
+    |
+752 |             && !self.asset_publishing()
+    |                      ^^^^^^^^^^^^^^^^ method not found in `&scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for reference `&scene_editor::SceneEditor` in the current scope
+   --> src/../../../crates/ruster-editor/src/scene_editor.rs:753:22
+    |
+753 |             && !self.asset_loading()
+    |                      ^^^^^^^^^^^^^ method not found in `&scene_editor::SceneEditor`
+
+error[E0599]: no method named `retire_asset_maps` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+   --> src/../../../crates/ruster-editor/src/scene_editor.rs:935:22
+    |
+935 |                 self.retire_asset_maps(1, crate::asset_worker::AssetMaps { meshes, textures });
+    |                      ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `revoke_connection` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1466:14
+     |
+1466 |         self.revoke_connection();
+     |              ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1467:17
+     |
+1467 |         if self.asset_loading() {
+     |                 ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `cancel_asset_work` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1468:18
+     |
+1468 |             self.cancel_asset_work();
+     |                  ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_root_guard` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1470:14
+     |
+1470 |         self.asset_root_guard()?;
+     |              ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `revoke_connection` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1610:14
+     |
+1610 |         self.revoke_connection();
+     |              ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `connection_draining` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1635:76
+     |
+1635 |         ) && (self.asset_ops.busy() || self.creation_export.busy() || self.connection_draining())
+     |                                                                            ^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `retire_root_assets` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1695:22
+     |
+1695 |                 self.retire_root_assets();
+     |                      ^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_busy` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1785:17
+     |
+1785 |         if self.asset_busy() || self.asset_paint_cleanup_pending() {
+     |                 ^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_paint_cleanup_pending` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1785:38
+     |
+1785 |         if self.asset_busy() || self.asset_paint_cleanup_pending() {
+     |                                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_shutdown` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1789:18
+     |
+1789 |             self.asset_shutdown();
+     |                  ^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `export_maintenance` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1816:14
+     |
+1816 |         self.export_maintenance();
+     |              ^^^^^^^^^^^^^^^^^^
+     |
+help: there is a method `external_maintenance` with a similar name, but with different arguments
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:860:5
+     |
+ 860 |     fn external_maintenance(&mut self, ctx: &egui::Context, blocked: bool) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `asset_shutdown` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1825:18
+     |
+1825 |             self.asset_shutdown();
+     |                  ^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_finished` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1830:25
+     |
+1830 |                 && self.asset_finished()
+     |                         ^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `connection_draining` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1831:26
+     |
+1831 |                 && !self.connection_draining()
+     |                          ^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_publishing` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1861:17
+     |
+1861 |         if self.asset_publishing()
+     |                 ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_publishing` found for reference `&scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1914:17
+     |
+1914 |         if self.asset_publishing() || self.asset_loading() {
+     |                 ^^^^^^^^^^^^^^^^ method not found in `&scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for reference `&scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1914:44
+     |
+1914 |         if self.asset_publishing() || self.asset_loading() {
+     |                                            ^^^^^^^^^^^^^ method not found in `&scene_editor::SceneEditor`
+
+error[E0599]: no method named `command_draft_pending` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1935:25
+     |
+1935 |         if self.runtime.command_draft_pending() {
+     |                         ^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `command_draft_pending` not found for this struct
+
+error[E0599]: no method named `asset_publishing` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1945:17
+     |
+1945 |         if self.asset_publishing() || self.asset_loading() {
+     |                 ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1945:44
+     |
+1945 |         if self.asset_publishing() || self.asset_loading() {
+     |                                            ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `apply_hud_draft` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1950:25
+     |
+1950 |             return self.apply_hud_draft();
+     |                         ^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `apply_collider_draft` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1953:25
+     |
+1953 |             return self.apply_collider_draft();
+     |                         ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `apply_display_draft` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1956:25
+     |
+1956 |             return self.apply_display_draft();
+     |                         ^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `apply_lighting_draft` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1959:25
+     |
+1959 |             return self.apply_lighting_draft();
+     |                         ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `apply_material_draft` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1962:25
+     |
+1962 |             return self.apply_material_draft();
+     |                         ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `apply_color_draft` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:1965:25
+     |
+1965 |             return self.apply_color_draft();
+     |                         ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `save_with_continuation` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2035:14
+     |
+2035 |         self.save_with_continuation(save_commands::Continuation::SaveOnly);
+     |              ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2138:17
+     |
+2138 |         if self.asset_loading() {
+     |                 ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `cancel_asset_work` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2139:18
+     |
+2139 |             self.cancel_asset_work();
+     |                  ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_root_guard` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2141:34
+     |
+2141 |         if let Err(error) = self.asset_root_guard() {
+     |                                  ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `stage_material_texture` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2520:18
+     |
+2520 |             self.stage_material_texture(&payload.asset_id, role)?;
+     |                  ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `create_light_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2607:26
+     |
+2607 |                     self.create_light_ui(ruster_scene::LightKind::Directional {
+     |                     -----^^^^^^^^^^^^^^^
+     |
+help: there is a method `create_menu` with a similar name
+     |
+2607 -                     self.create_light_ui(ruster_scene::LightKind::Directional {
+2607 +                     self.create_menu(ruster_scene::LightKind::Directional {
+     |
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2770:21
+     |
+2770 |             if self.asset_loading() {
+     |                     ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_observation` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2772:198
+     |
+2772 | ...null,"asset_operation":self.asset_observation()}),
+     |                                ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_observation` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2795:63
+     |
+2795 |             observation.insert("asset_operation".into(), self.asset_observation());
+     |                                                               ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `use_builtin_export_appearance` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2829:22
+     |
+2829 |                 self.use_builtin_export_appearance()
+     |                      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `hud_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2975:25
+     |
+2975 |             return self.hud_command(token, op, args);
+     |                         ^^^^^^^^^^^
+     |
+help: there is a method `command` with a similar name
+     |
+2975 -             return self.hud_command(token, op, args);
+2975 +             return self.command(token, op, args);
+     |
+
+error[E0599]: no method named `export_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2981:25
+     |
+2981 |             return self.export_command(token, op, args);
+     |                         ^^^^^^^^^^^^^^
+     |
+help: there is a method `command` with a similar name
+     |
+2981 -             return self.export_command(token, op, args);
+2981 +             return self.command(token, op, args);
+     |
+
+error[E0599]: no method named `persistence_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2984:25
+     |
+2984 |             return self.persistence_command(token, op, args);
+     |                         ^^^^^^^^^^^^^^^^^^^
+     |
+help: there is a method `content_command` with a similar name
+     |
+2984 -             return self.persistence_command(token, op, args);
+2984 +             return self.content_command(token, op, args);
+     |
+
+error[E0599]: no method named `material_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2995:25
+     |
+2995 |             return self.material_command(token, op, args);
+     |                         ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `lighting_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2998:25
+     |
+2998 |             return self.lighting_command(token, op, args);
+     |                         ^^^^^^^^^^^^^^^^
+     |
+help: there is a method `finish_command` with a similar name, but with different arguments
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2941:5
+     |
+2941 |     fn finish_command(&mut self, nonce: &str, outcome: Result<Value, (String, String)>) -> Value {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `collider_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3001:25
+     |
+3001 |             return self.collider_command(token, args);
+     |                         ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `color_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3004:25
+     |
+3004 |             return self.color_command(token, args);
+     |                         ^^^^^^^^^^^^^
+     |
+help: there is a method `command` with a similar name, but with different arguments
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:2908:5
+     |
+2908 |     pub fn command(&mut self, nonce: &str, op: &str, args: Value) -> Value {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `view_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3007:25
+     |
+3007 |             return self.view_command(token, op, args);
+     |                         ^^^^^^^^^^^^
+     |
+help: there is a method `command` with a similar name
+     |
+3007 -             return self.view_command(token, op, args);
+3007 +             return self.command(token, op, args);
+     |
+
+error[E0599]: no method named `capture_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3010:25
+     |
+3010 |             return self.capture_command(token, op, args);
+     |                         ^^^^^^^^^^^^^^^
+     |
+help: there is a method `content_command` with a similar name
+     |
+3010 -             return self.capture_command(token, op, args);
+3010 +             return self.content_command(token, op, args);
+     |
+
+error[E0599]: no method named `runtime_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3013:25
+     |
+3013 |             return self.runtime_command(token, op, args);
+     |                         ^^^^^^^^^^^^^^^
+     |
+help: there is a method `content_command` with a similar name
+     |
+3013 -             return self.runtime_command(token, op, args);
+3013 +             return self.content_command(token, op, args);
+     |
+
+error[E0599]: no method named `behavior_command` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3016:25
+     |
+3016 |             return self.behavior_command(token, op, args);
+     |                         ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_observation` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3101:370
+     |
+3101 | ...ed"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filte...
+     |                                ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3101:447
+     |
+3101 | ...bjects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|...
+     |                                  ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3101:1477
+     |
+3101 | ...string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self...
+     |                                  ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_publishing` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3604:33
+     |
+3604 |         ui.add_enabled_ui(!self.asset_publishing() && !self.asset_loading(), |ui| {
+     |                                 ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3604:61
+     |
+3604 |         ui.add_enabled_ui(!self.asset_publishing() && !self.asset_loading(), |ui| {
+     |                                                             ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `recovered_input_notice` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3609:14
+     |
+3609 |         self.recovered_input_notice(ui);
+     |              ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `state_inspector` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3633:22
+     |
+3633 |         self.runtime.state_inspector(ui);
+     |                      ^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `state_inspector` not found for this struct
+
+error[E0599]: no method named `command_controls` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3637:14
+     |
+3636 | /         self.runtime
+3637 | |             .command_controls(ui, &self.session, command_editable);
+     | |_____________-^^^^^^^^^^^^^^^^
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 |   pub(super) struct RuntimeUi {
+     |   --------------------------- method `command_controls` not found for this struct
+     |
+help: there is a method `controls` with a similar name, but with different arguments
+    --> src/../../../crates/ruster-editor/src/behavior_ui.rs:2181:5
+     |
+2181 | /     pub fn controls(
+2182 | |         &mut self,
+2183 | |         ui: &mut egui::Ui,
+2184 | |         session: &Session,
+...    |
+2187 | |         focus_shortcut: &str,
+2188 | |     ) -> Option<RunKey> {
+     | |_______________________^
+
+error[E0599]: no method named `hud_editable` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3689:54
+     |
+3689 |                     self.hud_draft.is_some() || self.hud_editable(),
+     |                                                      ^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `release_input` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3696:30
+     |
+3696 |                 self.runtime.release_input(ui.ctx());
+     |                              ^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `release_input` not found for this struct
+
+error[E0599]: no method named `ambient_inspector_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3707:18
+     |
+3707 |             self.ambient_inspector_ui(ui);
+     |                  ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `display_inspector_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3708:18
+     |
+3708 |             self.display_inspector_ui(ui);
+     |                  ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `command_draft_pending` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3717:42
+     |
+3717 |                         && !self.runtime.command_draft_pending()
+     |                                          ^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `command_draft_pending` not found for this struct
+
+error[E0599]: no method named `runtime_transform_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3727:18
+     |
+3727 |             self.runtime_transform_ui(ui);
+     |                  ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `command_draft_pending` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3732:268
+     |
+3732 | ....behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none()...
+     |                                         ^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `command_draft_pending` not found for this struct
+
+error[E0599]: no method named `command_draft_pending` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3755:302
+     |
+3755 | ....behavior.pending() && !self.runtime.command_draft_pending() && !self.input_actions.pending() && self.recovered_input.is_none()...
+     |                                         ^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `command_draft_pending` not found for this struct
+
+error[E0599]: no method named `command_draft_pending` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3771:38
+     |
+3771 |                     && !self.runtime.command_draft_pending()
+     |                                      ^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `command_draft_pending` not found for this struct
+
+error[E0599]: no method named `light_inspector_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3782:14
+     |
+3782 |         self.light_inspector_ui(ui);
+     |              ^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `collider_inspector_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3805:18
+     |
+3805 |             self.collider_inspector_ui(ui);
+     |                  ^^^^^^^^^^^^^^^^^^^^^
+     |
+help: there is a method `behavior_inspector_ui` with a similar name
+     |
+3805 -             self.collider_inspector_ui(ui);
+3805 +             self.behavior_inspector_ui(ui);
+     |
+
+error[E0599]: no method named `material_inspector_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3806:18
+     |
+3806 |             self.material_inspector_ui(ui);
+     |                  ^^^^^^^^^^^^^^^^^^^^^
+     |
+help: there is a method `behavior_inspector_ui` with a similar name
+     |
+3806 -             self.material_inspector_ui(ui);
+3806 +             self.behavior_inspector_ui(ui);
+     |
+
+error[E0599]: no method named `color_inspector_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3807:18
+     |
+3807 |             self.color_inspector_ui(ui);
+     |                  ^^^^^^^^^^^^^^^^^^
+     |
+help: there is a method `behavior_inspector_ui` with a similar name
+     |
+3807 -             self.color_inspector_ui(ui);
+3807 +             self.behavior_inspector_ui(ui);
+     |
+
+error[E0599]: no method named `ambient_inspector_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3810:14
+     |
+3810 |         self.ambient_inspector_ui(ui);
+     |              ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `display_inspector_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3811:14
+     |
+3811 |         self.display_inspector_ui(ui);
+     |              ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `start_human_asset` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3901:14
+     |
+3901 |         self.start_human_asset(&ctx, "asset_refresh", id, "", false);
+     |              ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3951:17
+     |
+3951 |         if self.asset_loading() {
+     |                 ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `retry_asset_open` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:3968:46
+     |
+3968 |                     if let Err(error) = self.retry_asset_open() {
+     |                                              ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `stage_material_texture` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4098:38
+     |
+4098 |             if let Err(error) = self.stage_material_texture(&id, role) {
+     |                                      ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_publishing` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4232:37
+     |
+4232 | ...   ui.add_enabled_ui(!self.asset_publishing() && !self.asset_loading(),|ui|{egui::ScrollArea::vertical().id_salt("asset_tools_b...
+     |                               ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4232:65
+     |
+4232 | ...   ui.add_enabled_ui(!self.asset_publishing() && !self.asset_loading(),|ui|{egui::ScrollArea::vertical().id_salt("asset_tools_b...
+     |                                                           ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `start_human_asset` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4312:22
+     |
+4312 | ...   self.start_human_asset(ctx,match op {"import"=>"asset_import","refresh"=>"asset_refresh",_=>"asset_rename"},&id,&source,true);
+     |            ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `revoke_connection` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4394:14
+     |
+4394 |         self.revoke_connection();
+     |              ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_close_guard` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4395:18
+     |
+4395 |         if !self.asset_close_guard() {
+     |                  ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `revoke_connection` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4424:14
+     |
+4424 |         self.revoke_connection();
+     |              ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4426:17
+     |
+4426 |         if self.asset_loading() {
+     |                 ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `cancel_asset_work` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4427:18
+     |
+4427 |             self.cancel_asset_work();
+     |                  ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_root_guard` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4429:34
+     |
+4429 |         if let Err(error) = self.asset_root_guard() {
+     |                                  ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `input_owned` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4440:36
+     |
+4440 |         let blocked = self.runtime.input_owned()
+     |                                    ^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `input_owned` not found for this struct
+
+error[E0599]: no method named `revoke_connection` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4466:18
+     |
+4466 |             self.revoke_connection();
+     |                  ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4468:65
+     |
+4468 |         if matches!(action, Action::New | Action::Open) && self.asset_loading() {
+     |                                                                 ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `cancel_asset_work` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4469:18
+     |
+4469 |             self.cancel_asset_work();
+     |                  ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_busy` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4471:17
+     |
+4471 |         if self.asset_busy()
+     |                 ^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4478:22
+     |
+4478 |             if !self.asset_loading() {
+     |                      ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `create_light_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4504:22
+     |
+4504 |                 self.create_light_ui(ruster_scene::LightKind::Point { range: 5.0 });
+     |                      ^^^^^^^^^^^^^^^
+     |
+help: there is a method `create_menu` with a similar name
+     |
+4504 -                 self.create_light_ui(ruster_scene::LightKind::Point { range: 5.0 });
+4504 +                 self.create_menu(ruster_scene::LightKind::Point { range: 5.0 });
+     |
+
+error[E0599]: no method named `open_export_dialog` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4509:36
+     |
+4509 |             Action::Export => self.open_export_dialog(),
+     |                                    ^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `input_owned` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4547:33
+     |
+4547 |                 if self.runtime.input_owned() {
+     |                                 ^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `input_owned` not found for this struct
+
+error[E0599]: no method named `hud_editable` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4835:58
+     |
+4835 |                         self.hud_draft.is_some() || self.hud_editable(),
+     |                                                          ^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `release_input` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4841:34
+     |
+4841 |                     self.runtime.release_input(ui.ctx());
+     |                                  ^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `release_input` not found for this struct
+
+error[E0599]: no method named `release_input` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:4851:34
+     |
+4851 |                     self.runtime.release_input(ui.ctx());
+     |                                  ^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `release_input` not found for this struct
+
+error[E0599]: no method named `release_input` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5025:26
+     |
+5025 |             self.runtime.release_input(ui.ctx());
+     |                          ^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `release_input` not found for this struct
+
+error[E0599]: no method named `cancel_native_hud_activation` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5027:26
+     |
+5027 |             self.runtime.cancel_native_hud_activation();
+     |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `cancel_native_hud_activation` not found for this struct
+
+error[E0599]: no method named `asset_begin_root_frame` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5122:14
+     |
+5122 |         self.asset_begin_root_frame(&ctx);
+     |              ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_frame` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5123:14
+     |
+5123 |         self.asset_frame(&ctx, false);
+     |              ^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_busy` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5165:21
+     |
+5165 |             || self.asset_busy();
+     |                     ^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `cancel_native_hud_activation` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5176:26
+     |
+5176 |             self.runtime.cancel_native_hud_activation();
+     |                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `cancel_native_hud_activation` not found for this struct
+
+error[E0599]: no method named `input_begin` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5178:22
+     |
+5178 |         self.runtime.input_begin(&ctx, input_blocked);
+     |                      ^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `input_begin` not found for this struct
+
+error[E0599]: no method named `asset_status_ui` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5183:64
+     |
+5183 |         egui::Panel::bottom("scene_status").show(ui, |ui| self.asset_status_ui(ui));
+     |                                                                ^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5232:26
+     |
+5232 |                 && !self.asset_loading()
+     |                          ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5236:21
+     |
+5236 |             if self.asset_loading() {
+     |                     ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_busy` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5256:52
+     |
+5256 |             let blocked = document_blocked || self.asset_busy();
+     |                                                    ^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `capture_reset_assets` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5262:22
+     |
+5262 |                 self.capture_reset_assets(key);
+     |                      ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_mark_callback_owners` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5270:18
+     |
+5270 |             self.asset_mark_callback_owners();
+     |                  ^^^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `input_owned` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5279:34
+     |
+5279 |                 && !self.runtime.input_owned()
+     |                                  ^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `input_owned` not found for this struct
+
+error[E0599]: no method named `input_finish` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5400:18
+     |
+5399 | /             self.runtime
+5400 | |                 .input_finish(&ctx, &viewport.response, blocked || hud_owns);
+     | |                 -^^^^^^^^^^^^ method not found in `RuntimeUi`
+     | |_________________|
+     |
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 |   pub(super) struct RuntimeUi {
+     |   --------------------------- method `input_finish` not found for this struct
+
+error[E0599]: no method named `asset_publishing` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5405:26
+     |
+5405 |                 && !self.asset_publishing()
+     |                          ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5406:26
+     |
+5406 |                 && !self.asset_loading()
+     |                          ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `current_run` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5426:69
+     |
+5426 |                     .filter(|frame| Some(frame.key) == self.runtime.current_run())
+     |                                                                     ^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `current_run` not found for this struct
+
+error[E0599]: no method named `paint_hud_overlay` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5481:18
+     |
+5481 |             self.paint_hud_overlay(ui, viewport.rect, shown_frame.as_ref());
+     |                  ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `observe_view` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5484:14
+     |
+5484 |         self.observe_view();
+     |              ^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `show_hud_editor` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5490:14
+     |
+5490 |         self.show_hud_editor(&ctx);
+     |              ^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `save_with_continuation` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5513:26
+     |
+5513 |                     self.save_with_continuation(save_commands::Continuation::ThenNew);
+     |                          ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_loading` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5542:37
+     |
+5542 | ...                   if self.asset_loading(){self.cancel_asset_work();}
+     |                               ^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `cancel_asset_work` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5542:58
+     |
+5542 | ...                   if self.asset_loading(){self.cancel_asset_work();}
+     |                                                    ^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `asset_root_guard` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5543:52
+     |
+5543 | ...                   if let Err(error)=self.asset_root_guard(){self.error=error;return;}
+     |                                              ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `start_human_save` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5553:34
+     |
+5553 | ...                   self.start_human_save(path, self.save_dialog_continuation);
+     |                            ^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `recovered_input_window` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5564:14
+     |
+5564 |         self.recovered_input_window(&ctx);
+     |              ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `release_input` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5566:26
+     |
+5566 |             self.runtime.release_input(&ctx);
+     |                          ^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `release_input` not found for this struct
+
+error[E0599]: no method named `debug_window` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5622:48
+     |
+5622 |         if let Some(diagnostic) = self.runtime.debug_window(&ctx, &self.session, blocked) {
+     |                                                ^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `debug_window` not found for this struct
+
+error[E0599]: no method named `save_with_continuation` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5646:26
+     |
+5646 |                     self.save_with_continuation(save_commands::Continuation::ThenClose);
+     |                          ^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `export_frame` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5669:14
+     |
+5669 |         self.export_frame(&ctx);
+     |              ^^^^^^^^^^^^
+     |
+help: there is a method `external_frame` with a similar name
+     |
+5669 -         self.export_frame(&ctx);
+5669 +         self.external_frame(&ctx);
+     |
+
+error[E0599]: no method named `asset_frame` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5672:14
+     |
+5672 |         self.asset_frame(&ctx, true);
+     |              ^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `finish_save_continuation` found for mutable reference `&mut scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5673:14
+     |
+5673 |         self.finish_save_continuation();
+     |              ^^^^^^^^^^^^^^^^^^^^^^^^ method not found in `&mut scene_editor::SceneEditor`
+
+error[E0599]: no method named `release_input` found for struct `RuntimeUi` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5694:33
+     |
+5694 |             self.editor.runtime.release_input(ctx);
+     |                                 ^^^^^^^^^^^^^ method not found in `RuntimeUi`
+     |
+    ::: src/../../../crates/ruster-editor/src/behavior_ui.rs:1684:1
+     |
+1684 | pub(super) struct RuntimeUi {
+     | --------------------------- method `release_input` not found for this struct
+
+error[E0599]: no method named `logic_tick` found for mutable reference `&mut Host` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5705:14
+     |
+5705 |         self.logic_tick(ctx);
+     |              ^^^^^^^^^^
+     |
+help: there is a method `logic` with a similar name, but with different arguments
+    --> /home/akilf/.cargo/registry/src/index.crates.io-1949cf8c6b5b557f/eframe-0.37.0/src/epi.rs:170:5
+     |
+ 170 |     fn logic(&mut self, ctx: &egui::Context, frame: &mut Frame) {
+     |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+error[E0599]: no method named `native_connection_ui` found for mutable reference `&mut Host` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5711:14
+     |
+5711 |         self.native_connection_ui(ui);
+     |              ^^^^^^^^^^^^^^^^^^^^ method not found in `&mut Host`
+
+error[E0599]: no method named `poll_capture` found for struct `scene_editor::SceneEditor` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5713:21
+     |
+ 399 | pub struct SceneEditor {
+     | ---------------------- method `poll_capture` not found for this struct
+...
+5713 |         self.editor.poll_capture(ui.ctx());
+     |                     ^^^^^^^^^^^^ method not found in `scene_editor::SceneEditor`
+
+error[E0599]: no method named `service_bridge` found for mutable reference `&mut Host` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5716:14
+     |
+5716 |         self.service_bridge(ui.ctx());
+     |              ^^^^^^^^^^^^^^ method not found in `&mut Host`
+
+error[E0599]: no method named `connect_adapter` found for struct `Host` in the current scope
+    --> src/../../../crates/ruster-editor/src/scene_editor.rs:5783:22
+     |
+5677 | struct Host {
+     | ----------- method `connect_adapter` not found for this struct
+...
+5783 |                 host.connect_adapter(&cc.egui_ctx)
+     |                      ^^^^^^^^^^^^^^^ method not found in `Host`
+
+Some errors have detailed explanations: E0583, E0599, E0753.
+For more information about an error, try `rustc --explain E0583`.
+error: could not compile `ruster-localhost-spike` (bin "ruster-localhost-spike") due to 208 previous errors

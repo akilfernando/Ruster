@@ -1,0 +1,1 @@
+../../../crates/ruster-editor/src/behavior_worker.rs

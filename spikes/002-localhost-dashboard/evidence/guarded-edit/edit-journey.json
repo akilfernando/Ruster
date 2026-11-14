@@ -1,0 +1,1969 @@
+{
+  "negative_cases": [
+    {
+      "case": "stale",
+      "status": 200,
+      "response": {
+        "error": {
+          "code": "stale_revision",
+          "message": "stale_revision",
+          "revision": "3",
+          "session_token": "localhost-fixture-1040495:scene:1"
+        },
+        "ok": false
+      }
+    },
+    {
+      "case": "wrong_session",
+      "status": 200,
+      "response": {
+        "error": {
+          "code": "stale_session",
+          "message": "stale_session",
+          "revision": "3",
+          "session_token": "localhost-fixture-1040495:scene:1"
+        },
+        "ok": false
+      }
+    },
+    {
+      "case": "wrong_origin",
+      "status": 403,
+      "response": {
+        "error": "denied"
+      }
+    },
+    {
+      "case": "unsupported",
+      "status": 200,
+      "response": {
+        "error": {
+          "code": "fixture_operation_denied"
+        },
+        "ok": false
+      }
+    }
+  ],
+  "before": {
+    "metrics": {
+      "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "authority": {
+        "ok": true,
+        "result": {
+          "asset_operation": {
+            "busy": false,
+            "loading": false,
+            "paint_cleanup_pending": false,
+            "phase": "idle"
+          },
+          "asset_revision": null,
+          "capabilities": [
+            "lighting_inspect",
+            "scene_light_create",
+            "scene_light_set",
+            "scene_ambient_set",
+            "scene_display_set",
+            "material_inspect",
+            "scene_material_set",
+            "scene_material_assign",
+            "scene_material_copy",
+            "scene_material_remove",
+            "scene_color",
+            "scene_collider_set",
+            "viewport_inspect",
+            "viewport_camera",
+            "scene_select",
+            "viewport_capture_start",
+            "viewport_capture_inspect",
+            "creation_export_inspect",
+            "creation_export_start",
+            "creation_export_cancel",
+            "scene_persistence_inspect",
+            "scene_save",
+            "behavior_runtime_inspect",
+            "behavior_runtime_state",
+            "behavior_runtime_command",
+            "behavior_runtime_reset",
+            "behavior_runtime_play",
+            "behavior_runtime_pause",
+            "behavior_runtime_step",
+            "behavior_runtime_stop",
+            "behavior_breakpoints",
+            "behavior_breakpoint_set",
+            "behavior_debug_inspect",
+            "behavior_debug_next",
+            "behavior_debug_continue",
+            "behavior_inspect",
+            "behavior_source",
+            "behavior_source_set",
+            "behavior_source_remove",
+            "behavior_create",
+            "behavior_binding",
+            "behavior_binding_set",
+            "behavior_binding_remove",
+            "behavior_property",
+            "behavior_property_set",
+            "behavior_state_default",
+            "behavior_state_default_set",
+            "behavior_command",
+            "behavior_command_set",
+            "hud_inspect",
+            "hud_panel_inspect",
+            "hud_panel_set",
+            "hud_panel_move",
+            "hud_settings_set",
+            "hud_label_set",
+            "hud_label_move",
+            "behavior_action",
+            "behavior_action_set",
+            "behavior_action_remove",
+            "scene_inspect",
+            "scene_transform",
+            "scene_create",
+            "scene_primitive",
+            "scene_rename",
+            "scene_duplicate",
+            "scene_delete",
+            "scene_transform_many",
+            "scene_delete_many",
+            "scene_duplicate_many",
+            "hud_activate",
+            "scene_undo",
+            "scene_redo",
+            "scene_replay",
+            "asset_inspect",
+            "asset_import",
+            "asset_refresh",
+            "asset_rename",
+            "scene_mesh",
+            "shader_refresh"
+          ],
+          "dirty": true,
+          "document_label": "procedural-demo",
+          "drafts_pending": false,
+          "history_evictions": 0,
+          "light_count": 0,
+          "lighting_mode": "legacy",
+          "loaded_format_version": 18,
+          "next_offset": null,
+          "object_count": 3,
+          "objects": [
+            {
+              "color": [
+                0.11999999731779099,
+                0.5799999833106995,
+                0.8500000238418579,
+                1.0
+              ],
+              "id": "left",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  -2.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "color": [
+                0.8999999761581421,
+                0.4000000059604645,
+                0.1599999964237213,
+                1.0
+              ],
+              "id": "center",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "color": [
+                0.30000001192092896,
+                0.75,
+                0.44999998807907104,
+                1.0
+              ],
+              "id": "right",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  2.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "preview_fingerprint": "c8f582038015666b",
+          "preview_stale": true,
+          "preview_tick": "0",
+          "recovery_pending": false,
+          "revision": "2",
+          "scene_id": "procedural-demo",
+          "session_token": "localhost-fixture-1040495:scene:1",
+          "shader_revision": "0",
+          "target_count": 3,
+          "undo_len": 0,
+          "unresolved_assets": []
+        }
+      },
+      "backend": "Vulkan",
+      "command": null,
+      "command_to_commit_ms": 0.00015800000000000002,
+      "draw_calls": 1,
+      "frames": 8,
+      "height": 512,
+      "native_total_ms": 13.269241,
+      "objects": 3,
+      "passes": 1,
+      "png_encode_ms": 6.978397,
+      "read_only": false,
+      "render_cpu_ms": 0.362399,
+      "render_only": false,
+      "revision": 2,
+      "submit_to_mapped_ms": 5.595072,
+      "width": 768,
+      "host_roundtrip_ms": 13.620876998174936
+    },
+    "authority": {
+      "ok": true,
+      "result": {
+        "asset_operation": {
+          "busy": false,
+          "loading": false,
+          "paint_cleanup_pending": false,
+          "phase": "idle"
+        },
+        "asset_revision": null,
+        "capabilities": [
+          "lighting_inspect",
+          "scene_light_create",
+          "scene_light_set",
+          "scene_ambient_set",
+          "scene_display_set",
+          "material_inspect",
+          "scene_material_set",
+          "scene_material_assign",
+          "scene_material_copy",
+          "scene_material_remove",
+          "scene_color",
+          "scene_collider_set",
+          "viewport_inspect",
+          "viewport_camera",
+          "scene_select",
+          "viewport_capture_start",
+          "viewport_capture_inspect",
+          "creation_export_inspect",
+          "creation_export_start",
+          "creation_export_cancel",
+          "scene_persistence_inspect",
+          "scene_save",
+          "behavior_runtime_inspect",
+          "behavior_runtime_state",
+          "behavior_runtime_command",
+          "behavior_runtime_reset",
+          "behavior_runtime_play",
+          "behavior_runtime_pause",
+          "behavior_runtime_step",
+          "behavior_runtime_stop",
+          "behavior_breakpoints",
+          "behavior_breakpoint_set",
+          "behavior_debug_inspect",
+          "behavior_debug_next",
+          "behavior_debug_continue",
+          "behavior_inspect",
+          "behavior_source",
+          "behavior_source_set",
+          "behavior_source_remove",
+          "behavior_create",
+          "behavior_binding",
+          "behavior_binding_set",
+          "behavior_binding_remove",
+          "behavior_property",
+          "behavior_property_set",
+          "behavior_state_default",
+          "behavior_state_default_set",
+          "behavior_command",
+          "behavior_command_set",
+          "hud_inspect",
+          "hud_panel_inspect",
+          "hud_panel_set",
+          "hud_panel_move",
+          "hud_settings_set",
+          "hud_label_set",
+          "hud_label_move",
+          "behavior_action",
+          "behavior_action_set",
+          "behavior_action_remove",
+          "scene_inspect",
+          "scene_transform",
+          "scene_create",
+          "scene_primitive",
+          "scene_rename",
+          "scene_duplicate",
+          "scene_delete",
+          "scene_transform_many",
+          "scene_delete_many",
+          "scene_duplicate_many",
+          "hud_activate",
+          "scene_undo",
+          "scene_redo",
+          "scene_replay",
+          "asset_inspect",
+          "asset_import",
+          "asset_refresh",
+          "asset_rename",
+          "scene_mesh",
+          "shader_refresh"
+        ],
+        "dirty": true,
+        "document_label": "procedural-demo",
+        "drafts_pending": false,
+        "history_evictions": 0,
+        "light_count": 0,
+        "lighting_mode": "legacy",
+        "loaded_format_version": 18,
+        "next_offset": null,
+        "object_count": 3,
+        "objects": [
+          {
+            "color": [
+              0.11999999731779099,
+              0.5799999833106995,
+              0.8500000238418579,
+              1.0
+            ],
+            "id": "left",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                -2.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "color": [
+              0.8999999761581421,
+              0.4000000059604645,
+              0.1599999964237213,
+              1.0
+            ],
+            "id": "center",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "color": [
+              0.30000001192092896,
+              0.75,
+              0.44999998807907104,
+              1.0
+            ],
+            "id": "right",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                2.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "preview_fingerprint": "c8f582038015666b",
+        "preview_stale": true,
+        "preview_tick": "0",
+        "recovery_pending": false,
+        "revision": "2",
+        "scene_id": "procedural-demo",
+        "session_token": "localhost-fixture-1040495:scene:1",
+        "shader_revision": "0",
+        "target_count": 3,
+        "undo_len": 0,
+        "unresolved_assets": []
+      }
+    },
+    "command": null,
+    "scene": {
+      "id": "procedural-demo",
+      "revision": 2,
+      "objects": [
+        {
+          "id": "left",
+          "transform": {
+            "translation": [
+              -2.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.12,
+            0.58,
+            0.85,
+            1.0
+          ]
+        },
+        {
+          "id": "center",
+          "transform": {
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.9,
+            0.4,
+            0.16,
+            1.0
+          ]
+        },
+        {
+          "id": "right",
+          "transform": {
+            "translation": [
+              2.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.3,
+            0.75,
+            0.45,
+            1.0
+          ]
+        }
+      ]
+    },
+    "png": "iVBORw0KGgoAAAANSUhEUgAAAwAAAAIACAYAAAA19gs6AAAkzUlEQVR4nO3dd7BdZfkv8JckkKBIiCSh/CQYRbGAWGCMXvUK9jZimbHXa59Rx9715zjWsdc/vHYdy1WxK/eq13bFAgqiXCkCagw1CeEEchIC/HgW7rBzcsre5+yy1no+n5ntaevsvc/aG/N83/d537WklHJ9+bfly5eXW97yluUWt7hFWbJkSWm766+/vuy11159H7Nz584yMTFRNm3aVLZs2VLmI871gQceWG5+85uXvffeu7TRfM9vr6655ppy1VVXlY0bNy7odRjGe34Qzw0AYBii8qoCwJo1a8rKlSurbw67cGuq6f7mKPD+/ve/l350n+t+HouZz8vll19e/vGPf5R+9PI6DMJ8nhsAwLAsvuH2n1MLoV4Kz+5jsgSG6Z7/zW52s2oEv9dR3sMPP3y3cz3Tecl4fnsx09/Y7+swysAbz22fffYxEwAA1MKiaIFY6CjofALDXEZ5zELF+YvzOJdO20+3fs/dQo7pNorzMmr9vA4zBd6ZzstC37/xuvfy3AAAhm1R9D+P2jCK3mEVbr2aWtjP95hRGUZgqEMg6+X9PNsxwwxk4/hvDQBgqkX77bdfaYNxB4ZYzDuXXo6pqzoHsu5jYjHvXHo5Zhja8t8aANBsi6buQDNdwfXRj360fPGLXyxf+tKXyhe+8IXy3ve+t6xdu7bMZtwtJne7292q59nt3ve+d/n4xz9efT7okd5edvKJY2Y7L/HcHv/4x+9xzB3ucIfymc98puoj/+xnP1v233//UnfzOb8veMELyvOf//wZj+klVCxevLjMpZdj4jzH+7379sQnPrF6D33iE5+ojrnrXe+6x3tsNm3d7QkAaJY99j2crnCLkcvXvva15eKLLy63uc1tylOe8pTylre8pTz72c8u11577cgWsfazEHPp0qVVwdzt17/+dXUbp9me/69+9atyn/vcp3z961/f9b34mx/96EeXM844o+zYsaM885nP3OP32rJIOBbLbt++fcafj3q9xIte9KJq4e7Uc9d5Dy1btmyP9xgAQN31vPF57Hsf+9+fc845VfEfI9J3utOdyp///OfyvOc9rypcY2R1/fr11c8nJyfLAx7wgPK0pz1t1/7q8f2DDjqoPP3pT69CxXXXXVfe9KY3VdtofuQjH6l6pKPQ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AAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEjkvwCCyzSDRSTAPAAAAABJRU5ErkJggg=="
+  },
+  "edit": {
+    "metrics": {
+      "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "authority": {
+        "ok": true,
+        "result": {
+          "asset_operation": {
+            "busy": false,
+            "loading": false,
+            "paint_cleanup_pending": false,
+            "phase": "idle"
+          },
+          "asset_revision": null,
+          "capabilities": [
+            "lighting_inspect",
+            "scene_light_create",
+            "scene_light_set",
+            "scene_ambient_set",
+            "scene_display_set",
+            "material_inspect",
+            "scene_material_set",
+            "scene_material_assign",
+            "scene_material_copy",
+            "scene_material_remove",
+            "scene_color",
+            "scene_collider_set",
+            "viewport_inspect",
+            "viewport_camera",
+            "scene_select",
+            "viewport_capture_start",
+            "viewport_capture_inspect",
+            "creation_export_inspect",
+            "creation_export_start",
+            "creation_export_cancel",
+            "scene_persistence_inspect",
+            "scene_save",
+            "behavior_runtime_inspect",
+            "behavior_runtime_state",
+            "behavior_runtime_command",
+            "behavior_runtime_reset",
+            "behavior_runtime_play",
+            "behavior_runtime_pause",
+            "behavior_runtime_step",
+            "behavior_runtime_stop",
+            "behavior_breakpoints",
+            "behavior_breakpoint_set",
+            "behavior_debug_inspect",
+            "behavior_debug_next",
+            "behavior_debug_continue",
+            "behavior_inspect",
+            "behavior_source",
+            "behavior_source_set",
+            "behavior_source_remove",
+            "behavior_create",
+            "behavior_binding",
+            "behavior_binding_set",
+            "behavior_binding_remove",
+            "behavior_property",
+            "behavior_property_set",
+            "behavior_state_default",
+            "behavior_state_default_set",
+            "behavior_command",
+            "behavior_command_set",
+            "hud_inspect",
+            "hud_panel_inspect",
+            "hud_panel_set",
+            "hud_panel_move",
+            "hud_settings_set",
+            "hud_label_set",
+            "hud_label_move",
+            "behavior_action",
+            "behavior_action_set",
+            "behavior_action_remove",
+            "scene_inspect",
+            "scene_transform",
+            "scene_create",
+            "scene_primitive",
+            "scene_rename",
+            "scene_duplicate",
+            "scene_delete",
+            "scene_transform_many",
+            "scene_delete_many",
+            "scene_duplicate_many",
+            "hud_activate",
+            "scene_undo",
+            "scene_redo",
+            "scene_replay",
+            "asset_inspect",
+            "asset_import",
+            "asset_refresh",
+            "asset_rename",
+            "scene_mesh",
+            "shader_refresh"
+          ],
+          "dirty": true,
+          "document_label": "procedural-demo",
+          "drafts_pending": false,
+          "history_evictions": 0,
+          "light_count": 0,
+          "lighting_mode": "legacy",
+          "loaded_format_version": 18,
+          "next_offset": null,
+          "object_count": 3,
+          "objects": [
+            {
+              "color": [
+                0.11999999731779099,
+                0.5799999833106995,
+                0.8500000238418579,
+                1.0
+              ],
+              "id": "left",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "color": [
+                0.8999999761581421,
+                0.4000000059604645,
+                0.1599999964237213,
+                1.0
+              ],
+              "id": "center",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "color": [
+                0.30000001192092896,
+                0.75,
+                0.44999998807907104,
+                1.0
+              ],
+              "id": "right",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  2.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "preview_fingerprint": "c8f582038015666b",
+          "preview_stale": true,
+          "preview_tick": "0",
+          "recovery_pending": false,
+          "revision": "3",
+          "scene_id": "procedural-demo",
+          "session_token": "localhost-fixture-1040495:scene:1",
+          "shader_revision": "0",
+          "target_count": 3,
+          "undo_len": 1,
+          "unresolved_assets": []
+        }
+      },
+      "backend": "Vulkan",
+      "command": {
+        "ok": true,
+        "result": {
+          "changed": true,
+          "changed_target_count": 1,
+          "diff": [
+            {
+              "after": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              "after_mesh": null,
+              "after_object": {
+                "color": [
+                  0.11999999731779099,
+                  0.5799999833106995,
+                  0.8500000238418579,
+                  1.0
+                ],
+                "id": "left",
+                "transform": {
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                }
+              },
+              "before": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  -2.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              "before_mesh": null,
+              "before_object": {
+                "color": [
+                  0.11999999731779099,
+                  0.5799999833106995,
+                  0.8500000238418579,
+                  1.0
+                ],
+                "id": "left",
+                "transform": {
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "translation": [
+                    -2.0,
+                    0.0,
+                    0.0
+                  ]
+                }
+              },
+              "object_id": "left"
+            }
+          ],
+          "diff_count": 1,
+          "diff_truncated": false,
+          "dirty": true,
+          "history_evictions": 0,
+          "light_diff": [],
+          "lighting": {
+            "mode": "legacy"
+          },
+          "lighting_changed": false,
+          "revision": "3",
+          "session_token": "localhost-fixture-1040495:scene:1"
+        }
+      },
+      "command_to_commit_ms": 0.10434500000000001,
+      "draw_calls": 1,
+      "frames": 9,
+      "height": 512,
+      "native_total_ms": 9.709356000000001,
+      "objects": 3,
+      "passes": 1,
+      "png_encode_ms": 5.854825999999999,
+      "read_only": false,
+      "render_cpu_ms": 0.360922,
+      "render_only": false,
+      "revision": 3,
+      "submit_to_mapped_ms": 3.240433,
+      "width": 768,
+      "host_roundtrip_ms": 10.112310003023595
+    },
+    "authority": {
+      "ok": true,
+      "result": {
+        "asset_operation": {
+          "busy": false,
+          "loading": false,
+          "paint_cleanup_pending": false,
+          "phase": "idle"
+        },
+        "asset_revision": null,
+        "capabilities": [
+          "lighting_inspect",
+          "scene_light_create",
+          "scene_light_set",
+          "scene_ambient_set",
+          "scene_display_set",
+          "material_inspect",
+          "scene_material_set",
+          "scene_material_assign",
+          "scene_material_copy",
+          "scene_material_remove",
+          "scene_color",
+          "scene_collider_set",
+          "viewport_inspect",
+          "viewport_camera",
+          "scene_select",
+          "viewport_capture_start",
+          "viewport_capture_inspect",
+          "creation_export_inspect",
+          "creation_export_start",
+          "creation_export_cancel",
+          "scene_persistence_inspect",
+          "scene_save",
+          "behavior_runtime_inspect",
+          "behavior_runtime_state",
+          "behavior_runtime_command",
+          "behavior_runtime_reset",
+          "behavior_runtime_play",
+          "behavior_runtime_pause",
+          "behavior_runtime_step",
+          "behavior_runtime_stop",
+          "behavior_breakpoints",
+          "behavior_breakpoint_set",
+          "behavior_debug_inspect",
+          "behavior_debug_next",
+          "behavior_debug_continue",
+          "behavior_inspect",
+          "behavior_source",
+          "behavior_source_set",
+          "behavior_source_remove",
+          "behavior_create",
+          "behavior_binding",
+          "behavior_binding_set",
+          "behavior_binding_remove",
+          "behavior_property",
+          "behavior_property_set",
+          "behavior_state_default",
+          "behavior_state_default_set",
+          "behavior_command",
+          "behavior_command_set",
+          "hud_inspect",
+          "hud_panel_inspect",
+          "hud_panel_set",
+          "hud_panel_move",
+          "hud_settings_set",
+          "hud_label_set",
+          "hud_label_move",
+          "behavior_action",
+          "behavior_action_set",
+          "behavior_action_remove",
+          "scene_inspect",
+          "scene_transform",
+          "scene_create",
+          "scene_primitive",
+          "scene_rename",
+          "scene_duplicate",
+          "scene_delete",
+          "scene_transform_many",
+          "scene_delete_many",
+          "scene_duplicate_many",
+          "hud_activate",
+          "scene_undo",
+          "scene_redo",
+          "scene_replay",
+          "asset_inspect",
+          "asset_import",
+          "asset_refresh",
+          "asset_rename",
+          "scene_mesh",
+          "shader_refresh"
+        ],
+        "dirty": true,
+        "document_label": "procedural-demo",
+        "drafts_pending": false,
+        "history_evictions": 0,
+        "light_count": 0,
+        "lighting_mode": "legacy",
+        "loaded_format_version": 18,
+        "next_offset": null,
+        "object_count": 3,
+        "objects": [
+          {
+            "color": [
+              0.11999999731779099,
+              0.5799999833106995,
+              0.8500000238418579,
+              1.0
+            ],
+            "id": "left",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "color": [
+              0.8999999761581421,
+              0.4000000059604645,
+              0.1599999964237213,
+              1.0
+            ],
+            "id": "center",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "color": [
+              0.30000001192092896,
+              0.75,
+              0.44999998807907104,
+              1.0
+            ],
+            "id": "right",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                2.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "preview_fingerprint": "c8f582038015666b",
+        "preview_stale": true,
+        "preview_tick": "0",
+        "recovery_pending": false,
+        "revision": "3",
+        "scene_id": "procedural-demo",
+        "session_token": "localhost-fixture-1040495:scene:1",
+        "shader_revision": "0",
+        "target_count": 3,
+        "undo_len": 1,
+        "unresolved_assets": []
+      }
+    },
+    "command": {
+      "ok": true,
+      "result": {
+        "changed": true,
+        "changed_target_count": 1,
+        "diff": [
+          {
+            "after": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "after_mesh": null,
+            "after_object": {
+              "color": [
+                0.11999999731779099,
+                0.5799999833106995,
+                0.8500000238418579,
+                1.0
+              ],
+              "id": "left",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            "before": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                -2.0,
+                0.0,
+                0.0
+              ]
+            },
+            "before_mesh": null,
+            "before_object": {
+              "color": [
+                0.11999999731779099,
+                0.5799999833106995,
+                0.8500000238418579,
+                1.0
+              ],
+              "id": "left",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  -2.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            "object_id": "left"
+          }
+        ],
+        "diff_count": 1,
+        "diff_truncated": false,
+        "dirty": true,
+        "history_evictions": 0,
+        "light_diff": [],
+        "lighting": {
+          "mode": "legacy"
+        },
+        "lighting_changed": false,
+        "revision": "3",
+        "session_token": "localhost-fixture-1040495:scene:1"
+      }
+    },
+    "scene": {
+      "id": "procedural-demo",
+      "revision": 3,
+      "objects": [
+        {
+          "id": "left",
+          "transform": {
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.12,
+            0.58,
+            0.85,
+            1.0
+          ]
+        },
+        {
+          "id": "center",
+          "transform": {
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.9,
+            0.4,
+            0.16,
+            1.0
+          ]
+        },
+        {
+          "id": "right",
+          "transform": {
+            "translation": [
+              2.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.3,
+            0.75,
+            0.45,
+            1.0
+          ]
+        }
+      ]
+    },
+    "png": "iVBORw0KGgoAAAANSUhEUgAAAwAAAAIACAYAAAA19gs6AAAgu0lEQVR4nO3deZCcdbkv8B9JhIiQEEmiREmIgiuCCpTRq5bgvlDicst9ve5VarnveijLtdzXP7zuWojXXVG5Ry1cjqiACyAlgoCChASSQBKSTAhweF5Px85kpqd7ppe33+fzqZpKMtPT3fN2o8/393t+zywopdxc/sfixYvLbW9723LggQeWBQsWlKa7+eabyz777NPzbXbt2lW2bNlSNm7cWK677royG3GtDz744HKb29ym3OpWtypNNNvr260bbrihXH/99WXDhg1zeh0G8Z7vx3MDABiEqLyqALBy5cqydOnS6pODLtzG1VQ/cxR4f//730sv2q91L4/F9NflmmuuKf/4xz9KL7p5HfphNs8NAGBQ5t/y8R+TC6FuCs/222QJDFM9//33379awe92lXfVqlV7XOvprkvG69uN6X7GXl+HYQbeeG777ruvnQAAoBbmRQvEXFdBZxMYZjLM28xVXL+4jjNptf206/XazeU27YZxXYatl9dhusA73XWZ6/s3XvdunhsAwKDNi/7nYRtE0Tuowq1bkwv72d5mWAYRGOoQyLp5P3e6zSAD2Sj+WwMAmGzeAQccUJpg1IEhDvPOpJvb1FWdA1n7beIw70y6uc0gNOW/NQBgvM2bPIFmqoLrE5/4RPnKV75SvvrVr5Yvf/nL5QMf+EBZvXp16WTULSb3uc99qufZ7gEPeED51Kc+Vf293yu93Uzyidt0ui7x3J785CfvdZu73e1u5fOf/3zVR/6FL3yhLFq0qNTdbK7vS17ykvLiF7942tt0Eyrmz59fZtLNbeI6x/u9/eOpT31q9R769Kc/Xd3m3ve+917vsU6aOu0JABgve809nKpwi5XLN77xjeWqq64qd7rTncoznvGM8o53vKM8//nPLzfeeOPQDrH2chBzv/32qwrmdr/+9a+rj1Hq9Px/9atflQc+8IHlG9/4xu7Pxc/8+Mc/vvzpT38qO3fuLM997nP3+r6mHBKOw7ITExPTfn3Y5yVe9rKXVQd3J1+71nto4cKFe73HAADqruvB5zH3Pubf//Wvf62K/1iRvsc97lHOP//88qIXvagqXGNl9Yorrqi+vmPHjvLQhz60POtZz9o9Xz0+f7vb3a48+9nPrkLFTTfdVN72trdVYzQ//vGPVz3SUWjFDPUzzjijWoVtmfwYb3/723cXiw960IOqwjgKsrjPj370o9Xno+c+Vm7D6aefXn7zm9+UV7/61dVKc9z3K17xirJ58+bq6w972MPKIx7xiPL617++HHbYYdWfcWgziu7Y/fjpT39aBu3b3/52efSjH109bmtiTFyP2AGI6xS++MUvluc85znV329961uXt7zlLdVkoXDmmWdWuwhPe9rTypFHHll9LcTr9NrXvrYKbC3x+j3vec/b4/Hj2sTOybx586pgd/HFF5f3v//91WsZYrU7Xr/4erxmb3rTm8rxxx9fvcYRuLZu3Vre+973lssuu6y6fbxGd77znavX7MILLyzvfOc7q89P936JQjtW2OMjxP1v3769vPnNb959aPc73/lO+eY3v1mGobXj0F783/Wudy2vetWrqvdQmPwe+9KXvmSEKwBQa10HgKnaL6JIjII1CraPfexjVbEWq6aPfexjqyIt2oSiUIyiMPquY2Z+FKJf+9rXyu9+97uqSL3yyiur+4qi9w1veENVRD7xiU8sJ5xwQtm0aVP57ne/Wx71qEft9RiPe9zjqsdYvnx51Tby+9//vpx66qlVCIidiqOOOqp6vCjyW6J4a1m7dm15yEMeUr73ve9V/77f/e5XzjnnnOrvUXBGwRrtTo985COrgnoYASB+trgeJ510UlXot57Xtm3bqkJ5ste85jXVdY1C/y53uUt55jOfWb7+9a9XzzUCTctxxx1XrVTHGYT45VRx3a+99tq97u+Od7xjVWD/8Ic/rK5/7DxEER6FfBS0y5Ytq/4dc+3jvg455JAqVHzrW9+qXs8XvOAF1b/j9g9+8IOr27/yla+sgsqSJUuq99BjHvOYad8vIVbXP/nJT+5+Tq973euqnz1ek3h+8T3DMF0B3/7fQdxm8nus0/cCANTBvF569aOIPPzww8tb3/rWqsiJIjkKzWhZOfvss8uf//znqnA99thjq9vHbaJ4jaJt/fr1VWCIj9gZiKIwisZY7W/55z//Wa18x+p0FIKxIh8e/vCH7/UYxxxzTPW1KJajmP3Qhz5Uff/f/va3qsid6eeK+1+zZs3uf8eq/49+9KNyxBFHVCvcH/zgB6vnHCEgVqej2J2sX+cc2u8niu/253XiiSeWX/ziF1N+XzzX2BmIXzL1k5/8pPzxj3+sXo943iHCUbjXve5V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"
+  },
+  "undo": {
+    "metrics": {
+      "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+      "authority": {
+        "ok": true,
+        "result": {
+          "asset_operation": {
+            "busy": false,
+            "loading": false,
+            "paint_cleanup_pending": false,
+            "phase": "idle"
+          },
+          "asset_revision": null,
+          "capabilities": [
+            "lighting_inspect",
+            "scene_light_create",
+            "scene_light_set",
+            "scene_ambient_set",
+            "scene_display_set",
+            "material_inspect",
+            "scene_material_set",
+            "scene_material_assign",
+            "scene_material_copy",
+            "scene_material_remove",
+            "scene_color",
+            "scene_collider_set",
+            "viewport_inspect",
+            "viewport_camera",
+            "scene_select",
+            "viewport_capture_start",
+            "viewport_capture_inspect",
+            "creation_export_inspect",
+            "creation_export_start",
+            "creation_export_cancel",
+            "scene_persistence_inspect",
+            "scene_save",
+            "behavior_runtime_inspect",
+            "behavior_runtime_state",
+            "behavior_runtime_command",
+            "behavior_runtime_reset",
+            "behavior_runtime_play",
+            "behavior_runtime_pause",
+            "behavior_runtime_step",
+            "behavior_runtime_stop",
+            "behavior_breakpoints",
+            "behavior_breakpoint_set",
+            "behavior_debug_inspect",
+            "behavior_debug_next",
+            "behavior_debug_continue",
+            "behavior_inspect",
+            "behavior_source",
+            "behavior_source_set",
+            "behavior_source_remove",
+            "behavior_create",
+            "behavior_binding",
+            "behavior_binding_set",
+            "behavior_binding_remove",
+            "behavior_property",
+            "behavior_property_set",
+            "behavior_state_default",
+            "behavior_state_default_set",
+            "behavior_command",
+            "behavior_command_set",
+            "hud_inspect",
+            "hud_panel_inspect",
+            "hud_panel_set",
+            "hud_panel_move",
+            "hud_settings_set",
+            "hud_label_set",
+            "hud_label_move",
+            "behavior_action",
+            "behavior_action_set",
+            "behavior_action_remove",
+            "scene_inspect",
+            "scene_transform",
+            "scene_create",
+            "scene_primitive",
+            "scene_rename",
+            "scene_duplicate",
+            "scene_delete",
+            "scene_transform_many",
+            "scene_delete_many",
+            "scene_duplicate_many",
+            "hud_activate",
+            "scene_undo",
+            "scene_redo",
+            "scene_replay",
+            "asset_inspect",
+            "asset_import",
+            "asset_refresh",
+            "asset_rename",
+            "scene_mesh",
+            "shader_refresh"
+          ],
+          "dirty": true,
+          "document_label": "procedural-demo",
+          "drafts_pending": false,
+          "history_evictions": 0,
+          "light_count": 0,
+          "lighting_mode": "legacy",
+          "loaded_format_version": 18,
+          "next_offset": null,
+          "object_count": 3,
+          "objects": [
+            {
+              "color": [
+                0.11999999731779099,
+                0.5799999833106995,
+                0.8500000238418579,
+                1.0
+              ],
+              "id": "left",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  -2.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "color": [
+                0.8999999761581421,
+                0.4000000059604645,
+                0.1599999964237213,
+                1.0
+              ],
+              "id": "center",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            {
+              "color": [
+                0.30000001192092896,
+                0.75,
+                0.44999998807907104,
+                1.0
+              ],
+              "id": "right",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  2.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            }
+          ],
+          "preview_fingerprint": "c8f582038015666b",
+          "preview_stale": true,
+          "preview_tick": "0",
+          "recovery_pending": false,
+          "revision": "4",
+          "scene_id": "procedural-demo",
+          "session_token": "localhost-fixture-1040495:scene:1",
+          "shader_revision": "0",
+          "target_count": 3,
+          "undo_len": 0,
+          "unresolved_assets": []
+        }
+      },
+      "backend": "Vulkan",
+      "command": {
+        "ok": true,
+        "result": {
+          "changed": true,
+          "changed_target_count": 1,
+          "diff": [
+            {
+              "after": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  -2.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              "after_mesh": null,
+              "after_object": {
+                "color": [
+                  0.11999999731779099,
+                  0.5799999833106995,
+                  0.8500000238418579,
+                  1.0
+                ],
+                "id": "left",
+                "transform": {
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "translation": [
+                    -2.0,
+                    0.0,
+                    0.0
+                  ]
+                }
+              },
+              "before": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              },
+              "before_mesh": null,
+              "before_object": {
+                "color": [
+                  0.11999999731779099,
+                  0.5799999833106995,
+                  0.8500000238418579,
+                  1.0
+                ],
+                "id": "left",
+                "transform": {
+                  "rotation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ],
+                  "scale": [
+                    1.0,
+                    1.0,
+                    1.0
+                  ],
+                  "translation": [
+                    0.0,
+                    0.0,
+                    0.0
+                  ]
+                }
+              },
+              "object_id": "left"
+            }
+          ],
+          "diff_count": 1,
+          "diff_truncated": false,
+          "dirty": true,
+          "history_evictions": 0,
+          "light_diff": [],
+          "lighting": {
+            "mode": "legacy"
+          },
+          "lighting_changed": false,
+          "revision": "4",
+          "session_token": "localhost-fixture-1040495:scene:1"
+        }
+      },
+      "command_to_commit_ms": 0.060781,
+      "draw_calls": 1,
+      "frames": 14,
+      "height": 512,
+      "native_total_ms": 6.666570999999999,
+      "objects": 3,
+      "passes": 1,
+      "png_encode_ms": 3.274273,
+      "read_only": false,
+      "render_cpu_ms": 0.17436000000000001,
+      "render_only": false,
+      "revision": 4,
+      "submit_to_mapped_ms": 2.947389,
+      "width": 768,
+      "host_roundtrip_ms": 6.936443009180948
+    },
+    "authority": {
+      "ok": true,
+      "result": {
+        "asset_operation": {
+          "busy": false,
+          "loading": false,
+          "paint_cleanup_pending": false,
+          "phase": "idle"
+        },
+        "asset_revision": null,
+        "capabilities": [
+          "lighting_inspect",
+          "scene_light_create",
+          "scene_light_set",
+          "scene_ambient_set",
+          "scene_display_set",
+          "material_inspect",
+          "scene_material_set",
+          "scene_material_assign",
+          "scene_material_copy",
+          "scene_material_remove",
+          "scene_color",
+          "scene_collider_set",
+          "viewport_inspect",
+          "viewport_camera",
+          "scene_select",
+          "viewport_capture_start",
+          "viewport_capture_inspect",
+          "creation_export_inspect",
+          "creation_export_start",
+          "creation_export_cancel",
+          "scene_persistence_inspect",
+          "scene_save",
+          "behavior_runtime_inspect",
+          "behavior_runtime_state",
+          "behavior_runtime_command",
+          "behavior_runtime_reset",
+          "behavior_runtime_play",
+          "behavior_runtime_pause",
+          "behavior_runtime_step",
+          "behavior_runtime_stop",
+          "behavior_breakpoints",
+          "behavior_breakpoint_set",
+          "behavior_debug_inspect",
+          "behavior_debug_next",
+          "behavior_debug_continue",
+          "behavior_inspect",
+          "behavior_source",
+          "behavior_source_set",
+          "behavior_source_remove",
+          "behavior_create",
+          "behavior_binding",
+          "behavior_binding_set",
+          "behavior_binding_remove",
+          "behavior_property",
+          "behavior_property_set",
+          "behavior_state_default",
+          "behavior_state_default_set",
+          "behavior_command",
+          "behavior_command_set",
+          "hud_inspect",
+          "hud_panel_inspect",
+          "hud_panel_set",
+          "hud_panel_move",
+          "hud_settings_set",
+          "hud_label_set",
+          "hud_label_move",
+          "behavior_action",
+          "behavior_action_set",
+          "behavior_action_remove",
+          "scene_inspect",
+          "scene_transform",
+          "scene_create",
+          "scene_primitive",
+          "scene_rename",
+          "scene_duplicate",
+          "scene_delete",
+          "scene_transform_many",
+          "scene_delete_many",
+          "scene_duplicate_many",
+          "hud_activate",
+          "scene_undo",
+          "scene_redo",
+          "scene_replay",
+          "asset_inspect",
+          "asset_import",
+          "asset_refresh",
+          "asset_rename",
+          "scene_mesh",
+          "shader_refresh"
+        ],
+        "dirty": true,
+        "document_label": "procedural-demo",
+        "drafts_pending": false,
+        "history_evictions": 0,
+        "light_count": 0,
+        "lighting_mode": "legacy",
+        "loaded_format_version": 18,
+        "next_offset": null,
+        "object_count": 3,
+        "objects": [
+          {
+            "color": [
+              0.11999999731779099,
+              0.5799999833106995,
+              0.8500000238418579,
+              1.0
+            ],
+            "id": "left",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                -2.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "color": [
+              0.8999999761581421,
+              0.4000000059604645,
+              0.1599999964237213,
+              1.0
+            ],
+            "id": "center",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            }
+          },
+          {
+            "color": [
+              0.30000001192092896,
+              0.75,
+              0.44999998807907104,
+              1.0
+            ],
+            "id": "right",
+            "transform": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                2.0,
+                0.0,
+                0.0
+              ]
+            }
+          }
+        ],
+        "preview_fingerprint": "c8f582038015666b",
+        "preview_stale": true,
+        "preview_tick": "0",
+        "recovery_pending": false,
+        "revision": "4",
+        "scene_id": "procedural-demo",
+        "session_token": "localhost-fixture-1040495:scene:1",
+        "shader_revision": "0",
+        "target_count": 3,
+        "undo_len": 0,
+        "unresolved_assets": []
+      }
+    },
+    "command": {
+      "ok": true,
+      "result": {
+        "changed": true,
+        "changed_target_count": 1,
+        "diff": [
+          {
+            "after": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                -2.0,
+                0.0,
+                0.0
+              ]
+            },
+            "after_mesh": null,
+            "after_object": {
+              "color": [
+                0.11999999731779099,
+                0.5799999833106995,
+                0.8500000238418579,
+                1.0
+              ],
+              "id": "left",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  -2.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            "before": {
+              "rotation": [
+                0.0,
+                0.0,
+                0.0
+              ],
+              "scale": [
+                1.0,
+                1.0,
+                1.0
+              ],
+              "translation": [
+                0.0,
+                0.0,
+                0.0
+              ]
+            },
+            "before_mesh": null,
+            "before_object": {
+              "color": [
+                0.11999999731779099,
+                0.5799999833106995,
+                0.8500000238418579,
+                1.0
+              ],
+              "id": "left",
+              "transform": {
+                "rotation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ],
+                "scale": [
+                  1.0,
+                  1.0,
+                  1.0
+                ],
+                "translation": [
+                  0.0,
+                  0.0,
+                  0.0
+                ]
+              }
+            },
+            "object_id": "left"
+          }
+        ],
+        "diff_count": 1,
+        "diff_truncated": false,
+        "dirty": true,
+        "history_evictions": 0,
+        "light_diff": [],
+        "lighting": {
+          "mode": "legacy"
+        },
+        "lighting_changed": false,
+        "revision": "4",
+        "session_token": "localhost-fixture-1040495:scene:1"
+      }
+    },
+    "scene": {
+      "id": "procedural-demo",
+      "revision": 4,
+      "objects": [
+        {
+          "id": "left",
+          "transform": {
+            "translation": [
+              -2.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.12,
+            0.58,
+            0.85,
+            1.0
+          ]
+        },
+        {
+          "id": "center",
+          "transform": {
+            "translation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.9,
+            0.4,
+            0.16,
+            1.0
+          ]
+        },
+        {
+          "id": "right",
+          "transform": {
+            "translation": [
+              2.0,
+              0.0,
+              0.0
+            ],
+            "rotation": [
+              0.0,
+              0.0,
+              0.0
+            ],
+            "scale": [
+              1.0,
+              1.0,
+              1.0
+            ]
+          },
+          "color": [
+            0.3,
+            0.75,
+            0.45,
+            1.0
+          ]
+        }
+      ]
+    },
+    "png": "iVBORw0KGgoAAAANSUhEUgAAAwAAAAIACAYAAAA19gs6AAAkzUlEQVR4nO3dd7BdZfkv8JckkKBIiCSh/CQYRbGAWGCMXvUK9jZimbHXa59Rx9715zjWsdc/vHYdy1WxK/eq13bFAgqiXCkCagw1CeEEchIC/HgW7rBzcsre5+yy1no+n5ntaevsvc/aG/N83/d537WklHJ9+bfly5eXW97yluUWt7hFWbJkSWm766+/vuy11159H7Nz584yMTFRNm3aVLZs2VLmI871gQceWG5+85uXvffeu7TRfM9vr6655ppy1VVXlY0bNy7odRjGe34Qzw0AYBii8qoCwJo1a8rKlSurbw67cGuq6f7mKPD+/ve/l350n+t+HouZz8vll19e/vGPf5R+9PI6DMJ8nhsAwLAsvuH2n1MLoV4Kz+5jsgSG6Z7/zW52s2oEv9dR3sMPP3y3cz3Tecl4fnsx09/Y7+swysAbz22fffYxEwAA1MKiaIFY6CjofALDXEZ5zELF+YvzOJdO20+3fs/dQo7pNorzMmr9vA4zBd6ZzstC37/xuvfy3AAAhm1R9D+P2jCK3mEVbr2aWtjP95hRGUZgqEMg6+X9PNsxwwxk4/hvDQBgqkX77bdfaYNxB4ZYzDuXXo6pqzoHsu5jYjHvXHo5Zhja8t8aANBsi6buQDNdwfXRj360fPGLXyxf+tKXyhe+8IXy3ve+t6xdu7bMZtwtJne7292q59nt3ve+d/n4xz9efT7okd5edvKJY2Y7L/HcHv/4x+9xzB3ucIfymc98puoj/+xnP1v233//UnfzOb8veMELyvOf//wZj+klVCxevLjMpZdj4jzH+7379sQnPrF6D33iE5+ojrnrXe+6x3tsNm3d7QkAaJY99j2crnCLkcvXvva15eKLLy63uc1tylOe8pTylre8pTz72c8u11577cgWsfazEHPp0qVVwdzt17/+dXUbp9me/69+9atyn/vcp3z961/f9b34mx/96EeXM844o+zYsaM885nP3OP32rJIOBbLbt++fcafj3q9xIte9KJq4e7Uc9d5Dy1btmyP9xgAQN31vPF57Hsf+9+fc845VfEfI9J3utOdyp///OfyvOc9rypcY2R1/fr11c8nJyfLAx7wgPK0pz1t1/7q8f2DDjqoPP3pT69CxXXXXVfe9KY3VdtofuQjH6l6pKPQ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AAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEhEAAAAgEQEAAAASEQAAACARAQAAABIRAAAAIBEBAAAAEjkvwCCyzSDRSTAPAAAAABJRU5ErkJggg=="
+  }
+}

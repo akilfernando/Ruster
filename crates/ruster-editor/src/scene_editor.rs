@@ -392,6 +392,10 @@ enum RecoveryTransition {
     },
 }
 
+#[cfg(feature = "localhost-spike")]
+#[path = "../../../spikes/002-localhost-dashboard/src/authority.rs"]
+pub mod localhost_fixture;
+
 pub struct SceneEditor {
     session: Session,
     #[cfg(unix)]

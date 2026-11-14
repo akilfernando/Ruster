@@ -1,0 +1,265 @@
+{
+  "denials": [
+    {
+      "case": "missing_secret",
+      "status": 403
+    },
+    {
+      "case": "wrong_secret",
+      "status": 403
+    },
+    {
+      "case": "cross_origin",
+      "status": 403
+    },
+    {
+      "case": "wrong_host",
+      "status": 403
+    },
+    {
+      "case": "missing_origin",
+      "status": 403
+    },
+    {
+      "case": "no_edit_endpoint",
+      "status": 404
+    },
+    {
+      "case": "no_undo_endpoint",
+      "status": 404
+    },
+    {
+      "case": "no_save_endpoint",
+      "status": 404
+    }
+  ],
+  "idle": {
+    "seconds": 3.0004048430128023,
+    "before": {
+      "native": {
+        "cpu_ticks": 175,
+        "rss_kib": 313756
+      },
+      "host": {
+        "cpu_ticks": 8,
+        "rss_kib": 25104
+      }
+    },
+    "after": {
+      "native": {
+        "cpu_ticks": 175,
+        "rss_kib": 313756
+      },
+      "host": {
+        "cpu_ticks": 8,
+        "rss_kib": 25104
+      }
+    }
+  },
+  "active": {
+    "seconds": 1.284423795004841,
+    "before": {
+      "native": {
+        "cpu_ticks": 175,
+        "rss_kib": 313756
+      },
+      "host": {
+        "cpu_ticks": 8,
+        "rss_kib": 25104
+      }
+    },
+    "after": {
+      "native": {
+        "cpu_ticks": 298,
+        "rss_kib": 317968
+      },
+      "host": {
+        "cpu_ticks": 8,
+        "rss_kib": 25104
+      }
+    },
+    "rows": [
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 15,
+        "height": 512,
+        "native_total_ms": 142.300649,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 133.861264,
+        "read_only": true,
+        "render_cpu_ms": 2.251889,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 5.5774919999999995,
+        "width": 768,
+        "host_roundtrip_ms": 142.47169299051166
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 16,
+        "height": 512,
+        "native_total_ms": 146.93298900000002,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 140.670425,
+        "read_only": true,
+        "render_cpu_ms": 1.808437,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 4.030484,
+        "width": 768,
+        "host_roundtrip_ms": 147.03580099740066
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 17,
+        "height": 512,
+        "native_total_ms": 106.227589,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 97.750411,
+        "read_only": true,
+        "render_cpu_ms": 1.5338990000000001,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 6.602907,
+        "width": 768,
+        "host_roundtrip_ms": 106.34271500748582
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 18,
+        "height": 512,
+        "native_total_ms": 113.27329,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 106.622496,
+        "read_only": true,
+        "render_cpu_ms": 1.976786,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 4.290744,
+        "width": 768,
+        "host_roundtrip_ms": 113.46434301231056
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 19,
+        "height": 512,
+        "native_total_ms": 102.769127,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 97.400164,
+        "read_only": true,
+        "render_cpu_ms": 1.027217,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 3.9568650000000005,
+        "width": 768,
+        "host_roundtrip_ms": 102.963640994858
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 20,
+        "height": 512,
+        "native_total_ms": 101.626767,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 97.27188000000001,
+        "read_only": true,
+        "render_cpu_ms": 1.0181369999999998,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 2.96914,
+        "width": 768,
+        "host_roundtrip_ms": 101.91564599517733
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 21,
+        "height": 512,
+        "native_total_ms": 102.05779199999999,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 97.44328100000001,
+        "read_only": true,
+        "render_cpu_ms": 1.0016459999999998,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 3.1604229999999998,
+        "width": 768,
+        "host_roundtrip_ms": 102.33327798778191
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 22,
+        "height": 512,
+        "native_total_ms": 135.658007,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 130.598874,
+        "read_only": true,
+        "render_cpu_ms": 1.059135,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 3.238547,
+        "width": 768,
+        "host_roundtrip_ms": 135.94954201835208
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 23,
+        "height": 512,
+        "native_total_ms": 162.50056800000002,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 150.84314400000002,
+        "read_only": true,
+        "render_cpu_ms": 4.0890070000000005,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 5.20538,
+        "width": 768,
+        "host_roundtrip_ms": 162.77379301027395
+      },
+      {
+        "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+        "backend": "Vulkan",
+        "draw_calls": 1,
+        "frames": 24,
+        "height": 512,
+        "native_total_ms": 157.56219099999998,
+        "objects": 3,
+        "passes": 1,
+        "png_encode_ms": 151.397023,
+        "read_only": true,
+        "render_cpu_ms": 1.7474210000000001,
+        "render_only": false,
+        "revision": 0,
+        "submit_to_mapped_ms": 3.893702,
+        "width": 768,
+        "host_roundtrip_ms": 157.79270700295456
+      }
+    ]
+  },
+  "hz": 100
+}

@@ -1,0 +1,24 @@
+{
+  "url": "http://127.0.0.1:44295/",
+  "pid": 1018719,
+  "native_pid": 1018744,
+  "mode": "read-only disposable fixture",
+  "initial": {
+    "adapter": "NVIDIA GeForce RTX 4060 Laptop GPU",
+    "backend": "Vulkan",
+    "draw_calls": 1,
+    "frames": 3,
+    "height": 512,
+    "native_total_ms": 309.705663,
+    "objects": 3,
+    "passes": 3,
+    "png_encode_ms": 293.358321,
+    "read_only": true,
+    "render_cpu_ms": 10.794094999999999,
+    "render_only": false,
+    "revision": 0,
+    "submit_to_mapped_ms": 4.926302,
+    "width": 768,
+    "host_roundtrip_ms": 539.928134996444
+  }
+}

@@ -1,0 +1,1 @@
+First harness assertion checked stderr only; layer CURRENT-VALIDATION-ENABLED was actually emitted on stdout. Native exit was 0. Raw streams preserved. Corrected harness checks both streams and scans both.

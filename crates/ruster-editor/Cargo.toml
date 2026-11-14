@@ -7,6 +7,8 @@ license.workspace = true
 repository.workspace = true
 
 [features]
+# Isolated disposable experiment only; never enabled by default.
+localhost-spike = []
 # Developer-controlled native UI inspection; no listener unless explicitly enabled.
 inspection = ["eframe/inspection"]
 

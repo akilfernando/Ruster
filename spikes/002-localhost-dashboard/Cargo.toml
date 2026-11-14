@@ -1,0 +1,35 @@
+[package]
+name = "ruster-localhost-spike"
+version = "0.0.0"
+edition = "2021"
+
+[workspace]
+
+[patch.crates-io]
+wgpu-hal = { path = "../../third_party/wgpu-hal" }
+
+[features]
+default = ["localhost-spike"]
+localhost-spike = []
+inspection = ["eframe/inspection"]
+
+[dependencies]
+ruster-core = { path = "../../crates/ruster-core" }
+ruster-scene = { path = "../../crates/ruster-scene" }
+ruster-render = { path = "../../crates/ruster-render" }
+ruster-assets = { path = "../../crates/ruster-assets" }
+ruster-behavior = { path = "../../crates/ruster-behavior" }
+ruster-app = { path = "../../crates/ruster-app" }
+transform-gizmo-egui = { path = "../../crates/../third_party/transform-gizmo-egui" }
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "wgpu_no_default_features", "wayland", "x11", "accesskit", "clipboard"] }
+wgpu = { version = "30.0", default-features = false, features = ["std", "vulkan", "wgsl"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["raw_value"] }
+sha2 = "0.10.9"
+base64 = "0.22.1"
+png = "0.18.1"
+tempfile = "3"
+rustix = { version = "0.38.44", features = ["net", "process"] }
+
+pollster = "0.4"

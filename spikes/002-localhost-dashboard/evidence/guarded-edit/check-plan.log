@@ -1,0 +1,7 @@
+Plan: full: shared build inputs, check policy, or unrecognized files changed
+Check: Markdown whitespace and relative links
+Check: /home/akilf/.hermes/installs/a02ad27ec6505c9f/environments/75cae74325034a9b95923bb8e4b1e256/venv/bin/python3 -m unittest discover -s scripts/tests -v
+Check: cargo fmt -- --check
+Check: cargo clippy --workspace --all-targets --locked -- -D warnings
+Check: cargo test --workspace --locked
+Planned in 0.02s

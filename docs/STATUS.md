@@ -1,5 +1,9 @@
 # Current project status
 
+## Isolated localhost experiment — 2026-11-14
+
+Only this disposable worktree: [guarded edit/shared Undo spike](../spikes/002-localhost-dashboard/README.md) now passes real browser/native SceneEditor history and revision-pinned Vulkan image consistency, stale/wrong-session/wrong-Origin/forbidden-operation refusal, release lint/format and Core+Synchronization logging/scans. Explicit startup fixture grant is not production authority. Save, production/native/manual authority integration, representative performance and ChatGPT remain unqualified. Host/native stopped, token deleted and GPU QA gate released; no canonical/client/profile/user-project changes. This does not advance or restart E2a CP2 below.
+
 Updated 2026-11-14. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
 ## E2a CP2 immutable invocation capsule; execution HOLD — 2026-11-14

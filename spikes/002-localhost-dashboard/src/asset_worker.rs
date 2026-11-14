@@ -1,0 +1,1 @@
+../../../crates/ruster-editor/src/asset_worker.rs
