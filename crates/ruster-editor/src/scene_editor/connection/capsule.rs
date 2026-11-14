@@ -9,13 +9,16 @@ use std::{
     path::{Path, PathBuf},
 };
 
-#[derive(Clone)]
+#[derive(Clone, serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct Artifact {
     pub(super) path: PathBuf,
     /// Digest from a caller-qualified matched build, never learned from this file.
     pub(super) sha256: String,
 }
 
+#[derive(serde::Deserialize, serde::Serialize)]
+#[serde(deny_unknown_fields)]
 pub(super) struct LaunchSpec {
     pub(super) launcher: Artifact,
     pub(super) interpreter: Artifact,
@@ -133,6 +136,76 @@ pub(super) struct Provenance {
 }
 
 impl Provenance {
+    /// Import an explicitly selected qualification receipt, never discover or
+    /// self-qualify a launcher. The digest must come from the owner's independent
+    /// qualification. Its strict-inspection snapshot is an exact CAS precondition,
+    /// not a claim that the current entry still equals that snapshot.
+    pub(super) fn from_companion_manifest(
+        path: &Path,
+        digest: &str,
+        profile: &str,
+        locator: &Path,
+        remove: bool,
+    ) -> Result<super::consent::RegistrationConsent, String> {
+        #[derive(serde::Deserialize)]
+        #[serde(deny_unknown_fields)]
+        struct Companion {
+            version: u32,
+            editor_sha256: String,
+            launch: LaunchSpec,
+            inspection: Value,
+        }
+        literal(path)?;
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+        {
+            return Err("Requires an explicit lowercase SHA256 qualification digest.".into());
+        }
+        let manifest = Artifact {
+            path: path.into(),
+            sha256: digest.into(),
+        };
+        Pin::artifact(&manifest)?;
+        let mut bytes = Vec::new();
+        File::open(path)
+            .map_err(|_| "Cannot open companion manifest.")?
+            .take(1024 * 1024 + 1)
+            .read_to_end(&mut bytes)
+            .map_err(|_| "Cannot read companion manifest.")?;
+        if bytes.len() > 1024 * 1024 || format!("{:x}", Sha256::digest(&bytes)) != digest {
+            return Err("Companion manifest changed or exceeds the bounded input.".into());
+        }
+        let mut companion: Companion =
+            serde_json::from_slice(&bytes).map_err(|_| "Invalid qualified companion manifest.")?;
+        if companion.version != 1
+            || companion.launch.context["profile"].as_str() != Some(profile)
+            || companion.inspection
+                != serde_json::json!({"ok":true,"context":companion.launch.context,
+                "present":companion.inspection["present"],"entry":companion.inspection["entry"]})
+        {
+            return Err(
+                "Selected named profile or exact strict inspection does not match the manifest."
+                    .into(),
+            );
+        }
+        let editor = Artifact {
+            path: std::env::current_exe().map_err(|_| "Cannot identify running editor.")?,
+            sha256: companion.editor_sha256,
+        };
+        Pin::artifact(&editor)?;
+        companion.launch.runtime.extend([manifest, editor]);
+        let selection = serde_json::json!({"present":companion.inspection["present"],"entry":companion.inspection["entry"]});
+        super::consent::RegistrationConsent::preview_bound(
+            Self::freeze(companion.launch)?,
+            "rusterize",
+            locator,
+            selection,
+            remove,
+        )
+    }
+
     pub(super) fn freeze(spec: LaunchSpec) -> Result<Self, String> {
         if spec
             .environment
@@ -266,7 +339,7 @@ impl Provenance {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use serde_json::json;
     use std::os::unix::fs::{MetadataExt, PermissionsExt};
@@ -280,7 +353,7 @@ mod tests {
         }
     }
 
-    fn fixture(root: &std::path::Path) -> LaunchSpec {
+    pub(crate) fn fixture(root: &std::path::Path) -> LaunchSpec {
         let launcher = artifact(&root.join("launcher"), b"never execute");
         let interpreter = artifact(&root.join("python"), b"interpreter");
         let build = artifact(&root.join("build"), b"matched manifest");

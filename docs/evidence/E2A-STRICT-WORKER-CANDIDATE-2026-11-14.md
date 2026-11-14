@@ -100,3 +100,86 @@ that reviewed API. A shared-runtime promotion must separately use the existing
 safe review/cutover procedure after this active conversation; only then schedule
 one preflighted guarded default-build actual-client journey. No background task
 is implied by these queued steps.
+
+## Paused UI continuation — ChatGPT priority change
+
+The user changed primary focus to actual ChatGPT inspect/edit/readback/Undo and
+then real in-chat preview. **Hermes-only continuation is PAUSED by user direction,
+not running.** This supersedes the prior continuation objective, not the accepted
+strict-worker contract. Parent retains implementation ownership for ChatGPT.
+
+Partial changes on the isolated branch, based on reviewed `70c4058`:
+
+- `capsule.rs`: strict serde import of an explicitly selected version1 companion
+  receipt, pinned by an independently supplied lowercase SHA256; exact explicit
+  profile/inspection match; running editor hash match; manifest/editor pins added
+  to the existing frozen provenance. Reuses `LaunchSpec`, raw expected selection
+  and `RegistrationConsent::preview_bound`. No auto-discovery, qualification from
+  an absolute path, profile creation or configuration writer. A user-entered
+  digest selects external qualification; it does not prove that qualification or
+  make the receipt a shipped trusted resolver. Manifest read is capped at1MiB,
+  but initial `Pin::artifact` hashing is not size-capped before reading (WIP).
+- `native.rs`: actual blank-by-default named-profile/manifest/digest inputs,
+  explicit listener prerequisite, frozen preview and cancel/confirm-refusal path.
+  Shows config target, launcher/adapter/locator/argv, intended change, project and
+  session guards, separate socket-owner approval, immediate asset persistence,
+  separate Save/export grants, manual restart and Disconnect/removal distinction.
+  Old raw values are intentionally not painted, to avoid exposing prior secrets.
+  Input/scene/locator/provenance changes reject confirmation. Production factory
+  remains unmodified and refuses before any executable launch.
+- `consent.rs`: Clone support for existing temporary egui state; no worker or
+  registration authority was enabled. Clone/state ownership remains unreviewed.
+- Async preparation scaffolding (`RegistrationPreparation`, `pending`) was added
+  immediately before steering arrived, but **is unused/unwired**. Do not infer an
+  off-UI path or completed worker lifecycle. No new thread is launched by it.
+
+### Actual checks and known failure
+
+All logs are under `/home/akilf/Projects/Ruster-Audits/e2a-strict-worker-20261114`.
+
+- `ui-red.log`: real-widget explicit-input test initially fails because the
+  registration preview button is absent. Focused test then passes1case after
+  implementation. One missing `Path` import compile error was repaired.
+- `ui-journey-first.log`: first expanded headless real-widget test hits its120s
+  harness limit. This is a failed attempt, not a successful native journey.
+- `ui-journey-second.log`: same test completes1pass in121.53s: explicit listener,
+  qualified manifest preview, painted disclosures, Escape cancel, changed-profile
+  rejection, valid production refusal, changed-manifest rejection, exact config
+  and authored-state preservation, Disconnect/locator retirement.
+- `ui-nonblocking-red.log`: subsequently added responsiveness assertion fails
+  after34.40s. Provenance hashing includes the532179912-byte debug test executable
+  and blocks the editor thread. **This remains RED in final WIP source.** Do not
+  promote this UI or call onboarding complete. Input/manifest work must be moved
+  off-thread if this Hermes-specific path is resumed, with scoped result adoption
+  and cancellation; the skeleton is not the repair.
+- Scoped formatting and `git diff --check` pass. No final compile/default binary,
+  strict Clippy, affected package gate, native keyboard/GUI or actual-client run
+  follows the user's stop instruction. Prior172tests/native/build evidence only
+  covers unchanged reviewed inputs; it does not qualify this WIP UI.
+
+### Cleanup and handoff boundary
+
+`ui-stop-cleanup.json` verifies dead test processes1463317/1463993, exact owned
+locator directories absent after UID/device/inode-checked cleanup, and shared
+gateway693372alive. One cleanup preparation found that the second test's socket
+had already disappeared; only exact identity-scoped cleanup was repeated, never
+an authoring/configuration mutation. The timeout's marker-verified fixture moved
+from scratch into `ui-timeout-fixture-preserved/` for retained failure evidence.
+No native GUI, clipboard action, install, runtime promotion, profile/config write,
+shared restart or canonical dirty-tree edit occurred. No owned process remains.
+
+Reusable for ChatGPT: existing Host project/session/socket-owner authority,
+prelaunch observations, explicit human consent, fail-closed frozen companion
+identity patterns, immediate-persistence and destination-grant disclosures, and
+Disconnect/retirement. The new manifest importer currently bundles Hermes strict
+inspection and should not be transplanted wholesale as a generic client API.
+Hermes-only: named-profile selection, strict MCP inspect/apply receipt schema,
+manual Hermes restart language and registration/removal UI. These are **not on
+the ChatGPT critical path without causal evidence**. Parent should first establish
+the actual ChatGPT product/transport and first inspect/edit/readback/Undo, then
+in-chat preview. No further Hermes work is queued by this paused child.
+
+For Hermes alone, installed strict API/runtime cutover remains necessary, but is
+not sufficient: owner review/promotion of the production hold and the unfinished
+UI responsiveness/lifecycle still remain. No truthful single action now unblocks
+full Hermes onboarding; do not sell a runtime cutover as completing this WIP.

@@ -26,7 +26,7 @@ impl Invocation {
     }
 }
 
-#[derive(PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq)]
 enum State {
     Preview,
     Cancelled,
@@ -39,6 +39,7 @@ enum State {
 }
 
 /// This seam deliberately cannot choose a profile, launch a process, or retry.
+#[derive(Clone)]
 pub(super) struct RegistrationConsent {
     invocation: Invocation,
     state: State,

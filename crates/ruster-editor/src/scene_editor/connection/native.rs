@@ -7,6 +7,53 @@ pub(super) struct NativeUi {
     preview: Option<Preview>,
     focus_cancel: bool,
     notice: String,
+    #[cfg(target_os = "linux")]
+    registration: RegistrationUi,
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone, Default)]
+struct RegistrationUi {
+    profile: String,
+    manifest: String,
+    digest: String,
+    remove: bool,
+    preview: Option<RegistrationPreview>,
+    pending: Option<std::sync::Arc<RegistrationPreparation>>,
+}
+
+#[cfg(target_os = "linux")]
+struct RegistrationPreparation {
+    result: std::sync::Mutex<std::sync::mpsc::Receiver<Result<RegistrationPreview, String>>>,
+    cancelled: std::sync::atomic::AtomicBool,
+}
+
+#[cfg(target_os = "linux")]
+impl RegistrationPreparation {
+    fn start(
+        work: impl FnOnce() -> Result<RegistrationPreview, String> + Send + 'static,
+    ) -> Result<std::sync::Arc<Self>, String> {
+        let (send, result) = std::sync::mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("hermes-consent-preflight".into())
+            .spawn(move || {
+                let _ = send.send(work());
+            })
+            .map_err(|_| "Cannot start bounded registration preflight.")?;
+        Ok(std::sync::Arc::new(Self {
+            result: std::sync::Mutex::new(result),
+            cancelled: std::sync::atomic::AtomicBool::new(false),
+        }))
+    }
+}
+
+#[cfg(target_os = "linux")]
+#[derive(Clone)]
+struct RegistrationPreview {
+    consent: super::consent::RegistrationConsent,
+    observation: SceneObservation,
+    locator: PathBuf,
+    inputs: (String, String, String, bool),
 }
 
 /// Local human-visible readback only. These are concurrency guards, never the
@@ -32,6 +79,138 @@ struct Preview {
 }
 
 impl Host {
+    #[cfg(target_os = "linux")]
+    fn registration_controls_ui(&mut self, ui: &mut egui::Ui, state: &mut NativeUi) {
+        ui.separator();
+        ui.heading("Hermes registration · production held");
+        ui.label("Explicit named profile (never default)");
+        ui.text_edit_singleline(&mut state.registration.profile);
+        ui.label("Qualified companion manifest · absolute path");
+        ui.text_edit_singleline(&mut state.registration.manifest);
+        ui.label("Manifest SHA256 from independent qualification receipt");
+        ui.text_edit_singleline(&mut state.registration.digest);
+        ui.checkbox(
+            &mut state.registration.remove,
+            "Remove this exact registration",
+        );
+        ui.label("No profile discovery, creation, default selection or runtime installation. A digest pins your selected qualification receipt; it is not host attestation.");
+        if ui.button("Preview Hermes registration").clicked() {
+            state.registration.preview = None;
+            match self.registration_preview(&state.registration) {
+                Ok(preview) => {
+                    state.registration.preview = Some(preview);
+                    state.focus_cancel = true;
+                    state.notice.clear();
+                }
+                Err(error) => state.notice = error,
+            }
+        }
+        if let Some(preview) = state.registration.preview.clone() {
+            egui::Modal::new(egui::Id::unique("hermes_registration_consent")).show(ui.ctx(), |ui| {
+                ui.heading("Review exact Hermes configuration change");
+                let invocation = preview.consent.invocation();
+                let provenance = invocation.provenance().expect("bound preview");
+                ui.label(format!("Named profile: {}", provenance.profile()));
+                ui.label(format!("Exact config target: {}", provenance.context()["config"]["path"].as_str().unwrap_or("unavailable")));
+                ui.label(format!("Launcher: {}", provenance.launcher().display()));
+                ui.label(format!("Matched adapter: {}", provenance.adapter().display()));
+                ui.label(format!("Nonsecret locator: {}", preview.locator.display()));
+                ui.label(format!("Frozen argv: {:?}", invocation.args()));
+                // Show only the intended fields, not arbitrary raw old-entry secrets.
+                let request: Value = serde_json::from_str(invocation.stdin()).expect("prepared request");
+                ui.label(format!("Change: {} · exact old-entry conditional check (raw values withheld)", if request["entry"].is_null() { "remove" } else if request["expected"]["present"] == true { "replace/reuse" } else { "create" }));
+                ui.label(format!("Desired entry: {}", request["entry"]));
+                ui.label(format!("Project: {} · Session: {} · Generation: {}", self.editor.document_label(), preview.observation.incarnation, preview.observation.project_generation));
+                Self::scene_observation_ui(ui, &preview.observation, "Frozen ");
+                ui.label("Registration is NOT project approval. The actual client must establish its own socket owner; approve that same adapter separately for this project/session only. No automatic retarget or reconnect.");
+                ui.label("Asset catalog changes can persist immediately, before Save. Save/export destinations need separate grants.");
+                ui.label("Manual client restart required after registration/removal; shared gateway is never restarted here. Disconnect revokes editor authority; it does not remove configuration.");
+                ui.label("Production held: qualified installed strict API and owner review are still required. Confirm currently refuses before launch; it cannot enable the candidate executor.");
+                let cancel = ui.button("Cancel Hermes registration");
+                if state.focus_cancel { cancel.request_focus(); state.focus_cancel = false; }
+                let escape = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                if cancel.clicked() || escape {
+                    if let Some(mut preview) = state.registration.preview.take() { preview.consent.cancel(); }
+                    state.notice = "Registration cancelled; no request dispatched".into();
+                } else if ui.button("Confirm Hermes registration").clicked() {
+                    let preview = state.registration.preview.take().expect("pending preview");
+                    state.notice = self.confirm_registration(preview, &state.registration);
+                }
+            });
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    fn registration_preview(&self, inputs: &RegistrationUi) -> Result<RegistrationPreview, String> {
+        if inputs.profile.is_empty()
+            || inputs.profile == "default"
+            || inputs.manifest.is_empty()
+            || inputs.digest.is_empty()
+        {
+            return Err("Select an explicit non-default named profile and qualified companion manifest/digest; no defaults were selected.".into());
+        }
+        let locator = self
+            .bridge
+            .as_ref()
+            .filter(|bridge| bridge.authority().live())
+            .map(crate::bridge::Bridge::locator_path)
+            .ok_or(
+                "Start the project-local listener before preview; no registration was attempted.",
+            )?;
+        let consent = super::capsule::Provenance::from_companion_manifest(
+            std::path::Path::new(&inputs.manifest),
+            &inputs.digest,
+            &inputs.profile,
+            &locator,
+            inputs.remove,
+        )?;
+        Ok(RegistrationPreview {
+            consent,
+            observation: self.native_scene_observation(),
+            locator,
+            inputs: (
+                inputs.profile.clone(),
+                inputs.manifest.clone(),
+                inputs.digest.clone(),
+                inputs.remove,
+            ),
+        })
+    }
+
+    #[cfg(target_os = "linux")]
+    fn confirm_registration(
+        &self,
+        preview: RegistrationPreview,
+        inputs: &RegistrationUi,
+    ) -> String {
+        let unchanged = preview.inputs
+            == (
+                inputs.profile.clone(),
+                inputs.manifest.clone(),
+                inputs.digest.clone(),
+                inputs.remove,
+            )
+            && preview.observation == self.native_scene_observation()
+            && self.bridge.as_ref().is_some_and(|bridge| {
+                bridge.authority().live() && bridge.locator_path() == preview.locator
+            })
+            && self.editor.recovery_transition.is_none()
+            && !self.editor.close_in_progress();
+        if !unchanged
+            || preview
+                .consent
+                .invocation()
+                .provenance()
+                .is_none_or(|p| p.revalidate().is_err())
+        {
+            return "Registration context changed; consent discarded. No process launched; review again.".into();
+        }
+        match super::worker::Worker::start(preview.consent) {
+            Err(error) => error,
+            Ok(_) => "Registration worker pending; editor binding separate.".into(),
+        }
+    }
+
     /// Supported local observation, including when no listener/adapter exists.
     /// Does not dispatch a tool, start a listener, approve or claim an owner.
     pub(super) fn native_scene_observation(&self) -> SceneObservation {
@@ -173,7 +352,10 @@ impl Host {
             state.preview = None;
             self.disconnect_adapter();
         }
-        ui.label("Automatic Hermes registration is unavailable; no client configuration is changed here.");
+        #[cfg(target_os = "linux")]
+        self.registration_controls_ui(ui, state);
+        #[cfg(not(target_os = "linux"))]
+        ui.label("Automatic Hermes registration is unavailable on this platform.");
         if !state.notice.is_empty() {
             ui.label(&state.notice);
         }
@@ -273,6 +455,101 @@ mod tests {
                 modifiers: egui::Modifiers::NONE,
             }],
         );
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn registration_requires_explicit_qualified_inputs_without_selecting_default() {
+        let ctx = egui::Context::default();
+        let mut host = super::super::tests::host("registration-inputs");
+        let before = host.editor.session.snapshot_bytes().unwrap();
+        let mut state = NativeUi::default();
+        click(&mut host, &ctx, &mut state, "Preview Hermes registration");
+        assert!(state.notice.contains("explicit"), "{}", state.notice);
+        assert!(host.bridge.is_none());
+        assert_eq!(before, host.editor.session.snapshot_bytes().unwrap());
+    }
+
+    #[test]
+    #[cfg(target_os = "linux")]
+    fn qualified_manifest_native_preview_cancels_rejects_changes_and_keeps_production_held() {
+        use sha2::{Digest, Sha256};
+        let dir = tempfile::tempdir().unwrap();
+        let spec = super::super::capsule::tests::fixture(dir.path());
+        let manifest_path = dir.path().join("companion.json");
+        let manifest = json!({"version":1,
+            "editor_sha256":format!("{:x}",Sha256::digest(std::fs::read(std::env::current_exe().unwrap()).unwrap())),
+            "inspection":{"ok":true,"context":spec.context,"present":false,"entry":null},
+            "launch":spec});
+        let bytes = serde_json::to_vec(&manifest).unwrap();
+        std::fs::write(&manifest_path, &bytes).unwrap();
+        let ctx = egui::Context::default();
+        let mut host = super::super::tests::host("qualified-preview");
+        let before = host.editor.session.snapshot_bytes().unwrap();
+        let mut state = NativeUi::default();
+        state.registration.profile = "named".into();
+        state.registration.manifest = manifest_path.to_str().unwrap().into();
+        state.registration.digest = format!("{:x}", Sha256::digest(&bytes));
+        click(&mut host, &ctx, &mut state, "Preview Hermes registration");
+        assert!(
+            state.registration.preview.is_none(),
+            "listener must be explicit"
+        );
+        assert!(host.bridge.is_none());
+        click(&mut host, &ctx, &mut state, "Connect AI");
+        click(&mut host, &ctx, &mut state, "Confirm AI connection");
+        let locator = host.bridge.as_ref().unwrap().locator_path();
+        let config = dir.path().join("profiles/named/config.yaml");
+        let original = std::fs::read(&config).unwrap();
+        let started = std::time::Instant::now();
+        click(&mut host, &ctx, &mut state, "Preview Hermes registration");
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(2),
+            "qualification IO must not block the editor thread"
+        );
+        assert!(state.registration.preview.is_some(), "{}", state.notice);
+        let painted = paint(&mut host, &ctx, &mut state, vec![]);
+        for label in ["Named profile: named", "Asset catalog changes can persist immediately, before Save. Save/export destinations need separate grants."] {
+            assert!(painted.iter().any(|(text, _)| text == label), "missing {label}");
+        }
+        paint(
+            &mut host,
+            &ctx,
+            &mut state,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        assert!(state.registration.preview.is_none());
+        assert!(state.notice.contains("cancelled"));
+        click(&mut host, &ctx, &mut state, "Preview Hermes registration");
+        state.registration.profile = "other".into();
+        click(&mut host, &ctx, &mut state, "Confirm Hermes registration");
+        assert!(state.notice.contains("context changed"));
+        state.registration.profile = "named".into();
+        click(&mut host, &ctx, &mut state, "Preview Hermes registration");
+        click(&mut host, &ctx, &mut state, "Confirm Hermes registration");
+        assert!(
+            state.notice.contains("No process launched"),
+            "{}",
+            state.notice
+        );
+        assert!(state.registration.preview.is_none());
+        click(&mut host, &ctx, &mut state, "Preview Hermes registration");
+        std::fs::write(&manifest_path, b"changed").unwrap();
+        click(&mut host, &ctx, &mut state, "Confirm Hermes registration");
+        assert!(state.notice.contains("context changed"));
+        click(&mut host, &ctx, &mut state, "Preview Hermes registration");
+        assert!(state.registration.preview.is_none());
+        assert_eq!(std::fs::read(&config).unwrap(), original);
+        assert_eq!(before, host.editor.session.snapshot_bytes().unwrap());
+        click(&mut host, &ctx, &mut state, "Disconnect AI");
+        super::super::tests::retire(&mut host, &ctx);
+        assert!(!locator.exists());
     }
 
     #[test]
