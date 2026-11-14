@@ -159,6 +159,20 @@ fn direct_image_host_fixture() {
         } else {
             None
         };
+        // Cheap browser invalidation receipt: no PNG encoding or extra capture.
+        // This remains inside the disposable fixture, not a production endpoint.
+        if interactive {
+            let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
+            let v = &view["result"];
+            let status = json!({
+                "live": host.bridge.as_ref().is_some_and(|b| b.authority().live()),
+                "session_token": v["session_token"], "revision": v["revision"],
+                "view_revision": v["view_revision"],
+                "draft_reserved": reservation.is_some()
+            });
+            std::fs::write(out.join("status.tmp"), status.to_string()).unwrap();
+            std::fs::rename(out.join("status.tmp"), out.join("status.json")).unwrap();
+        }
         count += 1;
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(

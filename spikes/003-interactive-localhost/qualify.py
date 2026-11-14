@@ -39,6 +39,7 @@ class CDP:
         assert 'exceptionDetails' not in r,r
         return r['result'].get('value')
     def click(self,selector):
+        wait(lambda:self.js("!busy"))
         xy=self.js("(()=>{const r=document.querySelector("+json.dumps(selector)+").getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2}})()")
         for kind in ['mousePressed','mouseReleased']:
             self.call('Input.dispatchMouseEvent',{'type':kind,**xy,'button':'left','clickCount':1})
@@ -92,7 +93,11 @@ def main():
             wait(lambda:(profile/'DevToolsActivePort').exists());port=(profile/'DevToolsActivePort').read_text().splitlines()[0]
             targets=json.load(urllib.request.urlopen('http://127.0.0.1:'+port+'/json'));target=next(t for t in targets if t.get('url')==info['url']);c=CDP(target['webSocketDebuggerUrl'])
             c.call('Emulation.setDeviceMetricsOverride',{'width':1250,'height':1000,'deviceScaleFactor':1,'mobile':False});c.call('Page.bringToFront');wait(lambda:c.js("typeof operate==='function'"))
+            c.js("window.observation={active:0,max:0,status:0,frames:0};window.realFetch=fetch;window.fetch=async(...args)=>{const o=observation;o.active++;o.max=Math.max(o.max,o.active);if(args[0]==='/status')o.status++;else o.frames++;try{if(args[0]==='/status'&&window.injectStatusFailure){await new Promise(r=>setTimeout(r,1200));return new Response('{}',{status:503})}return await realFetch(...args)}finally{o.active--}}")
             c.js("document.querySelector('#capability').value="+json.dumps(token));c.click('#connect');base=c.snapshot()
+            time.sleep(2.6)
+            idle=c.js('({...observation})');assert idle['status']>=2 and idle['frames']==1 and idle['max']==1,idle
+            record['idle_observation']=idle
             assert base['scene']['session_token']==tool('scene_inspect')['result']['session_token']
             for action in ['right','panright','in']:c.click('[data-camera="'+action+'"]')
             navigated=c.snapshot();assert navigated['view']['camera']!=base['view']['camera'];assert tool('viewport_inspect')['result']['camera']==navigated['view']['camera']
@@ -110,12 +115,42 @@ def main():
             manual=c.snapshot();assert manual['scene']['revision']=='1';assert tool('scene_inspect')['result']['objects']==manual['scene']['objects'];assert manual['png']!=original['png']
             guarded['expected_revision']='1';guarded['transform']=json.loads(json.dumps(manual['scene']['objects'][1]['transform']));guarded['transform']['translation'][0]=2.5
             changed=tool('scene_transform',guarded);assert changed['ok'],changed
-            c.click('#connect');agent=c.snapshot();assert agent['scene']['revision']=='2';assert agent['scene']['objects'][1]['transform']['translation'][0]==2.5;assert agent['view']['active_object_id']=='center';assert agent['png']!=manual['png']
+            wait(lambda:c.js("current.scene.revision==='2' && !busy"));agent=c.snapshot();assert agent['scene']['revision']=='2';assert agent['scene']['objects'][1]['transform']['translation'][0]==2.5;assert agent['view']['active_object_id']=='center';assert agent['png']!=manual['png']
             c.click('#undo');undone=c.snapshot();assert undone['scene']['revision']=='3';assert undone['scene']['objects']==manual['scene']['objects'];assert undone['png']==manual['png']
             assert tool('scene_undo',{'expected_session_token':agent['scene']['session_token'],'expected_revision':'3'})['ok']
-            c.click('#connect');restored=c.snapshot();assert restored['scene']['revision']=='4';assert restored['scene']['objects']==original['scene']['objects'];assert restored['png']==original['png']
+            wait(lambda:c.js("current.scene.revision==='4' && !busy"));restored=c.snapshot();assert restored['scene']['revision']=='4';assert restored['scene']['objects']==original['scene']['objects'];assert restored['png']==original['png']
             # Stale local writes are not silently rebased; native draft still blocks agent.
             c.click('#begin');c.js("document.querySelector('#translation0').value='7'")
+            time.sleep(2)
+            assert c.js("document.querySelector('#translation0').value")=='7'
+            assert tool('scene_inspect')['result']['drafts_pending']
+            refreshed=c.js("operate('refresh',{},true)");assert refreshed['status']=='completed'
+            assert c.js("document.querySelector('#translation0').value")=='7'
+            # Offline pauses automatic observation, then resumes without a manual refresh.
+            c.call('Network.enable')
+            c.call('Network.emulateNetworkConditions',{'offline':True,'latency':0,'downloadThroughput':-1,'uploadThroughput':-1})
+            time.sleep(.3);before=c.js('observation.status');time.sleep(1.7);assert c.js('observation.status')==before
+            c.call('Network.emulateNetworkConditions',{'offline':False,'latency':0,'downloadThroughput':-1,'uploadThroughput':-1})
+            wait(lambda:c.js('observation.status')>before)
+            # A separate owned headless tab hides this page, no desktop input.
+            other=c.call('Target.createTarget',{'url':'about:blank'})['targetId']
+            targets=json.load(urllib.request.urlopen('http://127.0.0.1:'+port+'/json'));other_url=next(t['webSocketDebuggerUrl'] for t in targets if t['id']==other)
+            other_c=CDP(other_url);other_c.call('Page.bringToFront');time.sleep(.3)
+            hidden=c.js('document.hidden');record['hidden_page_observed']=hidden
+            assert hidden,'headless tab switch did not hide qualification page'
+            before=c.js('observation.status');time.sleep(1.7);assert c.js('observation.status')==before
+            c.call('Page.bringToFront');other_c.ws.close();c.call('Target.closeTarget',{'targetId':other});wait(lambda:c.js('observation.status')>before)
+            assert c.js("document.querySelector('#translation0').value")=='7'
+            # Inject a delayed read-only transport failure, not a native scene result.
+            c.js('window.injectStatusFailure=true');before_frames=c.js('observation.frames')
+            wait(lambda:c.js('busy && observation.active===1'))
+            refused_busy=c.js("operate('refresh')");assert refused_busy['status']=='busy-refused'
+            c.js("document.querySelector('#connect').click()");assert c.js("autoEnabled && outcomes.at(-1).status==='busy-refused'")
+            wait(lambda:c.js('!busy && autoDelay===1500'))
+            assert c.js('observation.frames')==before_frames
+            assert c.js("document.querySelector('#translation0').value")=='7'
+            record['injected_status_failure_backoff_ms']=c.js('autoDelay')
+            c.js('window.injectStatusFailure=false');wait(lambda:c.js('!busy && autoDelay===750'))
             stale=c.js("operate('scene_transform',{...pins(false,draft.source),expected_revision:'0',object_id:'center',transform:current.scene.objects[1].transform})")
             assert stale['status']=='failed';assert c.js("document.querySelector('#translation0').value")=='7';assert tool('scene_inspect')['result']['drafts_pending']
             c.js("document.querySelector('#translation0').focus()");c.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'Escape','code':'Escape','windowsVirtualKeyCode':27});c.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'Escape','code':'Escape','windowsVirtualKeyCode':27});wait(lambda:c.js('!busy && !draft'))
@@ -125,9 +160,13 @@ def main():
                 headers={'Origin':info['url'].rstrip('/'),'Content-Type':'application/json','X-Workspace-Capability':token,**override}
                 try:urllib.request.urlopen(urllib.request.Request(info['url']+'operation',data=b'{"op":"refresh","args":{}}',headers=headers));raise AssertionError('boundary accepted')
                 except urllib.error.HTTPError as e:assert e.code==403;negatives.append(override.keys().__iter__().__next__())
+            for override in [{'Origin':'http://evil.invalid'},{'X-Workspace-Capability':'wrong'},{'Host':'evil.invalid'}]:
+                headers={'Origin':info['url'].rstrip('/'),'X-Workspace-Capability':token,**override}
+                try:urllib.request.urlopen(urllib.request.Request(info['url']+'status',data=b'',headers=headers));raise AssertionError('status boundary accepted')
+                except urllib.error.HTTPError as e:assert e.code==403
             denied=c.js("operate('scene_save',{})");assert denied['status']=='failed' and denied['error']=='Error: forbidden_operation'
             burst=c.js("Promise.all(Array.from({length:80},()=>operate('refresh')))");assert sum(r['status']=='completed' for r in burst)==1;assert sum(r['status']=='busy-refused' for r in burst)==79;assert c.js('outcomes.length')<=64
-            preserved_samples=c.js('samples')
+            preserved_samples=c.js('samples');record['observation']=c.js('({...observation})');assert record['observation']['max']==1
             c.click('#begin');c.call('Page.reload');wait(lambda:c.js("typeof operate==='function' && current===null"));c.js("document.querySelector('#capability').value="+json.dumps(token));c.click('#connect')
             assert c.js('current.draft_reserved && !draft && !document.querySelector("#cancel").disabled')
             assert tool('scene_inspect')['result']['drafts_pending'];c.click('#cancel');assert not tool('scene_inspect')['result']['drafts_pending']

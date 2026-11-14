@@ -76,6 +76,16 @@ def main():
             self.reply(200, (ROOT/'workspace.html').read_text().replace('NONCE',nonce).encode(), 'text/html; charset=utf-8')
         def do_POST(self):
             if self.headers.get('Host') != authority or self.headers.get('Origin') != 'http://'+authority or not hmac.compare_digest(self.headers.get('X-Workspace-Capability',''),token): return self.reply(403,b'{"error":"denied"}')
+            if self.path == '/status':
+                # Same capability/origin boundary; observe only this exact native owner.
+                # Never dispatch a render or consume an MCP adapter owner for polling.
+                if host.poll() is not None: return self.reply(503,b'{"error":"native owner stopped"}')
+                try:
+                    observed = json.loads((run/'status.json').read_text())
+                    if not observed['live']: return self.reply(403,b'{"error":"revoked"}')
+                    return self.reply(200,json.dumps(observed).encode())
+                except (OSError, ValueError, KeyError):
+                    return self.reply(503,b'{"error":"status unavailable"}')
             if self.path != '/operation': return self.reply(404,b'{}')
             try:
                 size = int(self.headers.get('Content-Length','0'))
