@@ -106,6 +106,62 @@ def main():
             idle=c.js('({...observation})');assert idle['status']>=2 and idle['frames']==1 and idle['max']==1,idle
             record['idle_observation']=idle
             assert base['scene']['session_token']==tool('scene_inspect')['result']['session_token']
+            # Actual mouse navigation, no DOM-dispatched movement or browser scene.
+            def settled():
+                wait(lambda:c.js('!busy && !cameraFlight && !cameraIntent && cameraTimer===null'))
+            def drag(button,dx,dy,modifiers=0,cancel=None):
+                settled();wait(lambda:c.js('!busy'))
+                xy=c.js("(()=>{const r=frame.getBoundingClientRect();return {x:r.x+r.width*.5,y:r.y+r.height*.5}})()")
+                c.call('Input.dispatchMouseEvent',{'type':'mousePressed',**xy,'button':button,'buttons':{'left':1,'right':2,'middle':4}[button],'clickCount':1,'modifiers':modifiers})
+                for i in range(1,9):
+                    c.call('Input.dispatchMouseEvent',{'type':'mouseMoved','x':xy['x']+dx*i/8,'y':xy['y']+dy*i/8,'button':button,'buttons':{'left':1,'right':2,'middle':4}[button],'modifiers':modifiers})
+                if cancel=='escape':
+                    c.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'Escape','code':'Escape','windowsVirtualKeyCode':27})
+                    c.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'Escape','code':'Escape','windowsVirtualKeyCode':27})
+                elif cancel=='capture':c.js('frame.releasePointerCapture(gesture.id)')
+                elif cancel=='blur':c.call('Emulation.setFocusEmulationEnabled',{'enabled':False});c.js("dispatchEvent(new Event('blur'))")
+                c.call('Input.dispatchMouseEvent',{'type':'mouseReleased','x':xy['x']+dx,'y':xy['y']+dy,'button':button,'buttons':0,'clickCount':1,'modifiers':modifiers})
+                settled()
+            import math
+            navigation=[]
+            for width,dpr in [(1250,1),(980,2)]:
+                c.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':1000,'deviceScaleFactor':dpr,'mobile':False})
+                for button,mods in [('right',0),('middle',0),('right',8)]:
+                    before=c.snapshot();drag(button,30,15,mods);after=c.snapshot()
+                    assert after['view']['camera']!=before['view']['camera'],(button,after['view'])
+                    assert after['view']['selected_object_ids']==before['view']['selected_object_ids'],'camera drag picked'
+                    assert after['scene']==before['scene']
+                    assert after['view']['camera']==tool('viewport_inspect')['result']['camera']
+                    if button=='right' and not mods:
+                        assert math.isclose(after['view']['camera']['yaw'],before['view']['camera']['yaw']-.24,abs_tol=1e-5)
+                        assert math.isclose(after['view']['camera']['pitch'],before['view']['camera']['pitch']+.12,abs_tol=1e-5)
+                    else:assert after['view']['camera']['target']!=before['view']['camera']['target']
+                    navigation.append({'width':width,'dpr':dpr,'button':button,'shift':bool(mods),'native_mcp_equal':True})
+                before=c.snapshot();drag('left',30,15);assert c.snapshot()==before,'primary drag caused pick'
+                for delta in [120,-120]:
+                    wait(lambda:c.js('!busy'));before=c.snapshot();xy=c.js("(()=>{const r=frame.getBoundingClientRect();return {x:r.x+r.width*.5,y:r.y+r.height*.5}})()")
+                    c.js("window.lastWheel=null;frame.addEventListener('wheel',e=>{window.lastWheel={deltaY:e.deltaY,deltaMode:e.deltaMode}},{once:true})")
+                    prior_sequence=c.js('sequence')
+                    c.call('Input.dispatchMouseEvent',{'type':'mouseWheel',**xy,'deltaX':0,'deltaY':delta});wait(lambda:c.js('sequence')>prior_sequence);settled();after=c.snapshot()
+                    wheel=c.js('lastWheel');assert wheel and wheel['deltaMode']==0,wheel
+                    assert math.isclose(after['view']['camera']['distance'],before['view']['camera']['distance']*math.exp(wheel['deltaY']*.002),rel_tol=1e-5)
+                    navigation.append({'width':width,'dpr':dpr,'injected_wheel':delta,'browser_wheel':wheel,'native_mcp_equal':True})
+                    assert after['view']['camera']==tool('viewport_inspect')['result']['camera']
+                    assert after['view']['selected_object_ids']==before['view']['selected_object_ids']
+                for reason in ['escape','capture','blur']:
+                    drag('right',24,12,cancel=reason);assert c.js('gesture===null && cameraIntent===null')
+                reset=c.js("operate('viewport_camera',{...pins(true),camera:"+json.dumps(base['view']['camera'])+"})");assert reset['status']=='completed'
+            record['direct_camera_checks']=navigation
+            record['camera_samples']=c.js("samples.filter(r=>r.op==='viewport_camera')")
+            record['cancellation_checks']=['Escape key','lost capture','app blur event (not OS focus)']
+            # Stale native camera change must refuse, not rebase/replay a queued intent.
+            before=c.snapshot();c.js('clearTimeout(autoTimer);autoTimer=null')
+            native_camera=dict(before['view']['camera']);native_camera['yaw']+=.1
+            assert tool('viewport_camera',{'expected_session_token':before['view']['session_token'],'expected_revision':before['view']['revision'],'expected_view_revision':before['view']['view_revision'],'camera':native_camera})['ok']
+            drag('right',16,8);assert c.js("outcomes.at(-1).status==='failed' && outcomes.at(-1).error==='Error: stale_view'")
+            assert c.js('cameraIntent===null && gesture===null');c.click('#connect')
+            assert c.js("operate('viewport_camera',{...pins(true),camera:"+json.dumps(base['view']['camera'])+"})")['status']=='completed'
+            record['stale_camera_refusal']=True
             # Actual pointer → native picking; scaled image at two CSS/DPR combinations.
             selection_checks=[]
             for width,dpr in [(1250,1),(980,2)]:
@@ -150,6 +206,11 @@ def main():
             guarded={'expected_session_token':original['scene']['session_token'],'expected_revision':original['scene']['revision'],'object_id':'center','transform':original['scene']['objects'][1]['transform']}
             refused=tool('scene_transform',guarded);assert refused['error']['code']=='drafts_pending',refused
             c.js("document.querySelector('#translation0').value='1.25'")
+            draft_camera=c.snapshot()['view']['camera'];drag('right',16,8)
+            assert c.js("outcomes.at(-1).status==='failed' && outcomes.at(-1).error==='Error: drafts_pending'")
+            assert tool('viewport_inspect')['result']['camera']==draft_camera
+            assert c.js("document.querySelector('#translation0').value")=='1.25'
+            record['draft_camera_refusal']=True
             draft_pick=c.point(.03,.9)
             assert draft_pick['status']=='failed' and draft_pick['error']=='Error: drafts_pending',draft_pick
             assert c.js("document.querySelector('#translation0').value")=='1.25'

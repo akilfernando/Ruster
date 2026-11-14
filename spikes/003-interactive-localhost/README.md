@@ -1,5 +1,9 @@
 # Interactive localhost workspace — bounded disposable slice
 
+## Direct camera contract — 2026-11-15
+
+Sole delegated writer; browser pointer/wheel → existing guarded native `viewport_camera` → native PNG and same-owner MCP readback. Exit: right-drag orbit, middle/Shift-right pan and wheel zoom at DPR1/2, primary click retained with drag suppression, cancellation, pending draft/stale refusal, observer/shared Undo/access regressions and owned cleanup. One camera-only aggregate intent, completion-paced at minimum80ms; no authored-command queue/retry. Native remains authoritative; no browser renderer/geometry/history. No gizmo authoring, fly keyboard, production promotion, installation, desktop input or client changes. Reassess at30 cumulative minutes or two failed journeys. Existing source-matched native artifact/gates are reusable because this slice changes browser input only.
+
 ## Viewport selection contract — 2026-11-15
 
 One accountable delegated writer owns this bounded continuation in the existing clean candidate. Route: ordinary browser pointer → guarded native viewport pointer/picker → authoritative selection/outline/inspector → direct same-owner MCP readback. Exit includes object selection and background clear at scaled display sizes, stale scene/view refusal, draft preservation, one-flight/access/revocation boundaries and owned cleanup. Reuse accepted ChatGPT surface/automatic-refresh user reports; no repeated feasibility test. Non-goals: drag/gizmo authoring, browser geometry/history, production consent/onboarding, install/configuration changes. Reassess after30 cumulative minutes or two failed journeys.
