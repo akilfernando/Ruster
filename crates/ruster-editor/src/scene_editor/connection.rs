@@ -5,6 +5,10 @@ use super::*;
 #[allow(dead_code)]
 mod consent;
 
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+mod worker;
+
 #[cfg(all(test, unix))]
 mod tests;
 

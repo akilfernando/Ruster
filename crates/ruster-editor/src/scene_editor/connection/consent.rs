@@ -116,6 +116,7 @@ impl RegistrationConsent {
             }
             Some(value)
                 if exit == 0
+                    && value.as_object().is_some_and(|object| object.len() == 3)
                     && value.get("ok") == Some(&Value::Bool(true))
                     && value.get("changed").and_then(Value::as_bool).is_some()
                     && value.get("tools").and_then(Value::as_u64)
@@ -131,7 +132,19 @@ impl RegistrationConsent {
             }
             _ => State::Failed,
         };
+        if self.state == State::Failed {
+            self.receipt = None;
+        }
         Ok(())
+    }
+
+    pub(super) fn succeeded(&self) -> bool {
+        matches!(self.state, State::Created | State::Reused | State::Removed)
+    }
+
+    pub(super) fn fail(&mut self) {
+        self.state = State::Failed;
+        self.receipt = None;
     }
 
     pub(super) fn receipt(&self) -> Option<&Value> {
@@ -190,6 +203,11 @@ mod tests {
                 json!({"ok":true,"changed":true,"tools":84}),
                 "Registration failed or indeterminate; inspect before a new preview",
             ),
+            (
+                0,
+                json!({"ok":true,"changed":true,"tools":84,"secret":"never retain unknown fields"}),
+                "Registration failed or indeterminate; inspect before a new preview",
+            ),
         ] {
             let mut consent = RegistrationConsent::preview(
                 "named",
@@ -207,7 +225,14 @@ mod tests {
             assert!(consent.confirm().is_err());
             consent.complete(code, &receipt.to_string()).unwrap();
             assert_eq!(consent.status(), status);
-            assert_eq!(consent.receipt(), Some(&receipt));
+            assert_eq!(
+                consent.receipt(),
+                if consent.state == State::Failed {
+                    None
+                } else {
+                    Some(&receipt)
+                }
+            );
             assert!(consent.confirm().is_err());
             assert!(consent.complete(code, &receipt.to_string()).is_err());
             assert_eq!(consent.invocation(), &frozen);
