@@ -1,5 +1,11 @@
 # Current project status
 
+## Native-frame backend probe checkpoint — 2026-11-14
+
+Test-only candidate preserves the real Host/Session command-history and production viewport/capture pipeline. Actual matched STDIO adapter returns native PNG image blocks with session/revision/view/camera pins; Sphere create 0→1 and Undo 1→2 restore objects and identical matched-camera PNG bytes. Preapproval, stale capture and post-revocation reads/new capture deny without image. See [probe evidence](evidence/CHATGPT-NATIVE-PREVIEW-2026-11-14.md). No production renderer/authority behavior changed.
+
+**Not ChatGPT/client acceptance, not human consent, not finished UX.** Latest user clarification retains localhost Rusterize in ChatGPT’s internal browser as the intended working view; direct MCP images are capability evidence only. No static-image replacement, Apps SDK/component or external-dashboard surface was implemented. Visual-surface architecture and actual client responsiveness are **PAUSED pending parent/user alignment**; no owned processes remain after qualification. Stable project binding/onboarding, fresh-incarnation consent and production windowless lifecycle remain unimplemented. Canonical dirty status/private attachments and paused Hermes UI are untouched.
+
 Updated 2026-11-14. **M0–M8 retain their recorded Linux prototype checkpoints. M9 prototype qualification is incomplete alongside the new quality-first capability sequence.** The user accepted the [Astra/root goal revision](ROADMAP-REVIEW.md#creator-goal-reassessment--2026-11-05), explicitly requiring both direct editor use and native MCP as first-class creator workflows.
 
 ## Native prelaunch scene observation implemented and bounded-native qualified — 2026-11-14

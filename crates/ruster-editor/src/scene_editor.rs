@@ -26,6 +26,8 @@ mod material_ui;
 mod material_visual_probe;
 mod nonvisual;
 mod persistence_commands;
+#[cfg(all(test, feature = "inspection", unix))]
+mod preview_probe;
 mod recovered_input_ui;
 mod runtime_commands;
 mod runtime_transform_ui;
