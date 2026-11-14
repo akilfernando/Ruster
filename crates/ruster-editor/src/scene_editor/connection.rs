@@ -7,6 +7,10 @@ mod consent;
 
 #[cfg(target_os = "linux")]
 #[allow(dead_code)]
+mod capsule;
+
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
 mod worker;
 
 #[cfg(all(test, unix))]

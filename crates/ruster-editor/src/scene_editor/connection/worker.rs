@@ -1,6 +1,12 @@
 //! Linux-only bounded CLI owner. No UI-thread waits, retries or raw diagnostics.
 use super::consent::RegistrationConsent;
+#[cfg(test)]
 use serde_json::Value;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    mpsc, Arc,
+};
+#[cfg(test)]
 use std::{
     io::{Read, Write},
     os::{
@@ -9,14 +15,12 @@ use std::{
     },
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        mpsc, Arc,
-    },
     time::{Duration, Instant},
 };
 
+#[cfg(test)]
 const LIMIT: usize = 4096;
+#[cfg(test)]
 const DEADLINE: Duration = Duration::from_secs(45);
 
 pub(super) struct Worker {
@@ -25,9 +29,21 @@ pub(super) struct Worker {
 }
 
 impl Worker {
-    /// The explicit installed CLI and matched adapter provenance are caller obligations.
-    /// Confirmation is consumed before spawning; thread/spawn failure never authorizes retry.
-    pub(super) fn start(cli: PathBuf, mut consent: RegistrationConsent) -> Result<Self, String> {
+    /// Containment gate: no installed Hermes API currently binds strict profile
+    /// resolution, raw inspection and conditional mutation to one verified context.
+    /// Refuse BEFORE consent consumption or any executable launch. An absolute
+    /// launcher and a post-write receipt cannot establish pre-mutation provenance.
+    pub(super) fn start(_consent: RegistrationConsent) -> Result<Self, String> {
+        Err("Registration unavailable: Hermes lacks a qualified strict profile/raw inspection and context-bound apply contract. No process launched.".into())
+    }
+
+    /// Historical worker mechanics only; not a supported registration path.
+    /// Kept test-only so process/receipt regressions remain independently exercised.
+    #[cfg(test)]
+    fn start_unverified_fixture(
+        cli: PathBuf,
+        mut consent: RegistrationConsent,
+    ) -> Result<Self, String> {
         if !cli.is_absolute() || !cli.is_file() {
             return Err("Select an absolute supported Hermes executable.".into());
         }
@@ -41,8 +57,8 @@ impl Worker {
                 let outcome = (|| {
                     let output = run(
                         &cli,
-                        &invocation.args,
-                        &invocation.stdin,
+                        invocation.args(),
+                        invocation.stdin(),
                         &cancellation,
                         DEADLINE,
                     )?;
@@ -52,7 +68,7 @@ impl Worker {
                     if consent.succeeded() {
                         let args = vec![
                             "-p".into(),
-                            invocation.args[1].clone(),
+                            invocation.args()[1].clone(),
                             "config".into(),
                             "get".into(),
                             "mcp_servers".into(),
@@ -71,9 +87,9 @@ impl Worker {
                                 return Err(());
                             };
                         let request: Value =
-                            serde_json::from_str(&invocation.stdin).map_err(|_| ())?;
+                            serde_json::from_str(invocation.stdin()).map_err(|_| ())?;
                         if !servers.is_object()
-                            || servers.get(&invocation.args[4]).unwrap_or(&Value::Null)
+                            || servers.get(&invocation.args()[4]).unwrap_or(&Value::Null)
                                 != &request["entry"]
                         {
                             return Err(());
@@ -111,6 +127,7 @@ impl Drop for Worker {
     } // Never join on the editor thread.
 }
 
+#[cfg(test)]
 fn run(
     cli: &Path,
     args: &[String],
@@ -206,6 +223,54 @@ fn run(
 mod tests {
     use super::*;
     #[test]
+    fn unsupported_provenance_cannot_launch_or_mutate_default() {
+        use std::os::unix::fs::PermissionsExt;
+        let directory = tempfile::tempdir().unwrap();
+        let cli = directory.path().join("fallback-cli");
+        let default_config = directory.path().join("default-config");
+        let calls = directory.path().join("calls");
+        std::fs::write(&default_config, "unchanged default\n").unwrap();
+        // Any launch represents an unverified launcher/profile fallback. No
+        // post-mutation warning/readback can make this side effect safe.
+        std::fs::write(
+            &cli,
+            format!(
+                "#!/bin/sh\nprintf called > '{}'\nprintf MUTATED > '{}'\n",
+                calls.display(),
+                default_config.display()
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let consent = RegistrationConsent::preview(
+            "named",
+            "rusterize",
+            Path::new("/adapter"),
+            Path::new("/locator"),
+            None,
+            false,
+        )
+        .unwrap();
+        let outcome = Worker::start(consent);
+        if let Ok(worker) = &outcome {
+            let start = Instant::now();
+            while worker.poll().unwrap().is_none() {
+                assert!(start.elapsed() < Duration::from_secs(5));
+                std::thread::sleep(Duration::from_millis(10));
+            }
+        }
+        assert_eq!(
+            std::fs::read_to_string(default_config).unwrap(),
+            "unchanged default\n"
+        );
+        assert!(!calls.exists(), "unverified CLI must never be launched");
+        assert!(
+            outcome.is_err(),
+            "unsupported provenance must refuse before dispatch"
+        );
+    }
+
+    #[test]
     fn conflict_never_reads_back_and_mismatched_readback_fails_closed() {
         use std::os::unix::fs::PermissionsExt;
         let directory = tempfile::tempdir().unwrap();
@@ -235,7 +300,7 @@ mod tests {
                 false,
             )
             .unwrap();
-            let worker = Worker::start(cli.clone(), consent).unwrap();
+            let worker = Worker::start_unverified_fixture(cli.clone(), consent).unwrap();
             let start = Instant::now();
             let result = loop {
                 if let Some(result) = worker.poll().unwrap() {
@@ -290,7 +355,7 @@ mod tests {
             false,
         )
         .unwrap();
-        let worker = Worker::start(cli, consent).unwrap();
+        let worker = Worker::start_unverified_fixture(cli, consent).unwrap();
         let start = Instant::now();
         assert!(worker.poll().unwrap().is_none());
         worker.cancel();
@@ -299,55 +364,16 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "explicit disposable supported-Hermes profile qualification"]
-    fn installed_cli_disposable_profile() {
-        let profile = std::env::var("RUSTER_TEST_HERMES_PROFILE").unwrap();
-        assert_eq!(profile, "e2a-cp2-worker-20261114");
-        let adapter =
-            Path::new("/home/akilf/Projects/Ruster-Audits/e2a-cp1-20261114/final-bin/ruster-mcp");
-        let locator =
-            Path::new("/home/akilf/Projects/Ruster-Audits/e2a-cp2-20261114/worker/unbound.json");
-        let entry = serde_json::json!({"command":adapter,"enabled":true,"env":{"RUSTER_MCP_LOCATOR":locator}});
-        for (expected, remove, status) in [
-            (
-                None,
-                false,
-                "Registered; client restart required; editor binding separate",
-            ),
-            (
-                Some(entry.clone()),
-                false,
-                "Registration reused; client restart required; editor binding separate",
-            ),
-            (None, false, "Registration conflict; no refresh or retry"),
-            (
-                Some(entry.clone()),
-                true,
-                "Registration removed; client restart required; editor binding separate",
-            ),
-        ] {
-            let consent = RegistrationConsent::preview(
-                &profile,
-                "rusterize",
-                adapter,
-                locator,
-                expected,
-                remove,
-            )
-            .unwrap();
-            let worker =
-                Worker::start(PathBuf::from("/home/akilf/.local/bin/hermes"), consent).unwrap();
-            let start = Instant::now();
-            let result = loop {
-                if let Some(result) = worker.poll().unwrap() {
-                    break result;
-                }
-                assert!(start.elapsed() < Duration::from_secs(95));
-                std::thread::sleep(Duration::from_millis(10));
-            };
-            assert_eq!(result.status(), status);
-            println!("{}", result.status());
-        }
-        assert!(!locator.exists());
+    fn production_worker_refuses_unbound_consent() {
+        let consent = RegistrationConsent::preview(
+            "e2a-cp2-worker-20261114",
+            "rusterize",
+            Path::new("/adapter"),
+            Path::new("/locator"),
+            None,
+            false,
+        )
+        .unwrap();
+        assert!(Worker::start(consent).is_err());
     }
 }

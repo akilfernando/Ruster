@@ -3,11 +3,27 @@
 use serde_json::{json, Value};
 use std::path::Path;
 
-/// An immutable supported-CLI request. The caller must run it off the UI owner.
+/// Frozen request plus local provenance. Production execution remains disabled.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) struct Invocation {
-    pub(super) args: Vec<String>,
-    pub(super) stdin: String,
+    args: Vec<String>,
+    stdin: String,
+    #[cfg(target_os = "linux")]
+    provenance: Option<super::capsule::Provenance>,
+}
+
+impl Invocation {
+    #[cfg(target_os = "linux")]
+    pub(super) fn provenance(&self) -> Option<&super::capsule::Provenance> {
+        self.provenance.as_ref()
+    }
+
+    pub(super) fn args(&self) -> &[String] {
+        &self.args
+    }
+    pub(super) fn stdin(&self) -> &str {
+        &self.stdin
+    }
 }
 
 #[derive(PartialEq, Eq)]
@@ -31,7 +47,69 @@ pub(super) struct RegistrationConsent {
 }
 
 impl RegistrationConsent {
+    #[cfg(target_os = "linux")]
+    pub(super) fn preview_bound(
+        provenance: super::capsule::Provenance,
+        name: &str,
+        locator: &Path,
+        selection: Value,
+        remove: bool,
+    ) -> Result<Self, String> {
+        provenance.revalidate()?;
+        if selection.as_object().is_none_or(|v| v.len() != 2)
+            || selection["present"].as_bool().is_none()
+            || !(selection["entry"].is_null() || selection["entry"].is_object())
+            || (selection["present"] == false && !selection["entry"].is_null())
+            || (remove && selection["present"] != true)
+            || locator
+                .to_str()
+                .is_none_or(|s| s.contains('$') || s.contains('\0'))
+        {
+            return Err("Requires an exact raw selection and literal locator.".into());
+        }
+        let expected = selection["entry"]
+            .as_object()
+            .map(|_| selection["entry"].clone());
+        // prepare's legacy removal check requires an object; strict present-null
+        // removal is represented separately in the immutable raw selection below.
+        let mut consent = Self::prepare(
+            provenance.profile(),
+            name,
+            provenance.adapter(),
+            locator,
+            expected,
+            false,
+        )?;
+        let mut request: Value = serde_json::from_str(&consent.invocation.stdin)
+            .map_err(|_| "Invalid prepared request.")?;
+        request["context"] = provenance.context().clone();
+        request["expected"] = selection;
+        if remove {
+            request["entry"] = Value::Null;
+        }
+        consent.remove = remove;
+        consent.invocation.stdin = request.to_string();
+        if consent.invocation.stdin.len() > 4096 {
+            return Err("Strict request exceeds bounded worker input.".into());
+        }
+        consent.invocation.args.push("--strict-profile".into());
+        consent.invocation.provenance = Some(provenance);
+        Ok(consent)
+    }
+
+    #[cfg(test)]
     pub(super) fn preview(
+        profile: &str,
+        name: &str,
+        matched_adapter: &Path,
+        locator: &Path,
+        expected: Option<Value>,
+        remove: bool,
+    ) -> Result<Self, String> {
+        Self::prepare(profile, name, matched_adapter, locator, expected, remove)
+    }
+
+    fn prepare(
         profile: &str,
         name: &str,
         matched_adapter: &Path,
@@ -74,6 +152,8 @@ impl RegistrationConsent {
                     .map(str::to_owned)
                     .to_vec(),
                 stdin: json!({"expected": expected, "entry": entry}).to_string(),
+                #[cfg(target_os = "linux")]
+                provenance: None,
             },
             state: State::Preview,
             remove,
@@ -94,6 +174,13 @@ impl RegistrationConsent {
     pub(super) fn confirm(&mut self) -> Result<Invocation, String> {
         if self.state != State::Preview {
             return Err("Consent is no longer pending.".into());
+        }
+        #[cfg(target_os = "linux")]
+        if let Some(provenance) = &self.invocation.provenance {
+            if let Err(error) = provenance.revalidate() {
+                self.fail();
+                return Err(error);
+            }
         }
         self.state = State::Dispatched;
         Ok(self.invocation.clone())
