@@ -119,6 +119,7 @@ def main():
                     c.call('Input.dispatchKeyEvent',{'type':'keyDown','key':'Escape','code':'Escape','windowsVirtualKeyCode':27})
                     c.call('Input.dispatchKeyEvent',{'type':'keyUp','key':'Escape','code':'Escape','windowsVirtualKeyCode':27})
                 elif cancel=='capture':c.js('frame.releasePointerCapture(gesture.id)')
+                elif cancel=='pointercancel':c.js("frame.dispatchEvent(new PointerEvent('pointercancel',{pointerId:gesture.id}))")
                 elif cancel=='blur':c.call('Emulation.setFocusEmulationEnabled',{'enabled':False});c.js("dispatchEvent(new Event('blur'))")
                 c.call('Input.dispatchMouseEvent',{'type':'mouseReleased','x':xy['x']+dx,'y':xy['y']+dy,'button':button,'buttons':0,'clickCount':1,'modifiers':modifiers})
                 settled()
@@ -132,6 +133,7 @@ def main():
                     assert after['view']['selected_object_ids']==before['view']['selected_object_ids'],'camera drag picked'
                     assert after['scene']==before['scene']
                     assert after['view']['camera']==tool('viewport_inspect')['result']['camera']
+                    c.click('#connect');assert c.snapshot()['png']==after['png'],'camera reply pixels lag native refresh'
                     if button=='right' and not mods:
                         assert math.isclose(after['view']['camera']['yaw'],before['view']['camera']['yaw']-.24,abs_tol=1e-5)
                         assert math.isclose(after['view']['camera']['pitch'],before['view']['camera']['pitch']+.12,abs_tol=1e-5)
@@ -148,12 +150,12 @@ def main():
                     navigation.append({'width':width,'dpr':dpr,'injected_wheel':delta,'browser_wheel':wheel,'native_mcp_equal':True})
                     assert after['view']['camera']==tool('viewport_inspect')['result']['camera']
                     assert after['view']['selected_object_ids']==before['view']['selected_object_ids']
-                for reason in ['escape','capture','blur']:
+                for reason in ['escape','capture','pointercancel','blur']:
                     drag('right',24,12,cancel=reason);assert c.js('gesture===null && cameraIntent===null')
                 reset=c.js("operate('viewport_camera',{...pins(true),camera:"+json.dumps(base['view']['camera'])+"})");assert reset['status']=='completed'
             record['direct_camera_checks']=navigation
             record['camera_samples']=c.js("samples.filter(r=>r.op==='viewport_camera')")
-            record['cancellation_checks']=['Escape key','lost capture','app blur event (not OS focus)']
+            record['cancellation_checks']=['Escape key','lost capture','app pointercancel event','app blur event (not OS focus)']
             # Stale native camera change must refuse, not rebase/replay a queued intent.
             before=c.snapshot();c.js('clearTimeout(autoTimer);autoTimer=null')
             native_camera=dict(before['view']['camera']);native_camera['yaw']+=.1

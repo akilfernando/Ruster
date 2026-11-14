@@ -1,5 +1,14 @@
 # Current project status
 
+## Direct mouse camera slice — 2026-11-15
+
+**Implemented and ordinary-browser/native/MCP qualified**, not new ChatGPT user acceptance: right-drag orbit, middle/Shift-right pan, wheel zoom; native viewport click/background selection retained. One bounded camera-only aggregate intent, completion-paced dispatch, final-pointer-up settle and cancellation/stale/draft guards; no authored-command queue/replay or browser-owned renderer/scene/history. [Runnable artifact, exact behavior and evidence](../spikes/003-interactive-localhost/README.md#direct-mouse-camera-navigation-qualified--2026-11-15).
+
+Final DPR1/2 actual pointer/wheel + same-owner MCP journey passes camera/readback, unchanged authored scene/selection, click-vs-drag, cancellation, pending text, immediate native camera PNG equality and existing observer/shared Undo/access/revocation regressions. Native source unchanged and manifest verified; reuse existing matched host383306769b40fa903bcac0ec9c697a98c01895cf60012dc95bfeca3d2fe5551a. Core+Synchronization activation/scanner pass. Full gate against4869eb3 passes30.21s. Two failed wheel assertions retained; after whole-path reassessment harness records actual CSS event (CDP120→60 at DPR2), two subsequent journeys pass. Final26 camera request→decoded samples195.7–270.6ms/median237.3ms plus80ms pacing: stepped PNG interaction, no smoothness/parity claim. Evidence `/home/akilf/Projects/Ruster-Audits/direct-camera-20261115/manifest.json`.
+
+All four qualification owners cleaned; native exit0, independent PID/listener/capability/locator absence and gate reacquisition verified. Canonical/private work, ChatGPT owners/registrations, paused Hermes UI, desktop/focus/clipboard unchanged. **COMPLETE bounded slice, no live demo.** Next action QUEUED to parent: review checkpoint, then one combined new camera+click human test in a fresh exact-artifact ChatGPT localhost session if useful; do not repeat accepted MCP/automatic-refresh proof. Production promotion BLOCKED on existing consent/onboarding gates.
+
+
 ## Native localhost viewport click-selection — 2026-11-15
 
 **Implemented and ordinary-browser/native/MCP qualified** in the isolated interactive candidate. Browser pointer coordinates map into the last delivered native crop; guarded native admission refuses stale session/revision/view/frame, invalid coordinates and pending drafts, then the existing native picker/selection path updates outline, hierarchy and inspector. Background clears selection. No browser geometry, new MCP tool, parallel state/history, production consent change or installation. [Contract, runnable artifact and evidence](../spikes/003-interactive-localhost/README.md#viewport-click-selection-qualified--2026-11-15).
