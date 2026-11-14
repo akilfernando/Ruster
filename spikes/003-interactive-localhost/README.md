@@ -6,6 +6,10 @@ One authoritative **windowless native Host → SceneEditor → Session → produ
 
 This expands the **already user-confirmed** ChatGPT internal-browser localhost/capability/Move/Undo baseline. That earlier user report is not an independently captured timing/frame run. This increment's changed controls and combined MCP loop were exercised in owned ordinary headless Chromium, **not** independently in ChatGPT. Do not ask the user to repeat basic browser-load feasibility, or promote browser automation to model authoring. Prompts should author through MCP; these are direct human controls.
 
+## User-operated ChatGPT combined journey — recorded 2026-11-15
+
+The user reports the combined journey **“worked perfectly”** in the actual ChatGPT built-in browser with direct MCP authoring: manual `center` Translation X **5 / revision1** → direct MCP transform X **1.25 / revision2** → browser Shared Undo X **5 / revision3** → direct MCP Undo X **0 / revision4**, with browser refresh showing the restored state. The parent reports seeing the revision2 screenshot. This closes the bounded user-operated combined-client loop, not every navigation/draft/security case. Evidence is the user's report and parent-observed screenshot, **not independently retained raw final MCP calls, image equality or performance measurement**. The prior ordinary Chromium evidence below remains separate. Production consent remains unqualified: this session uses the explicit disposable first-owner startup grant.
+
 ## Run
 
 From this candidate worktree:
@@ -24,7 +28,25 @@ Qualified retained executable: `/home/akilf/Projects/Ruster-Audits/interactive-l
 
 Startup atomically allocates a **fresh private session** and prints its URL, run directory, exact native PID and locator. Read `<run>/capability.secret` locally; enter it into **Local capability**, then Connect / refresh. Never put the capability in URLs, chat, configuration, evidence or logs. Each run has different authority; an old recorded URL/locator is not a running instance. Ctrl-C/SIGTERM stops/reaps the owned native Host, retires its locator, closes HTTP and removes the capability. The existing GPU QA gate refuses overlapping ownership.
 
-For direct MCP, the developer setup is the matched adapter with `RUSTER_MCP_LOCATOR=<exact printed locator>`, with no implicit newest-editor fallback. The first read-only call returns `approval_required`; the explicitly granted fixture startup then approves **only that first exact adapter owner**. Retain that same adapter throughout edits. Do not edit existing ChatGPT registration or restart a gateway as part of this script. Existing manually retained registration still points to a retired locator and is not consent for this session.
+For direct MCP, the developer setup is the matched adapter with `RUSTER_MCP_LOCATOR=<exact printed locator>`, with no implicit newest-editor fallback. The first read-only call returns `approval_required`; the explicitly granted fixture startup then approves **only that first exact adapter owner**. Retain that same adapter throughout edits. Do not edit existing ChatGPT registration or restart a gateway as part of this script. A retained registration may point to a retired locator; inspect its exact session rather than assuming it targets this run. Registration alone is not consent.
+
+## Repeatable developer connection fields
+
+Small follow-up scope: make the existing manual compatibility setup unambiguous; no registration writer, launcher, automatic session selection or onboarding authority is added. A locator JSON is routing data, **not an executable or Python argument**. Putting it in Arguments cannot start the MCP wrapper.
+
+For the matched native adapter documented above, the developer field mapping is:
+
+| Field | Value |
+| --- | --- |
+| Transport | STDIO |
+| Command | `/home/akilf/Projects/Ruster-Audits/native-scene-observation-20261114/ruster-mcp` |
+| Arguments | Empty for this direct native executable |
+| Environment key | `RUSTER_MCP_LOCATOR` |
+| Environment value | This run's exact printed locator **path**, not its JSON contents |
+
+If retaining an existing Python-wrapper setup instead, keep its verified Python command and `.py` wrapper argument unchanged; replace **only** the locator environment value for a fresh session. Do not replace the `.py` argument with `connection.json`. This table describes the direct native executable, not an instruction to rewrite a user's saved wrapper connection. A fresh session needs its exact locator and fresh owner authorization; never select the newest editor implicitly. No live client configuration was changed by this follow-up.
+
+Read-only setup preflight on 2026-11-15 launched the exact native executable with an intentionally nonexistent locator and performed only `initialize` → `notifications/initialized` → `tools/list`: **84 tools**, including `scene_inspect`, `viewport_inspect`, `scene_transform` and `scene_undo`; EOF cleanup exited **0**. No project call or live owner was consumed. This checks launch/discovery, **not actual ChatGPT field loading, project binding or consent**. After correcting fields in the intended client, first check tool availability and make one read-only call; do not retry an uncertain mutation or silently approve a replacement owner.
 
 ## Incremental human test in ChatGPT's internal browser
 
@@ -61,4 +83,4 @@ Unoptimized developer test binary, tiny three-object demo, owned headless Chromi
 
 ## Remaining gaps
 
-Actual ChatGPT combined MCP/new-controls journey and production consent remain unqualified. Hierarchy selection is implemented; viewport click picking/drag orbit/gizmos, richer properties, multi-selection, push invalidation, automatic browser-draft lifetime, multi-tab arbitration and production packaging are not. The native fixture still renders continuously; browser frames are on-demand, so **no idle-efficiency claim**. Numeric edits cover translation/rotation/scale, not the whole native property catalog. Manual setup/test executable is scaffolding, not end-user onboarding. Parent independent acceptance/security review is still required before promoting any fixture seam to production.
+The bounded combined ChatGPT loop is user-confirmed as recorded above; untested expanded controls and production consent remain separate gates. Hierarchy selection is implemented; viewport click picking/drag orbit/gizmos, richer properties, multi-selection, push invalidation, automatic browser-draft lifetime, multi-tab arbitration and production packaging are not. The native fixture still renders continuously; browser frames are on-demand, so **no idle-efficiency claim**. Numeric edits cover translation/rotation/scale, not the whole native property catalog. Manual setup/test executable is scaffolding, not end-user onboarding. Reuse the earlier Telegram Astra assessment for the existing creator contract; no new review is requested by this follow-up. Production promotion remains outside this fixture/setup slice.
