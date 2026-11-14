@@ -753,6 +753,18 @@ pub(crate) fn preparing_test_lease(
     (pending.lease, move || state.take_reply_or_expire())
 }
 
+/// Explicit startup fixture authority only; never a production consent route.
+#[cfg(feature = "localhost-spike")]
+pub(crate) fn disposable_startup_lease(
+    deadline: Instant,
+) -> (RequestLease, impl FnMut() -> Option<Value>) {
+    let authority = Authority::new();
+    authority.0.lock().unwrap().approved = true;
+    let (pending, state, _) = new_pending_authorized(json!({}), deadline, Some(authority));
+    assert!(state.begin_prepare());
+    (pending.lease, move || state.take_reply_or_expire())
+}
+
 #[cfg(test)]
 pub(crate) fn owned_test_lease(
     deadline: Instant,

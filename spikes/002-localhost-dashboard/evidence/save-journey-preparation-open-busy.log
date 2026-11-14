@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/test_save.py", line 70, in <module>
+    run(False);run(True)
+               ~~~^^^^^^
+  File "/home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/test_save.py", line 55, in run
+    assert reopened_undo['command']['ok'] and reopened_undo['scene']['objects']==before['scene']['objects'] and reopened_undo['png']==before['png'], reopened_undo['command']
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: {'error': {'code': 'asset_busy', 'message': 'asset_busy: apply/revert drafts or resolve dialog, then inspect again', 'revision': '1', 'session_token': 'localhost-fixture-1048468:scene:1'}, 'ok': False}

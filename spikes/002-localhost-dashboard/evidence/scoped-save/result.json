@@ -1,0 +1,171 @@
+{
+  "occupied_destination_failure": {
+    "error": {
+      "code": "destination_exists",
+      "message": "Save As requires a fresh destination that does not exist",
+      "revision": "1",
+      "session_token": "localhost-fixture-1060845:scene:1"
+    },
+    "ok": false
+  },
+  "saved_command": {
+    "ok": true,
+    "result": {
+      "dirty": false,
+      "history_evictions": 0,
+      "persistence_token": "scene:2:save:1",
+      "receipt": {
+        "committed": true,
+        "document_bytes": 751,
+        "document_sha256": "b25e4ad1863063139311424c5fe0cf75e06eb0030cfcf297f7c38a2983ca6361",
+        "followup_pending": false,
+        "paint_cleanup_pending": false,
+        "path": "/home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/evidence/scoped-save/disposable-destination/fixture.json",
+        "persistence_token": "scene:2:save:1",
+        "revision": "1",
+        "warning": null
+      },
+      "revision": "1",
+      "session_token": "localhost-fixture-1060845:scene:2"
+    }
+  },
+  "negative_cases": [
+    {
+      "case": "stale_revision",
+      "error": {
+        "code": "stale_revision",
+        "message": "Inspect authored scene again",
+        "revision": "1",
+        "session_token": "localhost-fixture-1060845:scene:2"
+      }
+    },
+    {
+      "case": "wrong_session",
+      "error": {
+        "code": "stale_session",
+        "message": "Inspect the current scene incarnation",
+        "revision": "1",
+        "session_token": "localhost-fixture-1060845:scene:2"
+      }
+    },
+    {
+      "case": "stale_persistence",
+      "error": {
+        "code": "stale_persistence",
+        "message": "A save changed the scene association or committed identity; inspect persistence again",
+        "revision": "1",
+        "session_token": "localhost-fixture-1060845:scene:2"
+      }
+    },
+    {
+      "case": "arbitrary_destination",
+      "error": {
+        "code": "fixture_destination_denied"
+      }
+    },
+    {
+      "case": "unknown_path",
+      "error": {
+        "code": "invalid_arguments",
+        "message": "Unknown argument",
+        "revision": "1",
+        "session_token": "localhost-fixture-1060845:scene:2"
+      }
+    }
+  ],
+  "wrong_origin_status": 403,
+  "committed_sha256": "b25e4ad1863063139311424c5fe0cf75e06eb0030cfcf297f7c38a2983ca6361",
+  "png_sha256": "22339e5f9a9eaa99d8b1300eabb737a9a7ad57f13e760969ca4d3947520556e9",
+  "scene_exact": true,
+  "png_exact": true,
+  "undo_exact": true,
+  "fresh_process": {
+    "old_pid": 1060845,
+    "old_exit": 0,
+    "new_pid": 1060859
+  },
+  "scene": {
+    "id": "procedural-demo",
+    "revision": 1,
+    "objects": [
+      {
+        "id": "left",
+        "transform": {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "color": [
+          0.12,
+          0.58,
+          0.85,
+          1.0
+        ]
+      },
+      {
+        "id": "center",
+        "transform": {
+          "translation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "color": [
+          0.9,
+          0.4,
+          0.16,
+          1.0
+        ]
+      },
+      {
+        "id": "right",
+        "transform": {
+          "translation": [
+            2.0,
+            0.0,
+            0.0
+          ],
+          "rotation": [
+            0.0,
+            0.0,
+            0.0
+          ],
+          "scale": [
+            1.0,
+            1.0,
+            1.0
+          ]
+        },
+        "color": [
+          0.3,
+          0.75,
+          0.45,
+          1.0
+        ]
+      }
+    ]
+  }
+}

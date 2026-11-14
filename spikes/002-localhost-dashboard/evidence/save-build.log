@@ -1,0 +1,7 @@
+warning: /home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui/Cargo.toml: `lints.clippy.large-types-passed-by-value` is deprecated in favor of `lints.clippy.large_types_passed_by_value` and will not work in a future edition
+warning: /home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui/Cargo.toml: duplicate lint `large-types-passed-by-value` in `[lints.clippy]`, conflicts with `large_types_passed_by_value` and will not work in a future edition
+warning: /home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui/Cargo.toml: `lints.clippy.needless-pass-by-value` is deprecated in favor of `lints.clippy.needless_pass_by_value` and will not work in a future edition
+warning: /home/akilf/Projects/rusterize-localhost-spike-20261114/third_party/transform-gizmo-egui/Cargo.toml: duplicate lint `needless-pass-by-value` in `[lints.clippy]`, conflicts with `needless_pass_by_value` and will not work in a future edition
+warning: `transform-gizmo-egui` (manifest) generated 4 warnings
+   Compiling ruster-localhost-spike v0.0.0 (/home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard)
+    Finished `release` profile [optimized] target(s) in 7.50s

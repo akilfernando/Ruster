@@ -1,8 +1,8 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Rusterize · localhost spike</title>
 <style>body{margin:32px auto;max-width:1080px;padding:0 24px;background:#111820;color:#e0edf2;font:16px system-ui}h1{font-size:26px}small{color:#93b2bd}section{background:#192630;padding:20px;border-radius:12px;margin:18px 0}button,input{font:inherit;padding:10px;border-radius:6px;border:1px solid #43606d;background:#213743;color:white}button{cursor:pointer}img{width:100%;max-width:768px;display:block;background:#050809}pre{white-space:pre-wrap}#status{color:#8fe1c6}.columns{display:flex;gap:24px;flex-wrap:wrap}.columns section:first-child{flex:2}.columns section:last-child{flex:1}</style>
 <h1>Rusterize <small>/ prompt-first preview</small></h1>
-<details id="access" open><summary>Disposable fixture · startup edit/Undo grant · local capability</summary><p>Native Vulkan pixels, not browser geometry. One native guarded transform and shared Undo; Save unavailable. Startup grant is fixture-only, not production human consent.</p><label>Local capability <input id="token" type="password" autocomplete="off" placeholder="Local session capability"></label> <button id="connect">Connect & render</button></details>
-<p><button id="refresh" disabled>Refresh preview</button> <button id="edit" disabled>Move first cube +2 X</button> <button id="undo" disabled>Undo</button> <span id="status" role="status">Disconnected</span></p>
+<details id="access" open><summary>Disposable fixture · startup edit/Undo grant · local capability</summary><p>Native Vulkan pixels, not browser geometry. One native guarded transform and shared Undo; Save targets only the private disposable fixture when explicitly granted at server startup. No browser control grants permission. Startup grant is fixture-only, not production human consent.</p><label>Local capability <input id="token" type="password" autocomplete="off" placeholder="Local session capability"></label> <button id="connect">Connect & render</button></details>
+<p><button id="refresh" disabled>Refresh preview</button> <button id="edit" disabled>Move first cube +2 X</button> <button id="undo" disabled>Undo</button> <button id="save" disabled>Save disposable fixture</button> <button id="reopen" disabled>Fresh-process reopen</button> <span id="status" role="status">Disconnected</span></p>
 <section><img id="preview" alt="Native-rendered scene preview"><p>Selection: none · Last error: <span id="error">none</span></p><p id="receipt">No frame received.</p><details><summary>Native scene & timing detail</summary><pre id="timing"></pre><pre id="state">Awaiting native host</pre></details></section>
 <script nonce="NONCE">
 let capability='',frames=0,busy=false,lastVisible=0,nativeState=null;window.samples=[];
@@ -20,10 +20,11 @@ async function render(operation=null){
     const object=nativeState.scene.objects[0];args.object_id=object.id;
     args.transform=structuredClone(object.transform);args.transform.translation[0]+=2;
    }
+   if(operation==='scene_save')args.expected_persistence_token=state.persistence.persistence_token;
    request={operation,arguments:args};
    status.textContent='Command pending · previous image stale';
   }
-  const response=await fetch(request?'/command':'/render',{method:'POST',headers:{'X-Spike-Capability':capability,'Content-Type':'application/json'},body:request?JSON.stringify(request):null});
+  const response=await fetch(operation==='reopen_fixture'?'/reopen-fixture':request?'/command':'/render',{method:'POST',headers:{'X-Spike-Capability':capability,'Content-Type':'application/json'},body:request&&operation!=='reopen_fixture'?JSON.stringify(request):null});
   if(!response.ok)throw new Error('Request refused: '+response.status);
   const value=await response.json(),received=performance.now();
   if(value.command && value.command.ok===false)throw new Error(value.command.error.code);
@@ -38,12 +39,13 @@ async function render(operation=null){
   document.querySelector('#timing').textContent=JSON.stringify(window.samples.at(-1),null,2);
   document.querySelector('#access').open=false;document.querySelector('#error').textContent='none';
   status.textContent='Native frame received · request '+frames;
-  document.querySelector('#refresh').disabled=false;document.querySelector('#edit').disabled=false;document.querySelector('#undo').disabled=value.authority.result.undo_len===0;
+  document.querySelector('#refresh').disabled=false;document.querySelector('#edit').disabled=false;document.querySelector('#undo').disabled=value.authority.result.undo_len===0;document.querySelector('#save').disabled=false;document.querySelector('#reopen').disabled=!value.authority.result.persistence.associated_path;
  }catch(error){status.textContent=error.message;document.querySelector('#error').textContent=error.message;}
  finally{busy=false;document.querySelector('#connect').disabled=false;}
 }
 setInterval(()=>{if(lastVisible&&!busy)document.querySelector('#status').textContent='Native frame '+frames+' · age '+((performance.now()-lastVisible)/1000).toFixed(1)+'s · on-demand, not live motion';},1000);
 document.querySelector('#connect').onclick=()=>{capability=document.querySelector('#token').value;document.querySelector('#token').value='';render();};
 document.querySelector('#token').onkeydown=e=>{if(e.key==='Enter')document.querySelector('#connect').click();};document.querySelector('#refresh').onclick=()=>render();
+document.querySelector('#save').onclick=()=>render('scene_save');document.querySelector('#reopen').onclick=()=>render('reopen_fixture');
 document.querySelector('#edit').onclick=()=>render('scene_transform');document.querySelector('#undo').onclick=()=>render('scene_undo');
 </script></html>

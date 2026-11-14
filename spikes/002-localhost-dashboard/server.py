@@ -1,4 +1,4 @@
-"""Explicit disposable guarded edit/Undo host; no Save or production consent."""
+"""Explicit disposable guarded edit/Undo host; fixed disposable Save, never production consent."""
 import argparse
 import base64
 import fcntl
@@ -24,11 +24,16 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--disposable-fixture', action='store_true', required=True)
     parser.add_argument('--grant-disposable-edit-undo', action='store_true', required=True)
+    parser.add_argument('--grant-disposable-fixed-save', action='store_true')
+    parser.add_argument('--save-qualification', action='store_true')
     args = parser.parse_args()
     gate = open('/home/akilf/.hermes/qa/rusterize/state/gate.lock', 'a')
     fcntl.flock(gate, fcntl.LOCK_EX | fcntl.LOCK_NB)  # Refuse overlapping native QA.
-    run = ROOT / 'evidence' / 'guarded-edit'
+    run = ROOT / 'evidence' / ('scoped-save' if args.grant_disposable_fixed_save else 'scoped-save-denied' if args.save_qualification else 'guarded-edit')
     run.mkdir(parents=True, exist_ok=True)
+    destination = run / 'disposable-destination'
+    if args.grant_disposable_fixed_save:
+        destination.mkdir(mode=0o700)  # Exclusive: never reuse or delete unknown data.
     token = secrets.token_urlsafe(32)
     secret = run / 'capability.secret'
     fd = os.open(secret, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -40,8 +45,22 @@ def main():
                VK_INSTANCE_LAYERS='VK_LAYER_KHRONOS_validation', VK_LAYER_VALIDATE_SYNC='1',
                VK_LOADER_DEBUG='layer', RUSTER_MSAA_SAMPLES='4')
     log = (run / 'native.log').open('w')
-    native = subprocess.Popen([str(ROOT/'target/release/ruster-localhost-spike'), str(run), '--grant-disposable-edit-undo'],
-                              stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, env=env, text=True)
+    def start_native(reopen=False):
+        argv = [str(ROOT/'target/release/ruster-localhost-spike'), str(run), '--grant-disposable-edit-undo']
+        if args.grant_disposable_fixed_save: argv.append('--grant-disposable-fixed-save')
+        if reopen: argv.append('--reopen-fixed-save')
+        return subprocess.Popen(argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=log, env=env, text=True)
+    native = start_native()
+    def reopen_fixed():
+        nonlocal native
+        if not args.grant_disposable_fixed_save or not (destination/'fixture.json').is_file():
+            raise ValueError('No saved disposable fixture')
+        old_pid = native.pid
+        assert native.stdin is not None
+        native.stdin.close(); old_exit = native.wait(timeout=5)
+        if old_exit != 0: raise RuntimeError('Native owner failed during close')
+        native = start_native(reopen=True)
+        (run/'reopen-process.json').write_text(json.dumps({'old_pid':old_pid,'old_exit':old_exit,'new_pid':native.pid}))
     assert native.stdin is not None and native.stdout is not None
     def stop(signum, frame):
         raise KeyboardInterrupt
@@ -74,13 +93,14 @@ def main():
         def do_POST(self):
             if not authorized(self.headers,authority,token): return self.reply(403,b'{"error":"denied"}')
             if self.headers.get('Transfer-Encoding'): return self.reply(400,b'{}')
-            if self.path not in ('/render','/command'): return self.reply(404,b'{}')
+            if self.path not in ('/render','/command','/reopen-fixture'): return self.reply(404,b'{}')
             try:
                 length = int(self.headers.get('Content-Length','0'))
-                if length < 0 or length > 4096 or (self.path == '/render' and length):
+                if length < 0 or length > 4096 or (self.path != '/command' and length):
                     return self.reply(400,b'{}')
                 request = json.loads(self.rfile.read(length)) if self.path == '/command' else None
                 if self.path == '/command' and not isinstance(request,dict): return self.reply(400,b'{}')
+                if self.path == '/reopen-fixture': reopen_fixed()
                 metrics = render(request)
                 self.reply(200,json.dumps({'metrics':metrics,'authority':metrics['authority'],'command':metrics['command'],'scene':json.loads((run/'scene.json').read_text()),
                     'png':base64.b64encode((run/'preview.png').read_bytes()).decode()}).encode())
@@ -106,6 +126,11 @@ def main():
             try: native.wait(timeout=5)
             except subprocess.TimeoutExpired: native.kill(); native.wait()
         secret.unlink(missing_ok=True)
+        if args.grant_disposable_fixed_save:
+            (destination/'fixture.json').unlink(missing_ok=True)
+            # Native persistence may create its own project sidecar directories.
+            import shutil
+            shutil.rmtree(destination)
         log.close(); gate.close()
 
 if __name__ == '__main__': main()

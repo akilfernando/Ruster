@@ -1,3 +1,32 @@
+# Scoped disposable Save / fresh-process reopen — 2026-11-14
+
+## Verdict: PARTIAL — real persistence feasibility verified; production consent unqualified
+
+This supersedes the Save-unavailable boundary in the historical checkpoint below.
+
+- Optional **server-startup** `--grant-disposable-fixed-save` scopes one private, exclusively created mode-0700 directory and fixed `fixture.json`. No browser permission button, path/filename input, upload, export kit or user-scene authority. Assumption: the human operator authorizes this exact disposable startup scope. Automation exercising that fixture is **not trusted-human consent**, and the `localhost-spike`-only lease constructor is explicitly an assumed fixture authority, not native production owner approval.
+- Save uses existing `SceneEditor::dispatch_save_request`, the existing async asset worker, guarded admission, publication lease, recovery acknowledgement and committed receipt. It never routes through the test-only synchronous Save or public Session mutation. Fresh reopen closes/reaps the old native owner, starts a distinct process and calls real `Session::open` on the same fixed saved document; no JSON copying or alternate serializer. Existing Save adoption clears the old grant; it is not silently restored in that incarnation. The explicitly granted fresh native process obtains only the startup fixture scope again.
+- Existing windowless Host seams are sufficient for worker/recovery polling, not for a trusted file picker. Native file-picker/human-gesture consent remains unimplemented/unqualified. Prototype Save uses no native window and does not establish production MCP or native-client approval.
+- `python3 test_save.py` PASS: no-grant HTTP Save returns `save_permission_required` without file creation; an occupied fixed destination fails `destination_exists` through real deferred persistence and preserves sentinel bytes; granted Save persists the edited scene. Stale revision/session/persistence, arbitrary filename, unknown path and wrong Origin preserve destination bytes and state. Shared Undo restores original objects and byte-exact PNG without changing disk. Fresh process restores the **saved edit**, byte-exact scene/PNG and committed Undo history; Undo after reopen also restores original objects/pixels without writing disk. Records: `evidence/scoped-save/result.json`, `scoped-save-denied/result.json`, `save-journey.log`, both `cleanup.json`.
+- Actual Chromium button journey: Connect → Move → Save disposable fixture → Fresh-process reopen; four visible-image receipts, exact reopened scene and PNG. Separate browser without Save startup grant displays `save_permission_required` and unchanged scene. `browser-save-reopen.json`, `browser-denied.json` retain receipts. This is browser automation, not a physical human walkthrough or ChatGPT integration.
+- Final release build, release all-target strict Clippy, formatting, boundary unit case, **two existing native persistence regressions** and diff checks PASS. Separate final-binary validation reports Core+Synchronization enabled; all supplied native/validation logs scan clear. Binary SHA256 `eda214b314075dfa68d07b2638a8d9cb0f72b1d1d58683c8853fead99da4e6ab`. Full workspace gate was dry-planned only, not run: standalone compiles actual editor source and selected existing persistence tests plus real wire/browser/GPU evidence cover this bounded fixture, not production acceptance.
+- Failed preparations are preserved, not retroactively passed: missing recovery polling caused Save timeout; automatic camera Fit produced different pixels across fresh processes despite equal scenes; the old harness incorrectly expected empty history after reopen; missing open-worker settling blocked reopened Undo with `asset_busy`. Final owner polls the genuine Host recovery/open seams. Rendering now uses the same explicit public renderer camera state in every process, so equality compares matched views rather than state-dependent first-frame Fit. No renderer source was changed or pixels synthesized.
+- All owned native/HTTP processes reaped, capability/destination removed, GPU gate reacquired. No canonical worktree, default profile/config, installed application, client registration, clipboard or global input changed. Earlier failed-build exit-101 logs remain in the prior checkpoint; this is not a no-failures claim.
+
+### Run
+
+```sh
+cd /home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard
+cargo build --release --locked --offline
+python3 test_save.py
+# Interactive disposable fixture, explicit operator startup acknowledgement:
+python3 server.py --disposable-fixture --grant-disposable-edit-undo --grant-disposable-fixed-save
+```
+
+Shutdown destroys only the exclusively created disposable destination. Existing destination directory refuses startup; no arbitrary browser-selected filesystem authority. Do not use this fixture for user projects. The exact next user-facing test is a real human selecting/confirming the fixed scope through a trusted native owner surface, then prompt/edit → Save → shutdown → reopen in the intended client; that route requires implementation and independent authority review first. Representative matched scene/performance, long idle/process/GPU memory, hidden-tab recovery, coalescing and actual ChatGPT-panel UX remain QUEUED, not running. Current timing instrumentation is retained; tiny-fixture historical timings are not current performance acceptance.
+
+---
+
 # Guarded edit / shared Undo checkpoint — 2026-11-14
 
 ## Verdict: PARTIAL — guarded fixture journey verified

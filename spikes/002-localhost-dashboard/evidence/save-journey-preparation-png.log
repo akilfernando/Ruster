@@ -1,0 +1,8 @@
+Traceback (most recent call last):
+  File "/home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/test_save.py", line 65, in <module>
+    run(False);run(True)
+               ~~~^^^^^^
+  File "/home/akilf/Projects/rusterize-localhost-spike-20261114/spikes/002-localhost-dashboard/test_save.py", line 50, in run
+    assert reopened['png']==saved['png'],'fresh-process native pixels must match'
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AssertionError: fresh-process native pixels must match

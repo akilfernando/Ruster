@@ -83,7 +83,11 @@ fn main() {
         Some("--grant-disposable-edit-undo"),
         "explicit startup fixture grant required"
     );
-    let mut owner = scene_editor::localhost_fixture::Owner::new();
+    let mut owner = scene_editor::localhost_fixture::Owner::new(
+        &out,
+        std::env::args().any(|arg| arg == "--grant-disposable-fixed-save"),
+        std::env::args().any(|arg| arg == "--reopen-fixed-save"),
+    );
     let scene = owner.scene();
     scene.validate().unwrap();
     // Exactly one immutable authored scene. No alternate JS project model.
@@ -144,7 +148,26 @@ fn main() {
                     egui::CentralPanel::default()
                         .frame(egui::Frame::NONE)
                         .show(ctx, |ui| {
-                            ruster_render::viewport(ui, &scene, None);
+                            // Match the view across independent processes; automatic
+                            // first-frame Fit depends on the currently loaded bounds.
+                            let mut navigation = ruster_render::NavigationOptions {
+                                enabled: false,
+                                camera: Some(ruster_render::CameraState {
+                                    target: [0., 0., 0.],
+                                    yaw: 0.7,
+                                    pitch: 0.45,
+                                    distance: 10.,
+                                    orthographic: false,
+                                }),
+                                ..Default::default()
+                            };
+                            ruster_render::viewport_with_navigation(
+                                ui,
+                                &scene,
+                                &[],
+                                &Default::default(),
+                                &mut navigation,
+                            );
                         });
                 },
             );

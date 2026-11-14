@@ -1,0 +1,13 @@
+{
+  "denied": {
+    "error": {
+      "code": "save_permission_required",
+      "message": "Restart with an explicit RUSTER_MCP_SAVE_DIR grant",
+      "revision": "0",
+      "session_token": "localhost-fixture-1060833:scene:1"
+    },
+    "ok": false
+  },
+  "scene_unchanged": true,
+  "destination_absent": true
+}
