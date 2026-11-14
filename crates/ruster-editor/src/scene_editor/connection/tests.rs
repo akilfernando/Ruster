@@ -86,6 +86,46 @@ fn bounded_hermes_owner_fixture() {
 }
 
 #[test]
+fn cp2_local_status_keeps_disconnected_listening_and_revoked_distinct() {
+    let ctx = egui::Context::default();
+    let mut host = host("cp2-local-status");
+    let authored = host.editor.session.snapshot_bytes().unwrap();
+    let paint = |host: &Host| {
+        let mut text = Vec::new();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            host.connection_status_ui(ui);
+        });
+        for shape in &output.shapes {
+            if let egui::epaint::Shape::Text(shape) = &shape.shape {
+                text.push(shape.galley.job.text.clone());
+            }
+        }
+        output.textures_delta.clear();
+        text.join("\n")
+    };
+    let text = paint(&host);
+    assert!(text.contains("Disconnected"));
+    assert!(!text.contains("Registered"));
+    let locator = host.connect_adapter(&ctx).unwrap();
+    let text = paint(&host);
+    assert!(text.contains("Waiting for an adapter"));
+    assert!(text.contains("Registration and client reload are separate"));
+    assert!(!text.contains("Connected to this project"));
+    let (owner, _) = approved(host.bridge.as_ref().unwrap());
+    let text = paint(&host);
+    assert!(text.contains("Connected to this project"));
+    assert!(text.contains("Asset catalog changes can persist immediately, before Save."));
+    assert!(!text.contains("Registered"));
+    host.disconnect_adapter();
+    assert!(paint(&host).contains("Authority revoked; retiring connection"));
+    drop(owner);
+    retire(&mut host, &ctx);
+    assert!(paint(&host).contains("Disconnected"));
+    assert!(!locator.exists());
+    assert_eq!(host.editor.session.snapshot_bytes().unwrap(), authored);
+}
+
+#[test]
 fn save_root_rebase_is_a_new_project_authority_generation() {
     let ctx = egui::Context::default();
     let mut host = host("save-root");

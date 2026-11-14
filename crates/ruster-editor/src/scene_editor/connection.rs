@@ -1,5 +1,9 @@
-//! CP1 owner API. Deliberately no Connect UI, registration or remote approval.
+//! CP1 owner API and bounded CP2 presentation/consent seams; no native Connect wiring.
 use super::*;
+
+// Bounded CP2 consent seam; native wiring is a subsequent integration slice.
+#[allow(dead_code)]
+mod consent;
 
 #[cfg(all(test, unix))]
 mod tests;
@@ -70,6 +74,22 @@ impl Host {
     pub(super) fn terminal_connection_receipts(&self) -> &std::collections::VecDeque<Value> {
         &self.editor.retired_connection_receipts
     }
+    /// Read-only CP2 presentation seam. Registration/reload receipts must be
+    /// supplied by the later consent controller, never inferred from a listener.
+    pub(super) fn connection_status_ui(&self, ui: &mut egui::Ui) {
+        ui.heading("AI connection");
+        ui.label(match self.connection_state() {
+            "retired" => "Disconnected",
+            "revoked_draining" => "Authority revoked; retiring connection",
+            "listening_unbound" => "Waiting for an adapter",
+            "approval_required" => "Adapter approval required",
+            "bound" => "Connected to this project",
+            _ => "Connection state unavailable",
+        });
+        ui.label("Registration and client reload are separate from editor binding.");
+        ui.label("Asset catalog changes can persist immediately, before Save.");
+    }
+
     pub(super) fn connection_state(&self) -> &'static str {
         match &self.bridge {
             None => "retired",
