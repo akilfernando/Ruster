@@ -24,7 +24,7 @@ python3 spikes/003-interactive-localhost/server.py \
   --grant-disposable-local-and-first-mcp-owner
 ```
 
-Qualified retained executable: `/home/akilf/Projects/Ruster-Audits/interactive-localhost-20261114/host-fixture-final`, SHA256 `44748ac43b02cfe4933d8302f28bef777f15261561fea1eafae73c715a2ac4c8`. Matched unchanged MCP adapter: `/home/akilf/Projects/Ruster-Audits/native-scene-observation-20261114/ruster-mcp`, SHA256 `1f9c1e2351b1c0b9d6903d31fcf459c70ce4a50ffd51ea0a9b70c809a8ae7343`.
+Qualified current executable: `/home/akilf/Projects/Ruster-Audits/automatic-refresh-20261115/host-fixture`, SHA256 `f43415fc5fc9437047e4e498b0c00d4472518c0beb14b3061d7a7d2ea52a23a9`. The earlier `interactive-localhost-20261114/host-fixture-final` is historical and lacks the automatic status receipt; do not use it with the current server. Matched unchanged MCP adapter: `/home/akilf/Projects/Ruster-Audits/native-scene-observation-20261114/ruster-mcp`, SHA256 `1f9c1e2351b1c0b9d6903d31fcf459c70ce4a50ffd51ea0a9b70c809a8ae7343`.
 
 Startup atomically allocates a **fresh private session** and prints its URL, run directory, exact native PID and locator. Read `<run>/capability.secret` locally; enter it into **Local capability**, then Connect / refresh. Never put the capability in URLs, chat, configuration, evidence or logs. Each run has different authority; an old recorded URL/locator is not a running instance. Ctrl-C/SIGTERM stops/reaps the owned native Host, retires its locator, closes HTTP and removes the capability. The existing GPU QA gate refuses overlapping ownership.
 
