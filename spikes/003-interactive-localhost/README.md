@@ -10,6 +10,12 @@ This expands the **already user-confirmed** ChatGPT internal-browser localhost/c
 
 The user reports the combined journey **“worked perfectly”** in the actual ChatGPT built-in browser with direct MCP authoring: manual `center` Translation X **5 / revision1** → direct MCP transform X **1.25 / revision2** → browser Shared Undo X **5 / revision3** → direct MCP Undo X **0 / revision4**, with browser refresh showing the restored state. The parent reports seeing the revision2 screenshot. This closes the bounded user-operated combined-client loop, not every navigation/draft/security case. Evidence is the user's report and parent-observed screenshot, **not independently retained raw final MCP calls, image equality or performance measurement**. The prior ordinary Chromium evidence below remains separate. Production consent remains unqualified: this session uses the explicit disposable first-owner startup grant.
 
+## Automatic refresh accepted in ChatGPT by user report — 2026-11-15
+
+Akil confirms **both automatic updates work** in the actual ChatGPT internal browser: direct MCP transform of `center` to Translation X1.25, then direct MCP Undo, without manual Refresh. The supplied ChatGPT transcript reports the transform started at X0 (not an independently verified manual X5 baseline). This accepts the bounded external-edit/Undo automatic-refresh increment by **explicit user report**, not independently captured client calls, frame equality, latency, or every expanded control/draft case. Production consent/onboarding remains unqualified.
+
+The first inspection returned approval-required; a later request succeeded without user configuration changes. The explicitly granted disposable fixture publishes the pending adapter identity and asynchronously approves its first exact owner; inspection can reach the native guard before that approval is processed. This explains the observed two-request behavior; it is not a transport failure or evidence of production human consent. Do not suggest approval in a nonexistent native window for this windowless fixture, automatically replay an uncertain mutation, or generalize fixture auto-approval to production. The live state had an owner, consumed approval file and no server failure receipt; no raw first-call trace was retained.
+
 ## Run
 
 From this candidate worktree:

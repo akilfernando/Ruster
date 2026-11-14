@@ -1,5 +1,11 @@
 # Current project status
 
+## Automatic refresh accepted in ChatGPT by user report — 2026-11-15
+
+Akil confirms **both automatic updates work** in the actual ChatGPT internal browser: direct MCP transform of `center` to Translation X1.25, then direct MCP Undo, without manual Refresh. The supplied ChatGPT transcript reports the transform started at X0 (not an independently verified manual X5 baseline). This accepts the bounded external-edit/Undo automatic-refresh increment by **explicit user report**, not independently captured client calls, frame equality, latency, or every expanded control/draft case. Production consent/onboarding remains unqualified.
+
+The first inspection returned approval-required; a later request succeeded without user configuration changes. The explicitly granted disposable fixture publishes the pending adapter identity and asynchronously approves its first exact owner; inspection can reach the native guard before that approval is processed. This explains the observed two-request behavior; it is not a transport failure or evidence of production human consent. Do not suggest approval in a nonexistent native window for this windowless fixture, automatically replay an uncertain mutation, or generalize fixture auto-approval to production. The live state had an owner, consumed approval file and no server failure receipt; no raw first-call trace was retained.
+
 ## Automatic external-edit refresh — 2026-11-15
 
 Approved bounded continuation, sole delegated writer in the clean interactive-localhost candidate at3788816; canonical dirty STATUS/private attachments preserved. Ownership preflight inspected current conversations/processes, found no candidate writer/live demo and a free QA gate; no desktop input. Exit contract: direct same-session MCP edit/Undo automatically updates committed browser state and native frame, while native-reserved inspector text stays pending with MCP overwrites refused. Non-goals: production consent/renderer/auth changes, gizmos, onboarding, installation or client registration. Budget25minutes/two failed journeys.
