@@ -59,8 +59,16 @@ fn direct_image_host_fixture() {
     // Match viewport framing across revision zero and Undo: the normal welcome
     // banner is revision-zero-only and is not part of the viewport camera.
     host.editor.workspace.welcome = false;
+    let interactive = std::env::var_os("INTERACTIVE_LOCALHOST_FIXTURE").is_some();
+    if interactive {
+        host.editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        host.editor.workspace.welcome = false;
+    }
     let locator = host.connect_adapter(&ctx).unwrap();
-    let deadline = Instant::now() + Duration::from_secs(180);
+    let locator_value: Value = serde_json::from_slice(&std::fs::read(&locator).unwrap()).unwrap();
+    let nonce = locator_value["incarnation"].as_str().unwrap().to_string();
+    let mut reservation: Option<(String, String, String)> = None;
+    let deadline = Instant::now() + Duration::from_secs(if interactive { 1800 } else { 180 });
     let mut previous = None;
     let mut count = 0;
     while Instant::now() < deadline && !out.join("stop").exists() {
@@ -79,6 +87,78 @@ fn direct_image_host_fixture() {
             host.disconnect_adapter();
             std::fs::remove_file(out.join("revoke")).unwrap();
         }
+        let request_path = out.join("local-request.json");
+        let local = if interactive && request_path.exists() {
+            let request: Value =
+                serde_json::from_slice(&std::fs::read(&request_path).unwrap()).unwrap();
+            std::fs::remove_file(&request_path).unwrap();
+            let started = Instant::now();
+            let op = request["op"].as_str().unwrap_or("");
+            let args = request["args"].clone();
+            let failure = |code: &str| json!({"ok":false,"error":{"code":code}});
+            let live = host.bridge.as_ref().is_some_and(|b| b.authority().live());
+            let response = if !live {
+                failure("revoked")
+            } else if op == "refresh" {
+                json!({"ok":true})
+            } else if op == "draft_begin" {
+                let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
+                let v = &view["result"];
+                if reservation.is_some() || !host.editor.guard().is_ok() {
+                    failure("drafts_pending")
+                } else if args["expected_session_token"] != v["session_token"]
+                    || args["expected_revision"] != v["revision"]
+                    || args["expected_view_revision"] != v["view_revision"]
+                    || args["object_id"] != v["active_object_id"]
+                    || !args["object_id"].is_string()
+                {
+                    failure("stale_draft")
+                } else {
+                    reservation = Some((
+                        v["session_token"].as_str().unwrap().into(),
+                        v["revision"].as_str().unwrap().into(),
+                        args["object_id"].as_str().unwrap().into(),
+                    ));
+                    // Use the real inspector draft guard. No alternate history or
+                    // agent-specific conflict rule; all MCP writes see drafts_pending.
+                    host.editor.draft.as_mut().unwrap().translation[0] =
+                        "pending local inspector input".into();
+                    json!({"ok":true})
+                }
+            } else if op == "draft_cancel" {
+                reservation = None;
+                host.editor.sync_draft();
+                json!({"ok":true})
+            } else if op == "scene_transform" {
+                if let Some((token, revision, object)) = &reservation {
+                    if args["expected_session_token"] != *token
+                        || args["expected_revision"] != *revision
+                        || args["object_id"] != *object
+                    {
+                        failure("stale_draft")
+                    } else {
+                        host.editor.sync_draft();
+                        let response = host.editor.command(&nonce, op, args);
+                        if response["ok"] == true {
+                            reservation = None;
+                        } else {
+                            host.editor.draft.as_mut().unwrap().translation[0] =
+                                "pending local inspector input".into();
+                        }
+                        response
+                    }
+                } else {
+                    failure("draft_required")
+                }
+            } else if matches!(op, "viewport_camera" | "scene_select" | "scene_undo") {
+                host.editor.command(&nonce, op, args)
+            } else {
+                failure("forbidden_operation")
+            };
+            Some((response, started.elapsed().as_secs_f64() * 1000.))
+        } else {
+            None
+        };
         count += 1;
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -198,6 +278,43 @@ fn direct_image_host_fixture() {
             [1408, 896],
             &pixels,
         ));
+        if let Some((response, commit_ms)) = local {
+            use base64::Engine as _;
+            let rect = host.editor.captures.rect.unwrap();
+            let x = rect.min.x.ceil() as usize;
+            let y = rect.min.y.ceil() as usize;
+            let width = (rect.max.x.floor() as usize).saturating_sub(x);
+            let height = (rect.max.y.floor() as usize).saturating_sub(y);
+            assert!(width > 0 && height > 0 && x + width <= 1408 && y + height <= 896);
+            let rgba: Vec<u8> = (y..y + height)
+                .flat_map(|row| {
+                    image.pixels[row * 1408 + x..row * 1408 + x + width]
+                        .iter()
+                        .flat_map(|p| p.to_array())
+                })
+                .collect();
+            let mut png = Vec::new();
+            {
+                let mut encoder = png::Encoder::new(&mut png, width as u32, height as u32);
+                encoder.set_compression(png::Compression::Fast);
+                encoder.set_color(png::ColorType::Rgba);
+                encoder.set_depth(png::BitDepth::Eight);
+                encoder
+                    .write_header()
+                    .unwrap()
+                    .write_image_data(&rgba)
+                    .unwrap();
+            }
+            let scene = host.editor.command(&nonce, "scene_inspect", json!({}));
+            let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
+            let reply = json!({"response":response,"scene":scene["result"],"view":view["result"],"commit_ms":commit_ms,"native_frame":count,"png":base64::engine::general_purpose::STANDARD.encode(png),"fixture_authority_only":true,"draft_reserved":reservation.is_some()});
+            std::fs::write(out.join("local-response.tmp"), reply.to_string()).unwrap();
+            std::fs::rename(
+                out.join("local-response.tmp"),
+                out.join("local-response.json"),
+            )
+            .unwrap();
+        }
         for callback in callbacks {
             callback.complete(image.clone());
         }
