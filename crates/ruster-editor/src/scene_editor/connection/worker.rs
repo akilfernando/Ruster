@@ -1,26 +1,25 @@
 //! Linux-only bounded CLI owner. No UI-thread waits, retries or raw diagnostics.
 use super::consent::RegistrationConsent;
-#[cfg(test)]
 use serde_json::Value;
 use std::sync::{
     atomic::{AtomicBool, Ordering},
     mpsc, Arc,
 };
-#[cfg(test)]
 use std::{
     io::{Read, Write},
     os::{
         fd::OwnedFd,
         unix::{net::UnixStream, process::CommandExt},
     },
-    path::{Path, PathBuf},
+    path::Path,
     process::{Command, Stdio},
     time::{Duration, Instant},
 };
 
 #[cfg(test)]
+use std::path::PathBuf;
+
 const LIMIT: usize = 4096;
-#[cfg(test)]
 const DEADLINE: Duration = Duration::from_secs(45);
 
 pub(super) struct Worker {
@@ -35,6 +34,61 @@ impl Worker {
     /// launcher and a post-write receipt cannot establish pre-mutation provenance.
     pub(super) fn start(_consent: RegistrationConsent) -> Result<Self, String> {
         Err("Registration unavailable: Hermes lacks a qualified strict profile/raw inspection and context-bound apply contract. No process launched.".into())
+    }
+
+    /// Compiled review candidate, intentionally NOT called by the production
+    /// factory `start`. Supporting tests cannot promote the factory's gate.
+    pub(super) fn start_strict_candidate(mut consent: RegistrationConsent) -> Result<Self, String> {
+        if consent.invocation().provenance().is_none() {
+            return Err("Strict candidate requires a frozen provenance capsule.".into());
+        }
+        let invocation = consent.confirm()?;
+        let cancel = Arc::new(AtomicBool::new(false));
+        let cancellation = cancel.clone();
+        let (send, result) = mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("hermes-strict-registration".into())
+            .spawn(move || {
+                let outcome = (|| {
+                    let provenance = invocation.provenance().ok_or(())?;
+                    let (exit, output) = run_strict(
+                        &invocation,
+                        invocation.args(),
+                        invocation.stdin(),
+                        &cancellation,
+                    )?;
+                    consent.complete(exit, &output).map_err(|_| ())?;
+                    if consent.succeeded() {
+                        let request: Value =
+                            serde_json::from_str(invocation.stdin()).map_err(|_| ())?;
+                        let args = [
+                            "-p",
+                            provenance.profile(),
+                            "mcp",
+                            "inspect",
+                            &invocation.args()[4],
+                            "--json",
+                            "--strict-profile",
+                        ]
+                        .map(str::to_owned);
+                        let (exit, output) = run_strict(&invocation, &args, "", &cancellation)?;
+                        let readback: Value = serde_json::from_str(&output).map_err(|_| ())?;
+                        let desired = &request["entry"];
+                        let expected = serde_json::json!({"ok":true,"context":provenance.context(),
+                            "present":!desired.is_null(),"entry":desired});
+                        if exit != 0 || readback != expected {
+                            return Err(());
+                        }
+                    }
+                    Ok::<_, ()>(())
+                })();
+                if outcome.is_err() {
+                    consent.fail();
+                }
+                let _ = send.send(consent);
+            })
+            .map_err(|_| "Cannot start strict registration candidate.".to_owned())?;
+        Ok(Self { cancel, result })
     }
 
     /// Historical worker mechanics only; not a supported registration path.
@@ -127,6 +181,24 @@ impl Drop for Worker {
     } // Never join on the editor thread.
 }
 
+fn run_strict(
+    invocation: &super::consent::Invocation,
+    args: &[String],
+    input: &str,
+    cancel: &AtomicBool,
+) -> Result<(i32, String), ()> {
+    let provenance = invocation.provenance().ok_or(())?;
+    provenance.revalidate().map_err(|_| ())?;
+    run_configured(
+        provenance.launcher(),
+        args,
+        input,
+        cancel,
+        DEADLINE,
+        Some(provenance),
+    )
+}
+
 #[cfg(test)]
 fn run(
     cli: &Path,
@@ -135,13 +207,25 @@ fn run(
     cancel: &AtomicBool,
     deadline: Duration,
 ) -> Result<(i32, String), ()> {
+    run_configured(cli, args, input, cancel, deadline, None)
+}
+
+fn run_configured(
+    cli: &Path,
+    args: &[String],
+    input: &str,
+    cancel: &AtomicBool,
+    deadline: Duration,
+    provenance: Option<&super::capsule::Provenance>,
+) -> Result<(i32, String), ()> {
     if cancel.load(Ordering::Acquire) || input.len() > LIMIT {
         return Err(());
     }
     let (mut output, writer) = UnixStream::pair().map_err(|_| ())?;
     output.set_nonblocking(true).map_err(|_| ())?;
+    let (mut diagnostics, errors) = UnixStream::pair().map_err(|_| ())?;
+    diagnostics.set_nonblocking(true).map_err(|_| ())?;
     let mut command = Command::new(cli);
-    let errors = writer.try_clone().map_err(|_| ())?;
     command
         .args(args)
         .process_group(0)
@@ -160,6 +244,14 @@ fn run(
             command.env_remove(key);
         }
     }
+    if let Some(provenance) = provenance {
+        command
+            .env_clear()
+            .envs(provenance.environment())
+            .current_dir(provenance.cwd());
+        // Recheck after command construction, immediately before dispatch.
+        provenance.revalidate().map_err(|_| ())?;
+    }
     let mut child = command.spawn().map_err(|_| ())?;
     let result = (|| {
         child
@@ -170,41 +262,20 @@ fn run(
             .map_err(|_| ())?;
         let start = Instant::now();
         let mut bytes = Vec::new();
+        let mut total = 0;
         loop {
             if cancel.load(Ordering::Acquire) || start.elapsed() >= deadline {
                 return Err(());
             }
-            let mut buffer = [0; 1024];
-            match output.read(&mut buffer) {
-                Ok(0) => {
-                    // EOF alone is not exit: retain PID ownership until group cleanup.
-                }
-                Ok(n) => {
-                    bytes.extend_from_slice(&buffer[..n]);
-                    if bytes.len() > LIMIT {
-                        return Err(());
-                    }
-                }
-                Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => {}
-                Err(_) => return Err(()),
-            }
+            drain(&mut output, Some(&mut bytes), &mut total)?;
+            drain(&mut diagnostics, None, &mut total)?;
             let stat =
                 std::fs::read_to_string(format!("/proc/{}/stat", child.id())).map_err(|_| ())?;
             if stat.rsplit_once(')').and_then(|(_, s)| s.as_bytes().get(1)) == Some(&b'Z') {
-                // Drain the bounded remaining socket bytes after leader exit.
-                loop {
-                    match output.read(&mut buffer) {
-                        Ok(0) => break,
-                        Ok(n) => {
-                            bytes.extend_from_slice(&buffer[..n]);
-                            if bytes.len() > LIMIT {
-                                return Err(());
-                            }
-                        }
-                        Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => break,
-                        Err(_) => return Err(()),
-                    }
-                }
+                // EOF alone never implies leader exit. Both channels remain
+                // jointly bounded; diagnostics cannot contaminate JSON receipts.
+                drain(&mut output, Some(&mut bytes), &mut total)?;
+                drain(&mut diagnostics, None, &mut total)?;
                 return String::from_utf8(bytes).map_err(|_| ());
             }
             std::thread::sleep(Duration::from_millis(10));
@@ -217,6 +288,30 @@ fn run(
     );
     let status = child.wait().map_err(|_| ())?;
     result.map(|stdout| (status.code().unwrap_or(-1), stdout))
+}
+
+fn drain(
+    stream: &mut UnixStream,
+    mut retained: Option<&mut Vec<u8>>,
+    total: &mut usize,
+) -> Result<(), ()> {
+    let mut buffer = [0; 1024];
+    loop {
+        match stream.read(&mut buffer) {
+            Ok(0) => return Ok(()),
+            Ok(n) => {
+                *total += n;
+                if *total > LIMIT {
+                    return Err(());
+                }
+                if let Some(bytes) = retained.as_mut() {
+                    bytes.extend_from_slice(&buffer[..n]);
+                }
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => return Ok(()),
+            Err(_) => return Err(()),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -330,7 +425,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let cli = directory.path().join("cli");
         use std::os::unix::fs::PermissionsExt;
-        for body in ["printf 'bad'; exit 0", "yes secret", "sleep 10 & wait"] {
+        for body in [
+            "printf 'bad'; exit 0",
+            "yes secret",
+            "yes secret >&2",
+            "sleep 10 & wait",
+        ] {
             std::fs::write(&cli, format!("#!/bin/sh\n{body}\n")).unwrap();
             std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o700)).unwrap();
             let result = run(

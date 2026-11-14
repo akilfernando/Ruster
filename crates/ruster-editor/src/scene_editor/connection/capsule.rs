@@ -183,6 +183,12 @@ impl Provenance {
         {
             return Err("Strict profile hierarchy mismatch.".into());
         }
+        // Hermes discovery legitimately secures its profile directory to 0700.
+        // Freeze only an already-secured destination so this cannot first surface
+        // as a provenance failure AFTER a successful configuration mutation.
+        if directories[2].mode & 0o777 != 0o700 {
+            return Err("Selected Hermes profile must already have private 0700 permissions before preview; no permissions were changed.".into());
+        }
         let this = Self {
             launcher: Pin::artifact(&spec.launcher)?,
             interpreter: Pin::artifact(&spec.interpreter)?,
@@ -283,6 +289,7 @@ mod tests {
         std::fs::create_dir(root.join("work")).unwrap();
         let home = root.join("profiles/named");
         std::fs::create_dir_all(&home).unwrap();
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o700)).unwrap();
         std::fs::write(home.join("config.yaml"), b"unrelated: unchanged").unwrap();
         let identity = |p: &std::path::Path, directory: bool| {
             let m = std::fs::metadata(p).unwrap();
@@ -309,6 +316,144 @@ mod tests {
                 "home":identity(&home,true),"config":identity(&home.join("config.yaml"),false),
                 "runtime":{"python":interpreter.path,"python_sha256":interpreter.sha256}}),
         }
+    }
+
+    #[test]
+    fn insecure_profile_is_rejected_before_preview_or_runtime_normalization() {
+        let dir = tempfile::tempdir().unwrap();
+        let spec = fixture(dir.path());
+        let home = dir.path().join("profiles/named");
+        std::fs::set_permissions(&home, std::fs::Permissions::from_mode(0o755)).unwrap();
+        assert!(Provenance::freeze(spec).is_err(), "Hermes discovery secures the profile to 0700; refuse BEFORE any mutation, not during readback");
+        assert_eq!(std::fs::metadata(home).unwrap().mode() & 0o777, 0o755);
+    }
+
+    #[test]
+    fn strict_worker_uses_frozen_environment_cwd_and_exact_raw_readback() {
+        use super::super::{consent::RegistrationConsent, worker::Worker};
+        for mismatch in [false, true] {
+            let dir = tempfile::tempdir().unwrap();
+            let mut spec = fixture(dir.path());
+            let entry = json!({"command": spec.adapter.path, "enabled": true,
+                "env": {"RUSTER_MCP_LOCATOR": dir.path().join("locator")}});
+            let readback = json!({"ok":true,"context":spec.context,
+                "present":true,"entry":if mismatch { Value::Null } else { entry }});
+            let script = format!("#!/bin/sh\nprintf 'probe startup diagnostic\\n' >&2\n[ \"$PWD\" = '{}' ] || exit 9\n[ -z \"${{HERMES_HOME+x}}${{PYTHONPATH+x}}${{RUSTER_MCP_ENABLE+x}}\" ] || exit 8\n/bin/cat >/dev/null\nif [ \"$4\" = apply ]; then printf '%s' '{{\"ok\":true,\"changed\":true,\"tools\":84}}'; else printf '%s' '{}'; fi\n", spec.cwd.display(), readback);
+            spec.launcher = artifact(&spec.launcher.path, script.as_bytes());
+            let provenance = Provenance::freeze(spec).unwrap();
+            let consent = RegistrationConsent::preview_bound(
+                provenance,
+                "rusterize",
+                &dir.path().join("locator"),
+                json!({"present":false,"entry":null}),
+                false,
+            )
+            .unwrap();
+            let worker = Worker::start_strict_candidate(consent).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+            let result = loop {
+                if let Some(result) = worker.poll().unwrap() {
+                    break result;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            };
+            assert_eq!(result.succeeded(), !mismatch);
+        }
+    }
+
+    #[test]
+    #[ignore = "explicit isolated strict-API/companion fixture; no installed runtime cutover"]
+    fn actual_strict_cli_worker_create_reuse_conflict_remove() {
+        use super::super::{consent::RegistrationConsent, worker::Worker};
+        let manifest =
+            std::env::var("E2A_STRICT_WORKER_FIXTURE").expect("explicit fixture required");
+        let value: Value = serde_json::from_slice(&std::fs::read(manifest).unwrap()).unwrap();
+        let pinned = |key: &str| Artifact {
+            path: value[key]["path"].as_str().unwrap().into(),
+            sha256: value[key]["sha256"].as_str().unwrap().into(),
+        };
+        let launcher = pinned("launcher");
+        let environment: BTreeMap<String, String> =
+            serde_json::from_value(value["environment"].clone()).unwrap();
+        let cwd = PathBuf::from(value["cwd"].as_str().unwrap());
+        let inspect = || {
+            let output = std::process::Command::new(&launcher.path)
+                .args([
+                    "-p",
+                    "selected",
+                    "mcp",
+                    "inspect",
+                    "rusterize",
+                    "--json",
+                    "--strict-profile",
+                ])
+                .env_clear()
+                .envs(&environment)
+                .current_dir(&cwd)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "strict inspect failed: {:?}",
+                output
+            );
+            serde_json::from_slice::<Value>(&output.stdout).unwrap()
+        };
+        let default = PathBuf::from(value["default_config"].as_str().unwrap());
+        let before = std::fs::read(&default).unwrap();
+        let prepare = |raw: &Value, remove| {
+            let spec = LaunchSpec {
+                launcher: launcher.clone(),
+                interpreter: pinned("interpreter"),
+                build: pinned("build"),
+                adapter: pinned("adapter"),
+                runtime: value["runtime"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|v| Artifact {
+                        path: v["path"].as_str().unwrap().into(),
+                        sha256: v["sha256"].as_str().unwrap().into(),
+                    })
+                    .collect(),
+                cwd: cwd.clone(),
+                environment: environment.clone(),
+                context: raw["context"].clone(),
+            };
+            RegistrationConsent::preview_bound(
+                Provenance::freeze(spec).unwrap(),
+                "rusterize",
+                Path::new(value["locator"].as_str().unwrap()),
+                json!({"present":raw["present"],"entry":raw["entry"]}),
+                remove,
+            )
+            .unwrap()
+        };
+        let wait = |consent| {
+            let worker = Worker::start_strict_candidate(consent).unwrap();
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(100);
+            loop {
+                if let Some(result) = worker.poll().unwrap() {
+                    break result;
+                }
+                assert!(std::time::Instant::now() < deadline);
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        let empty = inspect();
+        assert_eq!(empty["present"], false);
+        let stale = prepare(&empty, false);
+        assert!(wait(prepare(&empty, false)).succeeded());
+        assert!(wait(prepare(&inspect(), false)).succeeded());
+        assert_eq!(
+            wait(stale).status(),
+            "Registration conflict; no refresh or retry"
+        );
+        assert!(wait(prepare(&inspect(), true)).succeeded());
+        assert_eq!(inspect()["present"], false);
+        assert_eq!(std::fs::read(default).unwrap(), before);
+        assert!(!Path::new(value["locator"].as_str().unwrap()).exists());
     }
 
     #[test]

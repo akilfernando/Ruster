@@ -16,6 +16,8 @@ In generic scene mode on Unix, **AI connection…** opens the local connection c
 
 Asset catalog changes may persist immediately before Save; Save/export destinations still require separate grants. These controls do not register or restart Hermes, edit client configuration, or establish adapter executable provenance. Automatic registration remains fail-closed. This is an implementation candidate, not native workflow acceptance; [qualification boundary](../../docs/evidence/E2A-CP2-NATIVE-ROUTE-2026-11-14.md).
 
+The [strict executor review checkpoint](../../docs/evidence/E2A-STRICT-WORKER-CANDIDATE-2026-11-14.md) adds a compiled, unconnected candidate for frozen consent → supported candidate strict apply → exact raw/context readback. It requires an already-private0700named profile before preview and keeps the production factory disabled. It does not add profile selection, discover a qualified companion automatically, promote the Hermes runtime or complete default-build onboarding.
+
 ## Built-in shapes — E1
 
 Use **Create → Cube / Sphere / Capsule / Light** in the main menu, hierarchy header, hierarchy context submenu or blank-scene welcome panel. Light retains Point/Directional options. The four Create actions are unbound by default and remappable under **File → Workspace and shortcuts…**. Menus support arrow-key traversal, Enter activation and Escape dismissal. Pending fields/dialogs still protect authored state. Each creation uses one shared Undo entry; preview remains captured until Reset. The Mesh inspector identifies the procedural kind.
