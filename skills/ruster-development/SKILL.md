@@ -8,6 +8,16 @@ Read the project's `AGENTS.md` and `docs/STATUS.md` first. Find the project from
 
 The user authorizes selective delegation for this project. Use a balanced coding model as the main developer, a stronger reasoning model for difficult synthesis, an economical model for bounded work, and a visual/computer-use specialist when those capabilities matter. These are roles, not pinned product families or versions.
 
+## Outcome and throughput controls
+
+Before substantial implementation, the root records one creator outcome, actual interaction route, accountable coordinator/writer, short end-to-end exit test, non-goals, required risk checks and progress budget in the existing handoff/status. Run a cheap executable preflight of the complete critical path before expensive runtime snapshots or desktop sessions. Discovery, owner establishment, human approval and successful authoring are separate stages; an alternate interaction channel is not acceptance of the intended one.
+
+Reassess after 30 minutes without that end-to-end smoke or two failed journey attempts; justify a larger initial budget for consequential work. Carry elapsed work and failures across handoffs rather than resetting them for a renamed slice. Diagnose the whole remaining path before another seam-sized assignment. Keep one implementation owner through coupled repairs; main-agent implementation is allowed, and specialist review is consolidated around meaningful risk boundaries. Briefs normally stay near 400 words plus needed interface constraints and evidence links.
+
+Freeze the scope and threat model. Classify new findings as outcome blockers, later production/release gates or nonblocking follow-ups; do not silently promote optional qualification into a new product requirement or weaken existing safeguards. Time-box expanding tooling prerequisites against a finite caller inventory and explicit exit proof. Preflight realistic harness phase timing and cleanup margin: an arbitrary test deadline is not a user-approved product performance limit. Revise harness-only limits transparently when justified, never hide a missed actual performance requirement or retry uncertain mutations.
+
+Use affected checks while iterating, reuse valid unchanged-input evidence, checkpoint/push coherent work, and report completed creator workflows and actual blockers rather than productivity by commit/test counts. Keep the current handoff concise and reference existing evidence; no new scheduler, telemetry system or per-tiny-change paperwork is required.
+
 ## Refresh once per root session
 
 Before substantive work, read `docs/workflow/MODEL-ROUTING.md` and refresh its dated snapshot:
