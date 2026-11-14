@@ -20,6 +20,54 @@ fn wait<F: Future>(future: F) -> F::Output {
         }
     }
 }
+// Coordinates are PNG pixels, not CSS pixels or full native-window coordinates.
+// Retain the last delivered crop; never pick against a resized/reframed image.
+fn pick_position(args: &Value, crop: Option<egui::Rect>) -> Result<egui::Pos2, &'static str> {
+    let rect = crop.ok_or("stale_frame")?;
+    let width = rect.max.x.floor() - rect.min.x.ceil();
+    let height = rect.max.y.floor() - rect.min.y.ceil();
+    if args["image_width"].as_f64() != Some(f64::from(width))
+        || args["image_height"].as_f64() != Some(f64::from(height))
+    {
+        return Err("stale_frame");
+    }
+    let x = args["x"].as_f64().ok_or("invalid_coordinates")?;
+    let y = args["y"].as_f64().ok_or("invalid_coordinates")?;
+    if !x.is_finite()
+        || !y.is_finite()
+        || x < 0.
+        || y < 0.
+        || x >= f64::from(width)
+        || y >= f64::from(height)
+    {
+        return Err("invalid_coordinates");
+    }
+    Ok(egui::pos2(
+        rect.min.x.ceil() + x as f32,
+        rect.min.y.ceil() + y as f32,
+    ))
+}
+
+#[test]
+fn viewport_pixel_coordinates_preserve_crop_and_reject_stale_dimensions() {
+    let rect = egui::Rect::from_min_max(egui::pos2(301.2, 113.7), egui::pos2(1102.9, 714.4));
+    let mut args = json!({"image_width":800,"image_height":600,"x":400,"y":300});
+    assert_eq!(pick_position(&args, Some(rect)), Ok(egui::pos2(702., 414.)));
+    for (key, value, code) in [
+        ("image_width", json!(801), "stale_frame"),
+        ("x", json!(-1), "invalid_coordinates"),
+        ("x", json!(800), "invalid_coordinates"),
+        ("y", json!(600), "invalid_coordinates"),
+        ("x", json!(null), "invalid_coordinates"),
+    ] {
+        let saved = args[key].clone();
+        args[key] = value;
+        assert_eq!(pick_position(&args, Some(rect)), Err(code));
+        args[key] = saved;
+    }
+    assert_eq!(pick_position(&args, None), Err("stale_frame"));
+}
+
 #[test]
 #[ignore = "explicit private PREVIEW_FIXTURE_DIR; fixture authorization, not client acceptance"]
 fn direct_image_host_fixture() {
@@ -71,6 +119,8 @@ fn direct_image_host_fixture() {
     let deadline = Instant::now() + Duration::from_secs(if interactive { 1800 } else { 180 });
     let mut previous = None;
     let mut count = 0;
+    let mut delivered_crop = None;
+    let mut pending_pick_response = None;
     while Instant::now() < deadline && !out.join("stop").exists() {
         let owner = host.pending_adapter();
         if previous != owner || !out.join("state.json").exists() {
@@ -87,6 +137,7 @@ fn direct_image_host_fixture() {
             host.disconnect_adapter();
             std::fs::remove_file(out.join("revoke")).unwrap();
         }
+        let mut pointer = None;
         let request_path = out.join("local-request.json");
         let local = if interactive && request_path.exists() {
             let request: Value =
@@ -101,6 +152,29 @@ fn direct_image_host_fixture() {
                 failure("revoked")
             } else if op == "refresh" {
                 json!({"ok":true})
+            } else if op == "viewport_pick" {
+                if delivered_crop != host.editor.captures.rect {
+                    failure("stale_frame")
+                } else {
+                    match pick_position(&args, delivered_crop) {
+                        Err(code) => failure(code),
+                        Ok(position) => {
+                            // Reuse exact native view/session/revision/draft admission.
+                            // A no-op selection validates without changing scene/history.
+                            let guarded = json!({
+                                "expected_session_token":args["expected_session_token"],
+                                "expected_revision":args["expected_revision"],
+                                "expected_view_revision":args["expected_view_revision"],
+                                "object_ids":host.editor.manipulation.ids
+                            });
+                            let response = host.editor.command(&nonce, "scene_select", guarded);
+                            if response["ok"] == true {
+                                pointer = Some(position);
+                            }
+                            response
+                        }
+                    }
+                }
             } else if op == "draft_begin" {
                 let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
                 let v = &view["result"];
@@ -182,6 +256,18 @@ fn direct_image_host_fixture() {
             time: Some(count as f64 / 60.),
             ..Default::default()
         };
+        let mut raw = raw;
+        if let Some(pos) = pointer {
+            raw.events.push(egui::Event::PointerMoved(pos));
+            for pressed in [true, false] {
+                raw.events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+        }
         host.input.observe(&raw, &ctx);
         host.logic_tick(&ctx);
         let mut full = ctx.run_ui(raw, |ui| {
@@ -292,9 +378,18 @@ fn direct_image_host_fixture() {
             [1408, 896],
             &pixels,
         ));
+        // Native queued selection is applied after this frame's viewport draw.
+        // Deliver the following rendered frame, never old pixels with new selection.
+        let local = if pointer.is_some() {
+            pending_pick_response = local;
+            None
+        } else {
+            local.or_else(|| pending_pick_response.take())
+        };
         if let Some((response, commit_ms)) = local {
             use base64::Engine as _;
             let rect = host.editor.captures.rect.unwrap();
+            delivered_crop = Some(rect);
             let x = rect.min.x.ceil() as usize;
             let y = rect.min.y.ceil() as usize;
             let width = (rect.max.x.floor() as usize).saturating_sub(x);

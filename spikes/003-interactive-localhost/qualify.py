@@ -45,6 +45,13 @@ class CDP:
             self.call('Input.dispatchMouseEvent',{'type':kind,**xy,'button':'left','clickCount':1})
         wait(lambda:self.js('!busy'))
         assert self.js("outcomes.at(-1).status")=='completed',self.js('outcomes.at(-1)')
+    def point(self,x,y):
+        wait(lambda:self.js("!busy"))
+        xy=self.js("(()=>{const i=document.querySelector('#frame'),r=i.getBoundingClientRect();return {x:r.left+i.clientLeft+i.clientWidth*"+str(x)+",y:r.top+i.clientTop+i.clientHeight*"+str(y)+"}})()")
+        for kind in ['mouseMoved','mousePressed','mouseReleased']:
+            self.call('Input.dispatchMouseEvent',{'type':kind,**xy,'button':'left','clickCount':1})
+        wait(lambda:self.js('!busy'))
+        return self.js('outcomes.at(-1)')
     def snapshot(self):return self.js('({scene:current.scene,view:current.view,png:current.png,draft:!!draft,native_frame:current.native_frame})')
 
 def stop(p):
@@ -99,8 +106,43 @@ def main():
             idle=c.js('({...observation})');assert idle['status']>=2 and idle['frames']==1 and idle['max']==1,idle
             record['idle_observation']=idle
             assert base['scene']['session_token']==tool('scene_inspect')['result']['session_token']
+            # Actual pointer → native picking; scaled image at two CSS/DPR combinations.
+            selection_checks=[]
+            for width,dpr in [(1250,1),(980,2)]:
+                c.call('Emulation.setDeviceMetricsOverride',{'width':width,'height':1000,'deviceScaleFactor':dpr,'mobile':False})
+                c.point(.03,.9); cleared=c.snapshot()
+                assert cleared['view']['selected_object_ids']==[],cleared['view']
+                assert tool('viewport_inspect')['result']['selected_object_ids']==[]
+                c.click('#connect');assert c.snapshot()['png']==cleared['png'],'background reply contains old selected pixels'
+                result=c.point(.5,.5); picked=c.snapshot()
+                assert result['status']=='completed',result
+                assert picked['view']['active_object_id']=='center',picked['view']
+                assert tool('viewport_inspect')['result']['active_object_id']=='center'
+                assert 'center' in c.js("document.querySelector('#identity').textContent")
+                assert picked['png']!=cleared['png'],'native outline did not change pixels'
+                c.click('#connect');assert c.snapshot()['png']==picked['png'],'pick reply contains old unselected pixels'
+                selection_checks.append({'css_width':width,'dpr':dpr,'picked':'center','background_clear':True})
+            record['viewport_pointer_checks']=selection_checks
+            for label,snapshot in [('pointer-selected',picked),('pointer-background',cleared)]:
+                (a.output/(label+'.png')).write_bytes(base64.b64decode(snapshot['png']))
+                (a.output/(label+'.json')).write_text(json.dumps({k:v for k,v in snapshot.items() if k!='png'},indent=2))
+            stale_pick=c.js("({...pins(true),x:1,y:1,image_width:document.querySelector('#frame').naturalWidth,image_height:document.querySelector('#frame').naturalHeight})")
             for action in ['right','panright','in']:c.click('[data-camera="'+action+'"]')
+            stale=c.js("operate('viewport_pick',"+json.dumps(stale_pick)+")")
+            assert stale['status']=='failed' and stale['error']=='Error: stale_view',stale
+            for key,value,code in [('expected_session_token','retired','stale_session'),('expected_revision','999','stale_revision'),('image_width',1,'stale_frame'),('x',-1,'invalid_coordinates')]:
+                refused=c.js("operate('viewport_pick',{...pins(true),x:1,y:1,image_width:document.querySelector('#frame').naturalWidth,image_height:document.querySelector('#frame').naturalHeight,"+json.dumps(key)+":"+json.dumps(value)+"})")
+                assert refused['error']=='Error: '+code,refused
             navigated=c.snapshot();assert navigated['view']['camera']!=base['view']['camera'];assert tool('viewport_inspect')['result']['camera']==navigated['view']['camera']
+            # Different surfaces in the changed native camera; no hierarchy fallback.
+            for x,y,expected in [(.35,.39,'left'),(.67,.64,'right'),(.48,.50,'center')]:
+                result=c.point(x,y)
+                assert result['status']=='completed',result
+                assert tool('viewport_inspect')['result']['active_object_id']==expected,(expected,c.snapshot()['view'])
+                assert c.snapshot()['view']['active_object_id']==expected
+                assert c.snapshot()['scene']['objects']==base['scene']['objects']
+                assert c.snapshot()['scene']['revision']=='0'
+            record['camera_changed_pointer_targets']=['left','right','center']
             c.click('[data-object="center"]');assert tool('viewport_inspect')['result']['active_object_id']=='center'
             c.click('#clear');assert tool('viewport_inspect')['result']['selected_object_ids']==[]
             c.click('[data-object="center"]');original=c.snapshot()
@@ -108,6 +150,11 @@ def main():
             guarded={'expected_session_token':original['scene']['session_token'],'expected_revision':original['scene']['revision'],'object_id':'center','transform':original['scene']['objects'][1]['transform']}
             refused=tool('scene_transform',guarded);assert refused['error']['code']=='drafts_pending',refused
             c.js("document.querySelector('#translation0').value='1.25'")
+            draft_pick=c.point(.03,.9)
+            assert draft_pick['status']=='failed' and draft_pick['error']=='Error: drafts_pending',draft_pick
+            assert c.js("document.querySelector('#translation0').value")=='1.25'
+            assert tool('viewport_inspect')['result']['active_object_id']=='center'
+            assert tool('scene_inspect')['result']['drafts_pending']
             c.click('#connect');assert c.js("document.querySelector('#translation0').value")=='1.25'
             # Actual keyboard Enter submission, not invoking the JS authoring function.
             c.js("document.querySelector('#translation0').focus()")
