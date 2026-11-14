@@ -1,4 +1,6 @@
-//! CP1 owner API and bounded CP2 presentation/consent seams; no native Connect wiring.
+//! Exact-owner native binding UI; client registration remains separately fail-closed.
+#[cfg(unix)]
+mod native;
 use super::*;
 
 // Bounded CP2 consent seam; native wiring is a subsequent integration slice.

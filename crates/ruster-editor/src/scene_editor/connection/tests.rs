@@ -2,7 +2,7 @@ use super::*;
 use crate::bridge::tests::{approved, frame, receive};
 use std::os::unix::net::UnixStream;
 
-fn host(id: &str) -> Host {
+pub(super) fn host(id: &str) -> Host {
     Host {
         editor: SceneEditor::new(Session::new(Scene::authored_empty(id)).unwrap()),
         input: Default::default(),
@@ -27,7 +27,7 @@ fn call(host: &mut Host, ctx: &egui::Context, stream: &UnixStream, request: Valu
     }
     worker.join().unwrap()
 }
-fn retire(host: &mut Host, ctx: &egui::Context) {
+pub(super) fn retire(host: &mut Host, ctx: &egui::Context) {
     host.disconnect_adapter();
     let deadline = Instant::now() + Duration::from_secs(3);
     while host.bridge.is_some() {
@@ -90,10 +90,11 @@ fn cp2_local_status_keeps_disconnected_listening_and_revoked_distinct() {
     let ctx = egui::Context::default();
     let mut host = host("cp2-local-status");
     let authored = host.editor.session.snapshot_bytes().unwrap();
-    let paint = |host: &Host| {
+    let paint = |host: &mut Host| {
         let mut text = Vec::new();
         let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
             host.connection_status_ui(ui);
+            host.binding_controls_ui(ui, &mut native::NativeUi::default());
         });
         for shape in &output.shapes {
             if let egui::epaint::Shape::Text(shape) = &shape.shape {
@@ -103,24 +104,28 @@ fn cp2_local_status_keeps_disconnected_listening_and_revoked_distinct() {
         output.textures_delta.clear();
         text.join("\n")
     };
-    let text = paint(&host);
+    let text = paint(&mut host);
     assert!(text.contains("Disconnected"));
+    assert!(
+        text.contains("Connect AI"),
+        "native status must expose a supported Connect action: {text}"
+    );
     assert!(!text.contains("Registered"));
     let locator = host.connect_adapter(&ctx).unwrap();
-    let text = paint(&host);
+    let text = paint(&mut host);
     assert!(text.contains("Waiting for an adapter"));
     assert!(text.contains("Registration and client reload are separate"));
     assert!(!text.contains("Connected to this project"));
     let (owner, _) = approved(host.bridge.as_ref().unwrap());
-    let text = paint(&host);
+    let text = paint(&mut host);
     assert!(text.contains("Connected to this project"));
     assert!(text.contains("Asset catalog changes can persist immediately, before Save."));
     assert!(!text.contains("Registered"));
     host.disconnect_adapter();
-    assert!(paint(&host).contains("Authority revoked; retiring connection"));
+    assert!(paint(&mut host).contains("Authority revoked; retiring connection"));
     drop(owner);
     retire(&mut host, &ctx);
-    assert!(paint(&host).contains("Disconnected"));
+    assert!(paint(&mut host).contains("Disconnected"));
     assert!(!locator.exists());
     assert_eq!(host.editor.session.snapshot_bytes().unwrap(), authored);
 }

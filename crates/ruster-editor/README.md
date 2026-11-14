@@ -10,6 +10,12 @@ See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-
 
 Current source saves Scene18 and raw drafts in Recovery15. E1 adds built-in sphere/capsule geometry with content14, the exact cumulative `builtin_primitives` runtime profile and Descriptor5. The Scene17/content13 F3c checkpoint added state-driven panels. F3a/F3b retain their accepted checkpoints. F3c has passed its bounded qualification. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
 
+## Local AI binding — CP2 candidate
+
+In generic scene mode on Unix, **AI connection…** opens the local connection controls. **Connect AI** previews the intended project/editor session and requires confirmation before starting a listener. When an adapter arrives, **Review adapter approval** previews its exact socket owner identity and local PID; confirmation approves only that owner for that project generation. Cancel/Escape grants nothing. **Disconnect AI** immediately revokes authority and lets the existing lifecycle retire the listener/publication owner asynchronously. Reconnection never implicitly retargets an old owner.
+
+Asset catalog changes may persist immediately before Save; Save/export destinations still require separate grants. These controls do not register or restart Hermes, edit client configuration, or establish adapter executable provenance. Automatic registration remains fail-closed. This is an implementation candidate, not native workflow acceptance; [qualification boundary](../../docs/evidence/E2A-CP2-NATIVE-ROUTE-2026-11-14.md).
+
 ## Built-in shapes — E1
 
 Use **Create → Cube / Sphere / Capsule / Light** in the main menu, hierarchy header, hierarchy context submenu or blank-scene welcome panel. Light retains Point/Directional options. The four Create actions are unbound by default and remappable under **File → Workspace and shortcuts…**. Menus support arrow-key traversal, Enter activation and Escape dismissal. Pending fields/dialogs still protect authored state. Each creation uses one shared Undo entry; preview remains captured until Reset. The Mesh inspector identifies the procedural kind.

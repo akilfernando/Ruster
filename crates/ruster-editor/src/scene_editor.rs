@@ -5703,6 +5703,8 @@ impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         #[cfg(feature = "inspection")]
         self.editor.asset_ops.timing_frame(ui.ctx());
+        #[cfg(unix)]
+        self.native_connection_ui(ui);
         self.editor.ui(ui);
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.
