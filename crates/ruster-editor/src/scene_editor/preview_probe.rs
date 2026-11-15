@@ -1,6 +1,7 @@
 //! Opt-in transport fixture: actual Host/Session and production viewport/capture.
 //! Fixture approval is NOT human consent; no UI, settings or default profile IO.
 use super::*;
+mod stream;
 use eframe::egui_wgpu;
 use std::{future::Future, task::Wake};
 struct ThreadWake(std::thread::Thread);
@@ -160,14 +161,28 @@ fn direct_image_host_fixture() {
     let locator = host.connect_adapter(&ctx).unwrap();
     let locator_value: Value = serde_json::from_slice(&std::fs::read(&locator).unwrap()).unwrap();
     let nonce = locator_value["incarnation"].as_str().unwrap().to_string();
+    let transport = interactive.then(|| stream::Bridge::connect(&nonce));
     let mut reservation: Option<(String, String, String)> = None;
     let deadline = Instant::now() + Duration::from_secs(if interactive { 1800 } else { 180 });
     let mut previous = None;
     let mut count = 0;
     let mut delivered_crop = None;
     let mut pending_pick_response = None;
-    while Instant::now() < deadline && !out.join("stop").exists() {
+    let mut fixture_approved = false;
+    while Instant::now() < deadline
+        && !out.join("stop").exists()
+        && transport.as_ref().is_none_or(|t| t.live())
+    {
         let owner = host.pending_adapter();
+        if interactive
+            && !fixture_approved
+            && std::env::var_os("LOCAL_BRIDGE_FIXTURE_FIRST_OWNER").is_some()
+        {
+            if let Some(selected) = &owner {
+                assert!(host.approve_adapter(selected));
+                fixture_approved = true;
+            }
+        }
         if previous != owner || !out.join("state.json").exists() {
             std::fs::write(out.join("state.json"),json!({"locator":locator,"owner":owner,"state":host.connection_state(),"fixture_authority_only":true}).to_string()).unwrap();
             previous = owner;
@@ -183,11 +198,12 @@ fn direct_image_host_fixture() {
             std::fs::remove_file(out.join("revoke")).unwrap();
         }
         let mut pointer = None;
-        let request_path = out.join("local-request.json");
-        let local = if interactive && request_path.exists() {
-            let request: Value =
-                serde_json::from_slice(&std::fs::read(&request_path).unwrap()).unwrap();
-            std::fs::remove_file(&request_path).unwrap();
+        let request = transport.as_ref().and_then(|t| t.requests.try_recv().ok());
+        let (status_request, request) = match request {
+            Some(request) if request["op"] == "status" => (true, None),
+            request => (false, request),
+        };
+        let local = if let Some(request) = request {
             let started = Instant::now();
             let op = request["op"].as_str().unwrap_or("");
             let args = request["args"].clone();
@@ -280,7 +296,7 @@ fn direct_image_host_fixture() {
         };
         // Cheap browser invalidation receipt: no PNG encoding or extra capture.
         // This remains inside the disposable fixture, not a production endpoint.
-        if interactive {
+        if status_request {
             let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
             let v = &view["result"];
             let status = json!({
@@ -289,8 +305,7 @@ fn direct_image_host_fixture() {
                 "view_revision": v["view_revision"],
                 "draft_reserved": reservation.is_some()
             });
-            std::fs::write(out.join("status.tmp"), status.to_string()).unwrap();
-            std::fs::rename(out.join("status.tmp"), out.join("status.json")).unwrap();
+            transport.as_ref().unwrap().reply(status);
         }
         let frame_started = Instant::now();
         count += 1;
@@ -468,20 +483,20 @@ fn direct_image_host_fixture() {
             let scene = host.editor.command(&nonce, "scene_inspect", json!({}));
             let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
             let reply = json!({"response":response,"scene":scene["result"],"view":view["result"],"commit_ms":commit_ms,"native_frame":count,"phases_ms":{"ui":ui_ms,"render_readback":readback_ms,"color_conversion":color_ms,"crop":crop_ms,"png":encode_ms},"png":base64::engine::general_purpose::STANDARD.encode(png),"fixture_authority_only":true,"draft_reserved":reservation.is_some()});
-            std::fs::write(out.join("local-response.tmp"), reply.to_string()).unwrap();
-            std::fs::rename(
-                out.join("local-response.tmp"),
-                out.join("local-response.json"),
-            )
-            .unwrap();
+            transport.as_ref().unwrap().reply(reply);
         }
         for callback in callbacks {
             callback.complete(image.as_ref().expect("capture callback image").clone());
         }
         drop(pixels);
         read.unmap();
-        std::thread::sleep(Duration::from_millis(10));
+        if interactive {
+            std::thread::park_timeout(Duration::from_millis(10));
+        } else {
+            std::thread::sleep(Duration::from_millis(10));
+        }
     }
+    drop(transport);
     host.disconnect_adapter();
     let until = Instant::now() + Duration::from_secs(3);
     while host.bridge.is_some() && Instant::now() < until {

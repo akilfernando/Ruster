@@ -8,10 +8,13 @@ import os
 from pathlib import Path
 import secrets
 import signal
+import socket
+
 import subprocess
 import tempfile
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
+from bridge import send, receive, authenticate
 
 ROOT = Path(__file__).resolve().parent
 
@@ -32,9 +35,19 @@ def main():
     token = secrets.token_urlsafe(32)
     secret.write_text(token); secret.chmod(0o600)
     nonce = secrets.token_urlsafe(20)
+    socket_root = Path(tempfile.mkdtemp(prefix='rb-', dir=os.environ['TMPDIR']))
+    socket_root.chmod(0o700)
+    socket_path = socket_root/'bridge.sock'
+    listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    listener.bind(str(socket_path)); socket_path.chmod(0o600)
+    listener.listen(1); listener.settimeout(20)
+    bridge_token = secrets.token_urlsafe(32)
+    bridge = None
     env = {k:v for k,v in os.environ.items() if not k.startswith(('RUSTER_', 'VK_', 'EGUI_INSPECTION'))}
     env.update(PREVIEW_FIXTURE_DIR=str(run), INTERACTIVE_LOCALHOST_FIXTURE='1',
-               RUSTER_RECOVERY_DIR=str(run/'recovery'), RUSTER_EDITOR_STATE=str(run/'settings.json'))
+               RUSTER_RECOVERY_DIR=str(run/'recovery'), RUSTER_EDITOR_STATE=str(run/'settings.json'),
+               LOCAL_BRIDGE_SOCKET=str(socket_path), LOCAL_BRIDGE_TOKEN=bridge_token,
+               LOCAL_BRIDGE_FIXTURE_FIRST_OWNER='1')
     if a.validation_diagnostics:
         layer = Path('/home/akilf/.local/opt/vulkan-validation-layers-1.4.363.1-1/scoped-layer')
         assert layer.is_dir(), 'scoped validation layer required; no global fallback'
@@ -42,25 +55,21 @@ def main():
     log = (run/'native.log').open('w')
     host = subprocess.Popen([str(a.host_binary), '--ignored', '--exact', 'scene_editor::preview_probe::direct_image_host_fixture', '--nocapture'], env=env, cwd=run, stdout=log, stderr=subprocess.STDOUT)
     server = None
-    approved = False
     def state():
         return json.loads((run/'state.json').read_text())
-    def approve_fixture_once():
-        nonlocal approved
-        s = state()
-        if not approved and s['owner']:
-            temp = run/'approve.tmp'; temp.write_text(json.dumps(s['owner'])); temp.replace(run/'approve.json')
-            approved = True
     def local(request):
+        nonlocal bridge
         started = time.perf_counter()
         assert host.poll() is None, 'native owner stopped'
-        assert not (run/'local-response.json').exists() and not (run/'local-request.json').exists(), 'uncertain previous operation; do not replay'
-        tmp = run/'request.tmp'; tmp.write_text(json.dumps(request)); tmp.replace(run/'local-request.json')
-        deadline = time.monotonic()+8
-        while not (run/'local-response.json').exists():
-            assert host.poll() is None and time.monotonic()<deadline, 'native response deadline; no retry'
-            time.sleep(.005)
-        reply = json.loads((run/'local-response.json').read_text()); (run/'local-response.json').unlink()
+        assert bridge is not None, 'bridge permanently closed; no reconnect/replay'
+        try:
+            deadline = time.monotonic()+8
+            send(bridge, request, deadline)
+            reply = receive(bridge, deadline)
+        except Exception:
+            bridge.close(); bridge = None
+            raise
+        if request['op'] == 'status': return reply
         reply['request_ms'] = (time.perf_counter()-started)*1000
         if reply['response'].get('error', {}).get('code') == 'revoked':
             return {'response':reply['response']}
@@ -81,10 +90,10 @@ def main():
                 # Never dispatch a render or consume an MCP adapter owner for polling.
                 if host.poll() is not None: return self.reply(503,b'{"error":"native owner stopped"}')
                 try:
-                    observed = json.loads((run/'status.json').read_text())
+                    observed = local({'op':'status','args':{}})
                     if not observed['live']: return self.reply(403,b'{"error":"revoked"}')
                     return self.reply(200,json.dumps(observed).encode())
-                except (OSError, ValueError, KeyError):
+                except (OSError, ValueError, KeyError, EOFError, AssertionError):
                     return self.reply(503,b'{"error":"status unavailable"}')
             if self.path != '/operation': return self.reply(404,b'{}')
             try:
@@ -107,21 +116,27 @@ def main():
         while not (run/'state.json').exists():
             assert host.poll() is None and time.monotonic()<deadline, 'native startup failed'
             time.sleep(.02)
+        bridge, _ = listener.accept()
+        incarnation = json.loads(Path(state()['locator']).read_text())['incarnation']
+        peer_pid = authenticate(bridge, host.pid, bridge_token, incarnation)
+        listener.close()
         server=BoundedServer(('127.0.0.1',0),Handler); server.timeout=.1
         authority='127.0.0.1:'+str(server.server_port)
-        info={'url':'http://'+authority+'/', 'run':str(run), 'pid':os.getpid(), 'native_pid':host.pid,'locator':state()['locator'], 'fixture_authority_only':True}
+        info={'url':'http://'+authority+'/', 'run':str(run), 'pid':os.getpid(), 'native_pid':host.pid,'locator':state()['locator'], 'fixture_authority_only':True, 'transport':'persistent-unix-stream', 'socket_path':str(socket_path), 'peer_pid':peer_pid, 'incarnation':incarnation}
         (run/'server.json').write_text(json.dumps(info,indent=2)); print(json.dumps(info),flush=True)
         while host.poll() is None:
-            approve_fixture_once()
             server.handle_request()
     except KeyboardInterrupt: pass
     finally:
         if server: server.server_close()
+        if bridge: bridge.close()
+        listener.close()
         (run/'stop').touch()
         try: host.wait(timeout=8)
         except subprocess.TimeoutExpired: host.terminate(); host.wait(timeout=5)
+        socket_path.unlink(missing_ok=True); socket_root.rmdir()
         secret.unlink(missing_ok=True); log.close(); gate.close()
         locator=Path(state()['locator']) if (run/'state.json').exists() else None
-        (run/'server-cleanup.json').write_text(json.dumps({'host_exit':host.returncode,'capability_absent':not secret.exists(),'locator_absent':locator is None or not locator.exists(),'http_closed':True}))
+        (run/'server-cleanup.json').write_text(json.dumps({'host_exit':host.returncode,'capability_absent':not secret.exists(),'locator_absent':locator is None or not locator.exists(),'http_closed':True,'socket_absent':not socket_path.exists(),'socket_root_absent':not socket_root.exists()}))
 
 if __name__ == '__main__': main()

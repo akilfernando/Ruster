@@ -2,6 +2,7 @@
 """Focused real Chromium + native Vulkan + stdio MCP journey, not ChatGPT UI."""
 import argparse
 import base64
+import ctypes
 import fcntl
 import hashlib
 import json
@@ -10,6 +11,7 @@ from pathlib import Path
 import select
 import shutil
 import subprocess
+import struct
 import tempfile
 import time
 import urllib.error
@@ -72,6 +74,10 @@ def main():
                 assert server.poll() is None,'owned server startup failed'
                 return bool(list(a.output.glob('interactive-*/server.json')))
             wait(ready); infofile=next(a.output.glob('interactive-*/server.json'));run=infofile.parent;info=json.loads(infofile.read_text());token=(run/'capability.secret').read_text()
+            assert info['transport']=='persistent-unix-stream' and info['peer_pid']==info['native_pid']
+            assert Path(info['socket_path']).stat().st_mode & 0o777 == 0o600
+            assert Path(info['socket_path']).parent.stat().st_mode & 0o777 == 0o700
+            record['transport_binding']={k:info[k] for k in ['transport','peer_pid','native_pid','incarnation','socket_path']}
             clients=json.loads(subprocess.check_output(['hyprctl','-j','clients'],text=True))
             record['native_owned_window_count']=sum(client.get('pid')==info['native_pid'] for client in clients)
             assert record['native_owned_window_count']==0
@@ -124,6 +130,11 @@ def main():
             assert callback_image is not None
             assert base64.b64decode(callback_image['data']).startswith(b'\x89PNG\r\n\x1a\n')
             record['native_capture_callback_ready']=True
+            # Linux kernel evidence of all opens/creates/renames/deletes in the
+            # fixture root during actual pointer/frame/status traffic.
+            libc=ctypes.CDLL(None,use_errno=True)
+            audit_fd=libc.inotify_init1(os.O_NONBLOCK|os.O_CLOEXEC)
+            assert audit_fd>=0 and libc.inotify_add_watch(audit_fd,os.fsencode(run),0x20|0x8|0x100|0x200|0x40|0x80)>=0
             # Actual mouse navigation, no DOM-dispatched movement or browser scene.
             def settled():
                 wait(lambda:c.js('!busy && !cameraFlight && !cameraIntent && cameraTimer===null'))
@@ -151,6 +162,21 @@ def main():
                 c.call('Input.dispatchMouseEvent',{'type':'mouseMoved','x':xy['x']+i*.3,'y':xy['y']+i*.05,'button':'right','buttons':2})
             c.call('Input.dispatchMouseEvent',{'type':'mouseReleased','x':xy['x']+53.7,'y':xy['y']+8.95,'button':'right','buttons':0,'clickCount':1})
             settled();moved=c.snapshot()
+            time.sleep(.8)
+            events=[]
+            try:
+                raw=os.read(audit_fd,65536)
+                offset=0
+                while offset<len(raw):
+                    wd,mask,cookie,size=struct.unpack_from('iIII',raw,offset)
+                    name=raw[offset+16:offset+16+size].rstrip(b'\0').decode()
+                    events.append({'name':name,'mask':mask});offset+=16+size
+            except BlockingIOError: pass
+            finally: os.close(audit_fd)
+            assert not events,events
+            record['hotpath_filesystem_events']=events
+            assert not any((run/name).exists() for name in ['local-request.json','local-response.json','status.json','request.tmp','local-response.tmp','status.tmp'])
+            record['legacy_transport_files_absent']=True
             assert moved['scene']==base['scene']
             assert moved['view']['camera']==tool('viewport_inspect')['result']['camera']
             assert moved['view']['selected_object_ids']==base['view']['selected_object_ids']

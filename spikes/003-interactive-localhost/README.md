@@ -1,5 +1,22 @@
 # Interactive localhost workspace — bounded disposable slice
 
+## Persistent native connection — qualified 2026-11-15
+
+This continuation supersedes earlier file-transport/performance-follow-up descriptions **for this isolated candidate only**. Browser HTTP now uses one explicitly bound persistent Unix-domain connection to the exact native fixture. No per-camera/command/frame/status payload files, reconnect, file fallback or authored replay. Bounded length framing, absolute deadlines, partial IO/EOF cleanup and a bounded IO worker keep incomplete socket reads/writes off native editor processing. Browser controls/renderer/history/quality are unchanged; native waits are request-wakeable, not busy-spin. Existing first-exact-MCP-owner approval is now consumed once inside the explicitly granted native fixture rather than polled by the HTTP server. This remains disposable cooperative-user authority, not production consent.
+
+Final real browser/native/MCP regression journey passes, including capture callbacks, picks, drafts and exact shared Undo. A kernel watch observes zero hot-path filesystem events. File-control and socket PNGs match byte-for-byte at initial/fixed-camera/selection states. Matched unchanged-quality release runs measure32.99/33.08→49.84/50.14 distinct changing native PNGs/s at paint opportunities; final artifact50.84fps, oldest-input→decoded median26.10ms versus49.20/49.00ms control. **Not60fps, physical display or new actual ChatGPT acceptance.** User confirms concurrent desktop/YouTube use; these are uncontrolled shared CPU/GPU traces, not isolated benchmarks. Tests were headless/windowless only, with no host desktop/focus/input. No idle-window or arbitrary FPS prerequisite; profiling/build loads are stopped before handoff. Full evidence, remaining lifecycle file polling, fault tests, source/build pins and cleanup: [persistent bridge evidence](../../docs/evidence/PERSISTENT-BRIDGE-2026-11-15.md).
+
+No live demo is running. Parent owns review/integration and any new ChatGPT test. For a later explicitly owned developer session, use this source's `server.py` with the matching socket-enabled artifact (old native binaries fail closed; they are not compatible):
+
+```sh
+python3 spikes/003-interactive-localhost/server.py \
+  --host-binary /home/akilf/Projects/Ruster-Audits/persistent-bridge-20261115/host-final \
+  --output-root /home/akilf/Projects/Ruster-Audits/persistent-bridge-20261115 \
+  --grant-disposable-local-and-first-mcp-owner
+```
+
+Use the newly printed URL/run/locator, never an old endpoint. Browser **Local capability** comes from that run's private `capability.secret` (do not put it in a URL/chat); existing direct MCP configuration uses the exact newly printed locator. No registration or end-user onboarding change. Stop the owned server with SIGTERM; it closes the stream/native owner and removes capability, locator, socket and short socket directory. Check its `server-cleanup.json` and exact PID/listener absence. Run focused protocol checks with `python3 -m unittest discover -s spikes/003-interactive-localhost -p test_bridge.py -v`; `qualify.py` now requires the persistent transport and verifies binding, socket permissions and zero hot-path filesystem events.
+
 ## Bounded capture-copy continuation — 2026-11-15
 
 User now reports the actual ChatGPT built-in-browser viewport is significantly better and usable. This supersedes the historical responsiveness-pending wording below **by user report only**; no measured ChatGPT frame rate is claimed.60 updates/sec is aspirational, not a release blocker.
