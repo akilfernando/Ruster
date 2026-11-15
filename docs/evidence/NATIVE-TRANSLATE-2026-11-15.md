@@ -22,7 +22,7 @@ Audit root: `/home/akilf/Projects/Ruster-Audits/native-translate-20261115/`.
 
 Final artifact `host-final`, SHA256 `56d2eb653781e2b8129eab0f88f26e8c5fb8187e306a41262a6a968829363c20`; matched unchanged MCP adapter `/home/akilf/Projects/Ruster-Audits/native-scene-observation-20261114/ruster-mcp`, SHA256 `1f9c1e2351b1c0b9d6903d31fcf459c70ce4a50ffd51ea0a9b70c809a8ae7343`. `build.jsonl` records actual editor/renderer compilation from this isolated source; `build-final.jsonl` / `build-final.log` record final optimized inspection fixture compilation. `manifest.json` pins source, artifacts and receipts.
 
-`journey-5-final/result.json` passes actual headless Chromium pointer input → windowless native Host/SceneEditor/Session/Vulkan → real stdio MCP. No host desktop input/window. PNGs remain872×553 lossless RGBA, native1408×896 readback,4×MSAA, NVIDIA RTX4060 Laptop GPU, Vulkan; no resolution/quality reduction or FPS claim. CSS1250/DPR1 and CSS980/DPR2 map to the same native image/crop, without multiplying input by browser DPR.
+`journey-6-final/result.json` passes actual headless Chromium pointer input → windowless native Host/SceneEditor/Session/Vulkan → real stdio MCP. No host desktop input/window. PNGs remain872×553 lossless RGBA, native1408×896 readback,4×MSAA, NVIDIA RTX4060 Laptop GPU, Vulkan; no resolution/quality reduction or FPS claim. CSS1250/DPR1 and CSS980/DPR2 map to the same native image/crop, without multiplying input by browser DPR.
 
 | State | Revision | Undo / Redo | Native center Translation X |
 | --- | --- | --- | --- |
@@ -30,7 +30,7 @@ Final artifact `host-final`, SHA256 `56d2eb653781e2b8129eab0f88f26e8c5fb8187e306
 | During drag |0|0 /0|committed0; transient preview0.5625232458114624|
 | Release at a later pointer-up-only point |1|1 /0|0.8278638124465942|
 | Browser Shared Undo |2|0 /1|0|
-| Second drag at DPR2 |3|1 /0|0.42594289779663086|
+| Second drag at DPR2, same final native point |3|1 /0|0.8278638124465942|
 | Same-owner MCP Undo |4|0 /1|0|
 
 Real native preview geometry/pixels change while MCP committed objects/revision/history remain unchanged; MCP transform refuses `drafts_pending`. MCP reads exactly the released authored objects. Both Undo routes restore exact original authored objects **and byte-identical native PNGs** (camera/framing pinned). Actual before/drag/released images were visually inspected; geometry moves with native handles/outline, without visible corruption.
@@ -41,7 +41,9 @@ Escape (CDP keyboard), lost capture (actual capture release), pointercancel (exp
 
 Retained preparations: initial binary-name discovery failed before startup (`probe-1`, one empty owned profile later removed); `probe-2` is successful image inspection only, not an end-to-end pass. `journey-1` passes the initial happy path with `host-prep`; `journey-3` passes expanded settle/cancel/DPR checks with `host-settle`. `journey-2` and `journey-4-final` are occupied-QA-gate preparation refusals by the separate assembly-core owner, not candidate behavior failures; no other owner was stopped. The first refusal exposed harness cleanup masking the primary exception, now corrected to retain gate-unavailable status. Final preflight waited for gate availability; final journey and regression cleanly reacquire it.
 
-Final source checks: release inspection all-target strict Clippy passes (`clippy.log`). Full project change gate and native diagnostic scan results are recorded in the final status update; no dry-run is represented as a pass. No independent fresh security review or actual ChatGPT human acceptance of this new control is claimed.
+One real terminal-intent defect was caught after the first checkpoint: while a preview was in flight, post-release hover could overwrite the queued final release point. `terminal-hover-red` deterministically fails the same-native-endpoint assertion with a150ms delayed preview, retaining the committed incorrect result and clean shutdown. The browser now freezes preview intent after release/cancel; `journey-6-final` passes that regression, same native release transform at DPR1/2, and the full adverse journey. This is one failed candidate behavior journey, not relabelled a pass; the QA-gate refusals above remain preparation failures. `journey-5-final` is the earlier passing expanded journey before this new regression.
+
+Source checks: release inspection all-target strict Clippy passes (`clippy.log`); existing genuine native manipulation tests pass7/7 (`manipulation-tests.log`), including off-axis commit-once/cancel behavior. Socket protocol tests pass4/4 (`bridge-tests.log`). Full `scripts/check.py --base 14cd60e97fb4c91a8511954b255ec2c7a0f07d1e` change gate passes361Rust/30Python/5existing ignores, formatting/strict lint/Markdown in79.65seconds (`check.log`), before the final HTML-only terminal-intent repair; native Rust inputs are unchanged. Final `scripts/check.py --base 14cd60e97fb4c91a8511954b255ec2c7a0f07d1e` gate after that HTML/harness repair passes361Rust/30Python/5existing ignores plus Markdown/formatting/strict workspace Clippy in30.98seconds (`check-final.log`); documentary result updates afterward use explicit-path Markdown validation. Final journey and existing regression native logs explicitly activate Core+Synchronization validation and pass `scripts/check_vulkan_log.py`; raw logs remain available. No dry-run is represented as a pass. No independent fresh security review or actual ChatGPT human acceptance of this new control is claimed.
 
 ## Reproduce / changed human checkpoint
 

@@ -58,7 +58,7 @@ def main():
             c.call('Emulation.setDeviceMetricsOverride',{'width':1250,'height':1000,'deviceScaleFactor':1,'mobile':False});c.call('Page.bringToFront');wait(lambda:c.js("typeof operate==='function'"))
             c.js("$('capability').value="+json.dumps((run/'capability.secret').read_text()));c.click('#connect');c.click('[data-object="center"]')
             c.js("$('translate').checked=true")
-            c.js("window.admission={active:0,max:0};window.originalFetch=fetch;window.fetch=async(...args)=>{admission.active++;admission.max=Math.max(admission.max,admission.active);try{return await originalFetch(...args)}finally{admission.active--}}")
+            c.js("window.admission={active:0,max:0};window.originalFetch=fetch;window.fetch=async(...args)=>{admission.active++;admission.max=Math.max(admission.max,admission.active);try{if(window.delayPreview&&args[1]?.body&&JSON.parse(args[1].body).op==='translate_move')await new Promise(r=>setTimeout(r,150));return await originalFetch(...args)}finally{admission.active--}}")
             def save(name):
                 snap=c.js('current');(a.output/(name+'.png')).write_bytes(base64.b64decode(snap.pop('png')));(a.output/(name+'.json')).write_text(json.dumps(snap,indent=2));return snap
             before=save('before')
@@ -98,8 +98,12 @@ def main():
             c.call('Emulation.setDeviceMetricsOverride',{'width':980,'height':1100,'deviceScaleFactor':2,'mobile':False})
             mouse('mouseMoved',x,y,0);mouse('mousePressed',x,y);wait(lambda:c.js('!busy && translation && !translation.flight'))
             mouse('mouseMoved',x+36,y);wait(lambda:c.js('!busy && translation && !translation.flight && !translation.latest'))
-            mouse('mouseReleased',x+36,y,0);wait(lambda:c.js('!busy && !translation'))
+            # Release during an in-flight preview; post-release hover must not edit.
+            c.js('window.delayPreview=true')
+            mouse('mouseMoved',x+40,y);mouse('mouseReleased',x+72,y,0);mouse('mouseMoved',x+120,y,0)
+            wait(lambda:c.js('!busy && !translation'));c.js('window.delayPreview=false')
             dpr2=save('dpr2-release');assert dpr2['undo_len']==1
+            assert abs(center(dpr2['scene']['objects'])['translation'][0]-center(released['scene']['objects'])['translation'][0])<.02,'post-release hover changed terminal intent'
             mcp_undo=tool('scene_undo',{'expected_session_token':dpr2['view']['session_token'],'expected_revision':dpr2['scene']['revision']});assert mcp_undo['ok'],mcp_undo
             c.click('#connect');mcp_restored=save('mcp-undo');assert mcp_restored['scene']['objects']==before['scene']['objects'] and mcp_restored['undo_len']==0
             assert (a.output/'mcp-undo.png').read_bytes()==(a.output/'before.png').read_bytes()
