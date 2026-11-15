@@ -13,7 +13,7 @@ inventory, not a competing active schedule.
 - **Architecture contracts:** [decision records](decisions/); the roadmap links them rather than duplicating their specifications.
 - **Working convergence home:** `feat/cumulative-editor-20261115`. Protected feedback candidates remain frozen references, not alternative permanent products. Its default native editor is now installed as a partial cumulative handoff; this is not a canonical merge, full MCP/browser promotion or release.
 
-### Starting point: source progress is not delivered parity
+### Starting point before cumulative client trial: source progress is not delivered parity
 
 The actual ChatGPT trial demonstrated native/browser approval, shared-session MCP
 inspection, one edit and Undo (revisions 0→1→2), visible native/browser agreement,
@@ -25,7 +25,10 @@ not an inference from an automated browser.
 The newer normal-workspace candidate supports camera navigation and selection.
 A same-build, equal-quality hidden-workspace comparison reduced camera response
 median 527.05→329.00 ms; source/live capability checks pass, but actual-client
-usability remains unaccepted. Capture completion/service pacing remains unsplit.
+usability is now explicitly **rejected**: the cumulative actual-client controls
+work, but Akil reports a noticeable responsiveness regression against the earlier
+accepted fixture. Capture completion/service pacing remains unsplit; diagnose
+that path against the actual accepted reference, not an arbitrary refresh target.
 
 The qualified hierarchy repairs are already present under cherry-picked commits;
 source comparison, not ancestry alone, establishes that. The cumulative editor's
@@ -46,8 +49,8 @@ per-run connection capabilities.
 | Workstream | Next bounded outcome | Current state / acceptance gate |
 | --- | --- | --- |
 | Cumulative engine/editor | Native nested groups, supported nonuniform leaves/attached light, shared transforms/history, Save and fresh reopen in the current cumulative candidate | Functional compound PASS; grouped-guide repair has RED/GREEN, native visual proof and parent changed-risk GO. Default native candidate **INSTALLED** with verified rollback/hash/help smoke; no extra GUI launch, physical-human acceptance pending. Final visual-run close-selector failure is preserved, not relabeled normal close. |
-| Managed ChatGPT startup | A closed registered project opens through the stable MCP invocation, then native/browser consent and the internal-browser handoff work | Actual-client cold startup remains **UNRESOLVED**; servicing PID of the second failure is unproven. Additive adapter-local fresh/cached provenance is implemented and headless STDIO-qualified, not installed/client-qualified. Parent review/promotion and actual invocation correlation precede another desktop trial; no root-cause or silent retry claim. |
-| Normal browser navigation | Responsive orbit/pan/zoom/Fit and shared selection in the normal connection route, with full-quality current native pixels | Source review/live capability pass; latency improved but usability **HELD**. Diagnose the measured capture seam or perform a coordinated representative visibility comparison before another redesign. |
+| Managed ChatGPT startup | A closed registered project opens through the stable MCP invocation, then native/browser consent and the internal-browser handoff work | **PASS in the current actual-client diagnostic-launcher run**: verified fresh servicing adapter/environment, correlated native launch, human approvals and full-session/revision0 agreement. Permanent uninstrumented onboarding/promotion remains open; the historical second failure's cause remains unknown. |
+| Normal browser navigation | Responsive orbit/pan/zoom/Fit and shared selection in the normal connection route, with full-quality current native pixels | Actual-client controls technically work; responsiveness **FAILS human acceptance**, a noticeable regression against the accepted earlier interactive fixture. Source/evidence comparison is RUNNING without touching the live session; preserve fidelity and diagnose before repair/retest. |
 | Intended browser editing | Bring intended human manipulation/shared Undo into this same route rather than leaving it fixture-only | **QUEUED**, not provided by the preview/navigation grant. Define the bounded interaction and truthful native permission text before implementation; AI authors through direct MCP. |
 | Usable delivery | Promote one matched editor/MCP/launcher set, with exact versions, rollback and short changed-surface smoke | **QUEUED** after relevant qualification. Do not silently replace frozen feedback artifacts or call a compiled candidate installed. |
 

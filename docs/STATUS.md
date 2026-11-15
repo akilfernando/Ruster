@@ -1,6 +1,37 @@
 # Current project status
 
-## Adapter startup discriminator headlessly qualified — 2026-11-15
+## Actual-client cumulative trial — 2026-11-15
+
+**Managed launch and connection PASS for this diagnostic-launcher run:** actual
+ChatGPT adapter2045384/start23107722 launches native2046240, whose image matches
+the installed default editor. Correct desktop variables and fresh attempt0 were
+verified before the single startup call. Native approval, browser approval and
+full-session/revision0 browser/native receipt/direct-MCP agreement pass by human
+report. Earlier `viewport_occluded` recovers after native overlays are dismissed;
+no guard was bypassed. This does not diagnose the historical second startup error
+or qualify a permanent uninstrumented launcher.
+
+**Controls function, responsiveness FAILS human acceptance.** Akil reports all
+camera/navigation/selection controls technically work but feel noticeably worse
+than the previously accepted interactive browser. The matched automated329ms
+result was an improvement against this newer path, not proof of prior usable
+parity. Do not promote the browser as accepted or treat this as aspirational60Hz
+polish. No authored edit/Undo or fresh Save/reopen was exercised in this client run.
+
+**RUNNING:** one bounded source/evidence comparison against the accepted fast
+fixture (`deleg_a330cb48`), no live-session input/requests, desktop access, heavy
+build or installation. Locate the demonstrated timing seam before repair; retain
+full fidelity, coherent state and explicit authority. No more manual testing is
+requested now. Existing native installation remains unchanged.
+
+Raw user/identity receipts: cumulative audit `startup-provenance/` files
+`actual-client-managed-start-user-receipt.json`,
+`actual-client-browser-agreement-user-receipt.json` and
+`actual-client-responsiveness-user-receipt.json`. No full session token is stored.
+
+## Adapter startup discriminator preparation checkpoint — 2026-11-15
+
+Preparation record below; the actual-client outcome above supersedes its waiting state.
 
 **Headless discriminator PASS; actual ChatGPT managed cold startup UNRESOLVED.**
 Existing `project_list` and `project_startup_unavailable` responses now carry a
@@ -40,8 +71,8 @@ artifacts/registration and real ChatGPT entry remain unchanged.
 PID/start/attempt and desktop environment via discovery first, then permit one
 registered start-or-attach attempt with real consent. Missing diagnostics or a
 cached failed instance means stop, not another blind retry. No root cause or
-FD/driver/sandbox theory is established. Actual-client qualification waits for
-Akil's next hands-on window; no further desktop test is running.
+FD/driver/sandbox theory is established. That preparation gate is now superseded
+by the actual-client outcome above; no agent-driven desktop test is running.
 [Contract, raw receipts and limits](evidence/CUMULATIVE-EDITOR-2026-11-15.md#adapter-local-startup-provenance--2026-11-15).
 
 ## Partial cumulative native handoff installed — 2026-11-15

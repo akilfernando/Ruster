@@ -725,6 +725,27 @@ Actual managed startup, browser usability and explicit browser-edit permission
 remain convergence gates. Local raw receipts: `collider-repair/parent-changed-risk-review.*`
 and `collider-repair/native-install-receipt.json` in the cumulative audit.
 
+### Cumulative client outcome — 2026-11-15
+
+The prepared optimized adapter/current installed native image now starts from
+actual ChatGPT through a temporary pinned diagnostic launcher. Actual PID/start,
+desktop forwarding and the fresh attempt are verified before startup; the child
+identity, human approvals and shared browser/MCP session/revision0 then agree.
+The historical second failure is still causally unknown; this is a successful
+current run, not retroactive proof of that failure's fix.
+
+Akil reports navigation/selection technically work but are noticeably less
+responsive than the earlier accepted interactive test. **Usability is rejected.**
+The automated527.05→329ms improvement compared two versions of the newer path,
+not its parity with the earlier usable fixture. Functional convergence does not
+erase a regression. Continue a bounded old/new path diagnosis, without live input
+or another manual test request, before choosing a repair. Keep native delivery
+and the remaining creator work visible; no broad streaming rewrite, lower pixel
+quality, weakened consent or arbitrary60Hz requirement is approved by this result.
+Revisit on a measured demonstrated-seam repair and actual-client usability check.
+Raw observed acceptance is retained in the cumulative audit's
+`startup-provenance/actual-client-responsiveness-user-receipt.json`.
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.
