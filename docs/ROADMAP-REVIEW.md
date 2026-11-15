@@ -780,6 +780,36 @@ work continues after the verified computer-free notice without a fresh opportuni
 Raw comparison and completed Astra backend receipts: cumulative audit
 `capture-ready-progress/`; isolated preparation owns `capture-backend-overlay/`.
 
+### Native-first priority — user decision, 2026-11-15
+
+**Authority/trigger:** Akil proposes and approves a simplified native interface
+beside ChatGPT, then explicitly asks Astra to define initial UI/implementation and
+the regular developer to build. Browser viewing stays a nice-to-have with future
+potential: defer, not remove.
+
+**Decision/rationale:** native human interaction uses the existing renderer,
+without waiting on screenshot/PNG/HTTP/browser decode. Preserve one native
+Session/history/selection and the ordinary full editor. A compact native layout
+is the design direction, not an approved second scene, chat client or renderer
+rewrite. Expected latency benefits are architectural, not yet native-first user
+acceptance. Opening a window does not automatically give ChatGPT sight; explicitly
+define structured MCP plus qualified on-demand native images when needed.
+
+**Alternatives/consequences:** browser performance no longer gates the primary
+workflow. Do not delete useful browser work or merely relocate its HTML pipeline.
+SDK diagnostics are checkpointed/stopped, with artifact hash and absent compiler
+verified; measured capture repair stays in cumulative source. No installed/live
+candidate/global dependency changes. Meaningful consent, wrong-project guards,
+native input priority and shared history remain; UI mode is not extra authority.
+
+**Execution/exit:** actual Astra design admission verified RUNNING, read-only;
+regular Sol UI implementation QUEUED after design. Ground layout, launch/attach,
+state-preserving editor escape and one short creator journey in current source;
+separate proposals/existing behavior. Root owns handoff/cumulative integration.
+Revisit browser for a concrete use case or user direction, not an automatic cycle.
+Raw brief/admission: cumulative audit `native-first-design/`; retained SDK
+checkpoint `capture-backend-overlay/` is compiled/headlessly tested, unmeasured.
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.

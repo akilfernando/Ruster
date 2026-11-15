@@ -1,5 +1,26 @@
 # Current project status
 
+## Primary direction: native-first AI workspace — 2026-11-15
+
+**USER APPROVED:** simplified native Rusterize UI beside ChatGPT, more viewport
+space and less routine chrome because MCP handles much authoring. Same native
+Session/history/selection, not a second scene/webview. Full editor stays first-class.
+The exact initial layout is not yet implemented.
+
+**RUNNING:** Astra defines initial UI and implementation, `proc_cb9f52acc52e`;
+actual `gpt-6-astra`/low and new started admission verified. Cover native controls,
+launch/attach, state-preserving full-editor escape, consent and on-demand image
+observation without a mandatory browser. Regular Sol development is **QUEUED
+after design**, not active implementation. No desktop test runs. Raw brief/proof:
+cumulative audit `native-first-design/`.
+
+**Browser DEFERRED, NOT REMOVED:** user retains it as a nice-to-have for future
+use cases; optimization no longer gates native-first. SDK worker checkpointed and
+stopped; artifact `08438241…85aac` verifies and no compiler remains in that audit
+namespace. No SDK runtime, installed/global dependency or live-trial change.
+Retain `capture-backend-overlay/`; browser timing/holds below are prior evidence,
+not the active delivery plan.
+
 ## Actual-client cumulative trial — 2026-11-15
 
 **Managed launch and connection PASS for this diagnostic-launcher run:** actual
@@ -84,11 +105,12 @@ later submit/poll progress; surface/presentation waits remain alternatives. Thes
 are mechanisms, not attribution of the139.95ms. Root follows the bounded next
 step, not a global timer/continuous-render or transport rewrite.
 
-**RUNNING:** `deleg_3a965737`, audit-only locked eframe/egui-wgpu source overlays
-and local diagnostic manifest, bounded numeric backend spans and headless checks.
-Global registry, cumulative production dependencies, installation, live endpoints
-and desktop are out of scope. Stop if safe correlation requires a larger design.
-A later controlled cohort must select the next repair; no manual retest requested.
+**DEFERRED checkpoint:** `deleg_3a965737` completed the isolated diagnostic build
+and headless checks, then stopped on the native-first pivot. No backend runtime
+attribution/speedup is established. Global registry, production dependencies,
+installation and live endpoints remain unchanged. Revisit only for a concrete
+browser use case or user reprioritization; native-first design above supersedes
+this former critical path.
 
 Raw user/identity receipts: cumulative audit `startup-provenance/` files
 `actual-client-managed-start-user-receipt.json`,

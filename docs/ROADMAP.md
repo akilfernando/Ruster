@@ -2,6 +2,10 @@
 
 ## Current delivery roadmap — 2026-11-15
 
+**Latest user-approved priority:** native-first, viewport-focused Rusterize UI
+alongside ChatGPT. Astra defines interface/implementation, then regular Sol builds.
+Browser viewing remains a deferred nice-to-have, not deleted or a native-first gate.
+
 **User-confirmed direction:** converge native editor, engine, MCP and browser work
 into one cumulative product line, and preserve the reasons for significant
 planning decisions so later work can learn from them. This section is the current
@@ -42,16 +46,17 @@ workflow are still open. The gap was not simply missing source merges.
 ### Immediate convergence milestone
 
 **Creator outcome:** use one identifiable editor/MCP/launcher combination to open,
-organize, inspect and edit the same project, navigate its native-rendered browser
-view, Undo confidently, and save/reopen without selecting an old demo or copying
-per-run connection capabilities.
+organize, inspect and edit the same project beside ChatGPT in a compact native
+workspace, navigate directly, Undo confidently, and save/reopen without selecting
+an old demo or copying per-run capabilities. Browser viewing is optional.
 
 | Workstream | Next bounded outcome | Current state / acceptance gate |
 | --- | --- | --- |
+| Native-first AI workspace — PRIMARY | Astra defines native initial layout and implementation; regular dev builds a same-Session creator journey | User direction confirmed; verified Astra design RUNNING, UI implementation QUEUED after design. Reuse native renderer/history/selection/consent, retain Full editor. No new layout or automatic agent sight claimed. |
 | Cumulative engine/editor | Native nested groups, supported nonuniform leaves/attached light, shared transforms/history, Save and fresh reopen in the current cumulative candidate | Functional compound PASS; grouped-guide repair has RED/GREEN, native visual proof and parent changed-risk GO. Default native candidate **INSTALLED** with verified rollback/hash/help smoke; no extra GUI launch, physical-human acceptance pending. Final visual-run close-selector failure is preserved, not relabeled normal close. |
 | Managed ChatGPT startup | A closed registered project opens through the stable MCP invocation, then native/browser consent and the internal-browser handoff work | **PASS in the current actual-client diagnostic-launcher run**: verified fresh servicing adapter/environment, correlated native launch, human approvals and full-session/revision0 agreement. Permanent uninstrumented onboarding/promotion remains open; the historical second failure's cause remains unknown. |
-| Normal browser navigation | Responsive orbit/pan/zoom/Fit and shared selection in the normal connection route, with full-quality current native pixels | Responsiveness **FAILS human acceptance**, but first local repair is measured: same settled-refresh cohort internal264.48→198.77ms, headers281→206ms, initial PNG byte-identical. Source cumulatively integrated, NOT installed/released. Remaining139.95ms backend interval motivates Astra-directed isolated dependency diagnostics, RUNNING headlessly; no global SDK/timer changes. Cleanup verified; live candidate unchanged; full inspection failure retained. |
-| Intended browser editing | Bring intended human manipulation/shared Undo into this same route rather than leaving it fixture-only | **QUEUED**, not provided by the preview/navigation grant. Define the bounded interaction and truthful native permission text before implementation; AI authors through direct MCP. |
+| Browser view — OPTIONAL/DEFERRED | Preserve future browser use cases without blocking native-first | Measured capture repair remains in cumulative source; responsiveness unaccepted. SDK diagnostic build checkpointed/stopped, no backend runtime. Retain code/evidence; revisit on a concrete use case or user direction. |
+| Intended browser editing | Future optional browser manipulation/shared Undo | **DEFERRED** with browser view, not granted by current navigation approval. AI authors through direct MCP; no silent browser editing authority. |
 | Usable delivery | Promote one matched editor/MCP/launcher set, with exact versions, rollback and short changed-surface smoke | **QUEUED** after relevant qualification. Do not silently replace frozen feedback artifacts or call a compiled candidate installed. |
 
 These gates need not block all independent work. A desktop refusal blocks that
