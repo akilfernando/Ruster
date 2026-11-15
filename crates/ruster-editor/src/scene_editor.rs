@@ -9157,6 +9157,51 @@ mod tests {
             "requested world coordinate exceeds 10000 despite local f32 rounding: {reply}"
         );
         assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
+
+        // In-bounds cancellation: parent rounds to 9999 but the requested
+        // unselected child's world X is 0.0001, not zero.
+        editor
+            .session
+            .edit(
+                editor.session.scene().revision,
+                "parent",
+                &Transform::default(),
+            )
+            .unwrap();
+        editor
+            .session
+            .edit(
+                editor.session.scene().revision,
+                "left",
+                &Transform {
+                    translation: [-9999., 0., 0.],
+                    ..Transform::default()
+                },
+            )
+            .unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("fidelity.json");
+        editor.session.save(&path).unwrap();
+        for op in ["scene_transform", "scene_transform_many"] {
+            let inspect = editor.command("host", "scene_inspect", json!({}))["result"].clone();
+            let before = editor.session.snapshot_bytes().unwrap();
+            let transform = json!({"object_id":"parent", "transform":{"translation":[9999.0001,0.,0.],"rotation":[0.,0.,0.],"scale":[1.,1.,1.]}});
+            let mut args = if op == "scene_transform" {
+                transform.clone()
+            } else {
+                json!({"transforms":[transform]})
+            };
+            args["expected_session_token"] = inspect["session_token"].clone();
+            args["expected_revision"] = inspect["revision"].clone();
+            let reply = editor.command("host", op, args);
+            assert_eq!(
+                reply["ok"], false,
+                "original descendant fidelity must refuse: {reply}"
+            );
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
+            assert!(!editor.session.is_dirty());
+            assert_eq!(editor.session.path(), Some(path.as_path()));
+        }
     }
 
     #[test]
