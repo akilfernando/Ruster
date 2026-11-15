@@ -683,6 +683,22 @@ which outcome is deferred, why and with whose authority. Do not silently add new
 frameworks, lower fidelity/consent, or substitute another fixture for the named
 client.
 
+**Observed execution follow-up — 2026-11-15:** renewed user AFK permission allowed
+the cumulative native Save/fresh-reopen proof, which exposed a real grouped-collider
+overlay defect despite equal before/after viewport crops. The same cumulative line
+now has owning paint-path RED/GREEN coverage and a small resolved-world repair
+(`fbdcbf7`), plus matched fresh NVIDIA reopen/group-move/Undo images with numeric
+alignment evidence. No alternate hierarchy math, authored rewrite, runtime cache
+or broad rerun was introduced. The final close-menu harness selector failed after
+the visual exit; preserve that failure and verified exact-owned cleanup rather
+than rerun the successful edit sequence. Computer-free handoff preceded docs.
+Lesson: validate actual guide geometry against the shared world-pose contract;
+identical persistence/screenshots can reproduce an identical visual defect. Fresh
+UI labels include shortcut suffixes, so copied semantic stems alone do not qualify
+a normal-close route. Parent changed-risk review, actual managed ChatGPT startup,
+329ms browser usability, human acceptance and installation remain separate gates.
+[Repair, changed proof and retained failure](evidence/CUMULATIVE-EDITOR-2026-11-15.md#grouped-collider-guide-repair-and-changed-native-proof--2026-11-15).
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.

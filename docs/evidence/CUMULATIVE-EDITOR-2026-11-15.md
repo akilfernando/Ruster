@@ -1,6 +1,7 @@
 # Cumulative native editor candidate — 2026-11-15
 
-**Native functional journey PASS; compound visual qualification HELD by a displaced collider guide.**
+**Prior native functional journey PASS; grouped guide repair and changed native visual proof now pass. Parent changed-risk review/promotion remain pending.**
+The final section records the repair; earlier failures and visual hold below remain historical evidence.
 Fresh idle-window run `native-3` supersedes the admission blocker below; prior failures remain preserved.
 Candidate `90ceccf2ba8aade6588b11d99802be6daab7406c`, product source
 `167d12353d606efc83a3ba957c81e64d54846c3d`, exclusive branch
@@ -142,3 +143,114 @@ Raw audit: `native-3/{report.json,actions.json,physical-activity.log,edit/,reope
 `resume-visual-verification.json`. Historical `delivery-receipt.json`, `native-1`
 and `native-2` are intentionally unchanged. State: **HELD/stopped**, not fully
 qualified, installed or user-accepted.
+
+## Grouped collider guide repair and changed native proof — 2026-11-15
+
+**Changed native visual behavior PASS; independent changed-risk review and promotion
+pending.** Source `fbdcbf793ec4c287d95f74a3885b3fd2179003c0` was checkpointed,
+pushed and exact-remote-verified before GUI work. One scoped source file changes:
+`crates/ruster-editor/src/scene_editor/collider_viewport.rs`. Stored local poses
+remain authored data; no persistent cache, alternate hierarchy calculation, shader,
+physics or broad refactor. Existing runtime `SpatialWorld::new` resolves scene poses
+once then calls the collider contract with each world owner. Guide painting now
+uses that same invocation-local contract and owner for unavailable-outline labels;
+missing/invalid authoritative world pose fails closed. Disabled-component preview
+still copies/enables only its temporary collider, never its authored enabled flag.
+
+### Owning RED/GREEN and selected checks
+
+The viewport wrapper calls the extracted actual `paint_guides` body. Its regression
+records real egui `ClippedShape`s, not a disconnected test-only geometry helper:
+parent translation/rotation/uniform scale plus leaf rotation/nonuniform scale/local
+collider offset must emit the same24 colored/underlay line segments and label as a
+flat resolved-world equivalent. Independent owner checks require world(3,4,0),
+scale(2,4,6). Disabled nonuniform sphere emits no outline, retains `(off)` and
+`guide unavailable`, and anchors its label at world owner X3 (text X473), not the
+local pose or collider offset. Invalid parent topology emits no guide or label.
+Existing primitive offset/rotation/scale, contact identity and clipping tests remain.
+
+Audit `/home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/collider-repair/`:
+
+- `red-world-paint.log`: actual emitted geometry assertion FAIL on local-pose code.
+- `red-anchor.log`: geometry repaired but original local fallback restored for the
+  added fallback counterexample; actual label position FAIL. Final world anchor GREEN.
+- Earlier `red.log` and `red-behavior.log` retain test-harness API/texture-delta
+  preparation failures; these are not the behavioral RED or product regressions.
+- `change-gate.log`: `CARGO_TARGET_DIR=<private warm target> CARGO_BUILD_JOBS=4
+  python3 scripts/check.py --base 9550e450657d966a3b3186fed300ad8b50a54cdd` PASS35.99s:
+  Markdown, format, default strict Clippy/all-targets, editor181 pass/4 existing ignores.
+- `inspection-clippy.log`: `cargo clippy --locked --offline -j4 -p ruster-editor
+  --features inspection --all-targets -- -D warnings` PASS16.44s.
+- `inspection-tests.log`: `cargo test --locked --offline -j4 -p ruster-editor
+  --features inspection` PASS186/6 existing ignores; owning guide and clipping cases included.
+- `scene.log`: `cargo test --locked --offline -j4 -p ruster-scene` PASS56 + CLI1.
+  No unchanged whole-engine suite, broad renderer matrix or performance study.
+
+### Matched optimized builds and native proof
+
+Fresh immutable artifacts, not overwritten historical binaries. `build.py` and
+`build-{inspection,default}-receipt.json` pin every selected source input, compiler,
+commands/features, release profile, private warm target and copied artifact hashes.
+Both use rustc1.99.1 (`58cf8f9c3`, LLVM23.1.1), locked/offline Cargo release opt-level3,
+`-p ruster-editor --bin ruster-editor`, jobs4. Fresh source-path recompilation was
+observed; no relocated-cache freshness or source-equivalence shortcut.
+
+- `ruster-editor-release-inspection`: `dd38b319c261e2b49632081fe076a8a2a155ff46f69b48cb22317c0d324f7c7e`,45.75s.
+- `ruster-editor-release-default`: `9e5d1c34aca6acf7b2398d09466ac3b7618c879c7d4e3e52715e0dd8823737d7`,44.61s.
+  Default is compile evidence, not fresh default GUI/human acceptance.
+
+Renewed explicit AFK permission; fresh unlocked/workspace/focus/cursor/activity/gate
+admission. Exact-runtime Driver/msgpack/accessibility imports, input/artifact hashes,
+all16 frozen startup pins and two old immutable optimized artifacts pass before launch.
+One NVIDIA/Vulkan native process, silently on workspace2, app-scoped AccessKit and
+egui input only. No focus/workspace/cursor changes, clipboard, browser or MCP adapter.
+Reopen the exact native-3 `compound.json` (SHA256 `d956bdfc…e1869bf`), native select
+Cube/Fit, capture corrected guide, native group X4.25→5.5, select Cube/capture, native
+Edit→Undo, select Cube/capture and verify group X4.25. No complete Save/reopen rerun.
+
+Actual PNGs were delivered to `vision_analyze` and inspected. The orange box now
+follows the nonuniform mesh and its label sits at the selected Cube instead of left
+of it. `check-images.py`/`visual-verification.json` independently segment orange
+lines and connected neutral mesh surface regions (discarding label glyphs):
+
+| Native capture | Orange bounds (global pixels) | Neutral mesh bounds | Observed edge deltas |
+| --- | --- | --- | --- |
+| Old broken reopened |220,267–370,446|486,311–628,570|−266,−44,−258,−124px|
+| Corrected reopened |482,307–632,574|486,311–628,570|−4,−4,+4,+4px|
+| Ancestor moved |617,327–840,645|623,332–835,645|−6,−5,+5,0px|
+| Native Undo |482,307–632,574|486,311–628,570|−4,−4,+4,+4px|
+
+Observed4–6px includes thick black guide underlay/AA/angled boundaries, not a
+universal rendering tolerance; moved bottom is viewport-clipped. The first naive
+neutral-color mask included label glyphs and was rejected; connected surface
+filtering corrects this offline measurement, not the product or pixels. Old/new
+neutral mesh bounds agree exactly at the matched project/Fit camera. Corrected
+and Undo744×414 RGBA viewport crops `[188,233,932,647]` match exactly, raw SHA256
+`f122d43282db843d036e0eaefd65879e33e6a0d5b116763aaab91e7a559226ac`.
+These image observations complement the owning exact edge/anchor regression;
+screenshot equality alone is not the acceptance basis.
+
+### Retained terminal failure, cleanup and limits
+
+`native-4/report.json` truthfully remains `FAILED_CHANGED_NATIVE_VISUAL_CAPTURE`:
+after all requested captures/Undo readbacks, final normal-close selector used
+`Close window` instead of the actual unique `Close window Ctrl+Q`. No event was
+delivered. This is a harness finalization failure, not a lost edit or native crash.
+No uncertain mutation or journey was replayed; exact PID/binary/private-environment
+SIGTERM cleanup verified exit. Changed visual assertions pass independently; do not
+count this as another fully normal-closed creator journey. Prior native-3 complete
+functional/history/normal-close/Save/fresh-reopen evidence remains unchanged.
+
+`cleanup-receipt.json` independently proves owned PID/window/listener, runner and
+activity observer absent; disposable runtime/config/cache/state/recovery/project
+roots removed; shared gate reacquired/released; original workspace1/unfocused-window
+identity/cursor(1535,640)/unlocked state exact. Zero activity violations. All16 frozen
+startup pins, both old release artifacts and both new artifacts rehashed. Computer-
+free handoff preceded docs. Captured native-log Vulkan scanner passes; ordinary
+captured diagnostics only, not new validation-layer or performance acceptance.
+
+No install, canonical merge, user-state/config/registration edit, human-trial
+replacement, managed-startup repair or browser responsiveness acceptance. Main owns
+Telegram completion, the independent changed-risk review and any install/promotion
+choice. `installed=false`; human acceptance, actual managed ChatGPT startup and
+329ms normal-browser usability remain separate holds.

@@ -12,30 +12,33 @@ process lessons and the short format for future entries. Existing architecture
 contracts and technical evidence remain separate; no new planning service or
 whole-engine scope is activated. Project development guidance now requires upkeep.
 This is documentation/process work, not a passed cumulative journey or install.
-The fresh idle-window outcome below supersedes activity admission: native persistence/history pass, collider visual integration HELD.
+The fresh idle-window repair below resolves the collider visual hold; independent changed-risk review and promotion remain pending.
 
 ## Cumulative native editor candidate — 2026-11-15
 
-**Native functional journey PASS; visual compound qualification HELD/stopped.**
-Fresh explicitly authorized idle-window run on source `06f45c0` reused the exact
-optimized NVIDIA inspection artifact after585 input/two artifact hash checks.
-Native attach Cube→nested group, group X3→4.25, native Undo/Redo, Save, normal close,
-fresh graphical reopen and exact native re-Save all pass: revision18,14 Undo,
-0 Redo; byte-identical whole documents. Reopened native Undo/Redo also pass, with
-full saved history equal except for expected revision. Cube/light local/world and
-selection readbacks agree; fixed Fit/selection viewport crops match exactly.
-**New concrete defect:** selected collider outline is displaced from the grouped
-Cube; `collider_viewport.rs` uses local object pose instead of resolved world pose.
-Do not promote the equal-but-wrong overlay as accepted rendering. Next bounded
-work is grouped-owner RED/GREEN, resolved-world guide/anchor repair, changed-risk
-gate and matched-build visual proof. No product repair or new build in this run.
-Both native processes normal-closed; observer/runner/windows/listeners absent;
-exact desktop/cursor/unlocked state preserved, no activity violations, shared gate
-independently reacquired/released before docs. All16 frozen pins and both binaries
-unchanged. Prior admission failures retained; no fresh MCP/browser/adapter session.
-`installed=false`, user acceptance pending. Normal-workspace usability and actual
-ChatGPT managed startup remain separate holds.
-[Source equivalence, retained failures, cleanup and next finite gate](evidence/CUMULATIVE-EDITOR-2026-11-15.md).
+**Grouped collider guide/anchor repaired; changed native visual behavior verified.**
+Source checkpoint `fbdcbf793ec4c287d95f74a3885b3fd2179003c0` is pushed.
+The owning egui paint-path regression first failed on actual emitted line/label
+geometry, then passed using invocation-local `Scene::resolve_poses`, matching the
+existing runtime collider contract. Disabled nonuniform-sphere fallback anchors
+use the valid world owner; invalid topology fails closed; stored poses are untouched.
+Default change gate passes181 editor tests/4 existing ignores; inspection186/6;
+scene56 + CLI1 pass. Default/inspection strict Clippy and format pass. New pinned
+release artifacts preserve every old binary and all16 frozen startup pins.
+One fresh NVIDIA native process reopens native-3's exact saved compound, selects
+Cube/Fit, moves group X4.25→5.5 and native Undo restores4.25. All three actual PNGs
+show aligned mesh/guide; numeric extents and owning geometry assertions agree.
+The old/new mesh bounds match; corrected/Undo744×414 viewport crops match exactly.
+**Harness failure retained:** final Close-window selector omitted its `Ctrl+Q`
+suffix; no close event was delivered. Exact-owned SIGTERM cleanup then verified
+process/window/listener/observer absence, removed disposable runtime/profile roots,
+released the gate and preserved desktop/focus/cursor. No repeat native session.
+Prior complete native history/Save/fresh-reopen proof remains reused, not rerun.
+Computer-free handoff preceded offline image checks/docs. Parent changed-risk review
+and any install/promotion remain pending; no independent review is self-claimed.
+`installed=false`; human acceptance pending. Actual ChatGPT managed startup and
+329ms normal-browser usability remain separate holds.
+[RED/GREEN, exact builds, visual checks, failure and cleanup](evidence/CUMULATIVE-EDITOR-2026-11-15.md#grouped-collider-guide-repair-and-changed-native-proof--2026-11-15).
 
 ## Coherent workspace frame transaction — 2026-11-15
 
