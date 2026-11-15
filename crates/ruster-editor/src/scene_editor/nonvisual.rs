@@ -21,6 +21,7 @@ mod tests {
             editor: SceneEditor::new(Session::new(Scene::authored_empty("focus-blur")).unwrap()),
             input: Default::default(),
             bridge: None,
+            workspace: None,
         };
         let authored = host.editor.session.snapshot_bytes().unwrap();
         let draw = |host: &mut Host, events, blocked| {
@@ -109,6 +110,7 @@ mod tests {
             editor: SceneEditor::new(Session::new(Scene::authored_empty("hidden")).unwrap()),
             input: Default::default(),
             bridge: None,
+            workspace: None,
         };
         let (bridge, mut inspect) = crate::bridge::queued_test_bridge(
             json!({"operation":"lighting_inspect","arguments":{}}),
@@ -276,9 +278,19 @@ impl Host {
         }
         self.input.bridge_serviced = true;
         #[cfg(unix)]
+        let descriptor = self.workspace_descriptor();
+        #[cfg(unix)]
         if let Some(bridge) = &mut self.bridge {
             if bridge.dispatch_request(|nonce, op, args, lease| {
-                if op == "scene_save" {
+                if op == "workspace_descriptor" {
+                    lease.run_immediate(|| {
+                        if args.as_object().is_some_and(|m| m.is_empty()) {
+                            descriptor.clone()
+                        } else {
+                            json!({"ok":false,"error":{"code":"invalid_arguments"}})
+                        }
+                    });
+                } else if op == "scene_save" {
                     self.editor.dispatch_save_request(ctx, nonce, &args, lease);
                 } else if asset_commands::supported(op) {
                     self.editor
@@ -290,5 +302,7 @@ impl Host {
                 ctx.request_repaint();
             }
         }
+        #[cfg(unix)]
+        self.service_workspace(ctx);
     }
 }

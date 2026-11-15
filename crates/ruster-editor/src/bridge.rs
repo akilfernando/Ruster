@@ -566,8 +566,7 @@ impl Bridge {
         true
     }
     /// Bounded pending slot; neither selection nor transport can grant authority.
-    #[cfg(test)] // Current HTTP/persistent-bridge owner is the explicit test fixture.
-    pub fn request_browser(&mut self, request: browser::BrowserRequest) -> &'static str {
+    pub(crate) fn request_browser(&mut self, request: browser::BrowserRequest) -> &'static str {
         if !self.authority.live()
             || request.id.len() != 64
             || !request.id.bytes().all(|b| b.is_ascii_hexdigit())
@@ -594,8 +593,7 @@ impl Bridge {
             pairing.deny();
         }
     }
-    #[cfg(test)]
-    pub fn browser_authorized(&self, request: &browser::BrowserRequest) -> bool {
+    pub(crate) fn browser_authorized(&self, request: &browser::BrowserRequest) -> bool {
         self.approved()
             && self
                 .browser

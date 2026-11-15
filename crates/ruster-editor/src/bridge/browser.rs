@@ -2,9 +2,18 @@
 use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BrowserBinding {
+    pub native: String,
+    pub attachment: String,
+    pub peer_pid: u32,
+    pub origin: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BrowserRequest {
     pub id: String,
     pub context: String,
+    pub binding: Option<BrowserBinding>,
 }
 
 pub struct BrowserPairing {
@@ -14,8 +23,7 @@ pub struct BrowserPairing {
     denied: bool,
 }
 impl BrowserPairing {
-    #[cfg(test)]
-    pub fn new(request: BrowserRequest) -> Self {
+    pub(crate) fn new(request: BrowserRequest) -> Self {
         Self {
             request,
             deadline: Instant::now() + Duration::from_secs(120),
@@ -56,6 +64,7 @@ mod tests {
         let request = BrowserRequest {
             id: "a".repeat(64),
             context: "exact scene/session/origin".into(),
+            binding: None,
         };
         let mut pairing = BrowserPairing::new(request.clone());
         let wrong = BrowserRequest {

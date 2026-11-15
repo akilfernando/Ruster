@@ -149,6 +149,7 @@ fn direct_image_host_fixture() {
         ),
         input: Default::default(),
         bridge: None,
+        workspace: None,
     };
     // Match viewport framing across revision zero and Undo: the normal welcome
     // banner is revision-zero-only and is not part of the viewport camera.
@@ -207,6 +208,7 @@ fn direct_image_host_fixture() {
             let browser_request = crate::bridge::browser::BrowserRequest {
                 id: request["browser"].as_str().unwrap_or("").into(),
                 context: format!("{} · {} · {}", host.editor.session.scene().id, host.editor.scene_guard_token(&nonce), request["origin"].as_str().unwrap_or("")),
+                binding: None,
             };
             if request["op"] == "browser_pair" {
                 let state = host.bridge.as_mut().map_or("denied", |b| b.request_browser(browser_request.clone()));
@@ -216,7 +218,7 @@ fn direct_image_host_fixture() {
                 // Only explicit test-fixture input can stand in for native human action.
                 if out.join("approve-browser.json").exists() {
                     let approved: Value = serde_json::from_slice(&std::fs::read(out.join("approve-browser.json")).unwrap()).unwrap();
-                    let selected = crate::bridge::browser::BrowserRequest { id: approved["id"].as_str().unwrap().into(), context: approved["context"].as_str().unwrap().into() };
+                    let selected = crate::bridge::browser::BrowserRequest { id: approved["id"].as_str().unwrap().into(), context: approved["context"].as_str().unwrap().into(), binding: None };
                     assert!(host.bridge.as_mut().unwrap().approve_browser(&selected));
                     std::fs::remove_file(out.join("approve-browser.json")).unwrap();
                 }

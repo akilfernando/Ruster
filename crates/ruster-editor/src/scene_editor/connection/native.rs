@@ -348,6 +348,7 @@ mod tests {
         let request = crate::bridge::browser::BrowserRequest {
             id: "a".repeat(64),
             context: "native-consent exact browser/project".into(),
+            binding: None,
         };
         assert_eq!(
             host.bridge

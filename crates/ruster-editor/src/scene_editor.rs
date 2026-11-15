@@ -34,6 +34,8 @@ mod runtime_transform_ui;
 mod save_commands;
 mod shadow_feedback;
 mod view_commands;
+#[cfg(unix)]
+mod workspace_attachment;
 use crate::workspace::{Action, Side, Workspace};
 use eframe::{
     egui,
@@ -5876,6 +5878,8 @@ struct Host {
     input: nonvisual::InputGate,
     #[cfg(unix)]
     bridge: Option<crate::bridge::Bridge>,
+    #[cfg(unix)]
+    workspace: Option<workspace_attachment::WorkspaceAttachment>,
 }
 impl eframe::App for Host {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -5972,6 +5976,7 @@ fn run_session(session: Session) -> Result<(), String> {
                 },
                 #[cfg(unix)]
                 bridge: None,
+                workspace: None,
             };
             // Legacy opt-in creates only an unbound matched-wire listener. It
             // never approves an adapter or bypasses the explicit owner API.

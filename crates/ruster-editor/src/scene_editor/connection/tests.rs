@@ -7,8 +7,54 @@ pub(super) fn host(id: &str) -> Host {
         editor: SceneEditor::new(Session::new(Scene::authored_empty(id)).unwrap()),
         input: Default::default(),
         bridge: None,
+        workspace: None,
     }
 }
+#[test]
+fn saved_host_publishes_only_live_authenticated_workspace_descriptor() {
+    let directory = tempfile::tempdir().unwrap();
+    let mut host = host("workspace-project");
+    host.editor
+        .session
+        .save(&directory.path().join("project.ruster"))
+        .unwrap();
+    let ctx = egui::Context::default();
+    host.connect_adapter(&ctx).unwrap();
+    let (owner, handshake) = approved(host.bridge.as_ref().unwrap());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let descriptor = loop {
+        let reply = call(
+            &mut host,
+            &ctx,
+            &owner,
+            frame(&handshake, "workspace_descriptor", json!({})),
+        );
+        if reply["ok"] == true {
+            break reply["result"].clone();
+        }
+        assert!(
+            Instant::now() < deadline,
+            "live descriptor missing: {reply}"
+        );
+    };
+    assert_eq!(descriptor["scene_id"], "workspace-project");
+    assert_eq!(descriptor["binding"], handshake["binding"]);
+    assert!(descriptor["url"]
+        .as_str()
+        .unwrap()
+        .starts_with("http://127.0.0.1:"));
+    assert!(descriptor.get("credential").is_none());
+    retire(&mut host, &ctx);
+    assert!(std::net::TcpStream::connect(
+        descriptor["url"]
+            .as_str()
+            .unwrap()
+            .trim_start_matches("http://")
+            .trim_end_matches('/')
+    )
+    .is_err());
+}
+
 fn tick(host: &mut Host, ctx: &egui::Context) {
     host.input.observe(&egui::RawInput::default(), ctx);
     host.logic_tick(ctx);

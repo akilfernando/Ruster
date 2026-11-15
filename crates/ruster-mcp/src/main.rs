@@ -744,7 +744,16 @@ impl Adapter {
                 if name == "project_connect" {
                     observed["result"]["registered_project"] =
                         json!({"id":project.id,"name":project.name});
-                    observed["result"]["workspace_handoff"] = json!({"status":"approval_channel_required","message":"Browser authentication needs a private client handoff or explicit native browser approval; no credential is returned in MCP text or URL."});
+                    let descriptor = client.call("workspace_descriptor", &json!({}));
+                    observed["result"]["workspace_handoff"] = if descriptor["ok"] == true {
+                        project.workspace_handoff(
+                            &descriptor["result"],
+                            &observed["result"],
+                            client.native_pid(),
+                        )
+                    } else {
+                        json!({"status":"workspace_unavailable","message":"The exact native owner has not published a live authenticated workspace attachment. No registry URL fallback.","native_error":descriptor["error"]["code"]})
+                    };
                     return observed;
                 }
             }

@@ -71,6 +71,24 @@ pub(super) struct Captures {
     // Scalar receipt for this exact layout callback, never a source/callback owner.
     pub receipt: Option<ruster_render::FrameReceipt>,
 }
+impl Captures {
+    pub(super) fn cancel_owned(&mut self, id: &str) {
+        if self
+            .pending
+            .as_ref()
+            .is_some_and(|p| p.id.to_string() == id)
+        {
+            self.pending = None;
+        }
+        if self
+            .completed
+            .as_ref()
+            .is_some_and(|(saved, _, _)| saved.to_string() == id)
+        {
+            self.completed = None;
+        }
+    }
+}
 impl SceneEditor {
     /// Hidden logic can retire an expired request, but cannot certify a new
     /// viewport rectangle/layer stack or manufacture a rendered frame.
@@ -370,7 +388,7 @@ fn thumbnail(
         }
         if bytes.len() <= MAX_PNG {
             return Ok(
-                json!({"status":"ready","width":w,"height":h,"mime_type":"image/png","image_base64":base64::engine::general_purpose::STANDARD.encode(bytes),"source_width":sw,"source_height":sh}),
+                json!({"status":"ready","width":w,"height":h,"mime_type":"image/png","image_base64":base64::engine::general_purpose::STANDARD.encode(bytes),"source_width":sw,"source_height":sh,"viewport_points":{"min":[rect.min.x,rect.min.y],"max":[rect.max.x,rect.max.y]},"source_pixel_rect":{"x":x0,"y":y0,"width":sw,"height":sh},"pixels_per_point":ppp}),
             );
         }
     }
@@ -573,5 +591,14 @@ mod tests {
             .all(|v| *v == [0, 255, 0]));
         assert!(serde_json::to_vec(&result).unwrap().len() < 60000);
         assert_eq!(info.width, 512);
+        assert_eq!(
+            result["viewport_points"],
+            json!({"min":[200.0,20.0],"max":[900.0,600.0]})
+        );
+        assert_eq!(
+            result["source_pixel_rect"],
+            json!({"x":200,"y":20,"width":700,"height":580})
+        );
+        assert_eq!(result["pixels_per_point"], 1.0);
     }
 }

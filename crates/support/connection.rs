@@ -214,6 +214,9 @@ pub struct Client {
     failed: bool,
 }
 impl Client {
+    pub fn native_pid(&self) -> u32 {
+        self.locator.pid
+    }
     /// Public routing identity only, never the socket-bound approval capability.
     pub fn binding(&self) -> Value {
         self.locator.binding()

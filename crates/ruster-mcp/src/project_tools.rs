@@ -82,6 +82,36 @@ impl Registry {
     }
 }
 impl Project {
+    pub fn workspace_handoff(
+        &self,
+        descriptor: &Value,
+        inspected: &Value,
+        native_pid: u32,
+    ) -> Value {
+        let valid_url = descriptor["url"]
+            .as_str()
+            .and_then(|s| s.strip_prefix("http://127.0.0.1:"))
+            .and_then(|s| s.strip_suffix('/'))
+            .is_some_and(|port| {
+                !port.is_empty()
+                    && port.bytes().all(|b| b.is_ascii_digit())
+                    && port.parse::<u16>().is_ok_and(|n| n != 0)
+            });
+        if !valid_url
+            || descriptor["binding"] != self.binding
+            || descriptor["scene_id"] != self.scene_id
+            || descriptor["session_token"] != inspected["session_token"]
+            || descriptor["native_pid"].as_u64() != Some(native_pid as u64)
+            || descriptor["peer_pid"].as_u64().is_none_or(|n| n == 0)
+            || !descriptor["attachment"]
+                .as_str()
+                .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return json!({"status":"native_descriptor_mismatch","message":"Live native workspace identity disagrees with the registered project; no URL published."});
+        }
+        json!({"status":"native_browser_approval_required","url":descriptor["url"],"attachment":descriptor["attachment"],"message":"Open this secret-free workspace URL. Compare its pending browser code in Rusterize AI connection and approve that browser/project once. Cookies do not grant consent."})
+    }
+
     pub fn open(&self) -> io::Result<connection::Client> {
         let client = connection::Client::open(self.locator.clone())?;
         if client.binding() != self.binding {
@@ -145,6 +175,34 @@ mod tests {
                 .to_string()
         )
         .is_err());
+    }
+
+    #[test]
+    fn live_workspace_handoff_rejects_registry_or_native_identity_disagreement() {
+        let record = json!({"id":"one","name":"One","scene_id":"scene","locator":"/private/connection.json","binding":{"wire":connection::WIRE,"incarnation":"i","generation":"g","connection":"c"}});
+        let registry = Registry::parse(&json!({"projects":[record.clone()]}).to_string()).unwrap();
+        let project = registry.resolve("One").unwrap();
+        let inspected = json!({"scene_id":"scene","session_token":"native-session"});
+        let descriptor = json!({"url":"http://127.0.0.1:34567/","scene_id":"scene","session_token":"native-session","binding":record["binding"],"native_pid":42,"peer_pid":43,"attachment":"a".repeat(64)});
+        assert_eq!(
+            project.workspace_handoff(&descriptor, &inspected, 42)["url"],
+            descriptor["url"]
+        );
+        for (field, value) in [
+            ("url", json!("http://127.0.0.1:34567/?secret=x")),
+            ("scene_id", json!("other")),
+            ("session_token", json!("old")),
+            ("native_pid", json!(43)),
+            ("binding", json!({})),
+        ] {
+            let mut wrong = descriptor.clone();
+            wrong[field] = value;
+            assert_eq!(
+                project.workspace_handoff(&wrong, &inspected, 42)["status"],
+                "native_descriptor_mismatch",
+                "{wrong}"
+            );
+        }
     }
 
     #[test]

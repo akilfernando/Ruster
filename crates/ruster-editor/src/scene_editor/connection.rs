@@ -63,6 +63,9 @@ impl Host {
         .map_err(|e| e.to_string())?;
         let path = bridge.locator_path();
         self.editor.connection_authority = Some(bridge.authority());
+        self.workspace =
+            workspace_attachment::WorkspaceAttachment::start(&self.editor, &bridge, ctx)
+                .map_err(|e| e.to_string())?;
         self.bridge = Some(bridge);
         Ok(path)
     }
@@ -75,6 +78,7 @@ impl Host {
             .is_some_and(|bridge| bridge.approve_owner(owner))
     }
     pub(super) fn disconnect_adapter(&mut self) {
+        self.stop_workspace();
         self.editor.revoke_connection();
         if let Some(bridge) = &mut self.bridge {
             bridge.disconnect();
@@ -110,6 +114,9 @@ impl Host {
         }
     }
     pub(super) fn poll_connection(&mut self, ctx: &egui::Context) {
+        if self.bridge.as_ref().is_none_or(|b| !b.authority().live()) {
+            self.stop_workspace();
+        }
         if let Some(bridge) = &mut self.bridge {
             if !bridge.authority().live() {
                 self.editor.revoke_connection();
