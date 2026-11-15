@@ -28,14 +28,26 @@ Raw analysis/receipt: cumulative audit `astra-responsiveness/{result.md,receipt.
 Initial CLI `--run-budget` launch was rejected before admission/zero tokens; rerun
 without that unsupported flag completed. No global setting or fallback changed.
 
-**RUNNING:** bounded opt-in capture-span implementation with RED/GREEN completeness
-checks, `deleg_cc31240b`, isolated `diag/capture-progress-20261115` worktree and
-private outputs. No scheduling/encoding/transport change yet. No dependency-registry
-instrumentation, live-session access, desktop input, installation or manual retest.
-After source/tests, use a finite matched ordinary-Host cohort to select one repair;
-backend callback time stays explicitly opaque until evidence requires deeper
-instrumentation. Current human-feedback candidate and native installation stay frozen.
-This diagnostic must feed the cumulative line, not become another permanent product.
+**Diagnostic code complete:** isolated `diag/capture-progress-20261115` commit
+`0c77fe9` adds inspection-only explicit opt-in, seven-point numeric capture records,
+max64/process. Parent reads the entire owning diff/module/helper and verifies15
+source/log/artifact pins and remote SHA: GO for a diagnostic build/preparation,
+not a performance fix or installation. Affected11 inspection tests and default
+184 tests/4 existing ignores pass, with format/strict Clippy. Final full inspection
+suite **FAILS**:188 pass/1 asset-retirement assertion failure/6 ignores. One parent
+isolated diagnostic passes; this does not erase that failure or establish cause.
+No schedules, transport, encoding choices, repaint policy or guards changed.
+
+**RUNNING:** separate optimized inspection build `proc_2dc4faba909c` and inert
+finite-run preparation `deleg_0e498afe`; no live-session/native/GPU/input action.
+The feedback freeze protects that candidate, not independent headless preparation.
+After readiness, one guarded ordinary-Host cohort must attribute the dominant
+interval before a repair. Actual presence/owned-runtime guards remain a separate
+native-run dependency, not inferred AFK. Callback time remains explicitly opaque
+backend latency; no dependency-registry instrumentation. Raw proof and scoped
+parent review: cumulative audit `capture-progress/`. Instrumentation alone is not
+progress on responsiveness acceptance, which remains failed. Feed any qualified
+repair into the cumulative line rather than install another separate product.
 
 Raw user/identity receipts: cumulative audit `startup-provenance/` files
 `actual-client-managed-start-user-receipt.json`,

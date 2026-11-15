@@ -25,6 +25,19 @@ Raw collector and Astra report/receipt live under cumulative audit
 `responsiveness-regression/` and `astra-responsiveness/`. Next implementation
 `deleg_cc31240b` owns the isolated temporary diagnostic branch; no standing team.
 
+Diagnostic implementation subsequently completes on isolated `diag/capture-progress-20261115`
+at `0c77fe9`: inherited Sol,53 calls/1013.03s, effective effort/usage unknown.
+Parent verifies15 source/log/artifact hashes, remote SHA and complete production
+diff. Seven inspection-only explicit-opt-in spans/max64 reservations preserve all
+scheduling/encoding/transport/guard choices.11 affected inspection and184 default
+tests pass (4 existing default ignores); strict Clippy/format pass. Final whole
+inspection run **FAILS** (188pass/1 asset-retirement assertion failure/6ignores).
+One isolated parent cohort passes that asset test; no causal attribution or
+retry-to-green claim. Scoped GO is for diagnostic build/preparation only, not
+performance acceptance or promotion. Optimized build and separate inert finite-run
+preparation proceed without modifying the live trial. Raw `capture-progress/`
+receipt and `parent-review.json` preserve all checks/failures and the next gate.
+
 ## 2026-11-15 — One registered saved-project startup
 
 One inherited `gpt-6.1-sol` writer, effective effort/tokens/cost unknown; no model
