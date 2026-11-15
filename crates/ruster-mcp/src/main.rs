@@ -401,7 +401,7 @@ fn tools() -> Value {
         "description":"Canonical decimal u64; maximum 18446744073709551615."});
     let mut tools = vec![
         json!({"name":"project_list","description":"List explicitly registered project records only. Routing is not access approval. Use the host native question UI only if identity needs clarification; never scan filesystem or select newest editor.","inputSchema":object_schema(json!({}),vec![])}),
-        json!({"name":"project_connect","description":"Attach the exact registered project name or ID. Skip selection when already exact. Existing native approval is still required; no implicit startup, browser authentication or mutation retry. Subsequent scene tools use this same pinned owner.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":128}}),vec!["project"])}),
+        json!({"name":"project_connect","description":"Connect the exact registered project name or ID. A registered saved-project startup may start its pinned native owner; otherwise attach its exact publication. Skip selection when already exact. Native adapter approval remains explicit. Then open the returned secret-free workspace URL and ask the human to approve the pending browser/project once in native. No implicit access, newest-editor fallback, reconnect or mutation retry. Subsequent scene tools use the same pinned owner.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":128}}),vec!["project"])}),
     ];
     for (name, description) in [
         ("inspect", "Inspect the attached editor's session, authored configuration, revision and mutation guards. No history arrays, files or logs."),
