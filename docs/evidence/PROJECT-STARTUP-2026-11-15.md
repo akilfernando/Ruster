@@ -2,6 +2,15 @@
 
 ## Outcome and scope
 
+**Independent review: GO to physical/default-feature and actual ChatGPT trial.**
+Completed source-informed Astra review found no changed-code blocker within the
+stated cooperating same-UID boundary. The only wording clarification is the
+checkpoint-based cancellation qualification below; no new framework or test
+matrix is required. Review and verified runtime receipt are in audit
+`startup-review-result.md` / `startup-review-receipt.json`. This is not actual
+human/client, installation or release acceptance. The immutable human launcher
+is prepared and not launched; the next gate is real user/client interaction.
+
 **PASS: stable MCP invocation → one registered closed saved project → ordinary
 Host startup → normal native adapter approval → live secret-free browser URL →
 pending browser refusal → native-widget browser approval → actual MCP edit visible
@@ -50,9 +59,11 @@ Audit root:
   the existing Client handshake; scene identity is read before authored dispatch.
   URLs come from that same approved native owner, never the registry/publication.
 - Bootstrap parent PID/start/deadline is checked before desktop startup and again
-  before Host adoption. Dead/zombie/reused parent and expired launch refuse before
-  publication. Failed/cancelled startup is not retried by the same adapter. Native
-  initialization has a15-second admission budget; a late initialization must refuse.
+  before Host construction. Dead/zombie/reused parents and expiry are rejected at
+  those checkpoints; this is not instantaneous MCP cancellation handling or atomic
+  cancellation through publication. Failed preparation is not retried by the same
+  adapter. The15-second initialization admission budget is checked at those points,
+  not enforced by forcibly terminating a driver during Host construction.
   A driver stuck inside desktop initialization is not forcibly killed: status stays
   failed/pending and the held owner lock prevents duplicate startup. There is no
   universal driver-hang termination guarantee.
