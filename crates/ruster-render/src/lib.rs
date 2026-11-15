@@ -399,6 +399,8 @@ pub enum ViewPreset {
 /// and RMB held; frontends must disable it while text, modal or gesture owns input.
 #[derive(Clone, Debug)]
 pub struct NavigationOptions {
+    /// Presentation-only: the native compact shell supplies these controls.
+    pub show_controls: bool,
     /// Opt-in editor contour. Default-off so application selection retains its
     /// existing appearance; this is transient presentation, never scene content.
     pub selection_feedback: bool,
@@ -417,6 +419,7 @@ pub struct NavigationOptions {
 impl Default for NavigationOptions {
     fn default() -> Self {
         Self {
+            show_controls: true,
             selection_feedback: false,
             enabled: true,
             keyboard_enabled: false,
@@ -850,7 +853,8 @@ pub fn allocate_viewport(
     navigation.toggle_projection = false;
     navigation.reset = false;
     navigation.frame_selected = false;
-    ui.horizontal_wrapped(|ui| {
+    if navigation.show_controls {
+        ui.horizontal_wrapped(|ui| {
         if ui
             .add_enabled(
                 navigation_enabled,
@@ -896,6 +900,7 @@ pub fn allocate_viewport(
             fitted = true;
         }
     });
+    }
     let (rect, response) = ui.allocate_exact_size(
         ui.available_size().max(egui::vec2(1.0, 1.0)),
         egui::Sense::click_and_drag(),

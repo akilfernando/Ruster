@@ -55,10 +55,21 @@ impl Host {
         {
             return Err("Wait for the old connection/publication owner to retire.".into());
         }
-        let bridge = crate::bridge::Bridge::start_for(
+        let grant = match std::env::var_os("RUSTER_CONNECTOR_ENROLLMENT") {
+            Some(path) => Some(
+                crate::enrollment::Grant::load(
+                    std::path::Path::new(&path),
+                    &std::env::var("RUSTER_PROJECT_ID").map_err(|e| e.to_string())?,
+                )
+                .map_err(|e| e.to_string())?,
+            ),
+            None => None,
+        };
+        let bridge = crate::bridge::Bridge::start_enrolled(
             ctx.clone(),
             self.editor.connection_incarnation.clone(),
             self.editor.connection_generation.clone(),
+            grant,
         )
         .map_err(|e| e.to_string())?;
         let path = bridge.locator_path();

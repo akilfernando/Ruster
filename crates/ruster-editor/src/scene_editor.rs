@@ -1,4 +1,7 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
+mod ai_workspace;
+#[cfg(all(test, unix))]
+mod ai_workspace_tracer;
 mod asset_commands;
 mod asset_inspection;
 #[cfg(feature = "inspection")]
@@ -497,6 +500,12 @@ pub struct SceneEditor {
     draft_generation: u64,
     asset_origin: Option<PathBuf>,
     recovered_origin: Option<PathBuf>,
+    ai_workspace: bool,
+    ai_drawer: Option<ai_workspace::Drawer>,
+    ai_connection_label: &'static str,
+    ai_connection_requested: bool,
+    ai_release_navigation: bool,
+    ai_drawer_rect: Option<egui::Rect>,
     navigation: ruster_render::NavigationOptions,
     view_state: view_commands::ViewState,
     captures: capture_commands::Captures,
@@ -692,6 +701,12 @@ impl SceneEditor {
             recovered_origin: None,
             view_state: Default::default(),
             captures: Default::default(),
+            ai_workspace: false,
+            ai_drawer: None,
+            ai_connection_label: "Disconnected",
+            ai_connection_requested: false,
+            ai_release_navigation: false,
+            ai_drawer_rect: None,
             navigation: ruster_render::NavigationOptions {
                 camera,
                 reset: camera.is_none(),
@@ -5377,11 +5392,26 @@ impl SceneEditor {
         }
         self.runtime.input_begin(&ctx, input_blocked);
         self.route_shortcuts(&ctx);
-        egui::Panel::top("scene_top").show(ui, |ui| self.scene_menus(ui));
+        egui::Panel::top("scene_top").show(ui, |ui| {
+            if self.ai_workspace {
+                self.ai_header(ui);
+            } else {
+                self.scene_menus(ui);
+                if ui.small_button("AI workspace").clicked() {
+                    self.set_ai_workspace(true, &ctx);
+                }
+            }
+        });
         let about_open = crate::branding::is_about_open(&ctx);
         crate::branding::show_about(&ctx);
-        egui::Panel::bottom("scene_status").show(ui, |ui| self.asset_status_ui(ui));
-        if self.workspace.prefs.content_visible {
+        if !self.ai_workspace
+            || self.status_diagnostics()
+            || !self.notice.is_empty()
+            || self.asset_busy()
+        {
+            egui::Panel::bottom("scene_status").show(ui, |ui| self.asset_status_ui(ui));
+        }
+        if !self.ai_workspace && self.workspace.prefs.content_visible {
             let remaining = ui.available_height();
             // Reserve 160 points for compact tools/runtime/view chrome and
             // about 180 for the viewport, after global status/menu bars.
@@ -5413,7 +5443,11 @@ impl SceneEditor {
                     .show(ui, |ui| self.browser_contents(ui));
             });
         }
-        self.scene_sidebars(ui);
+        if self.ai_workspace {
+            self.ai_drawer_ui(&ctx);
+        } else {
+            self.scene_sidebars(ui);
+        }
         self.process_queued_action();
         self.process_queued_selection();
         self.process_content_intents();
@@ -5447,7 +5481,9 @@ impl SceneEditor {
                     .controls(ui, &self.session, self.generation, true, &shortcut);
                 return;
             }
-            self.manipulation_tools_ui(ui);
+            if !self.ai_workspace {
+                self.manipulation_tools_ui(ui);
+            }
             let document_blocked =
                 about_open || self.guard().is_err() || self.manipulation.offset_pending();
             if document_blocked || self.input_actions_open {
@@ -5455,11 +5491,13 @@ impl SceneEditor {
             }
             let blocked = document_blocked || self.asset_busy();
             let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
-            if let Some(key) =
-                self.runtime
-                    .controls(ui, &self.session, self.generation, blocked, &shortcut)
-            {
-                self.capture_reset_assets(key);
+            if !self.ai_workspace || self.runtime.has_worker() {
+                if let Some(key) =
+                    self.runtime
+                        .controls(ui, &self.session, self.generation, blocked, &shortcut)
+                {
+                    self.capture_reset_assets(key);
+                }
             }
             self.runtime.observe(
                 self.generation,
@@ -5474,8 +5512,13 @@ impl SceneEditor {
                 None
             };
             let selected: Vec<_> = self.manipulation.ids.iter().map(String::as_str).collect();
+            self.navigation.show_controls = !self.ai_workspace;
             self.navigation.selection_feedback = true;
-            self.navigation.enabled = !about_open
+            self.navigation.enabled = !self.ai_release_navigation
+                && !self
+                    .ai_drawer_rect
+                    .is_some_and(|rect| ctx.pointer_hover_pos().is_some_and(|p| rect.contains(p)))
+                && !about_open
                 && !self.runtime.input_owned()
                 && !self.export_dialog
                 && !self.close_approved
@@ -5598,6 +5641,7 @@ impl SceneEditor {
             }
             self.runtime
                 .input_finish(&ctx, &viewport.response, blocked || hud_owns);
+            self.ai_release_navigation = false;
             self.captures.rect = Some(viewport.rect);
             self.captures.view = Some(viewport.view);
             self.captures.projection = Some(viewport.projection);
@@ -5914,8 +5958,18 @@ impl eframe::App for Host {
         #[cfg(feature = "inspection")]
         self.editor.asset_ops.timing_frame(ui.ctx());
         #[cfg(unix)]
-        self.native_connection_ui(ui);
+        {
+            self.editor.ai_connection_label = match self.connection_state() {
+                "bound" => "Connected",
+                "listening_unbound" => "Disconnected",
+                "approval_required" => "Approval required (manual)",
+                "revoked_draining" => "Disconnected / retiring",
+                _ => "Disconnected",
+            };
+        }
         self.editor.ui(ui);
+        #[cfg(unix)]
+        self.native_connection_ui(ui);
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.
         self.input.human_pending = false;
@@ -6015,6 +6069,7 @@ fn run_session(session: Session) -> Result<(), String> {
                     let mut editor = SceneEditor::new(session);
                     #[cfg(feature = "inspection")]
                     editor.asset_ops.probe.attach_metrics(metrics);
+                    editor.ai_workspace = std::env::var("RUSTER_WORKSPACE").as_deref() == Ok("ai");
                     editor.save_grant = save_grant;
                     editor.creation_export = creation_export;
                     if let Some(path) = editor.session.path() {

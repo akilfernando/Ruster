@@ -1,7 +1,7 @@
 //! Explicit opt-in, same-user local bridge. Never owns mutable editor state.
 use crate::connection::{self, Locator};
 use std::io::Write;
-use std::os::unix::{fs::PermissionsExt, net::UnixListener};
+use std::os::unix::fs::PermissionsExt;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{mpsc, Arc, Mutex};
 use std::thread::JoinHandle;
@@ -30,6 +30,7 @@ pub struct Authority(Arc<Mutex<AuthorityState>>);
 struct AuthorityState {
     live: bool,
     approved: bool,
+    grant: Option<crate::enrollment::Grant>,
     owner: Option<(String, u32)>,
     commits: usize,
     requests: usize,
@@ -39,7 +40,10 @@ struct AuthorityState {
 }
 impl AuthorityState {
     fn admitted(&self) -> bool {
-        self.live && self.approved && self.endpoint_valid()
+        self.live
+            && self.approved
+            && self.endpoint_valid()
+            && self.grant.as_ref().is_none_or(|g| g.live())
     }
     fn endpoint_valid(&self) -> bool {
         self.endpoint
@@ -58,6 +62,7 @@ impl Authority {
         Self(Arc::new(Mutex::new(AuthorityState {
             live: true,
             approved: false,
+            grant: None,
             owner: None,
             commits: 0,
             requests: 0,
@@ -72,7 +77,9 @@ impl Authority {
         }
     }
     pub fn live(&self) -> bool {
-        self.0.lock().is_ok_and(|s| s.live && s.endpoint_valid())
+        self.0.lock().is_ok_and(|s| {
+            s.live && s.endpoint_valid() && s.grant.as_ref().is_none_or(|g| g.live())
+        })
     }
     fn authorized(&self) -> bool {
         self.0.lock().is_ok_and(|s| s.admitted())
@@ -116,6 +123,7 @@ pub struct RequestLease {
 /// editor adoption, even if the socket times out or its client disconnects.
 #[must_use]
 pub struct CommitLease {
+    _grant_lock: Option<std::fs::File>,
     shared: Arc<RequestState>,
 }
 
@@ -252,6 +260,15 @@ impl RequestLease {
 
     fn try_commit_with(self, now: impl FnOnce() -> Instant) -> Result<CommitLease, Expired> {
         let mut authority = self.shared.authority.as_ref().map(|a| a.0.lock());
+        let grant_lock = match &authority {
+            Some(Ok(s)) => s
+                .grant
+                .as_ref()
+                .map(|g| g.commit_lock())
+                .transpose()
+                .map_err(|_| Expired)?,
+            _ => None,
+        };
         if authority
             .as_ref()
             .is_some_and(|s| s.as_ref().map_or(true, |s| !s.admitted()))
@@ -275,6 +292,7 @@ impl RequestLease {
             }
         }
         Ok(CommitLease {
+            _grant_lock: grant_lock,
             shared: self.shared.clone(),
         })
     }
@@ -358,6 +376,52 @@ impl Drop for CommitLease {
 
 pub mod browser;
 
+#[cfg(test)]
+mod seamless_tests {
+    use super::*;
+    #[test]
+    fn enrolled_local_transport_never_needs_native_approval_and_revokes_before_commit() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("enrollment.json");
+        let exe = std::fs::read_link("/proc/self/exe").unwrap();
+        let secret = connection::unpredictable().unwrap();
+        let value = json!({"version":1,"connector_id":"fixture","executable":exe,"binary_identity":crate::project_startup::BinaryIdentity::read(&exe).unwrap(),"secret":secret,"generation":1,"projects":[{"id":"one","generation":1,"allowed":true},{"id":"two","generation":1,"allowed":true}]});
+        std::fs::write(&path, value.to_string()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let grant = crate::enrollment::Grant::load(&path, "one").unwrap();
+        let mut bridge = Bridge::start_enrolled(
+            egui::Context::default(),
+            "incarnation".into(),
+            "generation".into(),
+            Some(grant.clone()),
+        )
+        .unwrap();
+        let mut client = connection::Client::open(bridge.locator_path()).unwrap();
+        client.enroll(grant.proof().unwrap());
+        let worker = std::thread::spawn(move || {
+            let reply = client.call("scene_inspect", &json!({}));
+            (client, reply)
+        });
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while !worker.is_finished() && Instant::now() < deadline {
+            bridge.dispatch_command(|_, _, _| json!({"ok":true,"result":{"scene_id":"one"}}));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        let (mut client, reply) = worker.join().unwrap();
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert!(bridge.approved());
+        let authority = bridge.authority();
+        grant.revoke(false).unwrap();
+        assert!(!authority.authorized());
+        assert!(authority.authorize_publication().is_none());
+        assert!(crate::enrollment::Grant::load(&path, "one").is_err());
+        assert!(crate::enrollment::Grant::load(&path, "two").is_ok());
+        assert_ne!(client.call("scene_inspect", &json!({}))["ok"], true);
+        bridge.disconnect();
+    }
+}
+
 pub struct Bridge {
     browser: Option<browser::BrowserPairing>,
     receiver: mpsc::Receiver<Pending>,
@@ -385,6 +449,14 @@ impl Bridge {
         incarnation: String,
         generation: String,
     ) -> std::io::Result<Self> {
+        Self::start_enrolled(ctx, incarnation, generation, None)
+    }
+    pub fn start_enrolled(
+        ctx: egui::Context,
+        incarnation: String,
+        generation: String,
+        grant: Option<crate::enrollment::Grant>,
+    ) -> std::io::Result<Self> {
         let mut directory = tempfile::Builder::new()
             .prefix("ruster-mcp-")
             .rand_bytes(24)
@@ -394,7 +466,7 @@ impl Bridge {
 
         std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
         let path = directory.path().join("editor.sock");
-        let listener = UnixListener::bind(&path)?;
+        let listener = connection::bind_socket(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         let locator = Locator::capture(&path, incarnation, generation)?;
@@ -412,6 +484,7 @@ impl Bridge {
         let (wake, wake_receiver) = mpsc::sync_channel(1);
         let authority = Authority::new();
         authority.0.lock().unwrap().listener_owned = true;
+        authority.0.lock().unwrap().grant = grant.clone();
         authority.0.lock().unwrap().endpoint = Some((
             locator.clone(),
             locator_path.clone(),
@@ -446,16 +519,22 @@ impl Bridge {
                         if Instant::now() >= hello_deadline { return Ok(()); }
                     };
                     if hello["wire"] != connection::WIRE || hello["binding"] != worker_locator.binding()
-                        || hello.as_object().is_none_or(|m| m.len() != 3)
+                        || hello.as_object().is_none_or(|m| m.len() != if hello.get("enrollment").is_some() {4} else {3})
                         || hello["hello"].as_str().is_none_or(|s| s.len() != 64) {
                         let _ = connection::send(&mut stream, &denied("wire_incompatible"));
                         continue;
                     }
+                    let trusted = match (&grant, hello.get("enrollment")) {
+                        (Some(g), Some(proof)) if g.authenticate(proof, pid) => true,
+                        (_, Some(_)) | (Some(_), None) => { connection::send(&mut stream, &denied("enrollment_required"))?; continue; },
+                        (None, None) => false,
+                    };
                     let owner = hello["hello"].as_str().unwrap().to_string();
                     {
                         let mut state = worker_authority.0.lock().map_err(|_| std::io::Error::other("authority poisoned"))?;
                         if !state.live || state.owner.is_some() { return Ok(()); }
                         state.owner = Some((owner.clone(), pid));
+                        state.approved = trusted;
                     }
                     ctx.request_repaint();
                     connection::send(&mut stream, &json!({"binding":worker_locator.binding(),"state":"approval_required"}))?;
@@ -532,6 +611,9 @@ impl Bridge {
 
     pub fn authority(&self) -> Authority {
         self.authority.clone()
+    }
+    pub fn persistent_grant(&self) -> Option<crate::enrollment::Grant> {
+        self.authority.0.lock().ok()?.grant.clone()
     }
     pub fn approved(&self) -> bool {
         self.authority.authorized()
@@ -1057,7 +1139,7 @@ pub(crate) mod tests {
             match replacement {
                 "socket" => {
                     std::fs::remove_file(&path).unwrap();
-                    other_listener = Some(UnixListener::bind(&path).unwrap());
+                    other_listener = Some(connection::bind_socket(&path).unwrap());
                     std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))
                         .unwrap();
                 }
