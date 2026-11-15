@@ -106,8 +106,22 @@ pub(super) fn paint(
     if selected.is_empty() || !viewport.rect.is_positive() {
         return;
     }
-    let vp = lighting_viewport::view_projection(viewport);
-    let painter = ui.painter().with_clip_rect(viewport.rect);
+    paint_guides(
+        ui,
+        viewport.rect,
+        lighting_viewport::view_projection(viewport),
+        scene,
+        selected,
+    );
+}
+
+fn paint_guides(ui: &egui::Ui, rect: egui::Rect, vp: DMat4, scene: &Scene, selected: &[String]) {
+    // Match runtime spatial queries and mesh/light painting: stored poses are local.
+    // Resolve once per paint invocation; invalid topology must not invent a guide.
+    let Ok(poses) = scene.resolve_poses() else {
+        return;
+    };
+    let painter = ui.painter().with_clip_rect(rect);
     for object in scene
         .objects
         .iter()
@@ -139,10 +153,13 @@ pub(super) fn paint(
                 ColliderRole::Sensor => egui::Color32::from_rgb(75, 215, 230),
             }
         };
-        let resolved = outline(&collider, &object.transform);
+        let Some(owner) = poses.transforms.get(&object.id) else {
+            continue;
+        };
+        let resolved = outline(&collider, owner);
         if let Some(resolved) = &resolved {
             segments(resolved, |a, b| {
-                if let Some(points) = lighting_viewport::segment(viewport.rect, vp, a, b) {
+                if let Some(points) = lighting_viewport::segment(rect, vp, a, b) {
                     painter.line_segment(
                         points,
                         egui::Stroke::new(3.5, egui::Color32::from_black_alpha(180)),
@@ -155,14 +172,14 @@ pub(super) fn paint(
             });
         }
         let anchor = resolved.map_or_else(
-            || DVec3::from_array(object.transform.translation.map(f64::from)),
+            || DVec3::from_array(owner.translation.map(f64::from)),
             |resolved| DVec3::from_array(resolved.center),
         );
-        if let Some((point, _)) = lighting_viewport::project(viewport.rect, vp, anchor) {
+        if let Some((point, _)) = lighting_viewport::project(rect, vp, anchor) {
             label(
                 ui,
                 &painter,
-                viewport.rect,
+                rect,
                 point,
                 format!(
                     "{role} {shape}{status}{}",
@@ -293,6 +310,107 @@ mod tests {
     use super::*;
     use ruster_behavior::spatial::SweepResult;
     use ruster_scene::{ColliderShape, Object};
+
+    fn painted(scene: &Scene) -> Vec<egui::epaint::ClippedShape> {
+        let context = egui::Context::default();
+        let mut output = context.run_ui(egui::RawInput::default(), |ui| {
+            paint_guides(
+                ui,
+                egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800.0, 600.0)),
+                DMat4::orthographic_rh(-20.0, 20.0, -15.0, 15.0, -20.0, 20.0),
+                scene,
+                &["box".into()],
+            );
+        });
+        output.textures_delta.clear();
+        output.shapes
+    }
+
+    #[test]
+    fn grouped_guide_paint_matches_world_geometry_and_label() {
+        let mut scene = Scene::empty("grouped-guide");
+        let mut object = Object::cube("box", None);
+        object.transform.translation = [1.0, 0.0, 0.0];
+        object.transform.rotation = [0.0, 0.0, 0.25];
+        object.transform.scale = [1.0, 2.0, 3.0];
+        object.collider = Some(Collider {
+            offset: [0.5, 0.25, 0.125],
+            ..Collider::default()
+        });
+        scene.objects.push(object);
+        let mut session = ruster_scene::Session::new(scene).unwrap();
+        session.create_group(0, "assembly", None).unwrap();
+        session.reparent(1, "box", Some("assembly")).unwrap();
+        session
+            .edit(
+                2,
+                "assembly",
+                &Transform {
+                    translation: [3.0, 2.0, 0.0],
+                    rotation: [0.0, 0.0, std::f32::consts::FRAC_PI_2],
+                    scale: [2.0; 3],
+                },
+            )
+            .unwrap();
+        let grouped = session.scene();
+        let world = grouped.resolve_poses().unwrap().transforms["box"].clone();
+        assert!(DVec3::from_array(world.translation.map(f64::from))
+            .abs_diff_eq(DVec3::new(3.0, 4.0, 0.0), 0.00001));
+        assert_eq!(world.scale, [2.0, 4.0, 6.0]);
+        let mut flat = Scene::empty("flat-world-guide");
+        let mut object = grouped.objects[0].clone();
+        object.transform = world;
+        flat.objects.push(object);
+        let expected = painted(&flat);
+        assert_eq!(
+            expected
+                .iter()
+                .filter(|s| matches!(s.shape, egui::Shape::LineSegment { .. }))
+                .count(),
+            24
+        );
+        assert_eq!(
+            painted(grouped),
+            expected,
+            "actual paint must use world edges and world collider-center label, not stored locals"
+        );
+
+        // A disabled nonuniform sphere has no valid outline. Its label still
+        // belongs at the resolved owner, not at its offset or stored local pose.
+        let mut unavailable = grouped.clone();
+        unavailable.objects[0].collider = Some(Collider {
+            enabled: false,
+            offset: [5.0, 0.0, 0.0],
+            shape: ColliderShape::Sphere { radius: 0.25 },
+            ..Collider::default()
+        });
+        flat.objects[0].collider = unavailable.objects[0].collider;
+        let expected = painted(&flat);
+        assert!(!expected
+            .iter()
+            .any(|s| matches!(s.shape, egui::Shape::LineSegment { .. })));
+        let text = expected
+            .iter()
+            .find_map(|s| match &s.shape {
+                egui::Shape::Text(text) => Some(text),
+                _ => None,
+            })
+            .unwrap();
+        assert!(text.galley.text().contains("(off) · guide unavailable"));
+        assert!(
+            (text.pos.x - 473.0).abs() < 0.001,
+            "fallback must anchor at world owner X=3"
+        );
+        assert_eq!(painted(&unavailable), expected);
+        assert!(!unavailable.objects[0].collider.unwrap().enabled);
+
+        // Invalid topology has no authoritative world owner: fail closed.
+        unavailable
+            .hierarchy
+            .parents
+            .insert("box".into(), "missing".into());
+        assert!(painted(&unavailable).is_empty());
+    }
 
     #[test]
     fn primitive_edges_match_scaled_rotated_offsets_and_contacts_require_captured_identity() {
