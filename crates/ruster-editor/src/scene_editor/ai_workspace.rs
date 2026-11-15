@@ -26,76 +26,84 @@ impl SceneEditor {
     pub(super) fn ai_header(&mut self, ui: &mut egui::Ui) {
         let ctx = ui.ctx().clone();
         let wide = ui.available_width() >= 900.;
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button("Full editor").clicked() {
-                self.set_ai_workspace(false, &ctx);
-            }
-            let status = match self.ai_connection_label {
-                "Connected" => "Connected",
-                "Approval required (manual)" => "Pending",
-                "Disconnected / retiring" => "Retiring",
-                "Access revoked" => "Revoked",
-                "Connection error" => "Error",
-                _ => "Offline",
-            };
-            if ui
-                .button(format!("AI: {status}"))
-                .on_hover_text(self.ai_connection_label)
-                .clicked()
-            {
-                self.ai_connection_requested = true;
-            }
-            for action in [Action::Undo, Action::Save] {
+        // A horizontal row sizes to its controls. `with_layout` alone takes the
+        // panel's previous full height; adding the tools below then grows that
+        // remembered height every frame until the viewport is pushed off-screen.
+        ui.horizontal(|ui| {
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if ui.button("Full editor").clicked() {
+                    self.set_ai_workspace(false, &ctx);
+                }
+                let status = match self.ai_connection_label {
+                    "Connected" => "Connected",
+                    "Approval required (manual)" => "Pending",
+                    "Disconnected / retiring" => "Retiring",
+                    "Access revoked" => "Revoked",
+                    "Connection error" => "Error",
+                    _ => "Offline",
+                };
                 if ui
-                    .button(if action == Action::Save {
-                        if self.session.is_dirty() || self.session.path().is_none() {
-                            "Save •"
-                        } else {
-                            "Save"
-                        }
-                    } else {
-                        "Undo"
-                    })
-                    .on_hover_text(self.workspace.shortcut_text(action))
+                    .button(format!("AI: {status}"))
+                    .on_hover_text(self.ai_connection_label)
                     .clicked()
                 {
-                    self.queued_action = Some(action);
+                    self.ai_connection_requested = true;
                 }
-            }
-            ui.menu_button("…", |ui| {
-                if !wide {
-                    self.ai_tools(ui);
-                }
-                self.scene_menus(ui);
-                if ui.button("Content").clicked() && !self.drafts() {
-                    self.ai_drawer = Some(Drawer::Content);
-                    ui.close();
-                }
-                self.tool_options_ui(ui);
-                let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
-                let blocked = self.guard().is_err();
-                if let Some(key) =
-                    self.runtime
-                        .controls(ui, &self.session, self.generation, blocked, &shortcut)
-                {
-                    self.capture_reset_assets(key);
-                }
-            });
-            ui.add(
-                egui::Label::new(format!(
-                    "{}{}",
-                    self.document_label(),
-                    if self.session.is_dirty() {
-                        " •"
-                    } else if self.session.path().is_none() {
-                        " · Not saved"
-                    } else {
-                        " · Saved"
+                for action in [Action::Undo, Action::Save] {
+                    if ui
+                        .button(if action == Action::Save {
+                            if self.session.is_dirty() || self.session.path().is_none() {
+                                "Save •"
+                            } else {
+                                "Save"
+                            }
+                        } else {
+                            "Undo"
+                        })
+                        .on_hover_text(self.workspace.shortcut_text(action))
+                        .clicked()
+                    {
+                        self.queued_action = Some(action);
                     }
-                ))
-                .truncate(),
-            )
-            .on_hover_text(self.document_label());
+                }
+                ui.menu_button("…", |ui| {
+                    if !wide {
+                        self.ai_tools(ui);
+                    }
+                    self.scene_menus(ui);
+                    if ui.button("Content").clicked() && !self.drafts() {
+                        self.ai_drawer = Some(Drawer::Content);
+                        ui.close();
+                    }
+                    self.tool_options_ui(ui);
+                    let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
+                    let blocked = self.guard().is_err();
+                    if let Some(key) = self.runtime.controls(
+                        ui,
+                        &self.session,
+                        self.generation,
+                        blocked,
+                        &shortcut,
+                    ) {
+                        self.capture_reset_assets(key);
+                    }
+                });
+                ui.add(
+                    egui::Label::new(format!(
+                        "{}{}",
+                        self.document_label(),
+                        if self.session.is_dirty() {
+                            " •"
+                        } else if self.session.path().is_none() {
+                            " · Not saved"
+                        } else {
+                            " · Saved"
+                        }
+                    ))
+                    .truncate(),
+                )
+                .on_hover_text(self.document_label());
+            });
         });
         if wide {
             self.ai_tools(ui);
@@ -255,6 +263,110 @@ mod tests {
             !editor.navigation.enabled,
             "drawer blocks underlying native navigation/picking"
         );
+    }
+
+    #[test]
+    fn production_host_ai_header_stays_at_top_and_leaves_visible_viewport() {
+        use eframe::App as _;
+        for (size, native_scale, zoom) in [
+            (egui::vec2(1280., 805.), 1., 1.),
+            (egui::vec2(1280., 805.), 1.25, 1.25),
+            (egui::vec2(600., 850.), 1., 1.),
+            (egui::vec2(800., 650.), 1., 1.),
+            (egui::vec2(600., 850.), 1., 1.25),
+        ] {
+            let ctx = egui::Context::default();
+            crate::editor_theme::configure(&ctx);
+            ctx.set_zoom_factor(zoom);
+            let project = tempfile::tempdir().unwrap();
+            let path = project.path().join("demo.ruster");
+            Scene::demo().save(&path).unwrap();
+            let mut editor = SceneEditor::test_loaded(Session::open(&path).unwrap());
+            assert_eq!(editor.session.scene().objects.len(), 3);
+            assert_eq!(editor.session.scene().revision, 0);
+            assert!(!editor.session.is_dirty());
+            let snapshot = editor.session.snapshot_bytes().unwrap();
+            editor.ai_workspace = true;
+            editor.workspace.welcome = false;
+            editor.workspace.prefs.scale = zoom;
+            editor.scale_applied = zoom;
+            let mut host = Host {
+                editor,
+                input: Default::default(),
+                #[cfg(unix)]
+                bridge: None,
+                #[cfg(unix)]
+                workspace: None,
+                #[cfg(unix)]
+                workspace_enabled: false,
+            };
+            let mut frame = eframe::Frame::_new_kittest();
+            let mut previous = None;
+            for index in 0..40 {
+                let mut raw = egui::RawInput {
+                    // Native backends report screen geometry in egui points,
+                    // not physical pixels, at the current native DPI and zoom.
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        size / (native_scale * zoom),
+                    )),
+                    ..Default::default()
+                };
+                raw.viewports
+                    .get_mut(&egui::ViewportId::ROOT)
+                    .unwrap()
+                    .native_pixels_per_point = Some(native_scale);
+                if index == 0 {
+                    // Apply egui's initial zoom transition before measuring the
+                    // native geometry (its transition pass ignores screen_rect).
+                    ctx.run_ui(raw.clone(), |_| {})
+                        .drop_without_applying_deltas();
+                }
+                host.raw_input_hook(&ctx, &mut raw);
+                let mut output = ctx.run_ui(raw, |ui| host.ui(ui, &mut frame));
+                output.textures_delta.clear();
+                let header = output
+                    .shapes
+                    .iter()
+                    .find_map(|shape| {
+                        let egui::epaint::Shape::Text(text) = &shape.shape else {
+                            return None;
+                        };
+                        (text.galley.job.text == "Full editor")
+                            .then(|| text.galley.rect.translate(text.pos.to_vec2()))
+                    })
+                    .expect("production Host paints workspace controls");
+                let viewport = host.editor.captures.rect.expect("real viewport allocation");
+                if index == 0 || index == 39 {
+                    eprintln!("Host frame={index} size={size:?} native_scale={native_scale} zoom={zoom} content={:?} header={header:?} viewport={viewport:?}", ctx.content_rect());
+                }
+                // This proves the real scene renderer is hooked to the visible
+                // allocation; CPU composition does not prove GPU pixels.
+                assert!(output.shapes.iter().any(|shape| {
+                    matches!(&shape.shape, egui::epaint::Shape::Callback(callback)
+                        if callback.rect == viewport && shape.clip_rect.intersect(viewport).area() >= viewport.area() * 0.99)
+                }), "scene callback must target the unclipped visible viewport");
+                if let Some(previous) = previous {
+                    assert_eq!(viewport, previous, "layout must not grow across frames");
+                }
+                previous = Some(viewport);
+                assert!(
+                    header.bottom() < ctx.content_rect().top() + 70.,
+                    "header must be bounded at top, not vertically centered: {header:?}"
+                );
+                assert!(
+                    ctx.content_rect().contains_rect(viewport),
+                    "viewport must be on screen: {viewport:?}"
+                );
+                assert!(
+                    viewport.height() > ctx.content_rect().height() * 0.8,
+                    "viewport must dominate native window: {viewport:?}"
+                );
+                assert!(viewport.width() > ctx.content_rect().width() * 0.95);
+            }
+            assert_eq!(host.editor.session.snapshot_bytes().unwrap(), snapshot);
+            assert!(!host.editor.session.is_dirty());
+        }
     }
 
     #[test]
