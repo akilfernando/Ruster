@@ -20,6 +20,51 @@ fn wait<F: Future>(future: F) -> F::Output {
         }
     }
 }
+// Preserve ColorImage's premultiplied output, including transparent/additive pixels,
+// without converting the full native window for a local viewport-only reply.
+fn viewport_rgba(
+    pixels: &[u8],
+    stride: usize,
+    x: usize,
+    y: usize,
+    width: usize,
+    height: usize,
+) -> Vec<u8> {
+    let mut rgba = Vec::with_capacity(width * height * 4);
+    for row in y..y + height {
+        let bytes = &pixels[(row * stride + x) * 4..(row * stride + x + width) * 4];
+        if bytes.as_chunks::<4>().0.iter().all(|p| p[3] == 255) {
+            rgba.extend_from_slice(bytes);
+        } else {
+            for p in bytes.as_chunks::<4>().0 {
+                rgba.extend_from_slice(
+                    &egui::Color32::from_rgba_unmultiplied(p[0], p[1], p[2], p[3]).to_array(),
+                );
+            }
+        }
+    }
+    rgba
+}
+
+#[test]
+fn viewport_row_copy_matches_color_image_for_every_alpha_and_crop() {
+    let pixels: Vec<u8> = (0..=255)
+        .flat_map(|a| [173, 91, 23, a])
+        .chain([1, 2, 3, 255].repeat(256))
+        .collect();
+    let image = egui::ColorImage::from_rgba_unmultiplied([256, 2], &pixels);
+    for (x, width) in [(0, 256), (7, 91), (255, 1)] {
+        let expected: Vec<u8> = (0..2)
+            .flat_map(|row| {
+                image.pixels[row * 256 + x..row * 256 + x + width]
+                    .iter()
+                    .flat_map(|p| p.to_array())
+            })
+            .collect();
+        assert_eq!(viewport_rgba(&pixels, 256, x, 0, width, 2), expected);
+    }
+}
+
 // Coordinates are PNG pixels, not CSS pixels or full native-window coordinates.
 // Retain the last delivered crop; never pick against a resized/reframed image.
 fn pick_position(args: &Value, crop: Option<egui::Rect>) -> Result<egui::Pos2, &'static str> {
@@ -378,10 +423,13 @@ fn direct_image_host_fixture() {
         let readback_ms = frame_started.elapsed().as_secs_f64() * 1000. - ui_ms;
         let pixels = read.slice(..).get_mapped_range().unwrap();
         let color_started = Instant::now();
-        let image = Arc::new(egui::ColorImage::from_rgba_unmultiplied(
-            [1408, 896],
-            &pixels,
-        ));
+        // MCP/capture callbacks require a full native image; local PNG replies do not.
+        let image = (!callbacks.is_empty()).then(|| {
+            Arc::new(egui::ColorImage::from_rgba_unmultiplied(
+                [1408, 896],
+                &pixels,
+            ))
+        });
         let color_ms = color_started.elapsed().as_secs_f64() * 1000.;
         // Native queued selection is applied after this frame's viewport draw.
         // Deliver the following rendered frame, never old pixels with new selection.
@@ -401,13 +449,7 @@ fn direct_image_host_fixture() {
             let height = (rect.max.y.floor() as usize).saturating_sub(y);
             assert!(width > 0 && height > 0 && x + width <= 1408 && y + height <= 896);
             let crop_started = Instant::now();
-            let rgba: Vec<u8> = (y..y + height)
-                .flat_map(|row| {
-                    image.pixels[row * 1408 + x..row * 1408 + x + width]
-                        .iter()
-                        .flat_map(|p| p.to_array())
-                })
-                .collect();
+            let rgba = viewport_rgba(&pixels, 1408, x, y, width, height);
             let crop_ms = crop_started.elapsed().as_secs_f64() * 1000.;
             let encode_started = Instant::now();
             let mut png = Vec::new();
@@ -434,7 +476,7 @@ fn direct_image_host_fixture() {
             .unwrap();
         }
         for callback in callbacks {
-            callback.complete(image.clone());
+            callback.complete(image.as_ref().expect("capture callback image").clone());
         }
         drop(pixels);
         read.unmap();

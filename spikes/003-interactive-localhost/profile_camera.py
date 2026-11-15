@@ -50,10 +50,21 @@ def main():
             record['drag_interval']=c.js('({start:dragStart,end:dragEnd})')
             record['presented']=c.js('presented');record['samples']=c.js("profileSamples.filter(x=>x.op==='viewport_camera')");replies=c.js('profileReplies')
             for r in replies:r['png_sha256']=hashlib.sha256(__import__('base64').b64decode(r.pop('png'))).hexdigest()
-            assert len({r['png_sha256'] for r in replies})==len(replies),'native frame IDs without changing pixels'
+            # Native render identities can legitimately repeat pixels (e.g. a no-op
+            # settled intent). Count distinct decoded PNGs observed at paint opportunities,
+            # not HTTP replies or every new native frame ID.
+            record['duplicate_png_replies']=len(replies)-len({r['png_sha256'] for r in replies})
             record['replies']=replies;record['scene_unchanged']=c.snapshot()['scene']==base['scene'];assert record['scene_unchanged']
             import statistics
             active=[r for r in record['presented'] if record['drag_interval']['start']<=r['time']<=record['drag_interval']['end'] and r['native_frame'] in {x['native_frame'] for x in replies}]
+            hashes={r['native_frame']:r['png_sha256'] for r in replies}
+            seen=set();unique=[]
+            for row in active:
+                digest=hashes[row['native_frame']]
+                if digest not in seen:
+                    seen.add(digest);unique.append(row)
+            record['paint_opportunities_with_native_ids']=len(active)
+            active=unique
             duration=(record['drag_interval']['end']-record['drag_interval']['start'])/1000
             record['summary']={'committed_changing_frames':len(set(r['png_sha256'] for r in replies)),'presented_frames':len(active),'fps_during_drag':len(active)/duration,'drag_seconds':duration,'median_request_to_decoded_ms':statistics.median(r['request_to_decoded_ms'] for r in record['samples']),'median_first_input_to_decoded_ms':statistics.median(r.get('first_input_to_decoded_ms',r['request_to_decoded_ms']) for r in record['samples']),'median_latest_input_to_decoded_ms':statistics.median(r.get('latest_input_to_decoded_ms',r['request_to_decoded_ms']) for r in record['samples'])}
             phases=[r['phases'] for r in replies if r.get('phases')]

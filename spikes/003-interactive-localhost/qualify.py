@@ -106,6 +106,24 @@ def main():
             idle=c.js('({...observation})');assert idle['status']>=2 and idle['frames']==1 and idle['max']==1,idle
             record['idle_observation']=idle
             assert base['scene']['session_token']==tool('scene_inspect')['result']['session_token']
+            # Exercise the full native ColorImage callback path as well as local PNGs.
+            capture=tool('viewport_capture_start',{'expected_session_token':base['scene']['session_token'],'expected_revision':base['scene']['revision'],'expected_view_revision':base['view']['view_revision']})
+            assert capture['ok'],capture
+            capture_id=capture['result']['capture_id']
+            def captured():
+                envelope=rpc('tools/call',{'name':'viewport_capture_inspect','arguments':{'capture_id':capture_id}})
+                assert envelope is not None
+                reply=envelope['result']['structuredContent']
+                assert reply['ok'],reply
+                if reply['result']['status']=='pending':return None
+                assert reply['result']['status']=='ready',reply
+                images=[item for item in envelope['result']['content'] if item['type']=='image']
+                assert len(images)==1 and images[0]['mimeType']=='image/png'
+                return images[0]
+            wait(captured);callback_image=captured()
+            assert callback_image is not None
+            assert base64.b64decode(callback_image['data']).startswith(b'\x89PNG\r\n\x1a\n')
+            record['native_capture_callback_ready']=True
             # Actual mouse navigation, no DOM-dispatched movement or browser scene.
             def settled():
                 wait(lambda:c.js('!busy && !cameraFlight && !cameraIntent && cameraTimer===null'))

@@ -1,5 +1,11 @@
 # Interactive localhost workspace — bounded disposable slice
 
+## Bounded capture-copy continuation — 2026-11-15
+
+User now reports the actual ChatGPT built-in-browser viewport is significantly better and usable. This supersedes the historical responsiveness-pending wording below **by user report only**; no measured ChatGPT frame rate is claimed.60 updates/sec is aspirational, not a release blocker.
+
+Isolated `feat/camera-copy-20261115` preserves the accepted baseline and removes cheap fixture capture overhead: preallocated bulk opaque-row copying, identical egui conversion for nonopaque pixels, and full ColorImage conversion only when native capture callbacks actually request it. No renderer, camera, quality, authority, transport pipeline or browser interaction change. [Measured evidence and limits](../../docs/evidence/CAMERA-COPY-2026-11-15.md). Local capture CPU cost improves materially, but owned-browser throughput does **not** show a repeatable material improvement;60fps is explicitly deferred. Parent may continue the separately desired native gizmo bridge after reviewing this checkpoint, without another human usability repeat.
+
 ## Continuous-feedback experiment — prototype measured, ChatGPT user gate pending 2026-11-15
 
 Owner: bounded performance worker, isolated `feat/continuous-localhost-20261115`; original live source unchanged. User reports functional click/camera correctness accepted, responsiveness NOT accepted. Exit: owned real Chromium sustained pointer drag presents >=15 distinct changing native frames/s and median input-to-decoded <100ms, followed by settled native picking, MCP camera/state agreement, unchanged authored history and existing draft/access/observer regressions. Engineering targets, not promised user acceptance. Profile phases first; remove avoidable fixture waits/copies/encoding before media infrastructure. Reassess after30 cumulative minutes or two failed journeys. No independent browser scene/camera, fake animation, mutation replay, install, registration, desktop input or production-consent change. Actual ChatGPT smoothness remains a user gate.
