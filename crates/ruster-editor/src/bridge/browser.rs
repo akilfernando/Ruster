@@ -3,7 +3,14 @@ use std::time::{Duration, Instant};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct BrowserBinding {
-    pub native: String,
+    pub native_incarnation: String,
+    pub native_generation: String,
+    pub native_connection: String,
+    pub native_pid: u32,
+    pub native_uid: u32,
+    pub project: String,
+    pub scene_id: String,
+    pub session_token: String,
     pub attachment: String,
     pub peer_pid: u32,
     pub origin: String,

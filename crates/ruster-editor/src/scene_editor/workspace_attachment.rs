@@ -329,7 +329,23 @@ impl Host {
                 workspace.origin.as_deref().unwrap_or("")
             ),
             binding: Some(crate::bridge::browser::BrowserBinding {
-                native: workspace.identity.to_string(),
+                native_incarnation: workspace.identity["binding"]["incarnation"]
+                    .as_str()
+                    .unwrap()
+                    .into(),
+                native_generation: workspace.identity["binding"]["generation"]
+                    .as_str()
+                    .unwrap()
+                    .into(),
+                native_connection: workspace.identity["binding"]["connection"]
+                    .as_str()
+                    .unwrap()
+                    .into(),
+                native_pid: std::process::id(),
+                native_uid: rustix::process::getuid().as_raw(),
+                project: workspace.identity["project"].as_str().unwrap().into(),
+                scene_id: workspace.identity["scene_id"].as_str().unwrap().into(),
+                session_token: workspace.identity["session_token"].as_str().unwrap().into(),
                 attachment: workspace.attachment.clone(),
                 peer_pid: workspace.peer_pid.unwrap_or(0),
                 origin: workspace.origin.clone().unwrap_or_default(),
