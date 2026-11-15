@@ -1,5 +1,45 @@
 # Nested assembly core prototype — 2026-11-15
 
+## Requested-world admission repair — 2026-11-15
+
+**COMPLETE bounded prototype repair; production integration remains QUEUED to
+parent.** Astra's later architecture review supplied a source-derived (then
+unexecuted) counterexample: identity/unit-scale parent X=9999, leaf local X=1,
+world X=10000, requested leaf world delta +1e-8. This repair executed that exact
+case and its negative counterpart before changing the helper. The existing
+atomic-refusal regression now covers geometry, group and point-light boundaries,
+selected ancestors with unselected boundary descendants, and ancestor/descendant
+selection normalization. All 18 table rows were actually admitted on the old
+helper, yielding one failing test (not a zero-test run). Boundary no-ops/inward
+requests remain admissible, and outward refusal requires complete Assembly
+equality.
+
+`translate_selection` now checks the unquantized requested world translation of
+every affected target before converting any local translation to f32. Existing
+requested-local admission and staged `flatten()` stored/resolved validation still
+run separately before swap. No bound/tolerance, experimental scale/light policy,
+production module declaration, schema, history or Lua contract changed. Owner:
+exclusive Hermes/Sol repair worker; exit: executed RED/GREEN plus existing CPU
+consumer/export checks; non-goals remain the prototype contract below.
+
+Evidence in `/home/akilf/Projects/Ruster-Audits/assembly-core-20261115/`:
+`requested-world-red.log` retains the initial six-row failure;
+`requested-world-closure-red.log` retains the exact-parent, expanded 18-row failure
+with the helper verified identical to baseline `2bf9548`;
+`requested-world-final-focused.log` records final formatted-source GREEN (one
+focused test, five example tests), runnable example, two actual CPU
+render/spatial consumer tests, seven package/export tests, strict affected
+all-target Clippy and formatting. Fresh `python3 scripts/check.py --full` passes
+in 33.54s on final Rust/test inputs: 363 Rust tests, 30 Python tests, five existing
+ignored fixtures, workspace formatting/strict Clippy/Markdown. Raw log:
+`requested-world-full.log`. Later documentation-only updates receive direct
+Markdown/diff checks without rerunning unchanged Rust. Commands reuse the existing
+serialized gate and audit-local Cargo target. This is implementer verification,
+not a fresh independent-review acceptance or actual renderer f32 model-arithmetic,
+instance-normal/GPU appearance, editor/MCP, persistence/recovery or production
+hierarchy qualification. Historical receipts below remain scoped to their own
+inputs; the earlier source-derived counterexample is now an executed regression.
+
 ## Parent repair of independent-review counterexamples — 2026-11-15
 
 The delegated repair stopped with a provider HTTP400 after adding the exact far-descendant test; parent preserved that test and completed the repair directly. The exact reparent counterexample now fails before the fix and passes afterward. Reparent validates every affected world pose and the flattened f32 target matrices, not just the moved group, before atomic swap; its existing tolerance is not loosened. Signed-boundary selection tests reproduce f64 coordinates rounding back inside the f32 domain; requested local translation is now checked before conversion. Detached group IDs with spaces, separators, non-ASCII characters or overlength reproduce the grammar gap; admission now reuses production `validate_id`.

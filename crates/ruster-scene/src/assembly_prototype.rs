@@ -322,6 +322,25 @@ impl Assembly {
                 roots.push(*id);
             }
         }
+        // Admit the requested world-space closure before local f32 storage can
+        // erase a boundary crossing. Translation moves every covered descendant
+        // by the same world delta, irrespective of selection normalization.
+        let world_delta = DVec3::from_array(delta);
+        for (id, pose) in &worlds {
+            let mut ancestor = Some(id.as_str());
+            while let Some(target) = ancestor {
+                if selected.contains(target) {
+                    let requested = pose.translation + world_delta;
+                    if !requested.is_finite() || requested.abs().max_element() > 10_000.0 {
+                        return Err(
+                            "requested world translation exceeds prototype numeric bounds".into(),
+                        );
+                    }
+                    break;
+                }
+                ancestor = self.parent(target);
+            }
+        }
         let mut staged = self.clone();
         for id in roots {
             let delta = self.parent(id).map_or(DVec3::from_array(delta), |parent| {

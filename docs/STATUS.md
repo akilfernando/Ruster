@@ -1,5 +1,27 @@
 # Current project status
 
+## Requested-world admission counterexample repaired — 2026-11-15
+
+**COMPLETE bounded prototype repair, not production hierarchy integration.**
+Astra's later source-derived parent-X9999/leaf-local-X1/world-X10000 +1e-8
+counterexample is now executed RED/GREEN, including the negative counterpart.
+Selection translation admits the unquantized requested world closure (geometry,
+groups, lights and unselected descendants) before local f32 conversion, then
+retains separate requested-local and staged stored/resolved admission. Existing
+atomic-refusal test now covers 18 signed/target/selection rows plus valid no-op
+and inward controls; complete Assembly equality is required on rejection. No
+numeric tolerance or experimental policy is relaxed.
+
+Final-source runnable example, five example tests, two actual CPU consumer tests,
+seven package/export tests and affected strict lint/format pass. Fresh
+`python3 scripts/check.py --full` passes in33.54s: 363Rust/30Python/five existing
+ignored fixtures, workspace strict Clippy/format/Markdown. [RED/GREEN logs,
+contract and limits](evidence/F4A-CORE-PROTOTYPE-2026-11-15.md#requested-world-admission-repair--2026-11-15).
+No fresh independent acceptance, actual renderer f32 model-arithmetic/GPU normal
+appearance, production hierarchy/history/schema/Lua, persistence/recovery or
+editor/MCP integration claim. Parent review/production decision remains QUEUED;
+no desktop/input, installation, canonical checkout or private attachment changes.
+
 ## Parent repair of independent-review counterexamples — 2026-11-15
 
 The delegated repair stopped with a provider HTTP400 after adding the exact far-descendant test; parent preserved that test and completed the repair directly. The exact reparent counterexample now fails before the fix and passes afterward. Reparent validates every affected world pose and the flattened f32 target matrices, not just the moved group, before atomic swap; its existing tolerance is not loosened. Signed-boundary selection tests reproduce f64 coordinates rounding back inside the f32 domain; requested local translation is now checked before conversion. Detached group IDs with spaces, separators, non-ASCII characters or overlength reproduce the grammar gap; admission now reuses production `validate_id`.

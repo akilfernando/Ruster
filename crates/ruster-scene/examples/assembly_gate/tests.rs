@@ -74,6 +74,73 @@ fn rejected_edits_preserve_the_complete_assembly() {
         .is_err());
     assert_eq!(assembly, original);
 
+    // Astra's requested-world counterexample: the local request remains in
+    // range but f32 storage erases a world-boundary crossing. Cover both signs,
+    // leaf-only movement and ancestors whose unselected descendants cross.
+    let mut admitted = Vec::new();
+    for sign in [1.0, -1.0] {
+        for boundary in ["left", "hinge", "bulb"] {
+            for selected in [vec![boundary], vec!["root"], vec!["root", boundary]] {
+                let mut edge = fixture();
+                edge.parents.remove("bulb");
+                edge.groups[0].local.translation = [(sign * 9999.0) as f32, 0.0, 0.0];
+                edge.groups[1].local = Transform::default();
+                edge.scene.objects[0].transform.translation = [0.0; 3];
+                match boundary {
+                    "left" => {
+                        // Exact counterexample: one identity/unit-scale parent
+                        // at 9999 and its leaf at local 1, world 10000.
+                        edge.parents.insert("left".into(), "root".into());
+                        edge.scene.objects[0].transform.translation[0] = sign as f32;
+                    }
+                    "hinge" => {
+                        edge.groups[1].local.translation[0] = sign as f32;
+                        edge.scene.objects[0].transform.translation[0] = -sign as f32;
+                    }
+                    "bulb" => {
+                        edge.parents.insert("bulb".into(), "root".into());
+                        if let ruster_scene::Lighting::Authored { lights, .. } =
+                            &mut edge.scene.lighting
+                        {
+                            lights.get_mut("bulb").unwrap().transform.translation =
+                                [sign as f32, 0.0, 0.0];
+                        }
+                    }
+                    _ => unreachable!(),
+                }
+                let flat = edge.flatten().unwrap();
+                if boundary != "hinge" {
+                    assert_eq!(
+                        flat.target_transform(boundary).unwrap().translation[0],
+                        (sign * 10_000.0) as f32
+                    );
+                }
+                let original = edge.clone();
+                // Boundary no-ops and inward requests remain admissible.
+                edge.translate_selection(&selected, [0.0; 3]).unwrap();
+                assert_eq!(edge, original);
+                let mut inward = edge.clone();
+                inward
+                    .translate_selection(&selected, [-sign * 1e-8, 0.0, 0.0])
+                    .unwrap();
+                let result = edge.translate_selection(&selected, [sign * 1e-8, 0.0, 0.0]);
+                assert_eq!(
+                    edge, original,
+                    "refusal must preserve the complete assembly"
+                );
+                if result.is_ok() {
+                    admitted.push(format!(
+                        "sign={sign}, boundary={boundary}, selected={selected:?}"
+                    ));
+                }
+            }
+        }
+    }
+    assert!(
+        admitted.is_empty(),
+        "admitted requested world > signed bound: {admitted:?}"
+    );
+
     // Requested f64 coordinates must be admitted before f32 rounding. Both
     // signed limits would otherwise round an out-of-range request back inside.
     for sign in [-1.0, 1.0] {
