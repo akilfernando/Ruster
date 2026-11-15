@@ -157,6 +157,21 @@ impl Host {
                 "Owner identity is socket-bound, not executable provenance or client registration.",
             );
         }
+        if let Some(bridge) = &mut self.bridge
+            && let Some(request) = bridge.browser_request()
+        {
+            ui.separator();
+            ui.heading("Approve pending browser for this project?");
+            ui.label(format!("Browser verification code: {}", &request.id[..12]));
+            ui.label(&request.context);
+            ui.label("Compare the code with your browser. This is not verified application provenance. Approval permits reading and editing this exact native project/session for at most 30 minutes. Reload is automatic; Disconnect AI revokes it. Pending requests expire after 2 minutes. Denial requires a fresh native connection.");
+            if ui.button("Approve this browser/project once").clicked() {
+                bridge.approve_browser(&request);
+            }
+            if ui.button("Deny pending browser").clicked() {
+                bridge.deny_browser();
+            }
+        }
         let action = match self.connection_state() {
             "retired" => Some("Connect AI"),
             "approval_required" => Some("Review adapter approval"),
@@ -329,6 +344,34 @@ mod tests {
         .unwrap();
         assert!(crate::bridge::tests::receive(&mut stream)["capability"].is_string());
         assert_eq!(host.connection_state(), "bound");
+        let request = crate::bridge::browser::BrowserRequest {
+            id: "a".repeat(64),
+            context: "native-consent exact browser/project".into(),
+        };
+        assert_eq!(
+            host.bridge
+                .as_mut()
+                .unwrap()
+                .request_browser(request.clone()),
+            "pending"
+        );
+        assert!(!host.bridge.as_ref().unwrap().browser_authorized(&request));
+        click(
+            &mut host,
+            &ctx,
+            &mut state,
+            "Approve this browser/project once",
+        );
+        assert!(host.bridge.as_ref().unwrap().browser_authorized(&request));
+        let wrong_project = crate::bridge::browser::BrowserRequest {
+            context: "different-project".into(),
+            ..request.clone()
+        };
+        assert!(!host
+            .bridge
+            .as_ref()
+            .unwrap()
+            .browser_authorized(&wrong_project));
         click(&mut host, &ctx, &mut state, "Disconnect AI");
         assert_eq!(host.connection_state(), "revoked_draining");
         assert!(!host.editor.connection_authority.as_ref().unwrap().live());

@@ -1,7 +1,7 @@
 # Browser/project pairing for prompt-driven connection
 
 Date: 2026-11-15.
-Status: user-approved interaction and authority model; implementation pending.
+Status: user-approved interaction and authority model; integrated fixture implemented, production startup/client acceptance pending.
 
 Akil explicitly selected **Use one-time browser/project approval, then automatic connection** in the Telegram clarification. The question specified approval of the pending browser for the selected project, automatic authentication while that grant is valid, no capability copying or secret-bearing URLs, and no first-visitor auto-trust.
 

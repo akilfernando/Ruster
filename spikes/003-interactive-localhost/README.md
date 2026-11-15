@@ -1,5 +1,59 @@
 # Interactive localhost workspace — bounded disposable slice
 
+## Browser pairing — integrated fixture exit, 2026-11-15
+
+The approved one-time pairing slice now runs through the existing HTTP workspace,
+persistent native bridge and native-owned grant. Opening the nonsecret URL creates
+an unauthenticated pending browser. Compare its nonsecret verification code in
+Rusterize → AI connection, approve that exact browser/project once, and the page
+loads automatically. Reload reuses an HttpOnly, SameSite=Strict session cookie;
+no capability entry, Connect click, URL credential, clipboard or browser storage
+API is needed. Native UI also offers denial; Disconnect AI revokes the grant.
+
+Pending lifetime is 2 minutes; approved lifetime is at most 30 minutes, additionally
+bounded by the existing native fixture lease. A single pending/granted slot never
+retargets; denial, expiry, browser loss or changed native identity needs a fresh
+explicit native connection, not automatic takeover. Closing a pending tab grants
+nothing and leaves it to expire. Exact scene/session/origin and the approved
+socket owner are checked before browser reads/writes. Native replacement has no
+migration. Cookie credentials exist only in server memory and browser session
+cookies; only their SHA-256 identity reaches native pending state. Eight issued
+credentials maximum, no user-agent trust. Existing manual developer capability
+mode remains explicit fixture scaffolding, not pairing consent.
+
+`qualify.py --pairing-only` demonstrates actual pending refusal → **explicit
+fixture approval, not human consent** → automatic authenticated native pixels →
+real registered-project MCP transform observed automatically → browser Shared
+Undo → reload with empty capability input → disconnect refusal. It uses one owned
+headless Chromium, a saved disposable scene, real adapter/project_list/project_connect
+and exact native owner. Existing server flag still explicitly grants the disposable
+MCP owner; it never approves a browser. No new renderer, daemon, client config,
+installation or global input. Native approval button is in the existing UI, but
+physical human approval and actual one-prompt ChatGPT remain separate unqualified
+gates. Production HTTP/native startup attachment and registry workspace-URL
+publication/refresh remain unfinished; project_connect conservatively retains its
+old handoff diagnostic until those surfaces exist. This is not production acceptance.
+
+Evidence: `/home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/browser-pairing/`.
+`red-actual` fails on missing automatic pairing; `green2` passes the integrated
+browser exit. `red-saved` rejects an unassociated scene; `green-saved` passes using
+an exact registered saved project. Earlier failed preparation used a non-inspection
+binary; a subsequent stream-schema refusal is retained and repaired without
+reconnect/replay. All journey cleanup receipts close native0, server/browser/adapter,
+remove profile/capability/locator/socket, and reacquire the QA gate. Initial attempts
+to run final native-widget/change gates are **NOT RUN**: another native hierarchy
+owner holds the shared QA lock; empty logs are lock refusals, not passes.
+A bounded 90-second wait also refused. Work is **BLOCKED/stopped at this safe
+checkpoint**, not running in the background. Final added native-widget/expiry
+assertions, test-only transport API exposure and legacy-mode polling cancellation
+still need final-source compilation/qualification once that owner releases the
+lock. Four existing Python stream tests and `git diff --check` pass. Current
+source hashes, retained logs, qualified earlier artifact and independent exact
+native/server PID, locator/socket absence and listener-refusal checks are pinned
+in `browser-pairing/manifest.json` in the audit above. No lease was extended and
+no other owner's resources were touched.
+
+
 ## Prompt-project connection contract — 2026-11-15
 
 Exclusive writer: `feat/prompt-connect-20261115`, base `f9bf7a4`.

@@ -157,6 +157,10 @@ fn direct_image_host_fixture() {
     if interactive {
         host.editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
         host.editor.workspace.welcome = false;
+        host.editor
+            .save_scene(out.join("paired-project.json"))
+            .unwrap();
+        host.editor.test_finish_asset_work();
     }
     let locator = host.connect_adapter(&ctx).unwrap();
     let locator_value: Value = serde_json::from_slice(&std::fs::read(&locator).unwrap()).unwrap();
@@ -199,6 +203,30 @@ fn direct_image_host_fixture() {
         }
         let mut pointer = None;
         let request = transport.as_ref().and_then(|t| t.requests.try_recv().ok());
+        let request = request.and_then(|request| {
+            let browser_request = crate::bridge::browser::BrowserRequest {
+                id: request["browser"].as_str().unwrap_or("").into(),
+                context: format!("{} · {} · {}", host.editor.session.scene().id, host.editor.scene_guard_token(&nonce), request["origin"].as_str().unwrap_or("")),
+            };
+            if request["op"] == "browser_pair" {
+                let state = host.bridge.as_mut().map_or("denied", |b| b.request_browser(browser_request.clone()));
+                if let Some(pending) = host.bridge.as_ref().and_then(|b| b.browser_request()) {
+                    std::fs::write(out.join("browser-pending.json"), json!({"id":pending.id,"context":pending.context}).to_string()).unwrap();
+                }
+                // Only explicit test-fixture input can stand in for native human action.
+                if out.join("approve-browser.json").exists() {
+                    let approved: Value = serde_json::from_slice(&std::fs::read(out.join("approve-browser.json")).unwrap()).unwrap();
+                    let selected = crate::bridge::browser::BrowserRequest { id: approved["id"].as_str().unwrap().into(), context: approved["context"].as_str().unwrap().into() };
+                    assert!(host.bridge.as_mut().unwrap().approve_browser(&selected));
+                    std::fs::remove_file(out.join("approve-browser.json")).unwrap();
+                }
+                transport.as_ref().unwrap().reply(json!({"state":state,"code":&browser_request.id[..browser_request.id.len().min(12)]}));
+                None
+            } else if request.get("browser").is_some() && !host.bridge.as_ref().is_some_and(|b| b.browser_authorized(&browser_request)) {
+                transport.as_ref().unwrap().reply(json!({"response":{"ok":false,"error":{"code":"browser_denied"}},"live":false}));
+                None
+            } else { Some(request) }
+        });
         let (status_request, request) = match request {
             Some(request) if request["op"] == "status" => (true, None),
             request => (false, request),

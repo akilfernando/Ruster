@@ -356,7 +356,10 @@ impl Drop for CommitLease {
     }
 }
 
+pub mod browser;
+
 pub struct Bridge {
+    browser: Option<browser::BrowserPairing>,
     receiver: mpsc::Receiver<Pending>,
     directory: tempfile::TempDir,
     nonce: String,
@@ -515,6 +518,7 @@ impl Bridge {
         })?;
         directory.disable_cleanup(true);
         Ok(Self {
+            browser: None,
             receiver,
             directory,
             nonce: locator.incarnation.clone(),
@@ -561,7 +565,45 @@ impl Bridge {
         state.approved = true;
         true
     }
+    /// Bounded pending slot; neither selection nor transport can grant authority.
+    #[cfg(test)] // Current HTTP/persistent-bridge owner is the explicit test fixture.
+    pub fn request_browser(&mut self, request: browser::BrowserRequest) -> &'static str {
+        if !self.authority.live()
+            || request.id.len() != 64
+            || !request.id.bytes().all(|b| b.is_ascii_hexdigit())
+            || request.context.len() > 2048
+        {
+            return "denied";
+        }
+        let pairing = self
+            .browser
+            .get_or_insert_with(|| browser::BrowserPairing::new(request.clone()));
+        pairing.state(&request)
+    }
+    pub fn browser_request(&self) -> Option<browser::BrowserRequest> {
+        let pairing = self.browser.as_ref()?;
+        (self.authority.live() && pairing.state(pairing.request()) == "pending")
+            .then(|| pairing.request().clone())
+    }
+    /// Human-native only; deliberately absent from every command/MCP dispatcher.
+    pub fn approve_browser(&mut self, request: &browser::BrowserRequest) -> bool {
+        self.approved() && self.browser.as_mut().is_some_and(|p| p.approve(request))
+    }
+    pub fn deny_browser(&mut self) {
+        if let Some(pairing) = &mut self.browser {
+            pairing.deny();
+        }
+    }
+    #[cfg(test)]
+    pub fn browser_authorized(&self, request: &browser::BrowserRequest) -> bool {
+        self.approved()
+            && self
+                .browser
+                .as_ref()
+                .is_some_and(|p| p.state(request) == "approved")
+    }
     pub fn disconnect(&mut self) {
+        self.deny_browser();
         self.authority.revoke();
         self.stop.store(true, Ordering::Release);
         let _ = self.wake.try_send(());
@@ -731,6 +773,7 @@ pub(crate) fn queued_test_bridge(
     assert!(sender.try_send(pending).is_ok());
     (
         Bridge {
+            browser: None,
             receiver,
             directory: tempfile::tempdir().unwrap(),
             nonce: "test".into(),
@@ -843,6 +886,7 @@ pub(crate) mod tests {
         });
         let (dropped, observed) = mpsc::sync_channel(1);
         let bridge = Bridge {
+            browser: None,
             receiver: mpsc::sync_channel(1).1,
             directory: tempfile::tempdir().unwrap(),
             nonce: "drop-test".into(),
@@ -1267,6 +1311,7 @@ pub(crate) mod tests {
         let (sender, receiver) = mpsc::sync_channel(1);
         let directory = tempfile::tempdir().unwrap();
         let mut bridge = Bridge {
+            browser: None,
             receiver,
             directory,
             nonce: "test".into(),

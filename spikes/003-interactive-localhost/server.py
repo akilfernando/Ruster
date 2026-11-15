@@ -3,6 +3,8 @@
 import argparse
 import fcntl
 import hmac
+import hashlib
+from http.cookies import SimpleCookie
 import json
 import os
 from pathlib import Path
@@ -43,6 +45,8 @@ def main():
     listener.listen(1); listener.settimeout(20)
     bridge_token = secrets.token_urlsafe(32)
     bridge = None
+    browser_sessions = set()
+    cookie_name = 'ruster_browser_' + secrets.token_hex(8)
     env = {k:v for k,v in os.environ.items() if not k.startswith(('RUSTER_', 'VK_', 'EGUI_INSPECTION'))}
     env.update(PREVIEW_FIXTURE_DIR=str(run), INTERACTIVE_LOCALHOST_FIXTURE='1',
                RUSTER_RECOVERY_DIR=str(run/'recovery'), RUSTER_EDITOR_STATE=str(run/'settings.json'),
@@ -69,28 +73,48 @@ def main():
         except Exception:
             bridge.close(); bridge = None
             raise
-        if request['op'] == 'status': return reply
+        if request['op'] in ('status', 'browser_pair'): return reply
         reply['request_ms'] = (time.perf_counter()-started)*1000
         if reply['response'].get('error', {}).get('code') == 'revoked':
             return {'response':reply['response']}
         return reply
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, format, *args): pass
-        def reply(self, code, body, kind='application/json'):
+        def reply(self, code, body, kind='application/json', cookie=None):
             self.send_response(code)
             for k,v in {'Content-Type':kind, 'Content-Length':str(len(body)), 'Cache-Control':'no-store', 'Referrer-Policy':'no-referrer', 'X-Content-Type-Options':'nosniff', 'Content-Security-Policy':"default-src 'none'; img-src data:; connect-src 'self'; style-src 'unsafe-inline'; script-src 'nonce-"+nonce+"'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'"}.items(): self.send_header(k,v)
+            if cookie: self.send_header('Set-Cookie', cookie)
             self.end_headers(); self.wfile.write(body)
         def do_GET(self):
             if self.path != '/' or self.headers.get('Host') != authority: return self.reply(403,b'{}')
             self.reply(200, (ROOT/'workspace.html').read_text().replace('NONCE',nonce).encode(), 'text/html; charset=utf-8')
         def do_POST(self):
-            if self.headers.get('Host') != authority or self.headers.get('Origin') != 'http://'+authority or not hmac.compare_digest(self.headers.get('X-Workspace-Capability',''),token): return self.reply(403,b'{"error":"denied"}')
+            origin = 'http://'+authority
+            if self.headers.get('Host') != authority or self.headers.get('Origin') != origin: return self.reply(403,b'{"error":"denied"}')
+            cookies = SimpleCookie()
+            try: cookies.load(self.headers.get('Cookie',''))
+            except Exception: return self.reply(403,b'{}')
+            credential = cookies[cookie_name].value if cookie_name in cookies else ''
+            browser_id = hashlib.sha256(credential.encode()).hexdigest() if credential in browser_sessions else None
+            if self.path == '/pair':
+                if self.headers.get('X-Workspace-CSRF') != nonce: return self.reply(403,b'{}')
+                cookie = None
+                if browser_id is None:
+                    if len(browser_sessions) >= 8: return self.reply(403,b'{}')
+                    credential = secrets.token_urlsafe(32); browser_sessions.add(credential)
+                    browser_id = hashlib.sha256(credential.encode()).hexdigest()
+                    cookie = cookie_name+'='+credential+'; HttpOnly; SameSite=Strict; Path=/'
+                paired = local({'op':'browser_pair','args':{},'browser':browser_id,'origin':origin})
+                return self.reply(200,json.dumps(paired).encode(),cookie=cookie)
+            legacy = hmac.compare_digest(self.headers.get('X-Workspace-Capability',''),token)
+            if not legacy and (browser_id is None or self.headers.get('X-Workspace-CSRF') != nonce): return self.reply(403,b'{"error":"denied"}')
+            binding = {} if legacy else {'browser':browser_id,'origin':origin}
             if self.path == '/status':
                 # Same capability/origin boundary; observe only this exact native owner.
                 # Never dispatch a render or consume an MCP adapter owner for polling.
                 if host.poll() is not None: return self.reply(503,b'{"error":"native owner stopped"}')
                 try:
-                    observed = local({'op':'status','args':{}})
+                    observed = local({'op':'status','args':{},**binding})
                     if not observed['live']: return self.reply(403,b'{"error":"revoked"}')
                     return self.reply(200,json.dumps(observed).encode())
                 except (OSError, ValueError, KeyError, EOFError, AssertionError):
@@ -101,7 +125,7 @@ def main():
                 if self.headers.get('Transfer-Encoding') or not 0 < size <= 4096: return self.reply(400,b'{}')
                 request = json.loads(self.rfile.read(size))
                 if not isinstance(request,dict) or set(request) != {'op','args'}: return self.reply(400,b'{}')
-                reply = local(request)
+                reply = local({**request,**binding})
                 self.reply(200,json.dumps(reply).encode())
             except Exception as exc:
                 (run/'failure.txt').write_text(repr(exc))

@@ -20,7 +20,7 @@ $('begin').disabled=!selected||!!draft||current.draft_reserved||(busy&&!backgrou
 for(const group of ['translation','rotation','scale'])for(let i=0;i<3;i++)$(group+i).disabled=!draft||(busy&&!background);
 $('draft').textContent=draft?'Pending local draft reserved natively. Agent writes are blocked; Apply or Cancel.':current.draft_reserved?'Native draft reservation remains; local text is unavailable in this page. Cancel to release it.':'';
 $('details').textContent=JSON.stringify({scene:s,view:v,draft_reserved:current.draft_reserved,outcomes},null,2)}
-async function operate(op,args={},automatic=false,inputTiming=null){if(op!=='viewport_camera')cancelCamera();const id=++sequence,start=performance.now();if(busy){const r={id,op,status:'busy-refused'};outcomes.push(r);if(outcomes.length>64)outcomes.shift();$('status').textContent='Busy: request explicitly refused, not queued or retried.';return r}busy=true;background=automatic;$('status').textContent=`Pending ${op}; previous frame is stale/unconfirmed.`;show();let row={id,op,status:'accepted'};outcomes.push(row);if(outcomes.length>64)outcomes.shift();try{const response=await fetch('/operation',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Capability':$('capability').value},signal:AbortSignal.timeout(10000),body:JSON.stringify({op,args})});if(!response.ok)throw Error('HTTP '+response.status+'; no automatic retry');const next=await response.json();if(!next.response?.ok)throw Error(next.response?.error?.code||next.error||'native refusal');
+async function operate(op,args={},automatic=false,inputTiming=null){if(op!=='viewport_camera')cancelCamera();const id=++sequence,start=performance.now();if(busy){const r={id,op,status:'busy-refused'};outcomes.push(r);if(outcomes.length>64)outcomes.shift();$('status').textContent='Busy: request explicitly refused, not queued or retried.';return r}busy=true;background=automatic;$('status').textContent=`Pending ${op}; previous frame is stale/unconfirmed.`;show();let row={id,op,status:'accepted'};outcomes.push(row);if(outcomes.length>64)outcomes.shift();try{const response=await fetch('/operation',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Capability':$('capability').value,'X-Workspace-CSRF':'NONCE'},signal:AbortSignal.timeout(10000),body:JSON.stringify({op,args})});if(!response.ok)throw Error('HTTP '+response.status+'; no automatic retry');const next=await response.json();if(!next.response?.ok)throw Error(next.response?.error?.code||next.error||'native refusal');
 if(op==='draft_begin')draft={source:next,object_id:next.view.active_object_id};if(op==='scene_transform'||op==='draft_cancel')draft=null;
 const img=new Image();img.src='data:image/png;base64,'+next.png;await img.decode();$('frame').src=img.src;current=next;
 row.status='completed';row.commit_ms=next.commit_ms;row.request_to_decoded_ms=performance.now()-start;row.decoded_at=performance.now();if(inputTiming){row.first_input_to_decoded_ms=row.decoded_at-inputTiming.first;row.latest_input_to_decoded_ms=row.decoded_at-inputTiming.latest;}samples.push({...row,revision:next.scene.revision,view_revision:next.view.view_revision});if(samples.length>64)samples.shift();$('status').textContent=`Completed ${op}. Committed revision ${next.scene.revision}; decoded native frame. ${row.request_to_decoded_ms.toFixed(1)} ms request→decoded (not physical display).`;
@@ -79,7 +79,7 @@ async function checkAuto(){
  if(busy||gesture||cameraFlight||cameraIntent){scheduleAuto();return}busy=true;
  let changed=false;
  try{
-  const response=await fetch('/status',{method:'POST',headers:{'X-Workspace-Capability':$('capability').value},signal:AbortSignal.timeout(3000)});
+  const response=await fetch('/status',{method:'POST',headers:{'X-Workspace-Capability':$('capability').value,'X-Workspace-CSRF':'NONCE'},signal:AbortSignal.timeout(3000)});
   if(!response.ok){if(response.status===403)autoEnabled=false;throw Error('HTTP '+response.status)}
   const s=await response.json();if(s.session_token!==current.view.session_token){autoEnabled=false;throw Error('Native session changed; reconnect explicitly')}
   changed=s.revision!==current.view.revision||s.view_revision!==current.view.view_revision||s.draft_reserved!==current.draft_reserved;autoDelay=750;
@@ -89,4 +89,18 @@ async function checkAuto(){
  scheduleAuto();
 }
 for(const event of ['visibilitychange','online','offline'])addEventListener(event,()=>{if(document.hidden||!navigator.onLine){cancelCamera();clearTimeout(autoTimer);autoTimer=null;$('presentation').textContent='Preview unconfirmed while hidden/offline.'}else scheduleAuto()});
+// Pairing polls only read-only admission; no authored operation is replayed.
+async function pairBrowser(){
+ if($('capability').value)return; // Explicit legacy developer mode remains separate.
+ try{
+  const response=await fetch('/pair',{method:'POST',headers:{'X-Workspace-CSRF':'NONCE'},signal:AbortSignal.timeout(10000)});
+  if(!response.ok)throw Error('Pairing HTTP '+response.status);
+  const pairing=await response.json();
+  if(pairing.state==='approved'){if(!busy)await $('connect').onclick();else setTimeout(pairBrowser,750);return}
+  if(pairing.state!=='pending')throw Error('Pairing denied, expired or revoked; review a fresh native connection.');
+  $('status').textContent='Pending native approval. Compare browser code '+pairing.code+' in Rusterize → AI connection. No read/edit authority yet. Pending expires in 2 minutes; grant lasts at most 30 minutes. Deny/cancel grants nothing.';
+  setTimeout(pairBrowser,750);
+ }catch(error){$('status').textContent=String(error);}
+}
+setTimeout(pairBrowser,0);
 </script></html>

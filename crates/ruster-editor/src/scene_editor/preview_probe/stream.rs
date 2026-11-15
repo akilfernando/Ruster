@@ -102,7 +102,16 @@ impl Bridge {
                         REQUEST_LIMIT,
                     )?;
                     if !request.is_object()
-                        || request.as_object().is_none_or(|v| v.len() != 2)
+                        || request.as_object().is_none_or(|v| {
+                            !(v.len() == 2
+                                || (v.len() == 4
+                                    && request["browser"].as_str().is_some_and(|s| {
+                                        s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit())
+                                    })
+                                    && request["origin"].as_str().is_some_and(|s| {
+                                        s.len() <= 256 && s.starts_with("http://127.0.0.1:")
+                                    })))
+                        })
                         || !request["op"].is_string()
                         || !request["args"].is_object()
                     {

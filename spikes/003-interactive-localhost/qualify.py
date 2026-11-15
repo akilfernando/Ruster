@@ -63,7 +63,7 @@ def stop(p):
         except subprocess.TimeoutExpired:p.kill();p.wait()
 
 def main():
-    p=argparse.ArgumentParser();p.add_argument('--host-binary',type=Path,required=True);p.add_argument('--adapter',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--validation-diagnostics',action='store_true');a=p.parse_args()
+    p=argparse.ArgumentParser();p.add_argument('--host-binary',type=Path,required=True);p.add_argument('--adapter',type=Path,required=True);p.add_argument('--output',type=Path,required=True);p.add_argument('--validation-diagnostics',action='store_true');p.add_argument('--pairing-only',action='store_true');a=p.parse_args()
     a.output.mkdir(exist_ok=False,parents=True)
     profile=Path(tempfile.mkdtemp(prefix='interactive-chromium-',dir=os.environ['TMPDIR']))
     server=chrome=adapter=c=None; run=None; record: dict[str, object]={'actual_chatgpt':False,'production_consent':False,'host_sha256':hashlib.sha256(a.host_binary.read_bytes()).hexdigest(),'adapter_sha256':hashlib.sha256(a.adapter.read_bytes()).hexdigest()}; seq=0
@@ -81,7 +81,14 @@ def main():
             clients=json.loads(subprocess.check_output(['hyprctl','-j','clients'],text=True))
             record['native_owned_window_count']=sum(client.get('pid')==info['native_pid'] for client in clients)
             assert record['native_owned_window_count']==0
-            env={k:v for k,v in os.environ.items() if not k.startswith('RUSTER_')};env['RUSTER_MCP_LOCATOR']=info['locator']
+            env={k:v for k,v in os.environ.items() if not k.startswith('RUSTER_')}
+            if a.pairing_only:
+                assert (run/'paired-project.json').is_file(), 'pairing must use an associated saved project'
+                locator=json.loads(Path(info['locator']).read_text())
+                registry=run/'project-registry.json'
+                registry.write_text(json.dumps({'projects':[{'id':'paired-project','name':'Paired Project','scene_id':'procedural-demo','locator':info['locator'],'binding':{key:locator[key] for key in ['wire','incarnation','generation','connection']}}]}));registry.chmod(0o600)
+                env['RUSTER_MCP_PROJECT_REGISTRY']=str(registry)
+            else: env['RUSTER_MCP_LOCATOR']=info['locator']
             adapter=subprocess.Popen([str(a.adapter)],stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=mlog,text=True,bufsize=1,env=env)
             def rpc(method,params=None,notify=False):
                 nonlocal seq
@@ -98,14 +105,42 @@ def main():
                 assert reply is not None
                 return reply['result']['structuredContent']
             rpc('initialize',{'protocolVersion':'2025-06-18','capabilities':{},'clientInfo':{'name':'interactive-localhost-qualification-NOT-ChatGPT','version':'1'}});rpc('notifications/initialized',notify=True)
-            assert tool('scene_inspect')['error']['code']=='approval_required'
+            if a.pairing_only:
+                listed=tool('project_list');assert listed['ok'],listed
+                initial=tool('project_connect',{'project':'Paired Project'});assert not initial['ok'],initial
+            else: assert tool('scene_inspect')['error']['code']=='approval_required'
             wait(lambda:not (run/'approve.json').exists() and json.loads((run/'state.json').read_text())['owner'] is not None)
             time.sleep(.3)
+            if a.pairing_only:
+                attached=tool('project_connect',{'project':'paired-project'});assert attached['ok'],attached
             assert tool('scene_inspect')['ok']
             chrome=subprocess.Popen([str(CHROME),'--headless=new','--ozone-platform=headless','--remote-debugging-port=0','--remote-allow-origins=*','--no-first-run','--disable-background-networking','--user-data-dir='+str(profile),info['url']],stdout=clog,stderr=clog)
             wait(lambda:(profile/'DevToolsActivePort').exists());port=(profile/'DevToolsActivePort').read_text().splitlines()[0]
             targets=json.load(urllib.request.urlopen('http://127.0.0.1:'+port+'/json'));target=next(t for t in targets if t.get('url')==info['url']);c=CDP(target['webSocketDebuggerUrl'])
             c.call('Emulation.setDeviceMetricsOverride',{'width':1250,'height':1000,'deviceScaleFactor':1,'mobile':False});c.call('Page.bringToFront');wait(lambda:c.js("typeof operate==='function'"))
+            if a.pairing_only:
+                wait(lambda:c.js("typeof pairBrowser==='function'"),seconds=3)
+                wait(lambda:(run/'browser-pending.json').exists())
+                assert c.js('current===null')
+                assert c.js("operate('refresh')")['status']=='failed'
+                pending=json.loads((run/'browser-pending.json').read_text())
+                # Explicit exact pending fixture approval, NOT human native consent.
+                (run/'approve-browser.json').write_text(json.dumps(pending))
+                wait(lambda:c.js('current!==null && !busy'))
+                base=c.snapshot();s=tool('scene_inspect')['result']
+                assert base['scene']['session_token']==s['session_token']
+                edited=tool('scene_transform',{'expected_session_token':s['session_token'],'expected_revision':s['revision'],'object_id':'center','transform':{'translation':[1.25,0,0],'rotation':[0,0,0],'scale':[1,1,1]}})
+                assert edited['ok'],edited
+                wait(lambda:c.js("current.scene.revision==='1'"))
+                c.click('#undo');assert tool('scene_inspect')['result']['revision']=='2'
+                c.call('Page.reload');wait(lambda:c.js("typeof current!=='undefined' && current!==null && !busy"))
+                assert c.js("current.scene.revision==='2' && document.querySelector('#capability').value===''")
+                assert c.js("document.cookie===''"), 'credential must be HttpOnly'
+                record['pairing']={'pending_refused':True,'explicit_fixture_approval':True,'automatic_load':True,'mcp_observed':True,'shared_undo':True,'reload_without_connect':True}
+                (run/'revoke').touch();wait(lambda:not (run/'revoke').exists())
+                assert c.js("operate('refresh')")['status']=='failed'
+                record['passed']=True
+                return
             c.js("window.observation={active:0,max:0,status:0,frames:0};window.realFetch=fetch;window.fetch=async(...args)=>{const o=observation;o.active++;o.max=Math.max(o.max,o.active);if(args[0]==='/status')o.status++;else o.frames++;try{if(args[0]==='/status'&&window.injectStatusFailure){await new Promise(r=>setTimeout(r,1200));return new Response('{}',{status:503})}return await realFetch(...args)}finally{o.active--}}")
             c.js("document.querySelector('#capability').value="+json.dumps(token));c.click('#connect');base=c.snapshot()
             time.sleep(2.6)
