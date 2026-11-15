@@ -583,3 +583,119 @@ At the user’s request, Astra reassesses accepted F3c and actual flat scene/ren
 Select nested transform-only Groups with uniform parent scale, geometry/point-light leaves, shared render/picking/spatial semantics and local hinge animation as the proposed finite scope. Root/Astra must settle compatibility, references, reparenting, resolved bounds and scale behavior at an early runnable gate. Complete both creator paths, keyboard UX, history/recovery, exact delivery and predeclared measured quality checks before acceptance. Numerical references must be grounded in a fresh baseline. No inherited C1a budgets are silently adopted.
 
 The user requests pausing development after planning to conserve weekly usage. Save the proposal and pause here. Approval, implementation and goal activation remain pending. No new substantial test project, M9 or publication is activated.
+
+## Development decision record — 2026-11-15
+
+### Reading and maintenance contract
+
+This is a dated decision history, not a second task board. [ROADMAP](ROADMAP.md#current-delivery-roadmap--2026-11-15)
+owns current delivery priorities; [STATUS](STATUS.md) owns executed state and
+linked evidence; architectural specifications remain in `docs/decisions/`.
+Keep earlier reviews intact and append superseding decisions rather than
+rewriting past reasoning to look correct in hindsight. Record meaningful changes
+of direction, priority, parallel-flow boundaries, scope, integration/promotion or
+explicit deferral—not every implementation detail.
+
+Akil explicitly requests this record on 2026-11-15 so both creator and assistant
+can examine planning effectiveness over time. He confirms the convergence plan.
+The roadmap now foregrounds the current cumulative delivery line and separates
+that approved direction from proposed later engine work. This documentation
+maintenance is not a fresh full-engine strategic reassessment or approval of
+all older capability proposals.
+
+### Retrospective: how the current position developed
+
+**Recorded retrospectively on 2026-11-15**, from existing dated decisions,
+qualification records and retained Telegram handoffs. These are summaries, not
+claims that a contemporaneous decision journal already contained these entries.
+Exact elapsed effort, causal attribution and unrecorded alternatives remain
+unknown where evidence does not establish them.
+
+| Decision period | Direction and authority | Result / qualification | Planning lesson |
+| --- | --- | --- | --- |
+| November4–5 | User confirms creator-first Rust/Vulkan engine, native editing and MCP as first-class routes; quality-first scope includes lighting/materials/textures | Earlier roadmap and capability reviews describe staged, bounded deliveries—not mature-engine parity | Preserve creator outcomes and declared limits when a narrow proof succeeds. |
+| November9–10 | User chooses significant foundations before a substantial test project; root/Astra select bounded runtime state/lifecycle/UI slices | F1/F2a/F3a/F3b/F3c evidence records their own acceptance and remaining gaps | Separate application-specific rules from reusable engine facilities; finish finite workflows rather than adopting a whole capability table as one goal. |
+| November13–15 | User requests engine/editor work alongside ChatGPT/MCP, with frequent durable checkpoints and safe autonomous continuation | Parallel engine, viewport and connector candidates protect accepted work, but introduce multiple launch/qualification paths | Branch isolation protects work; it does not provide a cumulative installed experience by itself. |
+| November15: hierarchy | User explicitly approves the bounded first hierarchy milestone | Native/MCP groups, supported transforms/history and Save/fresh reopen technically qualify; broader runtime/scripts/duplication/recovery/export remain outside scope | Keep the accepted subset separate from the larger F4a proposal; do not generalize component evidence into delivery of every consumer. |
+| November15: connection | User wants named-project prompt startup and internal-browser opening; explicitly selects native browser/project approval followed by automatic connection while valid | One registered-project launcher and ordinary native attachment implemented; real-client startup remains unresolved | Test the exact client environment and ordinary lifecycle early. Metadata discovery and a locally launched native owner are not closed-project client acceptance. |
+| November15: human trial | User operates actual ChatGPT/native approvals, guarded edit and Undo, browser observation and revocation | Same session and revisions0→1→2 visibly agree; access is refused after Disconnect. Browser lacks earlier demo interactions; initial startup was diagnostic, not ChatGPT success | State preview-only scope prominently. Connection convenience and shared-state correctness do not establish interactive viewport parity. |
+| November15: latency | Root chooses a measured coherent native-frame repair, preserving quality/authority rather than changing transport speculatively | Same-build hidden-workspace median527.05→329.00ms; identical lossless pixels and safety pass, usability still held | Quantify the actual service seam and input age. Do not equate a relative improvement with accepted responsiveness or attribute unsplit capture time to GPU/encoding. |
+
+Sources: prior sections of this review, [direction](DIRECTION.md),
+[foundation sequence](plans/CREATOR-FOUNDATIONS.md),
+[bounded hierarchy contract](decisions/2026-11-15-bounded-assembly-hierarchy.md),
+[hierarchy evidence](evidence/ASSEMBLY-HIERARCHY-2026-11-15.md),
+[project startup](evidence/PROJECT-STARTUP-2026-11-15.md),
+[frame transaction](evidence/WORKSPACE-FRAME-TRANSACTION-2026-11-15.md), and
+[cumulative qualification](evidence/CUMULATIVE-EDITOR-2026-11-15.md).
+Human-operated trial reports are preserved in the local startup audit's
+`human-trial/actual-chatgpt-{edit-undo,revocation,close}-user-receipt.json` files;
+they are user-reported client evidence, not independently replayed production
+acceptance. No capability, credential or private client transcript is reproduced.
+
+### Decision 2026-11-15-01: converge the delivery flows
+
+**Status/authority:** direction accepted by Akil on 2026-11-15. Root selects the
+bounded execution order in the current roadmap. Completion, installation and
+broader runtime/export scope remain distinct decisions/gates.
+
+**Trigger:** individually successful engine/editor, browser and connection slices
+do not yet give Akil one readily identifiable current build with their combined
+experience. The actual trial made this visible: real MCP editing worked, but
+browser navigation from an older demo was absent.
+
+**Observed nuance:** the newer candidate already contains the qualified hierarchy
+repairs under cherry-picked commit IDs. The 585 tracked non-documentation inputs
+match the optimized candidate source. Thus the finding is not that all feature
+code is absent from one source tree. Runtime selection, frozen launchers,
+combined qualification and installed delivery also lag. The cumulative native
+journey then stops before launch on physical-activity admission; it is blocked,
+not a failed product test and not active implementation.
+
+**Alternatives and trade-off:** indefinitely retaining separate successful flows
+preserves isolation but perpetuates setup and parity gaps. An immediate big-bang
+merge/replacement risks unverified combinations and destroys a stable feedback
+reference. Choose one cumulative line with bounded, evidence-backed promotions,
+while keeping old feedback candidates immutable until deliberately superseded.
+
+**Decision:** make `feat/cumulative-editor-20261115` the current convergence home.
+Qualify the native compound workflow, repair genuine managed-startup failures,
+and restore intended normal-browser interaction against the same engine/session.
+Allow independent safe tasks, but require an explicit route back to that shared
+delivery. A partial native-only handoff may state browser limitations; it must
+not be called completion of the combined workflow.
+
+**Expected creator benefit:** less uncertainty over which build/launcher has a
+feature; no per-run locator/capability copying; shared edits/history; usable
+navigation; and clear supported Save/reopen/delivery behavior. These are targets,
+not measured time/usage savings or a claim of current complete parity.
+
+**Consequences:** existing source/review evidence can be reused when inputs match;
+only missing combined or changed-risk proof is required. Native qualification
+needs a genuine activity-admitted desktop opportunity. Safe headless diagnosis
+need not wait for that opportunity. Later assembly runtime/export remains a
+separately bounded proposal; no broad merge, public release or unsupported
+platform claim follows from this decision.
+
+**Revisit/exit:** evaluate the current roadmap's observable native, MCP, browser
+and promotion gates. Replan if a dependency makes a gate disproportionate; record
+which outcome is deferred, why and with whose authority. Do not silently add new
+frameworks, lower fidelity/consent, or substitute another fixture for the named
+client.
+
+### Process evaluation to carry forward
+
+- **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.
+- **What did not suffice:** numerous implementation/evidence records did not make the current end-user build and its missing parity prominent enough. Harness environment/fixture success reached human testing before the exact client startup was qualified.
+- **Correction:** begin each substantive milestone with the current cumulative source/artifact/launcher and a finite creator exit; finish with its actual delivery state. Keep implementation, combined qualification, human acceptance and installation separate in the roadmap/status handoff.
+- **Check effectiveness:** at milestone close ask what Akil can do in the delivered build, what is still candidate/fixture-only, which prerequisite caused rework or waiting, and whether that should change the next plan. Record available observations; do not invent effort percentages, model-specific blame or universal savings.
+
+### Entry format for future significant decisions
+
+Use a short dated entry containing: **status and authority; trigger/context;
+alternatives and rationale; decision and scope; intended creator outcome;
+consequences/dependencies; evidence or uncertainty; and revisit/exit condition.**
+After execution, append the observed outcome and process lesson, linking the raw
+technical evidence rather than duplicating it. A routine fix normally updates
+STATUS/evidence only; a changed development direction also updates ROADMAP and
+this record. Preserve superseded decisions with a link to their replacement.

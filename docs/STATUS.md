@@ -1,5 +1,19 @@
 # Current project status
 
+## Roadmap and development decision continuity — 2026-11-15
+
+Akil confirms convergence toward one cumulative editor/engine/MCP/browser delivery
+and requests an ongoing history of significant planning decisions and lessons.
+[Current roadmap](ROADMAP.md#current-delivery-roadmap--2026-11-15) now identifies
+that delivery line, outcomes, priorities and separate acceptance/promotion gates.
+[Decision record](ROADMAP-REVIEW.md#development-decision-record--2026-11-15) preserves
+a labeled retrospective, accepted convergence rationale, alternatives/trade-offs,
+process lessons and the short format for future entries. Existing architecture
+contracts and technical evidence remain separate; no new planning service or
+whole-engine scope is activated. Project development guidance now requires upkeep.
+This is documentation/process work, not a passed cumulative journey or install.
+The activity-admission blocker below remains; no GUI retry was performed.
+
 ## Cumulative native editor candidate — 2026-11-15
 
 **BLOCKED/stopped before launch by physical-activity admission; not qualified.**

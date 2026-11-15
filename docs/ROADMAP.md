@@ -1,5 +1,90 @@
 # Milestone roadmap
 
+## Current delivery roadmap — 2026-11-15
+
+**User-confirmed direction:** converge native editor, engine, MCP and browser work
+into one cumulative product line, and preserve the reasons for significant
+planning decisions so later work can learn from them. This section is the current
+near-term plan. The older capability sequence below remains the longer-term
+inventory, not a competing active schedule.
+
+- **Where we have been and why:** [development decision record](ROADMAP-REVIEW.md#development-decision-record--2026-11-15), including a clearly labeled retrospective and the convergence decision.
+- **What is actually implemented/tested/blocked:** [STATUS](STATUS.md) and its linked evidence.
+- **Architecture contracts:** [decision records](decisions/); the roadmap links them rather than duplicating their specifications.
+- **Working convergence home:** `feat/cumulative-editor-20261115`. Protected feedback candidates remain frozen references, not alternative permanent products. This branch is not a canonical merge, installed build or release.
+
+### Starting point: source progress is not delivered parity
+
+The actual ChatGPT trial demonstrated native/browser approval, shared-session MCP
+inspection, one edit and Undo (revisions 0→1→2), visible native/browser agreement,
+and revocation. Its browser was preview-only. ChatGPT-managed startup from closed
+still failed; a local diagnostic opened the editor, so that launch is not a passed
+prompt-startup test. Those results are human-reported actual-client evidence,
+not an inference from an automated browser.
+
+The newer normal-workspace candidate supports camera navigation and selection.
+A same-build, equal-quality hidden-workspace comparison reduced camera response
+median 527.05→329.00 ms; source/live capability checks pass, but actual-client
+usability remains unaccepted. Capture completion/service pacing remains unsplit.
+
+The qualified hierarchy repairs are already present under cherry-picked commits;
+source comparison, not ancestry alone, establishes that. The cumulative editor's
+native compound qualification stopped before launch on an activity guard. No
+cumulative installation has been verified in this run. The delivery gap therefore
+includes qualification, runtime/launcher choice and installed experience, not
+simply missing source merges.
+
+### Immediate convergence milestone
+
+**Creator outcome:** use one identifiable editor/MCP/launcher combination to open,
+organize, inspect and edit the same project, navigate its native-rendered browser
+view, Undo confidently, and save/reopen without selecting an old demo or copying
+per-run connection capabilities.
+
+| Workstream | Next bounded outcome | Current state / acceptance gate |
+| --- | --- | --- |
+| Cumulative engine/editor | Native nested groups, supported nonuniform leaves/attached light, shared transforms/history, Save and fresh reopen in the current cumulative candidate | Component qualification retained; cumulative journey **BLOCKED/stopped** before launch by activity admission. Resume only with a fresh appropriate desktop window; not installed. |
+| Managed ChatGPT startup | A closed registered project opens through the stable MCP invocation, then native/browser consent and the internal-browser handoff work | Desktop-variable forwarding corrected; later actual-client startup failure remains **UNRESOLVED**, diagnosis queued. No silent fallback launch or approval. |
+| Normal browser navigation | Responsive orbit/pan/zoom/Fit and shared selection in the normal connection route, with full-quality current native pixels | Source review/live capability pass; latency improved but usability **HELD**. Diagnose the measured capture seam or perform a coordinated representative visibility comparison before another redesign. |
+| Intended browser editing | Bring intended human manipulation/shared Undo into this same route rather than leaving it fixture-only | **QUEUED**, not provided by the preview/navigation grant. Define the bounded interaction and truthful native permission text before implementation; AI authors through direct MCP. |
+| Usable delivery | Promote one matched editor/MCP/launcher set, with exact versions, rollback and short changed-surface smoke | **QUEUED** after relevant qualification. Do not silently replace frozen feedback artifacts or call a compiled candidate installed. |
+
+These gates need not block all independent work. A desktop refusal blocks that
+GUI journey, not safe headless diagnosis. Native-only improvements may be handed
+off with explicit browser limitations when their own gates pass; that is a partial
+delivery from the same cumulative line, not completion of the whole convergence
+milestone. An aspirational 60 Hz target must not indefinitely block usable editor
+capabilities, but clearly clunky controls must not be labeled accepted.
+
+### Delivery and process rules
+
+1. Keep one named cumulative integration home and an explicit matched artifact/launcher set. Feature branches are temporary bounded experiments or repairs; give them a path back before counting the feature delivered.
+2. Distinguish source implemented, component tested, combined workflow tested, actual-client/human accepted, and installed. Record each separately; do not substitute commit/test totals for a creator outcome.
+3. Freeze human feedback candidates. Integrate and qualify elsewhere, then deliberately promote the selected candidate; do not mutate a running test or carry old browser consent into a new native lifetime.
+4. Check the actual intended client and ordinary startup early. A fixture, a local environment, tools/list or a successful diagnostic launch does not establish the end-user flow. State missing interactions prominently before a trial.
+5. Reuse matching evidence and fix demonstrated failures. Coordinate the actual desktop opportunity instead of repeatedly attempting a refused guard. Preserve refusals and exact recovery; never lower consent, quality or safety to make a gate pass.
+6. At a meaningful priority, parallel-flow, scope, architecture or promotion decision, update this plan and append the rationale/evaluation to the decision record. Do not produce paperwork for every routine fix.
+
+### After convergence: proposed next engine contract
+
+Recommend completing a bounded assembly runtime/delivery workflow: author a nested
+mechanism, express a group/hinge behavior, run it, and deliver the same supported
+result standalone. This is a **proposal**, not approval of the larger F4a
+scripting/duplication/recovery/export package, prefabs or scene transitions. The
+current bounded hierarchy contract still explicitly rejects unsupported runtime
+and export combinations. Select the next contract before implementing it.
+
+Then select slices from the retained foundation plan: richer content/animation,
+physics/audio and devices/player data, material/lighting completion, measured
+scale/LOD, and later ray tracing. Dependencies may revise the order; record the
+reason. No calendar promise, percentage of engine completion or public release
+is implied.
+
+## Retained capability roadmap
+
+The following earlier plan and prototype history are preserved for context. Later
+dated decisions above and in ROADMAP-REVIEW supersede their scheduling where stated.
+
 Updated 2026-11-10. This is the working delivery plan requested by the user. Milestone scope is an implementation plan, not a promise of dates or already delivered capabilities. Developer experience is the primary pillar; the product is an interactive simulation and visualization engine with games as one application.
 
 The user requested a quality-first realignment with Astra on2026-11-05 after identifying missing core capabilities. The sequence below supersedes finish-M9-first scheduling and generic long-horizon session goals. Historical M0–M8 evidence remains valid within its original scope. [Capability inventory](ENGINE-CAPABILITIES.md) records the gaps; [reassessment](ROADMAP-REVIEW.md#quality-first-roadmap-realignment--2026-11-05) records the rationale.
@@ -19,7 +104,7 @@ This is the root/Astra working plan under the user's realignment authorization. 
 | V1 Textured materials | Import UV-mapped geometry and a base-color image; create/assign an opaque material and tint; edit, reopen and export the same appearance | Accepted complete within [V1 evidence](evidence/V1-readiness.md); explicit asset/material identity, color-space/sampling policy, compatibility, last-good refresh, dependency packaging, UI/MCP and actual rendered evidence |
 | V2 Authored lighting | Accepted [V2a diffuse-light authoring](plans/V2A-AUTHORED-LIGHTING.md) and [V2b bounded Sun shadows](plans/V2B-SUN-SHADOWS.md): directional, bounded point lights, ambient and optional Sun-shadow map | V2a/V2b accepted2026-11-06 after both creator paths, recovery/runtime, exact four-output delivery and named quality/cost audits. Broader shadows, PBR/specular/environment/HDR remain separate; no new goal starts automatically |
 | V3 Material and shader depth | [V3a Surface Study](plans/V3A-SURFACE-STUDY.md) accepted: direct-lit nonmetallic/authored-normal/manual-exposure workflows and verified handoff. [V3b Finish Patterns](plans/V3B-FINISH-PATTERNS.md) accepted2026-11-07: explicit linear roughness images, both creator paths and exact handoff. Metallic/environment/reflections, normal maps, transparency and custom-shader authoring remain separate | Preserve verified normal/color/material/runtime boundaries; select tangents/maps/environment from a concrete next creator contract. Node graphs remain unselected |
-| C1 Reusable composition | Proposed [F4a Assembly Groups](plans/F4A-ASSEMBLY-GROUPS.md), rebasing historical C1a after accepted F3c. Nested transform-only Groups, attached point lights/colliders and local hinge behavior. Planning only, approval pending and development paused. Then separately select richer hierarchy/prefabs/overrides and scene lifecycle | Explicit transform/reference/lifecycle semantics, atomic history and migration, authoring/runtime separation and reusable content outside the sample |
+| C1 Reusable composition | User-approved bounded native/MCP hierarchy, transforms/history and Save/reopen technically qualify in the November15 candidate; cumulative delivery remains pending. The larger [F4a Assembly Groups](plans/F4A-ASSEMBLY-GROUPS.md) scripting/duplication/recovery/runtime/export scope is not approved wholesale. Prefabs/overrides and scene lifecycle remain separate | Explicit transform/reference/lifecycle semantics, atomic history and migration, authoring/runtime separation and reusable content outside the sample |
 | P1 Complete interaction | Accepted [I1a Creator Input Actions](plans/I1A-CREATOR-INPUT.md), completed2026-11-07: keyboard actions/Lua/operable standalone through both creator paths. Accepted [F3b controls](plans/F3B-INTERACTIVE-CONTROLS.md) adds authored HUD buttons and typed command activation during Play/Pause. General UI composition, pointer/gamepad gameplay actions and audio require separate slices | Separate sessions for each workflow, shared code/script access, focus/accessibility, packaged resources and usable controls in the exported creation |
 | P2 Physical and animated worlds | Accepted [P2a Spatial Queries / Clearance Bench](plans/P2A-SPATIAL-QUERIES.md), completed2026-11-08: explicit primitives, sphere sweeps and sensor occupancy through both creator paths. Then separately select rigid-body/character interaction; animation clips/playback; then skeletal/blended animation and navigation/pathfinding as required | Exercise a small playable creation; choose maintained libraries against concrete needs, verify fixed-step interaction and diagnostics; scripted translation is not animation/physics acceptance |
 | D1 Runtime state and content delivery | Runtime save/load/settings; richer scene/material/animation import and reimport; complete dependency packaging and asset lifecycle | Grow with the earlier dependent slices; editor Save/recovery is not a player save, and raw OBJ is not a rich-scene importer |
@@ -39,7 +124,7 @@ The user directs addressing the remaining significant gaps before a test project
 
 ## Session and promotion gates
 
-Select **one** slice at a time. Write its start state, final artifact, dependency choices, acceptance journeys and exclusions before setting the goal. Conduct an early feasibility review across the full import→authoring→render→export path before extensive UI or format work. If a new fundamental dependency appears, replan explicitly; do not substitute a sample-specific workaround or silently add another subsystem. Use [session goal discipline](DIRECTION.md#session-goal-discipline) and [testing policy](TESTING.md).
+Select **one primary cumulative delivery milestone** at a time. Independent bounded engine/editor and MCP tasks may run alongside one another when ownership is clear and their results converge into that milestone, rather than separate product forks. Write the start state, final artifact, dependency choices, acceptance journeys and exclusions before substantial implementation. Conduct an early feasibility review across the relevant import→authoring→render→export path before extensive UI or format work. If a new fundamental dependency appears, replan explicitly; do not substitute a sample-specific workaround or silently add another subsystem. Use [session goal discipline](DIRECTION.md#session-goal-discipline) and [testing policy](TESTING.md).
 
 At each runnable checkpoint, evaluate visual/interaction quality, ordinary failures/recovery, shared editor/MCP semantics, compatibility and representative costs. Stop at the defined slice boundary and report residual gaps; do not continue merely to grow a milestone list. Missing focus/human/hardware evidence remains open and cannot be replaced by source tests. An engineering candidate may be recorded without declaring feature acceptance.
 
