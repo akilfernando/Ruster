@@ -758,6 +758,28 @@ weakened privacy/consent or streaming architecture is accepted by this review.
 Preserve the live feedback build and feed changes back into the cumulative line.
 Raw review and terminal proof: cumulative audit `astra-responsiveness/`.
 
+**Measured follow-through:** one explicitly authorized baseline cohort exposes
+112.34ms after encode completion. The targeted exact-ID/token authorized-inspect
+adoption repair goes RED→GREEN, receives Astra changed-risk GO for measurement,
+then improves a matching optimized ordinary-Host settled-refresh cohort:
+internal264.48→198.77ms, headers281→206ms; initial PNG bytes match at928×515.
+This is not matched camera/observer-off/visible-client or usability acceptance.
+Root integrates byte-identical production source as `3a144d3`/`0b1ccef` into the
+cumulative line, preserving installed/live artifacts and the known full-inspection
+asset-retirement failure rather than calling the checkpoint a release.
+
+**Next bounded choice:** Astra's follow-up finds concrete extra-paint screenshot
+queueing and map-progress requirements in the locked framework, but not which
+dominates the remaining139.95ms. Prepare audit-only copies of eframe/egui-wgpu
+with local diagnostic manifest overrides and bounded numeric spans; do not edit
+global registry or cumulative production dependencies, accelerate all timers,
+weaken privacy/input priority or silently approve a renderer rewrite. Stop if
+safe attribution needs a larger design. The revisit condition is one qualified
+backend-phase cohort selecting a repair, not more generic telemetry. No native
+work continues after the verified computer-free notice without a fresh opportunity.
+Raw comparison and completed Astra backend receipts: cumulative audit
+`capture-ready-progress/`; isolated preparation owns `capture-backend-overlay/`.
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.

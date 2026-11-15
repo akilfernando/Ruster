@@ -57,6 +57,26 @@ repair at authorized inspect (`deleg_bb6dfa43`); no more desktop actions under
 that completed window. Evidence: `measured-phase-parent-receipt.json` and the
 exact ordinary run beneath cumulative audit `capture-progress/`.
 
+Ready-result repair `deleg_bb6dfa43` completes: inherited Sol37 calls/504.04s,
+effective effort/usage unknown. Exact real-encoder seam goes pending→ready without
+another UI pass; scoped5 capture tests per feature,12 capture-related and2
+workspace tests, strict Clippy/format pass (overlap not summed). Root reads full
+diff and verifies source/remote. Astra resumed changed-risk review completes with
+GO_SCOPED_MEASUREMENT; first changed-cwd resume is rejected before admission/zero
+tokens and preserved. A newly verified corrected admission, not old model metadata,
+establishes that review ran. Full original inspection failure is not relabeled.
+
+Fresh authorized matching ordinary-Host comparison passes:3 settled refreshes,
+full928×515, initial PNG byte-equal, internal264.48→198.77ms and header281→206ms;
+post-encode wait112.34→45.93ms. Exact owned cleanup and desktop preservation
+independently verify; computer-free notice issued. Root integrates source-only
+`3a144d3`/`0b1ccef`, crate/manifest/lock equality to measured95622f2 verified;
+no installation or actual-client usability claim. Completed Astra backend-source
+follow-up recommends bounded isolated SDK diagnostics, not a speculative fix;
+`deleg_3a965737` now owns that audit-only preparation. Actual reviewed model/effort,
+tokens/duration and terminal admissions remain in raw capture-ready-progress
+review/backend receipts; no cost/savings inference.
+
 ## 2026-11-15 — One registered saved-project startup
 
 One inherited `gpt-6.1-sol` writer, effective effort/tokens/cost unknown; no model

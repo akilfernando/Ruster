@@ -62,23 +62,33 @@ each feature configuration; broader12 capture-related and2 workspace tests,
 strict Clippy both configurations and format pass. These cohorts overlap; no
 whole-suite pass or speedup claim. Original asset-retirement failure remains.
 
-**READY for scoped comparison; native run BLOCKED on fresh away availability.**
-Optimized repair image `459421da…0e31df` and all owning source inputs verify.
-Astra's corrected resumed admission completes with **GO_SCOPED_MEASUREMENT**:
-no changed-code blocker, not integration/installation/release approval. The first
-resume attempt was rejected for changed cwd before admission/zero tokens; retry
-retains original policy, with exact terminal proof in `capture-ready-progress/`.
-Owner adoption may now occur outside UI; label phase5 accordingly, and phase4
-is encode completion before send rather than delivered response.
+**First repair shows a local measured improvement; cumulatively integrated.**
+Fresh permission admits the matching three-refresh cohort on optimized `95622f2`:
+internal median264.48→198.77ms, header wait281→206ms; post-encode wait112.34→45.93ms.
+Adoption→ready construction falls63.76→0.028ms while opaque backend remains139.95ms.
+Geometry stays928×515 and saved initial PNG bytes match exactly. Not a camera,
+visible actual-client, matched observer-off or human usability acceptance claim.
+Native/adapter/listener absence, desktop/cursor/lock, QA release and installed hash
+independently verify; computer-free notice issued, no further desktop tests.
+Evidence: `capture-ready-progress/comparison-parent-receipt.json` and its exact run.
 
-Comparison helper derives from the corrected executed baseline; bindings only
-change checkout/artifact/namespace. Exact-interpreter preflight, five inert seam
-regressions and missing-import refusal pass. All source/baseline/live inputs stay
-frozen; no native test is running. Readiness/command and review receipts are under
-`capture-ready-progress/comparison-preparation/` and its parent. Obtain one new
-approximately6-minute idle opportunity (workspace1 active/2 empty), recheck guards,
-then compare the same finite cohort. No speedup yet; the original whole-suite
-asset-retirement failure and human responsiveness rejection remain unresolved.
+Source-only checkpoints `3a144d3` and `0b1ccef` bring diagnostics/repair into the
+cumulative line; all crates/manifests/lock are byte-identical to measured `95622f2`,
+so matching scoped tests/review are reused. This is NOT installation, a broad test
+pass or release. Actual-client candidate/installed native remain frozen; inherited
+asset-retirement full-suite failure and human responsiveness rejection remain.
+
+**Astra backend analysis COMPLETE:** exact locked framework source shows new
+screenshot commands miss that paint's action collection, and map callbacks need
+later submit/poll progress; surface/presentation waits remain alternatives. These
+are mechanisms, not attribution of the139.95ms. Root follows the bounded next
+step, not a global timer/continuous-render or transport rewrite.
+
+**RUNNING:** `deleg_3a965737`, audit-only locked eframe/egui-wgpu source overlays
+and local diagnostic manifest, bounded numeric backend spans and headless checks.
+Global registry, cumulative production dependencies, installation, live endpoints
+and desktop are out of scope. Stop if safe correlation requires a larger design.
+A later controlled cohort must select the next repair; no manual retest requested.
 
 Raw user/identity receipts: cumulative audit `startup-provenance/` files
 `actual-client-managed-start-user-receipt.json`,
