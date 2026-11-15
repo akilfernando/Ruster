@@ -2,31 +2,40 @@
 
 ## Coherent workspace frame transaction — 2026-11-15
 
-**Implementation pushed; live qualification BLOCKED by desktop guard.** The companion now reserves one native
-frame transaction containing an optional closed camera/Fit/pick/select control,
-coherent scene/view metadata and full-resolution capture-start. Native exact
-attachment/browser/publication authority and existing freshness/draft/input guards
-remain owning gates. Publication ends at reservation, not asynchronous readback;
-failed capture never rolls back or replays an already-applied control. Pixel,
-privacy, 5s capture and HTTP admission limits are unchanged.
+**Same-build optimized legacy/new qualification COMPLETE; measured response improves,
+actual-client usability remains unqualified.** Source `167d123` and inspection
+artifact `763df18894c3d1e…` are unchanged. Independent Astra changed-risk review is
+GO. The companion reserves coherent control/scene/view/capture in one native turn;
+existing attachment, browser/publication, stale/draft/input, privacy, bounded queues,
+5s capture and HTTP admission gates remain. Failed capture never replays a control.
 
-One owner in `feat/workspace-controls-20261115`; exit is matched optimized ordinary
-Host + owned Chromium orbit/pan/zoom/settle, same 928×515 RGBA/camera/backend/crop,
-independent MCP pick/clear/progress/history, stale/draft/revoke refusal and exact
-cleanup. No renderer/transport rewrite, authoring, install, startup-trial launch,
-focus/compositor experiment or human/ChatGPT usability claim. Reassess after30min
-without integration or two same-seam failures. HTTP source-derived RED observed
-four expected failures for redundant native turns; changed HTTP tests pass6/6
-normally and with optimized children. Extended native owning control regression
-passes; full affected editor180tests, capture4tests, default/inspection strict
-Clippy and formatting pass. Private optimized artifact built from167d123; no live
-measurement completed. Two baseline preparations stopped before measurement: a
-`/proc/fd` race repaired in the audit runner, then unexplained desktop-guard refusal.
-No GUI retries followed the guard refusal. Independent owned cleanup and16frozen
-startup pins pass; original release artifact preserved. Same-build old/new protocol
-runner is prepared, not qualified. Desktop revalidation, actual measurements and
-parent changed-risk review remain pending. No performance improvement is claimed.
-[Exact evidence, blocker and continuation](evidence/WORKSPACE-FRAME-TRANSACTION-2026-11-15.md).
+Fresh admission verified unlocked workspace1, exact focused-window/cursor identity,
+empty silent workspace2, activity observer and free shared gate. One retained runner
+journey per protocol passes on the SAME optimized native, same camera/project/crop,
+928×515 8-bit lossless RGBA, NVIDIA ICD, hidden native visibility and owned headless
+Chromium. Orbit/pan/zoom/final settle, rendered center pick + clear independently read
+through MCP, native draft/stale image/view/geometry refusals, unchanged authored
+scene/history, revoke refusal and cleanup all pass. Before/camera/picked PNG hashes
+match exactly across protocols; each run retains10 decoded frames /8 distinct PNGs.
+
+Camera-only request→decoded median **527.05→329.00ms (37.58% lower)**,6 completions
+per protocol. Oldest coalesced input median/max **728.85/1021.40→433.75/613.30ms**;
+latest **711.75/985.70→418.00/549.80ms**. Independent MCP progresses in73.04/61.67ms.
+The remaining capture-completion/service-pacing interval is about264–265ms; three
+40ms polling gaps contribute about121ms within that interval and may overlap work.
+GPU readback versus encoder cause is NOT established. No quality/timeout reduction,
+renderer change or foreground comparison. This single shared-host hidden pair is not
+FPS, physical-input or ChatGPT usability acceptance; actual ChatGPT-managed closed
+startup remains independently UNRESOLVED despite diagnostic-owner attachment proof.
+
+Exact owned PIDs/windows/companions/adapters/Chromium/listeners/locators/roots are
+absent; desktop/cursor/lock unchanged and shared gate independently reacquired then
+released before docs. All16 original pins and both immutable new artifacts remain
+preserved. Earlier failed preparations/guard refusal remain historical evidence;
+no full-engine gates or unchanged build repeated. Next dominant seam is the unsplit
+capture-completion/native-service pacing interval; foreground comparison requires
+separate coordination. No further native work is running.
+[Exact evidence, timings and limitations](evidence/WORKSPACE-FRAME-TRANSACTION-2026-11-15.md).
 
 ## Normal workspace non-authored controls — 2026-11-15
 

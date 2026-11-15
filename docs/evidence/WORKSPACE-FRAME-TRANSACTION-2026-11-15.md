@@ -1,6 +1,99 @@
 # Restricted coherent workspace frame repair — 2026-11-15
 
-## Outcome and current hold
+## Completed same-build continuation — 2026-11-15
+
+**Capability/source:** unchanged product `167d123`; actual independent Astra changed-risk
+review is GO (`changed-risk-result.md` / `changed-risk-receipt.json`). Existing
+source-level gates below remain valid; no repeated build/full engine suite.
+**Capability/live:** both ordinary inspection-enabled native Host + owned headless
+Chromium journeys pass. **Performance:** measured improvement for one matched
+shared-host hidden pair only, not physical or actual ChatGPT usability acceptance.
+
+Receipts are in audit subdirectory `continuation-20261115-155441/`:
+`preflight.json`, `manifest.json`, retained-derived `measure.py`, `legacy.log`,
+`transaction.log`, `summary.json`, `independent-cleanup.json`, per-run `report.json`,
+`phase-breakdown.json`, `native-http-phases.jsonl`, MCP protocol, actions, trees and
+lossless native PNGs. The corrected retained runner and wrapper were reused;
+changes only relocate receipts, strengthen activity-refusal diagnostics, require
+empty workspace2 and record cursor/lock preservation. No guard or timeout weakened.
+Existing integration venv imports actual native Driver, `msgpack` and real CDP
+qualification module successfully; native-only QA venv lacks `websockets` and was
+not used to launch. No installation or configuration change.
+
+Fresh admission verifies unlocked workspace1, stable focus/cursor, empty workspace2,
+activity observer `idled` with no `resumed`, and free shared gate. Native remains
+silently on workspace2 with exact owned-class no-focus/render-unfocused rule; no
+host input, focus/workspace movement, clipboard access or private-window capture.
+The rule is removed after cleanup. Chromium is independently owned and headless;
+its page reports `visible` in both runs, not foreground native visibility.
+
+| Matched operation / metric | Legacy serial | Coherent frame |
+| --- | ---: | ---: |
+| Camera request→decoded median (6 completions) | 527.05ms | 329.00ms |
+| Camera request→decoded range | 500.70–533.80ms | 286.70–332.10ms |
+| Oldest input→decoded median / max | 728.85 / 1021.40ms | 433.75 / 613.30ms |
+| Latest input→decoded median / max | 711.75 / 985.70ms | 418.00 / 549.80ms |
+| Rendered viewport pick (1) | 522.30ms | 300.50ms |
+| Clear selection (1) | 527.60ms | 311.60ms |
+| Refresh median (3; includes initial capture) | 458.00ms | 325.80ms |
+| Independent MCP progress during camera | 73.04ms | 61.67ms |
+| Decoded samples / distinct PNG identities | 10 / 8 | 10 / 8 |
+
+Camera median falls198.05ms /37.58%; this is not debug-versus-release, reduced
+fidelity, or a mixed-operation aggregate. Both use the exact artifact SHA below,
+same scene data, camera progression/final camera,928×515 source/crop,8-bit PNG
+color type6 (RGBA), device scaling and native preferences. Before, post-camera and
+picked PNG SHA256s are identical across protocols. The full-resolution source crop
+is x236/y292/w928/h515, pixels-per-point1.25. Both launches pin NVIDIA ICD via
+`VK_DRIVER_FILES`; exact GPU device name/utilization was not separately captured.
+
+Both runs complete orbit/pan/zoom and final one-flight/latest-intent settle, change
+native pixels without advancing authored revision, pick center through rendered
+viewport coordinates, independently read selection through MCP, clear through the
+browser and independently read empty selection. Immediate pick/clear pixels equal
+fresh native refresh. Session/revision/view/capture coherence assertions pass;
+authored scene/history equals the initial baseline, including after guards.
+Stale view, old image, wrong dimensions, invalid coordinates and pending native
+precision-draft selection/pick/camera refuse; draft text remains intact until
+native Escape. Disconnect closes native locator/HTTP endpoint and subsequent MCP
+and browser operations refuse. Native widget input is inspection-injected, not
+physical-human consent/input.
+
+Actual before/picked native app-only PNGs were loaded through `vision_analyze`:
+three intact shaded cubes, changed camera, and outline/gizmo selection moving from
+left blue to center orange; no blank/corrupt image observed. This visual check
+supplements, not replaces, exact PNG hashes and MCP state assertions.
+
+### Phase finding and finite exit
+
+For the same six camera completions, browser wait-to-headers median is520.35→321.00ms;
+body/JSON median0.75→0.75ms; image decode median5.45→6.35ms. Native composite refresh
+median is463.45→317.09ms (legacy's separate camera-control native turn is outside
+that refresh). Legacy repeats scene/view/capture-start service turns at about66ms;
+new coherent reservation is a single turn. After reservation/start, capture
+completion plus inspection/service pacing remains265.41→264.49ms. Three existing
+40ms polling gaps total about121ms inside this interval. They can overlap native
+work; do not sum these with readback/encoder time as independently recoverable
+savings. No additional live phase diagnostic or foreground comparison was run.
+
+**Next dominant seam:** split native capture completion/readback/encoding versus
+service-turn/hidden-window pacing before choosing a repair. GPU-versus-PNG cause is
+not established. A separately admitted foreground comparison may be useful but
+requires coordination; do not switch the user's workspace or weaken admission.
+Actual ChatGPT/default controls usability and original ChatGPT-managed closed
+startup remain unqualified/UNRESOLVED independently; diagnostic-owner attachment
+and this alternate automated client do not repair or accept that startup path.
+
+Independent cleanup verifies exact native PIDs2001402/2002230, windows, adapters,
+companions, Chromium, listeners, locators and private workspace roots absent;
+both runs preserve desktop/cursor/lock. Shared gate is independently reacquired and
+released before documentation. All16 original pins and both immutable new binaries
+are preserved. Earlier failed preparations remain untouched. No install, real MCP
+registration change, product source edit, new human/client setup approval request,
+demo or foreground experiment.
+This bounded qualification is COMPLETE and no further native work is running.
+
+## Initial checkpoint and historical hold
 
 Implementation checkpoint `167d12353d606efc83a3ba957c81e64d54846c3d` is pushed.
 Affected native/HTTP checks pass and the private optimized artifact is built.
