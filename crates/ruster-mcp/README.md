@@ -1,56 +1,65 @@
 # Ruster native MCP adapter
 
-## Exact registered-project attachment — partial prompt-first slice
+## One registered saved project: stable startup/attachment
 
-Set `RUSTER_MCP_PROJECT_REGISTRY` once to an absolute private (`0600`, same UID,
-no symlink components, at most8192bytes) installation-owned JSON record. Do not
-also set legacy `RUSTER_MCP_LOCATOR`: conflicting/invalid configuration refuses
-without fallback. The adapter snapshots the record at process startup; changing
-it cannot retarget an existing adapter. This first slice permits **one** explicit
-project, not filesystem discovery or a project-manager subsystem.
-
-Record shape (placeholders are nonsecret routing identity, never capabilities):
-
-```json
-{"projects":[{"id":"disposable-assembly","name":"Disposable Assembly","scene_id":"creator-assembly","locator":"/absolute/private-runtime/connection.json","binding":{"wire":"ruster-owner-1","incarnation":"EXACT_NATIVE_INCARNATION","generation":"EXACT_NATIVE_GENERATION","connection":"EXACT_NATIVE_CONNECTION"}}]}
-```
-
-`project_list {}` returns only that registered ID/name/scene identity. Listing
-creates no native owner and grants no access. `project_connect {"project":
-"Disposable Assembly"}` (or the exact ID) binds the existing fixed native Client,
-checks the registered incarnation/generation/connection and, after native owner
-approval, checks actual scene identity before authored dispatch. Names are exact,
-case-sensitive; no fuzzy/newest/default project selection. If the user named it
-exactly, skip the picker. Use real listed records with a host-native question only
-when clarification is needed; this adapter does not claim to invoke that UI.
-
-Initial `approval_required` is a real consent gate, not success. Meaningful native
-approval remains explicit; registration is not approval. Subsequent scene tools
-use the same socket owner and exact native session/revision guards. A repeated
-connect is read-only inspection of that owner, not reconnect/replay or renewed
-consent; retirement/replacement refuses permanently for that adapter.
-
-**Not full onboarding:** no production startup/registration writer, automatic
-browser authentication or actual one-prompt ChatGPT acceptance is claimed.
-Successful attachment returns `workspace_handoff.status:approval_channel_required`
-instead of leaking a capability or pretending an anonymous navigation is approved.
-A private client credential handoff or explicit native approval of the pending
-browser is needed. The existing fixture workspace/Host/Origin/CSRF boundary is
-unchanged. [Contract, executed native journey and next decision](../../spikes/003-interactive-localhost/README.md#prompt-project-connection-contract--2026-11-15).
-
-Developer reproduction (explicit disposable fixture grant, not human consent):
+One-time explicit registration can now replace per-run native launch/Connect and
+locator construction. Use matched immutable native/adapter artifacts and an existing
+canonical saved scene; this is a bounded Linux developer setup, not a general project
+manager or claimed terminal-free distribution:
 
 ```sh
-cargo build -p ruster-mcp --locked
-RUSTER_TEST_MCP_BINARY="$PWD/target/debug/ruster-mcp" \
-  cargo test -p ruster-editor project_registry_stdio_creator_save_fresh_open \
-  --locked -- --ignored --nocapture
+python3 scripts/register_saved_project.py \
+  --scene /absolute/project/scene.json \
+  --native /absolute/immutable/ruster-editor \
+  --adapter /absolute/immutable/ruster-mcp \
+  --registration /absolute/private/new-registration \
+  --id my-project --name 'My Project'
 ```
 
-This uses an actual saved disposable project, native SceneEditor/Session/bridge,
-a real adapter subprocess, guarded shared-history edits and Save/fresh-open,
-then disconnect and same-adapter refusal. It is windowless, not browser/rendered
-or ChatGPT validation. Use the existing QA resource lock for native execution.
+The command refuses overwrite and produces a private registry plus a stable
+`/absolute/private/new-registration/connect.py`. Configure that **same executable**
+once as the client's STDIO MCP command (arguments/environment blank). Alternatively
+set `RUSTER_MCP_PROJECT_REGISTRY` once to the generated private registry when launching
+the adapter directly. Do not also set legacy `RUSTER_MCP_LOCATOR`.
+
+`project_list {}` lists only the explicitly registered ID/name/scene; it neither
+launches native nor claims an owner. `project_connect {"project":"My Project"}`
+(or the exact ID) starts that pinned saved project if its registered native is closed,
+or attaches its exact current publication. Names are case-sensitive, without fuzzy,
+newest-editor, filesystem discovery or implicit fallback. Skip a picker when the
+prompt names this unique authorized record. Host-native questions remain a client
+choice, not an MCP UI claim.
+
+Initial `approval_required` needs native **AI connection → Review adapter approval →
+Confirm AI connection**. No initial manual native launch/Connect/locator is needed.
+After approval, repeat connect to get `workspace_handoff` with a secret-free URL;
+open it, compare the pending code and approve that exact browser/project once in
+native. Registry, URL and cookie presence never confer consent. Reload is automatic
+only while the existing native-bound browser grant remains valid.
+
+The native holds a registration-pinned lifetime lock even after Disconnect. An
+intentionally disconnected/revoked live editor needs an explicit fresh native Connect
+and new adapter approval; connect refuses rather than spawning another editor or
+closing unsaved human work. The same adapter never migrates to another publication.
+A fresh incarnation needs fresh native/browser consent, not a per-run registry edit.
+Startup cancellation before Host adoption checks exact parent PID/start/deadline;
+failed startup is not automatically retried. Already published native editors retain
+their normal user-owned lifetime when an adapter exits. No Save/export destination
+is implicitly granted. Trusted launchers must exec, preserving their child/native PID.
+
+Legacy explicit locator/binding registry records remain supported, as does the
+mutually exclusive `RUSTER_MCP_LOCATOR` mode. Those developer modes still require
+explicit per-run binding and are not the recommended registered-startup route.
+The registry is private0600, same UID, no symlink components, at most8192bytes and
+snapshotted at adapter startup. New startup records pin native executable identity,
+scene path/identity, routing directory and lock-file identities; deliberate replacement
+requires fresh registration. Never hand-edit a running locator or capability into
+model-visible arguments. Cooperating same-UID boundary, not hostile-user confinement.
+
+[Executed ordinary Host startup/attach/pair/edit/reload/revoke, immutable human trial,
+failures/cleanup and exact limitations](../../docs/evidence/PROJECT-STARTUP-2026-11-15.md).
+Automated ordinary-Host input is not physical-human/default-feature/actual ChatGPT
+acceptance. The normal browser preview remains read-only; no renderer/history change.
 
 ## Bounded assembly authoring (WIP)
 
@@ -62,9 +71,9 @@ Groups require positive uniform scale; leaves retain supported nonuniform scale.
 
 `ruster-mcp` is a Linux stdio MCP server attached to one explicitly enabled local editor. It preserves the logistics tools `inspect`, `edit`, `undo`, `redo` and `replay`, and adds `scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo` and `scene_replay` for generic scenes, plus object create/display-rename/duplicate/delete and the six bounded content tools below. The editor owns and serializes the actual session operations. Project content tools can import, refresh and rename registered OBJ/PNG sources through the confined asset store; they are not general filesystem access. Ten bounded behavior data tools also share the authored session. Eleven bounded asynchronous runtime/debug tools operate the editor-owned VM. Two explicitly granted persistence tools add generic-scene Save/SaveAs through the same editor lifecycle. No shell, project replacement, expression evaluation or arbitrary variable mutation is exposed.
 
-Build from the repository root with `cargo build --locked -p ruster-mcp`. **E2a CP1 changes the editor wire to `ruster-owner-1`; old socket-only adapters fail closed.** Use a matched editor/adapter and one immutable absolute `RUSTER_MCP_LOCATOR` pointing to the editor-owned private `connection.json`. The locator is nonsecret identity, not a capability. Never select an active/only/newest editor or change the locator per call.
+Build from the repository root with `cargo build --locked -p ruster-mcp`. **E2a CP1 changes the editor wire to `ruster-owner-1`; old socket-only adapters fail closed.** For the legacy explicit-locator mode, use a matched editor/adapter and one immutable absolute `RUSTER_MCP_LOCATOR` pointing to the editor-owned private `connection.json`. The locator is nonsecret identity, not a capability. Never select an active/only/newest editor or change the locator per call.
 
-CP1 exposes local Host Connect/pending-owner/approve/Disconnect/state APIs, **not normal-startup Connect UI or production registration automation**. Initial project calls return `approval_required` until the human owner explicitly approves that exact connected adapter principal. MCP initialize/tools/list are allowed unbound and consume no authority. The adapter keeps one owner socket and its capability in memory; EOF/restart revokes rather than reclaiming. A shared Hermes gateway may retain that principal across frontend chats. The capability never belongs in configuration, arguments, logs, authored/history/recovery data or the locator.
+The ordinary Host exposes native Connect/adapter approval/Disconnect UI and the one-project startup registration above. Historical CP1 command examples below retain explicit locator mode; they are not the current managed-startup instructions. Initial project calls return `approval_required` until the human owner explicitly approves that exact connected adapter principal. MCP initialize/tools/list are allowed unbound and consume no authority. The adapter keeps one owner socket and its capability in memory; EOF/restart revokes rather than reclaiming. A shared Hermes gateway may retain that principal across frontend chats. The capability never belongs in configuration, arguments, logs, authored/history/recovery data or the locator.
 
 The actual isolated Hermes qualification uses its supported CLI, not hand-edited configuration:
 

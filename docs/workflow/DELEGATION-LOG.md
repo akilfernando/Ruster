@@ -2,6 +2,24 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
+## 2026-11-15 — One registered saved-project startup
+
+One inherited `gpt-6.1-sol` writer, effective effort/tokens/cost unknown; no model
+discovery, child agents, client settings or installation. Exclusive isolated worktree
+preserves the qualified prompt-connect candidate. Stable invocation reaches the
+ordinary Host native-approval/browser-pair/MCP-edit/reload/revoke exit before the
+30-minute reassessment budget. Two failed native-test preparations are retained and
+reassessed: child exec rules did not inherit; then the retained Driver expected the
+old class. Inspection-only unique app ID and the same exact-class/PID/profile/input
+guards repair test isolation, not consent. A held-lock replacement counterexample
+executes RED→GREEN; actual startup-adapter cancellation self-refuses without an
+orphan/publication. Final default/inspection strict checks pass178/24/183tests with
+existing ignores unchanged. Fresh native Connect enables same-PID attachment; old
+adapters still refuse replacement publication. Parent changed-risk review and actual
+human/default/ChatGPT acceptance remain separate. No independent review claim or
+Vulkan-layer/performance claim. [Proof, exact failed preparations and prepared stable
+human launcher](../evidence/PROJECT-STARTUP-2026-11-15.md).
+
 ## 2026-11-15 — Bounded integrated assembly hierarchy WIP
 
 One inherited `gpt-6.1-sol` implementation owner; effective effort/tokens/cost unknown. No new routing discovery, children, Claude, scheduler or generalized harness. Existing Scene/Session/Change authority now drives the real guarded Unix bridge nested group/nonuniform-box/collider/point-light move/hinge/detach/Undo/save/fresh-open tracer. Native controls also created/nested groups and a cube, set nonuniform scale and moved the assembly; a genuine automatic checkpoint confirms revision7. Native capture timed out and the finite private software lease expired before Save/reopen; no completed native creator journey or rendered appearance is claimed. Cleanup verified, host inputs inaccessible. First source checkpoint `67680db` pushed/remote-verified. Full default gate passed before final refinements; final source/build/gate pins belong in [current evidence](../evidence/ASSEMBLY-HIERARCHY-2026-11-15.md). Original approved milestone remains incomplete, not replaced by prototype or test counts. Native/STDIO/render/numerical qualification and consequential review remain explicit.

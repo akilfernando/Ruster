@@ -3,6 +3,27 @@
 Date: 2026-11-15.
 Status: user-approved interaction/authority model; root-selected normal Host attachment first slice implemented and automated-qualified; human/default/client acceptance pending.
 
+## Registered saved-project startup extension — 2026-11-15
+
+The user-directed residual-setup removal is implemented as **one explicitly
+registered saved-project bootstrap**, not registry expansion. Registration pins the
+allowed saved path/scene/logical ID, trusted native executable or exec-preserving
+launcher, private routing directory and lifetime/startup lock identities. The stable
+adapter invocation starts only that project, or reads its exact native publication;
+existing socket peer/binding and scene readback remain authoritative. Publication
+contains nonsecret actual PID/UID/process-start and incarnation/generation/connection
+identity, not a URL or permission. Native starts unapproved; normal adapter and
+browser widgets still supply consent. A live disconnected/revoked registered editor
+must receive fresh native action rather than being duplicated or killed. Failed or
+cancelled bootstrap does not retry, and old adapters cannot adopt a new publication.
+Legacy locator mode remains explicit and supported.
+
+[Implementation, ordinary-Host startup/attach proof, private artifact pins, human
+trial and limits](../evidence/PROJECT-STARTUP-2026-11-15.md). This supersedes the
+historical startup/registry-refresh gap below, not physical-human/actual ChatGPT
+acceptance or installation authority. The previously qualified candidate stays
+immutable; this work is isolated on `feat/project-startup-20261115`.
+
 ## Root-selected normal transport contract — 2026-11-15
 
 The source-informed completed Astra assessment is adopted by the coordinator: **Host-owned restricted workspace attachment**, separate from the single approved MCP-owner socket, not adapter HTTP multiplexing. This is a technical default under the already-approved user authority model, not a new user-consent decision. The ordinary Host launches one optional private HTTP child only from the explicit connection lifecycle for a saved project. OS peer PID/UID, launch challenge, native binding, saved project/session, attachment, origin and browser credential hash remain pinned. The child never opens `connection::Client` or claims MCP ownership.

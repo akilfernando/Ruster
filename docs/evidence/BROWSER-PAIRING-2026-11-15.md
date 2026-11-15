@@ -1,5 +1,10 @@
 # Browser pairing qualification — 2026-11-15
 
+The per-run locator/native-startup residual below is superseded by the isolated
+[registered saved-project startup qualification](PROJECT-STARTUP-2026-11-15.md).
+These retained browser/transport proofs remain valid; their historical setup limits
+are not the current managed-startup instructions.
+
 ## Normal workspace review repairs
 
 2026-11-15: both source-inferred HOLD findings are now **executed counterexamples**

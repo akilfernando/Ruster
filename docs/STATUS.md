@@ -1,5 +1,36 @@
 # Current project status
 
+## Registered saved-project startup — 2026-11-15
+
+**Stable invocation removes per-run locator/native startup setup for one deliberately
+registered saved project.** Pushed code `376aa97` starts only the pinned path/native
+launcher, or attaches its exact live publication through the normal socket handshake.
+Private atomic PID/UID/process-start/project/path/scene/binding metadata and pinned
+routing locks prevent wrong-owner adoption/duplicate managed editors. Initial native
+adapter approval and one-time browser/project approval remain explicit. A live
+disconnected/revoked owner needs fresh native Connect; no automatic replacement,
+identity migration, shell/path selection, cached-guard replay or unknown-process kill.
+Legacy explicit-locator mode remains supported. The existing qualified prompt-connect
+checkout/artifacts are untouched.
+
+Final ordinary-Host app-scoped journey passes closed-project startup → native adapter
+approval → pending browser refusal → native browser approval → MCP edit visible in
+native pixels → same-cookie reload → revoke. New stable adapters refuse the revoked
+owner, then attach the same PID only after explicit fresh native Connect/approval.
+Cancelled startup self-refuses before publication; actual adapter cancellation leaves
+no native PID/publication. Directory/lock replacement regression executes RED→GREEN.
+Default/inspection strict Clippy, default editor178tests, MCP24tests and inspection
+editor183tests pass (existing ignores unchanged); default and inspection artifacts
+are source-qualified. No new Vulkan validation claim. Failed GUI preparations and
+exact reconciliation remain visible, not relabeled passes.
+
+Prepared immutable default-feature disposable trial has a single stable command;
+two discovery/list probes pass without native launch. No real ChatGPT settings,
+installation, live demo, merge or release. **Human/default/actual ChatGPT named-project
+acceptance is QUEUED for user availability; implementation is COMPLETE for this
+bounded automated exit.** Parent consequential changed-risk review remains pending.
+[Setup, exact artifacts/proof, failures, cleanup and remaining human steps](evidence/PROJECT-STARTUP-2026-11-15.md).
+
 ## Normal workspace review repairs — 2026-11-15
 
 **Both review counterexamples reproduced RED, repaired, and genuine ordinary-Host
