@@ -23,9 +23,11 @@ journey, rendered-pixel/f32-normal proof and remaining raw-world gesture/budget
 qualification are unfinished. [Exact source/format inventory, commands, failures,
 artifacts and next executable work](evidence/ASSEMBLY-HIERARCHY-2026-11-15.md).
 
-Default full gate passed43.65s before final bounded refinements; final-source gate
-and inspection lint/build evidence must be recorded separately. Audit/isolated
-target: `/home/akilf/Projects/Ruster-Audits/assembly-hierarchy-20261115/`.
+Final source `17f41e5` passes the full workspace gate51.56s, strict inspection
+all-target Clippy15.32s and actual default/inspection builds. Manifest pins source,
+compiler records, artifacts and cleanup. These gates do not complete the native/
+STDIO/render/numerical acceptance above. Audit/isolated target:
+`/home/akilf/Projects/Ruster-Audits/assembly-hierarchy-20261115/`.
 No milestone acceptance, install, release, canonical merge or sibling/private work.
 
 ## Bounded integrated assembly hierarchy approved — 2026-11-15

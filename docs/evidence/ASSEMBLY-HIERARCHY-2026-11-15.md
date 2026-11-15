@@ -125,6 +125,33 @@ registration, installation, release or canonical merge was introduced. The nativ
 probe reused the existing private display/inspection backend; its import preflight
 caught missing kernel msgpack before launch and reused the retained QA dependency.
 
+## Final source qualification checkpoint
+
+Source commit `17f41e530d915c75129401fd6b8ac59cffcb7f56` is pushed and
+remote-verified. `full-final.log` records `python3 scripts/check.py --full`
+passing51.56s (373 Rust passed,31 Python passed, five existing ignored fixtures),
+including workspace formatting/strict Clippy. `inspection-clippy-final.log`
+records strict inspection all-target Clippy passing15.32s. Actual default and
+inspection builds pass with compiler JSON in `default-build-final.jsonl` and
+`inspection-build-final.jsonl`; local compiler records also include a real render
+compile from this isolated checkout, not a relocated Fresh-only artifact.
+
+`manifest.json` under the audit root pins540 tracked source/build inputs,
+compiler provenance, logs, binary hashes and native cleanup. Final source-built
+artifacts:
+
+- `ruster-editor-default-final`: SHA256 `d724fad10f5df274010f682767435e06a745d00c43f736536e468b3fdb96a753`.
+- `ruster-editor-inspection-final`: SHA256 `d8e696910334be001fe91e4073421e515bd4be1bbf2f55970b0425f5fe9af1a2`.
+- `target/debug/ruster-mcp`: SHA256 `f7aca136d830890c1419808c3cb155c7ceb0c8a3b2d0131d59701235eaade915`.
+
+The incomplete real-native run used the earlier `ruster-editor-inspection`,
+SHA256 `223f7e965d756d6981ee979c2a9ab83c8f1134943dbb02b8cba4765410ddc99a`,
+before the final light-inclusive group-Fit refinement. It is not a final-artifact
+native acceptance claim. Captured native logs pass `scripts/check_vulkan_log.py`;
+Core/Synchronization activation was not established for that private-software run.
+The QA lock is released/reacquired and no audit-built executable remains running.
+No live demo remains.
+
 ## Exact remaining acceptance / continuation
 
 The approved milestone remains incomplete:
@@ -145,8 +172,17 @@ The approved milestone remains incomplete:
    before rounding. The new local raw-command/precision admission is proven, but
    gizmo candidates still narrow in Gesture::transform and require a focused
    requested-world boundary check/repair before acceptance.
-5. Fresh consequential review and final default/inspection change-gate evidence;
-   no independent production acceptance is claimed.
+5. Fresh consequential review; the default/inspection build/lint gates above
+   passed but do not establish independent production acceptance.
+
+Next executable implementation step: extend the existing
+`manipulation::tests::hierarchy_gizmo_moves_in_world_and_normalizes_ancestor_selection`
+with the requested-world counterexample (parent X9999, leaf local X1, world X10000,
+world gizmo delta +1e-8), run its current RED, then admit the original f64 requested
+world/descendant closure before Gesture candidate narrowing. Reuse the existing
+Session authority/resolver and test, not a new numerical harness. After that safe
+repair, use the existing optimized inspection/native qualification route to finish
+Save/fresh-open and rendered appearance. This handoff is not a user pause.
 
 Unsupported full scripting, subtree duplication/clipboard, full crash recovery
 and faithful standalone hierarchy delivery remain outside the approved milestone,
