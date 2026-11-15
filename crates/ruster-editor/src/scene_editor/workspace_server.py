@@ -101,6 +101,9 @@ def main():
         view = local({'op':'viewport_inspect','args':{},**binding})
         if not view.get('ok'): return {'response':view}
         v = view['result']
+        stale = {'response':{'ok':False,'error':{'code':'stale_observation'}}}
+        if any(scene['result'].get(key) != v.get(key) or v.get(key) is None for key in ('session_token','revision')):
+            return stale
         started = local({'op':'viewport_capture_start','args':{'expected_session_token':v['session_token'],'expected_revision':v['revision'],'expected_view_revision':v['view_revision']},**binding})
         if not started.get('ok'): return {'response':started}
         deadline = time.monotonic()+6
@@ -112,6 +115,8 @@ def main():
             if time.monotonic() >= deadline: raise TimeoutError('capture deadline; never replay')
             time.sleep(.04)
         if capture['status'] != 'ready': return {'response':{'ok':False,'error':{'code':capture.get('reason','capture_failed')}}}
+        if any(capture.get(key) != v.get(key) or v.get(key) is None for key in ('session_token','revision','view_revision')) or capture.get('capture_id') != started['result']['capture_id']:
+            return stale
         return {'response':{'ok':True},'scene':scene['result'],'view':v,'png':capture['image_base64'],'native_frame':capture['capture_id'],'capture':{k:v for k,v in capture.items() if k!='image_base64'},'draft_reserved':False}
 
     class AdmissionReader(io.RawIOBase):

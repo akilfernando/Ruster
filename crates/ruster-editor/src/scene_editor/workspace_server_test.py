@@ -20,6 +20,7 @@ class WorkspaceHTTP(unittest.TestCase):
         listener=socket.socket(socket.AF_UNIX);listener.bind(str(path));path.chmod(0o600);listener.listen(1);listener.settimeout(2)
         self.addCleanup(listener.close)
         child=subprocess.Popen([sys.executable,*(['-O'] if sys.flags.optimize else []),'-u',str(Path(__file__).with_name('workspace_server.py'))],stdin=subprocess.PIPE,stderr=subprocess.PIPE)
+        if child.stdin is None or child.stderr is None: raise RuntimeError('child pipes required')
         def cleanup():
             if child.poll() is None: child.terminate();child.wait(timeout=3)
             child.stderr.close()
@@ -43,7 +44,9 @@ class WorkspaceHTTP(unittest.TestCase):
             try:
                 while True:
                     request=receive();requests.append(request)
-                    send({'state':'approved'} if request['op']=='browser_pair' else reply(request))
+                    if request['op']=='browser_pair': send({'state':'approved'})
+                    elif reply is not None: send(reply(request))
+                    else: raise RuntimeError('unexpected native request')
             except (OSError,EOFError): pass
         threading.Thread(target=native,daemon=True).start()
         host=ready['origin'].removeprefix('http://')
@@ -53,7 +56,9 @@ class WorkspaceHTTP(unittest.TestCase):
             connection.request('POST',route,body,headers)
             response=connection.getresponse();data=response.read();cookie=response.getheader('Set-Cookie');connection.close()
             return response.status,json.loads(data),cookie
-        _,_,cookie=post('/pair');headers['Cookie']=cookie.split(';')[0]
+        _,_,cookie=post('/pair')
+        if cookie is None: raise RuntimeError('pair cookie required')
+        headers['Cookie']=cookie.split(';')[0]
         return child,bridge,host,headers,post,requests
 
     def test_trickling_requests_have_absolute_deadline_and_native_eof_cleanup(self):
@@ -61,7 +66,7 @@ class WorkspaceHTTP(unittest.TestCase):
             for native_eof in (False,True):
                 with self.subTest(body=body,native_eof=native_eof), tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as root:
                     child,bridge,host,headers,_,_=self.companion(root)
-                    client=socket.create_connection(tuple([host.split(':')[0],int(host.split(':')[1])]),timeout=1)
+                    client=socket.create_connection((host.split(':')[0],int(host.split(':')[1])),timeout=1)
                     self.addCleanup(client.close)
                     if body:
                         wire='POST /operation HTTP/1.0\r\nHost: '+host+'\r\n'+''.join(k+': '+v+'\r\n' for k,v in headers.items())+'Content-Length: 4096\r\n\r\n{'
@@ -86,6 +91,34 @@ class WorkspaceHTTP(unittest.TestCase):
                     else:
                         self.assertIsNone(child.poll(),'HTTP timeout alone must not kill a healthy attachment')
                         bridge.shutdown(socket.SHUT_RDWR);bridge.close();self.assertEqual(child.wait(timeout=1),0)
+
+    def test_refresh_requires_one_scene_view_and_capture_identity(self):
+        for mismatch in ('revision','session_token','capture_revision','capture_session_token','capture_view_revision','capture_id',None):
+            with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as root:
+                scene={'session_token':'one','revision':'7','scene_id':'scene','objects':[]}
+                view={**scene,'view_revision':'3'}
+                if mismatch in ('revision','session_token'): scene[mismatch]='old'
+                capture={**view,'capture_id':'42','status':'ready','image_base64':'private-pixels'}
+                if mismatch and mismatch.startswith('capture_'): capture['capture_id' if mismatch=='capture_id' else mismatch.removeprefix('capture_')]='wrong'
+                def reply(request):
+                    # Request parsing's 2s budget must not truncate legitimate native
+                    # capture work, which has an independent existing reply budget.
+                    if mismatch is None and request['op']=='viewport_capture_inspect': time.sleep(2.1)
+                    results={'scene_inspect':scene,'viewport_inspect':view,'viewport_capture_start':{'capture_id':'42'},'viewport_capture_inspect':capture}
+                    return {'ok':True,'result':results[request['op']]}
+                child,bridge,_,_,post,requests=self.companion(root,reply)
+                status,result,_=post('/operation',json.dumps({'op':'refresh','args':{}}))
+                self.assertEqual(status,200)
+                if mismatch:
+                    self.assertFalse(result['response']['ok'],'mixed metadata/pixels must never become a successful observation')
+                    self.assertEqual(result['response']['error']['code'],'stale_observation')
+                    self.assertNotIn('png',result);self.assertNotIn('scene',result);self.assertNotIn('capture',result)
+                    if mismatch in ('revision','session_token'):
+                        self.assertEqual([r['op'] for r in requests],['browser_pair','scene_inspect','viewport_inspect'],'refuse before capture; no retry/replay')
+                else:
+                    self.assertTrue(result['response']['ok']);self.assertEqual(result['png'],'private-pixels')
+                    self.assertEqual(result['scene'],scene);self.assertEqual(result['view'],view)
+                bridge.shutdown(socket.SHUT_RDWR);bridge.close();self.assertEqual(child.wait(timeout=1),0)
 
     def test_cleanup_preserves_replaced_endpoint(self):
         import importlib.util
