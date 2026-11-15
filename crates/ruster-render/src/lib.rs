@@ -3416,6 +3416,27 @@ mod tests {
             Some(scene.objects[0].id.clone())
         );
         assert_eq!(pick(&scene, &BTreeMap::new(), vp, 0.95, 0.95), None);
+        let rect = egui::Rect::from_min_size(egui::pos2(301.25, 113.5), egui::vec2(840., 600.));
+        assert_eq!(
+            pick_at(
+                &scene,
+                &BTreeMap::new(),
+                camera.state(),
+                rect,
+                rect.center()
+            ),
+            pick(&scene, &BTreeMap::new(), vp, 0., 0.)
+        );
+        assert_eq!(
+            pick_at(
+                &scene,
+                &BTreeMap::new(),
+                camera.state(),
+                rect,
+                rect.min - egui::vec2(1., 0.)
+            ),
+            None
+        );
         let surface = model(&scene.objects[0]).transform_point3(Vec3::new(0.2, 0.1, 0.5));
         let ndc = vp.project_point3(surface);
         assert!(ndc.x.abs() > 0.05 && ndc.y.abs() > 0.01);

@@ -74,7 +74,7 @@ impl Framing {
 }
 fn send(socket: &mut UnixStream, value: &Value) -> io::Result<()> {
     let body = serde_json::to_vec(value)?;
-    if body.is_empty() || body.len() > 65536 {
+    if body.is_empty() || body.len() > 8 * 1024 * 1024 {
         return Err(io::Error::other("workspace reply length"));
     }
     let bytes = [
@@ -365,7 +365,7 @@ impl Host {
                 json!({}),
             );
             let v = &observed["result"];
-            json!({"live":true,"session_token":v["session_token"],"revision":v["revision"],"view_revision":v["view_revision"],"draft_reserved":false})
+            json!({"live":true,"session_token":v["session_token"],"revision":v["revision"],"view_revision":v["view_revision"],"draft_reserved":self.editor.drafts() || self.editor.manipulation.offset_pending()})
         } else if matches!(
             op,
             "viewport_camera" | "viewport_fit" | "viewport_pick" | "scene_select"
@@ -395,11 +395,15 @@ impl Host {
         {
             failure("capture_not_owned")
         } else if let Some(lease) = bridge.authority().authorize_publication() {
-            let result = self.editor.command(
-                &self.editor.connection_incarnation.clone(),
-                op,
-                request["args"].clone(),
-            );
+            let result = if matches!(op, "viewport_capture_start" | "viewport_capture_inspect") {
+                workspace_capture(&mut self.editor, op, &request["args"])
+            } else {
+                self.editor.command(
+                    &self.editor.connection_incarnation.clone(),
+                    op,
+                    request["args"].clone(),
+                )
+            };
             if op == "viewport_capture_start" && result["ok"] == true {
                 workspace.capture = result["result"]["capture_id"].as_str().map(str::to_owned);
                 workspace.browser = Some(browser);
@@ -413,6 +417,14 @@ impl Host {
             workspace.stop();
         }
         ctx.request_repaint();
+    }
+}
+
+fn workspace_capture(editor: &mut SceneEditor, op: &str, args: &Value) -> Value {
+    let token = editor.scene_guard_token(&editor.connection_incarnation);
+    match editor.workspace_capture_command(&token, op, args) {
+        Ok(value) => json!({"ok":true,"result":value}),
+        Err((code, message)) => json!({"ok":false,"error":{"code":code,"message":message}}),
     }
 }
 
@@ -482,10 +494,10 @@ fn workspace_control(
     if args["capture_id"].as_str() != owned_capture || owned_capture.is_none() {
         return failure("stale_capture");
     }
-    let captured = editor.command(
-        &nonce,
+    let captured = workspace_capture(
+        editor,
         "viewport_capture_inspect",
-        json!({"capture_id":args["capture_id"]}),
+        &json!({"capture_id":args["capture_id"]}),
     );
     if captured["ok"] != true {
         return captured;
@@ -520,13 +532,22 @@ fn workspace_control(
                 / capture["height"].as_f64().unwrap_or(1.))
             / ppp) as f32,
     );
-    let picked = ruster_render::pick_at(
-        editor.session.scene(),
-        &editor.resolved,
-        camera,
-        rect,
-        position,
-    );
+    let light = editor
+        .captures
+        .view
+        .zip(editor.captures.projection)
+        .and_then(|(view, projection)| {
+            lighting_viewport::pick_at(editor.session.scene(), rect, view, projection, position)
+        });
+    let picked = light.or_else(|| {
+        ruster_render::pick_at(
+            editor.session.scene(),
+            &editor.resolved,
+            camera,
+            rect,
+            position,
+        )
+    });
     let mut next = guarded;
     next["object_ids"] = json!(picked.into_iter().collect::<Vec<_>>());
     editor.command(&nonce, "scene_select", next)
@@ -535,6 +556,48 @@ fn workspace_control(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn controls_preserve_scene_history_and_pending_drafts() {
+        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        editor.navigation.reset = false;
+        editor.navigation.camera = Some(ruster_render::CameraState {
+            target: [0., 0., 0.],
+            yaw: 0.,
+            pitch: 0.,
+            distance: 6.,
+            orthographic: false,
+        });
+        editor.captures.rect = Some(egui::Rect::from_min_size(
+            egui::Pos2::ZERO,
+            egui::vec2(800., 600.),
+        ));
+        let nonce = editor.connection_incarnation.clone();
+        let base = editor.command(&nonce, "scene_inspect", json!({}));
+        let view = editor.command(&nonce, "viewport_inspect", json!({}));
+        let pins = json!({"expected_session_token":view["result"]["session_token"],"expected_revision":view["result"]["revision"],"expected_view_revision":view["result"]["view_revision"]});
+        let fit = workspace_control(&mut editor, "viewport_fit", &pins, None);
+        assert_eq!(fit["ok"], true, "{fit}");
+        assert_eq!(editor.command(&nonce, "scene_inspect", json!({})), base);
+        assert_eq!(
+            workspace_control(&mut editor, "viewport_fit", &pins, None)["error"]["code"],
+            "stale_view"
+        );
+        let view = editor.command(&nonce, "viewport_inspect", json!({}));
+        let mut next = pins;
+        next["expected_view_revision"] = view["result"]["view_revision"].clone();
+        editor.manipulation.delta[0] = "-".into();
+        assert_eq!(
+            workspace_control(&mut editor, "viewport_fit", &next, None)["error"]["code"],
+            "drafts_pending"
+        );
+        next["object_ids"] = json!(["right"]);
+        assert_eq!(
+            workspace_control(&mut editor, "scene_select", &next, None)["error"]["code"],
+            "drafts_pending"
+        );
+        assert_eq!(editor.manipulation.delta[0], "-");
+        assert_eq!(editor.manipulation.ids, vec!["left"]);
+    }
     #[test]
     fn restricted_length_frames_reject_partial_expiry_duplicates_and_unsafe_origins() {
         for origin in ["http://127.0.0.1:1", "http://127.0.0.1:65535"] {

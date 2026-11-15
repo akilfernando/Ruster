@@ -120,6 +120,37 @@ fn marker_hit<'a>(markers: &[Marker<'a>], pointer: egui::Pos2) -> Option<&'a str
         .map(|(_, marker)| marker.id)
 }
 
+/// Same passive native icon hit rule, without synthesizing a viewport click.
+pub(super) fn pick_at(
+    scene: &Scene,
+    rect: egui::Rect,
+    view: [[f32; 4]; 4],
+    projection: [[f32; 4]; 4],
+    pointer: egui::Pos2,
+) -> Option<String> {
+    let poses = scene.resolve_poses().ok()?;
+    let mut lighting = scene.lighting.clone();
+    if let ruster_scene::Lighting::Authored { lights, .. } = &mut lighting {
+        for (id, light) in lights {
+            light.transform = poses.transforms[id].clone();
+        }
+    }
+    let vp = DMat4::from_cols_array_2d(&projection.map(|c| c.map(f64::from)))
+        * DMat4::from_cols_array_2d(&view.map(|c| c.map(f64::from)));
+    let markers: Vec<_> = lighting
+        .lights()
+        .filter_map(|(id, light)| {
+            project(rect, vp, position(light)).map(|(center, depth)| Marker {
+                id,
+                light,
+                center,
+                depth,
+            })
+        })
+        .collect();
+    marker_hit(&markers, pointer).map(str::to_owned)
+}
+
 fn range_guide(painter: &egui::Painter, rect: egui::Rect, vp: DMat4, light: &Light) {
     let LightKind::Point { range } = light.kind else {
         return;

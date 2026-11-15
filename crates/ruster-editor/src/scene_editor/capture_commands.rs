@@ -61,6 +61,7 @@ struct Pending {
     receiver: Option<mpsc::Receiver<std::result::Result<Value, String>>>,
     permit: Option<ReadbackPermit>,
     token: String,
+    full_resolution: bool,
     cancel: CancelOnDrop,
 }
 #[derive(Default)]
@@ -68,6 +69,9 @@ pub(super) struct Captures {
     pending: Option<Pending>,
     completed: Option<(u64, Pin, Value)>,
     pub rect: Option<egui::Rect>,
+    workspace_owned: bool,
+    pub view: Option<[[f32; 4]; 4]>,
+    pub projection: Option<[[f32; 4]; 4]>,
     // Scalar receipt for this exact layout callback, never a source/callback owner.
     pub receipt: Option<ruster_render::FrameReceipt>,
 }
@@ -134,6 +138,23 @@ impl SceneEditor {
         }
     }
     pub(super) fn capture_command(&mut self, token: &str, op: &str, args: &Value) -> Result<Value> {
+        self.capture_command_inner(token, op, args, false)
+    }
+    pub(super) fn workspace_capture_command(
+        &mut self,
+        token: &str,
+        op: &str,
+        args: &Value,
+    ) -> Result<Value> {
+        self.capture_command_inner(token, op, args, true)
+    }
+    fn capture_command_inner(
+        &mut self,
+        token: &str,
+        op: &str,
+        args: &Value,
+        workspace: bool,
+    ) -> Result<Value> {
         let map = args.as_object().ok_or_else(|| fail("invalid_arguments"))?;
         let decimal = |key: &str| -> Option<u64> {
             let s = args[key].as_str()?;
@@ -154,6 +175,9 @@ impl SceneEditor {
             return Err(fail("viewport_occluded"));
         }
         if op == "viewport_capture_inspect" {
+            if workspace != self.captures.workspace_owned {
+                return Err(fail("capture_not_owned"));
+            }
             if map.len() != 1 || decimal("capture_id").is_none() {
                 return Err(fail("invalid_arguments"));
             }
@@ -214,6 +238,7 @@ impl SceneEditor {
             .try_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
             .map_err(|_| fail("capture_limit"))?;
         self.captures.completed = None;
+        self.captures.workspace_owned = workspace;
         self.captures.pending = Some(Pending {
             id,
             pin,
@@ -221,6 +246,7 @@ impl SceneEditor {
             receiver: None,
             permit: Some(permit),
             token: token.to_owned(),
+            full_resolution: workspace,
             cancel: CancelOnDrop(Arc::new(AtomicBool::new(false))),
         });
         if let Some(ctx) = &self.export_context {
@@ -290,6 +316,7 @@ impl SceneEditor {
             }
         } else if let Some(rect) = self.captures.rect {
             let receipt = self.captures.receipt.clone();
+            let full_resolution = pending.full_resolution;
             let (sender, receiver) = mpsc::sync_channel(1);
             let ppp = ctx.pixels_per_point();
             let wake = ctx.clone();
@@ -318,7 +345,7 @@ impl SceneEditor {
                         if cancel.load(Ordering::Acquire) {
                             return;
                         }
-                        let _ = sender.send(thumbnail(&image, rect, ppp));
+                        let _ = sender.send(capture_image(&image, rect, ppp, full_resolution));
                         wake.request_repaint();
                     });
             });
@@ -350,10 +377,11 @@ fn clear_layers(ctx: &egui::Context) -> bool {
     })
 }
 
-fn thumbnail(
+fn capture_image(
     image: &Arc<egui::ColorImage>,
     rect: egui::Rect,
     ppp: f32,
+    full_resolution: bool,
 ) -> std::result::Result<Value, String> {
     if !ppp.is_finite() || ppp <= 0. || !rect.is_positive() || !rect.is_finite() {
         return Err("invalid viewport geometry".into());
@@ -367,7 +395,12 @@ fn thumbnail(
     }
     let sw = x1 - x0;
     let sh = y1 - y0;
-    for bound in [512usize, 384, 256, 128, 64] {
+    let bounds = if full_resolution {
+        vec![sw.max(sh)]
+    } else {
+        vec![512usize, 384, 256, 128, 64]
+    };
+    for bound in bounds {
         let factor = (bound as f64 / sw.max(sh) as f64).min(1.);
         let w = (sw as f64 * factor).round().max(1.) as usize;
         let h = (sh as f64 * factor).round().max(1.) as usize;
@@ -375,24 +408,43 @@ fn thumbnail(
         for y in 0..h {
             for x in 0..w {
                 let pixel = image[(x0 + x * sw / w, y0 + y * sh / h)];
-                rgb.extend_from_slice(&[pixel.r(), pixel.g(), pixel.b()]);
+                if full_resolution {
+                    rgb.extend_from_slice(&pixel.to_array());
+                } else {
+                    rgb.extend_from_slice(&[pixel.r(), pixel.g(), pixel.b()]);
+                }
             }
         }
         let mut bytes = Vec::new();
         {
             let mut encoder = png::Encoder::new(&mut bytes, w as u32, h as u32);
-            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_color(if full_resolution {
+                png::ColorType::Rgba
+            } else {
+                png::ColorType::Rgb
+            });
             encoder.set_depth(png::BitDepth::Eight);
             let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
             writer.write_image_data(&rgb).map_err(|e| e.to_string())?;
         }
-        if bytes.len() <= MAX_PNG {
+        if bytes.len()
+            <= if full_resolution {
+                4 * 1024 * 1024
+            } else {
+                MAX_PNG
+            }
+        {
             return Ok(
                 json!({"status":"ready","width":w,"height":h,"mime_type":"image/png","image_base64":base64::engine::general_purpose::STANDARD.encode(bytes),"source_width":sw,"source_height":sh,"viewport_points":{"min":[rect.min.x,rect.min.y],"max":[rect.max.x,rect.max.y]},"source_pixel_rect":{"x":x0,"y":y0,"width":sw,"height":sh},"pixels_per_point":ppp}),
             );
         }
     }
-    Err("thumbnail exceeds bounded transport".into())
+    Err(if full_resolution {
+        "lossless capture exceeds bounded transport; no downsampling"
+    } else {
+        "thumbnail exceeds bounded transport"
+    }
+    .into())
 }
 
 #[cfg(test)]
@@ -429,7 +481,41 @@ mod tests {
             .unwrap();
         assert_ne!(first["capture_id"], second["capture_id"]);
         assert_eq!(
+            b.workspace_capture_command(
+                "b",
+                "viewport_capture_inspect",
+                &json!({"capture_id":second["capture_id"]})
+            )
+            .unwrap_err()
+            .0,
+            "capture_not_owned"
+        );
+        b.captures
+            .cancel_owned(second["capture_id"].as_str().unwrap());
+        let workspace = b
+            .workspace_capture_command("b", "viewport_capture_start", &args)
+            .unwrap();
+        assert_eq!(
             b.capture_command(
+                "b",
+                "viewport_capture_inspect",
+                &json!({"capture_id":workspace["capture_id"]})
+            )
+            .unwrap_err()
+            .0,
+            "capture_not_owned"
+        );
+        assert_eq!(
+            b.workspace_capture_command(
+                "b",
+                "viewport_capture_inspect",
+                &json!({"capture_id":workspace["capture_id"]})
+            )
+            .unwrap()["status"],
+            "pending"
+        );
+        assert_eq!(
+            b.workspace_capture_command(
                 "b",
                 "viewport_capture_inspect",
                 &json!({"capture_id":first["capture_id"]})
@@ -564,6 +650,50 @@ mod tests {
     }
 
     #[test]
+    fn workspace_capture_retains_full_resolution_and_exact_rgba() {
+        let mut image = egui::ColorImage::filled([701, 583], egui::Color32::TRANSPARENT);
+        for y in 0..583 {
+            for x in 0..701 {
+                image[(x, y)] = egui::Color32::from_rgba_premultiplied(
+                    (x % 127) as u8,
+                    (y % 127) as u8,
+                    23,
+                    128,
+                );
+            }
+        }
+        let image = Arc::new(image);
+        let result = capture_image(
+            &image,
+            egui::Rect::from_min_max(egui::pos2(1., 2.), egui::pos2(701., 582.)),
+            1.,
+            true,
+        )
+        .unwrap();
+        assert_eq!(
+            (result["width"].as_u64(), result["height"].as_u64()),
+            (Some(700), Some(580))
+        );
+        let bytes = base64::engine::general_purpose::STANDARD
+            .decode(result["image_base64"].as_str().unwrap())
+            .unwrap();
+        let mut reader = png::Decoder::new(std::io::Cursor::new(bytes))
+            .read_info()
+            .unwrap();
+        let mut decoded = vec![0; reader.output_buffer_size().unwrap()];
+        let info = reader.next_frame(&mut decoded).unwrap();
+        let expected: Vec<u8> = (2..582)
+            .flat_map(|y| {
+                (1..701).flat_map({
+                    let image = image.clone();
+                    move |x| image[(x, y)].to_array()
+                })
+            })
+            .collect();
+        assert_eq!(&decoded[..info.buffer_size()], expected);
+    }
+
+    #[test]
     fn image_observation_crops_private_panels_and_bounds_transport() {
         let mut image = egui::ColorImage::filled([1000, 700], egui::Color32::RED);
         for y in 20..600 {
@@ -571,10 +701,11 @@ mod tests {
                 image[(x, y)] = egui::Color32::GREEN;
             }
         }
-        let result = thumbnail(
+        let result = capture_image(
             &Arc::new(image),
             egui::Rect::from_min_max(egui::pos2(200., 20.), egui::pos2(900., 600.)),
             1.,
+            false,
         )
         .unwrap();
         let bytes = base64::engine::general_purpose::STANDARD

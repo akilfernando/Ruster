@@ -5598,6 +5598,8 @@ impl SceneEditor {
             self.runtime
                 .input_finish(&ctx, &viewport.response, blocked || hud_owns);
             self.captures.rect = Some(viewport.rect);
+            self.captures.view = Some(viewport.view);
+            self.captures.projection = Some(viewport.projection);
             self.captures.receipt = Some(viewport.receipt.clone());
             self.view_state.input_active = ui.input(|input| input.pointer.any_down());
             let may_draw = !about_open

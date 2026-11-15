@@ -15,7 +15,7 @@ import struct
 import sys
 import time
 
-LIMIT = 65536
+LIMIT = 8 * 1024 * 1024
 # One absolute budget from accept through request line, headers and body. Native
 # operations retain their separate 2s send / 8s reply / 6s capture-poll budgets.
 HTTP_ADMISSION_SECONDS = 2
