@@ -191,6 +191,15 @@ impl SceneEditor {
                 return Err(fail("invalid_arguments"));
             }
             let id = decimal("capture_id").unwrap();
+            // Only an exact, authorized owner inspection may drain an already
+            // issued readback. This cannot issue a screenshot or certify layout.
+            if self.captures.pending.as_ref().is_some_and(|pending| {
+                pending.id == id && pending.token == token && pending.receiver.is_some()
+            }) {
+                if let Some(ctx) = self.export_context.clone() {
+                    self.progress_capture_result(&ctx, pin.clone());
+                }
+            }
             if let Some((saved, captured, value)) = &self.captures.completed {
                 if *saved == id {
                     if captured != &pin {
@@ -270,10 +279,10 @@ impl SceneEditor {
         }
         Ok(json!({"capture_id":id.to_string(),"status":"pending"}))
     }
-    /// Called after the current UI has produced its actual camera and viewport rectangle.
-    pub(super) fn poll_capture(&mut self, ctx: &egui::Context) {
-        let pin = self.capture_pin();
-        let Some(mut pending) = self.captures.pending.take() else {
+    /// Revalidate and adopt only an already-produced result. The retained UI
+    /// context supplies privacy/size checks, never fresh layout or readback.
+    fn progress_capture_result(&mut self, ctx: &egui::Context, pin: Pin) {
+        let Some(pending) = self.captures.pending.take() else {
             return;
         };
         let error = if pin != pending.pin {
@@ -336,7 +345,17 @@ impl SceneEditor {
                 }
                 Err(mpsc::TryRecvError::Empty) => {}
             }
-        } else if let Some(rect) = self.captures.rect {
+        }
+        self.captures.pending = Some(pending);
+    }
+    /// Called after the current UI has produced its actual camera and viewport rectangle.
+    pub(super) fn poll_capture(&mut self, ctx: &egui::Context) {
+        let pin = self.capture_pin();
+        self.progress_capture_result(ctx, pin);
+        let Some(mut pending) = self.captures.pending.take() else {
+            return;
+        };
+        if let Some(rect) = self.captures.rect.filter(|_| pending.receiver.is_none()) {
             let receipt = self.captures.receipt.clone();
             let full_resolution = pending.full_resolution;
             let (sender, receiver) = mpsc::sync_channel(1);
@@ -718,9 +737,8 @@ mod tests {
         sender.send(Ok(encoded)).unwrap();
         editor.captures.pending.as_mut().unwrap().receiver = Some(receiver);
         let id = editor.captures.pending.as_ref().unwrap().id.to_string();
-        let mut output = ctx.run_ui(input(), |ui| editor.poll_capture(ui.ctx()));
-        output.textures_delta.clear();
-        assert_ne!(editor.captures.timing.snapshot().unwrap().0[5], u64::MAX);
+        // No UI/poll_capture turn after the encoder has produced its result.
+        assert_eq!(editor.captures.timing.snapshot().unwrap().0[5], u64::MAX);
         assert_eq!(editor.captures.timing.snapshot().unwrap().0[6], u64::MAX);
         assert_eq!(
             editor
@@ -732,6 +750,11 @@ mod tests {
                 .unwrap_err()
                 .0,
             "capture_not_owned"
+        );
+        assert_eq!(
+            editor.captures.timing.snapshot().unwrap().0[5],
+            u64::MAX,
+            "unauthorized route cannot adopt pixels"
         );
         assert_eq!(
             editor.captures.timing.snapshot().unwrap().0[6],
@@ -761,6 +784,190 @@ mod tests {
         assert_eq!(editor.captures.timing.snapshot().unwrap(), complete);
         drop(editor);
         assert!(!READBACK_BUSY.load(Ordering::Acquire));
+    }
+
+    #[test]
+    fn inspect_progress_preserves_validation_and_never_issues_readback() {
+        // Real encoder output, with only the already-issued callback prefix
+        // supplied at this headless seam. No fresh GPU receipt is fabricated.
+        for case in [
+            "ready",
+            "owner",
+            "id",
+            "token",
+            "generation",
+            "revision",
+            "view",
+            "tick",
+            "asset",
+            "run",
+            "runtime",
+            "runtime_stale",
+            "shader",
+            "rect",
+            "draft",
+            "input",
+            "expiry",
+            "occlusion",
+            "size",
+            "cancel",
+            "unissued",
+            "empty",
+            "disconnected",
+            "encoder_failure",
+            "no_context",
+        ] {
+            let mut editor =
+                SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
+            editor.navigation.reset = false;
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(4., 4.));
+            editor.captures.rect = Some(rect);
+            let ctx = egui::Context::default();
+            let input = || egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::vec2(100., 100.),
+                )),
+                ..Default::default()
+            };
+            let mut output = ctx.run_ui(input(), |_| {});
+            output.textures_delta.clear();
+            editor.export_context = Some(ctx.clone());
+            let mut pin = editor.capture_pin();
+            match case {
+                "generation" => pin.generation += 1,
+                "revision" => pin.revision += 1,
+                "view" => pin.view += 1,
+                "tick" => pin.tick += 1,
+                "asset" => pin.asset_revision = Some(1),
+                "run" => {
+                    pin.run = Some(crate::behavior_worker::RunKey {
+                        generation: 1,
+                        reset_epoch: 1,
+                        authored_revision: 1,
+                    })
+                }
+                "runtime" => pin.runtime = !pin.runtime,
+                "runtime_stale" => pin.runtime_stale = !pin.runtime_stale,
+                "shader" => pin.shader_revision += 1,
+                "rect" => pin.rect = None,
+                _ => {}
+            }
+            let (sender, receiver) = mpsc::channel();
+            if !matches!(case, "empty" | "disconnected") {
+                sender
+                    .send(if case == "encoder_failure" {
+                        Err("render_pending".into())
+                    } else {
+                        capture_image(
+                            &Arc::new(egui::ColorImage::filled([4, 4], egui::Color32::TRANSPARENT)),
+                            rect,
+                            1.,
+                            true,
+                        )
+                    })
+                    .unwrap();
+            }
+            let cancel = Arc::new(AtomicBool::new(false));
+            editor.captures.workspace_owned = true;
+            editor.captures.pending = Some(Pending {
+                id: 42,
+                pin,
+                started: Instant::now(),
+                receiver: Some(receiver),
+                permit: None,
+                token: "owner".into(),
+                full_resolution: true,
+                cancel: CancelOnDrop(cancel.clone()),
+            });
+            match case {
+                "draft" => {
+                    editor.draft = Some(super::super::Fields::from(
+                        &ruster_scene::Transform::default(),
+                    ))
+                }
+                "input" => editor.view_state.input_active = true,
+                "expiry" => {
+                    editor.captures.pending.as_mut().unwrap().started -= Duration::from_secs(6)
+                }
+                "cancel" => editor.captures.cancel_owned("42"),
+                "unissued" => editor.captures.pending.as_mut().unwrap().receiver = None,
+                "no_context" => editor.export_context = None,
+                "occlusion" => {
+                    let mut output = ctx.run_ui(input(), |ui| {
+                        egui::Window::new("private text").show(ui.ctx(), |ui| {
+                            ui.label("private");
+                        });
+                    });
+                    output.textures_delta.clear();
+                }
+                "size" => {
+                    let mut output = ctx.run_ui(
+                        egui::RawInput {
+                            screen_rect: Some(egui::Rect::from_min_size(
+                                egui::Pos2::ZERO,
+                                egui::vec2(10000., 10000.),
+                            )),
+                            ..Default::default()
+                        },
+                        |_| {},
+                    );
+                    output.textures_delta.clear();
+                }
+                _ => {}
+            }
+            if case == "disconnected" {
+                drop(sender);
+            }
+            let token = if case == "token" { "other" } else { "owner" };
+            let id = if case == "id" { "43" } else { "42" };
+            let result = editor.capture_command_inner(
+                token,
+                "viewport_capture_inspect",
+                &json!({"capture_id":id}),
+                case != "owner",
+            );
+            match case {
+                "ready" => assert_eq!(result.unwrap()["status"], "ready"),
+                "owner" => assert_eq!(result.unwrap_err().0, "capture_not_owned"),
+                "id" | "cancel" => assert_eq!(result.unwrap_err().0, "capture_not_found"),
+                "occlusion" => assert_eq!(result.unwrap_err().0, "viewport_occluded"),
+                "generation" | "revision" | "view" | "tick" | "asset" | "run" | "runtime"
+                | "runtime_stale" | "shader" | "rect" => {
+                    assert_eq!(result.unwrap_err().0, "stale_capture", "{case}");
+                }
+                "token" | "unissued" | "empty" | "no_context" => {
+                    assert_eq!(result.unwrap()["status"], "pending", "{case}");
+                    assert!(editor.captures.pending.is_some());
+                }
+                _ => {
+                    let result = result.unwrap();
+                    assert_eq!(result["status"], "failed", "{case}");
+                    assert!(result.get("image_base64").is_none(), "{case}");
+                    let reason = match case {
+                        "draft" | "input" => "view_busy",
+                        "expiry" => "capture_expired",
+                        "size" => "capture_size_limit",
+                        "disconnected" => "capture_worker_unavailable",
+                        "encoder_failure" => "render_pending",
+                        _ => unreachable!(),
+                    };
+                    assert_eq!(result["reason"], reason, "{case}");
+                }
+            }
+            assert_eq!(editor.captures.rect, Some(rect), "{case}");
+            let mut output = ctx.run_ui(input(), |_| {});
+            output.textures_delta.clear();
+            assert!(
+                output.viewport_output.values().all(|viewport| viewport
+                    .commands
+                    .iter()
+                    .all(|command| !matches!(command, egui::ViewportCommand::Screenshot(_)))),
+                "inspect must never issue readback: {case}"
+            );
+            drop(editor);
+            assert!(cancel.load(Ordering::Acquire), "{case}");
+        }
     }
 
     #[test]
