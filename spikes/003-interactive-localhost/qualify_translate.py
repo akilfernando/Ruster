@@ -98,12 +98,14 @@ def main():
             c.call('Emulation.setDeviceMetricsOverride',{'width':980,'height':1100,'deviceScaleFactor':2,'mobile':False})
             mouse('mouseMoved',x,y,0);mouse('mousePressed',x,y);wait(lambda:c.js('!busy && translation && !translation.flight'))
             mouse('mouseMoved',x+36,y);wait(lambda:c.js('!busy && translation && !translation.flight && !translation.latest'))
-            # Release during an in-flight preview; post-release hover must not edit.
+            # Freeze the first release despite hover AND a refused second click.
             c.js('window.delayPreview=true')
             mouse('mouseMoved',x+40,y);mouse('mouseReleased',x+72,y,0);mouse('mouseMoved',x+120,y,0)
+            assert c.js('translation && translation.end && translation.flight'),'preview delay did not preserve the pending terminal gesture'
+            mouse('mousePressed',x+120,y);mouse('mouseReleased',x+120,y,0)
             wait(lambda:c.js('!busy && !translation'));c.js('window.delayPreview=false')
             dpr2=save('dpr2-release');assert dpr2['undo_len']==1
-            assert abs(center(dpr2['scene']['objects'])['translation'][0]-center(released['scene']['objects'])['translation'][0])<.02,'post-release hover changed terminal intent'
+            assert abs(center(dpr2['scene']['objects'])['translation'][0]-center(released['scene']['objects'])['translation'][0])<.02,'refused second click/release changed the first terminal endpoint'
             mcp_undo=tool('scene_undo',{'expected_session_token':dpr2['view']['session_token'],'expected_revision':dpr2['scene']['revision']});assert mcp_undo['ok'],mcp_undo
             c.click('#connect');mcp_restored=save('mcp-undo');assert mcp_restored['scene']['objects']==before['scene']['objects'] and mcp_restored['undo_len']==0
             assert (a.output/'mcp-undo.png').read_bytes()==(a.output/'before.png').read_bytes()

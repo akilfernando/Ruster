@@ -1,5 +1,11 @@
 # Native Translate bridge — 2026-11-15
 
+## Parent review repair — second release ordering, 2026-11-15
+
+The independent review held demo readiness because a refused second click/release could overwrite the first drag endpoint while a preview was in flight. Parent extended the existing real-browser delayed-preview case with that exact second click. `review-second-release-red/result.json` reproduces the incorrect native endpoint; the original failure remains failed and cleaned. The pointer-up handler now ignores further releases after either terminal release or cancellation is set, preserving the first terminal intent.
+
+`review-second-release-green/result.json` passes the complete owned Chromium/native/MCP Translate journey: the second click cannot redirect the first release, exactly one Undo entry is committed, both Undo routes restore original objects/pixels, and DPR/cancellation/draft/stale/revocation/max-one-flight cases still pass. Native source and `host-final` are unchanged; no duplicate Rust build/full suite is claimed. The page now explicitly warns about the five-second stationary-gesture safety lease and release/reconnect recovery. This closes the reviewed bounded pointer-ordering blocker for a labelled human-feedback demo; actual ChatGPT Translate acceptance, richer timeout UX and production consent remain unqualified.
+
 ## Contract / ownership
 
 One delegated writer, isolated `feat/native-translate-20261115` at `/home/akilf/Projects/rusterize-native-translate-20261115`, based on persistent socket `14cd60e97fb4c91a8511954b255ec2c7a0f07d1e`. Canonical dirty STATUS/private attachments, accepted source, other writers/indexes/targets, paused Hermes, configuration, installed product and user data are untouched. The target is an independent reflink clone under the audit, with editor/renderer release artifacts invalidated and actual compilation from this source recorded.
