@@ -3729,6 +3729,33 @@ mod tests {
         assert_eq!(session.is_dirty(), dirty);
         assert_eq!(session.undo_len(), undo);
         assert_eq!(session.path(), Some(path.as_path()));
+
+        // Combined capacity, not three independent geometry/light/group caps.
+        let mut mixed = Scene::empty("combined-capacity");
+        mixed.objects = (0..MAX_OBJECTS - 3)
+            .map(|i| Object::cube(format!("box-{i}"), None))
+            .collect();
+        mixed.lighting = Lighting::authored_default("sun");
+        let Lighting::Authored { lights, .. } = &mut mixed.lighting else {
+            unreachable!()
+        };
+        lights.insert("point".into(), Light::point(None));
+        let mut mixed = Session::new(mixed).unwrap();
+        mixed.create_group(0, "last", None).unwrap();
+        assert_eq!(mixed.scene().target_count(), MAX_OBJECTS);
+        let path = dir.path().join("combined.json");
+        mixed.save(&path).unwrap();
+        let before = mixed.snapshot_bytes().unwrap();
+        assert!(mixed
+            .create_group(mixed.scene().revision, "overflow", None)
+            .is_err());
+        assert_eq!(mixed.snapshot_bytes().unwrap(), before);
+        assert!(!mixed.is_dirty());
+        assert_eq!(mixed.path(), Some(path.as_path()));
+        assert_eq!(
+            Session::open(&path).unwrap().snapshot_bytes().unwrap(),
+            before
+        );
     }
 
     #[test]

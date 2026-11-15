@@ -1319,6 +1319,51 @@ mod tests {
         m.precision_revision = Some(session.scene().revision);
         assert!(m.apply_precision(&mut session).is_err());
         assert_eq!(session.snapshot_bytes().unwrap(), before);
+
+        // A light-only cancellation must also reject; the geometry remains at
+        // zero so its own relative translation tolerance cannot mask this risk.
+        let mut scene = Scene::empty("light-fidelity");
+        scene.objects.push(Object::cube("box", None));
+        scene.lighting = ruster_scene::Lighting::authored_default("sun");
+        let ruster_scene::Lighting::Authored { lights, .. } = &mut scene.lighting else {
+            unreachable!()
+        };
+        let mut point = ruster_scene::Light::point(None);
+        point.transform.translation = [-9999., 0., 0.];
+        lights.insert("point".into(), point);
+        let mut session = Session::new(scene).unwrap();
+        session.create_group(0, "assembly", None).unwrap();
+        session.reparent(1, "box", Some("assembly")).unwrap();
+        session.reparent(2, "point", Some("assembly")).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("light.json");
+        session.save(&path).unwrap();
+        let before = session.snapshot_bytes().unwrap();
+        let mut gesture = Gesture::begin(&session, &["assembly".into(), "box".into()]).unwrap();
+        let candidate = gesture.candidate.clone();
+        let current_proxy = gesture.current_proxy;
+        let mut moved = gesture.proxy;
+        moved.translation.x = 9999.0001;
+        let gesture_refused = gesture.transform(session.scene(), moved).is_err();
+        assert_eq!(gesture.candidate, candidate);
+        assert_eq!(gesture.current_proxy, current_proxy);
+        let mut m = Manipulation::default();
+        m.select_only(Some("assembly".into()));
+        m.delta[0] = "9999.0001".into();
+        let offset_refused = m.apply_delta(&mut session).is_err();
+        m.reset_precision(session.scene()).unwrap();
+        m.precision[0] = "9999.0001".into();
+        m.edited[0] = true;
+        m.precision_revision = Some(session.scene().revision);
+        let precision_refused = m.apply_precision(&mut session).is_err();
+        assert!(gesture_refused && offset_refused && precision_refused,
+            "light fidelity refusals: gesture={gesture_refused}, offset={offset_refused}, precision={precision_refused}");
+        assert_eq!(session.snapshot_bytes().unwrap(), before);
+        assert!(!session.is_dirty());
+        assert_eq!(session.path(), Some(path.as_path()));
+        gesture.transform(session.scene(), gesture.proxy).unwrap();
+        moved.translation.x = 9999.;
+        gesture.transform(session.scene(), moved).unwrap();
     }
 
     fn assert_orientation(actual: [f32; 3], expected: DQuat) {
