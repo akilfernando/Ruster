@@ -1,5 +1,27 @@
 # Current project status
 
+## Bounded integrated assembly hierarchy approved — 2026-11-15
+
+Akil explicitly selected **Yes—build this bounded first milestone** on Telegram.
+The [accepted scope and outcome contract](decisions/2026-11-15-bounded-assembly-hierarchy.md)
+authorize ordinary native-editor and shared-session MCP grouping/reparenting,
+Undo and save/reopen; uniform positive group scale with supported nonuniform
+geometry leaves; spatially attached lights with unchanged authored range/intensity;
+and explicit rejection by incompatible export/runtime paths. Qualification is
+bounded to eight levels/256 combined targets, not permanent engine limits.
+
+Implementation checkout `feat/assembly-hierarchy-20261115` starts at repaired
+prototype `542ec26`. The next real exit is scene-owned topology plus existing
+Session structural history/persistence and native/MCP creator journeys—not another
+helper-only experiment. First tracer is real Session group/parent/move/Undo/save/
+fresh-open with shared-operation MCP readback. Reassess at45 cumulative minutes
+without that integrated smoke or two failed same-journey attempts. Minion owns
+coordination; one delegated implementation writer carries the coupled outcome.
+Full F4a scripting/duplication/clipboard/crash/export qualification remains outside
+this accepted subset. No implementation acceptance, installation, release or
+canonical merge is claimed; canonical dirty/private work and other accepted
+checkouts remain untouched.
+
 ## Requested-world admission counterexample repaired — 2026-11-15
 
 **COMPLETE bounded prototype repair, not production hierarchy integration.**

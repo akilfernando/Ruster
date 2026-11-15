@@ -1,6 +1,8 @@
 # F4a — Assembly Groups
 
-Proposed2026-11-10 by Astra/Root after accepted F3c on product01fe8f9. The user requests the next plan, then a development pause for weekly usage. **Planning only. Approval and implementation remain pending. Development is paused after this handoff.** No Goal-tool goal is created. This proposal supersedes the obsolete baseline and proposed execution contract in [C1a Assembly Study](C1A-ASSEMBLY-STUDY.md).
+**Current authority — 2026-11-15:** Akil approved the [bounded first integrated hierarchy milestone](../decisions/2026-11-15-bounded-assembly-hierarchy.md). Its editor/MCP/grouping/Undo/save-reopen subset is authorized; broader scripting, duplication, recovery and faithful standalone-export gates below are not blanket-approved or claimed complete. The historical pause below no longer governs that accepted subset.
+
+Proposed2026-11-10 by Astra/Root after accepted F3c on product01fe8f9. The original proposal was planning-only and paused; this document retains the larger proposed F4a scope for reference. No Goal-tool goal is created. This proposal supersedes the obsolete baseline and proposed execution contract in [C1a Assembly Study](C1A-ASSEMBLY-STUDY.md).
 
 ## Creator outcome
 
