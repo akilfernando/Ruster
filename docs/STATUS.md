@@ -1,5 +1,20 @@
 # Current project status
 
+## Normal workspace non-authored controls — 2026-11-15
+
+RUNNING in isolated `feat/workspace-controls-20261115`; single writer. Exit:
+ordinary project-bound Host → approved browser camera gesture → changed native
+capture → viewport pick at delivered geometry → independent direct-MCP selection
+readback → clear → native revoke/refusal. Same project/session/view, native draft
+and stale-capture guards, unchanged authored scene/history, bounded camera intent
+and MCP-first dispatch are mandatory. Non-goals: browser authoring, transforms,
+gizmo commits, Save/export, consent automation, client setup or renderer/history
+redesign. Existing startup/human-trial artifacts and accepted fixture are immutable.
+Owned Chromium is technical evidence only; physical/default/ChatGPT acceptance is
+separate. Reassess after 30 minutes without integrated camera/pick smoke or two
+same-seam failures. Production capture quality/latency is reported, not confused
+with accepted full-resolution viewport parity.
+
 ## Registered saved-project startup — 2026-11-15
 
 **Stable invocation removes per-run locator/native startup setup for one deliberately

@@ -120,6 +120,22 @@ class WorkspaceHTTP(unittest.TestCase):
                     self.assertEqual(result['scene'],scene);self.assertEqual(result['view'],view)
                 bridge.shutdown(socket.SHUT_RDWR);bridge.close();self.assertEqual(child.wait(timeout=1),0)
 
+    def test_navigation_selection_forward_only_typed_non_authored_operations(self):
+        with tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as root:
+            def reply(request):
+                return {'ok':False,'error':{'code':'native_guard_refusal'}}
+            _,_,_,_,post,requests=self.companion(root,reply)
+            for op in ('viewport_camera','viewport_fit','viewport_pick','scene_select'):
+                _,result,_=post('/operation',json.dumps({'op':op,'args':{'sentinel':'exact'}}))
+                self.assertEqual(result['response']['error']['code'],'native_guard_refusal')
+                self.assertEqual(requests[-1]['op'],op)
+                self.assertEqual(requests[-1]['args'],{'sentinel':'exact'})
+            before=len(requests)
+            for op in ('scene_transform','scene_undo','scene_save','draft_begin','raw_input','browser_approve'):
+                _,result,_=post('/operation',json.dumps({'op':op,'args':{}}))
+                self.assertEqual(result['response']['error']['code'],'forbidden_operation')
+            self.assertEqual(len(requests),before)
+
     def test_cleanup_preserves_replaced_endpoint(self):
         import importlib.util
         spec=importlib.util.spec_from_file_location('owned_workspace_server',Path(__file__).with_name('workspace_server.py'))

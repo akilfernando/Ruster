@@ -144,7 +144,11 @@ impl Host {
             ui.heading("Approve pending browser for this project?");
             ui.label(format!("Browser verification code: {}", &request.id[..12]));
             ui.label(&request.context);
-            ui.label("Compare the code with your browser. This is not verified application provenance. Approval permits reading and editing this exact native project/session for at most 30 minutes. Reload is automatic; Disconnect AI revokes it. Pending requests expire after 2 minutes. Denial requires a fresh native connection.");
+            if request.binding.is_some() {
+                ui.label("Compare the code with your browser. This is not verified application provenance. Approval permits a native project preview with non-authored camera navigation and shared selection only, for at most 30 minutes. Browser transforms, properties, Undo, Save and export are not granted. Direct MCP authoring retains its separate adapter approval. Reload is automatic; Disconnect AI revokes this browser. Pending requests expire after 2 minutes. Denial requires a fresh native connection.");
+            } else {
+                ui.label("Compare the code with your browser. This is not verified application provenance. Approval permits reading and editing this exact native project/session for at most 30 minutes. Reload is automatic; Disconnect AI revokes it. Pending requests expire after 2 minutes. Denial requires a fresh native connection.");
+            }
             if ui.button("Approve this browser/project once").clicked()
                 && bridge.approve_browser(&request)
             {

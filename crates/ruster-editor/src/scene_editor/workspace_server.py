@@ -178,6 +178,9 @@ def main():
                 request=json.loads(self.rfile.read(size))
                 if not isinstance(request,dict) or set(request)!={'op','args'}: return self.reply(400,b'{}')
                 if request['op']=='refresh': reply=refresh(binding)
+                elif request['op'] in ('viewport_camera','viewport_fit','viewport_pick','scene_select') and isinstance(request['args'],dict):
+                    result=local({**request,**binding})
+                    reply=refresh(binding) if result.get('ok') else {'response':result}
                 else: reply={'response':{'ok':False,'error':{'code':'forbidden_operation'}}}
                 self.reply(200,json.dumps(reply).encode())
             except (OSError,ValueError,KeyError,EOFError,TimeoutError):

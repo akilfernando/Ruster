@@ -366,6 +366,22 @@ impl Host {
             );
             let v = &observed["result"];
             json!({"live":true,"session_token":v["session_token"],"revision":v["revision"],"view_revision":v["view_revision"],"draft_reserved":false})
+        } else if matches!(
+            op,
+            "viewport_camera" | "viewport_fit" | "viewport_pick" | "scene_select"
+        ) {
+            if let Some(lease) = bridge.authority().authorize_publication() {
+                let result = workspace_control(
+                    &mut self.editor,
+                    op,
+                    &request["args"],
+                    workspace.capture.as_deref(),
+                );
+                lease.complete(result.clone());
+                result
+            } else {
+                failure("revoked")
+            }
         } else if !matches!(
             op,
             "scene_inspect"
@@ -398,6 +414,122 @@ impl Host {
         }
         ctx.request_repaint();
     }
+}
+
+fn workspace_control(
+    editor: &mut SceneEditor,
+    op: &str,
+    args: &Value,
+    owned_capture: Option<&str>,
+) -> Value {
+    let nonce = editor.connection_incarnation.clone();
+    if matches!(op, "viewport_camera" | "scene_select") {
+        return editor.command(&nonce, op, args.clone());
+    }
+    let fields: &[&str] = if op == "viewport_fit" {
+        &[
+            "expected_session_token",
+            "expected_revision",
+            "expected_view_revision",
+        ]
+    } else {
+        &[
+            "expected_session_token",
+            "expected_revision",
+            "expected_view_revision",
+            "capture_id",
+            "image_width",
+            "image_height",
+            "x",
+            "y",
+        ]
+    };
+    if args.as_object().is_none_or(|map| {
+        map.len() != fields.len() || fields.iter().any(|key| !map.contains_key(*key))
+    }) {
+        return failure("invalid_arguments");
+    }
+    // Validate all native session/revision/view and pending-draft guards before
+    // resolving coordinates or replacing selection. No synthetic native input.
+    let guarded = json!({"expected_session_token":args["expected_session_token"],"expected_revision":args["expected_revision"],"expected_view_revision":args["expected_view_revision"],"object_ids":editor.manipulation.ids});
+    let admitted = editor.command(&nonce, "scene_select", guarded.clone());
+    if admitted["ok"] != true {
+        return admitted;
+    }
+    if editor.runtime.visible {
+        return failure("authored_view_required");
+    }
+    let Some(rect) = editor.captures.rect else {
+        return failure("viewport_unavailable");
+    };
+    let Some(camera) = editor.navigation.camera else {
+        return failure("viewport_unavailable");
+    };
+    if op == "viewport_fit" {
+        let Some(state) = ruster_render::frame_scene(
+            editor.session.scene(),
+            &editor.resolved,
+            camera,
+            rect.aspect_ratio(),
+        ) else {
+            return failure("fit_out_of_range");
+        };
+        let mut next = guarded;
+        next.as_object_mut().unwrap().remove("object_ids");
+        next["camera"] = json!({"target":state.target,"yaw":state.yaw,"pitch":state.pitch,"distance":state.distance,"orthographic":state.orthographic});
+        return editor.command(&nonce, "viewport_camera", next);
+    }
+    if args["capture_id"].as_str() != owned_capture || owned_capture.is_none() {
+        return failure("stale_capture");
+    }
+    let captured = editor.command(
+        &nonce,
+        "viewport_capture_inspect",
+        json!({"capture_id":args["capture_id"]}),
+    );
+    if captured["ok"] != true {
+        return captured;
+    }
+    let capture = &captured["result"];
+    if capture["status"] != "ready"
+        || args["image_width"] != capture["width"]
+        || args["image_height"] != capture["height"]
+    {
+        return failure("stale_capture");
+    }
+    let coordinate = |key: &str, size: &str| {
+        args[key]
+            .as_f64()
+            .filter(|v| v.is_finite() && *v >= 0. && *v < capture[size].as_f64().unwrap_or(0.))
+    };
+    let (Some(x), Some(y)) = (coordinate("x", "width"), coordinate("y", "height")) else {
+        return failure("invalid_coordinates");
+    };
+    let ppp = capture["pixels_per_point"].as_f64().unwrap_or(0.);
+    if ppp <= 0. {
+        return failure("stale_capture");
+    }
+    let source = &capture["source_pixel_rect"];
+    let position = egui::pos2(
+        ((source["x"].as_f64().unwrap_or(0.)
+            + x * capture["source_width"].as_f64().unwrap_or(0.)
+                / capture["width"].as_f64().unwrap_or(1.))
+            / ppp) as f32,
+        ((source["y"].as_f64().unwrap_or(0.)
+            + y * capture["source_height"].as_f64().unwrap_or(0.)
+                / capture["height"].as_f64().unwrap_or(1.))
+            / ppp) as f32,
+    );
+    let picked = ruster_render::pick_at(
+        editor.session.scene(),
+        &editor.resolved,
+        camera,
+        rect,
+        position,
+    );
+    let mut next = guarded;
+    next["object_ids"] = json!(picked.into_iter().collect::<Vec<_>>());
+    editor.command(&nonce, "scene_select", next)
 }
 
 #[cfg(test)]

@@ -1307,6 +1307,51 @@ pub fn object_has_complete_uvs(
     object_mesh(object, meshes).is_some_and(|mesh| mesh.has_complete_uvs())
 }
 
+/// Restricted frontends reuse the renderer's exact projection, hierarchy and
+/// triangle/slab picker, never a browser-owned geometric approximation.
+pub fn pick_at(
+    scene: &Scene,
+    meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+    state: CameraState,
+    rect: egui::Rect,
+    position: egui::Pos2,
+) -> Option<String> {
+    if !rect.is_positive() || !rect.contains(position) || !state.is_valid() {
+        return None;
+    }
+    let (view, projection, _) = Camera::from_state(state).checked_matrices(rect.aspect_ratio())?;
+    let poses = scene.resolve_poses().ok()?;
+    let mut resolved = scene.clone();
+    for object in &mut resolved.objects {
+        object.transform = poses.transforms[&object.id].clone();
+    }
+    pick(
+        &resolved,
+        meshes,
+        projection * view,
+        (position.x - rect.left()) / rect.width() * 2. - 1.,
+        1. - (position.y - rect.top()) / rect.height() * 2.,
+    )
+}
+
+/// Fit all geometry while preserving the current native camera orientation.
+pub fn frame_scene(
+    scene: &Scene,
+    meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
+    state: CameraState,
+    aspect: f32,
+) -> Option<CameraState> {
+    let poses = scene.resolve_poses().ok()?;
+    let mut resolved = scene.clone();
+    for object in &mut resolved.objects {
+        object.transform = poses.transforms[&object.id].clone();
+    }
+    let mut camera = Camera::from_state(state);
+    camera.frame(Camera::fit(&resolved, meshes, aspect)?);
+    camera.checked_matrices(aspect)?;
+    Some(camera.state())
+}
+
 fn pick(
     scene: &Scene,
     meshes: &BTreeMap<String, Arc<ruster_assets::Mesh>>,
