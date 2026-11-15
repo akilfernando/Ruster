@@ -22,6 +22,15 @@ impl Hierarchy {
     }
 }
 
+/// Original-precision command values, admitted before narrowing into authored f32.
+#[derive(Clone, Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct TransformRequest {
+    pub translation: [f64; 3],
+    pub rotation: [f64; 3],
+    pub scale: [f64; 3],
+}
+
 /// World-space observations. Authored roots are copied exactly, not decomposed.
 pub struct ResolvedPoses {
     pub transforms: BTreeMap<String, Transform>,
@@ -88,6 +97,123 @@ fn close(a: DMat4, b: DMat4) -> bool {
         .all(|(a, b)| a.is_finite() && b.is_finite() && (a - b).abs() <= 2e-6 * a.abs().max(1.))
 }
 impl Scene {
+    /// Remove descendants of selected ancestors once; preserve input order.
+    pub fn normalize_assembly_selection(&self, ids: &[String]) -> Result<Vec<String>, SceneError> {
+        if ids.len() > MAX_OBJECTS {
+            return Err(invalid("selection exceeds combined target budget"));
+        }
+        let mut seen = HashSet::new();
+        for id in ids {
+            if !seen.insert(id.as_str()) || self.target_transform(id).is_none() {
+                return Err(invalid("missing or repeated selection target"));
+            }
+        }
+        self.resolve_poses()?;
+        Ok(ids
+            .iter()
+            .filter(|id| {
+                let mut current = id.as_str();
+                while let Some(parent) = self.hierarchy.parents.get(current) {
+                    if seen.contains(parent.as_str()) {
+                        return false;
+                    }
+                    current = parent;
+                }
+                true
+            })
+            .cloned()
+            .collect())
+    }
+    /// Convert world-space manipulation into admitted local edits. Roots retain
+    /// their original TRS values/arithmetic; only parented targets need inversion.
+    pub fn local_edits_for_world(
+        &self,
+        edits: &[(String, Transform)],
+    ) -> Result<Vec<(String, Transform)>, SceneError> {
+        if self.hierarchy.is_empty() {
+            return Ok(edits.to_vec());
+        }
+        let ids = edits.iter().map(|(id, _)| id.clone()).collect::<Vec<_>>();
+        let normalized = self.normalize_assembly_selection(&ids)?;
+        let old = self.resolve_poses()?;
+        let mut overrides = BTreeMap::new();
+        let mut locals = Vec::new();
+        for (id, world) in edits.iter().filter(|(id, _)| normalized.contains(id)) {
+            world.validate()?;
+            if old.transforms[id] == *world {
+                continue;
+            }
+            let w = Pose::from_local(world);
+            let local = if let Some(parent) = self.hierarchy.parents.get(id) {
+                let p = old.poses[parent];
+                Pose {
+                    position: (p.rotation.inverse() * (w.position - p.position)) / p.scale,
+                    rotation: (p.rotation.inverse() * w.rotation).normalize(),
+                    scale: if self.lighting.light(id).is_some() {
+                        DVec3::ONE
+                    } else {
+                        w.scale / p.scale
+                    },
+                }
+            } else {
+                w
+            };
+            overrides.insert(id.clone(), local);
+            locals.push((
+                id.clone(),
+                if self.hierarchy.parents.contains_key(id) {
+                    local.stored()?
+                } else {
+                    world.clone()
+                },
+            ));
+        }
+        // Admit unrounded requested world closure, then stored/resolved closure.
+        let requested = self.resolve_requested(&overrides)?;
+        let mut staged = self.clone();
+        for (id, t) in &locals {
+            staged.set_local(id, t.clone())?;
+        }
+        staged.validate()?;
+        let stored = staged.resolve_poses()?;
+        for (id, p) in requested.poses {
+            if !close(p.matrix(), stored.poses[&id].matrix()) {
+                return Err(invalid(
+                    "world manipulation exceeds descendant storage tolerance",
+                ));
+            }
+        }
+        Ok(locals)
+    }
+    pub fn preview_world_transforms(
+        &self,
+        edits: &[(String, Transform)],
+    ) -> Result<Scene, SceneError> {
+        let locals = self.local_edits_for_world(edits)?;
+        let mut scene = self.clone();
+        for (id, t) in locals {
+            scene.set_local(&id, t)?;
+        }
+        scene.validate()?;
+        Ok(scene)
+    }
+    fn set_local(&mut self, id: &str, t: Transform) -> Result<(), SceneError> {
+        if let Some(group) = self.hierarchy.groups.get_mut(id) {
+            group.transform = t;
+            return Ok(());
+        }
+        if let Some(object) = self.objects.iter_mut().find(|o| o.id == id) {
+            object.transform = t;
+            return Ok(());
+        }
+        if let Lighting::Authored { lights, .. } = &mut self.lighting {
+            if let Some(light) = lights.get_mut(id) {
+                light.transform = t;
+                return Ok(());
+            }
+        }
+        Err(SceneError::ObjectNotFound(id.into()))
+    }
     pub fn require_flat(&self) -> Result<(), SceneError> {
         if !self.hierarchy.is_empty() {
             return Err(invalid(
@@ -98,6 +224,55 @@ impl Scene {
     }
     /// Resolve after topology admission. No persistent cache and no Scene clone.
     pub fn resolve_poses(&self) -> Result<ResolvedPoses, SceneError> {
+        self.resolve_requested(&BTreeMap::new())
+    }
+    /// Validate every requested local and complete world closure before f32 storage.
+    pub fn admit_transform_requests(
+        &self,
+        requests: &[(String, TransformRequest)],
+    ) -> Result<(), SceneError> {
+        let mut overrides = BTreeMap::new();
+        for (id, t) in requests {
+            if self.target_transform(id).is_none() || overrides.contains_key(id) {
+                return Err(invalid("missing or repeated transform target"));
+            }
+            if !t
+                .translation
+                .iter()
+                .chain(&t.rotation)
+                .all(|v| v.is_finite() && v.abs() <= 10000.)
+                || !t
+                    .scale
+                    .iter()
+                    .all(|v| v.is_finite() && *v >= 0.001 && *v <= 1000.)
+            {
+                return Err(invalid("requested local transform exceeds numeric bounds"));
+            }
+            if self.hierarchy.groups.contains_key(id)
+                && (t.scale[0] != t.scale[1] || t.scale[0] != t.scale[2])
+            {
+                return Err(invalid("requested group scale must be uniform"));
+            }
+            if self.lighting.light(id).is_some() && t.scale != [1.; 3] {
+                return Err(invalid("lights retain unit scale"));
+            }
+            let [x, y, z] = t.rotation;
+            overrides.insert(
+                id.clone(),
+                Pose {
+                    position: DVec3::from_array(t.translation),
+                    rotation: DQuat::from_euler(EulerRot::ZYX, z, y, x),
+                    scale: DVec3::from_array(t.scale),
+                },
+            );
+        }
+        self.resolve_requested(&overrides)?;
+        Ok(())
+    }
+    fn resolve_requested(
+        &self,
+        overrides: &BTreeMap<String, Pose>,
+    ) -> Result<ResolvedPoses, SceneError> {
         if self.target_count() > MAX_OBJECTS {
             return Err(invalid("hierarchy combined target budget exceeded"));
         }
@@ -149,16 +324,23 @@ impl Scene {
             let local = self
                 .target_transform(id)
                 .ok_or_else(|| invalid("missing local transform"))?;
-            let mut pose = Pose::from_local(local);
+            let mut pose = overrides
+                .get(id)
+                .copied()
+                .unwrap_or_else(|| Pose::from_local(local));
             // Apply nearest parent first, then its ancestors.
             for parent in chain {
-                pose = Pose::from_local(&self.hierarchy.groups[parent].transform).compose(pose);
+                pose = overrides
+                    .get(parent)
+                    .copied()
+                    .unwrap_or_else(|| Pose::from_local(&self.hierarchy.groups[parent].transform))
+                    .compose(pose);
             }
             // Lights follow position/orientation, but keep authored scale/range/intensity.
             if self.lighting.light(id).is_some() {
                 pose.scale = DVec3::ONE;
             }
-            let stored = if self.hierarchy.parents.contains_key(id) {
+            let stored = if self.hierarchy.parents.contains_key(id) || overrides.contains_key(id) {
                 pose.stored()?
             } else {
                 local.clone()
@@ -201,6 +383,18 @@ pub(crate) fn reject_legacy_fields(value: &serde_json::Value) -> Result<(), Scen
 }
 
 impl Session {
+    pub fn edit_world_transforms(
+        &mut self,
+        expected_revision: u64,
+        edits: &[(String, Transform)],
+    ) -> Result<u64, SceneError> {
+        self.check_revision(expected_revision)?;
+        let locals = self.scene().local_edits_for_world(edits)?;
+        self.edit_transforms(expected_revision, &locals)
+    }
+    pub fn allocate_group_ids(&self, count: usize) -> Result<Vec<String>, SceneError> {
+        allocate_ids("group", count, MAX_OBJECTS, self.reserved_target_ids())
+    }
     pub fn create_group(
         &mut self,
         expected_revision: u64,

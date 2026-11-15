@@ -324,6 +324,9 @@ impl Authoring {
             && self.hud.is_default()
     }
     pub fn validate(&self, scene: &Scene) -> Result<(), SceneError> {
+        if !self.is_empty() {
+            scene.require_flat()?;
+        }
         crate::input::validate_action_map(&self.actions)?;
         self.hud.validate()?;
         if self.sources.len() > MAX_SOURCES || self.bindings.len() > MAX_BINDINGS {

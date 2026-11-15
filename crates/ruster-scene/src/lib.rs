@@ -18,7 +18,7 @@ pub const HIERARCHY_FORMAT_VERSION: u32 = 19;
 pub const MAX_MATERIALS: usize = 64;
 
 mod hierarchy;
-pub use hierarchy::{Group, Hierarchy, ResolvedPoses};
+pub use hierarchy::{Group, Hierarchy, ResolvedPoses, TransformRequest};
 mod authoring;
 mod collider;
 pub mod hud;
@@ -434,6 +434,12 @@ impl Scene {
                     .lights()
                     .find(|(key, _)| *key == id)
                     .map(|(key, light)| light.display_name(key))
+            })
+            .or_else(|| {
+                self.hierarchy
+                    .groups
+                    .get_key_value(id)
+                    .map(|(key, g)| g.name.as_deref().unwrap_or(key))
             })
     }
 
@@ -2611,7 +2617,11 @@ impl Session {
     pub fn path(&self) -> Option<&Path> {
         self.path.as_deref()
     }
-    /// Source format opened, or the current format after a successful save.
+    /// Format required by current content and reversible history.
+    pub fn save_format_version(&self) -> u32 {
+        self.document.required_version()
+    }
+    /// Source format opened, or the required format after a successful save.
     pub fn loaded_format_version(&self) -> u32 {
         self.loaded_format_version
     }
@@ -2741,6 +2751,11 @@ impl Session {
         name: Option<String>,
     ) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
+        if !self.scene().hierarchy.is_empty() {
+            return Err(SceneError::Invalid(
+                "Assembly duplication is unsupported in this milestone".into(),
+            ));
+        }
         if let Some(light) = self.scene().lighting.light(source) {
             let mut light = light.clone();
             if name.is_some() {
@@ -3123,6 +3138,11 @@ impl Session {
         pairs: &[(String, String)],
     ) -> Result<u64, SceneError> {
         self.check_revision(expected_revision)?;
+        if !self.scene().hierarchy.is_empty() {
+            return Err(SceneError::Invalid(
+                "Assembly duplication is unsupported in this milestone".into(),
+            ));
+        }
         if pairs.len() > MAX_OBJECTS {
             return Err(SceneError::Invalid("selection exceeds 256 targets".into()));
         }

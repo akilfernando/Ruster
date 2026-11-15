@@ -81,17 +81,18 @@ pub(crate) struct SpatialWorld {
 impl SpatialWorld {
     pub(crate) fn new(scene: &Scene) -> Result<Self, String> {
         scene.validate().map_err(|error| error.to_string())?;
+        let poses = scene.resolve_poses().map_err(|error| error.to_string())?;
         let mut entries = Vec::new();
         for object in &scene.objects {
             if let Some(collider) = object.collider {
                 if let Some(resolved) = collider
-                    .resolve(&object.transform)
+                    .resolve(&poses.transforms[&object.id])
                     .map_err(|error| error.to_string())?
                 {
                     entries.push(Entry {
                         id: object.id.clone(),
                         resolved,
-                        owner: object.transform.clone(),
+                        owner: poses.transforms[&object.id].clone(),
                         collider,
                     });
                 }
@@ -590,6 +591,43 @@ fn finite_hit(hit: &ShapeCastHit) -> bool {
 mod tests {
     use super::*;
     use ruster_scene::{ColliderShape, Object};
+
+    #[test]
+    fn hierarchy_collider_queries_share_resolved_world_pose() {
+        let mut scene = Scene::empty("assembly-spatial");
+        let mut box_object = wall("box", [1., 0., 0.], [0.5; 3]);
+        box_object.transform.scale = [1., 2., 3.];
+        scene.objects.push(box_object);
+        let mut session = ruster_scene::Session::new(scene).unwrap();
+        session.create_group(0, "assembly", None).unwrap();
+        session.reparent(1, "box", Some("assembly")).unwrap();
+        session
+            .edit(
+                2,
+                "assembly",
+                &Transform {
+                    translation: [3., 0., 0.],
+                    rotation: [0., 0., std::f32::consts::FRAC_PI_2],
+                    scale: [2.; 3],
+                },
+            )
+            .unwrap();
+        let resolved = session.scene().resolve_poses().unwrap();
+        let world = SpatialWorld::new(session.scene()).unwrap();
+        assert_eq!(
+            world.entries[0].owner, resolved.transforms["box"],
+            "spatial queries must not resolve stored locals as world coordinates"
+        );
+        assert_eq!(
+            world.entries[0].resolved,
+            session.scene().objects[0]
+                .collider
+                .unwrap()
+                .resolve(&resolved.transforms["box"])
+                .unwrap()
+                .unwrap()
+        );
+    }
 
     const TOI_TOLERANCE: f64 = 0.0001;
 

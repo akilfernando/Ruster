@@ -920,6 +920,72 @@ pub fn render_viewport_with_materials(
     navigation: &mut NavigationOptions,
     surface: ViewportSurface,
 ) -> ViewportInteraction {
+    // Resolve once for this invocation. This private render input never enters
+    // persistence/export: Scene remains the owner of authored local topology.
+    let mut resolved_input;
+    let mut expanded_selection = Vec::new();
+    let scene = if scene.hierarchy.is_empty() {
+        scene
+    } else {
+        let poses = match scene.resolve_poses() {
+            Ok(poses) => poses,
+            Err(error) => {
+                ui.colored_label(
+                    egui::Color32::RED,
+                    format!("Hierarchy render refused: {error}"),
+                );
+                let (view, projection, gizmo_projection) =
+                    surface.camera.matrices(surface.rect.aspect_ratio());
+                return ViewportInteraction {
+                    receipt: FrameReceipt::default(),
+                    rect: surface.rect,
+                    response: surface.response,
+                    picked: None,
+                    fit_attempted: false,
+                    fit_error: Some(
+                        "Invalid hierarchy: repair the authored scene before rendering.",
+                    ),
+                    view: view.to_cols_array_2d(),
+                    projection: projection.to_cols_array_2d(),
+                    gizmo_projection: gizmo_projection.to_cols_array_2d(),
+                };
+            }
+        };
+        // Selection strings belong to the original scene, not the temporary map.
+        for id in scene
+            .objects
+            .iter()
+            .map(|o| o.id.as_str())
+            .chain(scene.lighting.lights().map(|(id, _)| id))
+        {
+            let mut current = id;
+            loop {
+                if selected.contains(&current) {
+                    expanded_selection.push(id);
+                    break;
+                }
+                let Some(parent) = scene.hierarchy.parents.get(current) else {
+                    break;
+                };
+                current = parent;
+            }
+        }
+        resolved_input = scene.clone();
+        for object in &mut resolved_input.objects {
+            object.transform = poses.transforms[&object.id].clone();
+        }
+        if let ruster_scene::Lighting::Authored { lights, .. } = &mut resolved_input.lighting {
+            for (id, light) in lights {
+                light.transform = poses.transforms[id].clone();
+            }
+        }
+        &resolved_input
+    };
+    let selected = if expanded_selection.is_empty() {
+        selected
+    } else {
+        expanded_selection.as_slice()
+    };
     let ViewportSurface {
         rect,
         response,
@@ -2575,6 +2641,38 @@ fn gpu_durations(values: &[u64], shadow: bool, period: f64) -> Option<(f64, f64,
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hierarchy_viewport_fit_uses_world_pose_without_editing_locals() {
+        let mut scene = Scene::demo();
+        scene.objects.truncate(1);
+        scene.objects[0].transform.translation = [0.; 3];
+        let mut session = ruster_scene::Session::new(scene).unwrap();
+        session.create_group(0, "assembly", None).unwrap();
+        session.reparent(1, "left", Some("assembly")).unwrap();
+        session
+            .edit(
+                2,
+                "assembly",
+                &ruster_scene::Transform {
+                    translation: [5., 0., 0.],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let before = session.snapshot_bytes().unwrap();
+        let ctx = egui::Context::default();
+        let mut navigation = NavigationOptions::default();
+        let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+            viewport_with_navigation(ui, session.scene(), &[], &BTreeMap::new(), &mut navigation);
+        });
+        output.textures_delta.clear();
+        assert_eq!(
+            navigation.camera.unwrap().target,
+            [5., 0., 0.],
+            "real viewport Fit must consume hierarchy world poses"
+        );
+        assert_eq!(session.snapshot_bytes().unwrap(), before);
+    }
     use super::*;
     #[test]
     fn gpu_intervals_preserve_missing_shadow_and_complete_scene_gap() {

@@ -1140,13 +1140,13 @@ pub(crate) mod tests {
         let (owner_b, handshake_b) = approved(&b);
         assert_ne!(handshake_a["binding"], handshake_b["binding"]);
         // Use the owning capability inventory, not a second hand-maintained
-        // matrix. All 79 scene + 5 legacy operations cross the same gate.
+        // matrix. All 81 scene + 5 legacy operations cross the same gate.
         let operations: Vec<_> = crate::scene_editor::SCENE_CAPABILITIES
             .iter()
             .copied()
             .chain(["inspect", "edit", "undo", "redo", "replay"])
             .collect();
-        assert_eq!(operations.len(), 84);
+        assert_eq!(operations.len(), 86);
         for op in operations {
             for bad in ["missing", "wrong", "other_editor"] {
                 let mut request = frame(&handshake_b, op, json!({}));

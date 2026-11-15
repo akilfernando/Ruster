@@ -1051,6 +1051,13 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     if (document.get("format") != "ruster-scene" or type(version) is not int
             or not 1 <= version <= 18 or not isinstance(scene, dict)):
         raise ValueError("content requires a supported Scene1–18 document")
+    # This delivery profile does not support topology, even under an old version.
+    if "hierarchy" in scene or any(
+            isinstance(change, dict) and (change.get("kind") == "hierarchy" or any(
+                isinstance(delta, dict) and delta.get("kind") == "hierarchy"
+                for delta in change.get("scene", []) if isinstance(change.get("scene"), list)))
+            for stack in ("undo", "redo") for change in document.get(stack, [])):
+        raise ValueError("assembly hierarchy requires an unsupported runtime/export capability")
     validate_hud_fields(document)
     validate_primitive_fields(document)
     validate_state_fields(document)

@@ -1,5 +1,13 @@
 # Generic authored scenes
 
+## Bounded hierarchy capability (format 19, WIP)
+
+`Scene.hierarchy` owns `groups: BTreeMap<String, Group>` and target→group `parents`. `Group` stores an optional display name and local Transform. Only groups parent; geometry leaves support existing nonuniform scale, groups require positive exactly uniform scale, and the Sun remains root. Point lights inherit spatial placement but retain authored range/intensity and unit scale. `Scene::resolve_poses` returns an invocation-local world observation; roots are copied exactly. No retained cache is introduced.
+
+`Session::create_group`, `reparent`, `edit_transforms` (local) and `edit_world_transforms` use existing staged Change/history admission, shared revision and reversible identity reservations. Reparent preserves the entire world closure within the disclosed matrix tolerance or refuses. `save_format_version()` reports Scene19 whenever current groups or retained structural history require it; otherwise output remains byte-compatible Scene18 with no hierarchy field. Scene1–18 reject hierarchy at actual scene/history owners. `HIERARCHY_FORMAT_VERSION=19` is separate from the preserved flat `FORMAT_VERSION=18`. Recovery snapshot bytes use the same decoder; raw-draft format remains unchanged.
+
+The current qualification envelope is eight group levels /256 combined targets, not a permanent engine limit. Unsupported legacy authoring/runtime and delivery reject before mutation/execution/publication. [Implementation, owning-callsite inventory and unfinished qualification](../../docs/evidence/ASSEMBLY-HIERARCHY-2026-11-15.md); this candidate is not milestone acceptance.
+
 ## Built-in geometry (format 18)
 
 `Object.primitive: Option<Primitive>` stores `"sphere"` or `"capsule"`. Absent/null remains the unit cube when no mesh is assigned; `None` is omitted from output. A non-null primitive and mesh asset cannot coexist. `Object::procedural` constructs a shape. `Session::set_primitive(revision, object_id, Option<Primitive>)` clears a mesh; `set_mesh` clears the primitive, even when setting `None`. Coupled deltas use one Undo entry. Stale, invalid and equal edits preserve the established transaction/no-op rules.

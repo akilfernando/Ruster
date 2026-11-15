@@ -209,10 +209,16 @@ pub(super) fn paint_and_pick(
     selected: &[String],
     pointer_allowed: bool,
 ) -> Option<String> {
+    let poses = authored_scene.resolve_poses().ok()?;
+    let mut resolved_lighting = authored_scene.lighting.clone();
+    if let ruster_scene::Lighting::Authored { lights, .. } = &mut resolved_lighting {
+        for (id, light) in lights {
+            light.transform = poses.transforms[id].clone();
+        }
+    }
     let vp = view_projection(viewport);
     let view = DMat4::from_cols_array_2d(&viewport.view.map(|column| column.map(f64::from)));
-    let markers: Vec<_> = authored_scene
-        .lighting
+    let markers: Vec<_> = resolved_lighting
         .lights()
         .filter_map(|(id, light)| {
             project(viewport.rect, vp, position(light)).map(|(center, depth)| Marker {
@@ -224,7 +230,7 @@ pub(super) fn paint_and_pick(
         })
         .collect();
     let painter = ui.painter().with_clip_rect(viewport.rect);
-    for (id, light) in authored_scene.lighting.lights() {
+    for (id, light) in resolved_lighting.lights() {
         if selected.iter().any(|selected| selected == id) {
             range_guide(&painter, viewport.rect, vp, light);
         }
@@ -342,6 +348,32 @@ pub(super) fn frame_selection(
     mut camera: ruster_render::CameraState,
     aspect: f32,
 ) -> Option<ruster_render::CameraState> {
+    let poses = scene.resolve_poses().ok()?;
+    let mut closure = Vec::new();
+    let ids = if scene.hierarchy.is_empty() {
+        ids
+    } else {
+        scene.normalize_assembly_selection(ids).ok()?;
+        for id in scene
+            .objects
+            .iter()
+            .map(|o| o.id.as_str())
+            .chain(scene.lighting.lights().map(|(id, _)| id))
+        {
+            let mut current = id;
+            loop {
+                if ids.iter().any(|selected| selected == current) {
+                    closure.push(id.to_owned());
+                    break;
+                }
+                let Some(parent) = scene.hierarchy.parents.get(current) else {
+                    break;
+                };
+                current = parent;
+            }
+        }
+        closure.as_slice()
+    };
     if ids.is_empty()
         || ids.len() > ruster_scene::MAX_OBJECTS
         || !camera.is_valid()
@@ -357,7 +389,7 @@ pub(super) fn frame_selection(
         if ids[..index].contains(id) {
             return None;
         }
-        let transform = scene.target_transform(id)?;
+        let transform = poses.transforms.get(id)?;
         let mut include = |point: DVec3| {
             low = low.min(point);
             high = high.max(point);

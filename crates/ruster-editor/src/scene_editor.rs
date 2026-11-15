@@ -300,6 +300,38 @@ impl HierarchySearch {
                     light: true,
                 }
             }));
+            self.rows
+                .extend(scene.hierarchy.groups.iter().map(|(id, g)| HierarchyRow {
+                    id: id.clone(),
+                    name: format!("Group · {}", g.name.as_deref().unwrap_or(id)),
+                    search:
+                        format!("{id}\n{}\ngroup", g.name.as_deref().unwrap_or(id)).to_lowercase(),
+                    tooltip: format!(
+                        "Assembly group\nStable ID: {id}\nPositive uniform scale only"
+                    ),
+                    light: false,
+                }));
+            if !scene.hierarchy.is_empty() {
+                let path = |id: &str| {
+                    let mut path = vec![id.to_owned()];
+                    let mut current = id;
+                    while let Some(parent) = scene.hierarchy.parents.get(current) {
+                        path.push(parent.clone());
+                        current = parent;
+                    }
+                    path.reverse();
+                    path
+                };
+                self.rows.sort_by_key(|row| path(&row.id));
+                for row in &mut self.rows {
+                    let depth = path(&row.id).len() - 1;
+                    row.name = format!("{}{name}", "  ".repeat(depth), name = row.name);
+                    if let Some(parent) = scene.hierarchy.parents.get(&row.id) {
+                        row.tooltip
+                            .push_str(&format!("\nParent: {parent}\nTransform fields are local"));
+                    }
+                }
+            }
             self.revision = Some(scene.revision);
         }
         if changed || self.query != query {
@@ -2966,6 +2998,10 @@ impl SceneEditor {
             }
         }
     }
+    fn hierarchy_page(scene: &Scene, start: usize) -> Value {
+        let h = &scene.hierarchy;
+        json!({"groups":h.groups.iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"parents":h.parents.iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"group_count":h.groups.len(),"parent_count":h.parents.len(),"next_offset":if start+16<h.groups.len().max(h.parents.len()){Some((start+16).to_string())}else{None}})
+    }
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
         if matches!(
             op,
@@ -3110,12 +3146,12 @@ impl SceneEditor {
             };
             let start = usize::try_from(offset).map_err(|_| err("invalid_arguments"))?;
             let scene = self.session.scene();
-            if start > scene.objects.len() {
+            if start > scene.target_count() {
                 return Err(err("invalid_arguments"));
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"hierarchy":scene.hierarchy,"stored_coordinate_space":"local","resolved_world":scene.resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"object_count":scene.objects.len(),"light_count":scene.lighting.light_count(),"target_count":scene.target_count(),"lighting_mode":if scene.lighting.is_legacy(){"legacy"}else{"authored"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":SCENE_CAPABILITIES}),
+                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"hierarchy":Self::hierarchy_page(scene,start),"resolved_world_count":scene.target_count(),"resolved_world_next_offset":if start+16<scene.target_count(){Some((start+16).to_string())}else{None},"stored_coordinate_space":"local","resolved_world":scene.resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"object_count":scene.objects.len(),"light_count":scene.lighting.light_count(),"target_count":scene.target_count(),"lighting_mode":if scene.lighting.is_legacy(){"legacy"}else{"authored"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":SCENE_CAPABILITIES}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -3155,6 +3191,36 @@ impl SceneEditor {
             return Ok(
                 json!({"session_token":token,"revision":revision.to_string(),"ticks":preview.tick.to_string(),"scene_id":preview.scene.id,"object_count":preview.scene.objects.len(),"fingerprint":preview.scene.fingerprint()}),
             );
+        }
+        if !self.session.scene().hierarchy.is_empty()
+            && matches!(op, "scene_transform" | "scene_transform_many")
+        {
+            let values = if op == "scene_transform" {
+                vec![args.clone()]
+            } else {
+                args["transforms"]
+                    .as_array()
+                    .ok_or_else(|| err("invalid_arguments"))?
+                    .clone()
+            };
+            let requests = values
+                .iter()
+                .map(|v| {
+                    let id = v["object_id"]
+                        .as_str()
+                        .ok_or_else(|| err("invalid_arguments"))?
+                        .to_owned();
+                    let t = serde_json::from_value::<ruster_scene::TransformRequest>(
+                        v["transform"].clone(),
+                    )
+                    .map_err(|_| err("invalid_arguments"))?;
+                    Ok((id, t))
+                })
+                .collect::<Result<Vec<_>, (String, String)>>()?;
+            self.session
+                .scene()
+                .admit_transform_requests(&requests)
+                .map_err(|e| ("invalid_arguments".into(), e.to_string()))?;
         }
         let before = self.session.scene().clone();
         let result = match op {
@@ -3361,12 +3427,14 @@ impl SceneEditor {
         let mut ids: std::collections::BTreeSet<_> =
             before.objects.iter().map(|o| o.id.as_str()).collect();
         ids.extend(self.session.scene().objects.iter().map(|o| o.id.as_str()));
+        let mut changed_targets = std::collections::BTreeSet::<String>::new();
         let mut diff = Vec::with_capacity(16);
         let mut diff_count = 0;
         for id in ids {
             let old = before.objects.iter().find(|o| o.id == id);
             let new = self.session.scene().objects.iter().find(|o| o.id == id);
             if old != new {
+                changed_targets.insert(id.to_owned());
                 diff_count += 1;
                 if diff.len() < 16 {
                     diff.push(json!({"object_id":id,
@@ -3394,14 +3462,35 @@ impl SceneEditor {
                 }
             })
             .collect();
+        for delta in &light_diff {
+            if let Some(id) = delta["light_id"].as_str() {
+                changed_targets.insert(id.to_owned());
+            }
+        }
+        let hierarchy_changed = before.hierarchy != self.session.scene().hierarchy;
+        for id in before
+            .hierarchy
+            .groups
+            .keys()
+            .chain(self.session.scene().hierarchy.groups.keys())
+            .chain(before.hierarchy.parents.keys())
+            .chain(self.session.scene().hierarchy.parents.keys())
+        {
+            if before.hierarchy.groups.get(id) != self.session.scene().hierarchy.groups.get(id)
+                || before.hierarchy.parents.get(id)
+                    != self.session.scene().hierarchy.parents.get(id)
+            {
+                changed_targets.insert(id.clone());
+            }
+        }
         let lighting_changed = before.lighting != self.session.scene().lighting;
         let diff_truncated = diff_count > diff.len();
         self.notice = format!(
             "Agent {op}: revision {revision}; {} targets changed. Preview unchanged.",
-            diff_count + light_diff.len()
+            changed_targets.len()
         );
         Ok(
-            json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"hierarchy":self.session.scene().hierarchy,"stored_coordinate_space":"local","resolved_world":self.session.scene().resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().take(16).collect::<BTreeMap<_,_>>(),"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"light_diff":light_diff,"lighting_changed":lighting_changed,"lighting":self.session.scene().lighting,"changed_target_count":diff_count+light_diff.len(),"dirty":self.session.is_dirty()}),
+            json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"hierarchy":Self::hierarchy_page(self.session.scene(),0),"resolved_world_count":self.session.scene().target_count(),"resolved_world_next_offset":if self.session.scene().target_count()>16{Some("16")}else{None},"stored_coordinate_space":"local","resolved_world":self.session.scene().resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().take(16).collect::<BTreeMap<_,_>>(),"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"light_diff":light_diff,"lighting_changed":lighting_changed,"lighting":self.session.scene().lighting,"changed_target_count":changed_targets.len(),"hierarchy_changed":hierarchy_changed,"changed_target_ids":changed_targets.iter().take(16).collect::<Vec<_>>(),"dirty":self.session.is_dirty()}),
         )
     }
     fn create_entries(ui: &mut egui::Ui) -> Option<ContextAction> {
@@ -3435,6 +3524,75 @@ impl SceneEditor {
             }
         });
     }
+    fn new_group_button(&mut self, ui: &mut egui::Ui) {
+        let enabled = self.guard().is_ok() && !self.manipulation.offset_pending();
+        if ui.add_enabled(enabled,egui::Button::new("New group")).on_hover_text("Create an empty assembly group. Parent targets through the Inspector; shared Undo and save.").clicked() {
+            let result=self.session.allocate_group_ids(1).and_then(|ids| {let id=ids[0].clone();self.session.create_group(self.session.scene().revision,&id,Some(id.clone()))?;Ok(id)});
+            match result {Ok(id)=>{self.selected=Some(id);self.manipulation.select_only(self.selected.clone());self.sync_draft();self.error.clear();self.notice="Created assembly group; one Undo removes it.".into();},Err(e)=>self.error=e.to_string()}
+        }
+    }
+    fn assembly_parent_ui(&mut self, ui: &mut egui::Ui) {
+        if self.manipulation.ids.len() != 1 {
+            return;
+        }
+        let Some(id) = self.selected.clone() else {
+            return;
+        };
+        if self.session.scene().hierarchy.groups.is_empty() {
+            return;
+        }
+        let before = self.session.scene().hierarchy.parents.get(&id).cloned();
+        let mut parent = before.clone();
+        let enabled = self.guard().is_ok()
+            && !self.manipulation.offset_pending()
+            && !self
+                .session
+                .scene()
+                .lighting
+                .light(&id)
+                .is_some_and(|l| matches!(l.kind, ruster_scene::LightKind::Directional { .. }));
+        ui.add_enabled_ui(enabled, |ui| {
+            egui::ComboBox::from_id_salt("assembly-parent")
+                .selected_text(parent.as_deref().unwrap_or("Scene root"))
+                .show_ui(ui, |ui| {
+                    ui.selectable_value(&mut parent, None, "Scene root (detach)");
+                    for (key, g) in &self.session.scene().hierarchy.groups {
+                        if key != &id {
+                            ui.selectable_value(
+                                &mut parent,
+                                Some(key.clone()),
+                                format!("{} ({key})", g.name.as_deref().unwrap_or(key)),
+                            );
+                        }
+                    }
+                });
+        });
+        if parent != before {
+            match self
+                .session
+                .reparent(self.session.scene().revision, &id, parent.as_deref())
+            {
+                Ok(_) => {
+                    self.sync_draft();
+                    self.error.clear();
+                    self.notice="Parent changed with world pose preserved; one Undo restores stored locals.".into();
+                }
+                Err(e) => self.error = e.to_string(),
+            }
+        }
+        ui.small("Transform fields: local to parent. Gizmos: world-space placement.");
+        if self.session.scene().hierarchy.groups.contains_key(&id) {
+            ui.small("Group scale must be positive and uniform on X/Y/Z.");
+        }
+        if let Ok(poses) = self.session.scene().resolve_poses() {
+            if let Some(t) = poses.transforms.get(&id) {
+                ui.small(format!(
+                    "Resolved world position: {:.4}, {:.4}, {:.4}",
+                    t.translation[0], t.translation[1], t.translation[2]
+                ));
+            }
+        }
+    }
     fn hierarchy_contents(&mut self, ui: &mut egui::Ui) {
         ui.heading("Objects");
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
@@ -3467,6 +3625,7 @@ impl SceneEditor {
         }
         ui.horizontal_wrapped(|ui| {
             self.create_menu(ui);
+            self.new_group_button(ui);
             if ui
                 .add_enabled(
                     !self.manipulation.ids.is_empty(),
@@ -3539,7 +3698,7 @@ impl SceneEditor {
                 let mut lights_heading = false;
                 for index in &self.hierarchy_search.visible {
                     let row = &self.hierarchy_search.rows[*index];
-                    if row.light && !lights_heading {
+                    if row.light && !lights_heading && self.session.scene().hierarchy.is_empty() {
                         ui.separator();
                         ui.strong("Lights");
                         lights_heading = true;
@@ -3760,6 +3919,7 @@ impl SceneEditor {
             self.behavior_inspector_ui(ui);
             return;
         }
+        self.assembly_parent_ui(ui);
         if self.runtime.visible {
             self.runtime_transform_ui(ui);
         } else {
@@ -3859,7 +4019,7 @@ impl SceneEditor {
                 ui.label(format!(
                     "Loaded scene format v{}; Save writes v{}.",
                     self.session.loaded_format_version(),
-                    ruster_scene::FORMAT_VERSION
+                    self.session.save_format_version()
                 ));
             });
     }
@@ -8904,14 +9064,144 @@ mod tests {
     }
 
     #[test]
-    fn hierarchy_guarded_session_vertical_tracer() {
+    fn hierarchy_native_create_button_is_guarded_and_undoable() {
         let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
-        let initial = editor.command("host", "scene_inspect", json!({}))["result"].clone();
+        let ctx = egui::Context::default();
+        let frame = |e: &mut SceneEditor, events: Vec<egui::Event>| {
+            let mut out = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| {
+                    e.hierarchy_contents(ui);
+                },
+            );
+            out.textures_delta.clear();
+            out.shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == "New group" => {
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()))
+                    }
+                    _ => None,
+                })
+                .expect("ordinary hierarchy must expose New group")
+        };
+        let rect = frame(&mut editor, vec![]);
+        let pos = rect.center();
+        for pressed in [true, false] {
+            frame(
+                &mut editor,
+                vec![
+                    egui::Event::PointerMoved(pos),
+                    egui::Event::PointerButton {
+                        pos,
+                        button: egui::PointerButton::Primary,
+                        pressed,
+                        modifiers: egui::Modifiers::NONE,
+                    },
+                ],
+            );
+        }
+        assert_eq!(editor.session.scene().hierarchy.groups.len(), 1);
+        assert_eq!(editor.session.undo_len(), 1);
+        assert!(editor
+            .session
+            .scene()
+            .hierarchy
+            .groups
+            .contains_key(editor.selected.as_ref().unwrap()));
+        editor.history(false);
+        assert!(editor.session.scene().hierarchy.groups.is_empty());
+    }
+
+    #[test]
+    fn hierarchy_guarded_request_bounds_are_checked_before_f32_rounding() {
+        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        editor.session.create_group(0, "parent", None).unwrap();
+        editor.session.reparent(1, "left", Some("parent")).unwrap();
+        editor
+            .session
+            .edit(
+                2,
+                "left",
+                &Transform {
+                    translation: [1., 0., 0.],
+                    ..Transform::default()
+                },
+            )
+            .unwrap();
+        editor
+            .session
+            .edit(
+                3,
+                "parent",
+                &Transform {
+                    translation: [9999., 0., 0.],
+                    ..Transform::default()
+                },
+            )
+            .unwrap();
+        let inspect = editor.command("host", "scene_inspect", json!({}))["result"].clone();
+        let before = editor.session.snapshot_bytes().unwrap();
+        let reply=editor.command("host","scene_transform",json!({"expected_session_token":inspect["session_token"],"expected_revision":inspect["revision"],"object_id":"left","transform":{"translation":[1.00000001,0.,0.],"rotation":[0.,0.,0.],"scale":[1.,1.,1.]}}));
+        assert_eq!(
+            reply["ok"], false,
+            "requested world coordinate exceeds 10000 despite local f32 rounding: {reply}"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), before);
+    }
+
+    #[test]
+    fn hierarchy_guarded_session_vertical_tracer() {
+        fn transport(
+            editor: &mut SceneEditor,
+            bridge: &mut crate::bridge::Bridge,
+            stream: &std::os::unix::net::UnixStream,
+            handshake: &Value,
+            op: &str,
+            args: Value,
+        ) -> Value {
+            let mut stream = stream.try_clone().unwrap();
+            let frame = crate::bridge::tests::frame(handshake, op, args);
+            let worker = std::thread::spawn(move || {
+                crate::connection::send(&mut stream, &frame).unwrap();
+                crate::bridge::tests::receive(&mut stream)
+            });
+            let deadline = Instant::now() + Duration::from_secs(4);
+            while !worker.is_finished() {
+                bridge.dispatch_command(|host, op, args| editor.command(host, op, args));
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            worker.join().unwrap()
+        }
+        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let mut bridge = crate::bridge::Bridge::start(egui::Context::default()).unwrap();
+        // Explicitly assumed test consent, not evidence of native human consent.
+        let (stream, handshake) = crate::bridge::tests::approved(&bridge);
+        let initial = transport(
+            &mut editor,
+            &mut bridge,
+            &stream,
+            &handshake,
+            "scene_inspect",
+            json!({}),
+        )["result"]
+            .clone();
         let token = initial["session_token"].as_str().unwrap().to_owned();
-        let call = |editor: &mut SceneEditor, op: &str, mut args: Value| {
+        let mut call = |editor: &mut SceneEditor, op: &str, mut args: Value| {
             args["expected_session_token"] = json!(token);
-            args["expected_revision"] = json!(editor.session.scene().revision.to_string());
-            let reply = editor.command("host", op, args);
+            let should_succeed = args.get("expected_revision").is_none();
+            if should_succeed {
+                args["expected_revision"] = json!(editor.session.scene().revision.to_string());
+            }
+            let reply = transport(editor, &mut bridge, &stream, &handshake, op, args);
+            if !should_succeed {
+                return reply;
+            }
             assert_eq!(reply["ok"], true, "{op}: {reply}");
             reply["result"].clone()
         };
@@ -8935,6 +9225,27 @@ mod tests {
             "scene_reparent",
             json!({"object_id":"left","parent_id":"hinge"}),
         );
+        call(
+            &mut editor,
+            "scene_transform",
+            json!({"object_id":"left","transform":Transform{translation:[-2.,0.,0.],scale:[1.,2.,3.],..Default::default()}}),
+        );
+        call(
+            &mut editor,
+            "scene_collider_set",
+            json!({"object_id":"left","collider":ruster_scene::Collider{enabled:true,shape:ruster_scene::ColliderShape::Box{half_extents:[0.5;3]},..Default::default()}}),
+        );
+        let point = ruster_scene::Light::point(Some("Attached point".into()));
+        call(
+            &mut editor,
+            "scene_light_create",
+            json!({"light_id":"point","light":point}),
+        );
+        call(
+            &mut editor,
+            "scene_reparent",
+            json!({"object_id":"point","parent_id":"hinge"}),
+        );
         let before = editor.session.scene().clone();
         let moved = Transform {
             translation: [3., 0., 0.],
@@ -8947,12 +9258,43 @@ mod tests {
         );
         assert_eq!(receipt["hierarchy"]["parents"]["left"], "hinge");
         assert_eq!(receipt["resolved_world"]["left"]["translation"][0], 1.);
+        assert_eq!(receipt["resolved_world"]["point"]["translation"][0], 3.);
+        assert_eq!(receipt["changed_target_count"], 1);
+        assert_eq!(
+            editor.session.scene().lighting.light("point"),
+            before.lighting.light("point"),
+            "range/intensity and authored local stay unchanged"
+        );
         let stored = editor.session.snapshot_bytes().unwrap();
-        let stale=editor.command("host","scene_reparent",json!({"expected_session_token":token,"expected_revision":"0","object_id":"left","parent_id":null}));
+        let stale = call(
+            &mut editor,
+            "scene_reparent",
+            json!({"expected_revision":"0","object_id":"left","parent_id":null}),
+        );
         assert_eq!(stale["error"]["code"], "stale_revision");
         assert_eq!(editor.session.snapshot_bytes().unwrap(), stored);
         call(&mut editor, "scene_undo", json!({}));
         assert_eq!(editor.session.scene().hierarchy, before.hierarchy);
+        call(&mut editor, "scene_redo", json!({}));
+        call(
+            &mut editor,
+            "scene_transform",
+            json!({"object_id":"hinge","transform":Transform{rotation:[0.,0.,std::f32::consts::FRAC_PI_2],..Default::default()}}),
+        );
+        let world = editor.session.scene().resolve_poses().unwrap().transforms["left"].clone();
+        call(
+            &mut editor,
+            "scene_reparent",
+            json!({"object_id":"left","parent_id":null}),
+        );
+        let detached = editor.session.scene().resolve_poses().unwrap().transforms["left"].clone();
+        assert!(world
+            .translation
+            .into_iter()
+            .zip(detached.translation)
+            .all(|(a, b)| (a - b).abs() < 2e-6));
+        call(&mut editor, "scene_undo", json!({}));
+        assert_eq!(editor.session.scene().hierarchy.parents["left"], "hinge");
         call(&mut editor, "scene_redo", json!({}));
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("assembly.json");
@@ -8962,6 +9304,16 @@ mod tests {
             editor.session.snapshot_bytes().unwrap(),
             reopened.snapshot_bytes().unwrap()
         );
+        assert_eq!(
+            reopened.loaded_format_version(),
+            ruster_scene::HIERARCHY_FORMAT_VERSION
+        );
+        drop(stream);
+        let deadline = Instant::now() + Duration::from_secs(3);
+        while !bridge.poll_retired() {
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     #[test]

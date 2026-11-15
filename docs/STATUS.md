@@ -1,32 +1,32 @@
 # Current project status
 
-## Integrated assembly Session tracer — 2026-11-15
+## Integrated assembly implementation checkpoint — 2026-11-15
 
-**WIP, milestone not accepted.** Exclusive `feat/assembly-hierarchy-20261115`
-now has production Scene-owned groups/parent links and invocation-local world
-resolution. Existing Session Change/staging/history owns group creation,
-world-preserving reparent, group local transforms and Undo/Redo. Guarded editor
-commands `scene_group_create`/`scene_reparent` and existing transform/Undo commands
-return topology and labeled resolved-world observations; MCP advertises the new
-shapes. Flat documents continue emitting Scene18; documents retaining hierarchy
-or structural history explicitly emit Scene19. Legacy Scene1–18 rejects hierarchy
-fields at owning scene/history boundaries.
+**WIP, approved milestone incomplete.** Production Scene topology/resolution now
+participates in existing Session Change/history/persistence. The real guarded Unix
+bridge creator tracer creates nested groups, nonuniform box/collider and attached
+point light, moves the assembly, rotates the hinge, detaches, Undo/Redoes, saves
+and opens a fresh identical Session. Native UI adds New group, indented topology,
+Inspector parent/detach and labeled local/world values. Existing renderer/Fit/pick/
+normal/shadow/light preparation, spatial queries and native gizmos consume shared
+resolved poses; no persistent cache or delivery flattening. Flat saves remain
+Scene18; hierarchy/history explicitly requires Scene19. Unsupported legacy
+runtime/authoring/export paths reject; Rust/Python delivery boundaries agree.
 
-Observed RED: missing Scene19 admission, unsupported structural editor command,
-and ninth-level admission. GREEN: complete scene suite56+CLI1, MCP16 and actual
-headless SceneEditor guarded nested group/parent/move/Undo/Redo/save/fresh Session
-open tracer. These are shared-operation tests, **not** native window interaction,
-a live MCP socket journey or actual ChatGPT acceptance. Logs and isolated target:
-`/home/akilf/Projects/Ruster-Audits/assembly-hierarchy-20261115/` (`checkpoint-pass.log`).
-A wrong Cargo format package name and two stale MCP inventory expectations are
-retained failed preparations, not product acceptance.
+**Real native progress:** private software-Vulkan app created/nested two groups,
+created/parented a cube, applied scale `[1,2,1]` and moved its assembly to `[3,0,0]`.
+Actual recovery checkpoint revision7 confirms these edits/history. This is not
+Save acceptance. Screenshot timed out; the finite private lease expired before
+Save/reopen. Owned native/compositor/listener/service cleanup is verified; no host
+input/focus/workspace actions. Independent STDIO MCP process, full native compound
+journey, rendered-pixel/f32-normal proof and remaining raw-world gesture/budget
+qualification are unfinished. [Exact source/format inventory, commands, failures,
+artifacts and next executable work](evidence/ASSEMBLY-HIERARCHY-2026-11-15.md).
 
-Remaining: native controls; renderer/normal/shadow/pick/Fit/gizmo/light/collider
-consumer wiring; precise raw-request/world admission; compatibility/runtime/export
-refusals and Rust/Python agreement; target/history budget and numerical qualification;
-actual native and independent MCP creator journeys; change gate/review. Current
-writer continues the coupled milestone; no install/merge/release, desktop/global
-input, canonical/private or sibling checkout changes.
+Default full gate passed43.65s before final bounded refinements; final-source gate
+and inspection lint/build evidence must be recorded separately. Audit/isolated
+target: `/home/akilf/Projects/Ruster-Audits/assembly-hierarchy-20261115/`.
+No milestone acceptance, install, release, canonical merge or sibling/private work.
 
 ## Bounded integrated assembly hierarchy approved — 2026-11-15
 

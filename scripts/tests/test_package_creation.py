@@ -22,6 +22,19 @@ import package_creation
 
 
 class CreationDistributionTests(unittest.TestCase):
+    def test_hierarchy_capability_is_never_silently_packaged(self):
+        for version in (18, 19):
+            for history in (False, True):
+                document = {"format": "ruster-scene", "format_version": version,
+                            "scene": {"objects": []}, "undo": [], "redo": []}
+                hierarchy = {"groups": {}, "parents": {}}
+                if history:
+                    document["undo"] = [{"scene": [{"kind": "hierarchy", "before": hierarchy, "after": hierarchy}]}]
+                else:
+                    document["scene"]["hierarchy"] = hierarchy
+                with self.assertRaises(ValueError):
+                    package_creation.scene_dependencies(document)
+
     def test_primitive_owners_and_history_are_versioned_not_assets(self):
         obj = {"id": "shape", "primitive": "sphere"}
         document = {"format": "ruster-scene", "format_version": 18,

@@ -8,7 +8,16 @@ cargo run --locked -p ruster-editor -- --scene examples/content/scene.json
 
 See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-content-and-shader-iteration-m6) below for their controls. The [editor experience baseline](../../docs/EDITOR-EXPERIENCE.md) records required usability still to deliver.
 
-Current source saves Scene18 and raw drafts in Recovery15. E1 adds built-in sphere/capsule geometry with content14, the exact cumulative `builtin_primitives` runtime profile and Descriptor5. The Scene17/content13 F3c checkpoint added state-driven panels. F3a/F3b retain their accepted checkpoints. F3c has passed its bounded qualification. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
+Current source saves flat documents as Scene18; assembly content or retained structural history explicitly requires Scene19. Raw drafts remain Recovery15. E1 adds built-in sphere/capsule geometry with content14, the exact cumulative `builtin_primitives` runtime profile and Descriptor5. The Scene17/content13 F3c checkpoint added state-driven panels. F3a/F3b retain their accepted checkpoints. F3c has passed its bounded qualification. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
+
+## Bounded assembly hierarchy — implementation WIP
+
+**New group** in the Objects panel creates a scene-owned empty group. Select one target and use the Inspector's parent dropdown to attach it to a group, or choose **Scene root (detach)**. Reparent preserves the complete descendant world closure within a per-matrix-element `2e-6 * max(1, abs(original))` bound or refuses without changing history. This is tolerance-bounded preservation, not bit-exact world preservation; Undo restores the actual stored locals.
+
+Indented group/object/light rows expose topology. Transform fields are **local to the parent**; gizmo placement and the labeled resolved-position observation are world-space. Groups require positive uniform X/Y/Z scale; geometry leaves retain supported nonuniform scale. Attached point lights follow position/orientation without changing their authored range or intensity. The Sun remains scene-level. Shared Undo/Redo and Save retain topology/local history without requiring an AI service. The qualification envelope is eight group levels and 256 combined targets, not a permanent engine capacity promise.
+
+This candidate rejects hierarchy with legacy behavior/HUD/input authoring and rejects incompatible runtime/export operations before execution/publication. Assembly duplication and copying are not implemented; they reject instead of copying locals into unparented substitutes. Flat workflows retain their existing format/arithmetic. The native creator journey and rendered appearance are **not fully qualified**; see [integrated implementation evidence and precise remaining gaps](../../docs/evidence/ASSEMBLY-HIERARCHY-2026-11-15.md).
+
 
 ## Local AI binding — CP2 candidate
 

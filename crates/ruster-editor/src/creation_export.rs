@@ -67,6 +67,7 @@ pub(crate) struct Request {
 pub(crate) fn scene_dependencies(
     scene: &ruster_scene::Scene,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
+    scene.require_flat().map_err(|e| e.to_string())?;
     scene.validate().map_err(|e| e.to_string())?;
     let meshes: BTreeSet<_> = scene
         .objects
@@ -1565,6 +1566,15 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn hierarchy_delivery_is_rejected_before_dependency_publication() {
+        let mut session = ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap();
+        session.create_group(0, "assembly", None).unwrap();
+        assert!(
+            scene_dependencies(session.scene()).is_err(),
+            "hierarchy delivery must not flatten"
+        );
+    }
 
     // Real helper IPC must retain renderer f32 identity despite an intermediate
     // f64 JSON roundtrip; different, invalid and unrequested framing still fail.

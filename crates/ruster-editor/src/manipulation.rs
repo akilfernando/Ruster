@@ -106,7 +106,15 @@ fn proxy_for(
     pivot: Pivot,
     local: bool,
 ) -> Result<GizmoTransform, String> {
-    let transforms = selected_transforms(session.scene(), ids)?;
+    let poses = session.scene().resolve_poses().map_err(|e| e.to_string())?;
+    let normalized = session
+        .scene()
+        .normalize_assembly_selection(ids)
+        .map_err(|e| e.to_string())?;
+    let transforms = normalized
+        .iter()
+        .map(|id| &poses.transforms[id])
+        .collect::<Vec<_>>();
     let mut center = DVec3::ZERO;
     for transform in &transforms {
         center += DVec3::from_array(transform.translation.map(f64::from));
@@ -114,7 +122,7 @@ fn proxy_for(
     let active = transforms
         .last()
         .ok_or("Select geometry or a light first.")?;
-    center /= ids.len() as f64;
+    center /= normalized.len() as f64;
     let position = if pivot == Pivot::Active {
         DVec3::from_array(active.translation.map(f64::from))
     } else {
@@ -153,7 +161,14 @@ impl Gesture {
         pivot: Pivot,
         local: bool,
     ) -> Result<Self, String> {
-        let transforms = selected_transforms(session.scene(), ids)?;
+        selected_transforms(session.scene(), ids)?;
+        let normalized = session
+            .scene()
+            .normalize_assembly_selection(ids)
+            .map_err(|e| e.to_string())?;
+        let ids = normalized.as_slice();
+        let poses = session.scene().resolve_poses().map_err(|e| e.to_string())?;
+        let transforms = ids.iter().map(|id| &poses.transforms[id]);
         if tool == Tool::Scale {
             reject_light_scale(session.scene(), ids)?;
         }
@@ -246,7 +261,7 @@ impl Gesture {
     }
     fn commit(self, session: &mut Session) -> Result<u64, String> {
         session
-            .edit_transforms(self.revision, &self.candidate)
+            .edit_world_transforms(self.revision, &self.candidate)
             .map_err(|e| e.to_string())
     }
 }
@@ -571,6 +586,48 @@ impl Manipulation {
         if !self.precision_pending() {
             return Ok(());
         }
+        if !session.scene().hierarchy.is_empty() {
+            let requests = self
+                .ids
+                .iter()
+                .zip(&selected)
+                .map(|(id, t)| {
+                    let mut requested = ruster_scene::TransformRequest {
+                        translation: t.translation.map(f64::from),
+                        rotation: t.rotation.map(f64::from),
+                        scale: t.scale.map(f64::from),
+                    };
+                    for (i, text) in self
+                        .precision
+                        .iter()
+                        .enumerate()
+                        .filter(|(i, _)| self.edited[*i])
+                    {
+                        let value = text.trim().parse::<f64>().map_err(|_| {
+                            "Enter finite transform values; the draft is preserved.".to_owned()
+                        })?;
+                        if i < 3 {
+                            requested.translation[i] = value;
+                        } else if i < 6 {
+                            let axis = i - 3;
+                            if value != f64::from(self.rotation_unit.display(t.rotation[axis])) {
+                                requested.rotation[axis] = match self.rotation_unit {
+                                    AngleUnit::Radians => value,
+                                    AngleUnit::Degrees => value.to_radians(),
+                                };
+                            }
+                        } else {
+                            requested.scale[i - 6] = value;
+                        }
+                    }
+                    Ok((id.clone(), requested))
+                })
+                .collect::<Result<Vec<_>, String>>()?;
+            session
+                .scene()
+                .admit_transform_requests(&requests)
+                .map_err(|e| e.to_string())?;
+        }
         let mut values = [0.0_f32; 9];
         for (i, text) in self
             .precision
@@ -757,6 +814,7 @@ impl Manipulation {
         root: Option<&Path>,
         document_generation: u64,
     ) -> Result<(), String> {
+        session.scene().require_flat().map_err(|_|"Assembly clipboard is not supported in this milestone; no local transforms were copied.".to_string())?;
         selected_transforms(session.scene(), &self.ids)?;
         let mut objects = Vec::new();
         let mut lights = BTreeMap::new();
@@ -890,7 +948,13 @@ impl Manipulation {
         Ok(())
     }
     pub fn apply_delta(&self, session: &mut Session) -> Result<(), String> {
-        let selected = selected_transforms(session.scene(), &self.ids)?;
+        selected_transforms(session.scene(), &self.ids)?;
+        let normalized = session
+            .scene()
+            .normalize_assembly_selection(&self.ids)
+            .map_err(|e| e.to_string())?;
+        let poses = session.scene().resolve_poses().map_err(|e| e.to_string())?;
+        let selected = normalized.iter().map(|id| &poses.transforms[id]);
         let mut delta = [0.0_f32; 3];
         for (axis, text) in self.delta.iter().enumerate() {
             delta[axis] = text
@@ -902,7 +966,7 @@ impl Manipulation {
             }
         }
         let mut edits = Vec::with_capacity(self.ids.len());
-        for (id, original) in self.ids.iter().zip(selected) {
+        for (id, original) in normalized.iter().zip(selected) {
             let mut transform = original.clone();
             for (value, offset) in transform.translation.iter_mut().zip(delta) {
                 *value += offset;
@@ -910,7 +974,7 @@ impl Manipulation {
             edits.push((id.clone(), transform));
         }
         session
-            .edit_transforms(session.scene().revision, &edits)
+            .edit_world_transforms(session.scene().revision, &edits)
             .map_err(|e| e.to_string())?;
         Ok(())
     }
@@ -925,23 +989,7 @@ impl Manipulation {
             .map(|(id, _)| id.clone())
             .collect::<Vec<_>>();
         selected_transforms(scene, &ids).ok()?;
-        let mut candidate = scene.clone();
-        for (id, transform) in &gesture.candidate {
-            transform.validate().ok()?;
-            if let Some(object) = candidate.objects.iter_mut().find(|object| &object.id == id) {
-                object.transform.clone_from(transform);
-            } else {
-                if transform.scale != [1.; 3] {
-                    return None;
-                }
-                let ruster_scene::Lighting::Authored { lights, .. } = &mut candidate.lighting
-                else {
-                    return None;
-                };
-                lights.get_mut(id)?.transform.clone_from(transform);
-            }
-        }
-        Some(candidate)
+        scene.preview_world_transforms(&gesture.candidate).ok()
     }
     /// Returns true when the overlay owns the pointer (including a release).
     pub fn draw(
@@ -1090,6 +1138,75 @@ impl Manipulation {
 mod tests {
     use super::*;
     use egui::{Event, Modifiers, PointerButton, Pos2, RawInput, Rect};
+
+    #[test]
+    fn hierarchy_gizmo_moves_in_world_and_normalizes_ancestor_selection() {
+        let mut scene = Scene::empty("gizmo-assembly");
+        let mut object = Object::cube("box", None);
+        object.transform.translation = [1., 0., 0.];
+        scene.objects.push(object);
+        let mut session = Session::new(scene).unwrap();
+        session.create_group(0, "assembly", None).unwrap();
+        session.reparent(1, "box", Some("assembly")).unwrap();
+        session
+            .edit(
+                2,
+                "assembly",
+                &Transform {
+                    translation: [3., 0., 0.],
+                    rotation: [0., 0., std::f32::consts::FRAC_PI_2],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let mut gesture = Gesture::begin(&session, &["box".into()]).unwrap();
+        let p = DVec3::from(gesture.proxy.translation);
+        assert!(
+            (p - DVec3::new(3., 1., 0.)).length() < 1e-6,
+            "gizmo must start at resolved world pose: {p}"
+        );
+        let mut moved = gesture.proxy;
+        moved.translation = (p + DVec3::new(2., 0., 0.)).into();
+        gesture.transform(moved).unwrap();
+        let before = session.snapshot_bytes().unwrap();
+        gesture.commit(&mut session).unwrap();
+        let world = session.scene().resolve_poses().unwrap().transforms["box"].translation;
+        assert!((DVec3::from_array(world.map(f64::from)) - DVec3::new(5., 1., 0.)).length() < 2e-6);
+        session.undo(session.scene().revision).unwrap();
+        assert_ne!(
+            session.snapshot_bytes().unwrap(),
+            before,
+            "Undo revision remains monotonic"
+        );
+        let gesture = Gesture::begin(&session, &["assembly".into(), "box".into()]).unwrap();
+        assert_eq!(
+            gesture.start.len(),
+            1,
+            "ancestor selection must transform child once"
+        );
+        session
+            .edit(
+                session.scene().revision,
+                "assembly",
+                &Transform {
+                    translation: [9999., 0., 0.],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let mut m = Manipulation::default();
+        m.select_only(Some("box".into()));
+        m.reset_precision(session.scene()).unwrap();
+        m.precision[0] = "1.00000001".into();
+        m.edited[0] = true;
+        m.precision_revision = Some(session.scene().revision);
+        let before = session.snapshot_bytes().unwrap();
+        assert!(
+            m.apply_precision(&mut session).is_err(),
+            "native raw precision must not round an out-of-domain world request back inside"
+        );
+        assert_eq!(session.snapshot_bytes().unwrap(), before);
+    }
 
     fn assert_orientation(actual: [f32; 3], expected: DQuat) {
         let t = Transform {

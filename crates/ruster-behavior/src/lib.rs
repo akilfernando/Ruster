@@ -547,6 +547,7 @@ impl Engine {
     pub fn reset(&mut self, scene: &Scene, authoring: &Authoring) -> Result<Runtime, Diagnostic> {
         scene
             .validate()
+            .and_then(|()| scene.require_flat())
             .and_then(|()| authoring.validate(scene))
             .map_err(|e| {
                 Diagnostic::plain(

@@ -151,7 +151,7 @@ fn run() -> Result<(), Box<dyn Error>> {
                 session.authoring().sources.len(),
                 session.authoring().bindings.len()
             );
-            if session.loaded_format_version() != FORMAT_VERSION {
+            if session.loaded_format_version() < FORMAT_VERSION {
                 println!("older scene opened; next save upgrades to v{FORMAT_VERSION}, preserving history");
             }
         }
