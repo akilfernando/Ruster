@@ -1903,6 +1903,8 @@ fn check_serialized_size(
         lighting: &'a Lighting,
         #[serde(skip_serializing_if = "DisplayProfile::is_legacy")]
         display: &'a DisplayProfile,
+        #[serde(skip_serializing_if = "Hierarchy::is_empty")]
+        hierarchy: &'a Hierarchy,
     }
     impl<'a> From<&'a Scene> for SceneView<'a> {
         fn from(scene: &'a Scene) -> Self {
@@ -1913,6 +1915,7 @@ fn check_serialized_size(
                 materials: &scene.materials,
                 lighting: &scene.lighting,
                 display: &scene.display,
+                hierarchy: &scene.hierarchy,
             }
         }
     }
@@ -5516,6 +5519,49 @@ mod tests {
         );
         session.undo(5).unwrap();
         assert_eq!(session.scene().objects, before.scene.objects);
+
+        // Whole structural maps are retained by parent/detach edits. Admission
+        // must count the current map as well as every reachable history payload.
+        let mut structural = Scene::empty("structural-byte-boundary");
+        let ids: Vec<_> = (0..240)
+            .map(|i| format!("group-{i}-{}", "g".repeat(110)))
+            .collect();
+        for id in &ids {
+            structural.hierarchy.groups.insert(
+                id.clone(),
+                Group {
+                    name: Some("n".repeat(128)),
+                    transform: Transform::default(),
+                },
+            );
+        }
+        let mut structural = Session::new(structural).unwrap();
+        for i in 0..8 {
+            let parent = (i % 2 == 0).then_some(ids[0].as_str());
+            structural
+                .reparent(structural.scene().revision, &ids[1], parent)
+                .unwrap();
+            let bytes = structural
+                .snapshot_bytes()
+                .expect("admitted hierarchy must encode");
+            assert!(bytes.len() as u64 <= MAX_FILE_BYTES);
+            let mut reopened = Session::from_snapshot_bytes(&bytes).unwrap();
+            while reopened.undo_len() > 0 {
+                reopened.undo(reopened.scene().revision).unwrap();
+                let bytes = reopened
+                    .snapshot_bytes()
+                    .expect("retained Undo must encode");
+                Session::from_snapshot_bytes(&bytes).unwrap();
+            }
+            while reopened.redo_len() > 0 {
+                reopened.redo(reopened.scene().revision).unwrap();
+                let bytes = reopened
+                    .snapshot_bytes()
+                    .expect("retained Redo must encode");
+                Session::from_snapshot_bytes(&bytes).unwrap();
+            }
+        }
+        assert!(structural.history_evictions() > 0);
 
         let mut large = Session::new(Scene::empty("large")).unwrap();
         large
