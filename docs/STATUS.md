@@ -1,5 +1,31 @@
 # Current project status
 
+## Consequential hierarchy review repairs — 2026-11-15
+
+**Both reported blockers reproduced and repaired; milestone NOT accepted.**
+`8fcb082` includes hierarchy (with the real empty-map omission) in current and
+reachable Undo/Redo byte admission. A reachable240-group parent/detach sequence
+previously committed an unencodable document; the existing byte-bound owning test
+now requires encoding/reopening current and retained Undo/Redo states with eviction.
+`de1c3dd` compares original f64 local/world descendant closures against the exact
+staged stored scene, including resolved storage. The in-bounds parent9999.0001 /
+child-local−9999 cancellation reproduces incorrect MCP admission and world gizmo
+admission before repair. Native precision compares its actual parsed/angle-converted
+fields; world gesture/offset comparison follows actual narrow-world→invert→store.
+No budget or tolerance was loosened; snapshot/history/revision/save and gesture
+candidate/proxy refusal authority is preserved. Meaningful geometry and light-only
+unselected-descendant cases, no-op/inward controls and ancestor normalization pass.
+
+Final code `ac0b87c` also qualifies mixed geometry/light/group256-target admission
+and atomic257th refusal, plus production Session/resolution and actual f32
+model/inverse-transpose construction for rotated nonuniform geometry and a
+cancellation-sensitive closure in the existing CPU consumer test. This is not GPU
+appearance, graphical Host Save/fresh-process, physical-input or milestone acceptance.
+Full workspace gate passes61.85s:373Rust/31Python, six explicitly ignored fixtures;
+strict inspection all-target Clippy and actual default/inspection builds pass.
+[Raw RED/GREEN logs, exact source checkpoints and remaining acceptance](evidence/ASSEMBLY-HIERARCHY-2026-11-15.md#consequential-review-repair-qualification).
+No desktop/compositor retry, installation, release, canonical/sibling/private edits.
+
 ## Original-precision native manipulation repair — 2026-11-15
 
 **Bounded repair verified; hierarchy milestone still incomplete.** The existing

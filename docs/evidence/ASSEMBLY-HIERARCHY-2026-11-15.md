@@ -217,6 +217,52 @@ fixture explicitly ignored in that invocation (run independently above).
 owner, raw evidence and independent cleanup; historical `manifest.json` is not
 rewritten as if its old artifacts contained this repair.
 
+## Consequential review repair qualification
+
+The read-only review's two source-inferred blockers are now executed defects,
+repaired in this same exclusive checkout. Source checkpoints (all pushed and
+remote-verified):
+
+- Starting source: `f9bf7a4c94372f52a6effe99dff0412b62eb214f`.
+- History repair: `8fcb0828bc55a1ab870327fc810b2935fa7b8dda`.
+- Original-to-stored closure repair: `de1c3dd974d3adebf4e7f4222efcef630eea4c90`.
+- Final code/owning-test input: `ac0b87cea45090bee477356e3bcd063aae41ab70`.
+
+All logs below are under the audit root already named above; commands use its
+existing `target` and serialize with nonblocking
+`/home/akilf/.hermes/qa/rusterize/state/gate.lock`.
+
+| Evidence | Actual result |
+| --- | --- |
+| `history-hierarchy-red.log` | First 256-group fixture passed: not a reproduction; its map/step sizes left sufficient headroom. Not counted as RED. |
+| `history-hierarchy-red-2.log` | Existing `grouped_edits_are_atomic_one_step_and_byte_bounded` with 240 valid groups (84,395-byte empty-parent hierarchy) and real parent/detach edits fails after admission: `snapshot_bytes()` returns `Capacity`. Test-first against starting production. |
+| `history-hierarchy-green.log` | Same owning case passes after adding hierarchy to `SceneView` with actual `Hierarchy::is_empty` behavior. Every admitted current state and all retained Undo/Redo states encode and reopen; byte eviction occurs. 14.62s test execution. |
+| `descendant-fidelity-red.log` | Before the precision repair, both existing editor request and manipulation hierarchy cases fail on identity parent requested X9999.0001 / geometry-local X−9999. MCP incorrectly returns success with child world X0; world Gesture incorrectly admits. Four other hierarchy cases pass, opt-in STDIO fixture ignored. |
+| `descendant-fidelity-green.log` | Repaired original f64→exact staged storage comparison: six hierarchy cases pass, opt-in STDIO fixture ignored. Direct single/many command refusal and native precision/world offset/gizmo refusal preserve authority. |
+| `review-seams-green.log` | Existing mixed-capacity case admits combined 256 and atomically refuses 257; existing CPU renderer case passes production Session/resolution, actual f32 model and inverse-transpose arithmetic, rotated nonuniform leaf, light/collider/pick/Fit and cancellation closure. All eight manipulation cases pass, including a light-only cancellation whose geometry cannot force refusal. |
+| `review-repair-full-gate.log` | On final code `ac0b87c`, `python3 scripts/check.py --full` passes 61.85s: 373 Rust passed, 31 Python passed, six existing explicitly ignored fixtures; workspace formatting, strict all-target Clippy and Markdown checks pass. |
+| `review-repair-builds.log` | On the same code: strict inspection-feature all-target Clippy passes 3.87s; actual default editor/MCP build passes 5.88s; actual inspection editor build passes 8.36s. No native process launched. |
+
+The original-reference comparison uses complete resolved requested matrices and
+compares both the exact staged scene's resolved poses and its flattened stored TRS.
+Native precision supplies its actual f32/angle-converted edits to this comparison;
+world admission stages the actual narrow-world→parent-invert→local-store route.
+The fixed tolerance and 1 MiB budget are unchanged. Group/light/depth/target
+constraints and flat compatibility retain their existing owners. The tiny shared
+`instance_matrices` extraction is the actual production model/normal construction,
+not a parallel test-only arithmetic implementation. CPU checks establish neither
+GPU/shader behavior nor rendered appearance.
+
+This qualification supersedes the **missing CPU f32-model/normal and combined
+capacity/storage-fidelity evidence** in items 3–4 below, not the remaining native
+visual channels. No new independent post-repair review was run. Ordinary graphical
+Host Save→fresh graphical process, rendered pixels/appearance, native capture/lease
+blocker and consequential final acceptance remain separate and incomplete. The
+previous independent STDIO fixture remains historical evidence; it was not rerun
+or relabeled as a fresh graphical-process pass for this repair. Next step: parent
+review of this source/evidence, then the already-bounded native acceptance route.
+No desktop/compositor retries, lease changes, installation or sibling edits occurred.
+
 ## Exact remaining acceptance / continuation
 
 The approved milestone remains incomplete:
