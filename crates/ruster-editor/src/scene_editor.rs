@@ -119,6 +119,8 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "behavior_action_remove",
     "scene_inspect",
     "scene_transform",
+    "scene_group_create",
+    "scene_reparent",
     "scene_create",
     "scene_primitive",
     "scene_rename",
@@ -3038,6 +3040,18 @@ impl SceneEditor {
                 "object_id",
                 "transform",
             ],
+            "scene_group_create" => &[
+                "expected_session_token",
+                "expected_revision",
+                "object_id",
+                "name",
+            ],
+            "scene_reparent" => &[
+                "expected_session_token",
+                "expected_revision",
+                "object_id",
+                "parent_id",
+            ],
             "scene_create" => &[
                 "expected_session_token",
                 "expected_revision",
@@ -3101,7 +3115,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"object_count":scene.objects.len(),"light_count":scene.lighting.light_count(),"target_count":scene.target_count(),"lighting_mode":if scene.lighting.is_legacy(){"legacy"}else{"authored"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":SCENE_CAPABILITIES}),
+                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"hierarchy":scene.hierarchy,"stored_coordinate_space":"local","resolved_world":scene.resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"object_count":scene.objects.len(),"light_count":scene.lighting.light_count(),"target_count":scene.target_count(),"lighting_mode":if scene.lighting.is_legacy(){"legacy"}else{"authored"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":SCENE_CAPABILITIES}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -3144,6 +3158,26 @@ impl SceneEditor {
         }
         let before = self.session.scene().clone();
         let result = match op {
+            "scene_group_create" => {
+                let id = args["object_id"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let name = args["name"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                self.session.create_group(revision, id, Some(name.into()))
+            }
+            "scene_reparent" => {
+                let id = args["object_id"]
+                    .as_str()
+                    .ok_or_else(|| err("invalid_arguments"))?;
+                let parent = match args.get("parent_id") {
+                    Some(Value::Null) => None,
+                    Some(Value::String(s)) => Some(s.as_str()),
+                    _ => return Err(err("invalid_arguments")),
+                };
+                self.session.reparent(revision, id, parent)
+            }
             "scene_transform" => {
                 let id = args["object_id"]
                     .as_str()
@@ -3367,7 +3401,7 @@ impl SceneEditor {
             diff_count + light_diff.len()
         );
         Ok(
-            json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"light_diff":light_diff,"lighting_changed":lighting_changed,"lighting":self.session.scene().lighting,"changed_target_count":diff_count+light_diff.len(),"dirty":self.session.is_dirty()}),
+            json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"hierarchy":self.session.scene().hierarchy,"stored_coordinate_space":"local","resolved_world":self.session.scene().resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().take(16).collect::<BTreeMap<_,_>>(),"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"light_diff":light_diff,"lighting_changed":lighting_changed,"lighting":self.session.scene().lighting,"changed_target_count":diff_count+light_diff.len(),"dirty":self.session.is_dirty()}),
         )
     }
     fn create_entries(ui: &mut egui::Ui) -> Option<ContextAction> {
@@ -8867,6 +8901,67 @@ mod tests {
         assert!(!e.drafts());
         assert!(e.error.is_empty());
         assert_eq!(e.session.scene(), &initial);
+    }
+
+    #[test]
+    fn hierarchy_guarded_session_vertical_tracer() {
+        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let initial = editor.command("host", "scene_inspect", json!({}))["result"].clone();
+        let token = initial["session_token"].as_str().unwrap().to_owned();
+        let call = |editor: &mut SceneEditor, op: &str, mut args: Value| {
+            args["expected_session_token"] = json!(token);
+            args["expected_revision"] = json!(editor.session.scene().revision.to_string());
+            let reply = editor.command("host", op, args);
+            assert_eq!(reply["ok"], true, "{op}: {reply}");
+            reply["result"].clone()
+        };
+        call(
+            &mut editor,
+            "scene_group_create",
+            json!({"object_id":"assembly","name":"Assembly"}),
+        );
+        call(
+            &mut editor,
+            "scene_group_create",
+            json!({"object_id":"hinge","name":"Hinge"}),
+        );
+        call(
+            &mut editor,
+            "scene_reparent",
+            json!({"object_id":"hinge","parent_id":"assembly"}),
+        );
+        call(
+            &mut editor,
+            "scene_reparent",
+            json!({"object_id":"left","parent_id":"hinge"}),
+        );
+        let before = editor.session.scene().clone();
+        let moved = Transform {
+            translation: [3., 0., 0.],
+            ..Transform::default()
+        };
+        let receipt = call(
+            &mut editor,
+            "scene_transform",
+            json!({"object_id":"assembly","transform":moved}),
+        );
+        assert_eq!(receipt["hierarchy"]["parents"]["left"], "hinge");
+        assert_eq!(receipt["resolved_world"]["left"]["translation"][0], 1.);
+        let stored = editor.session.snapshot_bytes().unwrap();
+        let stale=editor.command("host","scene_reparent",json!({"expected_session_token":token,"expected_revision":"0","object_id":"left","parent_id":null}));
+        assert_eq!(stale["error"]["code"], "stale_revision");
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), stored);
+        call(&mut editor, "scene_undo", json!({}));
+        assert_eq!(editor.session.scene().hierarchy, before.hierarchy);
+        call(&mut editor, "scene_redo", json!({}));
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("assembly.json");
+        editor.session.save(&path).unwrap();
+        let reopened = Session::open(&path).unwrap();
+        assert_eq!(
+            editor.session.snapshot_bytes().unwrap(),
+            reopened.snapshot_bytes().unwrap()
+        );
     }
 
     #[test]

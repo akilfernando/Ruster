@@ -12,9 +12,13 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+/// Flat-scene wire format remains unchanged. Hierarchy is an explicit capability.
 pub const FORMAT_VERSION: u32 = 18;
+pub const HIERARCHY_FORMAT_VERSION: u32 = 19;
 pub const MAX_MATERIALS: usize = 64;
 
+mod hierarchy;
+pub use hierarchy::{Group, Hierarchy, ResolvedPoses};
 mod authoring;
 mod collider;
 pub mod hud;
@@ -266,6 +270,8 @@ fn validate_color(color: &[f32; 4]) -> Result<(), SceneError> {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct Scene {
+    #[serde(default, skip_serializing_if = "Hierarchy::is_empty")]
+    pub hierarchy: Hierarchy,
     pub id: String,
     pub revision: u64,
     pub objects: Vec<Object>,
@@ -283,6 +289,7 @@ impl Scene {
             id: id.into(),
             revision: 0,
             objects: Vec::new(),
+            hierarchy: Hierarchy::default(),
             materials: BTreeMap::new(),
             lighting: Lighting::Legacy,
             display: DisplayProfile::LegacySdr,
@@ -301,6 +308,7 @@ impl Scene {
         Self {
             id: "procedural-demo".into(),
             revision: 0,
+            hierarchy: Hierarchy::default(),
             materials: BTreeMap::new(),
             lighting: Lighting::Legacy,
             display: DisplayProfile::LegacySdr,
@@ -341,7 +349,7 @@ impl Scene {
         }
         self.lighting.validate()?;
         self.display.validate()?;
-        if self.objects.len() + self.lighting.light_count() > MAX_OBJECTS {
+        if self.target_count() > MAX_OBJECTS {
             return Err(SceneError::Invalid(format!(
                 "scene exceeds {MAX_OBJECTS} geometry and light targets"
             )));
@@ -371,6 +379,16 @@ impl Scene {
                 )));
             }
         }
+        for (id, group) in &self.hierarchy.groups {
+            validate_id(id)?;
+            validate_name(group.name.as_deref())?;
+            if !ids.insert(id.as_str()) {
+                return Err(SceneError::Invalid(format!(
+                    "duplicate scene target id {id}"
+                )));
+            }
+        }
+        self.resolve_poses()?;
         for (id, _) in self.lighting.lights() {
             if !ids.insert(id) {
                 return Err(SceneError::Invalid(format!(
@@ -392,7 +410,7 @@ impl Scene {
     }
 
     pub fn target_count(&self) -> usize {
-        self.objects.len() + self.lighting.light_count()
+        self.objects.len() + self.lighting.light_count() + self.hierarchy.groups.len()
     }
 
     /// A borrowed authoring lookup; geometry storage and runtime instances stay
@@ -403,6 +421,7 @@ impl Scene {
             .find(|object| object.id == id)
             .map(|object| &object.transform)
             .or_else(|| self.lighting.light(id).map(|light| &light.transform))
+            .or_else(|| self.hierarchy.groups.get(id).map(|group| &group.transform))
     }
 
     pub fn target_display_name(&self, id: &str) -> Option<&str> {
@@ -493,7 +512,7 @@ impl fmt::Display for SceneError {
             Self::Format(error) => write!(f, "invalid scene JSON: {error}"),
             Self::UnsupportedVersion(version) => write!(
                 f,
-                "unsupported scene version {version}; supported versions are 1 through {FORMAT_VERSION}"
+                "unsupported scene version {version}; supported versions are 1 through {HIERARCHY_FORMAT_VERSION}"
             ),
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
             Self::Capacity => write!(f, "authored state and required reversible history exceed 1 MiB; reduce content or edit size before retrying"),
@@ -555,6 +574,10 @@ struct IndexedObject {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum SceneDelta {
+    Hierarchy {
+        before: Hierarchy,
+        after: Hierarchy,
+    },
     Transforms {
         changes: Vec<TransformDelta>,
     },
@@ -644,12 +667,29 @@ impl SceneDelta {
             Self::Lighting { before, after } => {
                 before.light(id).is_some() || after.light(id).is_some()
             }
+            Self::Hierarchy { before, after } => {
+                before.groups.contains_key(id)
+                    || after.groups.contains_key(id)
+                    || before.parents.contains_key(id)
+                    || after.parents.contains_key(id)
+            }
             Self::Display { .. } => false,
         }
     }
     fn apply(&self, scene: &mut Scene, undo: bool) -> Result<(), SceneError> {
         let inconsistent = || SceneError::Invalid("inconsistent authored history".into());
         match self {
+            Self::Hierarchy { before, after } => {
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &scene.hierarchy != expected {
+                    return Err(inconsistent());
+                }
+                scene.hierarchy = replacement.clone();
+            }
             Self::Collider { id, before, after } => {
                 validate_id(id)?;
                 for collider in [before, after].into_iter().flatten() {
@@ -796,20 +836,25 @@ impl SceneDelta {
                 validate_id(id)?;
                 before.validate()?;
                 after.validate()?;
-                let object = scene
-                    .objects
-                    .iter_mut()
-                    .find(|o| &o.id == id)
-                    .ok_or_else(inconsistent)?;
+                let transform = if let Some(group) = scene.hierarchy.groups.get_mut(id) {
+                    &mut group.transform
+                } else {
+                    &mut scene
+                        .objects
+                        .iter_mut()
+                        .find(|o| &o.id == id)
+                        .ok_or_else(inconsistent)?
+                        .transform
+                };
                 let (expected, replacement) = if undo {
                     (after, before)
                 } else {
                     (before, after)
                 };
-                if before == after || &object.transform != expected {
+                if before == after || transform != expected {
                     return Err(inconsistent());
                 }
-                object.transform = replacement.clone();
+                *transform = replacement.clone();
             }
             Self::Color { id, before, after } => {
                 validate_id(id)?;
@@ -1107,6 +1152,7 @@ impl From<LegacyDocument> for Document {
             scene: Scene {
                 id: old.scene.id,
                 revision: old.scene.revision,
+                hierarchy: Hierarchy::default(),
                 materials: BTreeMap::new(),
                 lighting: Lighting::Legacy,
                 display: DisplayProfile::LegacySdr,
@@ -1196,6 +1242,7 @@ impl From<V2Document> for Document {
             scene: Scene {
                 id: old.scene.id,
                 revision: old.scene.revision,
+                hierarchy: Hierarchy::default(),
                 materials: BTreeMap::new(),
                 lighting: Lighting::Legacy,
                 display: DisplayProfile::LegacySdr,
@@ -1277,6 +1324,20 @@ impl Document {
             redo: Vec::new(),
         }
     }
+    fn required_version(&self) -> u32 {
+        if !self.scene.hierarchy.is_empty()
+            || self
+                .undo
+                .iter()
+                .chain(&self.redo)
+                .flat_map(|c| &c.scene)
+                .any(|d| matches!(d, SceneDelta::Hierarchy { .. }))
+        {
+            HIERARCHY_FORMAT_VERSION
+        } else {
+            FORMAT_VERSION
+        }
+    }
     fn validate(&self) -> Result<(), SceneError> {
         self.scene.validate()?;
         self.authoring.validate(&self.scene)?;
@@ -1312,6 +1373,9 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if (1..19).contains(&version) {
+            hierarchy::reject_legacy_fields(&value)?;
+        }
         if (1..18).contains(&version) {
             reject_pre_v18_primitive_fields(&value, version)?;
         }
@@ -1358,7 +1422,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=18 => serde_json::from_value(value)?,
+            5..=19 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1393,7 +1457,7 @@ impl Document {
     fn encode(&self) -> Result<Vec<u8>, SceneError> {
         self.validate()?;
         let mut upgraded = self.clone();
-        upgraded.format_version = FORMAT_VERSION;
+        upgraded.format_version = self.required_version();
         let mut bytes = serde_json::to_vec(&upgraded)?;
         bytes.push(b'\n');
         if bytes.len() as u64 > MAX_FILE_BYTES {
@@ -2586,6 +2650,7 @@ impl Session {
     pub fn contains_object_id(&self, id: &str) -> bool {
         self.scene().objects.iter().any(|o| o.id == id)
             || self.scene().lighting.light(id).is_some()
+            || self.scene().hierarchy.groups.contains_key(id)
             || self.document.authoring.object_ids().any(|used| used == id)
             || self
                 .document
@@ -2599,6 +2664,7 @@ impl Session {
     fn reserved_target_ids(&self) -> HashSet<&str> {
         let mut used: HashSet<&str> = self.scene().objects.iter().map(|o| o.id.as_str()).collect();
         used.extend(self.scene().lighting.lights().map(|(id, _)| id));
+        used.extend(self.scene().hierarchy.groups.keys().map(String::as_str));
         used.extend(self.document.authoring.object_ids());
         for change in self.document.undo.iter().chain(&self.document.redo) {
             used.extend(change.object_ids());
@@ -2624,6 +2690,15 @@ impl Session {
                     }
                     SceneDelta::Lighting { before, after } => {
                         used.extend(before.lights().chain(after.lights()).map(|(id, _)| id));
+                    }
+                    SceneDelta::Hierarchy { before, after } => {
+                        used.extend(
+                            before
+                                .groups
+                                .keys()
+                                .chain(after.groups.keys())
+                                .map(String::as_str),
+                        );
                     }
                     SceneDelta::Display { .. } => {}
                 }
@@ -3487,8 +3562,8 @@ impl Session {
             return Err(SceneError::Conflict);
         }
         self.document.write(&lock.path, !existing)?;
-        self.document.format_version = FORMAT_VERSION;
-        self.loaded_format_version = FORMAT_VERSION;
+        self.document.format_version = self.document.required_version();
+        self.loaded_format_version = self.document.format_version;
         self.saved = Some(self.document.clone());
         self.path = Some(lock.path.clone());
         Ok(())
@@ -3581,6 +3656,107 @@ impl Preview {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn hierarchy_refusals_preserve_document_history_and_save_authority() {
+        let mut session = Session::new(Scene::demo()).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("atomic.json");
+        session.save(&path).unwrap();
+        for i in 0..9 {
+            session
+                .create_group(session.scene().revision, &format!("g{i}"), None)
+                .unwrap();
+        }
+        for i in 1..8 {
+            session
+                .reparent(
+                    session.scene().revision,
+                    &format!("g{i}"),
+                    Some(&format!("g{}", i - 1)),
+                )
+                .unwrap();
+        }
+        let before = session.snapshot_bytes().unwrap();
+        let dirty = session.is_dirty();
+        let undo = session.undo_len();
+        assert!(
+            session
+                .reparent(session.scene().revision, "g8", Some("g7"))
+                .is_err(),
+            "ninth group level must refuse"
+        );
+        assert!(session.reparent(0, "left", Some("g0")).is_err());
+        assert!(session
+            .reparent(session.scene().revision, "g0", Some("g7"))
+            .is_err());
+        assert!(session
+            .reparent(session.scene().revision, "left", Some("center"))
+            .is_err());
+        assert!(session
+            .edit(
+                session.scene().revision,
+                "g0",
+                &Transform {
+                    scale: [1., 2., 1.],
+                    ..Transform::default()
+                }
+            )
+            .is_err());
+        assert_eq!(session.snapshot_bytes().unwrap(), before);
+        assert_eq!(session.is_dirty(), dirty);
+        assert_eq!(session.undo_len(), undo);
+        assert_eq!(session.path(), Some(path.as_path()));
+    }
+
+    #[test]
+    fn hierarchy_session_move_undo_save_fresh_open() {
+        let mut value: serde_json::Value = serde_json::from_slice(
+            &Session::new(Scene::demo())
+                .unwrap()
+                .snapshot_bytes()
+                .unwrap(),
+        )
+        .unwrap();
+        value["format_version"] = 19.into();
+        value["scene"]["hierarchy"] = serde_json::json!({
+            "groups": {"assembly": {"name": "Assembly", "transform": Transform::default()}},
+            "parents": {"left": "assembly"}
+        });
+        let mut session = Session::from_snapshot_bytes(&serde_json::to_vec(&value).unwrap())
+            .expect("scene-owned hierarchy capability must be admitted");
+        let before = session.scene().clone();
+        let moved = Transform {
+            translation: [3., 0., 0.],
+            ..Transform::default()
+        };
+        session
+            .edit_transforms(0, &[("assembly".into(), moved)])
+            .unwrap();
+        assert_eq!(
+            session.scene().objects,
+            before.objects,
+            "stored leaves stay local"
+        );
+        session.undo(1).unwrap();
+        assert_eq!(
+            session.scene().target_transform("assembly"),
+            Some(&Transform::default())
+        );
+        session.redo(2).unwrap();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("assembly.ruster-scene.json");
+        session.save(&path).unwrap();
+        let mut reopened = Session::open(&path).unwrap();
+        assert_eq!(
+            session.snapshot_bytes().unwrap(),
+            reopened.snapshot_bytes().unwrap()
+        );
+        reopened.undo(3).unwrap();
+        assert_eq!(
+            reopened.scene().target_transform("assembly"),
+            Some(&Transform::default())
+        );
+    }
     use super::*;
 
     fn legacy_value(document: &Document) -> serde_json::Value {
@@ -6792,7 +6968,7 @@ mod tests {
             br#"{"format_version":1,"id":"logistics","config":{}}"#.to_vec(),
         ];
         let mut value = good.clone();
-        value["format_version"] = (FORMAT_VERSION + 1).into();
+        value["format_version"] = (HIERARCHY_FORMAT_VERSION + 1).into();
         cases.push(serde_json::to_vec(&value).unwrap());
         let mut value = good.clone();
         value["unexpected"] = true.into();

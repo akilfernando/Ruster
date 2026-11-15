@@ -7,6 +7,7 @@ mod color_tools;
 #[path = "../../support/connection.rs"]
 mod connection;
 mod export_tools;
+mod hierarchy_tools;
 mod hud_tools;
 mod lighting_tools;
 mod material_tools;
@@ -124,6 +125,9 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     }
     if collider_tools::supported(name) {
         return collider_tools::valid(name, arguments);
+    }
+    if hierarchy_tools::supported(name) {
+        return hierarchy_tools::valid(name, arguments);
     }
     if color_tools::supported(name) {
         return color_tools::valid(name, arguments);
@@ -486,6 +490,7 @@ fn tools() -> Value {
     }
     tools.extend(collider_tools::list());
     tools.extend(color_tools::list());
+    tools.extend(hierarchy_tools::list());
     tools.extend(material_tools::list());
     tools.extend(lighting_tools::list());
     tools.extend(view_tools::list());
@@ -620,6 +625,7 @@ impl Server {
                     .contains(&name)
                         && !collider_tools::supported(name)
                         && !color_tools::supported(name)
+                        && !hierarchy_tools::supported(name)
                         && !material_tools::supported(name)
                         && !lighting_tools::supported(name)
                         && !view_tools::supported(name)
@@ -858,7 +864,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 84);
+        assert_eq!(tools.len(), 86);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -894,6 +900,8 @@ mod tests {
                 "scene_replay",
                 "scene_collider_set",
                 "scene_color",
+                "scene_group_create",
+                "scene_reparent",
                 "material_inspect",
                 "scene_material_set",
                 "scene_material_assign",

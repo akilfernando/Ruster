@@ -1,5 +1,33 @@
 # Current project status
 
+## Integrated assembly Session tracer — 2026-11-15
+
+**WIP, milestone not accepted.** Exclusive `feat/assembly-hierarchy-20261115`
+now has production Scene-owned groups/parent links and invocation-local world
+resolution. Existing Session Change/staging/history owns group creation,
+world-preserving reparent, group local transforms and Undo/Redo. Guarded editor
+commands `scene_group_create`/`scene_reparent` and existing transform/Undo commands
+return topology and labeled resolved-world observations; MCP advertises the new
+shapes. Flat documents continue emitting Scene18; documents retaining hierarchy
+or structural history explicitly emit Scene19. Legacy Scene1–18 rejects hierarchy
+fields at owning scene/history boundaries.
+
+Observed RED: missing Scene19 admission, unsupported structural editor command,
+and ninth-level admission. GREEN: complete scene suite56+CLI1, MCP16 and actual
+headless SceneEditor guarded nested group/parent/move/Undo/Redo/save/fresh Session
+open tracer. These are shared-operation tests, **not** native window interaction,
+a live MCP socket journey or actual ChatGPT acceptance. Logs and isolated target:
+`/home/akilf/Projects/Ruster-Audits/assembly-hierarchy-20261115/` (`checkpoint-pass.log`).
+A wrong Cargo format package name and two stale MCP inventory expectations are
+retained failed preparations, not product acceptance.
+
+Remaining: native controls; renderer/normal/shadow/pick/Fit/gizmo/light/collider
+consumer wiring; precise raw-request/world admission; compatibility/runtime/export
+refusals and Rust/Python agreement; target/history budget and numerical qualification;
+actual native and independent MCP creator journeys; change gate/review. Current
+writer continues the coupled milestone; no install/merge/release, desktop/global
+input, canonical/private or sibling checkout changes.
+
 ## Bounded integrated assembly hierarchy approved — 2026-11-15
 
 Akil explicitly selected **Yes—build this bounded first milestone** on Telegram.

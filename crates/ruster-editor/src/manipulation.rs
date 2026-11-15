@@ -297,6 +297,7 @@ impl Clipboard {
             );
         }
         Scene {
+            hierarchy: Default::default(),
             // Ambient is never copied. This temporary scene validates the whole
             // incoming membership, shared IDs and disabled-inclusive light caps.
             lighting: if self.lights.is_empty() {
