@@ -27,10 +27,13 @@ Native mode is presentation, not authority; browser handoff is optional.
 [Initial implementation contract](decisions/2026-11-15-native-ai-workspace.md)
 combines the designs with wrong-target/shared-client and reconnect acceptance.
 
-Regular Sol implementation is **QUEUED for handoff**, no live trust/configuration
-or desktop changes. Raw initial/seamless proposals and receipts: cumulative audit
-`native-first-design/`. The old per-run approval clauses are superseded only for
-the explicitly enrolled path; untrusted/manual behavior and other grants remain.
+**RUNNING:** regular dev owner `deleg_b5287db9` implements the combined Astra
+contract in isolated `feat/native-ai-workspace-20261115` from `ea38213`. One native
+UI/Session, trusted project-connect with no routine approval, bounded registry and
+explicit target epochs/revocation; TDD/headless first. Parent owns security review,
+actual-client/native acceptance and cumulative integration. No live enrollment,
+client config, installation or desktop changes. Raw proposals/receipts remain in
+`native-first-design/`; untrusted/manual behavior and other grants are preserved.
 
 **Browser DEFERRED, NOT REMOVED:** user retains it as a nice-to-have for future
 use cases; optimization no longer gates native-first. SDK worker checkpointed and

@@ -831,6 +831,13 @@ Browser authority stays separate/deferred. No live settings or trust were change
 by the design request. Revisit on a real native-first project-choice connection
 without a follow-up native approval, plus untrusted/stale/revoked refusal tests.
 
+**Design outcome:** revised Astra admission completes and explicitly removes the
+old routine approval for enrolled trust. Parent records the combined interface/
+trust/compatibility contract in `decisions/2026-11-15-native-ai-workspace.md`, adding
+old-conversation target-epoch and explicit reopen-without-client-restart tests.
+Regular dev owner `deleg_b5287db9` now implements it in an isolated branch feeding
+the cumulative line. Existing live enrollment/client settings are still untouched.
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.
