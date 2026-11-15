@@ -20,6 +20,46 @@ pub fn unpredictable() -> io::Result<String> {
     Ok(bytes.iter().map(|b| format!("{b:02x}")).collect())
 }
 
+/// Linux AF_UNIX has a short sockaddr pathname even when the backing private
+/// directory has a valid long absolute path. Address via a retained directory
+/// FD, while all persisted identities and validation keep the original path.
+/// No filesystem alias is created and no locator symlink is trusted.
+pub fn connect_socket(path: &Path) -> io::Result<UnixStream> {
+    with_socket_address(path, |address| UnixStream::connect(address))
+}
+pub fn bind_socket(path: &Path) -> io::Result<std::os::unix::net::UnixListener> {
+    with_socket_address(path, |address| {
+        std::os::unix::net::UnixListener::bind(address)
+    })
+}
+fn with_socket_address<T>(
+    path: &Path,
+    use_address: impl FnOnce(&Path) -> io::Result<T>,
+) -> io::Result<T> {
+    use std::os::unix::ffi::OsStrExt;
+    if path.as_os_str().as_bytes().len() < 104 {
+        return use_address(path);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        use std::os::fd::AsRawFd;
+        let parent = path
+            .parent()
+            .ok_or_else(|| io::Error::other("socket parent required"))?;
+        no_symlinks(parent)?;
+        let directory = fs::File::open(parent)?;
+        let name = path
+            .file_name()
+            .ok_or_else(|| io::Error::other("socket filename required"))?;
+        let address = PathBuf::from(format!("/proc/self/fd/{}", directory.as_raw_fd())).join(name);
+        use_address(&address)
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err(io::Error::other("socket path too long"))
+    }
+}
+
 pub fn peer(stream: &UnixStream) -> io::Result<(u32, u32)> {
     let cred = rustix::net::sockopt::get_socket_peercred(stream)?;
     Ok((cred.uid.as_raw(), cred.pid.as_raw_nonzero().get() as u32))
@@ -211,9 +251,25 @@ pub struct Client {
     owner: String,
     stream: Option<UnixStream>,
     capability: Option<String>,
+    proof: Option<Value>,
     failed: bool,
 }
 impl Client {
+    pub fn disconnect(&mut self) {
+        self.stream.take();
+        self.capability.take();
+        self.failed = true;
+        let deadline = Instant::now() + DEADLINE;
+        while self.validate().is_ok() && Instant::now() < deadline {
+            std::thread::sleep(POLL);
+        }
+    }
+    pub fn available(&self) -> bool {
+        !self.failed && self.validate().is_ok()
+    }
+    pub fn enroll(&mut self, proof: Value) {
+        self.proof = Some(proof);
+    }
     pub fn native_pid(&self) -> u32 {
         self.locator.pid
     }
@@ -241,6 +297,7 @@ impl Client {
             owner: unpredictable()?,
             stream: None,
             capability: None,
+            proof: None,
             failed: false,
         })
     }
@@ -269,15 +326,17 @@ impl Client {
         }
         self.validate()?;
         if self.stream.is_none() {
-            let mut stream = UnixStream::connect(self.locator_path.with_file_name("editor.sock"))?;
+            let mut stream = connect_socket(&self.locator_path.with_file_name("editor.sock"))?;
             self.validate()?;
             if peer(&stream)? != (self.locator.uid, self.locator.pid) {
                 return Err(io::Error::other("wrong connected editor peer"));
             }
-            let hello = Self::exchange(
-                &mut stream,
-                json!({"wire":WIRE,"hello":self.owner,"binding":self.locator.binding()}),
-            )?;
+            let mut request =
+                json!({"wire":WIRE,"hello":self.owner,"binding":self.locator.binding()});
+            if let Some(proof) = &self.proof {
+                request["enrollment"] = proof.clone();
+            }
+            let hello = Self::exchange(&mut stream, request)?;
             if hello["binding"] != self.locator.binding() || hello["state"] != "approval_required" {
                 return Err(io::Error::other("incompatible editor handshake"));
             }

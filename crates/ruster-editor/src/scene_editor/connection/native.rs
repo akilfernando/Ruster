@@ -112,7 +112,12 @@ impl Host {
         let mut state = ctx
             .data_mut(|data| data.get_temp::<NativeUi>(id))
             .unwrap_or_default();
-        if ui.button("AI connection…").clicked() {
+        if std::mem::take(&mut self.editor.ai_connection_requested)
+            || (!self.editor.ai_workspace
+                && ui
+                    .button(format!("AI: {}…", self.editor.ai_connection_label))
+                    .clicked())
+        {
             state.open = true;
         }
         if state.open {
@@ -192,6 +197,18 @@ impl Host {
                 state.preview = Some(self.binding_preview());
                 state.focus_cancel = true;
                 state.notice.clear();
+            }
+        }
+        if let Some(grant) = self.bridge.as_ref().and_then(|b| b.persistent_grant()) {
+            ui.label("Enrolled local connector: native authoring for this registered project. Save, export and execution keep their separate grants.");
+            for (label, all) in [
+                ("Revoke persistent access to this project", false),
+                ("Revoke access to all registered projects", true),
+            ] {
+                if ui.button(label).clicked() {
+                    self.disconnect_adapter();
+                    match grant.revoke(all) { Ok(())=>state.notice="Persistent access revoked. Deliberate re-enrollment required.".into(),Err(_)=>state.notice="Revocation not persisted: a publication may be finishing or enrollment changed. Disconnected locally; retry Revoke after it settles.".into() }
+                }
             }
         }
         if self.bridge.is_some() && ui.button("Disconnect AI").clicked() {

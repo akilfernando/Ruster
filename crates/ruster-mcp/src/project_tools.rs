@@ -14,6 +14,8 @@ pub(super) struct Project {
     pub name: String,
     pub scene_id: String,
     #[serde(default)]
+    pub enrollment: Option<PathBuf>,
+    #[serde(default)]
     locator: PathBuf,
     #[serde(default)]
     binding: Value,
@@ -29,43 +31,52 @@ impl Registry {
     pub fn parse(text: &str) -> io::Result<Self> {
         let value = strict_json::parse(text.as_bytes()).map_err(io::Error::other)?;
         let registry: Self = serde_json::from_value(value)?;
-        if registry.projects.len() != 1 {
+        if registry.projects.is_empty() || registry.projects.len() > 32 {
             return Err(io::Error::other(
-                "exactly one explicitly registered project required",
+                "1..=32 explicitly registered projects required",
             ));
         }
-        let project = &registry.projects[0];
-        if project.id.is_empty()
-            || project.id.len() > 128
-            || !project
-                .id
-                .bytes()
-                .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
-            || project.name.is_empty()
-            || project.name.len() > 128
-            || project.name.chars().any(char::is_control)
-            || project.scene_id.is_empty()
-            || project.scene_id.len() > 128
-            || (project.startup.is_none()
-                && (!project.locator.is_absolute()
-                    || !project.binding.as_object().is_some_and(|o| {
-                        exact_keys(o, &["wire", "incarnation", "generation", "connection"], &[])
-                    })
-                    || project.binding["wire"] != connection::WIRE
-                    || ["incarnation", "generation", "connection"].iter().any(|k| {
-                        !project.binding[k]
-                            .as_str()
-                            .is_some_and(|v| !v.is_empty() && v.len() <= 256)
-                    })))
-            || project.startup.as_ref().is_some_and(|s| {
-                !s.scene_path.is_absolute()
-                    || !s.native_binary.is_absolute()
-                    || !s.state_directory.is_absolute()
-                    || !project.locator.as_os_str().is_empty()
-                    || !project.binding.is_null()
-            })
-        {
-            return Err(io::Error::other("invalid registered project identity"));
+        for (index, project) in registry.projects.iter().enumerate() {
+            if registry.projects[..index].iter().any(|p| {
+                p.id == project.id
+                    || p.name == project.name
+                    || p.id == project.name
+                    || p.name == project.id
+            }) {
+                return Err(io::Error::other("ambiguous registered project identity"));
+            }
+            if project.id.is_empty()
+                || project.id.len() > 128
+                || !project
+                    .id
+                    .bytes()
+                    .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
+                || project.name.is_empty()
+                || project.name.len() > 128
+                || project.name.chars().any(char::is_control)
+                || project.scene_id.is_empty()
+                || project.scene_id.len() > 128
+                || (project.startup.is_none()
+                    && (!project.locator.is_absolute()
+                        || !project.binding.as_object().is_some_and(|o| {
+                            exact_keys(o, &["wire", "incarnation", "generation", "connection"], &[])
+                        })
+                        || project.binding["wire"] != connection::WIRE
+                        || ["incarnation", "generation", "connection"].iter().any(|k| {
+                            !project.binding[k]
+                                .as_str()
+                                .is_some_and(|v| !v.is_empty() && v.len() <= 256)
+                        })))
+                || project.startup.as_ref().is_some_and(|s| {
+                    !s.scene_path.is_absolute()
+                        || !s.native_binary.is_absolute()
+                        || !s.state_directory.is_absolute()
+                        || !project.locator.as_os_str().is_empty()
+                        || !project.binding.is_null()
+                })
+            {
+                return Err(io::Error::other("invalid registered project identity"));
+            }
         }
         Ok(registry)
     }
@@ -75,7 +86,7 @@ impl Registry {
         if !metadata.is_file()
             || metadata.mode() & 0o777 != 0o600
             || metadata.uid() != rustix::process::getuid().as_raw()
-            || metadata.len() > 8192
+            || metadata.len() > 262144
         {
             return Err(io::Error::other(
                 "private bounded project registry required",
@@ -121,7 +132,7 @@ impl Project {
         {
             return json!({"status":"native_descriptor_mismatch","message":"Live native workspace identity disagrees with the registered project; no URL published."});
         }
-        json!({"status":"native_browser_approval_required","url":descriptor["url"],"attachment":descriptor["attachment"],"message":"Open this secret-free workspace URL. Compare its pending browser code in Rusterize AI connection and approve that browser/project once. Cookies do not grant consent."})
+        json!({"status":"native_browser_approval_required","url":descriptor["url"],"attachment":descriptor["attachment"],"message":"Optional browser preview only; native connection is already complete. If requested, open this secret-free URL and explicitly approve its pending browser/project in native. Cookies do not grant browser consent."})
     }
 
     pub fn prepare(&mut self, child_pid: &mut Option<u32>) -> io::Result<()> {
@@ -129,6 +140,9 @@ impl Project {
             return Ok(());
         };
         startup.validate()?;
+        if let Some(path) = &self.enrollment {
+            crate::enrollment::Grant::load(path, &self.id)?;
+        }
         let _start = startup.lock("startup.lock")?;
         let owner = match startup.lock("owner.lock") {
             Ok(owner) => Some(owner),
@@ -159,6 +173,11 @@ impl Project {
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
+            if let Some(path) = &self.enrollment {
+                command
+                    .env("RUSTER_CONNECTOR_ENROLLMENT", path)
+                    .env("RUSTER_WORKSPACE", "ai");
+            }
             command.env(
                 "RUSTER_PROJECT_BOOTSTRAP",
                 serde_json::to_string(&crate::project_startup::Bootstrap::capture()?)?,
@@ -194,14 +213,24 @@ impl Project {
         }
         // A live registered owner, including a disconnected/revoked one, must
         // never be replaced. Its current publication is only routing metadata.
-        let publication=startup.read(&self.id,&self.scene_id).map_err(|_|io::Error::other("existing registered native owner needs explicit native Connect; no duplicate launched"))?;
+        let deadline = std::time::Instant::now() + crate::connection::DEADLINE;
+        let publication = loop {
+            match startup.read(&self.id,&self.scene_id) {
+                Ok(p)=>break p,
+                Err(_) if self.enrollment.is_some() && std::time::Instant::now()<deadline=>std::thread::sleep(crate::connection::POLL),
+                Err(_)=>return Err(io::Error::other("existing registered owner unavailable or needs upgrade/manual Connect; no duplicate launched")),
+            }
+        };
         self.locator = publication.locator;
         self.binding = publication.binding;
         Ok(())
     }
 
     pub fn open(&self) -> io::Result<connection::Client> {
-        let client = connection::Client::open(self.locator.clone())?;
+        let mut client = connection::Client::open(self.locator.clone())?;
+        if let Some(path) = &self.enrollment {
+            client.enroll(crate::enrollment::Grant::load(path, &self.id)?.proof()?);
+        }
         if client.binding() != self.binding {
             return Err(io::Error::other(
                 "registered incarnation changed; explicit registration required",
@@ -214,6 +243,28 @@ impl Project {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn bounded_projects_require_unique_unambiguous_selection() {
+        let one = json!({"id":"one","name":"One","scene_id":"same-scene","locator":"/private/one.json","binding":{"wire":connection::WIRE,"incarnation":"i","generation":"g","connection":"c"}});
+        let mut two = one.clone();
+        two["id"] = json!("two");
+        two["name"] = json!("Two");
+        let registry =
+            Registry::parse(&json!({"projects":[one.clone(),two.clone()]}).to_string()).unwrap();
+        assert_eq!(registry.resolve("Two").unwrap().id, "two");
+        two["name"] = json!("one");
+        assert!(Registry::parse(&json!({"projects":[one.clone(),two]}).to_string()).is_err());
+        let projects: Vec<_> = (0..33)
+            .map(|i| {
+                let mut p = one.clone();
+                p["id"] = json!(format!("p{i}"));
+                p["name"] = json!(format!("Project {i}"));
+                p
+            })
+            .collect();
+        assert!(Registry::parse(&json!({"projects":projects}).to_string()).is_err());
+    }
 
     #[test]
     fn private_registration_pins_native_binding_without_opening_owner() {

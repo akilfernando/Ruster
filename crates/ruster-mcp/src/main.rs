@@ -6,6 +6,9 @@ mod color_tools;
 #[allow(dead_code)]
 #[path = "../../support/connection.rs"]
 mod connection;
+#[path = "../../support/enrollment.rs"]
+#[allow(dead_code)]
+mod enrollment;
 mod export_tools;
 mod hierarchy_tools;
 mod hud_tools;
@@ -119,6 +122,29 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if let Some(binding) = arguments.get("connection") {
+        if !binding
+            .as_object()
+            .is_some_and(|m| exact_keys(m, &["project_id", "epoch"], &[]))
+            || !binding["project_id"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty() && s.len() <= 128)
+            || !binding["epoch"]
+                .as_str()
+                .is_some_and(|s| s.len() == 64 && s.bytes().all(|b| b.is_ascii_hexdigit()))
+        {
+            return false;
+        }
+        let mut args = arguments.clone();
+        args.as_object_mut().unwrap().remove("connection");
+        return if name == "project_disconnect" {
+            args.as_object().unwrap().is_empty()
+        } else if matches!(name, "project_connect" | "project_list") {
+            false
+        } else {
+            valid_arguments(name, &args)
+        };
+    }
     if name == "project_list" {
         return arguments.as_object().is_some_and(|o| o.is_empty());
     }
@@ -401,7 +427,7 @@ fn tools() -> Value {
         "description":"Canonical decimal u64; maximum 18446744073709551615."});
     let mut tools = vec![
         json!({"name":"project_list","description":"List explicitly registered project records only. Routing is not access approval. Use the host native question UI only if identity needs clarification; never scan filesystem or select newest editor.","inputSchema":object_schema(json!({}),vec![])}),
-        json!({"name":"project_connect","description":"Connect the exact registered project name or ID. A registered saved-project startup may start its pinned native owner; otherwise attach its exact publication. Skip selection when already exact. Native adapter approval remains explicit. Then open the returned secret-free workspace URL and ask the human to approve the pending browser/project once in native. No implicit access, newest-editor fallback, reconnect or mutation retry. Subsequent scene tools use the same pinned owner.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":128}}),vec!["project"])}),
+        json!({"name":"project_connect","description":"Connect the exact registered project name or ID. A registered saved-project startup may start its pinned native owner; otherwise attach its exact publication. Skip selection when already exact. An enrolled local connector connects without native approval, codes or a browser; legacy manual approval stays separate. Browser handoff is optional. No newest-editor fallback, background reconnect or mutation replay. Include the returned connection project/epoch in every subsequent project call; explicitly disconnect before switching projects.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":128}}),vec!["project"])}),
     ];
     for (name, description) in [
         ("inspect", "Inspect the attached editor's session, authored configuration, revision and mutation guards. No history arrays, files or logs."),
@@ -519,6 +545,20 @@ fn tools() -> Value {
     tools.extend(behavior_tools::list());
     tools.extend(runtime_tools::list());
     tools.extend(hud_tools::list());
+    tools.push(json!({"name":"project_disconnect","description":"Disconnect this exact epoch. Retains enrollment but invalidates queued work; reconnect only through a later explicit project_connect.","inputSchema":object_schema(json!({}),vec!["connection"])}));
+    for tool in &mut tools {
+        if !matches!(
+            tool["name"].as_str(),
+            Some("project_list" | "project_connect")
+        ) {
+            tool["inputSchema"]["properties"]["connection"] = object_schema(
+                json!({"project_id":{"type":"string","minLength":1,"maxLength":128},"epoch":{"type":"string","pattern":"^[0-9a-f]{64}$"}}),
+                vec!["project_id", "epoch"],
+            );
+            let description = tool["description"].as_str().unwrap_or("").to_string();
+            tool["description"] = json!(format!("{description} Registered-project calls MUST include the exact connection returned by project_connect, including reads. Never reuse a prior epoch or infer current binding."));
+        }
+    }
     json!({"tools":tools})
 }
 
@@ -587,7 +627,7 @@ impl Server {
                     Ok(
                         json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},
                         "serverInfo":{"name":"ruster-mcp","version":env!("CARGO_PKG_VERSION")},
-                        "instructions":"Project access requires explicit editor approval of this adapter owner. With an explicitly installed project registry, use project_connect with the exact named project; project_list contains only registered records and selection is not consent. initialize/tools/list alone grant no authority; keep the fixed selected locator. New/Open/Restore, disconnect, owner loss/restart or a project-root rebase revoke access and require fresh consent. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision as concurrency guards, not credentials. No automatic retries. Cancellation cannot roll back already authorized publication; after unknown outcomes inspect current state/receipts only through an approved connection. Edits remain unsaved until explicit persistence. Generic scene_save requires a separate editor-granted directory and session/revision/persistence tokens; legacy configuration Save remains human-only. Creator export requires a human-selected executable runtime kit and separate output grant; inspect its operation ID rather than restarting. Asset catalog changes persist immediately."}),
+                        "instructions":"Project access uses deliberate persistent local connector/project enrollment or separate legacy manual owner approval. Use project_connect with the exact registered project; copy its returned connection project/epoch into every following call, including reads. Never infer a current target for an old conversation. Explicit project_disconnect invalidates that epoch; a later explicit project_connect needs no server restart. A native-only connection is complete without a browser. With an explicitly installed project registry, project_list contains only registered records and selection is not consent. initialize/tools/list alone grant no authority; keep the fixed selected locator. New/Open/Restore, disconnect, owner loss/restart or a project-root rebase revoke access and require fresh consent. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision as concurrency guards, not credentials. No automatic retries. Cancellation cannot roll back already authorized publication; after unknown outcomes inspect current state/receipts only through an approved connection. Edits remain unsaved until explicit persistence. Generic scene_save requires a separate editor-granted directory and session/revision/persistence tokens; legacy configuration Save remains human-only. Creator export requires a human-selected executable runtime kit and separate output grant; inspect its operation ID rather than restarting. Asset catalog changes persist immediately."}),
                     )
                 }
             }
@@ -618,6 +658,7 @@ impl Server {
                     || ![
                         "project_list",
                         "project_connect",
+                        "project_disconnect",
                         "inspect",
                         "edit",
                         "undo",
@@ -724,6 +765,7 @@ struct Adapter {
     client: Option<connection::Client>,
     registry: Option<io::Result<project_tools::Registry>>,
     selected: Option<project_tools::Project>,
+    binding: Value,
     verified: bool,
     startup_error: Option<String>,
     startup_diagnostics: StartupDiagnostics,
@@ -768,6 +810,21 @@ impl Adapter {
                 return listed;
             }
             if name == "project_connect" {
+                if self
+                    .selected
+                    .as_ref()
+                    .is_some_and(|p| p.enrollment.is_some())
+                    && self.attempted
+                    && self.client.as_ref().is_none_or(|c| !c.available())
+                {
+                    self.client.take();
+                    self.selected.take();
+                    self.binding = Value::Null;
+                    self.attempted = false;
+                    self.verified = false;
+                    self.startup_error = None;
+                    self.startup_diagnostics = StartupDiagnostics::default();
+                }
                 let Ok(project) = registry.resolve(arguments["project"].as_str().unwrap_or(""))
                 else {
                     return domain_error("project_not_found", "Name or ID must exactly match an explicitly registered project; no filesystem discovery.");
@@ -781,6 +838,7 @@ impl Adapter {
                     }
                 } else {
                     self.selected = Some(project.clone());
+                    self.binding = json!({"project_id":project.id,"epoch":connection::unpredictable().expect("local randomness")});
                 }
                 if !self.attempted {
                     self.attempted = true;
@@ -796,6 +854,27 @@ impl Adapter {
             let Some(project) = &self.selected else {
                 return domain_error("project_required", "Call project_connect with an exact registered name or ID before project access.");
             };
+            if name != "project_connect" {
+                let Some(binding) = arguments.get("connection") else {
+                    return domain_error("connection_required", "Supply the explicit project/epoch returned by project_connect; never infer the current conversation target.");
+                };
+                if binding != &self.binding {
+                    return domain_error("connection_changed", "Old project/epoch refused before dispatch. Explicit connect does not retarget queued calls.");
+                }
+                if name == "project_disconnect" {
+                    if let Some(client) = &mut self.client {
+                        client.disconnect();
+                    }
+                    self.client.take();
+                    self.selected.take();
+                    self.binding = Value::Null;
+                    self.attempted = false;
+                    self.verified = false;
+                    self.startup_error = None;
+                    self.startup_diagnostics = StartupDiagnostics::default();
+                    return json!({"ok":true,"result":{"disconnected":true}});
+                }
+            }
             let Some(client) = self.client.as_mut() else {
                 if self.startup_error.is_some() {
                     return self.startup_failure(StartupResponseSource::CachedFailure);
@@ -815,6 +894,7 @@ impl Adapter {
                 if name == "project_connect" {
                     observed["result"]["registered_project"] =
                         json!({"id":project.id,"name":project.name});
+                    observed["result"]["connection"] = self.binding.clone();
                     let descriptor = client.call("workspace_descriptor", &json!({}));
                     observed["result"]["workspace_handoff"] = if descriptor["ok"] == true {
                         project.workspace_handoff(
@@ -828,9 +908,17 @@ impl Adapter {
                     return observed;
                 }
             }
-            return self.client.as_mut().unwrap().call(name, arguments);
+            let mut native_arguments = arguments.clone();
+            native_arguments
+                .as_object_mut()
+                .unwrap()
+                .remove("connection");
+            return self.client.as_mut().unwrap().call(name, &native_arguments);
         }
-        if matches!(name, "project_connect" | "project_list") {
+        if matches!(
+            name,
+            "project_connect" | "project_list" | "project_disconnect"
+        ) {
             return domain_error("registry_unavailable", "Configure an explicit private project registry during installation; no discovery or implicit locator fallback.");
         }
         if !self.attempted {
@@ -875,6 +963,40 @@ fn main() {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn explicit_disconnect_clears_attempt_cache_but_old_calls_never_retarget() {
+        let registry = project_tools::Registry::parse(&json!({"projects":[{"id":"one","name":"One","scene_id":"same","locator":"/not-opened/locator.json","binding":{"wire":connection::WIRE,"incarnation":"i","generation":"g","connection":"c"}}]}).to_string()).unwrap();
+        let mut adapter = Adapter {
+            registry: Some(Ok(registry)),
+            ..Default::default()
+        };
+        assert_eq!(
+            adapter.call("project_connect", &json!({"project":"one"}))["error"]["code"],
+            "bridge_unavailable"
+        );
+        assert_eq!(
+            adapter.call("scene_inspect", &json!({}))["error"]["code"],
+            "connection_required"
+        );
+        let binding = adapter.binding.clone();
+        assert_eq!(
+            adapter.call("project_disconnect", &json!({"connection":binding}))["ok"],
+            true
+        );
+        assert!(!adapter.attempted);
+        assert!(adapter.selected.is_none());
+        assert_eq!(
+            adapter.call("scene_inspect", &json!({"connection":binding}))["error"]["code"],
+            "project_required"
+        );
+        adapter.call("project_connect", &json!({"project":"one"}));
+        assert_ne!(adapter.binding, binding);
+        assert_eq!(
+            adapter.call("scene_inspect", &json!({"connection":binding}))["error"]["code"],
+            "connection_changed"
+        );
+    }
 
     #[test]
     fn registry_requires_explicit_selection_and_never_falls_back() {
@@ -1098,7 +1220,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 88);
+        assert_eq!(tools.len(), 89);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1195,7 +1317,8 @@ mod tests {
                 "hud_activate",
                 "hud_panel_inspect",
                 "hud_panel_set",
-                "hud_panel_move"
+                "hud_panel_move",
+                "project_disconnect"
             ]
         );
         for tool in tools {

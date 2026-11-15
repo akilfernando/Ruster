@@ -1809,6 +1809,9 @@ impl RuntimeUi {
             self.cancel_control_focus();
         }
     }
+    pub fn has_worker(&self) -> bool {
+        self.worker.is_some()
+    }
     pub fn is_playing(&self) -> bool {
         self.playing
     }

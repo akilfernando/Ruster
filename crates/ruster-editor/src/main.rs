@@ -16,6 +16,10 @@ mod connection;
 mod creation_export;
 mod directory_grant;
 mod editor_theme;
+#[cfg(unix)]
+#[path = "../../support/enrollment.rs"]
+#[allow(dead_code)]
+mod enrollment;
 mod input_ui;
 mod manipulation;
 mod model;
