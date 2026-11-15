@@ -1,5 +1,11 @@
 # Interactive localhost workspace — bounded disposable slice
 
+## ChatGPT usability accepted by user report — 2026-11-15
+
+Akil tested this optimized/completion-paced candidate in the actual ChatGPT built-in browser and reported: “significantly better. this feels usable.” The earlier click/orbit/pan/wheel behavior was already user-confirmed correct; this report accepts the improved subjective responsiveness. It is explicit user validation, not an independently measured ChatGPT frame rate or physical display latency. The retained owned-browser comparative traces remain separate evidence.
+
+The user would ideally like 60 updates per second, but explicitly says the current state is usable. Treat 60 as an optimization target, not achieved performance or a new blocker for other approved workflow work. A bounded isolated follow-up is running on remaining capture/copy/IPC overhead while independent pinned-candidate review and the existing broader focus-test failure investigation continue. Production consent/onboarding, full-gate qualification and installation/release remain separate; no pending review/test failure is erased by user usability acceptance.
+
 ## Continuous-feedback experiment — prototype measured, ChatGPT user gate pending 2026-11-15
 
 Owner: bounded performance worker, isolated `feat/continuous-localhost-20261115`; original live source unchanged. User reports functional click/camera correctness accepted, responsiveness NOT accepted. Exit: owned real Chromium sustained pointer drag presents >=15 distinct changing native frames/s and median input-to-decoded <100ms, followed by settled native picking, MCP camera/state agreement, unchanged authored history and existing draft/access/observer regressions. Engineering targets, not promised user acceptance. Profile phases first; remove avoidable fixture waits/copies/encoding before media infrastructure. Reassess after30 cumulative minutes or two failed journeys. No independent browser scene/camera, fake animation, mutation replay, install, registration, desktop input or production-consent change. Actual ChatGPT smoothness remains a user gate.
