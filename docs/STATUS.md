@@ -1,5 +1,19 @@
 # Current project status
 
+## Browser pairing resumption — 2026-11-15
+
+Shared QA gate acquired normally after the prior owner released it. Exact source
+first failed compilation: native browser controls used Rust2024 let-chains in this
+Rust2021 crate. Replaced only that expression with equivalent Option composition.
+Inspection test binary now compiles; real native widget consent and exact-context
+one-shot denial/expiry regressions each pass (one test selected each). Raw retained
+RED/fixed compiler JSON and logs: `browser-pairing/build-resume*.{log,jsonl}`;
+`widget-resume.log`, `expiry-resume.log` in the audit below. Browser final-source
+journey and affected gates are RUNNING, not yet accepted. Prior cumulative work
+~31minutes carries forward; reassess after20more minutes without a qualified exit.
+Next bounded seam is ordinary native Host/HTTP attachment and exact project URL;
+fixture success must not be reported as finished onboarding.
+
 ## Browser pairing — integrated fixture exit, 2026-11-15
 
 The approved one-time pairing slice now runs through the existing HTTP workspace,

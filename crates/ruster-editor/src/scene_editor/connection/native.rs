@@ -157,9 +157,10 @@ impl Host {
                 "Owner identity is socket-bound, not executable provenance or client registration.",
             );
         }
-        if let Some(bridge) = &mut self.bridge
-            && let Some(request) = bridge.browser_request()
-        {
+        if let Some((bridge, request)) = self.bridge.as_mut().and_then(|bridge| {
+            let request = bridge.browser_request()?;
+            Some((bridge, request))
+        }) {
             ui.separator();
             ui.heading("Approve pending browser for this project?");
             ui.label(format!("Browser verification code: {}", &request.id[..12]));
