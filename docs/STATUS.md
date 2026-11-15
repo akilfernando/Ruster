@@ -1,5 +1,53 @@
 # Current project status
 
+## Ordinary Host workspace first exit — 2026-11-15
+
+**First genuine ordinary-native project/pair/capture/MCP-edit/reload/revoke slice
+PASSES** on final code source `f5aa233` (inspection-enabled ordinary application, app-scoped
+native widget activation; no ignored preview fixture or approval-file injection).
+The Host owns one restricted HTTP child, separate from the existing single approved
+MCP owner. Exact OS peer PID/UID, private launch challenge, native/project/session/
+connection identity, attachment/origin and cookie-hash grant are pinned. Bounded
+capacity-one worker queues keep blocking IO off the editor thread; MCP is serviced
+before the next workspace admission. Production asynchronous viewport capture
+includes geometry plus session/revision/view identity. Normal HTTP has no legacy
+capability-header bypass, raw input, native-approval or mutation dispatcher.
+
+Real saved disposable project → native Connect AI → real registered-project MCP
+adapter approval → live `project_connect` URL (queried from that exact native owner,
+not a registry URL) → pending browser refusal → exact native browser approval →
+production native capture → direct MCP transform reflected in decoded browser
+pixels (revision0→1) → same-cookie reload at revision1 → native Disconnect → MCP
+refusal and closed HTTP listener. Native consent remains human-only in the product;
+automated input here is explicitly not physical-human consent or ChatGPT acceptance.
+The normal surface currently presents a bounded on-demand native **thumbnail** and
+read-only object/identity feedback; interactive browser controls remain deferred,
+not equivalent to the immutable accepted full-resolution fixture viewport.
+
+The three parent-requested scoped hierarchy safety commits were cherry-picked
+without documentation/decision wholesale changes: `8fcb082`, `de1c3dd`, `ac0b87c`
+are represented locally by `a45d754`, `5ef8e09`, `9316025`. Existing native/client
+consent changes were preserved. Final combined gates pass: workspace strict
+all-target Clippy and381Rust tests (7existing ignores), inspection strict Clippy
+and183editor tests (6existing ignores),31unchanged Python runner tests, three owning
+HTTP tests under ordinary and actually optimized child Python. Descriptor/capture
+geometry regressions were observed RED→GREEN; transport negatives include changed
+grant context, unsafe origin/framing, companion death and MCP progress during a
+partial HTTP request. Initial lint failures are retained, not relabelled passed.
+Independent consequential implementation review remains with the parent.
+
+Evidence and exact failed preparations:
+[ordinary-native result](evidence/BROWSER-PAIRING-2026-11-15.md).
+Audit root: `/home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/normal-attachment/`;
+final passing journey `ordinary-yu3oahnn/report.json`, raw `protocol.jsonl`, before/after
+PNG+JSON and native action/tree records. All owned native/adapter/browser resources
+are gone, listener and locator withdrawn; desktop preserved. No live demo advertised,
+no installation/client configuration/canonical merge/release. Physical-human,
+default-feature/noninspection and actual prompt→ChatGPT internal-browser acceptance
+remain separate unfinished gates. Broader browser controls/packaging are QUEUED,
+not claimed implemented. The old transport/authority blocker below is superseded;
+no unresolved user-authority choice remains.
+
 ## Browser pairing resumption — 2026-11-15
 
 **Final-source fixture qualification COMPLETE; ordinary-native HTTP attachment

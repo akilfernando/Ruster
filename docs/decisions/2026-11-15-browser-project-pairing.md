@@ -1,7 +1,7 @@
 # Browser/project pairing for prompt-driven connection
 
 Date: 2026-11-15.
-Status: user-approved interaction and authority model; root-selected normal attachment implementation in progress, client acceptance pending.
+Status: user-approved interaction/authority model; root-selected normal Host attachment first slice implemented and automated-qualified; human/default/client acceptance pending.
 
 ## Root-selected normal transport contract — 2026-11-15
 

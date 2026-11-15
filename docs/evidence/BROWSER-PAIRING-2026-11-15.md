@@ -1,4 +1,129 @@
-# Browser pairing final-source qualification — 2026-11-15
+# Browser pairing qualification — 2026-11-15
+
+## Current ordinary-native result (supersedes historical transport blocker)
+
+**PASS: first ordinary saved-project Host → real registered MCP owner → pending
+HTTP refusal → native-widget browser approval → production capture → direct MCP
+edit visible in that browser → same-cookie reload → Disconnect refusal.**
+Final executed code source: `f5aa233a2ff752e3498f217060e499def5bf82a7`.
+Audit: `/home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/normal-attachment/`.
+Final whole path: `ordinary-yu3oahnn/report.json`, `actions.json`, `protocol.jsonl`,
+`before.png/json`, `after.png/json`, native tree/log and native launch/cleanup receipts.
+Earlier combined-source successful whole path: `ordinary-i5cjoi36/report.json`.
+
+This uses the **ordinary inspection-enabled graphical application** opened on a
+saved disposable project, not the ignored preview fixture. App-scoped AccessKit
+activates native Connect, adapter review/confirm, pending-browser approval and
+Disconnect widgets. No native approval file, fixture grant, second MCP Client,
+registry URL assertion or browser capability header participates. Browser approval
+closes its native window so private editor overlays cannot enter a viewport capture.
+The initial run exposed below-window approval controls; moving consent before
+verbose identities and giving the native window bounded scrolling repairs that real
+UI defect. The browser receives native asynchronous capture thumbnails with exact
+session/revision/view/camera and pixel/point geometry, not fixture lossless frames.
+Normal browser editing controls are deliberately unavailable in this first slice;
+existing accepted fixture camera/picking/drafts/history remain separate and supported.
+
+`project_connect` first verifies registered native scene identity through its approved
+Client, then queries `workspace_descriptor` over that same socket and validates exact
+binding, scene/session, native PID and secret-free loopback URL. The Host publishes
+only after its single expected child has authenticated OS peer PID/UID and private
+challenge. Typed native-bound browser context includes saved path, incarnation,
+generation/connection, session/scene, attachment/peer/origin and credential hash.
+Cookie issuance is not consent. Pending expires after2minutes; approval lasts at most
+30minutes and never migrates across the native connection. Disconnect/EOF/death or
+document/native identity change withdraws the endpoint and cancels owned capture
+work; no replay/reconnect/retarget. Worker queues have capacity1 and native dispatch
+services MCP before another workspace job. Pending HTTP exposes only static/pairing
+and refusal status, never scene metadata or pixels; normal entrypoint has no legacy
+capability bypass or raw-input/approval/mutation operations.
+
+### Verification and failures retained
+
+- Descriptor regression RED: `red-descriptor-queued.log` reports unsupported operation;
+  GREEN: `native-integration-second.log`. Initial empty `red-descriptor.log` is **NOT
+  RUN** because the independent hierarchy owner held the shared gate. No lock stolen.
+- `native-integration-first.log` retains binary-length versus newline framing mismatch
+  and missing capture geometry RED. Production restricted framing uses the existing
+  fixture's length-frame/deadline mechanics; second log passes descriptor and geometry.
+- Owning HTTP cookie/Host/Origin/CSRF/no-legacy boundary: `red-http.log` then
+  `green-http.log`; final ordinary and optimized-Python checks `http-final.log` and
+  `http-optimized-final.log` pass. Final strengthened `http-boundary-final.log` and
+  `http-boundary-optimized-final.log` pass2tests. The final strengthened
+  `http-boundary-eof-final.log` and `http-boundary-eof-optimized-final.log` each
+  pass3tests, including wrong native PID/UID
+  (no challenge disclosed), Host/Origin/CSRF refusals before native dispatch, pending
+  cookie refusal and no legacy authority. The latter explicitly launches the child
+  itself with `-O`, not only its test parent. Authorization uses explicit rejection,
+  not `assert`.
+- `smoke-1.log` (missing msgpack) and `smoke-2.log` (missing websockets) are failed
+  preparations, not whole journeys. An audit-local isolated venv fixes dependencies;
+  no shared runtime was modified. `smoke-3.log` reaches real pending refusal then
+  rejects the clipped native approval control. `smoke-4.log` reaches capture, actual
+  MCP edit and cookie reload, then stops on the audit script's rebound guard variable.
+  At two whole-path failures the owner reassessed the full route: native layout was
+  repaired; the remaining correction was only the audit guard-variable collision.
+  Both failed runs were cleaned and retained; no uncertain mutation was replayed.
+- Parent-scoped hierarchy repairs `8fcb082`, `de1c3dd`, `ac0b87c` were integrated as
+  `a45d754`, `5ef8e09`, `9316025`, preserving consent edits. No hierarchy STATUS or
+  decision wholesale cherry-pick. The first combined and final-source native journeys
+  both pass. First complete-path timing is retained in `smoke-combined.log`; source
+  inspection, shared-gate wait and failed preparations were not reset/renamed. No
+  initial wall-clock receipt exists for all inherited work, so exact cumulative
+  elapsed time across the parent handoff is unknown, not asserted within budget.
+- `combined-change-gate.log` retains the strict-Clippy needless test-borrow failure;
+  `combined-change-gate-fixed.log` retains test-module ordering lint. Final matching
+  workspace strict all-target Clippy/tests (381passed,7existing ignores) and inspection
+  strict Clippy/tests (183passed,6existing ignores) pass in `combined-change-gate-final.log`.
+  The initial runner's31Python tests are reused unchanged; final docs checks are
+  separate. Native log scanner is clean, but no new active Vulkan validation-layer
+  run is claimed for this slice. Parent final hierarchy/native GPU evidence remains
+  separately qualified. Added owning tests cover unsafe origins, length/
+  duplicate/truncated-expired frames, healthy idle, changed grant context, companion
+  death/endpoint withdrawal and real MCP progress while HTTP headers are incomplete.
+  Existing expiry/denial and command/draft guards remain in the affected suites.
+
+### Cleanup correction and immutable pins
+
+Independent cleanup readback found two failed-run filesystem leftovers after their
+native processes were terminated: private MCP locator roots (their sockets had
+already retired) and stale private workspace socket roots. `failed-run-cleanup.json`
+records exact run PID/time attribution, original locator directory/socket identity,
+UID/mode/sole-entry and absent-kernel-owner checks, narrow removal and readback.
+No live owner was stopped and no sibling resource was touched. These failed runs
+remain failures; reconciliation is not a retroactive pass.
+
+The workspace side was repaired at its owning layer: on authenticated native EOF,
+the HTTP child removes only the original UID/mode/device/inode-bound private socket
+and empty owner root, including native process death when Rust destructors cannot
+run. The regression fails first in `red-native-eof-cleanup.log`, then passes in the
+final3HTTP tests, including replacement-file preservation and actual optimized child
+Python. `eof-fixed-native-gate.log` passes changed editor default/inspection strict
+Clippy,183inspection tests and actual final-source build; unchanged non-editor
+workspace evidence from the381-test run above is reused, not rerun solely for this
+Python repair.
+Final whole path is rerun on the rebuilt `ruster-editor-eof-final`; exact child PID,
+parent-owned socket path, listener/locator/socket/root/profile absence and preserved
+desktop are recorded in `ordinary-yu3oahnn/report.json` and independently rechecked.
+
+Audit `manifest.json` pins the source archive, production checkout bytes, immutable
+native/adapter artifacts, compiler messages, all raw logs and journey receipts.
+No active Vulkan-layer result is inferred from the clean native text-log scanner.
+
+### Exact limitations and next acceptance
+
+The first transport slice is complete. **Not claimed:** physical-human approval,
+default-feature/noninspection live interaction, actual prompt→ChatGPT internal-browser
+project handoff, interactive ordinary-runtime browser controls, installation, registry
+expansion, client configuration, merge or release. Independent consequential
+implementation review remains for the parent (the prior completed Astra review was
+architectural, not a review of these new executable bytes). No live URL is advertised.
+Next executable step: parent reviews the pinned transport implementation/evidence;
+then qualify the unchanged final-artifact default/noninspection/human/client route
+when its real user/channel dependency is available. Do not restart fixture-only
+journeys as proof of this normal-runtime outcome.
+
+## Historical fixture qualification (unchanged evidence, not current runtime proof)
 
 ## Outcome and boundary
 
