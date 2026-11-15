@@ -1,6 +1,75 @@
 # Current project status
 
-## Native AI blank-window layout repair — 2026-11-15
+## Cumulative native AI workspace integration — 2026-11-15
+
+**SOURCE INTEGRATED; actual ChatGPT/native bounded journey PASS; NOT installed or
+released.** Four ordered commits from approved base `ea38213` are cherry-picked
+onto `feat/cumulative-editor-20261115`, preserving the `b0116a0` developer handoff:
+`bc5c6c8`→`2a62c01`, `2670a4f`→`4d32b2e`, `2929689`→`3a99cfe`,
+`1dad9d0`→`f3adf61`. No new functionality or refactoring was added in integration.
+Independent Astra review of trust repairs `2929689` returned
+`GO_SCOPED_QUALIFICATION`; parent inspected the minimal layout-row fix `1dad9d0`.
+
+**Exact source equivalence PASS:** 226 tracked files across all `crates/`,
+`scripts/`, and Cargo manifests/lock compare byte-for-byte against qualified
+`1dad9d0df4605442dbf345c187c009287850d3f8`, including current worktree bytes and
+file-set equality. Crates tree `d4c4d20d678575247a31fe6f90def9e771acae25`;
+scripts tree `7d4de3d91b5e798afc43c53fbea736e4a5af7be0`; aggregate SHA-256
+`e1ab7c798387b0836332f7117c9be25dd97694e49bd2b4dc5f2dffa3d18422be`.
+Private audit receipt: `native-ai-workspace/cumulative-source-integration/byte-equivalence.json`
+under `/home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/`.
+Matching scoped verification is reused: layout cohort default194 pass/5 ignores,
+inspection199 pass/7 ignores, owning production-Host RED/GREEN and strict Clippy.
+No redundant rebuild/full suite or GUI work was run during source integration.
+Direct `scripts/check.py::validate_markdown` on all eight changed Markdown files
+against `b0116a0` and `git diff --check` PASS; source equivalence is checked again
+before final commit. Integration verification took minutes, with no heavy build.
+The older inspection asset-retirement failure remains historically unresolved;
+the later passing layout cohort is not a causal diagnosis of that failure.
+
+**Human-operated actual-client evidence, not a fake Host:** persisted enrolled
+fixture connected/cold-started without recurring native approval. The original
+`2929689` blank/centered-header screenshot FAILED layout; after the `1dad9d0`
+repair Akil reported “works great” and supplied a screenshot with three colored
+objects, top toolbar and gizmo: visual layout PASS. Actual ChatGPT's fresh MCP
+image report matches the native camera/selection. One guarded center-object
++0.5 world-X edit advances revision9→10; one native Undo and read-only MCP
+verification at revision11 restore the exact prior translation, rotation[0,0,0]
+and scale[1,1,1] in the same reported Session. Earlier manual trial edits remain;
+this is not a reset to the saved baseline.
+
+Private user receipts live in `native-ai-workspace/native-layout-repair/human-layout-trial-89p9zqc7/`:
+`actual-client-visual-pass.json`, `actual-client-image-user-receipt.json`,
+`actual-client-guarded-edit-user-receipt.json`, and
+`actual-client-native-undo-user-receipt.json`. No session identity, credentials or
+private trial files are copied into this repository. Parent's optimized default
+native artifact SHA-256 is `cfe290495ac3032d7fee80706bf0b986c2d991d5e54dba28bff43946e1902395`;
+unchanged `2929689` MCP artifact SHA-256 is
+`2ce9d76b5cffac5ff79b6b400d88bd4abea6b9a4c839bf9a0c56e01c2563f814`.
+These are trial artifact pins, not installed-editor replacement evidence.
+
+**Actual close/reopen without MCP restart PASS:** user normally closed/discarded
+the fixture and explicitly reconnected in the same ChatGPT conversation, obtaining
+a new connection at revision0. Parent independently verified the same adapter
+PID/start remained alive, the old native process was absent, and the new native
+process was parented by that same adapter with the reviewed `cfe290…` image.
+Private receipt: `actual-client-close-reopen-user-receipt.json` in the same trial
+directory. This is actual-client lifecycle evidence, not only a windowless tracer.
+
+**Current gates:** reopened human native trial ACTIVE and deliberately untouched.
+Fresh save/reopen of the preceding unsaved edits and broader lifecycle acceptance
+are not inferred from this close/discard/reconnect or edit/Undo. Quantitative/physical responsiveness is not benchmark
+proven. Missing startup diagnostics on successful connect is not a product defect;
+optional `browser_workspace_unavailable` is not a native blocker. Browser remains
+DEFERRED. Installed replacement/release is QUEUED after parent verification, not
+performed here. No config, enrollment, launcher, artifacts, preferences, GUI/input,
+native processes or protected canonical worktree were changed; frozen resources
+are retained and cleanup is deferred to the trial owner.
+
+## Native AI blank-window layout repair — implementation-time checkpoint, 2026-11-15
+
+Historical checkpoint below; the integrated user evidence above supersedes its
+pending graphical acceptance and parent review state for the bounded journey.
 
 **REPRODUCED / SOURCE HEADLESS GREEN; guarded visual proof PENDING:** actual
 production Host composition grows the wide header38 points/frame until controls
@@ -31,13 +100,13 @@ holds remain; parent owns integration and guarded native/client qualification.
 **USER APPROVED:** simplified native Rusterize UI beside ChatGPT, more viewport
 space and less routine chrome because MCP handles much authoring. Same native
 Session/history/selection, not a second scene/webview. Full editor stays first-class.
-The exact initial layout is not yet implemented.
+The initial native layout is now implemented and bounded-human-qualified above.
 
 **Initial Astra design COMPLETE:** five calls, exact terminal completion verified.
 Recommend reversible AI workspace in the same native window, viewport-first,
 collapsed Objects/Selection drawers and a Full editor escape; no second Session.
 Parent confirms existing Move/Rotate/Scale and native MCP image-content conversion.
-Actual client image reception still needs its cheap intended-client preflight.
+Actual-client image reception now passes the intended-client preflight above.
 
 **LATEST USER REQUIREMENT:** ChatGPT connect → choose registered project → connected.
 User explicitly permits removing recurring native connection approval. Previous
@@ -53,13 +122,16 @@ Native mode is presentation, not authority; browser handoff is optional.
 [Initial implementation contract](decisions/2026-11-15-native-ai-workspace.md)
 combines the designs with wrong-target/shared-client and reconnect acceptance.
 
-**RUNNING:** regular dev owner `deleg_b5287db9` implements the combined Astra
-contract in isolated `feat/native-ai-workspace-20261115` from `ea38213`. One native
-UI/Session, trusted project-connect with no routine approval, bounded registry and
-explicit target epochs/revocation; TDD/headless first. Parent owns security review,
-actual-client/native acceptance and cumulative integration. No live enrollment,
-client config, installation or desktop changes. Raw proposals/receipts remain in
-`native-first-design/`; untrusted/manual behavior and other grants are preserved.
+**Implementation handoff (historical, now COMPLETE/source-integrated):** regular
+dev owner `deleg_b5287db9` implemented the combined Astra contract in isolated
+`feat/native-ai-workspace-20261115` from `ea38213`. The original handoff assigned
+one native UI/Session, trusted project-connect with no routine approval, bounded
+registry and explicit target epochs/revocation; TDD/headless first. Parent owned
+security review, actual-client/native acceptance and cumulative integration.
+That source handoff made no live enrollment, client config, installation or desktop
+changes; later parent-operated trial evidence is recorded above. Raw proposals/
+receipts remain in `native-first-design/`; untrusted/manual behavior and other
+grants are preserved.
 
 **Browser DEFERRED, NOT REMOVED:** user retains it as a nice-to-have for future
 use cases; optimization no longer gates native-first. SDK worker checkpointed and

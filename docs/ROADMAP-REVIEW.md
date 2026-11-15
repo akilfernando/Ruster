@@ -838,6 +838,58 @@ old-conversation target-epoch and explicit reopen-without-client-restart tests.
 Regular dev owner `deleg_b5287db9` now implements it in an isolated branch feeding
 the cumulative line. Existing live enrollment/client settings are still untouched.
 
+### Native AI source integration and bounded human acceptance — 2026-11-15
+
+**Trigger/authority:** user asked to integrate the reviewed, human-qualified native
+AI workspace into the existing cumulative delivery branch, source-only; the live
+native trial remains protected. This advances the original `b0116a0` developer
+handoff without rewriting its historical design/implementation record.
+
+**Outcome:** ordered `bc5c6c8`, `2670a4f`, `2929689`, `1dad9d0` were cherry-picked
+as `2a62c01`, `4d32b2e`, `3a99cfe`, `f3adf61`. No conflicts or source repairs were
+needed. Actual blobs AND working bytes/file sets across 226 crates/scripts/Cargo
+files exactly match `1dad9d0`; per-file hashes, tree IDs and aggregate digest are
+in private audit `native-ai-workspace/cumulative-source-integration/byte-equivalence.json`.
+Existing scoped final-input tests are reused, not rerun during the active trial.
+Independent Astra trust-repair review is GO_SCOPED_QUALIFICATION; parent inspected
+the minimal layout fix and its real Host centered-header/offscreen-viewport RED.
+The later layout cohort passes default194/5 ignored and inspection199/7 ignored;
+this does not retrospectively diagnose the older asset-retirement failure.
+
+**Actual delivery boundary:** implemented source is now cumulative, not an installed
+editor replacement or release. Human-operated actual ChatGPT and ordinary native
+GUI pass enrolled cold connection without recurring native approval, repaired
+layout (three colored objects/top toolbar/gizmo, “works great”), fresh MCP image
+agreement, one +0.5 world-X edit revision9→10, and native Undo/read-only MCP revision11
+restoring the exact preceding state in the same reported Session. Preceding manual
+trial edits are preserved, not reset to a saved baseline. See current STATUS for
+private receipt locations and trial artifact hashes; no private identities shipped.
+
+**Alternatives/rationale:** retain one cumulative line rather than merge into the
+dirty protected canonical checkout or replace frozen trial artifacts. Exact byte
+comparison supports reuse of code evidence; ancestry or a higher test count alone
+would not. No new functionality, broad rebuild, GUI work, config or enrollment
+change was needed. Browser remains deferred; optional browser unavailability is
+not native failure. Absent failure diagnostics during successful connect is not a
+defect. Qualitative usability feedback is not a physical responsiveness benchmark.
+
+**Later actual-client gate, same date:** user normally closed/discarded the fixture
+and explicitly reconnected in the same ChatGPT conversation at new revision0.
+Parent independently verified the same adapter PID/start stayed alive, old native
+absent, and new reviewed `cfe290…` native image parented by that adapter. Thus
+close/reopen without manual MCP restart is actual-client PASS, not merely the
+windowless tracer result. Private `actual-client-close-reopen-user-receipt.json`
+joins the same trial receipts. This does not prove saved persistence of discarded
+manual edits, measured responsiveness or installed replacement.
+
+**Dependencies/revisit:** parent owns final artifact/install verification and any
+remaining bounded lifecycle/persistence qualification. Keep the deliberately
+running reopened trial/frozen worktrees and artifacts intact; cleanup remains
+with the trial owner. Reuse accepted connect/image/edit/Undo/close-reconnect gates
+rather than repeat them for source-only integration. Process lesson: exercise
+the actual Host geometry over repeated frames, and distinguish implemented,
+scoped-reviewed, human-qualified and installed outcomes in the same delivery line.
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.
