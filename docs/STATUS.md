@@ -38,16 +38,22 @@ suite **FAILS**:188 pass/1 asset-retirement assertion failure/6 ignores. One par
 isolated diagnostic passes; this does not erase that failure or establish cause.
 No schedules, transport, encoding choices, repaint policy or guards changed.
 
-**RUNNING:** separate optimized inspection build `proc_2dc4faba909c` and inert
-finite-run preparation `deleg_0e498afe`; no live-session/native/GPU/input action.
-The feedback freeze protects that candidate, not independent headless preparation.
-After readiness, one guarded ordinary-Host cohort must attribute the dominant
-interval before a repair. Actual presence/owned-runtime guards remain a separate
-native-run dependency, not inferred AFK. Callback time remains explicitly opaque
-backend latency; no dependency-registry instrumentation. Raw proof and scoped
-parent review: cumulative audit `capture-progress/`. Instrumentation alone is not
-progress on responsiveness acceptance, which remains failed. Feed any qualified
-repair into the cumulative line rather than install another separate product.
+**READY; native run BLOCKED on fresh user-away availability:** optimized artifact
+`f724b704…55b5bde` and all owning inputs are verified. The exact-interpreter inert
+preflight passes. Parent additionally catches/fixes the numeric trace/string wire
+revision join (observed RED→GREEN), bounds FIFO admission and protects observer
+startup with cleanup; five inert regressions pass. Updated derived-runner pins and
+proof: `capture-progress/run-preparation/parent-readiness-receipt.json`.
+
+No agent/native measurement is running. Read-only checks find workspace1 active,
+workspace2 empty, unlocked desktop and an available QA gate; these are transient,
+not AFK authority. Ask for one approximately6-minute idle window, leave workspace1
+active/workspace2 empty, then recheck admission in the exact runtime. The finite
+cohort is three settled refresh captures, not camera manipulation or a speedup
+claim. No live-trial, installed binary, authority or fidelity change. Final whole
+inspection failure stays visible. After this cohort, choose one demonstrated
+repair; do not expand diagnostic scaffolding or request another usability test
+without evidence.
 
 Raw user/identity receipts: cumulative audit `startup-provenance/` files
 `actual-client-managed-start-user-receipt.json`,
