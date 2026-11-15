@@ -1,5 +1,10 @@
 # Current project status
 
+## Localhost continuous camera prototype — 2026-11-15
+
+Isolated `feat/continuous-localhost-20261115` retains the user-reported accepted functional click/camera baseline but fixes its unaccepted responsiveness. Profiling identifies debug ColorImage/crop/PNG CPU costs, not GPU render, as dominant. An actually compiled/pinned release fixture plus completion-paced bounded camera delivery measures **28.35–34.53 changing native frames/s** across three owned-browser four-second runs; median oldest input→decoded **41.9–57.5ms**, versus debug+80ms **2.75fps /556.4ms**. Lossless872×553/4×MSAA/native authority unchanged; pins advance after decode. See [prototype evidence, limits and startup](../spikes/003-interactive-localhost/README.md#continuous-feedback-experiment--prototype-measured-chatgpt-user-gate-pending-2026-11-15). Audit `/home/akilf/Projects/Ruster-Audits/continuous-localhost-20261115/`; sustained-drag→settle→pick/MCP/draft/Undo/observer/access journey passes with real Core+Synchronization diagnostics. Physical visibility, actual ChatGPT responsiveness and broader workloads remain unaccepted. Native idle continuous capture remains inefficient. Qualification resources cleaned; canonical dirty STATUS/private attachments, original checkout and paused Hermes UI remain untouched. No installation/registration/configuration/consent change. Final project checks are pending below until their retained logs complete.
+
+
 ## Direct mouse camera slice — 2026-11-15
 
 **Implemented and ordinary-browser/native/MCP qualified**, not new ChatGPT user acceptance: right-drag orbit, middle/Shift-right pan, wheel zoom; native viewport click/background selection retained. One bounded camera-only aggregate intent, completion-paced dispatch, final-pointer-up settle and cancellation/stale/draft guards; no authored-command queue/replay or browser-owned renderer/scene/history. [Runnable artifact, exact behavior and evidence](../spikes/003-interactive-localhost/README.md#direct-mouse-camera-navigation-qualified--2026-11-15).

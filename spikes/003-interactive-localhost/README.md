@@ -1,5 +1,52 @@
 # Interactive localhost workspace — bounded disposable slice
 
+## Continuous-feedback experiment — prototype measured, ChatGPT user gate pending 2026-11-15
+
+Owner: bounded performance worker, isolated `feat/continuous-localhost-20261115`; original live source unchanged. User reports functional click/camera correctness accepted, responsiveness NOT accepted. Exit: owned real Chromium sustained pointer drag presents >=15 distinct changing native frames/s and median input-to-decoded <100ms, followed by settled native picking, MCP camera/state agreement, unchanged authored history and existing draft/access/observer regressions. Engineering targets, not promised user acceptance. Profile phases first; remove avoidable fixture waits/copies/encoding before media infrastructure. Reassess after30 cumulative minutes or two failed journeys. No independent browser scene/camera, fake animation, mutation replay, install, registration, desktop input or production-consent change. Actual ChatGPT smoothness remains a user gate.
+
+
+
+### Measured result and runnable candidate
+
+Audit: `/home/akilf/Projects/Ruster-Audits/continuous-localhost-20261115/`. Same native three-cube scene, **872×553 lossless PNG viewport**, native full1408×896 readback,4×MSAA, NVIDIA RTX4060 Laptop GPU / driver620.70.06, Vulkan, owned headless Chromium at1250×1000/DPR1. No quality/resolution reduction or renderer/camera algorithm change. Runtime power/scheduling are not pinned; four-second traces are descriptive, not a sustained-workload guarantee or physical display measurement.
+
+| Fixed pointer-stream comparison | Changing decoded native frames observed at browser paint opportunities during drag / second | Median oldest coalesced input → decoded | Median request → decoded |
+| --- | --- | --- | --- |
+| Unoptimized native +80ms dispatch (`comparison-debug-red`) | 2.75 | 556.4ms | 243.5ms |
+| Real release build, retained80ms dispatch (`comparison-release-control`) | 7.51 | 163.4ms | 45.6ms |
+| Release +completion-paced dispatch, three fresh processes (`comparison-final-1..3`) | 28.35 /34.53 /33.24 | 57.5 /43.25 /41.9ms | 30.8 /25.15 /25.9ms |
+
+All three final runs pass the >=15changing-native-frames/s and median oldest-input→decoded<100ms experiment gates. Samples include **every** completed camera response in each final run (115/140/135), not only the UI's last64 ledger entries. FPS counts distinct native frame identities at rAF opportunities inside the measured drag interval, matched to distinct returned PNG hashes; neither HTTP throughput nor rAF count alone is accepted. Final cumulative pointer delta is asserted after settle. The unchanged initial native PNG hash matches debug/control/final exactly. Earlier exploratory `baseline`, `release-baseline`, `release-paced`, `baseline-red`, `release-80ms-control`, `final-1..3` remain retained; those exploratory latency summaries can contain only the bounded latest64 samples. Only `comparison-*` is the final whole-trace cohort.
+
+**Diagnosis:** instrumented unoptimized median ColorImage conversion40.82ms, crop61.45ms and PNG81.40ms versus UI3.22ms / render+readback2.82ms (`baseline/result.json`). These are fixture wall-clock phase spans, not isolated GPU timings; render+readback includes tessellation/target allocation/submission/map wait. Actual release compilation reduces CPU capture costs. The old80ms wait after every completion still limits progression and adds coalescing age. Zero-added-delay dispatch now starts the next bounded camera intent only after the previous operation/decode completes. No WebRTC/WebCodecs/server-thread/streaming subsystem is justified for this bounded target. File IPC5ms polling, base64/JSON and full-frame capture remain; phase attribution does not separately isolate their individual costs. Idle native continuous render/readback remains explicitly inefficient and is not optimized here.
+
+Pixels and authoritative pins now advance together **after image decode**, so `current` does not point ahead of the delivered image. Existing one-flight admission, one bounded coalesced camera slot, no queued/replayed authored mutation, cancel-on-refusal/hidden/offline/blur/capture loss, pointer-up settle and native stale/draft guards remain. Only the fixture gains phase timings; production renderer/command/history source is unchanged.
+
+`journey-final-validation/result.json` passes sustained real CDP pointer drag→settle→native click/clear→MCP camera/selection agreement; exact scene preservation; both CSS/DPR picking cases; stale view/session/revision/frame/coordinate refusals; native draft protection/text preservation; browser transform→MCP same-object transform→browser Undo→MCP Undo with exact restored PNGs; observer hidden/offline/backoff; bounded busy refusals; Host/Origin/capability denial and revocation. Actual Core+Synchronization diagnostics activate and the captured native log scans clean. `journey-release` is the earlier passing combined journey before the added sustained-drag regression. No actual ChatGPT performance/user acceptance is claimed; functional click/camera behavior was accepted by prior user report, responsiveness was not.
+
+Reproduce the final comparison (requires an available QA lease):
+
+```sh
+python3 spikes/003-interactive-localhost/profile_camera.py \
+  --host-binary /home/akilf/Projects/Ruster-Audits/continuous-localhost-20261115/host-release-baseline \
+  --output /home/akilf/Projects/Ruster-Audits/continuous-localhost-20261115/new-comparison \
+  --require-target
+```
+
+Fresh **human browser-controls** demo, from this isolated checkout (the existing server prints the fresh URL/run/locator):
+
+```sh
+python3 spikes/003-interactive-localhost/server.py \
+  --host-binary /home/akilf/Projects/Ruster-Audits/continuous-localhost-20261115/host-release-baseline \
+  --output-root /home/akilf/Projects/Ruster-Audits/continuous-localhost-20261115 \
+  --grant-disposable-local-and-first-mcp-owner
+```
+
+Use the printed URL in ChatGPT's internal browser, enter that run's private `capability.secret` into **Local capability**, Connect, then right-drag continuously and click after release. No MCP reconfiguration is necessary for camera-only user feedback. A combined MCP test requires the new exact locator; old saved registration cannot implicitly retarget. Ctrl-C or the exact run's `stop` marker retires this disposable30-minute owner; verify `server-cleanup.json` afterward. No URL/secret is embedded in these commands. Use the pinned **release** binary, not the old debug host; no product installation is involved.
+
+Primary references accessed2026-11-15: [Cargo profiles](https://doc.rust-lang.org/cargo/reference/profiles.html) supports optimized release-profile selection and per-workload comparison rather than presumed speed; [WHATWG image decode](https://html.spec.whatwg.org/multipage/embedded-content.html#dom-img-decode) distinguishes decoded-image readiness from physical presentation. Full fetched primary HTML is retained in the audit. Network extractor failed on the configured search-only backend; direct HTTPS retrieval succeeded without configuration changes.
+
+
 ## Direct mouse camera navigation qualified — 2026-11-15
 
 Right-drag orbits, middle-drag / Shift-right-drag pans, wheel zooms; primary click retains native picking and primary movement beyond4CSS pixels suppresses selection. The browser submits transient camera requests through existing guarded `viewport_camera`; only native receipts/pixels become displayed state. Orbit/pan math follows native default-speed conventions; wheel uses normalized CSS units. No browser renderer/geometry, new MCP tool, native source, scene/history or production authority change.

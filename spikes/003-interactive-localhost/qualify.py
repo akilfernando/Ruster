@@ -123,6 +123,24 @@ def main():
                 elif cancel=='blur':c.call('Emulation.setFocusEmulationEnabled',{'enabled':False});c.js("dispatchEvent(new Event('blur'))")
                 c.call('Input.dispatchMouseEvent',{'type':'mouseReleased','x':xy['x']+dx,'y':xy['y']+dy,'button':button,'buttons':0,'clickCount':1,'modifiers':modifiers})
                 settled()
+            # Sustained genuine pointer stream, settle, then native click and MCP readback.
+            xy=c.js("(()=>{const r=frame.getBoundingClientRect();return {x:r.x+r.width*.5,y:r.y+r.height*.5}})()")
+            c.call('Input.dispatchMouseEvent',{'type':'mousePressed',**xy,'button':'right','buttons':2,'clickCount':1})
+            started=time.monotonic()
+            for i in range(180):
+                due=started+i/60
+                if due>time.monotonic():time.sleep(due-time.monotonic())
+                c.call('Input.dispatchMouseEvent',{'type':'mouseMoved','x':xy['x']+i*.3,'y':xy['y']+i*.05,'button':'right','buttons':2})
+            c.call('Input.dispatchMouseEvent',{'type':'mouseReleased','x':xy['x']+53.7,'y':xy['y']+8.95,'button':'right','buttons':0,'clickCount':1})
+            settled();moved=c.snapshot()
+            assert moved['scene']==base['scene']
+            assert moved['view']['camera']==tool('viewport_inspect')['result']['camera']
+            assert moved['view']['selected_object_ids']==base['view']['selected_object_ids']
+            assert c.point(.03,.9)['status']=='completed'
+            assert c.snapshot()['view']['selected_object_ids']==tool('viewport_inspect')['result']['selected_object_ids']==[]
+            clicked=c.snapshot();c.click('#connect');assert c.snapshot()['png']==clicked['png']
+            record['sustained_drag_settle_pick_mcp']=True
+            assert c.js("operate('viewport_camera',{...pins(true),camera:"+json.dumps(base['view']['camera'])+"})")['status']=='completed'
             import math
             navigation=[]
             for width,dpr in [(1250,1),(980,2)]:

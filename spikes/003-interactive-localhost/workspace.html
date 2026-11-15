@@ -20,10 +20,10 @@ $('begin').disabled=!selected||!!draft||current.draft_reserved||(busy&&!backgrou
 for(const group of ['translation','rotation','scale'])for(let i=0;i<3;i++)$(group+i).disabled=!draft||(busy&&!background);
 $('draft').textContent=draft?'Pending local draft reserved natively. Agent writes are blocked; Apply or Cancel.':current.draft_reserved?'Native draft reservation remains; local text is unavailable in this page. Cancel to release it.':'';
 $('details').textContent=JSON.stringify({scene:s,view:v,draft_reserved:current.draft_reserved,outcomes},null,2)}
-async function operate(op,args={},automatic=false){if(op!=='viewport_camera')cancelCamera();const id=++sequence,start=performance.now();if(busy){const r={id,op,status:'busy-refused'};outcomes.push(r);if(outcomes.length>64)outcomes.shift();$('status').textContent='Busy: request explicitly refused, not queued or retried.';return r}busy=true;background=automatic;$('status').textContent=`Pending ${op}; previous frame is stale/unconfirmed.`;show();let row={id,op,status:'accepted'};outcomes.push(row);if(outcomes.length>64)outcomes.shift();try{const response=await fetch('/operation',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Capability':$('capability').value},signal:AbortSignal.timeout(10000),body:JSON.stringify({op,args})});if(!response.ok)throw Error('HTTP '+response.status+'; no automatic retry');const next=await response.json();if(!next.response?.ok)throw Error(next.response?.error?.code||next.error||'native refusal');
+async function operate(op,args={},automatic=false,inputTiming=null){if(op!=='viewport_camera')cancelCamera();const id=++sequence,start=performance.now();if(busy){const r={id,op,status:'busy-refused'};outcomes.push(r);if(outcomes.length>64)outcomes.shift();$('status').textContent='Busy: request explicitly refused, not queued or retried.';return r}busy=true;background=automatic;$('status').textContent=`Pending ${op}; previous frame is stale/unconfirmed.`;show();let row={id,op,status:'accepted'};outcomes.push(row);if(outcomes.length>64)outcomes.shift();try{const response=await fetch('/operation',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Capability':$('capability').value},signal:AbortSignal.timeout(10000),body:JSON.stringify({op,args})});if(!response.ok)throw Error('HTTP '+response.status+'; no automatic retry');const next=await response.json();if(!next.response?.ok)throw Error(next.response?.error?.code||next.error||'native refusal');
 if(op==='draft_begin')draft={source:next,object_id:next.view.active_object_id};if(op==='scene_transform'||op==='draft_cancel')draft=null;
-current=next;const img=new Image();img.src='data:image/png;base64,'+next.png;await img.decode();$('frame').src=img.src;
-row.status='completed';row.commit_ms=next.commit_ms;row.request_to_decoded_ms=performance.now()-start;samples.push({...row,revision:next.scene.revision,view_revision:next.view.view_revision});if(samples.length>64)samples.shift();$('status').textContent=`Completed ${op}. Committed revision ${next.scene.revision}; decoded native frame. ${row.request_to_decoded_ms.toFixed(1)} ms request→decoded (not physical display).`;
+const img=new Image();img.src='data:image/png;base64,'+next.png;await img.decode();$('frame').src=img.src;current=next;
+row.status='completed';row.commit_ms=next.commit_ms;row.request_to_decoded_ms=performance.now()-start;row.decoded_at=performance.now();if(inputTiming){row.first_input_to_decoded_ms=row.decoded_at-inputTiming.first;row.latest_input_to_decoded_ms=row.decoded_at-inputTiming.latest;}samples.push({...row,revision:next.scene.revision,view_revision:next.view.view_revision});if(samples.length>64)samples.shift();$('status').textContent=`Completed ${op}. Committed revision ${next.scene.revision}; decoded native frame. ${row.request_to_decoded_ms.toFixed(1)} ms request→decoded (not physical display).`;
 $('presentation').textContent=`Decoded native frame ${next.native_frame}, revision ${next.scene.revision}. Paint opportunity pending.`;
 if(paintRequest!==null)cancelAnimationFrame(paintRequest);paintRequest=requestAnimationFrame(()=>{if(current===next)$('presentation').textContent=`Native frame ${next.native_frame}, revision ${next.scene.revision}: browser paint opportunity observed (not physical visibility).`});
 return row;
@@ -33,16 +33,16 @@ $('connect').onclick=async()=>{if(busy){await operate('refresh');return}autoEnab
 // Only camera deltas coalesce in one bounded slot; authored operations never queue.
 let gesture=null,cameraIntent=null,cameraTimer=null,cameraFlight=false,cameraEpoch=0;
 const frame=$('frame');frame.draggable=false;frame.style.touchAction='none';frame.style.userSelect='none';
-frame.insertAdjacentHTML('afterend','<p class="subtle">Right-drag: orbit · Middle-drag or Shift-right-drag: pan · Wheel: zoom · Primary click: select. Dragging never selects. Navigation waits for native pixels; no smooth/FPS claim.</p>');
+frame.insertAdjacentHTML('afterend','<p class="subtle">Right-drag: orbit · Middle-drag or Shift-right-drag: pan · Wheel: zoom · Primary click: select. Dragging never selects. Navigation displays successive authoritative native frames; no client-side scene or interpolated camera.</p>');
 function cancelCamera(){cameraEpoch++;cameraIntent=null;clearTimeout(cameraTimer);cameraTimer=null;const g=gesture;gesture=null;if(g&&frame.hasPointerCapture(g.id))frame.releasePointerCapture(g.id)}
 function queueCamera(mode,dx,dy,height){
  if(!current||!autoEnabled||document.hidden||!navigator.onLine)return;
  if(cameraIntent&&cameraIntent.mode!==mode){$('status').textContent='Finish current camera gesture first.';return}
- const p=cameraIntent||(cameraIntent={mode,dx:0,dy:0,height});p.dx+=dx;p.dy+=dy;
+ const p=cameraIntent||(cameraIntent={mode,dx:0,dy:0,height,first:performance.now(),latest:performance.now()});p.dx+=dx;p.dy+=dy;p.latest=performance.now();
  if(Math.abs(p.dx)>4096||Math.abs(p.dy)>4096){cancelCamera();$('status').textContent='Camera input bound exceeded; unsent navigation canceled.';return}
  scheduleCamera();
 }
-function scheduleCamera(){if(cameraTimer===null&&!cameraFlight&&cameraIntent)cameraTimer=setTimeout(flushCamera,80)}
+function scheduleCamera(){if(cameraTimer===null&&!cameraFlight&&cameraIntent)cameraTimer=setTimeout(flushCamera,0)}
 async function flushCamera(){
  cameraTimer=null;if(!cameraIntent)return;if(!autoEnabled||document.hidden||!navigator.onLine){cancelCamera();return}if(busy){scheduleCamera();return}
  const p=cameraIntent;cameraIntent=null;const epoch=cameraEpoch,camera=structuredClone(current.view.camera);
@@ -51,7 +51,7 @@ async function flushCamera(){
  if(p.mode==='orbit'){camera.yaw-=p.dx*.008;camera.pitch=Math.max(-1.45,Math.min(1.45,camera.pitch+p.dy*.008))}
  else if(p.mode==='pan'){const y=camera.yaw,t=camera.pitch,s=Math.sin(y),c=Math.cos(y),sp=Math.sin(t),cp=Math.cos(t),f=2*camera.distance*Math.tan(Math.PI/8)/Math.max(1,p.height);const right=[c,0,-s],up=[-s*sp,cp,-c*sp];camera.target=camera.target.map((v,i)=>v+(-right[i]*p.dx+up[i]*p.dy)*f)}
  else camera.distance=Math.max(.01,Math.min(1e7,camera.distance*Math.exp(p.dy*.002)));
- cameraFlight=true;const result=await operate('viewport_camera',{...pins(true),camera});cameraFlight=false;
+ cameraFlight=true;const result=await operate('viewport_camera',{...pins(true),camera},false,p);cameraFlight=false;
  if(result.status!=='completed'){cancelCamera();return}
  if(epoch===cameraEpoch)scheduleCamera();
 }

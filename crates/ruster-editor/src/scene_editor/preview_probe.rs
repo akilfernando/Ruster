@@ -247,6 +247,7 @@ fn direct_image_host_fixture() {
             std::fs::write(out.join("status.tmp"), status.to_string()).unwrap();
             std::fs::rename(out.join("status.tmp"), out.join("status.json")).unwrap();
         }
+        let frame_started = Instant::now();
         count += 1;
         let raw = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -275,6 +276,7 @@ fn direct_image_host_fixture() {
             host.editor.poll_capture(ui.ctx());
             host.service_bridge(ui.ctx());
         });
+        let ui_ms = frame_started.elapsed().as_secs_f64() * 1000.;
         let callbacks = full
             .viewport_output
             .values()
@@ -373,11 +375,14 @@ fn direct_image_host_fixture() {
             .poll(wgpu::PollType::wait_indefinitely())
             .unwrap();
         rx.recv().unwrap().unwrap();
+        let readback_ms = frame_started.elapsed().as_secs_f64() * 1000. - ui_ms;
         let pixels = read.slice(..).get_mapped_range().unwrap();
+        let color_started = Instant::now();
         let image = Arc::new(egui::ColorImage::from_rgba_unmultiplied(
             [1408, 896],
             &pixels,
         ));
+        let color_ms = color_started.elapsed().as_secs_f64() * 1000.;
         // Native queued selection is applied after this frame's viewport draw.
         // Deliver the following rendered frame, never old pixels with new selection.
         let local = if pointer.is_some() {
@@ -395,6 +400,7 @@ fn direct_image_host_fixture() {
             let width = (rect.max.x.floor() as usize).saturating_sub(x);
             let height = (rect.max.y.floor() as usize).saturating_sub(y);
             assert!(width > 0 && height > 0 && x + width <= 1408 && y + height <= 896);
+            let crop_started = Instant::now();
             let rgba: Vec<u8> = (y..y + height)
                 .flat_map(|row| {
                     image.pixels[row * 1408 + x..row * 1408 + x + width]
@@ -402,6 +408,8 @@ fn direct_image_host_fixture() {
                         .flat_map(|p| p.to_array())
                 })
                 .collect();
+            let crop_ms = crop_started.elapsed().as_secs_f64() * 1000.;
+            let encode_started = Instant::now();
             let mut png = Vec::new();
             {
                 let mut encoder = png::Encoder::new(&mut png, width as u32, height as u32);
@@ -414,9 +422,10 @@ fn direct_image_host_fixture() {
                     .write_image_data(&rgba)
                     .unwrap();
             }
+            let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let scene = host.editor.command(&nonce, "scene_inspect", json!({}));
             let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
-            let reply = json!({"response":response,"scene":scene["result"],"view":view["result"],"commit_ms":commit_ms,"native_frame":count,"png":base64::engine::general_purpose::STANDARD.encode(png),"fixture_authority_only":true,"draft_reserved":reservation.is_some()});
+            let reply = json!({"response":response,"scene":scene["result"],"view":view["result"],"commit_ms":commit_ms,"native_frame":count,"phases_ms":{"ui":ui_ms,"render_readback":readback_ms,"color_conversion":color_ms,"crop":crop_ms,"png":encode_ms},"png":base64::engine::general_purpose::STANDARD.encode(png),"fixture_authority_only":true,"draft_reserved":reservation.is_some()});
             std::fs::write(out.join("local-response.tmp"), reply.to_string()).unwrap();
             std::fs::rename(
                 out.join("local-response.tmp"),
