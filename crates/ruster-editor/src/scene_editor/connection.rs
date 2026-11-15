@@ -20,6 +20,7 @@ mod tests;
 
 impl SceneEditor {
     pub(super) fn revoke_connection(&mut self) {
+        self.captures.invalidate();
         #[cfg(unix)]
         if let Some(authority) = &self.connection_authority {
             authority.revoke();

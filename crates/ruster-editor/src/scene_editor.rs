@@ -81,6 +81,7 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "scene_select",
     "viewport_capture_start",
     "viewport_capture_inspect",
+    "viewport_capture_pick",
     "creation_export_inspect",
     "creation_export_start",
     "creation_export_cancel",
@@ -3065,7 +3066,10 @@ impl SceneEditor {
         if view_commands::supported(op) {
             return self.view_command(token, op, args);
         }
-        if matches!(op, "viewport_capture_start" | "viewport_capture_inspect") {
+        if matches!(
+            op,
+            "viewport_capture_start" | "viewport_capture_inspect" | "viewport_capture_pick"
+        ) {
             return self.capture_command(token, op, args);
         }
         if runtime_commands::supported(op) {

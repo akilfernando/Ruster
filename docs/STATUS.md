@@ -1,5 +1,13 @@
 # Current project status
 
+## MCP capture-bound visual grounding — 2026-11-15
+
+**First source slice implemented; CPU verification only; NOT integrated, GPU/client-qualified or installed.** Isolated branch `feat/mcp-visual-grounding-20261115` extends the existing ready observation with immutable selection/camera/matrices and adds read-only `viewport_capture_pick`. Exact thumbnail integer sampling/crop/source-pixel-center/DPI feeds native hierarchy/mesh picking against fresh-only authored state. Runtime images remain available with explicitly unsupported grounding. Native authority identity and captured session guard both pending and completed reads; native revocation cancels retained capture state. Layout/matrix/DPI/resource identity changes also advance view revision, preventing observed A→B→A revival. Extra metadata8KiB, MCP PNG40000bytes/512per side and native response64000bytes fail explicitly; malformed PNG cannot become metadata-only success.
+
+Behavioral RED receipts cover completed wrong-owner leakage, missing capture metadata, layout-return revival, MCP query schema, malformed-image success and changed resolved-resource adoption. GREEN CPU checks cover actual encoder/adoption dispatch, frontmost same-color geometry under a translated parent in perspective/orthographic narrow views, background miss vs invalid projection/runtime/coordinates, exact thumbnail sampling at fractional DPI, native-authority replacement/revocation and unchanged scene bytes/selection/camera/dirty/Undo/Redo. Production paint-receipt refusal is retained; synthetic encoder/adoption seams are not GPU or actual-client evidence.
+
+Audit (private): `/home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/mcp-visual-grounding/`; final command results and exact source hashes in its `manifest.json`. Scoped default/inspection package checks, strict Clippy and formatting recorded there. Parent owns independent ownership/freshness review, integration and source-matched native/current-client qualification. Frozen accepted native trial, live endpoints/enrollment/configuration, desktop and installed artifacts were untouched. Historical inspection asset-retirement failure remains causally unresolved; a current passing suite does not diagnose it. No broad workspace/GPU/optimized-build gate was run for this bounded slice.
+
 ## Cumulative native AI workspace integration — 2026-11-15
 
 **SOURCE INTEGRATED; actual ChatGPT/native bounded journey PASS; NOT installed or

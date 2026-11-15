@@ -363,6 +363,9 @@ pub fn install(render: &egui_wgpu::RenderState) -> MetricsHandle {
     metrics
 }
 
+/// Column-major native view and projection matrices.
+pub type CameraMatrices = ([[f32; 4]; 4], [[f32; 4]; 4]);
+
 /// Validated frontend-owned navigation context; it contains no GPU resources.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct CameraState {
@@ -373,6 +376,14 @@ pub struct CameraState {
     pub orthographic: bool,
 }
 impl CameraState {
+    /// Column-major matrices used by the native viewport (right-handed, depth 0..1).
+    pub fn matrices(self, aspect: f32) -> Option<CameraMatrices> {
+        if !self.is_valid() {
+            return None;
+        }
+        let (view, projection, _) = Camera::from_state(self).checked_matrices(aspect)?;
+        Some((view.to_cols_array_2d(), projection.to_cols_array_2d()))
+    }
     pub fn is_valid(self) -> bool {
         self.target
             .into_iter()

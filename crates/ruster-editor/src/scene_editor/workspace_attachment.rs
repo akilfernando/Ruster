@@ -729,6 +729,8 @@ mod tests {
             );
         }
         // Capture can fail after a successful control. Never undo or replay it.
+        // Establish fresh pins for the unavailable layout, not a stale command.
+        editor.captures.rect = None;
         let view = editor.command(&nonce, "viewport_inspect", json!({}));
         let args = json!({"expected_session_token":view["result"]["session_token"],"expected_revision":view["result"]["revision"],"expected_view_revision":view["result"]["view_revision"],"object_ids":[]});
         editor.captures.rect = None;
