@@ -397,8 +397,27 @@ mod seamless_tests {
             Some(grant.clone()),
         )
         .unwrap();
+        let proof = grant.proof().unwrap();
+        assert!(grant.authenticate(&proof, std::process::id()));
+        assert!(!grant.authenticate(&proof, u32::MAX));
+        for (key, value) in [
+            ("project", json!("two")),
+            ("generation", json!(0)),
+            ("secret", json!("0".repeat(64))),
+            ("connector", json!("claimed-chatgpt")),
+        ] {
+            let mut wrong = proof.clone();
+            wrong[key] = value;
+            assert!(!grant.authenticate(&wrong, std::process::id()));
+        }
+        let mut untrusted = connection::Client::open(bridge.locator_path()).unwrap();
+        assert_ne!(untrusted.call("scene_inspect", &json!({}))["ok"], true);
+        assert!(
+            bridge.pending_owner().is_none(),
+            "untrusted enrolled path cannot create an approval popup"
+        );
         let mut client = connection::Client::open(bridge.locator_path()).unwrap();
-        client.enroll(grant.proof().unwrap());
+        client.enroll(proof);
         let worker = std::thread::spawn(move || {
             let reply = client.call("scene_inspect", &json!({}));
             (client, reply)
@@ -412,7 +431,23 @@ mod seamless_tests {
         assert_eq!(reply["ok"], true, "{reply}");
         assert!(bridge.approved());
         let authority = bridge.authority();
+        let commit = authority.authorize_publication().unwrap();
+        assert!(
+            grant.revoke(false).is_err(),
+            "durable revoke cannot race an already authorized publication"
+        );
+        drop(commit);
+        let (queued, state, _) = new_pending_authorized(
+            json!({}),
+            Instant::now() + Duration::from_secs(2),
+            Some(authority.clone()),
+        );
+        assert!(state.begin_prepare());
         grant.revoke(false).unwrap();
+        assert!(
+            queued.lease.try_commit().is_err(),
+            "durable revoke must be checked again before commit"
+        );
         assert!(!authority.authorized());
         assert!(authority.authorize_publication().is_none());
         assert!(crate::enrollment::Grant::load(&path, "one").is_err());
@@ -611,9 +646,6 @@ impl Bridge {
 
     pub fn authority(&self) -> Authority {
         self.authority.clone()
-    }
-    pub fn persistent_grant(&self) -> Option<crate::enrollment::Grant> {
-        self.authority.0.lock().ok()?.grant.clone()
     }
     pub fn approved(&self) -> bool {
         self.authority.authorized()
@@ -1214,8 +1246,7 @@ pub(crate) mod tests {
     }
     pub(crate) fn approved(bridge: &Bridge) -> (std::os::unix::net::UnixStream, Value) {
         let mut stream =
-            std::os::unix::net::UnixStream::connect(bridge.directory.path().join("editor.sock"))
-                .unwrap();
+            connection::connect_socket(&bridge.directory.path().join("editor.sock")).unwrap();
         let locator = bridge.locator.as_ref().unwrap();
         let owner = connection::unpredictable().unwrap();
         connection::send(
@@ -1310,11 +1341,10 @@ pub(crate) mod tests {
     #[test]
     fn unapproved_transport_never_discloses_project_or_mutates() {
         use std::io::BufRead;
-        use std::os::unix::net::UnixStream;
         let mut bridge = Bridge::start(egui::Context::default()).unwrap();
         for operation in ["scene_inspect", "scene_create"] {
             let mut stream =
-                UnixStream::connect(bridge.directory.path().join("editor.sock")).unwrap();
+                connection::connect_socket(&bridge.directory.path().join("editor.sock")).unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(3)))
                 .unwrap();

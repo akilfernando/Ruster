@@ -1,6 +1,49 @@
 # Ruster native MCP adapter
 
-## One registered saved project: stable startup/attachment
+## Enrolled native-first connection (implementation candidate)
+
+With matched upgraded artifacts, deliberate one-time local connector enrollment
+and an explicit project allowlist, the target is `project_list` → exact
+`project_connect` → native connected. No recurring native approval, browser,
+codes, manual native launch or MCP-server restart is required. This is headlessly
+verified code, not installed distribution or actual ChatGPT acceptance.
+
+`scripts/enroll_local_connector.py --registry /private/registry.json --adapter
+/immutable/ruster-mcp --output /private/NEW-enrollment --connector-id local-chatgpt
+--project exact-project-id` provisions **new private files only**; repeat `--project`
+for the explicit allowlist. It never edits the input registry, client settings,
+installation or a live editor. The new `connect.py` is the stable STDIO command.
+Do not run this against live configuration until promotion is separately authorized.
+
+The registry supports 1–32 unique, unambiguous registered identities, at most
+262144 bytes. Enrollment v1 pins a private local secret, the actual peer executable,
+connector/grant generation and per-project generations. Routing-only old records
+remain readable and gain no permission. The project ID or a model/client name is
+not proof of a human click; the persistent policy deliberately trusts the enrolled
+local connector within that allowlist. This is not a same-UID-compromise sandbox.
+
+`project_connect` returns a nonsecret `result.connection` object containing
+`project_id` and `epoch`. Include that **exact object as `connection` in every
+subsequent registered-project call, including reads**, in addition to existing
+session/revision/view/persistence guards. Missing or old bindings refuse before
+native dispatch, even if the new project has identical scene/object IDs and revision.
+Do not replace an old conversation's binding with a newly observed current one.
+`project_disconnect {"connection":...}` invalidates the epoch and retains enrollment.
+Switching projects requires disconnect then explicit connect. After native close or
+retirement, an explicit connect can establish a fresh epoch in this same adapter;
+there is no polling reconnect, operation replay or newest-owner fallback.
+
+Native Disconnect retains enrollment. Native Revoke defaults to the displayed
+registered project; all-project revoke is a separate explicit action. Durable
+revocation is checked by all owners before dispatch and publication. Already
+admitted publication holds a shared file lease; a busy durable revoke reports failure
+rather than claiming it persisted. Save/export/execution/browser permissions remain
+separate. A missing/failed optional browser descriptor does not fail native connect.
+Unsupported/old trusted protocols fail closed without manual-approval fallback.
+
+[Headless evidence, failures, source scope and remaining guarded acceptance](../../docs/evidence/NATIVE-AI-WORKSPACE-2026-11-15.md).
+
+## Legacy routing-only saved project: stable startup/attachment
 
 One-time explicit registration can now replace per-run native launch/Connect and
 locator construction. Use matched immutable native/adapter artifacts and an existing
@@ -76,7 +119,7 @@ is implicitly granted. Trusted launchers must exec, preserving their child/nativ
 Legacy explicit locator/binding registry records remain supported, as does the
 mutually exclusive `RUSTER_MCP_LOCATOR` mode. Those developer modes still require
 explicit per-run binding and are not the recommended registered-startup route.
-The registry is private0600, same UID, no symlink components, at most8192bytes and
+The registry is private0600, same UID, no symlink components, at most262144bytes and
 snapshotted at adapter startup. New startup records pin native executable identity,
 scene path/identity, routing directory and lock-file identities; deliberate replacement
 requires fresh registration. Never hand-edit a running locator or capability into

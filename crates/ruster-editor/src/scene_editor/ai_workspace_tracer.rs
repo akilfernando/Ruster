@@ -49,6 +49,26 @@ struct Adapter {
     output: std::io::BufReader<std::process::ChildStdout>,
 }
 impl Adapter {
+    fn spawn(binary: &std::path::Path, registry: &std::path::Path) -> Self {
+        let mut child = std::process::Command::new(binary)
+            .env_remove("RUSTER_MCP_LOCATOR")
+            .env("RUSTER_MCP_PROJECT_REGISTRY", registry)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .spawn()
+            .unwrap();
+        let output = std::io::BufReader::new(child.stdout.take().unwrap());
+        let mut adapter = Self { child, output };
+        let init=adapter.request("initialize",json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"not-an-authentication-claim","version":"1"}}));
+        assert!(init["result"].is_object());
+        writeln!(
+            adapter.child.stdin.as_mut().unwrap(),
+            "{}",
+            json!({"jsonrpc":"2.0","method":"notifications/initialized"})
+        )
+        .unwrap();
+        adapter
+    }
     fn request(&mut self, method: &str, params: Value) -> Value {
         writeln!(
             self.child.stdin.as_mut().unwrap(),
@@ -76,8 +96,40 @@ impl Drop for Adapter {
 struct FixtureRoots(Vec<PathBuf>);
 impl Drop for FixtureRoots {
     fn drop(&mut self) {
+        let owners: Vec<_> = self
+            .0
+            .iter()
+            .filter_map(|root| {
+                let p: Value =
+                    serde_json::from_slice(&std::fs::read(root.join("native.json")).ok()?).ok()?;
+                Some((
+                    p["native_pid"].as_u64()? as u32,
+                    p["process_start"].as_str()?.to_string(),
+                    PathBuf::from(p["locator"].as_str()?),
+                ))
+            })
+            .collect();
         for root in &self.0 {
             let _ = std::fs::write(root.join("stop-fixture"), "");
+        }
+        let deadline = Instant::now() + Duration::from_secs(4);
+        for (pid, start, locator) in owners {
+            while crate::project_startup::process_start(pid).ok().as_ref() == Some(&start)
+                && Instant::now() < deadline
+            {
+                std::thread::sleep(Duration::from_millis(5));
+            }
+            if !std::thread::panicking() {
+                assert_ne!(
+                    crate::project_startup::process_start(pid).ok().as_ref(),
+                    Some(&start),
+                    "owned headless native fixture failed to stop"
+                );
+                assert!(
+                    !locator.exists() && !locator.with_file_name("editor.sock").exists(),
+                    "owned transport cleanup incomplete"
+                );
+            }
         }
     }
 }
@@ -121,23 +173,7 @@ fn trusted_cold_start_attach_reopen_switch_revoke_stdio() {
     let registry = dir.path().join("registry.json");
     std::fs::write(&registry, json!({"projects":projects}).to_string()).unwrap();
     std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o600)).unwrap();
-    let mut child = std::process::Command::new(binary)
-        .env_remove("RUSTER_MCP_LOCATOR")
-        .env("RUSTER_MCP_PROJECT_REGISTRY", &registry)
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::piped())
-        .spawn()
-        .unwrap();
-    let output = std::io::BufReader::new(child.stdout.take().unwrap());
-    let mut adapter = Adapter { child, output };
-    let init=adapter.request("initialize",json!({"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"not-an-authentication-claim","version":"1"}}));
-    assert!(init["result"].is_object());
-    writeln!(
-        adapter.child.stdin.as_mut().unwrap(),
-        "{}",
-        json!({"jsonrpc":"2.0","method":"notifications/initialized"})
-    )
-    .unwrap();
+    let mut adapter = Adapter::spawn(&binary, &registry);
     assert_eq!(
         adapter.call("project_list", json!({}))["result"]["projects"]
             .as_array()
@@ -166,6 +202,12 @@ fn trusted_cold_start_attach_reopen_switch_revoke_stdio() {
     assert_eq!(changed["result"]["revision"], "1");
     let undone=adapter.call("scene_undo",json!({"connection":first,"expected_session_token":changed["result"]["session_token"],"expected_revision":"1"}));
     assert_eq!(undone["ok"], true, "{undone}");
+    let persistence = adapter.call("scene_persistence_inspect", json!({"connection":first}));
+    let saved=adapter.call("scene_save",json!({"connection":first,"expected_session_token":changed["result"]["session_token"],"expected_revision":"2","expected_persistence_token":persistence["result"]["persistence_token"]}));
+    assert_eq!(saved["ok"], true, "{saved}");
+    let fresh = Session::open(roots.0[0].join("scene.json")).unwrap();
+    assert!(fresh.scene().objects.is_empty());
+    assert_eq!(fresh.scene().revision, 2);
     assert_eq!(
         adapter.call("project_connect", json!({"project":"two"}))["error"]["code"],
         "project_pinned"
@@ -202,8 +244,24 @@ fn trusted_cold_start_attach_reopen_switch_revoke_stdio() {
     let reopened = adapter.call("project_connect", json!({"project":"one"}));
     assert_eq!(reopened["ok"], true, "{reopened}");
     let third = reopened["result"]["connection"].clone();
+    let live_publication: Value =
+        serde_json::from_slice(&std::fs::read(roots.0[0].join("native.json")).unwrap()).unwrap();
+    let live_pid = live_publication["native_pid"].as_u64().unwrap() as u32;
+    std::fs::write(roots.0[0].join("stop-fixture"), "").unwrap();
+    let deadline = Instant::now() + Duration::from_secs(4);
+    while crate::project_startup::process_start(live_pid).is_ok() && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    std::fs::remove_file(roots.0[0].join("stop-fixture")).unwrap();
+    let direct_reopen = adapter.call("project_connect", json!({"project":"one"}));
     assert_eq!(
-        adapter.call("project_disconnect", json!({"connection":third}))["ok"],
+        direct_reopen["ok"], true,
+        "explicit connect after native close must not require manual MCP restart: {direct_reopen}"
+    );
+    let fourth = direct_reopen["result"]["connection"].clone();
+    assert_ne!(fourth, third);
+    assert_eq!(
+        adapter.call("project_disconnect", json!({"connection":fourth}))["ok"],
         true
     );
     let other = adapter.call("project_connect", json!({"project":"two"}));
@@ -219,10 +277,20 @@ fn trusted_cold_start_attach_reopen_switch_revoke_stdio() {
         adapter.call("scene_inspect", json!({"connection":current}))["result"]["revision"],
         "0"
     );
+    let mut parallel = Adapter::spawn(&binary, &registry);
+    let parallel_connected = parallel.call("project_connect", json!({"project":"one"}));
+    assert_eq!(parallel_connected["ok"], true, "{parallel_connected}");
+    let parallel_binding = parallel_connected["result"]["connection"].clone();
     crate::enrollment::Grant::load(&enrollment, "two")
         .unwrap()
         .revoke(true)
         .unwrap();
+    assert_ne!(
+        parallel.call("scene_inspect", json!({"connection":parallel_binding}))["ok"],
+        true,
+        "all-project revoke must stop another live native owner"
+    );
+    drop(parallel);
     assert_ne!(
         adapter.call("scene_inspect", json!({"connection":current}))["ok"],
         true

@@ -65,6 +65,10 @@ impl Enrollment {
     }
 }
 impl Grant {
+    pub fn access_allowed(path: &Path, project: &str) -> io::Result<bool> {
+        let e = Enrollment::read(path)?;
+        Ok(e.projects.iter().any(|p| p.id == project && p.allowed))
+    }
     pub fn load(path: &Path, project: &str) -> io::Result<Self> {
         let e = Enrollment::read(path)?;
         let p = e

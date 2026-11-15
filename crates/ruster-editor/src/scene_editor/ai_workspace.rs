@@ -30,15 +30,32 @@ impl SceneEditor {
             if ui.button("Full editor").clicked() {
                 self.set_ai_workspace(false, &ctx);
             }
+            let status = match self.ai_connection_label {
+                "Connected" => "Connected",
+                "Approval required (manual)" => "Pending",
+                "Disconnected / retiring" => "Retiring",
+                "Access revoked" => "Revoked",
+                "Connection error" => "Error",
+                _ => "Offline",
+            };
             if ui
-                .button(format!("AI: {}", self.ai_connection_label))
+                .button(format!("AI: {status}"))
+                .on_hover_text(self.ai_connection_label)
                 .clicked()
             {
                 self.ai_connection_requested = true;
             }
             for action in [Action::Undo, Action::Save] {
                 if ui
-                    .button(action.name())
+                    .button(if action == Action::Save {
+                        if self.session.is_dirty() || self.session.path().is_none() {
+                            "Save •"
+                        } else {
+                            "Save"
+                        }
+                    } else {
+                        "Undo"
+                    })
                     .on_hover_text(self.workspace.shortcut_text(action))
                     .clicked()
                 {
@@ -70,6 +87,8 @@ impl SceneEditor {
                     self.document_label(),
                     if self.session.is_dirty() {
                         " •"
+                    } else if self.session.path().is_none() {
+                        " · Not saved"
                     } else {
                         " · Saved"
                     }
@@ -83,38 +102,40 @@ impl SceneEditor {
         }
     }
     fn ai_tools(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            use crate::manipulation::Tool;
-            ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move");
-            ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate");
-            ui.add_enabled_ui(
-                self.manipulation.scale_allowed(self.session.scene()),
-                |ui| {
-                    ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale");
-                },
-            );
-            if ui.button("Frame").clicked() {
-                self.queued_action = Some(Action::Frame);
-            }
-            if ui.button("Projection").clicked() {
-                self.queued_action = Some(Action::Projection);
-            }
-            for (label, drawer) in [
-                ("Objects", Drawer::Objects),
-                ("Selection", Drawer::Selection),
-            ] {
-                if ui
-                    .selectable_label(self.ai_drawer == Some(drawer), label)
-                    .clicked()
-                    && !self.drafts()
-                {
-                    self.ai_drawer = if self.ai_drawer == Some(drawer) {
-                        None
-                    } else {
-                        Some(drawer)
-                    };
+        ui.add_enabled_ui(self.guard().is_ok() && !self.runtime.visible, |ui| {
+            ui.horizontal_wrapped(|ui| {
+                use crate::manipulation::Tool;
+                ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move");
+                ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate");
+                ui.add_enabled_ui(
+                    self.manipulation.scale_allowed(self.session.scene()),
+                    |ui| {
+                        ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale");
+                    },
+                );
+                if ui.button("Frame").clicked() {
+                    self.queued_action = Some(Action::Frame);
                 }
-            }
+                if ui.button("Projection").clicked() {
+                    self.queued_action = Some(Action::Projection);
+                }
+                for (label, drawer) in [
+                    ("Objects", Drawer::Objects),
+                    ("Selection", Drawer::Selection),
+                ] {
+                    if ui
+                        .selectable_label(self.ai_drawer == Some(drawer), label)
+                        .clicked()
+                        && !self.drafts()
+                    {
+                        self.ai_drawer = if self.ai_drawer == Some(drawer) {
+                            None
+                        } else {
+                            Some(drawer)
+                        };
+                    }
+                }
+            });
         });
     }
     pub(super) fn ai_drawer_ui(&mut self, ctx: &egui::Context) {
@@ -159,6 +180,84 @@ impl SceneEditor {
 mod tests {
     use super::*;
     #[test]
+    fn compact_find_shortcuts_open_drawers_without_changing_full_editor_preferences() {
+        let mut editor = SceneEditor::new(Session::new(Scene::empty("find-test")).unwrap());
+        editor.ai_workspace = true;
+        editor.workspace.prefs.hierarchy_visible = false;
+        editor.workspace.prefs.content_visible = false;
+        editor.queued_action = Some(Action::FindObjects);
+        editor.process_queued_action();
+        assert!(editor.ai_drawer == Some(Drawer::Objects));
+        assert!(!editor.workspace.prefs.hierarchy_visible);
+        editor.queued_action = Some(Action::FindContent);
+        editor.process_queued_action();
+        assert!(editor.ai_drawer == Some(Drawer::Content));
+        assert!(!editor.workspace.prefs.content_visible);
+    }
+
+    #[test]
+    fn workspace_switch_preserves_session_history_selection_camera_and_visible_drafts() {
+        let ctx = egui::Context::default();
+        let mut editor = SceneEditor::new(Session::new(Scene::empty("mode-test")).unwrap());
+        let observed = editor.command("host", "scene_inspect", json!({}));
+        assert_eq!(editor.command("host","scene_create",json!({"expected_session_token":observed["result"]["session_token"],"expected_revision":"0","object_id":"cube","name":"Cube"}))["ok"],true);
+        editor.select_object(Some("cube".into()), false);
+        editor.navigation.camera = Some(ruster_render::CameraState {
+            target: [1., 2., 3.],
+            yaw: 0.4,
+            pitch: 0.3,
+            distance: 7.,
+            orthographic: true,
+        });
+        let bytes = editor.session.snapshot_bytes().unwrap();
+        let selected = editor.manipulation.ids.clone();
+        let camera = editor.navigation.camera;
+        assert!(editor.set_ai_workspace(true, &ctx));
+        assert!(editor.set_ai_workspace(false, &ctx));
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), bytes);
+        assert_eq!(editor.manipulation.ids, selected);
+        assert_eq!(editor.navigation.camera, camera);
+        assert!(editor.set_ai_workspace(true, &ctx));
+        editor.draft.as_mut().unwrap().translation[0] = "unfinished -".into();
+        let draft = editor.draft.clone();
+        assert!(!editor.set_ai_workspace(false, &ctx));
+        assert!(editor.ai_workspace);
+        for _ in 0..3 {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(600., 850.),
+                    )),
+                    ..Default::default()
+                },
+                |ui| editor.ui(ui),
+            );
+            output.textures_delta.clear();
+        }
+        assert!(editor.ai_drawer == Some(Drawer::Selection));
+        let drawer = editor.ai_drawer_rect.unwrap();
+        assert!(ctx.content_rect().contains_rect(drawer));
+        assert!(editor.draft == draft);
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), bytes);
+        let result = editor.capture_command("host", "viewport_capture_start", &json!({}));
+        assert_eq!(result.unwrap_err().0, "viewport_occluded");
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                screen_rect: Some(ctx.content_rect()),
+                events: vec![egui::Event::PointerMoved(drawer.center())],
+                ..Default::default()
+            },
+            |ui| editor.ui(ui),
+        );
+        output.textures_delta.clear();
+        assert!(
+            !editor.navigation.enabled,
+            "drawer blocks underlying native navigation/picking"
+        );
+    }
+
+    #[test]
     fn ai_layout_keeps_eighty_percent_viewport_without_overwriting_full_preferences() {
         let ctx = egui::Context::default();
         crate::editor_theme::configure(&ctx);
@@ -172,7 +271,16 @@ mod tests {
             editor.workspace.prefs.hierarchy_width,
             editor.workspace.prefs.inspector_width,
         );
-        for size in [egui::vec2(800., 650.), egui::vec2(640., 600.)] {
+        for (size, scale) in [
+            (egui::vec2(600., 850.), 1.),
+            (egui::vec2(650., 900.), 1.),
+            (egui::vec2(800., 650.), 1.),
+            (egui::vec2(640., 600.), 1.),
+            (egui::vec2(1280., 800.), 1.),
+            (egui::vec2(600., 850.), 1.25),
+        ] {
+            editor.workspace.prefs.scale = scale;
+            editor.ai_connection_label = "Approval required (manual)";
             for _ in 0..3 {
                 let mut output = ctx.run_ui(
                     egui::RawInput {
@@ -181,13 +289,38 @@ mod tests {
                     },
                     |ui| editor.ui(ui),
                 );
+                let labels: Vec<_> = output
+                    .shapes
+                    .iter()
+                    .filter_map(|shape| {
+                        let egui::epaint::Shape::Text(text) = &shape.shape else {
+                            return None;
+                        };
+                        Some((
+                            text.galley.job.text.as_str(),
+                            text.galley.rect.translate(text.pos.to_vec2()),
+                        ))
+                    })
+                    .collect();
+                output.textures_delta.clear();
+                for label in ["Save", "Undo", "Full editor"] {
+                    let rect = labels
+                        .iter()
+                        .find(|(text, _)| *text == label || (label == "Save" && *text == "Save •"))
+                        .unwrap_or_else(|| panic!("missing {label}"))
+                        .1;
+                    assert!(
+                        ctx.content_rect().contains_rect(rect),
+                        "{label} clipped at {size:?} zoom {scale}: {rect:?}"
+                    );
+                }
                 output.textures_delta.clear();
             }
             let viewport = editor.captures.rect.expect("real viewport allocation");
-            if size.x == 800. {
+            if size.x == 800. && scale == 1. {
                 assert!(viewport.area() >= size.x * size.y * 0.8, "{viewport:?}");
             }
-            assert!(viewport.width() > size.x * 0.95);
+            assert!(viewport.width() > ctx.content_rect().width() * 0.95);
             assert_eq!(
                 (
                     editor.workspace.prefs.hierarchy_visible,

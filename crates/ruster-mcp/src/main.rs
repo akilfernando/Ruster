@@ -855,6 +855,9 @@ impl Adapter {
                 return domain_error("project_required", "Call project_connect with an exact registered name or ID before project access.");
             };
             if name != "project_connect" {
+                if name != "project_disconnect" && self.startup_error.is_some() {
+                    return self.startup_failure(StartupResponseSource::CachedFailure);
+                }
                 let Some(binding) = arguments.get("connection") else {
                     return domain_error("connection_required", "Supply the explicit project/epoch returned by project_connect; never infer the current conversation target.");
                 };

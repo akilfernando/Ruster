@@ -45,6 +45,30 @@ impl SceneEditor {
 // These explicit local owner APIs are CP2's integration seam, not MCP tools.
 #[allow(dead_code)]
 impl Host {
+    pub(super) fn enrolled_grant(&self) -> Result<Option<crate::enrollment::Grant>, String> {
+        let Some(path) = std::env::var_os("RUSTER_CONNECTOR_ENROLLMENT") else {
+            return Ok(None);
+        };
+        let startup: crate::project_startup::Startup = serde_json::from_str(
+            &std::env::var("RUSTER_PROJECT_STARTUP").map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        if self.editor.session.path() != Some(startup.scene_path.as_path())
+            || std::env::var("RUSTER_PROJECT_SCENE_ID").ok().as_deref()
+                != Some(self.editor.session.scene().id.as_str())
+        {
+            return Err(
+                "Registered project changed; no enrolled authority for the replacement document"
+                    .into(),
+            );
+        }
+        crate::enrollment::Grant::load(
+            std::path::Path::new(&path),
+            &std::env::var("RUSTER_PROJECT_ID").map_err(|e| e.to_string())?,
+        )
+        .map(Some)
+        .map_err(|e| e.to_string())
+    }
     pub(super) fn connect_adapter(&mut self, ctx: &egui::Context) -> Result<PathBuf, String> {
         self.poll_connection(ctx);
         if self.bridge.is_some()
@@ -55,16 +79,7 @@ impl Host {
         {
             return Err("Wait for the old connection/publication owner to retire.".into());
         }
-        let grant = match std::env::var_os("RUSTER_CONNECTOR_ENROLLMENT") {
-            Some(path) => Some(
-                crate::enrollment::Grant::load(
-                    std::path::Path::new(&path),
-                    &std::env::var("RUSTER_PROJECT_ID").map_err(|e| e.to_string())?,
-                )
-                .map_err(|e| e.to_string())?,
-            ),
-            None => None,
-        };
+        let grant = self.enrolled_grant()?;
         let bridge = crate::bridge::Bridge::start_enrolled(
             ctx.clone(),
             self.editor.connection_incarnation.clone(),
@@ -75,8 +90,13 @@ impl Host {
         let path = bridge.locator_path();
         self.editor.connection_authority = Some(bridge.authority());
         self.workspace = if self.workspace_enabled {
-            workspace_attachment::WorkspaceAttachment::start(&self.editor, &bridge, ctx)
-                .map_err(|e| e.to_string())?
+            match workspace_attachment::WorkspaceAttachment::start(&self.editor, &bridge, ctx) {
+                Ok(workspace) => workspace,
+                Err(_) => {
+                    self.editor.notice="Optional browser preview unavailable; native AI connection is independent.".into();
+                    None
+                }
+            }
         } else {
             None
         };
@@ -130,6 +150,10 @@ impl Host {
         ui.label(match self.connection_state() {
             "retired" => "Disconnected",
             "revoked_draining" => "Authority revoked; retiring connection",
+            "access_revoked" => "Persistent access revoked; deliberate re-enrollment required",
+            "connection_error" => {
+                "Enrollment or registered owner identity changed; connection refused"
+            }
             "listening_unbound" => "Waiting for an adapter",
             "approval_required" => "Adapter approval required",
             "bound" => "Connected to this project",
@@ -140,6 +164,16 @@ impl Host {
     }
 
     pub(super) fn connection_state(&self) -> &'static str {
+        if let Some(path) = std::env::var_os("RUSTER_CONNECTOR_ENROLLMENT") {
+            match crate::enrollment::Grant::access_allowed(
+                std::path::Path::new(&path),
+                &std::env::var("RUSTER_PROJECT_ID").unwrap_or_default(),
+            ) {
+                Ok(false) => return "access_revoked",
+                Err(_) => return "connection_error",
+                Ok(true) => (),
+            }
+        }
         match &self.bridge {
             None => "retired",
             Some(bridge) if !bridge.authority().live() => "revoked_draining",

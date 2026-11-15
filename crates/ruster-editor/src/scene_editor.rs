@@ -4749,13 +4749,21 @@ impl SceneEditor {
                 }
             }
             Action::FindObjects => {
-                self.workspace.prefs.hierarchy_visible = true;
-                self.workspace.changed();
+                if self.ai_workspace {
+                    self.ai_drawer = Some(ai_workspace::Drawer::Objects);
+                } else {
+                    self.workspace.prefs.hierarchy_visible = true;
+                    self.workspace.changed();
+                }
                 self.hierarchy_focus = true;
             }
             Action::FindContent => {
-                self.workspace.prefs.content_visible = true;
-                self.workspace.changed();
+                if self.ai_workspace {
+                    self.ai_drawer = Some(ai_workspace::Drawer::Content);
+                } else {
+                    self.workspace.prefs.content_visible = true;
+                    self.workspace.changed();
+                }
                 self.content_focus = true;
             }
             Action::FocusRuntime => {
@@ -5115,16 +5123,22 @@ impl SceneEditor {
                 });
             });
             ui.menu_button("View", |ui| {
-                let mut visibility_changed = false;
-                for (label, visible) in [
-                    ("Objects", &mut self.workspace.prefs.hierarchy_visible),
-                    ("Inspector", &mut self.workspace.prefs.inspector_visible),
-                    ("Content browser", &mut self.workspace.prefs.content_visible),
-                ] {
-                    visibility_changed |= ui.checkbox(visible, label).changed();
+                if ui.button("AI workspace").clicked() {
+                    self.set_ai_workspace(true, &ui.ctx().clone());
+                    ui.close();
                 }
-                if visibility_changed {
-                    self.workspace.changed();
+                if !self.ai_workspace {
+                    let mut visibility_changed = false;
+                    for (label, visible) in [
+                        ("Objects", &mut self.workspace.prefs.hierarchy_visible),
+                        ("Inspector", &mut self.workspace.prefs.inspector_visible),
+                        ("Content browser", &mut self.workspace.prefs.content_visible),
+                    ] {
+                        visibility_changed |= ui.checkbox(visible, label).changed();
+                    }
+                    if visibility_changed {
+                        self.workspace.changed();
+                    }
                 }
                 ui.separator();
                 for action in [
@@ -5397,9 +5411,6 @@ impl SceneEditor {
                 self.ai_header(ui);
             } else {
                 self.scene_menus(ui);
-                if ui.small_button("AI workspace").clicked() {
-                    self.set_ai_workspace(true, &ctx);
-                }
             }
         });
         let about_open = crate::branding::is_about_open(&ctx);
@@ -5964,12 +5975,14 @@ impl eframe::App for Host {
                 "listening_unbound" => "Disconnected",
                 "approval_required" => "Approval required (manual)",
                 "revoked_draining" => "Disconnected / retiring",
+                "access_revoked" => "Access revoked",
+                "connection_error" => "Connection error",
                 _ => "Disconnected",
             };
         }
-        self.editor.ui(ui);
         #[cfg(unix)]
         self.native_connection_ui(ui);
+        self.editor.ui(ui);
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.
         self.input.human_pending = false;
@@ -9529,7 +9542,7 @@ mod tests {
             assert_eq!(initial["registered_project"]["id"], "disposable-assembly");
             assert_eq!(
                 initial["workspace_handoff"]["status"],
-                "approval_channel_required"
+                "workspace_unavailable"
             );
             assert_eq!(initial["scene_id"], editor.session.scene().id);
         }
@@ -9541,6 +9554,9 @@ mod tests {
                 if should_succeed {
                     args["expected_revision"] = json!(editor.session.scene().revision.to_string());
                 }
+            }
+            if registered {
+                args["connection"] = initial["connection"].clone();
             }
             let reply = transport(editor, &mut bridge, &stream, &mut adapter, op, args);
             if !should_succeed {

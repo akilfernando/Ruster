@@ -367,7 +367,11 @@ impl Client {
                 self.failed = true;
                 self.stream.take();
                 self.capability.take();
-                json!({"ok":false,"error":{"code":"bridge_unavailable","message":"Selected owner transport unavailable or retired. Outcome may be unknown; do not replay. New explicit editor consent is required."}})
+                if self.proof.is_some() {
+                    json!({"ok":false,"error":{"code":"trusted_connection_unavailable","message":"Enrolled connector refused, revoked, retired or trust-protocol upgrade required. No manual approval fallback. Outcome may be unknown; do not replay. A later explicit project_connect can establish a fresh epoch."}})
+                } else {
+                    json!({"ok":false,"error":{"code":"bridge_unavailable","message":"Selected owner transport unavailable or retired. Outcome may be unknown; do not replay. New explicit editor consent is required."}})
+                }
             }
         }
     }
