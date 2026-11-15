@@ -746,6 +746,18 @@ Revisit on a measured demonstrated-seam repair and actual-client usability check
 Raw observed acceptance is retained in the cumulative audit's
 `startup-provenance/actual-client-responsiveness-user-receipt.json`.
 
+**Astra follow-up:** Akil explicitly requests the pipeline/optimization review.
+Actual `gpt-6-astra`/low completes with verified terminal receipt. Its recommendation
+is demand-driven capture progress in the ordinary Host, not another transport or
+browser renderer. The old continuously rendering offscreen fixture bypasses the
+new route's asynchronous screenshot/encoding/adoption/polling turns; existing
+measurements do not isolate which internal wait dominates. Root proceeds with
+bounded opt-in timestamps and completeness tests in a temporary isolated candidate,
+then one timing-selected repair. No global repaint acceleration, reduced fidelity,
+weakened privacy/consent or streaming architecture is accepted by this review.
+Preserve the live feedback build and feed changes back into the cumulative line.
+Raw review and terminal proof: cumulative audit `astra-responsiveness/`.
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.

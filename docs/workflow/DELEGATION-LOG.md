@@ -2,6 +2,29 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
+## 2026-11-15 — Actual-client responsiveness regression investigation
+
+Akil reports functional browser controls but a definite regression against his
+previous accepted fixture, then explicitly asks Astra for pipeline optimization
+analysis. Inherited Sol collector:16 calls/220.13s, effort/usage unknown; read-only
+report/source equivalence and retained measurements inspected by parent. Actual
+Astra `gpt-6-astra`/low, including verified wire effort:8 calls/120591ms;
+CLI tokens input313564/output3316/total316880/cache-read255872. These are repeated
+run usage counters, not cost or savings. Initial `--run-budget` CLI option fails
+before admission/zero tokens; remove only that unsupported flag. Rerun's exact
+gateway admission is terminal/completed=true, not inferred from exit0.
+
+Useful result: distinguish the offscreen continuously rendering fixture from
+ordinary asynchronous capture handoffs; keep264ms capture interval causally
+unsplit rather than blame GPU/PNG or sum overlapping polling waits. Parent
+reviews owning capture/UI order and retained metrics. Decision: bounded opt-in
+capture-phase diagnostics with no scheduling change first; one demonstrated-seam
+repair next. This is not a usable fix or a matched old/new speed ratio. Actual
+human responsiveness acceptance remains failed; no live session/runtime access.
+Raw collector and Astra report/receipt live under cumulative audit
+`responsiveness-regression/` and `astra-responsiveness/`. Next implementation
+`deleg_cc31240b` owns the isolated temporary diagnostic branch; no standing team.
+
 ## 2026-11-15 — One registered saved-project startup
 
 One inherited `gpt-6.1-sol` writer, effective effort/tokens/cost unknown; no model

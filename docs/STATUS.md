@@ -18,17 +18,24 @@ result was an improvement against this newer path, not proof of prior usable
 parity. Do not promote the browser as accepted or treat this as aspirational60Hz
 polish. No authored edit/Undo or fresh Save/reopen was exercised in this client run.
 
-**RUNNING:** Akil explicitly requests Astra investigate the pipeline and preserve
-core functionality. Actual gateway identity verifies `gpt-6-astra`/low (including
-wire effort), session `local-59747e8d8cb946dbd92adb7f9a4d5e5841c981a9165636e068226723b3d944c1`.
-Astra compares the preserved fast fixture and current normal route, separating
-measured intervals from hypotheses and proposing the smallest diagnostic/repair
-sequence. File-only, read-only; no live-session input/requests, desktop access,
-heavy build, installation or consent changes. Root owns implementation after
-review. Existing source collector `deleg_a330cb48` is supporting evidence, not an
-Astra review. Actual admission/completion evidence is retained under cumulative
- audit `astra-responsiveness/`; completion is pending, not inferred from launch.
-No more manual testing is requested now. Native installation remains unchanged.
+**Astra review COMPLETE:** actual `gpt-6-astra`/low and gateway terminal
+`completed=true` verified (8 calls). Repair demand-driven ordinary-Host capture
+progress, not transport/browser rendering: first separate reservation/issue,
+backend callback, encode/send, owner adoption and ready-reply waits. Scheduling
+is the leading hypothesis, not a proven GPU/PNG/compositor cause. Keep coherent
+pixels, consent, native-input priority, bounded work and sensible idle load.
+Raw analysis/receipt: cumulative audit `astra-responsiveness/{result.md,receipt.json}`.
+Initial CLI `--run-budget` launch was rejected before admission/zero tokens; rerun
+without that unsupported flag completed. No global setting or fallback changed.
+
+**RUNNING:** bounded opt-in capture-span implementation with RED/GREEN completeness
+checks, `deleg_cc31240b`, isolated `diag/capture-progress-20261115` worktree and
+private outputs. No scheduling/encoding/transport change yet. No dependency-registry
+instrumentation, live-session access, desktop input, installation or manual retest.
+After source/tests, use a finite matched ordinary-Host cohort to select one repair;
+backend callback time stays explicitly opaque until evidence requires deeper
+instrumentation. Current human-feedback candidate and native installation stay frozen.
+This diagnostic must feed the cumulative line, not become another permanent product.
 
 Raw user/identity receipts: cumulative audit `startup-provenance/` files
 `actual-client-managed-start-user-receipt.json`,
