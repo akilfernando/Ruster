@@ -5,6 +5,7 @@ mod asset_inspection;
 mod asset_timing;
 mod behavior_commands;
 mod capture_commands;
+mod capture_timing;
 mod collider_commands;
 mod collider_ui;
 mod collider_viewport;

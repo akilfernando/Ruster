@@ -70,10 +70,16 @@ pub(super) struct Captures {
     completed: Option<(u64, Pin, Value)>,
     pub rect: Option<egui::Rect>,
     workspace_owned: bool,
+    timing: super::capture_timing::Probe,
     pub view: Option<[[f32; 4]; 4]>,
     pub projection: Option<[[f32; 4]; 4]>,
     // Scalar receipt for this exact layout callback, never a source/callback owner.
     pub receipt: Option<ruster_render::FrameReceipt>,
+}
+impl Drop for Captures {
+    fn drop(&mut self) {
+        self.timing.finish(3);
+    }
 }
 impl Captures {
     pub(super) fn cancel_owned(&mut self, id: &str) {
@@ -82,6 +88,7 @@ impl Captures {
             .as_ref()
             .is_some_and(|p| p.id.to_string() == id)
         {
+            self.timing.finish(3);
             self.pending = None;
         }
         if self
@@ -89,6 +96,7 @@ impl Captures {
             .as_ref()
             .is_some_and(|(saved, _, _)| saved.to_string() == id)
         {
+            self.timing.finish(3);
             self.completed = None;
         }
     }
@@ -103,6 +111,7 @@ impl SceneEditor {
         let remaining = Duration::from_secs(5).saturating_sub(pending.started.elapsed());
         if remaining.is_zero() {
             let pending = self.captures.pending.take().unwrap();
+            self.captures.timing.finish(2);
             self.captures.completed = Some((
                 pending.id,
                 pending.pin.clone(),
@@ -187,6 +196,10 @@ impl SceneEditor {
                     if captured != &pin {
                         return Err(fail("stale_capture"));
                     }
+                    if value["status"] == "ready" {
+                        self.captures.timing.mark(6);
+                        self.captures.timing.finish(1);
+                    }
                     return Ok(value.clone());
                 }
             }
@@ -237,6 +250,9 @@ impl SceneEditor {
         let id = NEXT_CAPTURE
             .try_update(Ordering::AcqRel, Ordering::Acquire, |id| id.checked_add(1))
             .map_err(|_| fail("capture_limit"))?;
+        self.captures.timing.finish(3);
+        self.captures.timing =
+            super::capture_timing::Probe::begin([id, pin.generation, pin.revision, pin.view]);
         self.captures.completed = None;
         self.captures.workspace_owned = workspace;
         self.captures.pending = Some(Pending {
@@ -275,6 +291,7 @@ impl SceneEditor {
             None
         };
         if let Some(error) = error {
+            self.captures.timing.finish(2);
             self.captures.completed = Some((
                 pending.id,
                 pending.pin,
@@ -285,6 +302,10 @@ impl SceneEditor {
         if let Some(receiver) = &pending.receiver {
             match receiver.try_recv() {
                 Ok(result) => {
+                    self.captures.timing.mark(5);
+                    if result.is_err() {
+                        self.captures.timing.finish(2);
+                    }
                     let mut value = match result {
                         Ok(value) => value,
                         Err(error) => json!({"status":"failed","reason":error}),
@@ -305,6 +326,7 @@ impl SceneEditor {
                     return;
                 }
                 Err(mpsc::TryRecvError::Disconnected) => {
+                    self.captures.timing.finish(2);
                     self.captures.completed = Some((
                         pending.id,
                         pin,
@@ -322,7 +344,10 @@ impl SceneEditor {
             let wake = ctx.clone();
             let permit = pending.permit.take().expect("readback lease before issue");
             let cancel = pending.cancel.0.clone();
+            let timing = self.captures.timing.clone();
+            timing.mark(1);
             ctx.request_screenshot(move |image| {
+                timing.mark(2);
                 if cancel.load(Ordering::Acquire) {
                     return;
                 }
@@ -341,11 +366,14 @@ impl SceneEditor {
                 let _ = std::thread::Builder::new()
                     .name("viewport-thumbnail".into())
                     .spawn(move || {
+                        timing.mark(3);
                         let _permit = permit;
                         if cancel.load(Ordering::Acquire) {
                             return;
                         }
-                        let _ = sender.send(capture_image(&image, rect, ppp, full_resolution));
+                        let result = capture_image(&image, rect, ppp, full_resolution);
+                        timing.mark(4);
+                        let _ = sender.send(result);
                         wake.request_repaint();
                     });
             });
@@ -558,10 +586,25 @@ mod tests {
                 }),
             )
             .unwrap();
+        editor.captures.timing = super::super::capture_timing::Probe::begin_with(
+            true,
+            [
+                started["capture_id"].as_str().unwrap().parse().unwrap(),
+                0,
+                0,
+                0,
+            ],
+            Instant::now,
+        );
         let mut output = ctx.run_ui(input(), |ui| {
             editor.ui(ui);
             editor.poll_capture(ui.ctx());
         });
+        assert_ne!(
+            editor.captures.timing.snapshot().unwrap().0[1],
+            u64::MAX,
+            "actual screenshot issue milestone"
+        );
         output.textures_delta.clear();
         let callbacks = output
             .viewport_output
@@ -614,6 +657,20 @@ mod tests {
         assert_eq!(result["status"], "failed");
         assert_eq!(result["reason"], "render_pending");
         assert!(result.get("image_base64").is_none());
+        let failure = editor.captures.timing.snapshot().unwrap();
+        assert_ne!(failure.0[2], u64::MAX, "actual callback retained");
+        assert_eq!(
+            failure.0[3],
+            u64::MAX,
+            "nonfresh receipt never enters encoder"
+        );
+        assert_ne!(failure.0[5], u64::MAX, "owner failure adoption retained");
+        editor.captures.timing.mark(6);
+        assert_eq!(
+            editor.captures.timing.snapshot().unwrap(),
+            failure,
+            "terminal failure is immutable"
+        );
         assert!(
             !READBACK_BUSY.load(Ordering::Acquire),
             "nonfresh readback releases its sole lease"
@@ -631,6 +688,77 @@ mod tests {
             )
             .unwrap();
         assert!(READBACK_BUSY.load(Ordering::Acquire));
+        // Exercise real owner adoption/authorized reply with the actual lossless
+        // encoder result. Only the callback prefix is synthetic here; no GPU
+        // receipt or native latency is claimed by this headless seam test.
+        editor.captures.timing = super::super::capture_timing::Probe::begin_with(
+            true,
+            [
+                editor.captures.pending.as_ref().unwrap().id,
+                pin.generation,
+                pin.revision,
+                pin.view,
+            ],
+            Instant::now,
+        );
+        for phase in 1..5 {
+            editor.captures.timing.mark(phase);
+        }
+        let (sender, receiver) = mpsc::channel();
+        let encoded = capture_image(
+            &Arc::new(egui::ColorImage::filled(
+                [1400, 850],
+                egui::Color32::TRANSPARENT,
+            )),
+            editor.captures.rect.unwrap(),
+            1.,
+            true,
+        )
+        .unwrap();
+        sender.send(Ok(encoded)).unwrap();
+        editor.captures.pending.as_mut().unwrap().receiver = Some(receiver);
+        let id = editor.captures.pending.as_ref().unwrap().id.to_string();
+        let mut output = ctx.run_ui(input(), |ui| editor.poll_capture(ui.ctx()));
+        output.textures_delta.clear();
+        assert_ne!(editor.captures.timing.snapshot().unwrap().0[5], u64::MAX);
+        assert_eq!(editor.captures.timing.snapshot().unwrap().0[6], u64::MAX);
+        assert_eq!(
+            editor
+                .workspace_capture_command(
+                    "receipt",
+                    "viewport_capture_inspect",
+                    &json!({"capture_id":id})
+                )
+                .unwrap_err()
+                .0,
+            "capture_not_owned"
+        );
+        assert_eq!(
+            editor.captures.timing.snapshot().unwrap().0[6],
+            u64::MAX,
+            "unauthorized route cannot certify ready"
+        );
+        let ready = editor
+            .capture_command(
+                "receipt",
+                "viewport_capture_inspect",
+                &json!({"capture_id":id}),
+            )
+            .unwrap();
+        assert_eq!(ready["status"], "ready");
+        let complete = editor.captures.timing.snapshot().unwrap();
+        assert!(!complete.1);
+        assert!(complete.0.iter().all(|ns| *ns != u64::MAX));
+        assert!(complete.0.windows(2).all(|pair| pair[0] <= pair[1]));
+        let again = editor
+            .capture_command(
+                "receipt",
+                "viewport_capture_inspect",
+                &json!({"capture_id":id}),
+            )
+            .unwrap();
+        assert_eq!(again, ready);
+        assert_eq!(editor.captures.timing.snapshot().unwrap(), complete);
         drop(editor);
         assert!(!READBACK_BUSY.load(Ordering::Acquire));
     }

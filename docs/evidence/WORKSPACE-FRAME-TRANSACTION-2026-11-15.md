@@ -189,3 +189,125 @@ checks preceded removal of only that stale locator and empty owner root.
 run retained `measure.py` once per protocol with existing interpreter/msgpack path
 and compare phase/input-age/pixel receipts. No install, config, merge/release/demo,
 physical-user or actual ChatGPT acceptance was attempted.
+
+## Bounded first diagnostic candidate — 2026-11-15
+
+**Source-only candidate, not a responsiveness repair or human acceptance.**
+Astra's first safe action is implemented in the separately owned
+`diag/capture-progress-20261115` worktree based on `d5a3fcd`. Scheduling, transport,
+readback, encoding settings, adoption order, repaint/deadline policy, full RGBA,
+all pin/privacy/authorization guards and mutation behavior are unchanged.
+Parent retains ownership of shared STATUS/ROADMAP/REVIEW and integration.
+
+### Activation and record contract
+
+Compile **with `inspection`** and explicitly set `RUSTER_CAPTURE_TIMING=1` in the
+new diagnostic native child's environment before launch. This is an ordinary Host
+capture diagnostic, not the historical continuously rendering fixture. Default
+builds have a zero-sized no-op probe; inspection builds without the variable do
+not allocate a probe, read diagnostic clocks or serialize records. Existing
+lifecycle deadline clocks remain. No observers, new polling, wakes, sleeps or
+per-frame hooks were added. Enabled diagnostics add bounded mutex/clock work at
+capture milestones and a short terminal stderr write; compare opt-in/off matched
+cohorts for observer distortion before attributing a performance change.
+
+`RUSTER_CAPTURE_TIMING ` prefixes one JSON object on stderr, using the existing
+asset-timing convention. At most the first **64 capture reservations per process**
+are instrumented (not a ring, never overwrite); each owns a fixed seven-element
+nanosecond array. All captures count, including MCP/startup captures: choose a
+small predeclared cohort before reaching the cap. Numeric `ids` are exactly
+`[capture_id, editor_generation, authored_revision, view_revision]`, not authority.
+No pixels, paths, session tokens or capabilities are logged. `ns` indices:
+
+0. reservation origin (zero);
+1. immediately before screenshot request;
+2. screenshot callback entry;
+3. encoder worker entry;
+4. immediately before encoder result send;
+5. owner receiver adoption;
+6. first authorized, current-pin ready-inspection reply construction.
+
+The last point is **not socket flush or browser receipt**. Callback interval1→2
+is an **opaque backend interval**, including any surface/render/readback/map/full
+ColorImage work: no GPU/map/conversion sub-attribution is claimed. Socket enqueue,
+owner dispatch and deep dependency GPU points are deliberately not added in this
+first owning-code slice; time before reservation and after reply construction
+remains outside this seven-point partition. Retain existing HTTP/browser clocks
+and report any cross-boundary remainder instead of assigning it to these spans.
+
+`outcome`:1 ready,2 failed,3 cancelled/retired. Missing milestones use
+`18446744073709551615`; `invalid`:1 denotes gaps/order/capacity misuse within a
+record; `complete`:1 requires all seven ordered milestones and ready outcome.
+Failure/cancellation emits and freezes partial evidence; late callbacks and repeat
+inspect cannot overwrite it or emit twice. A new reservation retires an uninspected
+prior ready result as cancelled/retired. No private failure strings are copied.
+
+### Headless proof and limits
+
+Audit root:
+`/home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/capture-progress/`.
+Completeness test first **RED** on absent enabled reservation evidence, then
+**GREEN**. Existing owning capture regression separately **RED** on missing actual
+screenshot-issue milestone, then **GREEN** through actual egui screenshot callback,
+nonfresh-receipt refusal and failure adoption. A separately copied disabled mutant
+that ignores opt-in fails the disabled-clock test; it is fault-injection evidence,
+not the original implementation baseline. The unmodified disabled path passes.
+Separate-process explicit-opt-in capacity check admits exactly64, rejects65.
+
+The extended existing capture regression also exercises real encoder output,
+owner channel adoption and authorized ready reply; its callback-prefix timestamps
+are deliberately synthetic, **not a GPU success or native latency measurement**.
+Wrong route cannot mark ready; repeated inspect and terminal failure retain exact
+samples. Existing full-resolution exact-alpha, pin/lease/ownership, occlusion,
+workspace/draft and authorization tests are reused, not replaced by a new matrix.
+Final profile/features/source hashes and exact results are in audit `receipt.json`
+and Cargo logs. Only headless development/test builds run, with `-j2` and a
+separately owned reflink-copied target; owning editor recompilation is recorded.
+No frozen target/artifact/launcher, installed image, grants or user data was
+changed; no endpoints, desktop or live processes were accessed. No release/native/GPU or human
+qualification occurred, and responsiveness remains failed human acceptance.
+
+Final default change gate passes (184 tests,4 existing ignored; format, strict
+all-target Clippy and Markdown checks). Inspection strict all-target Clippy passes.
+The first full inspection run passed189/6 ignored; the final run reports188 passed,
+1 failed,6 ignored in unchanged
+`asset_commands::tests::human_and_deferred_assets_share_admission_authority_and_terminal_adoption`
+at `asset_commands.rs:3385` (session disposal queued/in-flight/ack assertion).
+This is an unresolved additional-suite failure, not a clean full-feature pass or
+proven baseline defect; no retry-to-green or out-of-scope asset repair was made.
+Affected inspection capture tests are separately retained. See raw final logs.
+
+
+### Exact readout and remaining native-run dependency
+
+`capture-phases.py` is a small audit-local consumer, not a runner platform. It
+rejects missing/duplicate/reordered/incomplete selected captures, overflow and
+unexpected metadata; it reports six mutually exclusive intervals whose sum is the
+internal total. Parser fixtures are labelled test data; the real headless owning
+seam's emitted record is separately parsed in `parser-real-headless-seam.json`.
+For a future owned native stderr capture and preselected capture ID:
+
+```sh
+python3 /home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/capture-progress/capture-phases.py \
+  --native-log "$OWNED_NATIVE_STDERR" --capture-id "$CAPTURE_ID"
+```
+
+**BLOCKED for native measurement by the intentional live-trial freeze.** Parent's
+next native prerequisite, only after that hold is lifted, is a separately owned
+optimized `inspection` ordinary-Host artifact from this source (not a test binary):
+
+```sh
+CARGO_TARGET_DIR=/home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/capture-progress/target \
+  cargo build --locked --release -j2 -p ruster-editor --features inspection --bin ruster-editor
+```
+
+Do not execute the frozen retained runner directly: its B/A/artifact locations
+still name the old trial. Derive the finite run from retained
+`workspace-controls-20261115/frame-transaction/continuation-20261115-155441/measure.py`
+setup/guards/cleanup, with separately owned B/A/native paths, explicit child env
+`RUSTER_CAPTURE_TIMING=1` and private native stderr capture (adapter startup may
+otherwise discard native stderr). Reuse its fixed project/camera/full RGBA,
+consent, visibility and browser input/header/decode clocks. Start with one settled
+camera capture, then the retained finite coalesced cohort if needed; compare an
+uninstrumented matched run, retain negative outcomes and unexplained remainders.
+No new transport, encoding or scheduling repair is authorized by these tests.
