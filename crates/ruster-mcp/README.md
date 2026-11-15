@@ -59,7 +59,13 @@ model-visible arguments. Cooperating same-UID boundary, not hostile-user confine
 [Executed ordinary Host startup/attach/pair/edit/reload/revoke, immutable human trial,
 failures/cleanup and exact limitations](../../docs/evidence/PROJECT-STARTUP-2026-11-15.md).
 Automated ordinary-Host input is not physical-human/default-feature/actual ChatGPT
-acceptance. The normal browser preview remains read-only; no renderer/history change.
+acceptance. The isolated normal-workspace controls candidate adds **non-authored**
+camera navigation/Fit and shared viewport/hierarchy selection, not browser authoring.
+Direct MCP remains the authoring channel. Full-resolution lossless workspace PNGs
+reuse production capture; this does not change MCP's bounded thumbnails. Native
+approval, exact pins, pending-draft protection and revocation remain mandatory.
+[Candidate proof, quality/latency limits and immutable startup-trial boundary](../../docs/evidence/WORKSPACE-CONTROLS-2026-11-15.md).
+The original human connection-trial artifacts have not been upgraded or replaced.
 
 ## Bounded assembly authoring (WIP)
 

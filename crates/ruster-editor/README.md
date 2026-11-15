@@ -596,6 +596,18 @@ The Inspector's **Color** fields edit the active object's tint through shared sc
 
 Native MCP now supports actual viewport thumbnails, guarded camera/selection changes and the same authored color operation. See the [native MCP guide](../ruster-mcp/README.md#viewport-observation-navigation-and-color). Saved headings follow the document filename without changing stable scene identity. **Use current view** in Export explicitly freezes initial application framing; it does not turn every working camera movement into scene data. See the [creator export guide](../../docs/CREATOR-WORKFLOW.md).
 
+The isolated normal project-bound browser controls candidate supports right-drag
+orbit, middle/Shift-right-drag pan, wheel zoom, Fit, primary-click surface selection,
+object/group list selection and Clear with no model round trip. Browser controls
+change only native view/selection, never authored transforms/properties/history or
+Save/export. Finish/cancel native drafts first; stale images/views refuse and must
+be explicitly refreshed. The object/group list follows the existing bounded
+`scene_inspect` page; it is not a browser scene or topology editor. Capture retains
+full source resolution/lossless RGBA (4MiB PNG cap, no quality fallback); MCP's
+thumbnail API is unchanged. This is on-demand native-frame delivery, not smooth
+viewport/ChatGPT usability acceptance. See [qualification and limits](../../docs/evidence/WORKSPACE-CONTROLS-2026-11-15.md).
+Do not replace the frozen startup human-trial command/artifacts with this candidate.
+
 V1 foundation note2026-11-05 (accepted source252fe48): Save writes Scene6 and export requires a current descriptor2/opaque-material runtime kit. Old pinned evaluation artifacts retain their original contracts. Material controls and native direct/MCP creation/export journeys now pass within their recorded scope. Real recovery, default standalone appearance and named focused/resource checks are recorded in [V1 acceptance](../../docs/evidence/V1-readiness.md), with physical-human/broader hardware and peak-memory limits explicit. Do not infer that workflow from historical Scene5 export evidence.
 
 

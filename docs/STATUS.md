@@ -2,18 +2,31 @@
 
 ## Normal workspace non-authored controls — 2026-11-15
 
-RUNNING in isolated `feat/workspace-controls-20261115`; single writer. Exit:
-ordinary project-bound Host → approved browser camera gesture → changed native
-capture → viewport pick at delivered geometry → independent direct-MCP selection
-readback → clear → native revoke/refusal. Same project/session/view, native draft
-and stale-capture guards, unchanged authored scene/history, bounded camera intent
-and MCP-first dispatch are mandatory. Non-goals: browser authoring, transforms,
-gizmo commits, Save/export, consent automation, client setup or renderer/history
-redesign. Existing startup/human-trial artifacts and accepted fixture are immutable.
-Owned Chromium is technical evidence only; physical/default/ChatGPT acceptance is
-separate. Reassess after 30 minutes without integrated camera/pick smoke or two
-same-seam failures. Production capture quality/latency is reported, not confused
-with accepted full-resolution viewport parity.
+**Automated ordinary-Host camera/pick/MCP/clear/revoke exit COMPLETE** in isolated
+`feat/workspace-controls-20261115`, product code `2333c5e`. First integrated smoke
+preceded quality/UI extensions. Native camera/Fit and shared object/group selection
+use the existing exact attachment and native view/draft/capture guards; browser
+transforms/properties, gizmo commits, Undo, Save/export and consent remain unavailable.
+Full source-resolution lossless RGBA now replaces the normal browser thumbnail;
+MCP thumbnails remain unchanged and capture ownership is separated. No renderer
+pipeline/history redesign, model round trip, second MCP owner, replay or lease extension.
+
+Final real Chromium/native-widget journey selects left/right/center at CSS650/780
+and DPR1/2, reads selection independently through MCP, selects a hierarchy group,
+refuses stale view/image/dimensions and pending native precision drafts, compares
+immediate select/clear pixels with refresh, and preserves exact authored state/history.
+MCP inspection progresses during camera work (68.8ms). Default/inspection strict
+Clippy and builds pass; editor180/185 and renderer14 tests pass (existing ignores
+unchanged); owning HTTP6tests pass normally and with optimized children.
+
+**Responsiveness is not accepted:** final unoptimized hidden-workspace lossless
+request→decoded median670.7ms (594.3–733.9ms), not focused/release/FPS/ChatGPT evidence.
+Original startup trial, commands/artifacts and accepted fixture remain immutable;
+15 original pins independently match. Failed preparations and exact cleanup are
+retained; no process/demo/endpoint remains. Parent changed-risk review is QUEUED
+before human handoff. Physical/default/actual ChatGPT controls and usable navigation
+acceptance remain unqualified, independently of the frozen startup connection trial.
+[Exact source/artifacts, proof, latency and exclusions](evidence/WORKSPACE-CONTROLS-2026-11-15.md).
 
 ## Registered saved-project startup — 2026-11-15
 
