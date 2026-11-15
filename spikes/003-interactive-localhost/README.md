@@ -26,6 +26,29 @@ explicit native approval of the pending browser is required before auto-auth can
 be implemented. Exact-project MCP work is safe independently; do not label it the
 full prompt-first outcome or upgrade existing fixture grants to production consent.
 
+**Executed safe partial:** `project_list`/`project_connect` are real MCP tools in
+the existing Rust adapter, not a standalone demo. One private record is snapshotted
+at startup. Existing native Client pins the recorded binding and checks the real
+scene after explicit owner approval. Real source-built STDIO/native journey on an
+associated saved disposable project passes: list/unbound refusal, unknown-name
+refusal, exact-name consent gate, same-PID fixture approval, exact-ID attachment,
+guarded authoring/shared Undo/Redo/Save/fresh-open, Disconnect and reconnect refusal.
+The existing owning creator tracer is extended rather than replaced. It does not
+exercise browser pixels/authentication or claim human consent/ChatGPT acceptance.
+
+Final full source gate versus `f9bf7a4` passes75.54s (377Rust,31Python,7Rust ignores,
+formatting and strict all-target lint); final rebuilt adapter/native journey also
+passes. Exact PID/locator cleanup is independently checked. Audit/source/binary
+pins and raw logs:
+`/home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/manifest.json`.
+Earlier gate failure from the new test's missing tempfile dev-dependency is
+retained; existing locked dependency added explicitly and final locked gate run.
+No live demo/client configuration/install/release. Consequential review QUEUED;
+full authenticated handoff BLOCKED, not accepted with a usability disclaimer.
+Next executable work after the authority choice is to attach a pending browser
+approval/private handoff to this exact project owner using the existing server,
+then test authenticated load/reload, same-session MCP edit/observer and revocation.
+
 ## Persistent native connection — qualified 2026-11-15
 
 This continuation supersedes earlier file-transport/performance-follow-up descriptions **for this isolated candidate only**. Browser HTTP now uses one explicitly bound persistent Unix-domain connection to the exact native fixture. No per-camera/command/frame/status payload files, reconnect, file fallback or authored replay. Bounded length framing, absolute deadlines, partial IO/EOF cleanup and a bounded IO worker keep incomplete socket reads/writes off native editor processing. Browser controls/renderer/history/quality are unchanged; native waits are request-wakeable, not busy-spin. Existing first-exact-MCP-owner approval is now consumed once inside the explicitly granted native fixture rather than polled by the HTTP server. This remains disposable cooperative-user authority, not production consent.

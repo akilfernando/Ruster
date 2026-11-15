@@ -30,8 +30,17 @@ Production startup/registry writing, authenticated browser handoff and full
 one-prompt ChatGPT acceptance are not implemented/claimed. Existing user-confirmed
 internal-browser prompt navigation/native Question UI are not being re-proven.
 
-Focused MCP tests/strict all-target lint pass; final selected gate pending at this
-checkpoint. [Bounded contract/API and executable reproduction](../spikes/003-interactive-localhost/README.md#prompt-project-connection-contract--2026-11-15).
+Final full change gate against `f9bf7a4` passes in75.54s: formatting, strict
+workspace all-target Clippy,377Rust/31Python tests and7explicit Rust ignores.
+Final rebuilt adapter/native registered-project journey additionally passes;
+independent readback confirms both exact PIDs and locator absent. Manifest/logs:
+`/home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/manifest.json`.
+Retained earlier gate failure: a new socket-boundary test omitted its `tempfile`
+dev-dependency; explicitly added the existing locked dependency, bootstrapped with
+`cargo test -p ruster-mcp --offline`, then ran the final locked gate. No required
+failure was relabelled passed. Independent consequential review is QUEUED to the
+parent; authenticated handoff work is BLOCKED on the authority choice above.
+[Bounded contract/API and executable reproduction](../spikes/003-interactive-localhost/README.md#prompt-project-connection-contract--2026-11-15).
 No client configuration, install, merge/release, canonical/private/sibling writes.
 
 
