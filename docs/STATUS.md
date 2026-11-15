@@ -1,5 +1,19 @@
 # Current project status
 
+## Native AI blank-window layout repair — 2026-11-15
+
+**REPRODUCED / SOURCE HEADLESS GREEN; guarded visual proof PENDING:** actual
+production Host composition grows the wide header38 points/frame until controls
+are centered and the viewport is off-screen. An egui horizontal controls row
+removes the remembered-height feedback without a fixed panel height. The new
+Host behavioral regression covers40 frames, saved clean three-object scene,
+wide/narrow/scale geometry and visible scene callback hookup. Default194 tests
+and inspection199 tests pass; existing ignores retained; strict Clippy passes.
+[Cause, RED/GREEN, coverage gap and qualification limits](verification/2026-11-15-native-ai-layout-repair.md).
+Frozen human trial/auth/launcher/registry and live native untouched. No GUI/GPU
+launch, desktop capture/input or activation. Parent owns replacement build,
+identity migration/review and fresh guarded actual-client visual acceptance.
+
 ## Bounded native AI review repairs — 2026-11-15
 
 **IMPLEMENTED / HEADLESS VERIFIED, parent review pending:** enrolled bind
