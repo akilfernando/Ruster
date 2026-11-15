@@ -366,6 +366,25 @@ impl Host {
             );
             let v = &observed["result"];
             json!({"live":true,"session_token":v["session_token"],"revision":v["revision"],"view_revision":v["view_revision"],"draft_reserved":self.editor.drafts() || self.editor.manipulation.offset_pending()})
+        } else if op == "workspace_frame_start" {
+            if let Some(lease) = bridge.authority().authorize_publication() {
+                // The lease ends with reservation, never across GPU/encoder waits.
+                let result = workspace_frame_start(
+                    &mut self.editor,
+                    &request["args"],
+                    workspace.capture.as_deref(),
+                );
+                if result["ok"] == true {
+                    workspace.capture = result["result"]["capture"]["capture_id"]
+                        .as_str()
+                        .map(str::to_owned);
+                    workspace.browser = Some(browser);
+                }
+                lease.complete(result.clone());
+                result
+            } else {
+                failure("revoked")
+            }
         } else if matches!(
             op,
             "viewport_camera" | "viewport_fit" | "viewport_pick" | "scene_select"
@@ -418,6 +437,66 @@ impl Host {
         }
         ctx.request_repaint();
     }
+}
+
+#[derive(serde::Deserialize)]
+#[serde(tag = "op", content = "args", deny_unknown_fields)]
+enum FrameControl {
+    #[serde(rename = "viewport_camera")]
+    Camera(Value),
+    #[serde(rename = "viewport_fit")]
+    Fit(Value),
+    #[serde(rename = "viewport_pick")]
+    Pick(Value),
+    #[serde(rename = "scene_select")]
+    Select(Value),
+}
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FrameStart {
+    control: Option<FrameControl>,
+}
+fn workspace_frame_start(editor: &mut SceneEditor, args: &Value, owned: Option<&str>) -> Value {
+    let Ok(frame) = serde_json::from_value::<FrameStart>(args.clone()) else {
+        return failure("invalid_arguments");
+    };
+    if let Some(control) = frame.control {
+        let (op, args) = match control {
+            FrameControl::Camera(args) => ("viewport_camera", args),
+            FrameControl::Fit(args) => ("viewport_fit", args),
+            FrameControl::Pick(args) => ("viewport_pick", args),
+            FrameControl::Select(args) => ("scene_select", args),
+        };
+        let result = workspace_control(editor, op, &args, owned);
+        if result["ok"] != true {
+            return result;
+        }
+        // This is not rollback: an applied camera/selection is never undone or
+        // replayed if observation or the later asynchronous capture fails.
+    }
+    let nonce = editor.connection_incarnation.clone();
+    let scene = editor.command(&nonce, "scene_inspect", json!({}));
+    if scene["ok"] != true {
+        return scene;
+    }
+    let view = editor.command(&nonce, "viewport_inspect", json!({}));
+    if view["ok"] != true {
+        return view;
+    }
+    let v = &view["result"];
+    let capture = workspace_capture(
+        editor,
+        "viewport_capture_start",
+        &json!({
+            "expected_session_token":v["session_token"],
+            "expected_revision":v["revision"],
+            "expected_view_revision":v["view_revision"],
+        }),
+    );
+    if capture["ok"] != true {
+        return capture;
+    }
+    json!({"ok":true,"result":{"scene":scene["result"],"view":v,"capture":capture["result"]}})
 }
 
 fn workspace_capture(editor: &mut SceneEditor, op: &str, args: &Value) -> Value {
@@ -597,6 +676,70 @@ mod tests {
         );
         assert_eq!(editor.manipulation.delta[0], "-");
         assert_eq!(editor.manipulation.ids, vec!["left"]);
+        let transaction = json!({"control":{"op":"scene_select","args":next}});
+        assert_eq!(
+            workspace_frame_start(&mut editor, &transaction, None)["error"]["code"],
+            "drafts_pending"
+        );
+        editor.manipulation.delta[0] = "0".into();
+        let frame = workspace_frame_start(&mut editor, &transaction, None);
+        assert_eq!(frame["ok"], true, "{frame}");
+        let result = &frame["result"];
+        assert_eq!(result["scene"], base["result"]);
+        assert_eq!(
+            result["scene"]["session_token"],
+            result["view"]["session_token"]
+        );
+        assert_eq!(result["scene"]["revision"], result["view"]["revision"]);
+        assert_eq!(result["view"]["selected_object_ids"], json!(["right"]));
+        let id = result["capture"]["capture_id"].as_str().unwrap();
+        assert_eq!(
+            workspace_capture(
+                &mut editor,
+                "viewport_capture_inspect",
+                &json!({"capture_id":id})
+            )["ok"],
+            true
+        );
+        let token = editor.scene_guard_token(&nonce);
+        assert_eq!(
+            editor
+                .capture_command(
+                    &token,
+                    "viewport_capture_inspect",
+                    &json!({"capture_id":id})
+                )
+                .unwrap_err()
+                .0,
+            "capture_not_owned"
+        );
+        editor.captures.cancel_owned(id);
+        assert_eq!(
+            workspace_frame_start(&mut editor, &transaction, None)["error"]["code"],
+            "stale_view"
+        );
+        for args in [
+            json!({"op":"scene_undo"}),
+            json!({"control":{"op":"scene_undo","args":{}}}),
+            json!({"control":{"op":"scene_select","args":{},"extra":true}}),
+        ] {
+            assert_eq!(
+                workspace_frame_start(&mut editor, &args, None)["error"]["code"],
+                "invalid_arguments"
+            );
+        }
+        // Capture can fail after a successful control. Never undo or replay it.
+        let view = editor.command(&nonce, "viewport_inspect", json!({}));
+        let args = json!({"expected_session_token":view["result"]["session_token"],"expected_revision":view["result"]["revision"],"expected_view_revision":view["result"]["view_revision"],"object_ids":[]});
+        editor.captures.rect = None;
+        let result = workspace_frame_start(
+            &mut editor,
+            &json!({"control":{"op":"scene_select","args":args}}),
+            None,
+        );
+        assert_eq!(result["error"]["code"], "viewport_unavailable");
+        assert!(editor.manipulation.ids.is_empty());
+        assert_eq!(editor.command(&nonce, "scene_inspect", json!({})), base);
     }
     #[test]
     fn restricted_length_frames_reject_partial_expiry_duplicates_and_unsafe_origins() {

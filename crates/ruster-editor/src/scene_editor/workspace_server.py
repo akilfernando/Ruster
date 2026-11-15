@@ -95,29 +95,29 @@ def main():
             bridge.close()
             raise
 
-    def refresh(binding):
-        scene = local({'op':'scene_inspect','args':{},**binding})
-        if not scene.get('ok'): return {'response':scene}
-        view = local({'op':'viewport_inspect','args':{},**binding})
-        if not view.get('ok'): return {'response':view}
-        v = view['result']
+    def refresh(binding, control=None):
+        # One owner turn: optional restricted control, coherent metadata, capture
+        # reservation. Completion still uses the ordinary post-layout readback.
+        frame = local({'op':'workspace_frame_start','args':{} if control is None else {'control':control},**binding})
+        if not frame.get('ok'): return {'response':frame}
+        scene = frame['result']['scene']
+        v = frame['result']['view']
+        started = frame['result']['capture']
         stale = {'response':{'ok':False,'error':{'code':'stale_observation'}}}
-        if any(scene['result'].get(key) != v.get(key) or v.get(key) is None for key in ('session_token','revision')):
+        if any(scene.get(key) != v.get(key) or v.get(key) is None for key in ('session_token','revision')):
             return stale
-        started = local({'op':'viewport_capture_start','args':{'expected_session_token':v['session_token'],'expected_revision':v['revision'],'expected_view_revision':v['view_revision']},**binding})
-        if not started.get('ok'): return {'response':started}
         deadline = time.monotonic()+6
         while True:
-            captured = local({'op':'viewport_capture_inspect','args':{'capture_id':started['result']['capture_id']},**binding})
+            captured = local({'op':'viewport_capture_inspect','args':{'capture_id':started['capture_id']},**binding})
             if not captured.get('ok'): return {'response':captured}
             capture = captured['result']
             if capture['status'] != 'pending': break
             if time.monotonic() >= deadline: raise TimeoutError('capture deadline; never replay')
             time.sleep(.04)
         if capture['status'] != 'ready': return {'response':{'ok':False,'error':{'code':capture.get('reason','capture_failed')}}}
-        if any(capture.get(key) != v.get(key) or v.get(key) is None for key in ('session_token','revision','view_revision')) or capture.get('capture_id') != started['result']['capture_id']:
+        if any(capture.get(key) != v.get(key) or v.get(key) is None for key in ('session_token','revision','view_revision')) or capture.get('capture_id') != started['capture_id']:
             return stale
-        return {'response':{'ok':True},'scene':scene['result'],'view':v,'png':capture['image_base64'],'native_frame':capture['capture_id'],'capture':{k:v for k,v in capture.items() if k!='image_base64'},'draft_reserved':False}
+        return {'response':{'ok':True},'scene':scene,'view':v,'png':capture['image_base64'],'native_frame':capture['capture_id'],'capture':{k:v for k,v in capture.items() if k!='image_base64'},'draft_reserved':False}
 
     class AdmissionReader(io.RawIOBase):
         def __init__(self, sock):
@@ -179,8 +179,7 @@ def main():
                 if not isinstance(request,dict) or set(request)!={'op','args'}: return self.reply(400,b'{}')
                 if request['op']=='refresh': reply=refresh(binding)
                 elif request['op'] in ('viewport_camera','viewport_fit','viewport_pick','scene_select') and isinstance(request['args'],dict):
-                    result=local({**request,**binding})
-                    reply=refresh(binding) if result.get('ok') else {'response':result}
+                    reply=refresh(binding, request)
                 else: reply={'response':{'ok':False,'error':{'code':'forbidden_operation'}}}
                 self.reply(200,json.dumps(reply).encode())
             except (OSError,ValueError,KeyError,EOFError,TimeoutError):

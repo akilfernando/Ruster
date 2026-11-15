@@ -104,7 +104,7 @@ class WorkspaceHTTP(unittest.TestCase):
                     # Request parsing's 2s budget must not truncate legitimate native
                     # capture work, which has an independent existing reply budget.
                     if mismatch is None and request['op']=='viewport_capture_inspect': time.sleep(2.1)
-                    results={'scene_inspect':scene,'viewport_inspect':view,'viewport_capture_start':{'capture_id':'42'},'viewport_capture_inspect':capture}
+                    results={'scene_inspect':scene,'viewport_inspect':view,'viewport_capture_start':{'capture_id':'42'},'workspace_frame_start':{'scene':scene,'view':view,'capture':{'capture_id':'42'}},'viewport_capture_inspect':capture}
                     return {'ok':True,'result':results[request['op']]}
                 child,bridge,_,_,post,requests=self.companion(root,reply)
                 status,result,_=post('/operation',json.dumps({'op':'refresh','args':{}}))
@@ -114,9 +114,10 @@ class WorkspaceHTTP(unittest.TestCase):
                     self.assertEqual(result['response']['error']['code'],'stale_observation')
                     self.assertNotIn('png',result);self.assertNotIn('scene',result);self.assertNotIn('capture',result)
                     if mismatch in ('revision','session_token'):
-                        self.assertEqual([r['op'] for r in requests],['browser_pair','scene_inspect','viewport_inspect'],'refuse before capture; no retry/replay')
+                        self.assertEqual([r['op'] for r in requests],['browser_pair','workspace_frame_start'],'refuse before polling; no retry/replay')
                 else:
                     self.assertTrue(result['response']['ok']);self.assertEqual(result['png'],'private-pixels')
+                    self.assertEqual([r['op'] for r in requests],['browser_pair','workspace_frame_start','viewport_capture_inspect'],'one native snapshot/start turn, then bounded polling')
                     self.assertEqual(result['scene'],scene);self.assertEqual(result['view'],view)
                 bridge.shutdown(socket.SHUT_RDWR);bridge.close();self.assertEqual(child.wait(timeout=1),0)
 
@@ -128,8 +129,8 @@ class WorkspaceHTTP(unittest.TestCase):
             for op in ('viewport_camera','viewport_fit','viewport_pick','scene_select'):
                 _,result,_=post('/operation',json.dumps({'op':op,'args':{'sentinel':'exact'}}))
                 self.assertEqual(result['response']['error']['code'],'native_guard_refusal')
-                self.assertEqual(requests[-1]['op'],op)
-                self.assertEqual(requests[-1]['args'],{'sentinel':'exact'})
+                self.assertEqual(requests[-1]['op'],'workspace_frame_start')
+                self.assertEqual(requests[-1]['args'],{'control':{'op':op,'args':{'sentinel':'exact'}}})
             before=len(requests)
             for op in ('scene_transform','scene_undo','scene_save','draft_begin','raw_input','browser_approve'):
                 _,result,_=post('/operation',json.dumps({'op':op,'args':{}}))

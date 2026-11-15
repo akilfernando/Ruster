@@ -1,5 +1,27 @@
 # Current project status
 
+## Coherent workspace frame transaction — 2026-11-15
+
+**RUNNING, bounded responsiveness repair.** The companion now reserves one native
+frame transaction containing an optional closed camera/Fit/pick/select control,
+coherent scene/view metadata and full-resolution capture-start. Native exact
+attachment/browser/publication authority and existing freshness/draft/input guards
+remain owning gates. Publication ends at reservation, not asynchronous readback;
+failed capture never rolls back or replays an already-applied control. Pixel,
+privacy, 5s capture and HTTP admission limits are unchanged.
+
+One owner in `feat/workspace-controls-20261115`; exit is matched optimized ordinary
+Host + owned Chromium orbit/pan/zoom/settle, same 928×515 RGBA/camera/backend/crop,
+independent MCP pick/clear/progress/history, stale/draft/revoke refusal and exact
+cleanup. No renderer/transport rewrite, authoring, install, startup-trial launch,
+focus/compositor experiment or human/ChatGPT usability claim. Reassess after30min
+without integration or two same-seam failures. HTTP source-derived RED observed
+four expected failures for redundant native turns; changed HTTP tests pass6/6
+normally and with optimized children. Extended native owning control regression
+passes. Checkpoint precedes private optimized qualification; final measurements
+and changed-risk review remain pending. New evidence only:
+`/home/akilf/Projects/Ruster-Audits/workspace-controls-20261115/frame-transaction/`.
+
 ## Normal workspace non-authored controls — 2026-11-15
 
 **Automated ordinary-Host camera/pick/MCP/clear/revoke exit COMPLETE** in isolated
