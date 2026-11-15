@@ -14,6 +14,79 @@ import unittest
 
 
 class WorkspaceHTTP(unittest.TestCase):
+    def companion(self, root, reply=None):
+        import threading
+        path=Path(root)/'workspace.sock'
+        listener=socket.socket(socket.AF_UNIX);listener.bind(str(path));path.chmod(0o600);listener.listen(1);listener.settimeout(2)
+        self.addCleanup(listener.close)
+        child=subprocess.Popen([sys.executable,*(['-O'] if sys.flags.optimize else []),'-u',str(Path(__file__).with_name('workspace_server.py'))],stdin=subprocess.PIPE,stderr=subprocess.PIPE)
+        def cleanup():
+            if child.poll() is None: child.terminate();child.wait(timeout=3)
+            child.stderr.close()
+        self.addCleanup(cleanup)
+        config=dict(socket=str(path),native_pid=os.getpid(),native_uid=os.getuid(),challenge='test',binding={},attachment='test',html='test')
+        child.stdin.write(json.dumps(config).encode()+b'\n');child.stdin.close()
+        bridge,_=listener.accept();bridge.settimeout(3);self.addCleanup(bridge.close)
+        def exact(n):
+            data=b''
+            while len(data)<n:
+                part=bridge.recv(n-len(data))
+                if not part: raise EOFError()
+                data+=part
+            return data
+        def receive(): return json.loads(exact(struct.unpack('!I',exact(4))[0]))
+        def send(value):
+            b=json.dumps(value).encode();bridge.sendall(struct.pack('!I',len(b))+b)
+        receive();send({'authenticated':True});ready=receive();send({'published':True})
+        requests=[]
+        def native():
+            try:
+                while True:
+                    request=receive();requests.append(request)
+                    send({'state':'approved'} if request['op']=='browser_pair' else reply(request))
+            except (OSError,EOFError): pass
+        threading.Thread(target=native,daemon=True).start()
+        host=ready['origin'].removeprefix('http://')
+        headers={'Origin':ready['origin'],'X-Workspace-CSRF':ready['nonce']}
+        def post(route,body=''):
+            connection=http.client.HTTPConnection(host,timeout=3)
+            connection.request('POST',route,body,headers)
+            response=connection.getresponse();data=response.read();cookie=response.getheader('Set-Cookie');connection.close()
+            return response.status,json.loads(data),cookie
+        _,_,cookie=post('/pair');headers['Cookie']=cookie.split(';')[0]
+        return child,bridge,host,headers,post,requests
+
+    def test_trickling_requests_have_absolute_deadline_and_native_eof_cleanup(self):
+        for body in (False,True):
+            for native_eof in (False,True):
+                with self.subTest(body=body,native_eof=native_eof), tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as root:
+                    child,bridge,host,headers,_,_=self.companion(root)
+                    client=socket.create_connection(tuple([host.split(':')[0],int(host.split(':')[1])]),timeout=1)
+                    self.addCleanup(client.close)
+                    if body:
+                        wire='POST /operation HTTP/1.0\r\nHost: '+host+'\r\n'+''.join(k+': '+v+'\r\n' for k,v in headers.items())+'Content-Length: 4096\r\n\r\n{'
+                    else: wire='GET / HTTP/1.0\r\nHost: '+host+'\r\nX-Unfinished: '
+                    client.sendall(wire.encode());started=time.monotonic();closed=False
+                    time.sleep(.15)
+                    if native_eof: bridge.shutdown(socket.SHUT_RDWR);bridge.close()
+                    until=started+(1.2 if native_eof else 2.8)
+                    while time.monotonic()<until:
+                        try:
+                            client.sendall(b' ')
+                            client.settimeout(.05)
+                            if client.recv(8192)==b'': closed=True;break
+                        except TimeoutError: pass
+                        except OSError: closed=True;break
+                        time.sleep(.05)
+                    self.assertTrue(closed,'byte progress must not extend the absolute HTTP admission deadline or mask native EOF')
+                    if native_eof:
+                        self.assertEqual(child.wait(timeout=.5),0)
+                        self.assertFalse(Path(root).exists(),'exact socket and empty owner root must retire while parsing')
+                        with self.assertRaises(OSError): socket.create_connection((host.split(':')[0],int(host.split(':')[1])),timeout=.2)
+                    else:
+                        self.assertIsNone(child.poll(),'HTTP timeout alone must not kill a healthy attachment')
+                        bridge.shutdown(socket.SHUT_RDWR);bridge.close();self.assertEqual(child.wait(timeout=1),0)
+
     def test_cleanup_preserves_replaced_endpoint(self):
         import importlib.util
         spec=importlib.util.spec_from_file_location('owned_workspace_server',Path(__file__).with_name('workspace_server.py'))

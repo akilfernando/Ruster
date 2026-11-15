@@ -1,6 +1,7 @@
 """Host-owned loopback HTTP companion. No MCP client, consent or native owner claim."""
 import atexit
 import hashlib
+import io
 from http.cookies import SimpleCookie
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
@@ -15,6 +16,9 @@ import sys
 import time
 
 LIMIT = 65536
+# One absolute budget from accept through request line, headers and body. Native
+# operations retain their separate 2s send / 8s reply / 6s capture-poll budgets.
+HTTP_ADMISSION_SECONDS = 2
 
 
 def receive(sock, deadline, limit=LIMIT):
@@ -110,7 +114,29 @@ def main():
         if capture['status'] != 'ready': return {'response':{'ok':False,'error':{'code':capture.get('reason','capture_failed')}}}
         return {'response':{'ok':True},'scene':scene['result'],'view':v,'png':capture['image_base64'],'native_frame':capture['capture_id'],'capture':{k:v for k,v in capture.items() if k!='image_base64'},'draft_reserved':False}
 
+    class AdmissionReader(io.RawIOBase):
+        def __init__(self, sock):
+            self.sock = sock
+            self.deadline = time.monotonic()+HTTP_ADMISSION_SECONDS
+        def readable(self): return True
+        def readinto(self, buffer):
+            nonlocal broken
+            left = self.deadline-time.monotonic()
+            if left <= 0: raise TimeoutError('absolute HTTP admission deadline')
+            ready, _, _ = select.select([self.sock, bridge], [], [], left)
+            if bridge in ready:
+                # No native command is in flight during HTTP admission. Readability
+                # is EOF or unsolicited data: either retires this exact attachment.
+                broken = True
+                raise ConnectionResetError('native attachment retired during HTTP admission')
+            if self.sock not in ready: raise TimeoutError('absolute HTTP admission deadline')
+            return self.sock.recv_into(buffer)
+
     class Handler(BaseHTTPRequestHandler):
+        def setup(self):
+            super().setup()
+            self.rfile.close()
+            self.rfile = io.BufferedReader(AdmissionReader(self.connection))
         def log_message(self, *_): pass
         def reply(self, code, body, kind='application/json', cookie=None):
             self.send_response(code)
