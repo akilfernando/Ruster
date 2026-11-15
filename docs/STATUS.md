@@ -12,24 +12,29 @@ process lessons and the short format for future entries. Existing architecture
 contracts and technical evidence remain separate; no new planning service or
 whole-engine scope is activated. Project development guidance now requires upkeep.
 This is documentation/process work, not a passed cumulative journey or install.
-The activity-admission blocker below remains; no GUI retry was performed.
+The fresh idle-window outcome below supersedes activity admission: native persistence/history pass, collider visual integration HELD.
 
 ## Cumulative native editor candidate — 2026-11-15
 
-**BLOCKED/stopped before launch by physical-activity admission; not qualified.**
-Candidate `90ceccf` already contains the accepted hierarchy repairs and current
-normal-workspace controls. All585 tracked non-documentation build/source inputs
-match the existing optimized artifact checkout; both release artifact hashes and
-all16 frozen original pins remain verified. No product changes or broad matrix
-rerun. Exact-runtime native Driver imports and runner compilation passed.
-A first audit-only special-workspace lookup error was repaired before launch;
-the next admission observed `resumed` and stopped without retry. Zero native
-sessions/complete cumulative journeys; no browser/adapter launched. Desktop
-preserved, owned preparation/observer processes absent and shared gate independently
-reacquired/released before docs. Native group edit → Undo/Redo → Save → fresh
-reopen exact history/render/selection, plus bounded same-compound interop, remain
-NOT RUN on this cumulative candidate. `installed=false`, user acceptance pending;
-normal-workspace usability and actual ChatGPT managed startup remain separate holds.
+**Native functional journey PASS; visual compound qualification HELD/stopped.**
+Fresh explicitly authorized idle-window run on source `06f45c0` reused the exact
+optimized NVIDIA inspection artifact after585 input/two artifact hash checks.
+Native attach Cube→nested group, group X3→4.25, native Undo/Redo, Save, normal close,
+fresh graphical reopen and exact native re-Save all pass: revision18,14 Undo,
+0 Redo; byte-identical whole documents. Reopened native Undo/Redo also pass, with
+full saved history equal except for expected revision. Cube/light local/world and
+selection readbacks agree; fixed Fit/selection viewport crops match exactly.
+**New concrete defect:** selected collider outline is displaced from the grouped
+Cube; `collider_viewport.rs` uses local object pose instead of resolved world pose.
+Do not promote the equal-but-wrong overlay as accepted rendering. Next bounded
+work is grouped-owner RED/GREEN, resolved-world guide/anchor repair, changed-risk
+gate and matched-build visual proof. No product repair or new build in this run.
+Both native processes normal-closed; observer/runner/windows/listeners absent;
+exact desktop/cursor/unlocked state preserved, no activity violations, shared gate
+independently reacquired/released before docs. All16 frozen pins and both binaries
+unchanged. Prior admission failures retained; no fresh MCP/browser/adapter session.
+`installed=false`, user acceptance pending. Normal-workspace usability and actual
+ChatGPT managed startup remain separate holds.
 [Source equivalence, retained failures, cleanup and next finite gate](evidence/CUMULATIVE-EDITOR-2026-11-15.md).
 
 ## Coherent workspace frame transaction — 2026-11-15

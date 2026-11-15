@@ -29,7 +29,8 @@ usability remains unaccepted. Capture completion/service pacing remains unsplit.
 
 The qualified hierarchy repairs are already present under cherry-picked commits;
 source comparison, not ancestry alone, establishes that. The cumulative editor's
-native compound qualification stopped before launch on an activity guard. No
+native compound edit/history/Save/fresh-reopen now passes, but visual qualification
+is HELD by a collider guide that uses local instead of resolved-world pose. No
 cumulative installation has been verified in this run. The delivery gap therefore
 includes qualification, runtime/launcher choice and installed experience, not
 simply missing source merges.
@@ -43,7 +44,7 @@ per-run connection capabilities.
 
 | Workstream | Next bounded outcome | Current state / acceptance gate |
 | --- | --- | --- |
-| Cumulative engine/editor | Native nested groups, supported nonuniform leaves/attached light, shared transforms/history, Save and fresh reopen in the current cumulative candidate | Component qualification retained; cumulative journey **BLOCKED/stopped** before launch by activity admission. Resume only with a fresh appropriate desktop window; not installed. |
+| Cumulative engine/editor | Native nested groups, supported nonuniform leaves/attached light, shared transforms/history, Save and fresh reopen in the current cumulative candidate | Native edit/history/Save/fresh graphical reopen PASS; byte-exact document/history and matching mesh pixels. **HELD/stopped**: grouped collider guide is displaced (local/world pose routing). Repair with grouped-owner RED/GREEN and matched-build native visual proof; desktop released, not installed. |
 | Managed ChatGPT startup | A closed registered project opens through the stable MCP invocation, then native/browser consent and the internal-browser handoff work | Desktop-variable forwarding corrected; later actual-client startup failure remains **UNRESOLVED**, diagnosis queued. No silent fallback launch or approval. |
 | Normal browser navigation | Responsive orbit/pan/zoom/Fit and shared selection in the normal connection route, with full-quality current native pixels | Source review/live capability pass; latency improved but usability **HELD**. Diagnose the measured capture seam or perform a coordinated representative visibility comparison before another redesign. |
 | Intended browser editing | Bring intended human manipulation/shared Undo into this same route rather than leaving it fixture-only | **QUEUED**, not provided by the preview/navigation grant. Define the bounded interaction and truthful native permission text before implementation; AI authors through direct MCP. |

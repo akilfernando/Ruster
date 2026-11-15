@@ -1,6 +1,7 @@
 # Cumulative native editor candidate — 2026-11-15
 
-**BLOCKED before native launch by physical-activity admission; not qualified.**
+**Native functional journey PASS; compound visual qualification HELD by a displaced collider guide.**
+Fresh idle-window run `native-3` supersedes the admission blocker below; prior failures remain preserved.
 Candidate `90ceccf2ba8aade6588b11d99802be6daab7406c`, product source
 `167d12353d606efc83a3ba957c81e64d54846c3d`, exclusive branch
 `feat/cumulative-editor-20261115`. No product source change, installation,
@@ -45,7 +46,7 @@ acceptance**. Prior instrumented GUI journeys are not a new cumulative journey.
 Normal-workspace controls remain unchanged; actual-client usability remains HELD.
 ChatGPT managed cold startup remains independently unresolved.
 
-## Executed preparation and truthful stop
+## Earlier preparation and truthful stop — retained history
 
 Audit: `/home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/`.
 Exact retained QA interpreter imported the real native inspection Driver,
@@ -78,7 +79,7 @@ Documentation gate `python3 scripts/check.py --base
 and relative-link checks in0.14s; `git diff --check` also passed. No Rust check was
 selected or represented as newly executed engine evidence.
 
-## Remaining gate
+## Earlier remaining gate — superseded by fresh result below
 
 `installed=false`; user acceptance pending. Current qualification is **BLOCKED,
 stopped**, not running. Resume one fresh activity-admitted native compound
@@ -87,3 +88,57 @@ route, private project/runtime/outputs, same source pins and finite deadline.
 Do not retry the refused admission automatically. Keep normal-workspace
 usability, actual ChatGPT managed startup and any later install/human gate
 explicitly separate; preserve all frozen commands/artifacts and real projects.
+
+## Fresh authorized idle-window result — 2026-11-15
+
+Executed source `06f45c046b2d2f0d792d2a898c660342858e9310`, unchanged product
+`167d123`. All585 receipt-pinned inputs and both authoritative optimized artifacts
+were revalidated before launch; no rebuild or product edit. Existing `native.py`
+was narrowly adapted as `native-3.py` with a fresh output directory, prelaunch
+activity cleanup, and failed-launch cleanup registration. No guard bypass/retry.
+
+One NVIDIA/Vulkan ordinary graphical Host journey, two fresh native processes:
+
+- Started from a disposable byte-exact prior native-created assembly. That fixture
+  had nested groups and attached point light, but Cube was at scene root. Used
+  the native parent selector to attach Cube to `group-2` while preserving world pose.
+- Native group-1 X edit3→4.25; native Edit-menu Undo restores3 and Redo restores4.25.
+- Native Save As, normal File→Close window, fresh graphical `--scene` reopen and
+  native Save As produce **byte-identical whole documents**, including topology,
+  local transforms, collider/light properties, revision18,14 Undo entries,0 Redo.
+  SHA256 `d956bdfc495a43e142de43910a7dbdedcab935f43c7d4a79b9b027f30e1869bf`.
+- Reopened native Undo/Redo also pass. Subsequent native Save matches the original
+  full document/history except for the expected scene revision increment.
+- Actual Cube selection, native local fields and resolved world X4.25 agree;
+  point light remains under group-2 at world(4.25,2,0). Nonuniform Cube scale(1,2,1)
+  survives. Fit + Cube selection yields an exactly equal744×414 RGBA viewport crop
+  before close/after reopen, crop `[188,233,932,647]` of1280×800 captures.
+
+**Visual acceptance HELD:** inspected `reopen/reopened-cube.png` shows the orange
+`Blocker box` outline displaced left of the selected mesh. Source confirms
+`scene_editor/collider_viewport.rs:142` resolves against `object.transform`
+(local), and the fallback anchor also uses local translation. This is a concrete
+hierarchy/editor-overlay integration defect, not a Save/reopen mismatch. Mesh and
+light/world readback pass; equal screenshots do not make an incorrect guide valid.
+No source repair, changed build or second desktop run was attempted after release.
+Next bounded repair needs a grouped-owner RED/GREEN regression, resolved-world
+outline/anchor routing, changed-risk gate and fresh matched-build graphical proof.
+
+No MCP/browser/adapter/companion was launched: adding that route would extend this
+native reservation. Prior actual-STDIO Save/fresh-open component evidence remains
+reused; no fresh current same-compound interop claim. Actual-client controls329ms
+usability remains HELD; ChatGPT managed closed startup remains unresolved.
+
+**Computer free:** both exact native PIDs/windows/listeners absent, normal closes
+recorded, runner/observer exited, no activity violations. Workspace1, unfocused
+window identity (all fields null), cursor(1535,640), unlocked state match exactly.
+Shared gate independently reacquired/released before documentation. All16 frozen
+original pins and both immutable release artifacts rehashed unchanged. No user
+project/preferences/clipboard/window changes or install. Vulkan log scanner passed
+both complete native logs; ordinary captured diagnostics only, no new layer claim.
+
+Raw audit: `native-3/{report.json,actions.json,physical-activity.log,edit/,reopen/}`;
+`resume-input-verification.json`, `resume-delivery-receipt.json`, and
+`resume-visual-verification.json`. Historical `delivery-receipt.json`, `native-1`
+and `native-2` are intentionally unchanged. State: **HELD/stopped**, not fully
+qualified, installed or user-accepted.
