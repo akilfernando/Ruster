@@ -1,5 +1,17 @@
 # Current project status
 
+## Bounded native AI review repairs — 2026-11-15
+
+**IMPLEMENTED / HEADLESS VERIFIED, parent review pending:** enrolled bind
+revocation cannot fall back to legacy approval; provisioning rejects malformed
+production registries before output; local all-project revocation remains usable
+after project revocation or document change without restoring work authority.
+Behavioral RED→GREEN logs, affected default/inspection checks and the real STDIO
+windowless-Host tracer pass. Same Session and adaptive workspace layout untouched.
+[Repair evidence and qualification limits](verification/2026-11-15-native-ai-review-repairs.md).
+No GUI/GPU/client/live-state changes or installation. Prior aggregate/inspection
+holds remain; parent owns integration and guarded native/client qualification.
+
 ## Primary direction: native-first AI workspace — 2026-11-15
 
 **USER APPROVED:** simplified native Rusterize UI beside ChatGPT, more viewport

@@ -64,6 +64,28 @@ impl Enrollment {
         Ok(e)
     }
 }
+/// Local administrative access only: cannot authenticate, connect or commit work.
+/// Loading this policy deliberately does not restore a revoked project grant.
+pub struct LocalPolicy {
+    path: PathBuf,
+    project: String,
+}
+impl LocalPolicy {
+    pub fn load(path: &Path, project: &str) -> io::Result<Self> {
+        let e = Enrollment::read(path)?;
+        if !e.projects.iter().any(|p| p.id == project) {
+            return Err(io::Error::other("unknown registered project"));
+        }
+        Ok(Self {
+            path: path.into(),
+            project: project.into(),
+        })
+    }
+    pub fn revoke(&self, all: bool) -> io::Result<()> {
+        revoke_policy(&self.path, &self.project, all)
+    }
+}
+
 impl Grant {
     pub fn access_allowed(path: &Path, project: &str) -> io::Result<bool> {
         let e = Enrollment::read(path)?;
@@ -129,37 +151,41 @@ impl Grant {
             && self.proof().ok().as_ref() == Some(proof)
     }
     pub fn revoke(&self, all: bool) -> io::Result<()> {
-        // Lock the retained inode, rewrite in place so concurrent owners share
-        // one generation order. Readers fail closed during an incomplete write.
-        let mut file = fs::OpenOptions::new()
-            .read(true)
-            .write(true)
-            .mode(0o600)
-            .open(&self.path)?;
-        file.try_lock().map_err(io::Error::other)?;
-        project_startup::private_file(&self.path)?;
-        use std::os::unix::fs::MetadataExt;
-        if file.metadata()?.ino() != fs::metadata(&self.path)?.ino() {
-            return Err(io::Error::other("enrollment replaced"));
-        }
-        let mut e = Enrollment::read(&self.path)?;
-        if all {
-            e.generation = e
+        revoke_policy(&self.path, &self.project, all)
+    }
+}
+
+fn revoke_policy(path: &Path, project: &str, all: bool) -> io::Result<()> {
+    // Same retained inode/exclusive lock and generation order as work grants.
+    // Readers fail closed during an incomplete write.
+    let mut file = fs::OpenOptions::new()
+        .read(true)
+        .write(true)
+        .mode(0o600)
+        .open(path)?;
+    file.try_lock().map_err(io::Error::other)?;
+    project_startup::private_file(path)?;
+    use std::os::unix::fs::MetadataExt;
+    if file.metadata()?.ino() != fs::metadata(path)?.ino() {
+        return Err(io::Error::other("enrollment replaced"));
+    }
+    let mut e = Enrollment::read(path)?;
+    if all {
+        e.generation = e
+            .generation
+            .checked_add(1)
+            .ok_or_else(|| io::Error::other("generation exhausted"))?;
+    }
+    for p in &mut e.projects {
+        if all || p.id == project {
+            p.allowed = false;
+            p.generation = p
                 .generation
                 .checked_add(1)
                 .ok_or_else(|| io::Error::other("generation exhausted"))?;
         }
-        for p in &mut e.projects {
-            if all || p.id == self.project {
-                p.allowed = false;
-                p.generation = p
-                    .generation
-                    .checked_add(1)
-                    .ok_or_else(|| io::Error::other("generation exhausted"))?;
-            }
-        }
-        file.set_len(0)?;
-        file.write_all(&serde_json::to_vec(&e)?)?;
-        file.sync_all()
     }
+    file.set_len(0)?;
+    file.write_all(&serde_json::to_vec(&e)?)?;
+    file.sync_all()
 }

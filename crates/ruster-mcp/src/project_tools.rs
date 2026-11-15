@@ -27,6 +27,45 @@ pub(super) struct Project {
 pub(super) struct Registry {
     projects: Vec<Project>,
 }
+#[cfg(test)]
+#[test]
+fn provisioned_registry_and_enrollment_are_accepted_by_production_readers() {
+    use std::os::unix::fs::PermissionsExt;
+    let root = tempfile::tempdir().unwrap();
+    let registry = root.path().join("input.json");
+    let output = root.path().join("output");
+    let exe = std::fs::read_link("/proc/self/exe").unwrap();
+    std::fs::write(&registry, json!({"projects":[{"id":"one","name":"One","scene_id":"scene","locator":"/fixture/connection.json","binding":{"wire":connection::WIRE,"incarnation":"i","generation":"g","connection":"c"}}, {"id":"two","name":"Two","scene_id":"scene-two","startup":{"scene_path":"/fixture/scene.ruster","native_binary":exe,"state_directory":"/fixture/state","binary_identity":crate::project_startup::BinaryIdentity::read(&exe).unwrap(),"routing_identity":{"directory_dev":0,"directory_ino":0,"owner_ino":0,"startup_ino":0}}}]}).to_string()).unwrap();
+    std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let result = std::process::Command::new("python3")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../scripts/enroll_local_connector.py"
+        ))
+        .args([
+            "--registry",
+            registry.to_str().unwrap(),
+            "--adapter",
+            exe.to_str().unwrap(),
+            "--output",
+            output.to_str().unwrap(),
+            "--connector-id",
+            "é",
+            "--project",
+            "one",
+        ])
+        .output()
+        .unwrap();
+    assert!(result.status.success(), "provisioner failed");
+    let loaded = Registry::load(&output.join("registry.json")).unwrap();
+    let project = loaded.resolve("one").unwrap();
+    assert!(
+        crate::enrollment::Grant::load(project.enrollment.as_ref().unwrap(), "one")
+            .unwrap()
+            .live()
+    );
+}
+
 impl Registry {
     pub fn parse(text: &str) -> io::Result<Self> {
         let value = strict_json::parse(text.as_bytes()).map_err(io::Error::other)?;
