@@ -45,6 +45,28 @@ impl SceneEditor {
 // These explicit local owner APIs are CP2's integration seam, not MCP tools.
 #[allow(dead_code)]
 impl Host {
+    /// Local native administration, independent of current document work access.
+    pub(super) fn enrolled_policy(
+        &self,
+    ) -> Result<Option<(crate::enrollment::LocalPolicy, String)>, String> {
+        let Some(path) = std::env::var_os("RUSTER_CONNECTOR_ENROLLMENT") else {
+            return Ok(None);
+        };
+        let project = std::env::var("RUSTER_PROJECT_ID").map_err(|e| e.to_string())?;
+        let startup: crate::project_startup::Startup = serde_json::from_str(
+            &std::env::var("RUSTER_PROJECT_STARTUP").map_err(|e| e.to_string())?,
+        )
+        .map_err(|e| e.to_string())?;
+        let policy = crate::enrollment::LocalPolicy::load(std::path::Path::new(&path), &project)
+            .map_err(|e| e.to_string())?;
+        Ok(Some((
+            policy,
+            format!(
+                "Registered project: {project} · {} (may differ from the current document)",
+                startup.scene_path.display()
+            ),
+        )))
+    }
     pub(super) fn enrolled_grant(&self) -> Result<Option<crate::enrollment::Grant>, String> {
         let Some(path) = std::env::var_os("RUSTER_CONNECTOR_ENROLLMENT") else {
             return Ok(None);

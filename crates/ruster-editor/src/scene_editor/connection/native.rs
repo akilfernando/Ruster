@@ -203,8 +203,9 @@ impl Host {
                 state.notice.clear();
             }
         }
-        if let Some(grant) = self.enrolled_grant().ok().flatten() {
-            ui.label("Enrolled local connector: native authoring for this registered project. Save, export and execution keep their separate grants.");
+        if let Some((grant, registered_project)) = self.enrolled_policy().ok().flatten() {
+            ui.label(registered_project);
+            ui.label("Local enrollment administration only; revoked or replacement documents receive no project work authority. Save, export and execution keep their separate grants.");
             for (label, all) in [
                 ("Revoke persistent access to this project", false),
                 ("Revoke access to all registered projects", true),
@@ -317,6 +318,68 @@ mod tests {
                 pressed: false,
                 modifiers: egui::Modifiers::NONE,
             }],
+        );
+    }
+
+    #[test]
+    fn local_revoke_controls_survive_revocation_and_document_change() {
+        use std::os::unix::fs::PermissionsExt;
+        if let Some(path) = std::env::var_os("NATIVE_ADMIN_RECOVERY") {
+            let path = PathBuf::from(path);
+            let ctx = egui::Context::default();
+            let mut host = super::super::tests::host("registered-scene");
+            let startup: crate::project_startup::Startup =
+                serde_json::from_str(&std::env::var("RUSTER_PROJECT_STARTUP").unwrap()).unwrap();
+            host.editor.session.save(&startup.scene_path).unwrap();
+            let before = host.editor.session.snapshot_bytes().unwrap();
+            let mut state = NativeUi::default();
+            let original = crate::enrollment::Grant::load(&path, "one").unwrap();
+            click(
+                &mut host,
+                &ctx,
+                &mut state,
+                "Revoke persistent access to this project",
+            );
+            assert!(!original.live());
+            assert!(original.commit_lock().is_err());
+            assert!(crate::enrollment::Grant::load(&path, "one").is_err());
+            assert!(crate::enrollment::Grant::load(&path, "two").is_ok());
+            assert!(host.enrolled_grant().is_err());
+            assert!(host.connect_adapter(&ctx).is_err());
+            assert!(paint(&mut host, &ctx, &mut state, vec![])
+                .iter()
+                .any(|(label, _)| label == "Revoke access to all registered projects"));
+            assert_eq!(host.editor.session.snapshot_bytes().unwrap(), before);
+            host.editor.session = Session::new(Scene::authored_empty("changed-document")).unwrap();
+            let before = host.editor.session.snapshot_bytes().unwrap();
+            let labels = paint(&mut host, &ctx, &mut state, vec![]);
+            assert!(labels
+                .iter()
+                .any(|(label, _)| label.contains("Registered project: one")
+                    && label.contains("registered.ruster")));
+            click(
+                &mut host,
+                &ctx,
+                &mut state,
+                "Revoke access to all registered projects",
+            );
+            assert!(crate::enrollment::Grant::load(&path, "two").is_err());
+            assert!(host.connect_adapter(&ctx).is_err());
+            assert_eq!(host.editor.session.snapshot_bytes().unwrap(), before);
+            return;
+        }
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("enrollment.json");
+        let exe = std::fs::read_link("/proc/self/exe").unwrap();
+        std::fs::write(&path, json!({"version":1,"connector_id":"fixture","executable":exe,"binary_identity":crate::project_startup::BinaryIdentity::read(&exe).unwrap(),"secret":crate::connection::unpredictable().unwrap(),"generation":1,"projects":[{"id":"one","generation":1,"allowed":true},{"id":"two","generation":1,"allowed":true}]}).to_string()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let startup = json!({"scene_path":root.path().join("registered.ruster"),"native_binary":exe,"state_directory":"/fixture","binary_identity":{"dev":0,"ino":0,"len":0,"mtime":0,"mtime_nsec":0},"routing_identity":{"directory_dev":0,"directory_ino":0,"owner_ino":0,"startup_ino":0}});
+        let result = std::process::Command::new(exe).args(["--exact", "scene_editor::connection::native::tests::local_revoke_controls_survive_revocation_and_document_change", "--nocapture"]).env("NATIVE_ADMIN_RECOVERY", &path).env("RUSTER_CONNECTOR_ENROLLMENT", &path).env("RUSTER_PROJECT_ID", "one").env("RUSTER_PROJECT_SCENE_ID", "registered-scene").env("RUSTER_PROJECT_STARTUP", startup.to_string()).output().unwrap();
+        assert!(
+            result.status.success(),
+            "{}\n{}",
+            String::from_utf8_lossy(&result.stdout),
+            String::from_utf8_lossy(&result.stderr)
         );
     }
 

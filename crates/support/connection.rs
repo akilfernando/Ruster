@@ -346,6 +346,11 @@ impl Client {
         if self.capability.is_none() {
             let reply = Self::exchange(stream, json!({"wire":WIRE,"bind":self.owner}))?;
             if reply["state"] == "approval_required" {
+                if self.proof.is_some() {
+                    return Err(io::Error::other(
+                        "enrolled bind refused; no legacy approval fallback",
+                    ));
+                }
                 return Ok(
                     json!({"ok":false,"error":{"code":"approval_required","message":"Approve this adapter owner in the selected editor before project access."}}),
                 );

@@ -37,6 +37,8 @@ struct AuthorityState {
     listener_owned: bool,
     receipts: std::collections::VecDeque<Value>,
     endpoint: Option<(Locator, std::path::PathBuf, u64, u64)>,
+    #[cfg(test)]
+    bind_gate: Option<(mpsc::SyncSender<()>, mpsc::Receiver<()>)>,
 }
 impl AuthorityState {
     fn admitted(&self) -> bool {
@@ -69,6 +71,8 @@ impl Authority {
             listener_owned: false,
             receipts: Default::default(),
             endpoint: None,
+            #[cfg(test)]
+            bind_gate: None,
         })))
     }
     pub fn revoke(&self) {
@@ -380,6 +384,82 @@ pub mod browser;
 mod seamless_tests {
     use super::*;
     #[test]
+    fn enrolled_client_retires_on_legacy_approval_reply() {
+        for enrolled in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            std::fs::set_permissions(root.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+            let socket = root.path().join("editor.sock");
+            let listener = connection::bind_socket(&socket).unwrap();
+            std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let locator = Locator::capture(&socket, "i".into(), "g".into()).unwrap();
+            let path = root.path().join("connection.json");
+            std::fs::write(&path, serde_json::to_vec(&locator).unwrap()).unwrap();
+            std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+            let server = std::thread::spawn(move || {
+                let (mut stream, _) = listener.accept().unwrap();
+                let _ = tests::receive(&mut stream);
+                connection::send(
+                    &mut stream,
+                    &json!({"binding":locator.binding(),"state":"approval_required"}),
+                )
+                .unwrap();
+                let _ = tests::receive(&mut stream);
+                connection::send(&mut stream, &json!({"state":"approval_required"})).unwrap();
+            });
+            let mut client = connection::Client::open(path).unwrap();
+            if enrolled {
+                client.enroll(json!({"fixture":true}));
+            }
+            let reply = client.call("scene_inspect", &json!({}));
+            server.join().unwrap();
+            if enrolled {
+                assert_eq!(reply["error"]["code"], "trusted_connection_unavailable");
+                assert!(!reply.to_string().contains("Approve this adapter"));
+                assert!(!client.available());
+                assert_eq!(
+                    client.call("scene_inspect", &json!({}))["error"]["code"],
+                    "trusted_connection_unavailable"
+                );
+            } else {
+                assert_eq!(reply["error"]["code"], "approval_required");
+                assert!(client.available());
+            }
+        }
+    }
+    #[test]
+    fn enrolled_bind_revoked_after_early_admission_never_requests_approval() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("enrollment.json");
+        let exe = std::fs::read_link("/proc/self/exe").unwrap();
+        std::fs::write(&path, json!({"version":1,"connector_id":"fixture","executable":exe,"binary_identity":crate::project_startup::BinaryIdentity::read(&exe).unwrap(),"secret":connection::unpredictable().unwrap(),"generation":1,"projects":[{"id":"one","generation":1,"allowed":true}]}).to_string()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+        let grant = crate::enrollment::Grant::load(&path, "one").unwrap();
+        let mut bridge = Bridge::start_enrolled(
+            egui::Context::default(),
+            "i".into(),
+            "g".into(),
+            Some(grant.clone()),
+        )
+        .unwrap();
+        let (entered, admission) = mpsc::sync_channel(1);
+        let (resume, resumed) = mpsc::sync_channel(1);
+        bridge.authority.0.lock().unwrap().bind_gate = Some((entered, resumed));
+        let mut stream =
+            connection::connect_socket(&bridge.locator_path().with_file_name("editor.sock"))
+                .unwrap();
+        let owner = connection::unpredictable().unwrap();
+        connection::send(&mut stream, &json!({"wire":connection::WIRE,"hello":owner,"binding":bridge.locator.as_ref().unwrap().binding(),"enrollment":grant.proof().unwrap()})).unwrap();
+        let _ = tests::receive(&mut stream);
+        connection::send(&mut stream, &json!({"wire":connection::WIRE,"bind":owner})).unwrap();
+        admission.recv_timeout(Duration::from_secs(5)).unwrap();
+        grant.revoke(false).unwrap();
+        resume.send(()).unwrap();
+        let reply = tests::receive(&mut stream);
+        assert_eq!(reply["error"]["code"], "trusted_connection_unavailable");
+        assert!(!bridge.authority.authorized());
+        bridge.disconnect();
+    }
+    #[test]
     fn enrolled_local_transport_never_needs_native_approval_and_revokes_before_commit() {
         use std::os::unix::fs::PermissionsExt;
         let root = tempfile::tempdir().unwrap();
@@ -579,8 +659,17 @@ impl Bridge {
                         worker_locator.validate_file(&locator_path, file_identity.0, file_identity.1)?;
                         let Some(request) = framing.poll(&mut stream)? else { continue; };
                         if request == json!({"wire":connection::WIRE,"bind":owner}) {
+                            #[cfg(test)]
+                            {
+                                let gate = worker_authority.0.lock().unwrap().bind_gate.take();
+                                if let Some((entered, resume)) = gate {
+                                    entered.send(()).unwrap();
+                                    resume.recv_timeout(Duration::from_secs(5)).unwrap();
+                                }
+                            }
                             let approved = worker_authority.authorized();
                             let reply = if approved { json!({"binding":worker_locator.binding(),"capability":capability}) }
+                                else if trusted { denied("trusted_connection_unavailable") }
                                 else { json!({"state":"approval_required"}) };
                             connection::send(&mut stream, &reply)?;
                             continue;
