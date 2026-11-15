@@ -16,6 +16,8 @@ production auto-approval, renderer/history/daemon rewrite, client configuration,
 installation, merge or release. Reassess after25 minutes without a real bound
 process smoke or two failed journeys. Native/build resources are serialized.
 
+**Authority update — 2026-11-15:** Akil approved [one-time native browser/project pairing followed by automatic connection while the grant is valid](../../docs/decisions/2026-11-15-browser-project-pairing.md). This resolves the interaction/authority choice described below; implementing and qualifying the authenticated browser handoff is the next action. It is not approval for first-visitor auto-trust or permanent/cross-incarnation grants.
+
 **Authority blocker identified before implementation:** the current workspace
 server authenticates an `X-Workspace-Capability` header entered manually; ordinary
 secret-free navigation carries neither that credential nor a browser identity.
