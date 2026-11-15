@@ -7,12 +7,30 @@ space and less routine chrome because MCP handles much authoring. Same native
 Session/history/selection, not a second scene/webview. Full editor stays first-class.
 The exact initial layout is not yet implemented.
 
-**RUNNING:** Astra defines initial UI and implementation, `proc_cb9f52acc52e`;
-actual `gpt-6-astra`/low and new started admission verified. Cover native controls,
-launch/attach, state-preserving full-editor escape, consent and on-demand image
-observation without a mandatory browser. Regular Sol development is **QUEUED
-after design**, not active implementation. No desktop test runs. Raw brief/proof:
-cumulative audit `native-first-design/`.
+**Initial Astra design COMPLETE:** five calls, exact terminal completion verified.
+Recommend reversible AI workspace in the same native window, viewport-first,
+collapsed Objects/Selection drawers and a Full editor escape; no second Session.
+Parent confirms existing Move/Rotate/Scale and native MCP image-content conversion.
+Actual client image reception still needs its cheap intended-client preflight.
+
+**LATEST USER REQUIREMENT:** ChatGPT connect → choose registered project → connected.
+User explicitly permits removing recurring native connection approval. Previous
+per-connection Approve/Connect AI requirement is superseded for an enrolled trusted
+connector and scoped registered projects; retain exact targeting and revoke access.
+Do not implement another routine native confirmation disguised as setup.
+
+**Revised Astra design COMPLETE:** exact terminal receipt verified. One-time
+local connector/project enrollment grants the trusted path; project selection
+then connects without native approval. Bounded multi-project records, explicit
+connect/disconnect epochs, durable revoke and legacy compatibility are specified.
+Native mode is presentation, not authority; browser handoff is optional.
+[Initial implementation contract](decisions/2026-11-15-native-ai-workspace.md)
+combines the designs with wrong-target/shared-client and reconnect acceptance.
+
+Regular Sol implementation is **QUEUED for handoff**, no live trust/configuration
+or desktop changes. Raw initial/seamless proposals and receipts: cumulative audit
+`native-first-design/`. The old per-run approval clauses are superseded only for
+the explicitly enrolled path; untrusted/manual behavior and other grants remain.
 
 **Browser DEFERRED, NOT REMOVED:** user retains it as a nice-to-have for future
 use cases; optimization no longer gates native-first. SDK worker checkpointed and

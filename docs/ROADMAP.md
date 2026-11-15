@@ -6,6 +6,11 @@
 alongside ChatGPT. Astra defines interface/implementation, then regular Sol builds.
 Browser viewing remains a deferred nice-to-have, not deleted or a native-first gate.
 
+**Connection acceptance:** ChatGPT request → select registered project → connected,
+without recurring native Approve/Connect AI/browser pairing. User explicitly permits
+that approval removal. Define one-time enrolled connector/project trust, exact owner
+binding and revocation; do not make the older per-run prompt an immutable requirement.
+
 **User-confirmed direction:** converge native editor, engine, MCP and browser work
 into one cumulative product line, and preserve the reasons for significant
 planning decisions so later work can learn from them. This section is the current

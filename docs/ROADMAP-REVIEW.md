@@ -810,6 +810,27 @@ Revisit browser for a concrete use case or user direction, not an automatic cycl
 Raw brief/admission: cumulative audit `native-first-design/`; retained SDK
 checkpoint `capture-backend-overlay/` is compiled/headlessly tested, unmeasured.
 
+### Seamless native connection — user authorization, 2026-11-15
+
+Akil explicitly says recurring connection approval should be removed if possible:
+open ChatGPT, ask to connect, choose the project, and be connected. This supersedes
+the earlier per-connection native Approve/Connect AI contract for the trusted path.
+Keep the distinction between granting permission and repeatedly prompting for it:
+stable connector/project permission can be enrolled once under this authorization,
+with exact private local identity and explicit registered targets. Do not call a
+client-provided name or model project_id cryptographic proof of a human click;
+persistent enrollment deliberately trusts that connector within the allowlist.
+
+Astra's initial compact-layout plan is complete and retained. Root requests a
+revised trust/picker/owner/Disconnect-vs-Revoke/compatibility design before Sol
+implements, including bounded multiple registered projects rather than the old
+one-project limitation. Preserve old/manual and frozen-trial behavior, no automatic
+filesystem discovery or newest-editor targeting, no secret in model inputs/results,
+no automatic reconnect/replay, and separate existing save/export/execution grants.
+Browser authority stays separate/deferred. No live settings or trust were changed
+by the design request. Revisit on a real native-first project-choice connection
+without a follow-up native approval, plus untrusted/stale/revoked refusal tests.
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.
