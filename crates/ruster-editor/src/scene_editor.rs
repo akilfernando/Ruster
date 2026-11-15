@@ -5880,6 +5880,8 @@ struct Host {
     bridge: Option<crate::bridge::Bridge>,
     #[cfg(unix)]
     workspace: Option<workspace_attachment::WorkspaceAttachment>,
+    #[cfg(unix)]
+    workspace_enabled: bool,
 }
 impl eframe::App for Host {
     fn raw_input_hook(&mut self, ctx: &egui::Context, raw: &mut egui::RawInput) {
@@ -5976,7 +5978,10 @@ fn run_session(session: Session) -> Result<(), String> {
                 },
                 #[cfg(unix)]
                 bridge: None,
+                #[cfg(unix)]
                 workspace: None,
+                #[cfg(unix)]
+                workspace_enabled: true,
             };
             // Legacy opt-in creates only an unbound matched-wire listener. It
             // never approves an adapter or bypasses the explicit owner API.

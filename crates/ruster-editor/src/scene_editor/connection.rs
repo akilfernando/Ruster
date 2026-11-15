@@ -63,9 +63,12 @@ impl Host {
         .map_err(|e| e.to_string())?;
         let path = bridge.locator_path();
         self.editor.connection_authority = Some(bridge.authority());
-        self.workspace =
+        self.workspace = if self.workspace_enabled {
             workspace_attachment::WorkspaceAttachment::start(&self.editor, &bridge, ctx)
-                .map_err(|e| e.to_string())?;
+                .map_err(|e| e.to_string())?
+        } else {
+            None
+        };
         self.bridge = Some(bridge);
         Ok(path)
     }

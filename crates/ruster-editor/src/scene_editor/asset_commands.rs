@@ -2462,6 +2462,7 @@ mod tests {
             editor: SceneEditor::with_workspace(session, Workspace::detached()),
             bridge: None,
             workspace: None,
+            workspace_enabled: false,
         };
         let ctx = egui::Context::default();
         let mut frame = eframe::Frame::_new_kittest();
@@ -3824,6 +3825,7 @@ mod tests {
                 input: Default::default(),
                 bridge: None,
                 workspace: None,
+                workspace_enabled: false,
             };
             let ctx = egui::Context::default();
             let mut original = None;

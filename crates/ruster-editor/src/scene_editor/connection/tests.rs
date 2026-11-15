@@ -8,15 +8,17 @@ pub(super) fn host(id: &str) -> Host {
         input: Default::default(),
         bridge: None,
         workspace: None,
+        workspace_enabled: false,
     }
 }
 #[test]
 fn saved_host_publishes_only_live_authenticated_workspace_descriptor() {
     let directory = tempfile::tempdir().unwrap();
     let mut host = host("workspace-project");
+    host.workspace_enabled = true;
     host.editor
         .session
-        .save(&directory.path().join("project.ruster"))
+        .save(directory.path().join("project.ruster"))
         .unwrap();
     let ctx = egui::Context::default();
     host.connect_adapter(&ctx).unwrap();
@@ -44,6 +46,58 @@ fn saved_host_publishes_only_live_authenticated_workspace_descriptor() {
         .unwrap()
         .starts_with("http://127.0.0.1:"));
     assert!(descriptor.get("credential").is_none());
+    // A companion occupied by a partial HTTP header cannot stall the MCP owner.
+    let endpoint = descriptor["url"]
+        .as_str()
+        .unwrap()
+        .trim_start_matches("http://")
+        .trim_end_matches('/');
+    let mut partial = std::net::TcpStream::connect(endpoint).unwrap();
+    std::io::Write::write_all(&mut partial, b"POST /pair HTTP/1.1\r\n").unwrap();
+    let started = Instant::now();
+    assert_eq!(
+        call(
+            &mut host,
+            &ctx,
+            &owner,
+            frame(&handshake, "scene_inspect", json!({}))
+        )["ok"],
+        true
+    );
+    assert!(
+        started.elapsed() < Duration::from_secs(1),
+        "HTTP cannot monopolize native dispatch"
+    );
+    // Terminate only this exact OS-authenticated owned child; MCP remains independent.
+    let child = descriptor["peer_pid"].as_u64().unwrap().to_string();
+    assert!(std::process::Command::new("kill")
+        .args(["-TERM", &child])
+        .status()
+        .unwrap()
+        .success());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while host.workspace.is_some() {
+        tick(&mut host, &ctx);
+        assert!(
+            Instant::now() < deadline,
+            "dead workspace attachment not retired"
+        );
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    assert_eq!(
+        host.workspace_descriptor()["error"]["code"],
+        "workspace_unavailable"
+    );
+    assert_eq!(
+        call(
+            &mut host,
+            &ctx,
+            &owner,
+            frame(&handshake, "scene_inspect", json!({}))
+        )["ok"],
+        true
+    );
+    drop(partial);
     retire(&mut host, &ctx);
     assert!(std::net::TcpStream::connect(
         descriptor["url"]

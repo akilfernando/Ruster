@@ -264,6 +264,7 @@ fn valid_origin(origin: &str) -> bool {
                 && port.parse::<u16>().is_ok_and(|n| n != 0)
         })
 }
+
 impl Host {
     pub(super) fn workspace_descriptor(&self) -> Value {
         self.workspace.as_ref().map_or_else(
@@ -396,5 +397,60 @@ impl Host {
             workspace.stop();
         }
         ctx.request_repaint();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn restricted_length_frames_reject_partial_expiry_duplicates_and_unsafe_origins() {
+        for origin in ["http://127.0.0.1:1", "http://127.0.0.1:65535"] {
+            assert!(valid_origin(origin));
+        }
+        for origin in [
+            "http://localhost:80",
+            "http://127.0.0.1:0",
+            "http://127.0.0.1:65536",
+            "http://127.0.0.1:80/",
+            "http://127.0.0.1:80?secret=x",
+            "https://127.0.0.1:80",
+        ] {
+            assert!(!valid_origin(origin));
+        }
+        let (mut writer, mut reader) = UnixStream::pair().unwrap();
+        let mut frame = Framing::default();
+        assert!(frame.poll(&mut reader).unwrap().is_none());
+        assert!(
+            frame.started.is_none(),
+            "healthy idle has no partial-frame deadline"
+        );
+        let body = br#"{"op":"status","args":{}}"#;
+        let bytes = [(body.len() as u32).to_be_bytes().as_slice(), body].concat();
+        for byte in &bytes {
+            writer.write_all(&[*byte]).unwrap();
+            let result = frame.poll(&mut reader).unwrap();
+            if frame.bytes.is_empty() {
+                assert_eq!(result, Some(json!({"op":"status","args":{}})));
+            } else {
+                assert!(result.is_none());
+            }
+        }
+        writer.write_all(&[0]).unwrap();
+        frame.poll(&mut reader).unwrap();
+        frame.started = Some(Instant::now() - Duration::from_secs(3));
+        assert!(frame.poll(&mut reader).is_err());
+        for size in [0u32, 4097, u32::MAX] {
+            let (mut w, mut r) = UnixStream::pair().unwrap();
+            w.write_all(&size.to_be_bytes()).unwrap();
+            assert!(Framing::default().poll(&mut r).is_err());
+        }
+        let (mut w, mut r) = UnixStream::pair().unwrap();
+        let body = br#"{"op":"status","op":"scene_inspect"}"#;
+        w.write_all(&(body.len() as u32).to_be_bytes()).unwrap();
+        w.write_all(body).unwrap();
+        let mut frame = Framing::default();
+        assert!(frame.poll(&mut r).unwrap().is_none());
+        assert!(frame.poll(&mut r).is_err());
     }
 }

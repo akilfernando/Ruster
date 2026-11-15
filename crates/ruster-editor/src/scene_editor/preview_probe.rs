@@ -150,6 +150,7 @@ fn direct_image_host_fixture() {
         input: Default::default(),
         bridge: None,
         workspace: None,
+        workspace_enabled: false,
     };
     // Match viewport framing across revision zero and Undo: the normal welcome
     // banner is revision-zero-only and is not part of the viewport camera.

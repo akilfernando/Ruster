@@ -71,7 +71,19 @@ mod tests {
         let request = BrowserRequest {
             id: "a".repeat(64),
             context: "exact scene/session/origin".into(),
-            binding: None,
+            binding: Some(BrowserBinding {
+                native_incarnation: "native".into(),
+                native_generation: "generation".into(),
+                native_connection: "connection".into(),
+                native_pid: 1,
+                native_uid: 2,
+                project: "/saved/project".into(),
+                scene_id: "scene".into(),
+                session_token: "session".into(),
+                attachment: "a".repeat(64),
+                peer_pid: 3,
+                origin: "http://127.0.0.1:1234".into(),
+            }),
         };
         let mut pairing = BrowserPairing::new(request.clone());
         let wrong = BrowserRequest {
@@ -83,6 +95,18 @@ mod tests {
         assert!(pairing.approve(&request));
         assert!(!pairing.approve(&request));
         assert_eq!(pairing.state(&wrong), "denied");
+        for field in ["origin", "peer", "session", "project", "attachment"] {
+            let mut replaced = request.clone();
+            let binding = replaced.binding.as_mut().unwrap();
+            match field {
+                "origin" => binding.origin.push_str("/other"),
+                "peer" => binding.peer_pid += 1,
+                "session" => binding.session_token.push_str("-old"),
+                "project" => binding.project.push_str("-other"),
+                _ => binding.attachment.push('a'),
+            }
+            assert_eq!(pairing.state(&replaced), "denied", "{field}");
+        }
         pairing.deadline = Instant::now();
         assert_eq!(pairing.state(&request), "denied");
         assert!(!pairing.approve(&request));

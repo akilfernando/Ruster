@@ -22,6 +22,7 @@ mod tests {
             input: Default::default(),
             bridge: None,
             workspace: None,
+            workspace_enabled: false,
         };
         let authored = host.editor.session.snapshot_bytes().unwrap();
         let draw = |host: &mut Host, events, blocked| {
@@ -111,6 +112,7 @@ mod tests {
             input: Default::default(),
             bridge: None,
             workspace: None,
+            workspace_enabled: false,
         };
         let (bridge, mut inspect) = crate::bridge::queued_test_bridge(
             json!({"operation":"lighting_inspect","arguments":{}}),
