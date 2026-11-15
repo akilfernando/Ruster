@@ -1,5 +1,73 @@
 # Browser pairing qualification — 2026-11-15
 
+## Normal workspace review repairs
+
+2026-11-15: both source-inferred HOLD findings are now **executed counterexamples**
+and repaired. Scope is only the normal HTTP companion, its owning Python suite and
+read-only normal HTML; no Rust/core/fixture behavior changes. Code checkpoints
+`e89349c1c32f032c2bcb82570c655f3f2116ddfa` (deadline/EOF) and
+`3b3583125e3ef71428066560bfa55ab16b4e7faa` (composite pins/read-only presentation)
+were pushed and remote-read back before native qualification.
+
+Audit root remains `normal-attachment/` under the absolute audit path below;
+new raw checks and artifact/source identities are in `repair/manifest.json`.
+
+- `repair/red-http.log`: all4header/body × deadline/native-EOF subcases fail on
+  baseline. Continuous bytes faster than the old inactivity timeout hold parsing
+  beyond2.8s or native death beyond1.2s. GREEN requires closed request, a still-live
+  healthy attachment on HTTP timeout, or child exit0/closed listener/exact socket
+  and empty owner-root retirement on native EOF. Replacement preservation remains
+  covered. The implementation uses bounded buffered raw reads with `select` on
+  HTTP plus native sockets, not a thread/server framework. One absolute2s admission
+  budget covers request line, headers and body; native2s-send/8s-reply and existing
+  capture-poll6s budgets remain distinct and unchanged.
+- `repair/red-observation.log`: owning deterministic native replies reproduce
+  successful mixed metadata/pixels before repair. A test construction typo initially
+  varied `id` instead of `capture_id`; the first attempted GREEN retains that
+  harness failure in `green-first-harness-id-error.log`. Corrected final oracle
+  uses native scene revision6/view7 and all six identity mismatches; replay against
+  pre-composite-repair `e89349c` fails all six in
+  `red-observation-final-oracle.log`. Mismatch now returns explicit
+  `stale_observation` with no scene/capture/PNG composite. Scene/view session and
+  revision are checked **before capture admission**; returned capture session,
+  revision, view revision and capture ID are checked before success. No retry,
+  rebase, second owner or authorization change. Matching capture deliberately
+  takes2.1s to prove admission's2s does not truncate valid native work.
+- `repair/green-final.log` and `green-optimized-final.log`:5owning tests pass,
+  8.49s/8.61s; the latter actually launches `python -O` children. Checks use explicit
+  admission refusals, not optimization-removable assertions.
+- Fresh source-qualified `repair/ruster-editor-default` and
+  `repair/ruster-editor-inspection` build from `3b35831` with locked/offline Cargo
+  under the shared nonblocking gate and this checkout's private target; compiler
+  JSON/logs are retained. Default and inspection strict all-target editor Clippy,
+  affected Markdown validation and the native text-log scanner pass; no new active
+  Vulkan-layer claim. The generic runner dry plan conservatively selected full
+  scope for embedded Python/HTML; the affected checks above replace an unnecessary
+  unchanged Rust/core workspace suite replay. Prior
+  381Rust/default,183inspection and31runner-test evidence below remains reusable.
+- `ordinary-tsrs56wz/report.json`: genuine ordinary saved-project Host, sole real
+  MCP owner, pending refusal, actual native-widget approval, capture, visible MCP
+  transform revision0→1, same-cookie reload1 and native Disconnect refusal pass.
+  Browser execution also confirms removed gesture handlers/instructions and matching
+  scene/view/capture pins. Exact launch preflight/imports use the same existing
+  audit venv; activity/ownership/shared-gate guards are preserved. This is app-scoped
+  injected native input, not physical-human consent or ChatGPT. No ignored fixture
+  or approval-file mechanism is used. `repair/independent-cleanup.json` independently
+  verifies exact native/companion PIDs, native window, listener, locator/root,
+  workspace socket/root absence and QA-gate reacquisition. Desktop remains unchanged.
+
+**Remaining end-user path:** no installation or client configuration was performed.
+An end user still needs an approved source-built/installed ordinary editor and
+adapter, a deliberately registered saved project, explicit native Connect AI and
+exact adapter-owner approval, then a client capable of `project_connect` and opening
+its secret-free URL, followed by native approval of that exact pending browser.
+The existing developer runner qualifies that sequence, not turnkey startup or actual
+ChatGPT internal-browser access. Fresh default/noninspection artifact compilation
+is qualified; live default interaction, human approval and actual ChatGPT handoff
+remain separate gates. Interactive normal-browser controls remain deferred. No live
+demo, lease extension, installation, canonical merge or release is claimed. Parent
+owns consequential review of these repairs.
+
 ## Current ordinary-native result (supersedes historical transport blocker)
 
 **PASS: first ordinary saved-project Host → real registered MCP owner → pending

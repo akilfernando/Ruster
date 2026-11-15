@@ -97,7 +97,7 @@ class WorkspaceHTTP(unittest.TestCase):
             with self.subTest(mismatch=mismatch), tempfile.TemporaryDirectory(dir=os.environ['TMPDIR']) as root:
                 scene={'session_token':'one','revision':'7','scene_id':'scene','objects':[]}
                 view={**scene,'view_revision':'3'}
-                if mismatch in ('revision','session_token'): scene[mismatch]='old'
+                if mismatch in ('revision','session_token'): scene[mismatch]='6' if mismatch=='revision' else 'previous-native-session'
                 capture={**view,'capture_id':'42','status':'ready','image_base64':'private-pixels'}
                 if mismatch and mismatch.startswith('capture_'): capture['capture_id' if mismatch=='capture_id' else mismatch.removeprefix('capture_')]='wrong'
                 def reply(request):

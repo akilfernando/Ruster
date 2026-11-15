@@ -1,5 +1,29 @@
 # Current project status
 
+## Normal workspace review repairs — 2026-11-15
+
+**Both review counterexamples reproduced RED, repaired, and genuine ordinary-Host
+journey requalified.** Code checkpoints `e89349c` and `3b35831` are pushed. HTTP
+admission now has one absolute2s request-line/header/body budget independent of
+byte progress, with native-death readiness checked during reads; native send/reply
+and capture budgets are unchanged. Scene/view session+revision must match before
+capture; returned capture session/revision/view/capture ID must match before any
+successful composite or pixels. Mismatch returns `stale_observation`, no replay.
+Misleading camera/pick gestures/instructions are removed from the read-only normal
+preview; the accepted interactive fixture is unchanged.
+
+Owning Python suite passes5tests normally and with actually optimized child Python,
+including trickling header/authenticated-body deadline and EOF/root cleanup cases,
+six mismatched-observation variants, and matching capture delayed beyond2s. Fresh
+default and inspection artifacts build; ordinary inspection-enabled saved-project
+Host/MCP/native-widget/browser capture/edit/reload/revoke passes in
+`normal-attachment/ordinary-tsrs56wz/report.json`. Independent exact process/window,
+listener/locator/socket/root cleanup and desktop preservation pass. Default live
+interaction, physical-human approval, actual ChatGPT onboarding, installation/client
+configuration and ordinary interactive controls remain unqualified/unfinished.
+Parent owns changed-risk review. [RED/GREEN logs, pins, exclusions and startup
+boundary](evidence/BROWSER-PAIRING-2026-11-15.md#normal-workspace-review-repairs).
+
 ## Ordinary Host workspace first exit — 2026-11-15
 
 **First genuine ordinary-native project/pair/capture/MCP-edit/reload/revoke slice
