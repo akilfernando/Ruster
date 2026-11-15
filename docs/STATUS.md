@@ -1,5 +1,40 @@
 # Current project status
 
+## Exact-project MCP connection — safe partial, 2026-11-15
+
+**Implemented native attachment; full ChatGPT prompt-first outcome BLOCKED.**
+`feat/prompt-connect-20261115` adds `project_list`/`project_connect` over one
+explicit private installation-owned registry, frozen at adapter startup. Exact
+name/ID, native incarnation/generation/connection and scene identity are pinned;
+no filesystem discovery/newest editor, implicit access approval or authored replay.
+Existing native Client/owner/Session and consent paths remain authoritative.
+
+Real source-built adapter/native SceneEditor journey passes against an associated
+saved disposable project: list without claiming owner, partial-name refusal,
+exact-name approval-required, explicit fixture approval of that exact PID,
+exact-ID attachment, guarded edits/shared Undo/Redo/Save/fresh-open equality,
+Disconnect and repeated-connect refusal. This is windowless production Session
+and bridge code with explicit **fixture consent**, not native human consent,
+rendered workspace, launcher installation or actual ChatGPT acceptance.
+Raw proof: `/home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/build-native.log`.
+Initial native resource-lock refusal was respected; the lock subsequently became
+available and the complete journey passed. No other owner/process was stopped.
+
+**Narrow remaining authority decision:** permit explicit native approval of a
+pending browser connection (then mint only an expiring in-memory browser session),
+or provide a client-supported private credential handoff. Ordinary secret-free
+navigation provides neither the existing capability header nor browser identity.
+Do not auto-approve first visitor or leak a capability through MCP text/URL.
+`project_connect` therefore reports `workspace_handoff:approval_channel_required`.
+Production startup/registry writing, authenticated browser handoff and full
+one-prompt ChatGPT acceptance are not implemented/claimed. Existing user-confirmed
+internal-browser prompt navigation/native Question UI are not being re-proven.
+
+Focused MCP tests/strict all-target lint pass; final selected gate pending at this
+checkpoint. [Bounded contract/API and executable reproduction](../spikes/003-interactive-localhost/README.md#prompt-project-connection-contract--2026-11-15).
+No client configuration, install, merge/release, canonical/private/sibling writes.
+
+
 ## Original-precision native manipulation repair — 2026-11-15
 
 **Bounded repair verified; hierarchy milestone still incomplete.** The existing

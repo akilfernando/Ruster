@@ -12,6 +12,7 @@ mod hud_tools;
 mod lighting_tools;
 mod material_tools;
 mod persistence_tools;
+mod project_tools;
 mod runtime_tools;
 #[path = "../../support/strict_json.rs"]
 mod strict_json;
@@ -114,6 +115,17 @@ fn exact_keys(object: &Map<String, Value>, required: &[&str], optional: &[&str])
 }
 
 fn valid_arguments(name: &str, arguments: &Value) -> bool {
+    if name == "project_list" {
+        return arguments.as_object().is_some_and(|o| o.is_empty());
+    }
+    if name == "project_connect" {
+        return arguments
+            .as_object()
+            .is_some_and(|o| exact_keys(o, &["project"], &[]))
+            && arguments["project"]
+                .as_str()
+                .is_some_and(|s| !s.is_empty() && s.len() <= 128);
+    }
     if hud_tools::supported(name) {
         return hud_tools::valid(name, arguments);
     }
@@ -383,7 +395,10 @@ fn object_schema(properties: Value, required: Vec<&str>) -> Value {
 fn tools() -> Value {
     let decimal = json!({"type":"string", "pattern":"^(0|[1-9][0-9]*)$", "maxLength":20,
         "description":"Canonical decimal u64; maximum 18446744073709551615."});
-    let mut tools = Vec::new();
+    let mut tools = vec![
+        json!({"name":"project_list","description":"List explicitly registered project records only. Routing is not access approval. Use the host native question UI only if identity needs clarification; never scan filesystem or select newest editor.","inputSchema":object_schema(json!({}),vec![])}),
+        json!({"name":"project_connect","description":"Attach the exact registered project name or ID. Skip selection when already exact. Existing native approval is still required; no implicit startup, browser authentication or mutation retry. Subsequent scene tools use this same pinned owner.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":128}}),vec!["project"])}),
+    ];
     for (name, description) in [
         ("inspect", "Inspect the attached editor's session, authored configuration, revision and mutation guards. No history arrays, files or logs."),
         ("edit", "Replace all three authored configuration fields. Requires the inspected identity/revision and clean human drafts. Unsaved; shares human undo; leaves preview unchanged."),
@@ -568,7 +583,7 @@ impl Server {
                     Ok(
                         json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},
                         "serverInfo":{"name":"ruster-mcp","version":env!("CARGO_PKG_VERSION")},
-                        "instructions":"Project access requires explicit editor approval of this adapter owner. initialize/tools/list alone grant no authority; keep the fixed selected locator. New/Open/Restore, disconnect, owner loss/restart or a project-root rebase revoke access and require fresh consent. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision as concurrency guards, not credentials. No automatic retries. Cancellation cannot roll back already authorized publication; after unknown outcomes inspect current state/receipts only through an approved connection. Edits remain unsaved until explicit persistence. Generic scene_save requires a separate editor-granted directory and session/revision/persistence tokens; legacy configuration Save remains human-only. Creator export requires a human-selected executable runtime kit and separate output grant; inspect its operation ID rather than restarting. Asset catalog changes persist immediately."}),
+                        "instructions":"Project access requires explicit editor approval of this adapter owner. With an explicitly installed project registry, use project_connect with the exact named project; project_list contains only registered records and selection is not consent. initialize/tools/list alone grant no authority; keep the fixed selected locator. New/Open/Restore, disconnect, owner loss/restart or a project-root rebase revoke access and require fresh consent. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision as concurrency guards, not credentials. No automatic retries. Cancellation cannot roll back already authorized publication; after unknown outcomes inspect current state/receipts only through an approved connection. Edits remain unsaved until explicit persistence. Generic scene_save requires a separate editor-granted directory and session/revision/persistence tokens; legacy configuration Save remains human-only. Creator export requires a human-selected executable runtime kit and separate output grant; inspect its operation ID rather than restarting. Asset catalog changes persist immediately."}),
                     )
                 }
             }
@@ -597,6 +612,8 @@ impl Server {
                     .unwrap_or_else(|| json!({}));
                 if !exact_keys(params, &["name"], &["arguments", "_meta"])
                     || ![
+                        "project_list",
+                        "project_connect",
                         "inspect",
                         "edit",
                         "undo",
@@ -658,9 +675,84 @@ impl Server {
 struct Adapter {
     attempted: bool,
     client: Option<connection::Client>,
+    registry: Option<io::Result<project_tools::Registry>>,
+    selected: Option<project_tools::Project>,
+    verified: bool,
 }
 impl Adapter {
+    fn configured() -> Self {
+        let registry = std::env::var_os("RUSTER_MCP_PROJECT_REGISTRY").map(|path| {
+            if std::env::var_os("RUSTER_MCP_LOCATOR").is_some() {
+                return Err(io::Error::other(
+                    "registry and legacy locator are mutually exclusive",
+                ));
+            }
+            project_tools::Registry::load(std::path::Path::new(&path))
+        });
+        Self {
+            registry,
+            ..Self::default()
+        }
+    }
     fn call(&mut self, name: &str, arguments: &Value) -> Value {
+        if let Some(registry) = &self.registry {
+            let Ok(registry) = registry else {
+                return domain_error(
+                    "registry_unavailable",
+                    "Explicit private project registration is invalid; no locator fallback.",
+                );
+            };
+            if name == "project_list" {
+                return registry.list();
+            }
+            if name == "project_connect" {
+                let Ok(project) = registry.resolve(arguments["project"].as_str().unwrap_or(""))
+                else {
+                    return domain_error("project_not_found", "Name or ID must exactly match an explicitly registered project; no filesystem discovery.");
+                };
+                if let Some(selected) = &self.selected {
+                    if selected.id != project.id {
+                        return domain_error(
+                            "project_pinned",
+                            "This adapter cannot retarget; fresh owner consent is required.",
+                        );
+                    }
+                } else {
+                    self.selected = Some(project.clone());
+                }
+                if !self.attempted {
+                    self.attempted = true;
+                    self.client = project.open().ok();
+                }
+            }
+            let Some(project) = &self.selected else {
+                return domain_error("project_required", "Call project_connect with an exact registered name or ID before project access.");
+            };
+            let Some(client) = self.client.as_mut() else {
+                return domain_error("bridge_unavailable", "Registered incarnation unavailable; no restart, retarget or fallback. Explicit registration and fresh owner consent required.");
+            };
+            if !self.verified || name == "project_connect" {
+                let mut observed = client.call("scene_inspect", &json!({}));
+                if observed["ok"] != true {
+                    return observed;
+                }
+                if observed["result"]["scene_id"] != project.scene_id {
+                    self.client.take();
+                    return domain_error("project_identity_changed", "Registered scene identity disagrees with native owner; no authored request dispatched.");
+                }
+                self.verified = true;
+                if name == "project_connect" {
+                    observed["result"]["registered_project"] =
+                        json!({"id":project.id,"name":project.name});
+                    observed["result"]["workspace_handoff"] = json!({"status":"approval_channel_required","message":"Browser authentication needs a private client handoff or explicit native browser approval; no credential is returned in MCP text or URL."});
+                    return observed;
+                }
+            }
+            return self.client.as_mut().unwrap().call(name, arguments);
+        }
+        if matches!(name, "project_connect" | "project_list") {
+            return domain_error("registry_unavailable", "Configure an explicit private project registry during installation; no discovery or implicit locator fallback.");
+        }
         if !self.attempted {
             self.attempted = true;
             self.client = std::env::var_os("RUSTER_MCP_LOCATOR")
@@ -675,7 +767,7 @@ impl Adapter {
 
 fn run(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
     let mut server = Server::default();
-    let mut adapter = Adapter::default();
+    let mut adapter = Adapter::configured();
     while let Some(frame) = read_frame(reader, MAX_FRAME)? {
         if let Some(response) = server.handle(&frame, |op, args| adapter.call(op, args)) {
             let serialized = response.to_string();
@@ -703,6 +795,68 @@ fn main() {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    #[test]
+    fn registry_requires_explicit_selection_and_never_falls_back() {
+        let registry = project_tools::Registry::parse(&json!({"projects":[{"id":"one","name":"One","scene_id":"scene-one","locator":"/not-opened/locator.json","binding":{"wire":connection::WIRE,"incarnation":"i","generation":"g","connection":"c"}}]}).to_string()).unwrap();
+        let mut adapter = Adapter {
+            registry: Some(Ok(registry)),
+            ..Default::default()
+        };
+        assert_eq!(
+            adapter.call("scene_inspect", &json!({}))["error"]["code"],
+            "project_required"
+        );
+        assert_eq!(
+            adapter.call("project_list", &json!({}))["result"]["projects"][0]["id"],
+            "one"
+        );
+        assert!(!adapter.attempted);
+        assert_eq!(
+            adapter.call("project_connect", &json!({"project":"On"}))["error"]["code"],
+            "project_not_found"
+        );
+        assert!(!adapter.attempted);
+        assert_eq!(
+            adapter.call("project_connect", &json!({"project":"One"}))["error"]["code"],
+            "bridge_unavailable"
+        );
+        assert!(adapter.attempted);
+    }
+
+    #[test]
+    fn registered_project_tools_route_without_implicit_project_access() {
+        let listed = tools();
+        let names: Vec<_> = listed["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert!(names.contains(&"project_list"));
+        assert!(names.contains(&"project_connect"));
+        let mut server = ready();
+        let mut calls = Vec::new();
+        let reply = server.handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"project_connect","arguments":{"project":"Disposable One"}}}).to_string().as_bytes(), |op, args| {
+            calls.push((op.to_owned(), args.clone()));
+            domain_error("approval_required", "native approval remains required")
+        }).unwrap();
+        assert_eq!(
+            calls,
+            vec![(
+                "project_connect".into(),
+                json!({"project":"Disposable One"})
+            )]
+        );
+        assert_eq!(
+            reply["result"]["structuredContent"]["error"]["code"],
+            "approval_required"
+        );
+        assert!(!valid_arguments(
+            "project_connect",
+            &json!({"project":"Disposable One","locator":"/injected"})
+        ));
+    }
 
     fn request(server: &mut Server, method: &str, params: Value) -> Value {
         server
@@ -864,7 +1018,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 86);
+        assert_eq!(tools.len(), 88);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -874,6 +1028,8 @@ mod tests {
         assert_eq!(
             names,
             [
+                "project_list",
+                "project_connect",
                 "inspect",
                 "edit",
                 "undo",

@@ -1,5 +1,31 @@
 # Interactive localhost workspace — bounded disposable slice
 
+## Prompt-project connection contract — 2026-11-15
+
+Exclusive writer: `feat/prompt-connect-20261115`, base `f9bf7a4`.
+Requested exit: ChatGPT prompt naming an exact registered project → start/attach
+its native owner → authenticated internal-browser workspace → direct MCP edit
+observed at the same owner/revision → disconnect refusal. Existing user-confirmed
+prompt navigation and native Question cards stand; no replacement picker or
+navigation feasibility demo. Initial install and meaningful native approval remain.
+
+First bounded implementation is explicit single-project registration and exact MCP
+attachment through the existing socket-bound Client; registration is routing, NOT
+access consent. No directory scanning/newest editor, hidden launch commands,
+production auto-approval, renderer/history/daemon rewrite, client configuration,
+installation, merge or release. Reassess after25 minutes without a real bound
+process smoke or two failed journeys. Native/build resources are serialized.
+
+**Authority blocker identified before implementation:** the current workspace
+server authenticates an `X-Workspace-Capability` header entered manually; ordinary
+secret-free navigation carries neither that credential nor a browser identity.
+An MCP text URL cannot transfer private authority under the no-secrets-in-chat/URL
+constraint. Auto-granting the first browser visitor would approve an unverified
+browser and is not authorized. A private client-supported credential handoff OR
+explicit native approval of the pending browser is required before auto-auth can
+be implemented. Exact-project MCP work is safe independently; do not label it the
+full prompt-first outcome or upgrade existing fixture grants to production consent.
+
 ## Persistent native connection — qualified 2026-11-15
 
 This continuation supersedes earlier file-transport/performance-follow-up descriptions **for this isolated candidate only**. Browser HTTP now uses one explicitly bound persistent Unix-domain connection to the exact native fixture. No per-camera/command/frame/status payload files, reconnect, file fallback or authored replay. Bounded length framing, absolute deadlines, partial IO/EOF cleanup and a bounded IO worker keep incomplete socket reads/writes off native editor processing. Browser controls/renderer/history/quality are unchanged; native waits are request-wakeable, not busy-spin. Existing first-exact-MCP-owner approval is now consumed once inside the explicitly granted native fixture rather than polled by the HTTP server. This remains disposable cooperative-user authority, not production consent.

@@ -1,5 +1,57 @@
 # Ruster native MCP adapter
 
+## Exact registered-project attachment — partial prompt-first slice
+
+Set `RUSTER_MCP_PROJECT_REGISTRY` once to an absolute private (`0600`, same UID,
+no symlink components, at most8192bytes) installation-owned JSON record. Do not
+also set legacy `RUSTER_MCP_LOCATOR`: conflicting/invalid configuration refuses
+without fallback. The adapter snapshots the record at process startup; changing
+it cannot retarget an existing adapter. This first slice permits **one** explicit
+project, not filesystem discovery or a project-manager subsystem.
+
+Record shape (placeholders are nonsecret routing identity, never capabilities):
+
+```json
+{"projects":[{"id":"disposable-assembly","name":"Disposable Assembly","scene_id":"creator-assembly","locator":"/absolute/private-runtime/connection.json","binding":{"wire":"ruster-owner-1","incarnation":"EXACT_NATIVE_INCARNATION","generation":"EXACT_NATIVE_GENERATION","connection":"EXACT_NATIVE_CONNECTION"}}]}
+```
+
+`project_list {}` returns only that registered ID/name/scene identity. Listing
+creates no native owner and grants no access. `project_connect {"project":
+"Disposable Assembly"}` (or the exact ID) binds the existing fixed native Client,
+checks the registered incarnation/generation/connection and, after native owner
+approval, checks actual scene identity before authored dispatch. Names are exact,
+case-sensitive; no fuzzy/newest/default project selection. If the user named it
+exactly, skip the picker. Use real listed records with a host-native question only
+when clarification is needed; this adapter does not claim to invoke that UI.
+
+Initial `approval_required` is a real consent gate, not success. Meaningful native
+approval remains explicit; registration is not approval. Subsequent scene tools
+use the same socket owner and exact native session/revision guards. A repeated
+connect is read-only inspection of that owner, not reconnect/replay or renewed
+consent; retirement/replacement refuses permanently for that adapter.
+
+**Not full onboarding:** no production startup/registration writer, automatic
+browser authentication or actual one-prompt ChatGPT acceptance is claimed.
+Successful attachment returns `workspace_handoff.status:approval_channel_required`
+instead of leaking a capability or pretending an anonymous navigation is approved.
+A private client credential handoff or explicit native approval of the pending
+browser is needed. The existing fixture workspace/Host/Origin/CSRF boundary is
+unchanged. [Contract, executed native journey and next decision](../../spikes/003-interactive-localhost/README.md#prompt-project-connection-contract--2026-11-15).
+
+Developer reproduction (explicit disposable fixture grant, not human consent):
+
+```sh
+cargo build -p ruster-mcp --locked
+RUSTER_TEST_MCP_BINARY="$PWD/target/debug/ruster-mcp" \
+  cargo test -p ruster-editor project_registry_stdio_creator_save_fresh_open \
+  --locked -- --ignored --nocapture
+```
+
+This uses an actual saved disposable project, native SceneEditor/Session/bridge,
+a real adapter subprocess, guarded shared-history edits and Save/fresh-open,
+then disconnect and same-adapter refusal. It is windowless, not browser/rendered
+or ChatGPT validation. Use the existing QA resource lock for native execution.
+
 ## Bounded assembly authoring (WIP)
 
 `scene_group_create` accepts the normal exact session/revision pins, `object_id` and `name`. `scene_reparent` accepts the pins, target `object_id` and `parent_id` (group stable ID, or null to detach). These are adapters over existing Session transactions and shared Undo/Redo, not a separate authority. Preserve the inspected current session/revision and human draft guards. Reparent preserves the complete descendant world closure within the documented tolerance or refuses atomically.

@@ -9156,16 +9156,22 @@ mod tests {
 
     #[test]
     fn hierarchy_guarded_session_vertical_tracer() {
-        hierarchy_creator_journey(false);
+        hierarchy_creator_journey(false, false);
     }
 
     #[test]
     #[ignore = "explicit RUSTER_TEST_MCP_BINARY; actual STDIO fixture approval, not human consent"]
     fn hierarchy_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true);
+        hierarchy_creator_journey(true, false);
     }
 
-    fn hierarchy_creator_journey(stdio: bool) {
+    #[test]
+    #[ignore = "explicit RUSTER_TEST_MCP_BINARY; registered-project STDIO fixture, not human consent"]
+    fn project_registry_stdio_creator_save_fresh_open() {
+        hierarchy_creator_journey(true, true);
+    }
+
+    fn hierarchy_creator_journey(stdio: bool, registered: bool) {
         use std::io::{BufRead, Write};
         struct Adapter(std::process::Child);
         impl Drop for Adapter {
@@ -9250,9 +9256,19 @@ mod tests {
         editor.connection_authority = Some(bridge.authority());
         let mut adapter = stdio.then(|| {
             let binary = std::env::var_os("RUSTER_TEST_MCP_BINARY").expect("exact source-built adapter");
-            let mut child = std::process::Command::new(binary)
-                .env("RUSTER_MCP_LOCATOR", bridge.locator_path())
-                .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
+            let mut command = std::process::Command::new(binary);
+            command.env_remove("RUSTER_MCP_LOCATOR").env_remove("RUSTER_MCP_PROJECT_REGISTRY");
+            if registered {
+                use std::os::unix::fs::PermissionsExt;
+                let locator: Value = serde_json::from_slice(&std::fs::read(bridge.locator_path()).unwrap()).unwrap();
+                let registry = dir.path().join("project-registry.json");
+                std::fs::write(&registry, json!({"projects":[{"id":"disposable-assembly","name":"Disposable Assembly","scene_id":editor.session.scene().id,"locator":bridge.locator_path(),"binding":{"wire":locator["wire"],"incarnation":locator["incarnation"],"generation":locator["generation"],"connection":locator["connection"]}}]}).to_string()).unwrap();
+                std::fs::set_permissions(&registry, std::fs::Permissions::from_mode(0o600)).unwrap();
+                command.env("RUSTER_MCP_PROJECT_REGISTRY", registry);
+            } else {
+                command.env("RUSTER_MCP_LOCATOR", bridge.locator_path());
+            }
+            let mut child = command.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::inherit()).spawn().unwrap();
             writeln!(child.stdin.as_mut().unwrap(), "{}", json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"hierarchy-actual-stdio-fixture","version":"1"}}})).unwrap();
             let mut line = String::new();
@@ -9266,14 +9282,59 @@ mod tests {
         } else {
             Some(crate::bridge::tests::approved(&bridge))
         };
+        if registered {
+            assert_eq!(
+                transport(
+                    &mut editor,
+                    &mut bridge,
+                    &stream,
+                    &mut adapter,
+                    "scene_inspect",
+                    json!({})
+                )["error"]["code"],
+                "project_required"
+            );
+            let listed = transport(
+                &mut editor,
+                &mut bridge,
+                &stream,
+                &mut adapter,
+                "project_list",
+                json!({}),
+            );
+            assert_eq!(listed["result"]["projects"][0]["id"], "disposable-assembly");
+            assert!(
+                bridge.pending_owner().is_none(),
+                "listing grants no native owner"
+            );
+            assert_eq!(
+                transport(
+                    &mut editor,
+                    &mut bridge,
+                    &stream,
+                    &mut adapter,
+                    "project_connect",
+                    json!({"project":"Disposable"})
+                )["error"]["code"],
+                "project_not_found"
+            );
+        }
         if stdio {
             let refused = transport(
                 &mut editor,
                 &mut bridge,
                 &stream,
                 &mut adapter,
-                "scene_inspect",
-                json!({}),
+                if registered {
+                    "project_connect"
+                } else {
+                    "scene_inspect"
+                },
+                if registered {
+                    json!({"project":"Disposable Assembly"})
+                } else {
+                    json!({})
+                },
             );
             assert_eq!(refused["error"]["code"], "approval_required");
             let owner = bridge.pending_owner().unwrap();
@@ -9292,10 +9353,26 @@ mod tests {
             &mut bridge,
             &stream,
             &mut adapter,
-            "scene_inspect",
-            json!({}),
+            if registered {
+                "project_connect"
+            } else {
+                "scene_inspect"
+            },
+            if registered {
+                json!({"project":"disposable-assembly"})
+            } else {
+                json!({})
+            },
         )["result"]
             .clone();
+        if registered {
+            assert_eq!(initial["registered_project"]["id"], "disposable-assembly");
+            assert_eq!(
+                initial["workspace_handoff"]["status"],
+                "approval_channel_required"
+            );
+            assert_eq!(initial["scene_id"], editor.session.scene().id);
+        }
         let token = initial["session_token"].as_str().unwrap().to_owned();
         let mut call = |editor: &mut SceneEditor, op: &str, mut args: Value| {
             let should_succeed = args.get("expected_revision").is_none();
@@ -9441,6 +9518,30 @@ mod tests {
             ruster_scene::HIERARCHY_FORMAT_VERSION
         );
         drop(call);
+        if registered {
+            bridge.disconnect();
+            let refused = transport(
+                &mut editor,
+                &mut bridge,
+                &stream,
+                &mut adapter,
+                "scene_inspect",
+                json!({}),
+            );
+            assert_eq!(refused["ok"], false, "disconnect must refuse same adapter");
+            let refused = transport(
+                &mut editor,
+                &mut bridge,
+                &stream,
+                &mut adapter,
+                "project_connect",
+                json!({"project":"Disposable Assembly"}),
+            );
+            assert_eq!(
+                refused["ok"], false,
+                "connect cannot refresh revoked authority"
+            );
+        }
         let locator = bridge.locator_path();
         if let Some(mut adapter) = adapter {
             drop(adapter.0.stdin.take());

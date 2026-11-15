@@ -214,6 +214,10 @@ pub struct Client {
     failed: bool,
 }
 impl Client {
+    /// Public routing identity only, never the socket-bound approval capability.
+    pub fn binding(&self) -> Value {
+        self.locator.binding()
+    }
     pub fn open(path: PathBuf) -> io::Result<Self> {
         no_symlinks(&path)?;
         let meta = fs::symlink_metadata(&path)?;
