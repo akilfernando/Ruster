@@ -62,13 +62,23 @@ each feature configuration; broader12 capture-related and2 workspace tests,
 strict Clippy both configurations and format pass. These cohorts overlap; no
 whole-suite pass or speedup claim. Original asset-retirement failure remains.
 
-**RUNNING:** optimized comparison build `proc_1ba8a874ca61` and Astra changed-risk
-review `proc_87f8ac4615b8`, actual model/wire effort verified. Root reviews complete
-one-file diff and source pins; review/measurement still precede integration.
-No further native test is running; a fresh opportunity is needed after the prior
-all-clear. Keep baseline source/artifact/helper and actual-client candidate frozen.
-Preserve fidelity, privacy, ownership, native input and idle policy; quantify the
-repair against the same finite cohort before claiming improvement.
+**READY for scoped comparison; native run BLOCKED on fresh away availability.**
+Optimized repair image `459421da…0e31df` and all owning source inputs verify.
+Astra's corrected resumed admission completes with **GO_SCOPED_MEASUREMENT**:
+no changed-code blocker, not integration/installation/release approval. The first
+resume attempt was rejected for changed cwd before admission/zero tokens; retry
+retains original policy, with exact terminal proof in `capture-ready-progress/`.
+Owner adoption may now occur outside UI; label phase5 accordingly, and phase4
+is encode completion before send rather than delivered response.
+
+Comparison helper derives from the corrected executed baseline; bindings only
+change checkout/artifact/namespace. Exact-interpreter preflight, five inert seam
+regressions and missing-import refusal pass. All source/baseline/live inputs stay
+frozen; no native test is running. Readiness/command and review receipts are under
+`capture-ready-progress/comparison-preparation/` and its parent. Obtain one new
+approximately6-minute idle opportunity (workspace1 active/2 empty), recheck guards,
+then compare the same finite cohort. No speedup yet; the original whole-suite
+asset-retirement failure and human responsiveness rejection remain unresolved.
 
 Raw user/identity receipts: cumulative audit `startup-provenance/` files
 `actual-client-managed-start-user-receipt.json`,
