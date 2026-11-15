@@ -1238,6 +1238,41 @@ mod tests {
             "native raw precision must not round an out-of-domain world request back inside"
         );
         assert_eq!(session.snapshot_bytes().unwrap(), before);
+        session
+            .edit(
+                session.scene().revision,
+                "box",
+                &Transform {
+                    translation: [-1., 0., 0.],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        session
+            .edit(
+                session.scene().revision,
+                "assembly",
+                &Transform {
+                    translation: [-9999., 0., 0.],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        for ids in [vec!["box".into()], vec!["assembly".into(), "box".into()]] {
+            let mut gesture = Gesture::begin(&session, &ids).unwrap();
+            let candidate = gesture.candidate.clone();
+            let current_proxy = gesture.current_proxy;
+            let before = session.snapshot_bytes().unwrap();
+            let mut moved = gesture.proxy;
+            moved.translation.x -= 1e-8;
+            assert!(gesture.transform(session.scene(), moved).is_err());
+            assert_eq!(gesture.candidate, candidate);
+            assert_eq!(gesture.current_proxy, current_proxy);
+            assert_eq!(session.snapshot_bytes().unwrap(), before);
+            gesture.transform(session.scene(), gesture.proxy).unwrap();
+            moved.translation.x += 1e-8 + 1.;
+            gesture.transform(session.scene(), moved).unwrap();
+        }
     }
 
     fn assert_orientation(actual: [f32; 3], expected: DQuat) {

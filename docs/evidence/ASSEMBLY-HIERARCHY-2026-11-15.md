@@ -9,8 +9,9 @@ records its independent RED; repaired offsets use the same f64 Gesture route.
 `precision-gate.log` records the affected final change gate passing. The first
 GREEN preparation failed to compile two existing Euler-helper assertions after
 its return type became f64; retained separately, not counted as a behavior pass.
-No tolerance changes; snapshot/candidate/proxy atomic refusal asserted. STDIO
-and native visual acceptance below remain separate, pending exits.
+No tolerance changes; signed snapshot/candidate/proxy atomic refusal asserted.
+STDIO fixture qualification below passes; ordinary-native visual acceptance
+remains separate and incomplete.
 Authority: [accepted bounded decision](../decisions/2026-11-15-bounded-assembly-hierarchy.md).
 Exclusive source: `/home/akilf/Projects/rusterize-assembly-hierarchy-20261115`,
 branch `feat/assembly-hierarchy-20261115`; initial source `8dacf8f`, first pushed
@@ -162,6 +163,60 @@ Core/Synchronization activation was not established for that private-software ru
 The QA lock is released/reacquired and no audit-built executable remains running.
 No live demo remains.
 
+## Independent STDIO deferred-Save journey — continuation
+
+The existing Session tracer now has an opt-in actual-adapter-process variant,
+`scene_editor::tests::hierarchy_stdio_creator_save_fresh_open`. Its native owner
+is the real production SceneEditor/Session in a windowless Rust fixture process,
+**not the graphical app Host or a new visual/native-app acceptance claim**.
+It does not reuse the bridge's synthetic client for this variant. An empty
+fixture scene is associated with a disposable directory before approval, so the
+actual creator Save does not silently rebase the approved owner. The exact
+adapter PID is checked against the pending bridge owner before the explicitly
+assumed fixture grant. This is not production human consent or ChatGPT acceptance.
+
+`stdio-creator-qualified-2.log` records22 actual STDIO project calls and replies:
+initial approval-required handshake, successful inspect, cube creation, two
+groups, nesting, nonuniform cube/collider and attached point light, assembly move,
+stale reparent refusal with full snapshot equality, native-history Undo followed
+by client Redo, hinge rotation, detach/client Undo/Redo, persistence inspection,
+real deferred `scene_save`, post-save receipt/scene readback. Save dispatch uses
+`dispatch_save_request`, existing asset-worker polling and real recovery
+acknowledgements, never direct Session save for the creator operation. A fresh
+`Session::open` exactly equals the owner's complete snapshot, including topology,
+stored locals and serialized Undo/Redo history; required format is19.
+
+Qualified native fixture PID1812966 and adapter PID1812970 exited; independent
+`/proc` checks confirm both absent and the exact locator absent. The test also
+reaps the adapter successfully and verifies bridge retirement/locator removal.
+No compositor, host input, clipboard, native screenshot or safety-lease extension
+was used. Fresh-open is a fresh Session, not a fresh graphical process.
+
+Command (audit-local target and matching binary):
+
+```sh
+RUSTER_TEST_MCP_BINARY=/home/akilf/Projects/Ruster-Audits/assembly-hierarchy-20261115/target/debug/ruster-mcp \
+CARGO_TARGET_DIR=/home/akilf/Projects/Ruster-Audits/assembly-hierarchy-20261115/target \
+cargo test --locked -p ruster-editor hierarchy_stdio_creator_save_fresh_open -- --ignored --nocapture
+```
+
+Retained failures: `stdio-creator-1.log` sent mutation guards to a read-only
+persistence inspection, correctly rejected by the adapter; no Save was attempted.
+`stdio-creator-qualified.log` explicitly named `cube`, whereas this adapter uses
+the default omitted primitive for a cube; refusal occurred before authoring.
+Both are fixture-schema failures, not product passes. Each subsequent run used
+new disposable state/owner; no uncertain write was replayed. Earlier
+`stdio-creator-2.log` and `stdio-creator-final.log` pass narrower pre-refinement
+journeys but are not substituted for the final qualified content.
+
+`hierarchy-tests-final.log`: six affected hierarchy cases pass, with the opt-in
+fixture explicitly ignored in that invocation (run independently above).
+`continuation-change-gate.log` records the final affected change gate;
+`continuation-inspection-clippy.log` records strict inspection all-target Clippy;
+`continuation-build.jsonl` records final default editor/adapter compilation. `continuation-manifest.json` pins final source, binaries, test
+owner, raw evidence and independent cleanup; historical `manifest.json` is not
+rewritten as if its old artifacts contained this repair.
+
 ## Exact remaining acceptance / continuation
 
 The approved milestone remains incomplete:
@@ -172,27 +227,25 @@ The approved milestone remains incomplete:
    unoptimized private software run, not permission to use host input or enlarge
    the lease silently. Use the established optimized inspection build boundary
    if diagnosing that cost; no new general harness is required.
-2. Run the matched **STDIO MCP process** independently against the live native
-   owner, including existing deferred Save and fresh-open readback. The real Unix
-   bridge tracer is supporting evidence, not this adapter-process journey.
+2. **STDIO adapter/windowless-native fixture exit passes**, as recorded above.
+   It is not graphical Host lifecycle/consent or actual ChatGPT acceptance; the
+   ordinary native app/visual journey in item1 is still pending.
 3. Qualify actual emitted f32 model/inverse-transpose normal/shadow/pick/light/
    collider agreement and appearance, not only high-precision resolved TRS/Fit.
 4. Complete numerical refusal qualification for the affected descendant closure,
    combined target/serialized-history budgets, and raw world gizmo/offset requests
-   before rounding. The new local raw-command/precision admission is proven, but
-   gizmo candidates still narrow in Gesture::transform and require a focused
-   requested-world boundary check/repair before acceptance.
+   before rounding. Original-precision gizmo/offset repair now passes signed
+   owning-test closure/atomic-refusal and no-op/inward checks; combined capacity
+   and renderer-level numerical qualification remain incomplete.
 5. Fresh consequential review; the default/inspection build/lint gates above
    passed but do not establish independent production acceptance.
 
-Next executable implementation step: extend the existing
-`manipulation::tests::hierarchy_gizmo_moves_in_world_and_normalizes_ancestor_selection`
-with the requested-world counterexample (parent X9999, leaf local X1, world X10000,
-world gizmo delta +1e-8), run its current RED, then admit the original f64 requested
-world/descendant closure before Gesture candidate narrowing. Reuse the existing
-Session authority/resolver and test, not a new numerical harness. After that safe
-repair, use the existing optimized inspection/native qualification route to finish
-Save/fresh-open and rendered appearance. This handoff is not a user pause.
+Precision repair and bounded independent STDIO/deferred-Save fixture exit are
+complete. Next native acceptance remains blocked on the recorded capture/lease
+issue; do not repeat the expensive unoptimized route blindly. Parent review and
+selection of a cheap existing optimized native diagnostic are QUEUED, not running.
+This checkpoint does not reset the cumulative milestone budget or claim the
+remaining graphical/renderer/budget gates solved.
 
 Unsupported full scripting, subtree duplication/clipboard, full crash recovery
 and faithful standalone hierarchy delivery remain outside the approved milestone,

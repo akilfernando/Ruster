@@ -239,6 +239,13 @@ impl Scene {
         let old = self.resolve_poses()?;
         let mut locals = Vec::new();
         for (id, t) in requests.iter().filter(|(id, _)| normalized.contains(id)) {
+            if !t
+                .rotation
+                .iter()
+                .all(|v| v.is_finite() && v.abs() <= 10000.)
+            {
+                return Err(invalid("requested world rotation exceeds numeric bounds"));
+            }
             let [x, y, z] = t.rotation;
             let world = Pose {
                 position: DVec3::from_array(t.translation),

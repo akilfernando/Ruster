@@ -9156,55 +9156,167 @@ mod tests {
 
     #[test]
     fn hierarchy_guarded_session_vertical_tracer() {
+        hierarchy_creator_journey(false);
+    }
+
+    #[test]
+    #[ignore = "explicit RUSTER_TEST_MCP_BINARY; actual STDIO fixture approval, not human consent"]
+    fn hierarchy_stdio_creator_save_fresh_open() {
+        hierarchy_creator_journey(true);
+    }
+
+    fn hierarchy_creator_journey(stdio: bool) {
+        use std::io::{BufRead, Write};
+        struct Adapter(std::process::Child);
+        impl Drop for Adapter {
+            fn drop(&mut self) {
+                let _ = self.0.kill();
+                let _ = self.0.wait();
+            }
+        }
         fn transport(
             editor: &mut SceneEditor,
             bridge: &mut crate::bridge::Bridge,
-            stream: &std::os::unix::net::UnixStream,
-            handshake: &Value,
+            stream: &Option<(std::os::unix::net::UnixStream, Value)>,
+            adapter: &mut Option<Adapter>,
             op: &str,
             args: Value,
         ) -> Value {
-            let mut stream = stream.try_clone().unwrap();
-            let frame = crate::bridge::tests::frame(handshake, op, args);
-            let worker = std::thread::spawn(move || {
-                crate::connection::send(&mut stream, &frame).unwrap();
-                crate::bridge::tests::receive(&mut stream)
-            });
+            let worker = if let Some(adapter) = adapter {
+                let request = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":op,"arguments":args}});
+                eprintln!("STDIO request: {request}");
+                writeln!(adapter.0.stdin.as_mut().unwrap(), "{request}").unwrap();
+                adapter.0.stdin.as_mut().unwrap().flush().unwrap();
+                let mut stdout = adapter.0.stdout.take().unwrap();
+                std::thread::spawn(move || {
+                    let mut raw = String::new();
+                    std::io::BufReader::new(&mut stdout)
+                        .read_line(&mut raw)
+                        .unwrap();
+                    eprintln!("STDIO response: {raw}");
+                    let value: Value = serde_json::from_str(&raw).unwrap();
+                    (value["result"]["structuredContent"].clone(), Some(stdout))
+                })
+            } else {
+                let (stream, handshake) = stream.as_ref().unwrap();
+                let mut stream = stream.try_clone().unwrap();
+                let frame = crate::bridge::tests::frame(handshake, op, args);
+                std::thread::spawn(move || {
+                    crate::connection::send(&mut stream, &frame).unwrap();
+                    (crate::bridge::tests::receive(&mut stream), None)
+                })
+            };
             let deadline = Instant::now() + Duration::from_secs(4);
             while !worker.is_finished() {
-                bridge.dispatch_command(|host, op, args| editor.command(host, op, args));
-                assert!(Instant::now() < deadline);
+                let ctx = egui::Context::default();
+                bridge.dispatch_request(|host, op, args, lease| {
+                    if op == "scene_save" {
+                        editor.dispatch_save_request(&ctx, host, &args, lease);
+                    } else {
+                        lease.run_immediate(|| editor.command(host, op, args));
+                    }
+                });
+                editor.asset_nonvisual_frame(&ctx, true);
+                editor.recovery.poll(&ctx);
+                editor.process_recovery_ack();
+                assert!(
+                    Instant::now() < deadline,
+                    "actual-client reply deadline; no replay"
+                );
                 std::thread::sleep(Duration::from_millis(1));
             }
-            worker.join().unwrap()
+            let (value, stdout) = worker.join().unwrap();
+            if let Some(stdout) = stdout {
+                adapter.as_mut().unwrap().0.stdout = Some(stdout);
+            }
+            value
         }
-        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
-        let mut bridge = crate::bridge::Bridge::start(egui::Context::default()).unwrap();
-        // Explicitly assumed test consent, not evidence of native human consent.
-        let (stream, handshake) = crate::bridge::tests::approved(&bridge);
+        let mut editor = SceneEditor::new(Session::new(Scene::empty("creator-assembly")).unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("assembly.json");
+        if stdio {
+            // Disposable fixture setup: establish the directory before consent.
+            // The creator's later MCP Save must not rebase an approved owner.
+            editor.save_scene(path.clone()).unwrap();
+            editor.test_finish_asset_work();
+            editor.save_grant = Some(persistence_commands::SaveGrant::new(dir.path()).unwrap());
+        }
+        let mut bridge = crate::bridge::Bridge::start_for(
+            egui::Context::default(),
+            editor.connection_incarnation.clone(),
+            editor.connection_generation.clone(),
+        )
+        .unwrap();
+        editor.connection_authority = Some(bridge.authority());
+        let mut adapter = stdio.then(|| {
+            let binary = std::env::var_os("RUSTER_TEST_MCP_BINARY").expect("exact source-built adapter");
+            let mut child = std::process::Command::new(binary)
+                .env("RUSTER_MCP_LOCATOR", bridge.locator_path())
+                .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::inherit()).spawn().unwrap();
+            writeln!(child.stdin.as_mut().unwrap(), "{}", json!({"jsonrpc":"2.0","id":0,"method":"initialize","params":{"protocolVersion":"2025-06-18","capabilities":{},"clientInfo":{"name":"hierarchy-actual-stdio-fixture","version":"1"}}})).unwrap();
+            let mut line = String::new();
+            std::io::BufReader::new(child.stdout.as_mut().unwrap()).read_line(&mut line).unwrap();
+            assert!(serde_json::from_str::<Value>(&line).unwrap().get("result").is_some());
+            writeln!(child.stdin.as_mut().unwrap(), "{}", json!({"jsonrpc":"2.0","method":"notifications/initialized"})).unwrap();
+            Adapter(child)
+        });
+        let stream = if stdio {
+            None
+        } else {
+            Some(crate::bridge::tests::approved(&bridge))
+        };
+        if stdio {
+            let refused = transport(
+                &mut editor,
+                &mut bridge,
+                &stream,
+                &mut adapter,
+                "scene_inspect",
+                json!({}),
+            );
+            assert_eq!(refused["error"]["code"], "approval_required");
+            let owner = bridge.pending_owner().unwrap();
+            assert_eq!(owner.1, adapter.as_ref().unwrap().0.id());
+            eprintln!(
+                "STDIO native_owner_pid={} adapter_pid={} locator={}",
+                std::process::id(),
+                owner.1,
+                bridge.locator_path().display()
+            );
+            // Explicit disposable test authority; never production human consent.
+            assert!(bridge.approve_owner(&owner));
+        }
         let initial = transport(
             &mut editor,
             &mut bridge,
             &stream,
-            &handshake,
+            &mut adapter,
             "scene_inspect",
             json!({}),
         )["result"]
             .clone();
         let token = initial["session_token"].as_str().unwrap().to_owned();
         let mut call = |editor: &mut SceneEditor, op: &str, mut args: Value| {
-            args["expected_session_token"] = json!(token);
             let should_succeed = args.get("expected_revision").is_none();
-            if should_succeed {
-                args["expected_revision"] = json!(editor.session.scene().revision.to_string());
+            if !op.ends_with("_inspect") {
+                args["expected_session_token"] = json!(token);
+                if should_succeed {
+                    args["expected_revision"] = json!(editor.session.scene().revision.to_string());
+                }
             }
-            let reply = transport(editor, &mut bridge, &stream, &handshake, op, args);
+            let reply = transport(editor, &mut bridge, &stream, &mut adapter, op, args);
             if !should_succeed {
                 return reply;
             }
             assert_eq!(reply["ok"], true, "{op}: {reply}");
             reply["result"].clone()
         };
+        call(
+            &mut editor,
+            "scene_create",
+            json!({"object_id":"left","name":"Assembly box"}),
+        );
         call(
             &mut editor,
             "scene_group_create",
@@ -9273,7 +9385,11 @@ mod tests {
         );
         assert_eq!(stale["error"]["code"], "stale_revision");
         assert_eq!(editor.session.snapshot_bytes().unwrap(), stored);
-        call(&mut editor, "scene_undo", json!({}));
+        if stdio {
+            editor.history(false); // Ordinary native Undo, then actual-client Redo.
+        } else {
+            call(&mut editor, "scene_undo", json!({}));
+        }
         assert_eq!(editor.session.scene().hierarchy, before.hierarchy);
         call(&mut editor, "scene_redo", json!({}));
         call(
@@ -9296,9 +9412,25 @@ mod tests {
         call(&mut editor, "scene_undo", json!({}));
         assert_eq!(editor.session.scene().hierarchy.parents["left"], "hinge");
         call(&mut editor, "scene_redo", json!({}));
-        let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("assembly.json");
-        editor.session.save(&path).unwrap();
+        if stdio {
+            let persistence = call(&mut editor, "scene_persistence_inspect", json!({}));
+            call(
+                &mut editor,
+                "scene_save",
+                json!({"expected_persistence_token":persistence["persistence_token"]}),
+            );
+            assert!(!editor.session.is_dirty());
+            let saved = call(&mut editor, "scene_persistence_inspect", json!({}));
+            assert_eq!(saved["last_committed_save"]["committed"], true);
+            let readback = call(&mut editor, "scene_inspect", json!({}));
+            assert_eq!(readback["hierarchy"]["parents"]["point"], "hinge");
+            assert_eq!(
+                readback["revision"],
+                editor.session.scene().revision.to_string()
+            );
+        } else {
+            editor.session.save(&path).unwrap();
+        }
         let reopened = Session::open(&path).unwrap();
         assert_eq!(
             editor.session.snapshot_bytes().unwrap(),
@@ -9308,11 +9440,23 @@ mod tests {
             reopened.loaded_format_version(),
             ruster_scene::HIERARCHY_FORMAT_VERSION
         );
+        drop(call);
+        let locator = bridge.locator_path();
+        if let Some(mut adapter) = adapter {
+            drop(adapter.0.stdin.take());
+            assert!(adapter.0.wait().unwrap().success());
+            eprintln!("STDIO adapter exited successfully; fresh-open snapshot/history exact");
+        }
         drop(stream);
         let deadline = Instant::now() + Duration::from_secs(3);
         while !bridge.poll_retired() {
             assert!(Instant::now() < deadline);
             std::thread::sleep(Duration::from_millis(1));
+        }
+        drop(bridge);
+        assert!(!locator.exists(), "exact native locator must retire");
+        if stdio {
+            eprintln!("STDIO cleanup: adapter reaped, native locator absent");
         }
     }
 

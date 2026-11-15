@@ -11,9 +11,17 @@ offsets share the repaired Gesture path and parse f64 (separate observed RED).
 Complete snapshot and gesture candidate/proxy remain unchanged on refusal;
 valid no-op/inward controls and all eight manipulation tests pass. The affected
 change gate passes; raw logs are in the existing hierarchy audit directory.
-Independent STDIO deferred-Save/fresh-open qualification is RUNNING in this
-continuation, separately from the still-pending ordinary-native visual journey.
-No native visual, f32-normal, budget or independent-review completion claimed.
+**Independent STDIO fixture journey passes:** the actual source-built adapter
+process authors its own cube, nested groups, collider and point light against
+one exact windowless production SceneEditor owner. Native-history Undo/client
+Redo, client detach/Undo/Redo, stale atomic refusal, deferred MCP Save, same-owner
+post-Save readback and fresh Session topology/local/serialized-history equality
+pass. Adapter/native fixture PIDs and locator are independently absent afterward.
+This is not a full native app/GUI, native human consent, actual ChatGPT, rendered
+appearance, f32-normal, combined-budget or independent-review acceptance.
+Ordinary native visual journey remains BLOCKED on the recorded capture/lease
+problem; no compositor route was retried. Full milestone review is QUEUED to
+parent. No background development/demo remains running after this checkpoint.
 
 ## Integrated assembly implementation checkpoint — 2026-11-15
 
