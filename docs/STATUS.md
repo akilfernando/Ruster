@@ -1,5 +1,38 @@
 # Current project status
 
+## Bounded hierarchy technically qualified — 2026-11-15
+
+**Parent technical acceptance for the approved subset; not physical-user acceptance,
+installation, canonical integration or full F4a.** Source `e2b65f1` now passes the
+ordinary native graphical compound journey on NVIDIA RTX4060/Vulkan/4xMSAA using
+app-scoped inspection input: nested groups, nonuniform cube/box collider, attached
+point light, root movement, hinge rotation, detach and native-menu Undo/Redo.
+Actual native Save and fresh graphical-process native re-Save produce identical
+whole-document bytes, topology, locals and serialized history: Scene19/revision14,
+12Undo/0Redo. Parent verified document SHA256
+`eff0aa07bcb6a7811d6923fc064c9135c57389fb51e88d47a20c8a3ce649adce`,
+992source pins, 53native artifact/runner pins, owned cleanup and reopened geometry/
+collider/light screenshots. The existing real STDIO creator/deferred-Save/fresh
+Session journey was rerun on final code and passes; fixture approval is not human
+consent. Actual physical Ctrl+Z was not tested; native menu Undo/Redo is qualified.
+
+Both source-review blockers have actual RED/GREEN repairs and a completed scoped
+Astra GO. Full/affected gates, combined256/257 boundaries and production f32
+model/inverse-transpose tests stand; GPU pictures establish qualitative appearance,
+not exact photometry/numerical GPU normals or validation-layer activation.
+Raw proof: `Ruster-Audits/assembly-hierarchy-20261115/native-gpu-qualification.json`,
+`parent-final-stdio.log` and `parent-bounded-hierarchy-acceptance.json` (audit paths
+under `/home/akilf/Projects/`). Historical software cutoffs remain failed; no
+identical software retry was used for acceptance. Original desktop preserved.
+A private-title exposure in one diagnostic is recorded without repeating its data.
+
+Next integration action: carry the three scoped hierarchy repair commits into the
+active prompt-connect candidate under its exclusive writer, then qualify that
+combined source. The normal native HTTP attachment is RUNNING separately; no
+canonical merge/install/release or full F4a scripting/duplication/clipboard/crash/
+standalone hierarchy delivery is claimed. Earlier incomplete checkpoints below
+are historical, superseded only for the accepted bounded subset.
+
 ## Consequential hierarchy review repairs — 2026-11-15
 
 **Both reported blockers reproduced and repaired; milestone NOT accepted.**

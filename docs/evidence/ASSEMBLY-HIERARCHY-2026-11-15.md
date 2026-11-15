@@ -1,4 +1,30 @@
-# Integrated assembly hierarchy — WIP evidence, 2026-11-15
+# Integrated assembly hierarchy — bounded technical qualification, 2026-11-15
+
+## Parent technical acceptance of the approved subset
+
+Source `e2b65f1` completes the bounded native-editor and independent STDIO creator
+workflow. Parent verified GPU-backed app-scoped native compound creation, menu
+Undo/Redo, actual Save/normal close/fresh graphical-process reopen and byte-exact
+native re-Save of the whole Scene19 document (revision14,12Undo/0Redo). Document
+SHA256 `eff0aa07bcb6a7811d6923fc064c9135c57389fb51e88d47a20c8a3ce649adce`.
+Reopened geometry/collider and attached-light screenshots were visually inspected.
+The existing real STDIO creator/deferred-Save/fresh-Session case was rerun on
+final source and passed. Completed scoped Astra follow-up closed both reproduced
+review defects without requesting more tests. Full/affected CPU gates and model/
+normal/capacity/history qualification remain supporting evidence.
+
+Audit root below now also contains `native-gpu-qualification.json`,
+`parent-final-stdio.log` and `parent-bounded-hierarchy-acceptance.json`. Parent
+verified all992 source pins and53 native artifact/runner pins, exact saved bytes,
+owned PID/listener cleanup and preserved desktop metadata. This is qualitative
+GPU appearance, not numerical GPU-normal/photometric or physical-input acceptance.
+A diagnostic private-title exposure is recorded without repeating its content.
+Physical-user/actual-ChatGPT acceptance, installed/canonical promotion and release
+remain pending. Full F4a scripting/duplication/clipboard/crash/export remains out
+of this approved subset. Earlier partial/failed reports are preserved below and
+are not retroactively converted to passes.
+
+## Historical implementation checkpoint
 
 Status: working production integration checkpoint, **not completed milestone acceptance**.
 
