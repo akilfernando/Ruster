@@ -70,6 +70,27 @@ impl Host {
             None
         };
         self.bridge = Some(bridge);
+        if let Some(raw) = std::env::var_os("RUSTER_PROJECT_STARTUP") {
+            let publication = (|| -> std::io::Result<()> {
+                let startup: crate::project_startup::Startup =
+                    serde_json::from_str(&raw.to_string_lossy())?;
+                if self.editor.session.path() != Some(startup.scene_path.as_path())
+                    || std::env::var("RUSTER_PROJECT_SCENE_ID").ok().as_deref()
+                        != Some(self.editor.session.scene().id.as_str())
+                {
+                    return Err(std::io::Error::other("registered project identity changed"));
+                }
+                startup.publish(
+                    &std::env::var("RUSTER_PROJECT_ID").map_err(std::io::Error::other)?,
+                    self.editor.session.scene().id.as_str(),
+                    path.clone(),
+                )
+            })();
+            if let Err(error) = publication {
+                self.disconnect_adapter();
+                return Err(error.to_string());
+            }
+        }
         Ok(path)
     }
     pub(super) fn pending_adapter(&self) -> Option<(String, u32)> {

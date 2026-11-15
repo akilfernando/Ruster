@@ -19,6 +19,10 @@ mod editor_theme;
 mod input_ui;
 mod manipulation;
 mod model;
+#[cfg(unix)]
+#[path = "../../support/project_startup.rs"]
+#[allow(dead_code)]
+mod project_startup;
 mod recovery;
 mod recovery_ui;
 mod recovery_worker;

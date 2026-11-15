@@ -5929,6 +5929,20 @@ pub fn run(path: PathBuf) -> Result<(), String> {
     run_session(session)
 }
 fn run_session(session: Session) -> Result<(), String> {
+    #[cfg(unix)]
+    let _registered_owner = if let Some(raw) = std::env::var_os("RUSTER_PROJECT_STARTUP") {
+        let startup: crate::project_startup::Startup =
+            serde_json::from_str(&raw.to_string_lossy()).map_err(|e| e.to_string())?;
+        if session.path() != Some(startup.scene_path.as_path())
+            || std::env::var("RUSTER_PROJECT_SCENE_ID").ok().as_deref()
+                != Some(session.scene().id.as_str())
+        {
+            return Err("Registered saved project identity changed; no connection opened".into());
+        }
+        Some(startup.lock("owner.lock").map_err(|e| e.to_string())?)
+    } else {
+        None
+    };
     let mcp_enabled = std::env::var("RUSTER_MCP_ENABLE").as_deref() == Ok("1");
     let save_grant = persistence_commands::SaveGrant::from_environment(mcp_enabled)?;
     let creation_export = crate::creation_export::Controller::from_environment(mcp_enabled)?;
@@ -5936,10 +5950,29 @@ fn run_session(session: Session) -> Result<(), String> {
     setup.instance_descriptor.backends = wgpu::Backends::VULKAN;
     ruster_render::configure_setup(&mut setup);
     let options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1280., 800.])
-            .with_app_id("org.ruster.editor")
-            .with_icon(crate::branding::window_icon()),
+        viewport: {
+            let viewport = egui::ViewportBuilder::default()
+                .with_inner_size([1280., 800.])
+                .with_app_id("org.ruster.editor")
+                .with_icon(crate::branding::window_icon());
+            // Inspection-only isolation for an adapter-launched native child:
+            // compositor exec rules do not follow an adapter's descendants.
+            #[cfg(feature = "inspection")]
+            let viewport = if std::env::var_os("EGUI_INSPECTION").is_some() {
+                std::env::var("EGUI_INSPECTION_APP_ID")
+                    .ok()
+                    .filter(|id| {
+                        id.starts_with("org.ruster.editor.test-")
+                            && id
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-')
+                    })
+                    .map_or(viewport.clone(), |id| viewport.with_app_id(id))
+            } else {
+                viewport
+            };
+            viewport
+        },
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             wgpu_setup: WgpuSetup::CreateNew(setup),

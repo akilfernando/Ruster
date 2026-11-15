@@ -12,6 +12,10 @@ mod hud_tools;
 mod lighting_tools;
 mod material_tools;
 mod persistence_tools;
+#[cfg(unix)]
+#[path = "../../support/project_startup.rs"]
+#[allow(dead_code)]
+mod project_startup;
 mod project_tools;
 mod runtime_tools;
 #[path = "../../support/strict_json.rs"]
@@ -722,7 +726,11 @@ impl Adapter {
                 }
                 if !self.attempted {
                     self.attempted = true;
-                    self.client = project.open().ok();
+                    let selected = self.selected.as_mut().unwrap();
+                    if let Err(error) = selected.prepare() {
+                        return domain_error("project_startup_unavailable", &error.to_string());
+                    }
+                    self.client = selected.open().ok();
                 }
             }
             let Some(project) = &self.selected else {

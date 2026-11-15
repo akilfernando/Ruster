@@ -13,8 +13,12 @@ pub(super) struct Project {
     pub id: String,
     pub name: String,
     pub scene_id: String,
+    #[serde(default)]
     locator: PathBuf,
+    #[serde(default)]
     binding: Value,
+    #[serde(default)]
+    startup: Option<crate::project_startup::Startup>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,15 +46,23 @@ impl Registry {
             || project.name.chars().any(char::is_control)
             || project.scene_id.is_empty()
             || project.scene_id.len() > 128
-            || !project.locator.is_absolute()
-            || !project.binding.as_object().is_some_and(|o| {
-                exact_keys(o, &["wire", "incarnation", "generation", "connection"], &[])
-            })
-            || project.binding["wire"] != connection::WIRE
-            || ["incarnation", "generation", "connection"].iter().any(|k| {
-                !project.binding[k]
-                    .as_str()
-                    .is_some_and(|v| !v.is_empty() && v.len() <= 256)
+            || (project.startup.is_none()
+                && (!project.locator.is_absolute()
+                    || !project.binding.as_object().is_some_and(|o| {
+                        exact_keys(o, &["wire", "incarnation", "generation", "connection"], &[])
+                    })
+                    || project.binding["wire"] != connection::WIRE
+                    || ["incarnation", "generation", "connection"].iter().any(|k| {
+                        !project.binding[k]
+                            .as_str()
+                            .is_some_and(|v| !v.is_empty() && v.len() <= 256)
+                    })))
+            || project.startup.as_ref().is_some_and(|s| {
+                !s.scene_path.is_absolute()
+                    || !s.native_binary.is_absolute()
+                    || !s.state_directory.is_absolute()
+                    || !project.locator.as_os_str().is_empty()
+                    || !project.binding.is_null()
             })
         {
             return Err(io::Error::other("invalid registered project identity"));
@@ -110,6 +122,74 @@ impl Project {
             return json!({"status":"native_descriptor_mismatch","message":"Live native workspace identity disagrees with the registered project; no URL published."});
         }
         json!({"status":"native_browser_approval_required","url":descriptor["url"],"attachment":descriptor["attachment"],"message":"Open this secret-free workspace URL. Compare its pending browser code in Rusterize AI connection and approve that browser/project once. Cookies do not grant consent."})
+    }
+
+    pub fn prepare(&mut self) -> io::Result<()> {
+        let Some(startup) = &self.startup else {
+            return Ok(());
+        };
+        startup.validate()?;
+        let _start = startup.lock("startup.lock")?;
+        if let Ok(owner) = startup.lock("owner.lock") {
+            drop(owner);
+            // No registered native owner: only this explicitly pinned launch is allowed.
+            let mut command = std::process::Command::new(&startup.native_binary);
+            for (key, _) in std::env::vars_os() {
+                if key.to_string_lossy().starts_with("RUSTER_")
+                    && key != "RUSTER_EDITOR_STATE"
+                    && key != "RUSTER_RECOVERY_DIR"
+                {
+                    command.env_remove(key);
+                }
+            }
+            command
+                .args([
+                    std::ffi::OsStr::new("--scene"),
+                    startup.scene_path.as_os_str(),
+                ])
+                .env("RUSTER_MCP_ENABLE", "1")
+                .env("RUSTER_PROJECT_STARTUP", serde_json::to_string(startup)?)
+                .env("RUSTER_PROJECT_ID", &self.id)
+                .env("RUSTER_PROJECT_SCENE_ID", &self.scene_id)
+                .stdin(std::process::Stdio::null())
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null());
+            let mut child = command.spawn()?;
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+            loop {
+                if child.try_wait()?.is_some() {
+                    return Err(io::Error::other("registered native startup failed"));
+                }
+                if let Ok(publication) = startup.read(&self.id, &self.scene_id) {
+                    if publication.native_pid != child.id() {
+                        return Err(io::Error::other(
+                            "publication is not the launched native child",
+                        ));
+                    }
+                    self.locator = publication.locator;
+                    self.binding = publication.binding;
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                    return Ok(());
+                }
+                if std::time::Instant::now() >= deadline {
+                    // Do not kill an editor that might contain human work. Retain its
+                    // owner lock and report failure; never spawn a replacement.
+                    std::thread::spawn(move || {
+                        let _ = child.wait();
+                    });
+                    return Err(io::Error::other("native startup pending/failed; inspect the registered native editor; no duplicate launched"));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(30));
+            }
+        }
+        // A live registered owner, including a disconnected/revoked one, must
+        // never be replaced. Its current publication is only routing metadata.
+        let publication=startup.read(&self.id,&self.scene_id).map_err(|_|io::Error::other("existing registered native owner needs explicit native Connect; no duplicate launched"))?;
+        self.locator = publication.locator;
+        self.binding = publication.binding;
+        Ok(())
     }
 
     pub fn open(&self) -> io::Result<connection::Client> {
@@ -203,6 +283,16 @@ mod tests {
                 "{wrong}"
             );
         }
+    }
+
+    #[test]
+    fn registered_saved_project_needs_no_per_run_locator() {
+        let record = json!({"id":"one","name":"One","scene_id":"scene-one","startup":{"scene_path":"/private/one.scene.json","native_binary":"/private/ruster-editor","state_directory":"/private/routing","binary_identity":{"dev":1,"ino":2,"len":3,"mtime":4,"mtime_nsec":5}}});
+        let registry = Registry::parse(&json!({"projects":[record]}).to_string());
+        assert!(
+            registry.is_ok(),
+            "saved-project registration must not require a per-run locator"
+        );
     }
 
     #[test]
