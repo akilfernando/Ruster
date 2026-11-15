@@ -38,22 +38,30 @@ suite **FAILS**:188 pass/1 asset-retirement assertion failure/6 ignores. One par
 isolated diagnostic passes; this does not erase that failure or establish cause.
 No schedules, transport, encoding choices, repaint policy or guards changed.
 
-**READY; native run BLOCKED on fresh user-away availability:** optimized artifact
-`f724b704…55b5bde` and all owning inputs are verified. The exact-interpreter inert
-preflight passes. Parent additionally catches/fixes the numeric trace/string wire
-revision join (observed RED→GREEN), bounds FIFO admission and protects observer
-startup with cleanup; five inert regressions pass. Updated derived-runner pins and
-proof: `capture-progress/run-preparation/parent-readiness-receipt.json`.
+**Measured native cohort PASS; cleanup independently verified.** Fresh user-away
+permission admits one optimized ordinary-Host run with three settled928×515
+refresh captures. Actual medians: reservation→issue1.85ms, opaque screenshot
+backend139.55ms, callback→encoder0.15ms, encoding10.04ms, encoded→adoption49.09ms,
+adoption→ready reply63.76ms. The paired per-capture post-encode wait median is
+112.34ms. These are hidden/inspection diagnostics, not matched camera or actual
+ChatGPT latency, no observer-overhead or usability acceptance claim. Negative RAF
+frame-timestamp/decode differences are excluded as invalid latency measurements.
 
-No agent/native measurement is running. Read-only checks find workspace1 active,
-workspace2 empty, unlocked desktop and an available QA gate; these are transient,
-not AFK authority. Ask for one approximately6-minute idle window, leave workspace1
-active/workspace2 empty, then recheck admission in the exact runtime. The finite
-cohort is three settled refresh captures, not camera manipulation or a speedup
-claim. No live-trial, installed binary, authority or fidelity change. Final whole
-inspection failure stays visible. After this cohort, choose one demonstrated
-repair; do not expand diagnostic scaffolding or request another usability test
-without evidence.
+Exact run `capture-progress/run-preparation/ordinary-8460196c82b04d60807c646622d5baf1/`;
+parent receipt `capture-progress/measured-phase-parent-receipt.json`. Exact owned
+native/adapter/listener absence, no cleanup hold, original desktop/cursor/lock,
+QA release and unchanged installed hash independently pass. Computer-free notice
+sent; no more desktop work is authorized by assumption after that handoff.
+
+**RUNNING:** one TDD ready-result progress repair (`deleg_bb6dfa43`) in isolated
+`fix/capture-ready-progress-20261115`. Target: an already-authorized exact-ID
+capture-inspect turn may adopt already-produced pixels before its reply, rather
+than return pending just before UI-only adoption and wait another owner turn.
+Keep complete existing guards and never issue screenshots/certify layout from
+logic. No global repaint/PNG/transport/authority change; actual benefit still
+requires matched measurement. Baseline source/artifact/helper and live feedback
+candidate stay frozen. Final whole inspection failure stays visible; human
+responsiveness remains failed. Qualified changes feed the cumulative line.
 
 Raw user/identity receipts: cumulative audit `startup-provenance/` files
 `actual-client-managed-start-user-receipt.json`,

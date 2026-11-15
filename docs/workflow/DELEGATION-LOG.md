@@ -38,6 +38,25 @@ performance acceptance or promotion. Optimized build and separate inert finite-r
 preparation proceed without modifying the live trial. Raw `capture-progress/`
 receipt and `parent-review.json` preserve all checks/failures and the next gate.
 
+Finite-run preparation `deleg_0e498afe` completes: inherited Sol45 calls/731.3s,
+effort/usage unknown. Parent reviews full helper and catches numeric trace IDs
+compared with string-valued protocol revisions before GUI. Actual assertion goes
+RED→GREEN; canonical mismatch negatives remain refused. Bound FIFO handshake and
+move observer spawn inside protected cleanup. Exact-runtime inert preflight and
+five additional synthetic/private-FIFO regressions pass; native readiness is not
+claimed from those checks. Raw corrected pins/proof remain in run-preparation.
+
+Fresh explicit away authorization then admits ONE ordinary optimized inspection
+Host cohort, three settled928×515 refresh samples (no camera/authored changes).
+Complete native traces expose paired median112.34ms after encoder completion;
+encoding median10.04ms, opaque backend139.55ms. This is not matched camera or
+actual-client latency and not a speedup. Ignore negative RAF-timestamp differences
+as presentation-latency data. Owned cleanup/desktop preservation independently
+checked and computer-free notice issued. Root proceeds with one headless TDD
+repair at authorized inspect (`deleg_bb6dfa43`); no more desktop actions under
+that completed window. Evidence: `measured-phase-parent-receipt.json` and the
+exact ordinary run beneath cumulative audit `capture-progress/`.
+
 ## 2026-11-15 — One registered saved-project startup
 
 One inherited `gpt-6.1-sol` writer, effective effort/tokens/cost unknown; no model
