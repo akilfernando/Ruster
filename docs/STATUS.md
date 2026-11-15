@@ -1,5 +1,30 @@
 # Current project status
 
+## Adapter startup discriminator headlessly qualified — 2026-11-15
+
+**Headless discriminator PASS; actual ChatGPT managed cold startup UNRESOLVED.**
+Existing `project_list` and `project_startup_unavailable` responses now carry a
+bounded nonsecret adapter PID/start, prepare attempt, actual spawned-child PID
+and snapshot/fresh/cached-failure discriminator. No new endpoint/input/registration
+field, retry, retarget, cache clearing, approval or native lifecycle change.
+Discovery only snapshots adapter memory; it never prepares, accesses project
+paths, locks or launches. These diagnostics are correlation, not authorization.
+
+Real STDIO TDD first failed on missing PID; private fake-native qualification then
+proved A spawns/fails exactly once, repeats preserve identity/attempt/child,
+independent B is unattempted, owner-lock contention prevents spawn (even after
+release, cached failure is not retried), and discovery works with both locks held
+and scene/native paths absent. Affected change gate passes 24 MCP unit tests plus
+one actual-STDIO regression, strict all-target Clippy and format. Installed native
+hash remains `9e5d1c34…`; no desktop/native editor, GPU, client config, registration,
+user state, frozen artifact or resource-limit change. No new real-client trial.
+
+**Next gate:** parent changed-risk acceptance and deliberate adapter promotion;
+only then correlate the actual failure's servicing PID/start/attempt before a
+coordinated cold-start trial. No root cause or FD/driver/sandbox theory established.
+Work here is complete; desktop/client qualification is HELD, not running.
+[Contract, raw receipts and limits](evidence/CUMULATIVE-EDITOR-2026-11-15.md#adapter-local-startup-provenance--2026-11-15).
+
 ## Partial cumulative native handoff installed — 2026-11-15
 
 Parent changed-risk review is **GO** for collider repair `fbdcbf7`, after complete

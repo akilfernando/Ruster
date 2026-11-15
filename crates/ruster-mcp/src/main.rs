@@ -673,6 +673,49 @@ impl Server {
     }
 }
 
+/// Adapter-local correlation only; never native identity, consent or authority.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "snake_case")]
+enum StartupResponseSource {
+    Snapshot,
+    FreshFailure,
+    CachedFailure,
+}
+struct StartupDiagnostics {
+    adapter_pid: u32,
+    process_start: Option<String>,
+    attempt_sequence: u8,
+    child_pid: Option<u32>,
+}
+impl Default for StartupDiagnostics {
+    fn default() -> Self {
+        let adapter_pid = std::process::id();
+        Self {
+            adapter_pid,
+            process_start: project_startup::process_start(adapter_pid)
+                .ok()
+                .filter(|s| {
+                    !s.is_empty() && s.len() <= 20 && s.bytes().all(|b| b.is_ascii_digit())
+                }),
+            attempt_sequence: 0,
+            child_pid: None,
+        }
+    }
+}
+impl StartupDiagnostics {
+    fn snapshot(&self, failure_cached: bool, response_source: StartupResponseSource) -> Value {
+        json!({
+            "adapter_pid": self.adapter_pid,
+            "process_start": self.process_start,
+            "prepare_attempted": self.attempt_sequence != 0,
+            "attempt_sequence": self.attempt_sequence,
+            "child_pid": self.child_pid,
+            "failure_cached": failure_cached,
+            "response_source": response_source,
+        })
+    }
+}
+
 /// Snapshot the locator exactly once per adapter process, lazily on its first
 /// project call. initialize/tools/list do not open or consume owner authority.
 #[derive(Default)]
@@ -683,8 +726,17 @@ struct Adapter {
     selected: Option<project_tools::Project>,
     verified: bool,
     startup_error: Option<String>,
+    startup_diagnostics: StartupDiagnostics,
 }
 impl Adapter {
+    fn startup_failure(&self, source: StartupResponseSource) -> Value {
+        let mut failure = domain_error(
+            "project_startup_unavailable",
+            self.startup_error.as_deref().unwrap(),
+        );
+        failure["error"]["startup_diagnostics"] = self.startup_diagnostics.snapshot(true, source);
+        failure
+    }
     fn configured() -> Self {
         let registry = std::env::var_os("RUSTER_MCP_PROJECT_REGISTRY").map(|path| {
             if std::env::var_os("RUSTER_MCP_LOCATOR").is_some() {
@@ -708,7 +760,12 @@ impl Adapter {
                 );
             };
             if name == "project_list" {
-                return registry.list();
+                let mut listed = registry.list();
+                listed["result"]["startup_diagnostics"] = self.startup_diagnostics.snapshot(
+                    self.startup_error.is_some(),
+                    StartupResponseSource::Snapshot,
+                );
+                return listed;
             }
             if name == "project_connect" {
                 let Ok(project) = registry.resolve(arguments["project"].as_str().unwrap_or(""))
@@ -727,13 +784,11 @@ impl Adapter {
                 }
                 if !self.attempted {
                     self.attempted = true;
+                    self.startup_diagnostics.attempt_sequence = 1;
                     let selected = self.selected.as_mut().unwrap();
-                    if let Err(error) = selected.prepare() {
+                    if let Err(error) = selected.prepare(&mut self.startup_diagnostics.child_pid) {
                         self.startup_error = Some(error.to_string());
-                        return domain_error(
-                            "project_startup_unavailable",
-                            self.startup_error.as_deref().unwrap(),
-                        );
+                        return self.startup_failure(StartupResponseSource::FreshFailure);
                     }
                     self.client = selected.open().ok();
                 }
@@ -742,8 +797,8 @@ impl Adapter {
                 return domain_error("project_required", "Call project_connect with an exact registered name or ID before project access.");
             };
             let Some(client) = self.client.as_mut() else {
-                if let Some(error) = &self.startup_error {
-                    return domain_error("project_startup_unavailable", error);
+                if self.startup_error.is_some() {
+                    return self.startup_failure(StartupResponseSource::CachedFailure);
                 }
                 return domain_error("bridge_unavailable", "Registered incarnation unavailable; no restart, retarget or fallback. Explicit registration and fresh owner consent required.");
             };

@@ -278,3 +278,69 @@ Raw local receipts: `collider-repair/parent-changed-risk-review.{md,json}` and
 candidate only; physical-human acceptance and the managed-startup/browser
 convergence gates remain open. The normal application entry uses this candidate;
 the frozen older ChatGPT trial still uses its own registered binary.
+
+## Adapter-local startup provenance — 2026-11-15
+
+**Outcome:** headless discriminator PASS, not a managed cold-start repair or
+actual-client qualification. Exclusive writer on `feat/cumulative-editor-20261115`,
+base `2345e2450e0560689be24c13d1129d33d3789021`; parent owns changed-risk acceptance,
+promotion and any later desktop/client action. Budget: reassess at30minutes or
+two same-seam failures; one intended missing-field RED, then GREEN without a
+failed repair cycle. No native editor or GUI/rendering was used.
+
+The completed Astra/low startup forensics found the second ChatGPT failure's
+servicing PID unproven. A corrected-environment new adapter did not establish call
+ownership; existing adapters retain the first prepare failure. Direct diagnostic
+native success followed by real-client attach/edit/Undo/revoke does not qualify
+managed startup. No FD-limit, driver or sandbox cause is established.
+
+The small additive response object is documented in the
+[MCP contract](../../crates/ruster-mcp/README.md#one-registered-saved-project-stable-startupattachment).
+`project_list.result.startup_diagnostics` snapshots only adapter-local state;
+every startup failure carries the same object under `error`, marking its response
+`fresh_failure` or `cached_failure`. PID/start/attempt/child stay identical on
+replay. PID is u32, process-start is null or at most20decimal characters,
+attempt sequence is0/1, child PID is null until actual successful spawn, cache
+state is bool and response source is a fixed enum. Process-start is captured
+once; unavailable identity stays null. Diagnostics are not native authentication,
+authorization or liveness. Input schemas/registration/binding/session/consent and
+one-attempt policy are unchanged. No endpoint, stderr reader/logging architecture,
+cache clearing, automatic retry or silent retarget was added.
+
+### Executed proof
+
+- First actual STDIO regression on the unchanged adapter failed as intended:
+  `adapter_pid` was null, expected process2041710 (exit101). This is the observed
+  tool output, not a reconstructed baseline run.
+- `cargo test --locked -p ruster-mcp --test startup_provenance -- --nocapture`
+  passes. Private shell fake-native can only record its PID and exit1. Receipt A:
+  PID2042597/start22974907, child2042598, attempt1, one spawn; later connect and
+  scene-inspect replay the same failure/identity with `cached_failure`.
+- Independent B: PID2042599/start22974911 starts unattempted. With both actual
+  routing locks held and native/scene paths temporarily absent, discovery is
+  unchanged. Holding only owner.lock refuses prepare with no child; releasing
+  owner.lock does not retry that cached refusal. Spawn count remains one.
+- Strict empty discovery schema and exact-name refusal leave A unattempted.
+  Output is a seven-field allowlist. No project access/lock/launch occurs on the
+  discovery code path. Both adapter processes and the fake child are absent
+  after qualification; adapters are killed/reaped only by their own fixture.
+- `python3 scripts/check.py --dry-run` selects only `ruster-mcp` (no reverse
+  workspace dependents). Executed `python3 scripts/check.py` passes Markdown,
+  package format, strict all-target Clippy and24unit+1STDIO tests in6.43s using
+  a fresh private target, not canonical/frozen build outputs. No unchanged
+  engine/editor/GPU matrix was run.
+
+Raw audit: `/home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/startup-provenance/`
+contains `stdio.log`, `change-gate.log`, `commands.json` and `receipt.json`.
+The receipt pins checkout build-input SHA256 values, rustc1.99.1
+`58cf8f9c35b355199727627d07ae34a4e2846d67`, Cargo1.99.1 and private debug adapter
+SHA256 `9f3bd5a72fff15ec8f8c810688c4243d6742bac4bc32f770df919232ee64450e`.
+Installed default native remains the verified `9e5d1c34…` artifact; no install,
+frozen startup/registration/client/config/environment export, user-data write,
+resource-limit change or native fixture replay was performed.
+
+**Remaining gate:** parent reviews this discriminator and controls deliberate
+promotion. Compare PID/start/attempt in actual invocation responses, not just a
+new process's existence or a prior discovery. Actual-client cold startup remains
+unresolved; root cause, changed-risk acceptance and a new desktop trial are not
+claimed. Exit-cause/stderr architecture is deferred beyond this discriminator.

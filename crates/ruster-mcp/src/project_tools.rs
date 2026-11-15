@@ -124,7 +124,7 @@ impl Project {
         json!({"status":"native_browser_approval_required","url":descriptor["url"],"attachment":descriptor["attachment"],"message":"Open this secret-free workspace URL. Compare its pending browser code in Rusterize AI connection and approve that browser/project once. Cookies do not grant consent."})
     }
 
-    pub fn prepare(&mut self) -> io::Result<()> {
+    pub fn prepare(&mut self, child_pid: &mut Option<u32>) -> io::Result<()> {
         let Some(startup) = &self.startup else {
             return Ok(());
         };
@@ -164,6 +164,7 @@ impl Project {
                 serde_json::to_string(&crate::project_startup::Bootstrap::capture()?)?,
             );
             let mut child = command.spawn()?;
+            *child_pid = Some(child.id());
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
             loop {
                 if child.try_wait()?.is_some() {

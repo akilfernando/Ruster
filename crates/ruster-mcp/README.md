@@ -22,13 +22,39 @@ once as the client's STDIO MCP command (arguments/environment blank). Alternativ
 set `RUSTER_MCP_PROJECT_REGISTRY` once to the generated private registry when launching
 the adapter directly. Do not also set legacy `RUSTER_MCP_LOCATOR`.
 
-`project_list {}` lists only the explicitly registered ID/name/scene; it neither
-launches native nor claims an owner. `project_connect {"project":"My Project"}`
+`project_list {}` lists only the explicitly registered ID/name/scene plus bounded
+adapter-local `result.startup_diagnostics`; it neither prepares the project,
+accesses its scene/native paths, acquires routing locks, launches native nor claims
+an owner. `project_connect {"project":"My Project"}`
 (or the exact ID) starts that pinned saved project if its registered native is closed,
 or attaches its exact current publication. Names are case-sensitive, without fuzzy,
 newest-editor, filesystem discovery or implicit fallback. Skip a picker when the
 prompt names this unique authorized record. Host-native questions remain a client
 choice, not an MCP UI claim.
+
+The same `startup_diagnostics` object appears under `error` for every
+`project_startup_unavailable` response, including cached failures from later
+project calls. It contains only:
+
+| Field | Diagnostic meaning |
+| --- | --- |
+| `adapter_pid` | This adapter process PID (u32), not the native owner PID. |
+| `process_start` | Adapter Linux process-start ticks as 1–20 decimal characters, or null if unavailable; captured once, never guessed. Pair with PID to disambiguate PID reuse within this boot. |
+| `prepare_attempted` | Whether this adapter called registered-project prepare. |
+| `attempt_sequence` | 0 before prepare, 1 afterwards; never incremented by discovery or replay. Legacy explicit-locator registry preparation is a no-op but still an attempt. |
+| `child_pid` | Actual child PID after successful spawn, otherwise null (including attachment/owner-lock refusal). Historical, not a liveness assertion. |
+| `failure_cached` | Whether this adapter retains a prepare failure; true even on the first failure response once retained. |
+| `response_source` | `snapshot` for discovery; `fresh_failure` for the response that performed prepare; `cached_failure` for later responses replaying that failure. |
+
+These are nonsecret correlation diagnostics, **not authentication, proof of native
+authorization, successful startup, liveness or a root-cause diagnosis**. Discovery
+is an in-memory snapshot after initial registry loading; it does not refresh the
+registry, clear cached failure, launch, retry, retarget or grant consent. Compare
+PID/start/attempt in the actual failure response, not just a preceding discovery:
+clients can route different calls to different coexisting adapters. Null start
+identity is explicitly incomplete correlation. Input schemas, registration data,
+native/session/binding checks and one-attempt behavior are unchanged. A fresh or
+cached generic failure alone still cannot explain why native startup failed.
 
 Initial `approval_required` needs native **AI connection → Review adapter approval →
 Confirm AI connection**. No initial manual native launch/Connect/locator is needed.
