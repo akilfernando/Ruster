@@ -19,9 +19,39 @@ Indented group/object/light rows expose topology. Transform fields are **local t
 This candidate rejects hierarchy with legacy behavior/HUD/input authoring and rejects incompatible runtime/export operations before execution/publication. Assembly duplication and copying are not implemented; they reject instead of copying locals into unparented substitutes. Flat workflows retain their existing format/arithmetic. The native creator journey and rendered appearance are **not fully qualified**; see [integrated implementation evidence and precise remaining gaps](../../docs/evidence/ASSEMBLY-HIERARCHY-2026-11-15.md).
 
 
-## Local AI binding — CP2 candidate
+## Native AI workspace — headless implementation candidate
 
-In generic scene mode on Unix, **AI connection…** opens the local connection controls. **Connect AI** previews the intended project/editor session and requires confirmation before starting a listener. When an adapter arrives, **Review adapter approval** previews its exact socket owner identity and local PID; confirmation approves only that owner for that project generation. Cancel/Escape grants nothing. **Disconnect AI** immediately revokes authority and lets the existing lifecycle retire the listener/publication owner asynchronously. Reconnection never implicitly retargets an old owner.
+Ordinary native startup remains Full editor. **View → AI workspace** switches the
+existing window; **Full editor** returns without recreating Session, history,
+selection or camera. New enrolled managed owners receive a presentation-only
+`RUSTER_WORKSPACE=ai` hint. No new CLI flag is passed to old registered binaries,
+and attachment never rearranges an already-open human owner.
+
+At reduced widths, one essential header retains project/unsaved state, Save, Undo,
+AI status and Full editor; **…** holds secondary tools/actions. Wider windows expose
+the existing transform/navigation actions directly. Objects, Selection and Content
+reuse existing controls in a collapsed, bounded overlay drawer, not permanent
+sidebars. The viewport takes its natural available aspect ratio; there is no forced
+portrait camera, crop or letterbox. Full-editor visibility and divider preferences
+are not overwritten. Resolve pending drafts, gestures or modals before changing mode;
+AI drafts keep Selection visible and cannot be silently hidden by closing its drawer.
+
+Remappable shortcuts, native picking/gizmos/navigation, Save/history, recovery, close
+safety, diagnostics and active-runtime Stop use their existing owners in both modes.
+The **AI: …** button exposes Disconnect and explicit project/all-project persistent
+revoke. Trusted enrolled connections do not ask for recurring native approval; the
+manual controls below remain a distinct legacy path. Save/export/execution grants
+are unchanged. Browser preview and model image reception are not prerequisites for
+local native interaction.
+
+Headless geometry covers 600×850, 650×900, 640×600, 800×650, wider windows and larger
+UI scale, plus drawer hit-testing/capture occlusion and state/draft preservation.
+This is not native-human usability or actual ChatGPT/image acceptance.
+[Evidence and precise remaining gates](../../docs/evidence/NATIVE-AI-WORKSPACE-2026-11-15.md).
+
+## Legacy local AI binding — CP2 candidate
+
+In generic scene mode on Unix, **AI: …** opens the local connection controls. **Connect AI** previews the intended project/editor session and requires confirmation before starting a listener. When an adapter arrives, **Review adapter approval** previews its exact socket owner identity and local PID; confirmation approves only that owner for that project generation. Cancel/Escape grants nothing. **Disconnect AI** immediately revokes authority and lets the existing lifecycle retire the listener/publication owner asynchronously. Reconnection never implicitly retargets an old owner.
 
 Asset catalog changes may persist immediately before Save; Save/export destinations still require separate grants. These controls do not register or restart Hermes, edit client configuration, or establish adapter executable provenance. Automatic registration remains fail-closed. This is an implementation candidate, not native workflow acceptance; [qualification boundary](../../docs/evidence/E2A-CP2-NATIVE-ROUTE-2026-11-14.md).
 

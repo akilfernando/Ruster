@@ -187,19 +187,23 @@ impl Host {
                 "Owner identity is socket-bound, not executable provenance or client registration.",
             );
         }
+        let enrolled = std::env::var_os("RUSTER_CONNECTOR_ENROLLMENT").is_some();
+        if enrolled {
+            ui.label("Use project_connect in the enrolled connector. No native approval is needed; browser access is optional and separate. Disconnect retains enrollment; Revoke removes persistent access.");
+        }
         let action = match self.connection_state() {
             "retired" => Some("Connect AI"),
             "approval_required" => Some("Review adapter approval"),
             _ => None,
         };
-        if let Some(action) = action {
+        if let Some(action) = action.filter(|_| !enrolled) {
             if ui.button(action).clicked() {
                 state.preview = Some(self.binding_preview());
                 state.focus_cancel = true;
                 state.notice.clear();
             }
         }
-        if let Some(grant) = self.bridge.as_ref().and_then(|b| b.persistent_grant()) {
+        if let Some(grant) = self.enrolled_grant().ok().flatten() {
             ui.label("Enrolled local connector: native authoring for this registered project. Save, export and execution keep their separate grants.");
             for (label, all) in [
                 ("Revoke persistent access to this project", false),
@@ -247,7 +251,6 @@ impl Host {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::unix::net::UnixStream;
 
     fn paint(
         host: &mut Host,
@@ -347,7 +350,8 @@ mod tests {
         let locator: crate::connection::Locator =
             serde_json::from_slice(&std::fs::read(&locator_path).unwrap()).unwrap();
         let mut stream =
-            UnixStream::connect(locator_path.parent().unwrap().join("editor.sock")).unwrap();
+            crate::connection::connect_socket(&locator_path.parent().unwrap().join("editor.sock"))
+                .unwrap();
         let owner = crate::connection::unpredictable().unwrap();
         crate::connection::send(
             &mut stream,
