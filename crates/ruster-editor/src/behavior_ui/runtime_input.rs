@@ -708,9 +708,15 @@ mod tests {
             }
         };
         wait(&mut runtime, false);
+        // The focus/gesture contract must not compete with tick admission's
+        // intentionally fail-closed input mutex. Keep Playing real, but park
+        // the first tick before it acquires that mutex, using the worker gate.
+        let (tick_reached, resume_tick) =
+            runtime.worker.as_ref().unwrap().gate_input_tick_for_test();
         runtime.pending = Some(Request::Play(key));
         runtime.flush();
         wait(&mut runtime, true);
+        tick_reached.recv_timeout(Duration::from_secs(5)).unwrap();
         let mut text = String::new();
         let mut time = 0.;
         let width = std::cell::Cell::new(1000.0);
@@ -720,6 +726,7 @@ mod tests {
         let accessible_buttons = std::cell::RefCell::new(std::collections::BTreeMap::new());
         let controls_blocked = std::cell::Cell::new(false);
         let reset_admissions = std::cell::RefCell::new(Vec::new());
+        let surface_focused_before_finish = std::cell::Cell::new(false);
         let mut draw = |runtime: &mut RuntimeUi, events, discard: bool| {
             time += 0.1;
             let mut output = ctx.run_ui(
@@ -749,6 +756,7 @@ mod tests {
                     ui.text_edit_singleline(&mut text);
                     let (_, surface) = ui
                         .allocate_exact_size(egui::vec2(900., 500.), egui::Sense::click_and_drag());
+                    surface_focused_before_finish.set(surface.has_focus());
                     runtime.input_finish(&ctx, &surface, false);
                     if discard && ctx.current_pass_index() == 0 {
                         ctx.request_discard("control activation replay");
@@ -817,6 +825,11 @@ mod tests {
                 .claimed
         );
         for arrow in [egui::Key::ArrowRight, egui::Key::ArrowUp] {
+            // Capture UI-owned state only: a new worker read here can race the
+            // publication under investigation and cannot explain its result.
+            let focus_before = ctx.memory(|memory| memory.focused());
+            let lease_before = runtime.input_control.lease;
+            let status_before = runtime.status.clone();
             draw(
                 &mut runtime,
                 vec![egui::Event::Key {
@@ -830,7 +843,31 @@ mod tests {
             );
             assert!(
                 runtime.input_owned(),
-                "gameplay arrows must not navigate to the actual inspector splitter"
+                "gameplay arrow ownership lost: arrow={arrow:?} status_before={status_before:?} status={:?} focus_before={focus_before:?} focus_after={:?} surface={:?} lease_before={lease_before:?} lease_after={:?} intent={:?} playing={} pending={:?} awaiting={:?} ready={} visible={} stale={} shutdown={} activation_frame={:?} last_frame={:?} frame={}",
+                runtime.status,
+                ctx.memory(|memory| memory.focused()),
+                runtime.input_control.surface,
+                runtime.input_control.lease,
+                runtime.input_control.intent,
+                runtime.playing,
+                runtime.pending.is_some(),
+                runtime.awaiting,
+                runtime.ready,
+                runtime.visible,
+                runtime.stale,
+                runtime.shutdown,
+                runtime.input_control.activation_frame,
+                runtime.input_control.last_frame,
+                ctx.cumulative_frame_nr(),
+            );
+            assert!(
+                surface_focused_before_finish.get(),
+                "{arrow:?} retains the genuine viewport Response before publication"
+            );
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                runtime.input_control.surface.map(|(id, _)| id),
+                "{arrow:?} must not focus the inspector splitter"
             );
             draw(
                 &mut runtime,
@@ -843,7 +880,63 @@ mod tests {
                 }],
                 false,
             );
+            assert!(
+                runtime.input_owned(),
+                "{arrow:?} key-up lost ownership: {}",
+                runtime.status
+            );
+            assert_eq!(
+                ctx.memory(|memory| memory.focused()),
+                runtime.input_control.surface.map(|(id, _)| id)
+            );
         }
+        // A deliberately contended key-up is NOT a focus-navigation failure.
+        // Assert the real pre-finish Response still owns focus, then require
+        // fail-closed cancellation and rejection of the old lease. No retry.
+        let space = |pressed| egui::Event::Key {
+            key: egui::Key::Space,
+            physical_key: None,
+            pressed,
+            repeat: false,
+            modifiers: egui::Modifiers::NONE,
+        };
+        draw(&mut runtime, vec![space(true)], false);
+        assert!(runtime.input_owned());
+        let old_lease = runtime.input_control.lease.unwrap();
+        let (resume_slot, slot_holder) = runtime
+            .worker
+            .as_ref()
+            .unwrap()
+            .contend_input_slot_for_test();
+        draw(&mut runtime, vec![space(false)], false);
+        assert!(
+            surface_focused_before_finish.get(),
+            "contention starts with the genuine viewport focus owner"
+        );
+        assert!(!runtime.input_owned(), "a busy key-up must fail closed");
+        assert_eq!(runtime.status, "Busy Choose Control runtime again.");
+        assert_eq!(ctx.memory(|memory| memory.focused()), None);
+        resume_slot.send(()).unwrap();
+        slot_holder.join().unwrap();
+        let worker = runtime.worker.as_ref().unwrap();
+        assert!(!worker.current_input_meta(key).unwrap().claimed);
+        assert_eq!(
+            worker.publish_key_event(old_lease, InputKey::Space, false),
+            Err(crate::behavior_worker::InputError::StaleLease)
+        );
+        // A fresh explicit ordinary activation is allowed; never replay a failed
+        // input mutation or silently restore the revoked lease.
+        button = draw(&mut runtime, vec![], false);
+        draw(
+            &mut runtime,
+            vec![
+                egui::Event::PointerMoved(button),
+                pointer(button, true),
+                pointer(button, false),
+            ],
+            true,
+        );
+        assert!(runtime.input_owned());
         for modifiers in [egui::Modifiers::NONE, egui::Modifiers::SHIFT] {
             button = draw(
                 &mut runtime,
@@ -907,6 +1000,7 @@ mod tests {
                 .unwrap()
                 .claimed
         );
+        resume_tick.send(()).unwrap();
         // The actual floating help must consume Escape after egui clears
         // focused() at begin_pass, including the compact window footprint.
         fn label_point(shapes: &[egui::epaint::ClippedShape], label: &str) -> egui::Pos2 {

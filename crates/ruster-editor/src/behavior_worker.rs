@@ -520,6 +520,29 @@ impl Worker {
     pub fn accepts(&self, key: RunKey) -> bool {
         key == self.current && self.shared.epoch.load(Ordering::SeqCst) == key.reset_epoch
     }
+    #[cfg(test)]
+    pub(super) fn gate_input_tick_for_test(&self) -> (Receiver<()>, SyncSender<()>) {
+        let (reached, arrival) = mpsc::sync_channel(1);
+        let (resume, release) = mpsc::sync_channel(1);
+        *self.shared.input_gate.lock().unwrap() = Some(TestGate {
+            reached,
+            resume: release,
+        });
+        (arrival, resume)
+    }
+    #[cfg(test)]
+    pub(super) fn contend_input_slot_for_test(&self) -> (SyncSender<()>, thread::JoinHandle<()>) {
+        let shared = self.shared.clone();
+        let (reached, arrival) = mpsc::sync_channel(1);
+        let (resume, release) = mpsc::sync_channel(1);
+        let holder = thread::spawn(move || {
+            let _slot = shared.input.lock().unwrap();
+            reached.send(()).unwrap();
+            let _ = release.recv_timeout(Duration::from_secs(5));
+        });
+        arrival.recv_timeout(Duration::from_secs(5)).unwrap();
+        (resume, holder)
+    }
     pub fn current_input_meta(&self, key: RunKey) -> Result<InputMeta, InputError> {
         if !self.accepts(key) {
             return Err(InputError::StaleRun);
