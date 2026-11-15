@@ -81,8 +81,17 @@ resolved numeric bounds before quantization; the final regression passes.
 `core-first.log` retains one preparation compile error from assuming a mutable
 Scene helper that does not exist; fixed locally without adding production API.
 
-The resolver lives only in a scene example support module, compiled into
-renderer/behavior test modules. No production call path is changed. Behavior's
+The resolver lives in `crates/ruster-scene/src/assembly_prototype.rs`, which is
+**not declared by the production scene library**. Only the runnable scene
+example and renderer/behavior test modules include it. No production call path
+is changed. This location preserves the existing editable-kit test-source
+closure: `scripts/new_app.py` copies selected crate `src/`/`tests/` but not crate
+`examples/`. Self-review found the initial example-helper placement would leave
+exported renderer/behavior tests with a missing include. The helper was moved
+without math changes and the existing two-real-export byte/hash regression now
+checks this input. `final-relocation.log` proves final example, all seven cases,
+strict affected Clippy and both actual relocated export manifests pass.
+Behavior's
 dev-dependency reuses already-locked glam0.30.10; only this owned worktree's
 Cargo manifest/lock edge changes, no new library/version or shared lock edit.
 Transforms use f64 composition and checked f32 Euler quantization with explicit
@@ -90,5 +99,51 @@ per-matrix-element absolute error <= 2e-6*max(1,abs(expected)). Flat root values
 bypass quantization and serialize byte-identically. Light reparent is explicitly
 refused pending its policy decision; geometry reparent is exercised.
 
-Full change gate, consolidated self-review and remote checkpoint remain pending.
+Full `python3 scripts/check.py --base 14cd60e97fb4c91a8511954b255ec2c7a0f07d1e`
+selected conservative full scope (owned lockfile/test paths), PASS in123.52s:
+363 Rust tests,30 Python tests, formatting, workspace strict all-target Clippy
+and Markdown. Five existing external/GPU ignores remain; no new ignore. The
+five explicit example regressions are outside ordinary workspace `cargo test`
+and were separately run. After relocating only the unchanged helper and
+extending the export regression, affected checks above were rerun; unchanged
+full-gate product behavior evidence is reused, not represented as a second
+full-gate pass. Self-review added-line secret/shell/eval scan and
+`git diff --check` pass. No independent reviewer ran in this bounded child.
+
+Working checkpoint `f2e019c8866d32e0cd0aefcf23e5b5f5af20dbd6` is pushed and
+remote-SHA verified before final qualification. Final source/log/executed-test
+SHA256 pins and resource cleanup are recorded in audit `manifest.json`.
 This is not native/GPU/shadow, runtime/Lua, UI/MCP, persistence or F4a acceptance.
+
+## Remaining gaps and recommended next implementation
+
+- **Decision gate, not an observed affine blocker:** selected uniform groups
+  preserve this nonuniform leaf exactly within stated f32 quantization tolerance.
+  No evidence here requires shear, a new lifecycle owner or a second renderer.
+  Positive-uniform-only group restrictions, point range/intensity inheritance,
+  depth/capacity and the reparent tolerance are experimental, not user-approved
+  production limits. Parent should review these before any persisted contract.
+- **One production pose owner is still absent.** Scene18 stores no topology;
+  `model` and `SpatialWorld::new` still consume flat transforms. The next bounded
+  implementation should promote a reviewed scene-owned resolver/validated
+  staged topology behind the same ordinary-editor/MCP operation layer, with
+  flat-bit-exactness and this consumer oracle retained. This prototype recomputes
+  short bounded ancestry paths; it is not the proposed O(N) production resolver
+  and has no accepted performance result or retained cross-call cache.
+- **Atomic prototype swap is not Session history.** Structural deltas,
+  parent/child clipboard/duplicate/delete and persistent/recoverable drafts
+  need existing Session admission/history integration rather than a second
+  undo system. Current production atomic history and exact sphere restrictions
+  remain unchanged and pass existing regressions.
+- **No script semantics are chosen.** A hinge is edited numerically in this
+  example, not animated through Lua. Resolve local/world observations, old
+  script compatibility and whole-runtime-step staging before claiming an
+  articulated creator workflow. Light reparent is intentionally refused here.
+- **Later gates remain real work:** production-format/content/kit decisions and
+  packager validation; save/reopen/recovery/exact runtime; normal editor keyboard
+  and guarded MCP authoring; real GPU normal/shadow/light appearance. The old
+  full F4a gate and its completion criteria remain unaccepted, not waived.
+
+**Bounded child complete, no owned background process.** Continuation is QUEUED
+to parent decision/integration review; no merge, install, release, config/profile
+or desktop change. Canonical dirty status/private attachments remain untouched.

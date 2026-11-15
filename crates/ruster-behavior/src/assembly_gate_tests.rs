@@ -2,7 +2,7 @@
 use super::spatial::SpatialWorld;
 use ruster_scene::{Collider, ColliderRole, ColliderShape, ResolvedShape, Transform};
 #[allow(dead_code)]
-#[path = "../../ruster-scene/examples/assembly_gate/support.rs"]
+#[path = "../../ruster-scene/src/assembly_prototype.rs"]
 mod support;
 
 #[test]

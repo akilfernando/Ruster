@@ -1,5 +1,5 @@
 //! Experimental CPU-only assembly gate; not a serialized scene capability.
-#[path = "assembly_gate/support.rs"]
+#[path = "../src/assembly_prototype.rs"]
 mod support;
 #[cfg(test)]
 #[path = "assembly_gate/tests.rs"]

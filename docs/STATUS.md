@@ -14,8 +14,12 @@ packet and production SpatialWorld overlap/sweep oracles. Seven focused cases,
 runnable example and strict affected all-target Clippy pass. Numeric rounding
 rejection has observed RED/GREEN evidence. [Contract, assumptions and evidence](evidence/F4A-CORE-PROTOTYPE-2026-11-15.md).
 
-**RUNNING within this bounded child:** full change gate and durable checkpoint.
-Production hierarchy/history/format migration, ordinary editor and MCP actions,
+**Bounded prototype delivered; production continuation QUEUED to parent review.**
+Full conservative change gate passes (363 Rust, 30 Python; five existing ignored
+fixtures retained), plus five explicit example cases. Final relocated-helper
+checks rerun all seven changed cases, example, affected strict lint and actual
+source-export closure. Independent product/architecture acceptance is not
+claimed. Production hierarchy/history/format migration, ordinary editor and MCP actions,
 script coordinate semantics, recovery/save/export and native/GPU appearance
 remain unimplemented/unqualified. No install/merge/release or desktop input.
 

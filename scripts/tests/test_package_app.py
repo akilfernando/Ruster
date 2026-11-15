@@ -88,7 +88,8 @@ class DistributionTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         required = ("crates/support/strict_json.rs", "examples/content/scene.wgsl",
                     "examples/logistics.scenario.json",
-                    "crates/ruster-scene/tests/fixtures/legacy-v1.scene.json")
+                    "crates/ruster-scene/tests/fixtures/legacy-v1.scene.json",
+                    "crates/ruster-scene/src/assembly_prototype.rs")
         for app in ("yard", "motion-lab"):
             with self.subTest(app=app):
                 destination = self.base / app
