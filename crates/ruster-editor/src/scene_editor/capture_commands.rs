@@ -47,6 +47,18 @@ struct Pin {
     shader_revision: u64,
     run: Option<crate::behavior_worker::RunKey>,
     rect: Option<egui::Rect>,
+    camera: Option<ruster_render::CameraState>,
+    selection: Vec<String>,
+    active: Option<String>,
+    matrices: Option<ruster_render::CameraMatrices>,
+    dpi: Option<f32>,
+    screen: Option<egui::Rect>,
+    resources: Vec<(u8, String, usize)>,
+}
+struct Owner {
+    token: String,
+    #[cfg(unix)]
+    authority: Option<crate::bridge::Authority>,
 }
 struct CancelOnDrop(Arc<AtomicBool>);
 impl Drop for CancelOnDrop {
@@ -70,6 +82,7 @@ pub(super) struct Captures {
     completed: Option<(u64, Pin, Value)>,
     pub rect: Option<egui::Rect>,
     workspace_owned: bool,
+    owner: Option<Owner>,
     timing: super::capture_timing::Probe,
     pub view: Option<[[f32; 4]; 4]>,
     pub projection: Option<[[f32; 4]; 4]>,
@@ -82,6 +95,12 @@ impl Drop for Captures {
     }
 }
 impl Captures {
+    pub(super) fn invalidate(&mut self) {
+        self.timing.finish(3);
+        self.pending = None;
+        self.completed = None;
+        self.owner = None;
+    }
     pub(super) fn cancel_owned(&mut self, id: &str) {
         if self
             .pending
@@ -121,6 +140,22 @@ impl SceneEditor {
             ctx.request_repaint_after(remaining);
         }
     }
+    pub(super) fn capture_resources(&self) -> Vec<(u8, String, usize)> {
+        let (meshes, textures) = if self.runtime.visible {
+            (&self.preview_assets, &self.preview_textures)
+        } else {
+            (&self.resolved, &self.resolved_textures)
+        };
+        meshes
+            .iter()
+            .map(|(id, value)| (0, id.clone(), Arc::as_ptr(value) as usize))
+            .chain(
+                textures
+                    .iter()
+                    .map(|(id, value)| (1, id.clone(), Arc::as_ptr(value) as usize)),
+            )
+            .collect()
+    }
     fn capture_pin(&mut self) -> Pin {
         self.observe_view();
         Pin {
@@ -144,6 +179,19 @@ impl SceneEditor {
                 .filter(|_| self.runtime.visible)
                 .map(|frame| frame.key),
             rect: self.captures.rect,
+            camera: self.navigation.camera,
+            selection: self.manipulation.ids.clone(),
+            active: self.selected.clone(),
+            matrices: self.captures.view.zip(self.captures.projection),
+            dpi: self
+                .export_context
+                .as_ref()
+                .map(egui::Context::pixels_per_point),
+            screen: self
+                .export_context
+                .as_ref()
+                .map(egui::Context::viewport_rect),
+            resources: self.capture_resources(),
         }
     }
     pub(super) fn capture_command(&mut self, token: &str, op: &str, args: &Value) -> Result<Value> {
@@ -183,12 +231,45 @@ impl SceneEditor {
         {
             return Err(fail("viewport_occluded"));
         }
-        if op == "viewport_capture_inspect" {
-            if workspace != self.captures.workspace_owned {
+        if matches!(op, "viewport_capture_inspect" | "viewport_capture_pick") {
+            if workspace != self.captures.workspace_owned
+                || self.captures.owner.as_ref().is_none_or(|owner| {
+                    if owner.token != token {
+                        return true;
+                    }
+                    #[cfg(unix)]
+                    {
+                        match (&owner.authority, &self.connection_authority) {
+                            (Some(saved), Some(current)) => !saved.same_authorized(current),
+                            (None, None) => false,
+                            _ => true,
+                        }
+                    }
+                    #[cfg(not(unix))]
+                    {
+                        false
+                    }
+                })
+            {
                 return Err(fail("capture_not_owned"));
             }
-            if map.len() != 1 || decimal("capture_id").is_none() {
+            let picking = op == "viewport_capture_pick";
+            if map.len() != if picking { 3 } else { 1 }
+                || decimal("capture_id").is_none()
+                || map
+                    .keys()
+                    .any(|k| !["capture_id", "u", "v"].contains(&k.as_str()))
+            {
                 return Err(fail("invalid_arguments"));
+            }
+            if picking
+                && ["u", "v"].iter().any(|k| {
+                    args[k]
+                        .as_f64()
+                        .is_none_or(|n| !n.is_finite() || !(0.0..1.0).contains(&n))
+                })
+            {
+                return Err(fail("invalid_coordinates"));
             }
             let id = decimal("capture_id").unwrap();
             // Only an exact, authorized owner inspection may drain an already
@@ -206,14 +287,28 @@ impl SceneEditor {
                         return Err(fail("stale_capture"));
                     }
                     if value["status"] == "ready" {
+                        self.view_guard()?;
+                        if self.manipulation.active() || self.runtime.is_playing() {
+                            return Err(fail("view_busy"));
+                        }
+                        if picking {
+                            return self.capture_pick(captured, value, args);
+                        }
                         self.captures.timing.mark(6);
                         self.captures.timing.finish(1);
+                    }
+                    if picking {
+                        return Err(fail("capture_unavailable"));
                     }
                     return Ok(value.clone());
                 }
             }
             return if self.captures.pending.as_ref().is_some_and(|p| p.id == id) {
-                Ok(json!({"capture_id":id.to_string(),"status":"pending"}))
+                if picking {
+                    Err(fail("capture_unavailable"))
+                } else {
+                    Ok(json!({"capture_id":id.to_string(),"status":"pending"}))
+                }
             } else {
                 Err(fail("capture_not_found"))
             };
@@ -264,6 +359,11 @@ impl SceneEditor {
             super::capture_timing::Probe::begin([id, pin.generation, pin.revision, pin.view]);
         self.captures.completed = None;
         self.captures.workspace_owned = workspace;
+        self.captures.owner = Some(Owner {
+            token: token.to_owned(),
+            #[cfg(unix)]
+            authority: self.connection_authority.clone(),
+        });
         self.captures.pending = Some(Pending {
             id,
             pin,
@@ -278,6 +378,45 @@ impl SceneEditor {
             ctx.request_repaint();
         }
         Ok(json!({"capture_id":id.to_string(),"status":"pending"}))
+    }
+    fn capture_pick(&self, pin: &Pin, value: &Value, args: &Value) -> Result<Value> {
+        if pin.runtime {
+            return Err(fail("runtime_grounding_unsupported"));
+        }
+        let rect = pin.rect.ok_or_else(|| fail("invalid_geometry"))?;
+        let camera = pin.camera.ok_or_else(|| fail("invalid_geometry"))?;
+        let matrices = camera
+            .matrices(rect.aspect_ratio())
+            .ok_or_else(|| fail("invalid_geometry"))?;
+        if !rect.is_finite() || !rect.is_positive() || pin.matrices != Some(matrices) {
+            return Err(fail("invalid_geometry"));
+        }
+        let scene = self.session.scene();
+        scene.validate().map_err(|_| fail("invalid_geometry"))?;
+        let poses = scene
+            .resolve_poses()
+            .map_err(|_| fail("invalid_geometry"))?;
+        for transform in poses.transforms.values() {
+            transform.validate().map_err(|_| fail("invalid_geometry"))?;
+        }
+        for mesh in self.resolved.values() {
+            ruster_assets::validate_mesh(mesh).map_err(|_| fail("invalid_geometry"))?;
+        }
+        let position = sample_position(
+            value,
+            args["u"].as_f64().unwrap(),
+            args["v"].as_f64().unwrap(),
+        )?;
+        if !rect.contains(position) {
+            return Err(fail("invalid_geometry"));
+        }
+        let object = ruster_render::pick_at(scene, &self.resolved, camera, rect, position);
+        let mut result = value.clone();
+        result.as_object_mut().unwrap().remove("image_base64");
+        result["status"] = json!(if object.is_some() { "hit" } else { "miss" });
+        result["object_id"] = json!(object);
+        result["domain"] = json!("scene_geometry");
+        Ok(result)
     }
     /// Revalidate and adopt only an already-produced result. The retained UI
     /// context supplies privacy/size checks, never fresh layout or readback.
@@ -329,8 +468,21 @@ impl SceneEditor {
                     value["runtime_frame_identity"] = pin.run.map(|key|json!({"generation":key.generation.to_string(),"reset_epoch":key.reset_epoch.to_string(),"authored_revision":key.authored_revision.to_string()})).unwrap_or(Value::Null);
                     value["asset_revision"] = json!(pin.asset_revision.map(|v| v.to_string()));
                     value["shader_revision"] = json!(pin.shader_revision.to_string());
-                    value["camera"] = self.navigation.camera.map(|camera|json!({"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).unwrap_or(Value::Null);
+                    if value["status"] == "ready" {
+                        let metadata = grounding_metadata(&pending.pin);
+                        if serde_json::to_vec(&metadata).map_or(true, |v| v.len() > 8192) {
+                            value = json!({"capture_id":pending.id.to_string(),"status":"failed","reason":"grounding_metadata_limit"});
+                        } else {
+                            value
+                                .as_object_mut()
+                                .unwrap()
+                                .extend(metadata.as_object().unwrap().clone());
+                        }
+                    }
 
+                    if serde_json::to_vec(&value).map_or(true, |v| v.len() > 64_000) {
+                        value = json!({"capture_id":pending.id.to_string(),"status":"failed","reason":"capture_output_limit"});
+                    }
                     self.captures.completed = Some((pending.id, pin, value));
                     return;
                 }
@@ -424,6 +576,63 @@ fn clear_layers(ctx: &egui::Context) -> bool {
     })
 }
 
+fn grounding_metadata(pin: &Pin) -> Value {
+    json!({
+        "grounding_version":1,
+        "selected_object_ids":pin.selection.iter().take(256).collect::<Vec<_>>(),
+        "selected_count":pin.selection.len(), "selection_truncated":pin.selection.len()>256,
+        "active_object_id":pin.active,
+        "display_mode":if pin.runtime {"runtime"} else {"authored"},
+        "grounding":{"status":if pin.runtime {"unsupported"} else {"available"},
+            "reason":if pin.runtime {Some("runtime_grounding_unsupported")} else {None},
+            "domain":"scene_geometry", "excluded":["gizmos","HUD","outlines","light_icons","grid"],
+            "pixel_provenance_guaranteed":false},
+        "camera":pin.camera.map(|c|json!({"target":c.target,"yaw":c.yaw,"pitch":c.pitch,"distance":c.distance,"orthographic":c.orthographic})),
+        "view_matrix":pin.matrices.map(|m|m.0), "projection_matrix":pin.matrices.map(|m|m.1),
+        "matrix_convention":"column_major; right_handed; depth_zero_to_one"
+    })
+}
+
+fn sample_position(value: &Value, u: f64, v: f64) -> Result<egui::Pos2> {
+    if [u, v]
+        .iter()
+        .any(|n| !n.is_finite() || !(0.0..1.0).contains(n))
+    {
+        return Err(fail("invalid_coordinates"));
+    }
+    let axis = |n: f64, size: &str, source_size: &str, origin: &str| -> Result<f32> {
+        let size = value[size]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or_else(|| fail("invalid_geometry"))?;
+        let source = value[source_size]
+            .as_u64()
+            .filter(|n| *n > 0)
+            .ok_or_else(|| fail("invalid_geometry"))?;
+        let origin = value["source_pixel_rect"][origin]
+            .as_u64()
+            .ok_or_else(|| fail("invalid_geometry"))?;
+        let dpi = value["pixels_per_point"]
+            .as_f64()
+            .filter(|n| n.is_finite() && *n > 0.)
+            .ok_or_else(|| fail("invalid_geometry"))?;
+        let pixel = (n * size as f64).floor() as u64;
+        let offset = pixel
+            .checked_mul(source)
+            .ok_or_else(|| fail("invalid_geometry"))?
+            / size;
+        Ok(((origin
+            .checked_add(offset)
+            .ok_or_else(|| fail("invalid_geometry"))? as f64
+            + 0.5)
+            / dpi) as f32)
+    };
+    Ok(egui::pos2(
+        axis(u, "width", "source_width", "x")?,
+        axis(v, "height", "source_height", "y")?,
+    ))
+}
+
 fn capture_image(
     image: &Arc<egui::ColorImage>,
     rect: egui::Rect,
@@ -497,8 +706,10 @@ fn capture_image(
 #[cfg(test)]
 mod tests {
     use super::*;
+    static CAPTURE_TEST_OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
     #[test]
     fn capture_identity_and_single_lease_survive_scene_replacement() {
+        let _owner = CAPTURE_TEST_OWNER.lock().unwrap();
         fn editor() -> SceneEditor {
             let mut editor =
                 SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
@@ -769,6 +980,28 @@ mod tests {
             )
             .unwrap();
         assert_eq!(ready["status"], "ready");
+        assert_eq!(ready["grounding_version"], 1);
+        assert_eq!(ready["selected_object_ids"], json!(editor.manipulation.ids));
+        assert_eq!(ready["active_object_id"], json!(editor.selected));
+        assert_eq!(ready["view_matrix"], json!(editor.captures.view.unwrap()));
+        assert_eq!(
+            ready["projection_matrix"],
+            json!(editor.captures.projection.unwrap())
+        );
+        let before = editor.command("receipt", "scene_inspect", json!({}));
+        let pick = editor
+            .capture_command(
+                "receipt",
+                "viewport_capture_pick",
+                &json!({"capture_id":id,"u":0.5,"v":0.5}),
+            )
+            .unwrap();
+        assert_eq!(pick["status"], "hit");
+        assert_eq!(pick["object_id"], "center");
+        assert_eq!(
+            editor.command("receipt", "scene_inspect", json!({})),
+            before
+        );
         let complete = editor.captures.timing.snapshot().unwrap();
         assert!(!complete.1);
         assert!(complete.0.iter().all(|ns| *ns != u64::MAX));
@@ -782,6 +1015,17 @@ mod tests {
             .unwrap();
         assert_eq!(again, ready);
         assert_eq!(editor.captures.timing.snapshot().unwrap(), complete);
+        assert_eq!(
+            editor
+                .capture_command(
+                    "intruder",
+                    "viewport_capture_inspect",
+                    &json!({"capture_id":id})
+                )
+                .unwrap_err()
+                .0,
+            "capture_not_owned"
+        );
         drop(editor);
         assert!(!READBACK_BUSY.load(Ordering::Acquire));
     }
@@ -800,6 +1044,7 @@ mod tests {
             "view",
             "tick",
             "asset",
+            "mesh",
             "run",
             "runtime",
             "runtime_stale",
@@ -815,6 +1060,7 @@ mod tests {
             "empty",
             "disconnected",
             "encoder_failure",
+            "metadata",
             "no_context",
         ] {
             let mut editor =
@@ -833,6 +1079,9 @@ mod tests {
             let mut output = ctx.run_ui(input(), |_| {});
             output.textures_delta.clear();
             editor.export_context = Some(ctx.clone());
+            if case == "metadata" {
+                editor.manipulation.ids = vec!["x".repeat(128); 256];
+            }
             let mut pin = editor.capture_pin();
             match case {
                 "generation" => pin.generation += 1,
@@ -870,6 +1119,11 @@ mod tests {
             }
             let cancel = Arc::new(AtomicBool::new(false));
             editor.captures.workspace_owned = true;
+            editor.captures.owner = Some(Owner {
+                token: "owner".into(),
+                #[cfg(unix)]
+                authority: None,
+            });
             editor.captures.pending = Some(Pending {
                 id: 42,
                 pin,
@@ -881,6 +1135,16 @@ mod tests {
                 cancel: CancelOnDrop(cancel.clone()),
             });
             match case {
+                "mesh" => {
+                    editor.resolved.insert(
+                        "changed".into(),
+                        Arc::new(ruster_assets::Mesh {
+                            vertices: vec![],
+                            indices: vec![],
+                            texcoords: None,
+                        }),
+                    );
+                }
                 "draft" => {
                     editor.draft = Some(super::super::Fields::from(
                         &ruster_scene::Transform::default(),
@@ -929,14 +1193,14 @@ mod tests {
             );
             match case {
                 "ready" => assert_eq!(result.unwrap()["status"], "ready"),
-                "owner" => assert_eq!(result.unwrap_err().0, "capture_not_owned"),
+                "owner" | "token" => assert_eq!(result.unwrap_err().0, "capture_not_owned"),
                 "id" | "cancel" => assert_eq!(result.unwrap_err().0, "capture_not_found"),
                 "occlusion" => assert_eq!(result.unwrap_err().0, "viewport_occluded"),
                 "generation" | "revision" | "view" | "tick" | "asset" | "run" | "runtime"
-                | "runtime_stale" | "shader" | "rect" => {
+                | "runtime_stale" | "shader" | "rect" | "size" | "mesh" => {
                     assert_eq!(result.unwrap_err().0, "stale_capture", "{case}");
                 }
-                "token" | "unissued" | "empty" | "no_context" => {
+                "unissued" | "empty" | "no_context" => {
                     assert_eq!(result.unwrap()["status"], "pending", "{case}");
                     assert!(editor.captures.pending.is_some());
                 }
@@ -950,6 +1214,7 @@ mod tests {
                         "size" => "capture_size_limit",
                         "disconnected" => "capture_worker_unavailable",
                         "encoder_failure" => "render_pending",
+                        "metadata" => "grounding_metadata_limit",
                         _ => unreachable!(),
                     };
                     assert_eq!(result["reason"], reason, "{case}");
@@ -968,6 +1233,271 @@ mod tests {
             drop(editor);
             assert!(cancel.load(Ordering::Acquire), "{case}");
         }
+    }
+
+    #[test]
+    fn capture_sample_follows_thumbnail_integer_sampling_and_fractional_dpi() {
+        let rect = egui::Rect::from_min_max(egui::pos2(3.3, 4.2), egui::pos2(803.8, 305.1));
+        let value = capture_image(
+            &Arc::new(egui::ColorImage::filled([1100, 500], egui::Color32::GREEN)),
+            rect,
+            1.25,
+            false,
+        )
+        .unwrap();
+        let (w, h) = (
+            value["width"].as_u64().unwrap(),
+            value["height"].as_u64().unwrap(),
+        );
+        let (sw, sh) = (
+            value["source_width"].as_u64().unwrap(),
+            value["source_height"].as_u64().unwrap(),
+        );
+        for (u, v) in [(0., 0.), (0.12345, 0.6789), (0.99999, 0.99999)] {
+            let position = sample_position(&value, u, v).unwrap();
+            let x = 5 + ((u * w as f64).floor() as u64) * sw / w;
+            let y = 6 + ((v * h as f64).floor() as u64) * sh / h;
+            assert_eq!(
+                position,
+                egui::pos2((x as f32 + 0.5) / 1.25, (y as f32 + 0.5) / 1.25)
+            );
+        }
+        for n in [-1., 1., f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                sample_position(&value, n, 0.).unwrap_err().0,
+                "invalid_coordinates"
+            );
+        }
+    }
+
+    #[test]
+    fn captured_engine_geometry_is_frontmost_and_read_only() {
+        let _owner = CAPTURE_TEST_OWNER.lock().unwrap();
+        // CPU encoder/adoption/picker path; not GPU/composited-pixel proof.
+        for orthographic in [false, true] {
+            let mut scene = ruster_scene::Scene::demo();
+            scene.objects.truncate(2);
+            scene.objects[0].id = "rear".into();
+            scene.objects[0].transform.translation = [0., 0., 0.];
+            scene.objects[1].id = "front".into();
+            scene.objects[1].transform.translation = [0., 0., 0.];
+            scene.hierarchy.groups.insert(
+                "parent".into(),
+                ruster_scene::Group {
+                    name: None,
+                    transform: ruster_scene::Transform {
+                        translation: [0., 0., 2.],
+                        ..Default::default()
+                    },
+                },
+            );
+            scene
+                .hierarchy
+                .parents
+                .insert("front".into(), "parent".into());
+            scene.objects[1].color = scene.objects[0].color;
+            let mut editor = SceneEditor::new(ruster_scene::Session::new(scene).unwrap());
+            editor.navigation.reset = false;
+            let camera = ruster_render::CameraState {
+                target: [0., 0., 0.],
+                yaw: 0.,
+                pitch: 0.,
+                distance: 6.,
+                orthographic,
+            };
+            editor.navigation.camera = Some(camera);
+            let rect = egui::Rect::from_min_size(egui::pos2(10., 20.), egui::vec2(300., 600.));
+            editor.captures.rect = Some(rect);
+            let (view, projection) = camera.matrices(rect.aspect_ratio()).unwrap();
+            editor.captures.view = Some(view);
+            editor.captures.projection = Some(projection);
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1000., 1000.),
+                    )),
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            output.textures_delta.clear();
+            editor.export_context = Some(ctx);
+            editor.manipulation.ids = vec!["rear".into()];
+            editor.selected = Some("rear".into());
+            let pin = editor.capture_pin();
+            let args = json!({"expected_session_token":"owner","expected_revision":pin.revision.to_string(),"expected_view_revision":pin.view.to_string()});
+            let start = editor
+                .capture_command("owner", "viewport_capture_start", &args)
+                .unwrap();
+            let id = start["capture_id"].clone();
+            let (sender, receiver) = mpsc::channel();
+            editor.captures.pending.as_mut().unwrap().receiver = Some(receiver);
+            // Selection is captured, not re-polled from a later unrelated response.
+            sender
+                .send(capture_image(
+                    &Arc::new(egui::ColorImage::filled([1000, 1000], egui::Color32::GREEN)),
+                    rect,
+                    1.,
+                    false,
+                ))
+                .unwrap();
+            let ready = editor
+                .capture_command(
+                    "owner",
+                    "viewport_capture_inspect",
+                    &json!({"capture_id":id}),
+                )
+                .unwrap();
+            assert_eq!(ready["selected_object_ids"], json!(["rear"]));
+            assert_eq!(ready["grounding"]["status"], "available");
+            let before = editor.command("owner", "scene_inspect", json!({}));
+            let history = (
+                editor.session.undo_len(),
+                editor.session.redo_len(),
+                editor.session.is_dirty(),
+            );
+            let scene_bytes = serde_json::to_vec(editor.session.scene()).unwrap();
+            let query = json!({"capture_id":id,"u":0.5,"v":0.5});
+            let hit = editor
+                .capture_command("owner", "viewport_capture_pick", &query)
+                .unwrap();
+            assert_eq!(hit["object_id"], "front");
+            assert_eq!(hit["revision"], ready["revision"]);
+            assert!(hit.get("image_base64").is_none());
+            let miss = editor
+                .capture_command(
+                    "owner",
+                    "viewport_capture_pick",
+                    &json!({"capture_id":id,"u":0.,"v":0.}),
+                )
+                .unwrap();
+            assert_eq!(miss["status"], "miss");
+            assert!(miss["object_id"].is_null());
+            assert_eq!(editor.command("owner", "scene_inspect", json!({})), before);
+            assert_eq!(editor.manipulation.ids, vec!["rear"]);
+            assert_eq!(editor.navigation.camera, Some(camera));
+            assert_eq!(
+                history,
+                (
+                    editor.session.undo_len(),
+                    editor.session.redo_len(),
+                    editor.session.is_dirty()
+                )
+            );
+            assert_eq!(
+                scene_bytes,
+                serde_json::to_vec(editor.session.scene()).unwrap()
+            );
+            let (_, saved, value) = editor.captures.completed.as_ref().unwrap();
+            let mut invalid = saved.clone();
+            invalid.matrices = Some(([[0.; 4]; 4], [[0.; 4]; 4]));
+            assert_eq!(
+                editor.capture_pick(&invalid, value, &query).unwrap_err().0,
+                "invalid_geometry"
+            );
+            invalid = saved.clone();
+            invalid.runtime = true;
+            assert_eq!(
+                editor.capture_pick(&invalid, value, &query).unwrap_err().0,
+                "runtime_grounding_unsupported"
+            );
+            assert_eq!(
+                editor
+                    .capture_command(
+                        "owner",
+                        "viewport_capture_pick",
+                        &json!({"capture_id":id,"u":1.,"v":0.})
+                    )
+                    .unwrap_err()
+                    .0,
+                "invalid_coordinates"
+            );
+            for op in ["viewport_capture_inspect", "viewport_capture_pick"] {
+                let a = if op.ends_with("pick") {
+                    query.clone()
+                } else {
+                    json!({"capture_id":id})
+                };
+                assert_eq!(
+                    editor.capture_command("stranger", op, &a).unwrap_err().0,
+                    "capture_not_owned"
+                );
+            }
+            #[cfg(unix)]
+            {
+                let authority = crate::bridge::Authority::test_approved();
+                editor.connection_authority = Some(authority.clone());
+                editor.captures.owner.as_mut().unwrap().authority = Some(authority.clone());
+                assert_eq!(
+                    editor
+                        .capture_command("owner", "viewport_capture_pick", &query)
+                        .unwrap()["object_id"],
+                    "front"
+                );
+                editor.connection_authority = Some(crate::bridge::Authority::test_approved());
+                assert_eq!(
+                    editor
+                        .capture_command("owner", "viewport_capture_pick", &query)
+                        .unwrap_err()
+                        .0,
+                    "capture_not_owned"
+                );
+                editor.connection_authority = Some(authority.clone());
+                authority.revoke();
+                assert_eq!(
+                    editor
+                        .capture_command(
+                            "owner",
+                            "viewport_capture_inspect",
+                            &json!({"capture_id":id})
+                        )
+                        .unwrap_err()
+                        .0,
+                    "capture_not_owned"
+                );
+                assert_eq!(
+                    editor
+                        .capture_command("owner", "viewport_capture_pick", &query)
+                        .unwrap_err()
+                        .0,
+                    "capture_not_owned"
+                );
+            }
+            drop(editor);
+        }
+    }
+
+    #[test]
+    fn layout_return_does_not_revive_completed_capture() {
+        let mut editor =
+            SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
+        editor.navigation.reset = false;
+        let a = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(800., 600.));
+        editor.captures.rect = Some(a);
+        let pin = editor.capture_pin();
+        editor.captures.owner = Some(Owner {
+            token: "owner".into(),
+            #[cfg(unix)]
+            authority: None,
+        });
+        editor.captures.completed = Some((42, pin, json!({"status":"ready"})));
+        editor.captures.rect = Some(a.shrink(1.));
+        editor.observe_view();
+        editor.captures.rect = Some(a);
+        editor.observe_view();
+        assert_eq!(
+            editor
+                .capture_command(
+                    "owner",
+                    "viewport_capture_inspect",
+                    &json!({"capture_id":"42"})
+                )
+                .unwrap_err()
+                .0,
+            "stale_capture"
+        );
     }
 
     #[test]

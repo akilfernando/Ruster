@@ -3146,6 +3146,8 @@ dependencies = [
 name = "ruster-mcp"
 version = "0.1.0"
 dependencies = [
+ "base64",
+ "png",
  "ruster-scene",
  "rustix 0.38.44",
  "serde",

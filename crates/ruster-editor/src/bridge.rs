@@ -88,6 +88,10 @@ impl Authority {
     fn authorized(&self) -> bool {
         self.0.lock().is_ok_and(|s| s.admitted())
     }
+    /// Identity is the authenticated native connection, never caller JSON.
+    pub(crate) fn same_authorized(&self, other: &Self) -> bool {
+        Arc::ptr_eq(&self.0, &other.0) && self.authorized()
+    }
     pub fn draining(&self) -> bool {
         self.0
             .lock()
@@ -1384,13 +1388,13 @@ pub(crate) mod tests {
         let (owner_b, handshake_b) = approved(&b);
         assert_ne!(handshake_a["binding"], handshake_b["binding"]);
         // Use the owning capability inventory, not a second hand-maintained
-        // matrix. All 81 scene + 5 legacy operations cross the same gate.
+        // matrix. All scene and legacy operations cross the same gate.
         let operations: Vec<_> = crate::scene_editor::SCENE_CAPABILITIES
             .iter()
             .copied()
             .chain(["inspect", "edit", "undo", "redo", "replay"])
             .collect();
-        assert_eq!(operations.len(), 86);
+        assert_eq!(operations.len(), 87);
         for op in operations {
             for bad in ["missing", "wrong", "other_editor"] {
                 let mut request = frame(&handshake_b, op, json!({}));

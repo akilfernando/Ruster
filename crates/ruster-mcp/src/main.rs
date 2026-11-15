@@ -53,18 +53,59 @@ fn tool_result(result: Value) -> Value {
     let mut content = Vec::new();
     // The bounded native viewport endpoint is the only image producer. Keep the
     // bytes out of the text/structured duplicate while preserving useful pins.
-    if result["ok"] == true && result["result"]["status"] == "ready" {
-        if let Some(data) = result["result"]
-            .as_object_mut()
-            .and_then(|v| v.remove("image_base64"))
-        {
-            if let Some(data) = data.as_str().filter(|s| s.len() <= 54_000) {
-                content.push(json!({"type":"image","data":data,"mimeType":"image/png"}));
-            }
+    if result["ok"] == true
+        && result["result"]["status"] == "ready"
+        && (result["result"].get("image_base64").is_some()
+            || result["result"].get("capture_id").is_some())
+    {
+        if !valid_capture_image(&result["result"]) {
+            return tool_result(domain_error(
+                "invalid_capture_image",
+                "Malformed or oversized capture PNG",
+            ));
         }
+        let data = result["result"]
+            .as_object_mut()
+            .unwrap()
+            .remove("image_base64")
+            .unwrap();
+        content.push(json!({"type":"image","data":data,"mimeType":"image/png"}));
     }
     content.push(json!({"type":"text","text":result.to_string()}));
     json!({"content":content,"structuredContent":result,"isError":result["ok"]!=true})
+}
+
+fn valid_capture_image(value: &Value) -> bool {
+    use base64::Engine as _;
+    let Some(data) = value["image_base64"]
+        .as_str()
+        .filter(|s| !s.is_empty() && s.len() <= 53_336)
+    else {
+        return false;
+    };
+    let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(data) else {
+        return false;
+    };
+    if bytes.len() > 40_000 || value["mime_type"] != "image/png" {
+        return false;
+    }
+    let Ok(mut reader) = png::Decoder::new(std::io::Cursor::new(bytes)).read_info() else {
+        return false;
+    };
+    let info = reader.info();
+    if info.width == 0
+        || info.height == 0
+        || info.width > 512
+        || info.height > 512
+        || value["width"].as_u64() != Some(u64::from(info.width))
+        || value["height"].as_u64() != Some(u64::from(info.height))
+    {
+        return false;
+    }
+    let Some(size) = reader.output_buffer_size().filter(|n| *n <= 512 * 512 * 8) else {
+        return false;
+    };
+    reader.next_frame(&mut vec![0; size]).is_ok()
 }
 
 fn domain_error(code: &str, message: &str) -> Value {
@@ -1201,13 +1242,47 @@ mod tests {
     }
 
     #[test]
+    fn malformed_capture_image_is_error_not_metadata_success() {
+        for data in [
+            json!("not base64!"),
+            json!("cG5n"),
+            json!("A".repeat(54001)),
+            json!(null),
+            json!(42),
+        ] {
+            let result = tool_result(
+                json!({"ok":true,"result":{"status":"ready","width":1,"height":1,"mime_type":"image/png","image_base64":data}}),
+            );
+            assert_eq!(result["isError"], true);
+            assert_eq!(
+                result["structuredContent"]["error"]["code"],
+                "invalid_capture_image"
+            );
+            assert_eq!(result["content"].as_array().unwrap().len(), 1);
+        }
+    }
+
+    #[test]
     fn viewport_image_uses_mcp_image_content_without_text_duplication() {
+        use base64::Engine as _;
+        let mut bytes = Vec::new();
+        {
+            let mut encoder = png::Encoder::new(&mut bytes, 1, 1);
+            encoder.set_color(png::ColorType::Rgb);
+            encoder.set_depth(png::BitDepth::Eight);
+            encoder
+                .write_header()
+                .unwrap()
+                .write_image_data(&[1, 2, 3])
+                .unwrap();
+        }
+        let data = base64::engine::general_purpose::STANDARD.encode(bytes);
         let result = tool_result(
-            json!({"ok":true,"result":{"status":"ready","capture_id":"2","revision":"9","image_base64":"cG5n"}}),
+            json!({"ok":true,"result":{"status":"ready","capture_id":"2","revision":"9","width":1,"height":1,"mime_type":"image/png","image_base64":data}}),
         );
         assert_eq!(result["content"][0]["type"], "image");
         assert_eq!(result["content"][0]["mimeType"], "image/png");
-        assert_eq!(result["content"][0]["data"], "cG5n");
+        assert_eq!(result["content"][0]["data"], data);
         assert!(result["structuredContent"]["result"]
             .get("image_base64")
             .is_none());
@@ -1223,7 +1298,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 89);
+        assert_eq!(tools.len(), 90);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1276,6 +1351,7 @@ mod tests {
                 "viewport_inspect",
                 "viewport_camera",
                 "scene_select",
+                "viewport_capture_pick",
                 "viewport_capture_start",
                 "viewport_capture_inspect",
                 "creation_export_inspect",

@@ -19,6 +19,11 @@ struct ViewSnapshot {
     camera: Option<CameraState>,
     selection: Vec<String>,
     active: Option<String>,
+    layout: Option<eframe::egui::Rect>,
+    dpi: Option<f32>,
+    screen: Option<eframe::egui::Rect>,
+    resources: Vec<(u8, String, usize)>,
+    matrices: Option<ruster_render::CameraMatrices>,
 }
 
 fn fail(code: &str) -> (String, String) {
@@ -73,6 +78,17 @@ impl SceneEditor {
             camera: self.navigation.camera,
             selection: self.manipulation.ids.clone(),
             active: self.selected.clone(),
+            layout: self.captures.rect,
+            resources: self.capture_resources(),
+            dpi: self
+                .export_context
+                .as_ref()
+                .map(eframe::egui::Context::pixels_per_point),
+            screen: self
+                .export_context
+                .as_ref()
+                .map(eframe::egui::Context::viewport_rect),
+            matrices: self.captures.view.zip(self.captures.projection),
         };
         if self
             .view_state
