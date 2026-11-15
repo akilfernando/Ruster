@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/python3
 """One-time explicit saved-project registration; never grants native/browser consent."""
 import argparse
 import json
@@ -40,9 +40,14 @@ def main():
     root.mkdir(mode=0o700)
     routing = root / "routing"
     routing.mkdir(mode=0o700)
+    for name in ("owner.lock", "startup.lock"):
+        with (routing / name).open("x"):
+            os.chmod(routing / name, 0o600)
+    dm = routing.stat()
     m = native.stat()
     record = {"id": args.id, "name": args.name, "scene_id": scene_id, "startup": {
         "scene_path": str(scene), "native_binary": str(native), "state_directory": str(routing),
+        "routing_identity": {"directory_dev": dm.st_dev, "directory_ino": dm.st_ino, "owner_ino": (routing / "owner.lock").stat().st_ino, "startup_ino": (routing / "startup.lock").stat().st_ino},
         "binary_identity": {"dev": m.st_dev, "ino": m.st_ino, "len": m.st_size,
                             "mtime": m.st_mtime_ns // 1_000_000_000, "mtime_nsec": m.st_mtime_ns % 1_000_000_000}}}
     registry = root / "registry.json"
@@ -52,7 +57,7 @@ def main():
     launcher = root / "connect.py"
     with launcher.open("x") as f:
         os.chmod(launcher, 0o700)
-        f.write("#!/usr/bin/env python3\nimport os\n")
+        f.write("#!/usr/bin/python3\nimport os\n")
         f.write("os.environ.pop('RUSTER_MCP_LOCATOR', None)\n")
         f.write(f"os.environ['RUSTER_MCP_PROJECT_REGISTRY'] = {str(registry)!r}\n")
         f.write(f"os.execv({str(adapter)!r}, [{str(adapter)!r}])\n")

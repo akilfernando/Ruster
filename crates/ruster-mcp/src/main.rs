@@ -682,6 +682,7 @@ struct Adapter {
     registry: Option<io::Result<project_tools::Registry>>,
     selected: Option<project_tools::Project>,
     verified: bool,
+    startup_error: Option<String>,
 }
 impl Adapter {
     fn configured() -> Self {
@@ -728,7 +729,11 @@ impl Adapter {
                     self.attempted = true;
                     let selected = self.selected.as_mut().unwrap();
                     if let Err(error) = selected.prepare() {
-                        return domain_error("project_startup_unavailable", &error.to_string());
+                        self.startup_error = Some(error.to_string());
+                        return domain_error(
+                            "project_startup_unavailable",
+                            self.startup_error.as_deref().unwrap(),
+                        );
                     }
                     self.client = selected.open().ok();
                 }
@@ -737,6 +742,9 @@ impl Adapter {
                 return domain_error("project_required", "Call project_connect with an exact registered name or ID before project access.");
             };
             let Some(client) = self.client.as_mut() else {
+                if let Some(error) = &self.startup_error {
+                    return domain_error("project_startup_unavailable", error);
+                }
                 return domain_error("bridge_unavailable", "Registered incarnation unavailable; no restart, retarget or fallback. Explicit registration and fresh owner consent required.");
             };
             if !self.verified || name == "project_connect" {

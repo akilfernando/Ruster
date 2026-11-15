@@ -37,6 +37,49 @@ impl BinaryIdentity {
         })
     }
 }
+/// Private startup liveness, not an approval capability. A native owner may
+/// transfer to its normal interactive lifetime only while this launch is current.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Bootstrap {
+    adapter_pid: u32,
+    process_start: String,
+    deadline_ms: u128,
+}
+impl Bootstrap {
+    fn now_ms() -> io::Result<u128> {
+        Ok(std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(io::Error::other)?
+            .as_millis())
+    }
+    pub fn capture() -> io::Result<Self> {
+        let adapter_pid = std::process::id();
+        Ok(Self {
+            adapter_pid,
+            process_start: process_start(adapter_pid)?,
+            deadline_ms: Self::now_ms()? + 15_000,
+        })
+    }
+    pub fn validate(&self) -> io::Result<()> {
+        if Self::now_ms()? >= self.deadline_ms
+            || process_start(self.adapter_pid).ok().as_ref() != Some(&self.process_start)
+        {
+            return Err(io::Error::other(
+                "registered project startup cancelled or expired; no owner published",
+            ));
+        }
+        Ok(())
+    }
+}
+#[derive(Clone, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct RoutingIdentity {
+    directory_dev: u64,
+    directory_ino: u64,
+    owner_ino: u64,
+    startup_ino: u64,
+}
 #[derive(Clone, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct Startup {
@@ -44,6 +87,7 @@ pub struct Startup {
     pub native_binary: PathBuf,
     pub state_directory: PathBuf,
     pub binary_identity: BinaryIdentity,
+    pub routing_identity: RoutingIdentity,
 }
 #[derive(Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -72,7 +116,13 @@ pub fn private_file(path: &Path) -> io::Result<Vec<u8>> {
 pub fn process_start(pid: u32) -> io::Result<String> {
     let stat = fs::read_to_string(format!("/proc/{pid}/stat"))?;
     stat.rsplit_once(") ")
-        .and_then(|(_, s)| s.split_whitespace().nth(19))
+        .and_then(|(_, s)| {
+            let state = s.split_whitespace().next()?;
+            if matches!(state, "Z" | "X") {
+                return None;
+            }
+            s.split_whitespace().nth(19)
+        })
         .map(str::to_owned)
         .ok_or_else(|| io::Error::other("process identity unavailable"))
 }
@@ -81,7 +131,9 @@ impl Startup {
         connection::no_symlinks(&self.scene_path)?;
         connection::no_symlinks(&self.state_directory)?;
         let m = fs::metadata(&self.state_directory)?;
-        if !m.is_dir()
+        if m.dev() != self.routing_identity.directory_dev
+            || m.ino() != self.routing_identity.directory_ino
+            || !m.is_dir()
             || m.uid() != rustix::process::getuid().as_raw()
             || m.mode() & 0o777 != 0o700
             || !self.scene_path.is_file()
@@ -99,12 +151,28 @@ impl Startup {
         let file = OpenOptions::new()
             .read(true)
             .write(true)
-            .create(true)
             .truncate(false)
             .mode(0o600)
             .open(&path)?;
         private_file(&path)?;
-        file.try_lock().map_err(io::Error::other)?;
+        let m = file.metadata()?;
+        let expected = match name {
+            "owner.lock" => self.routing_identity.owner_ino,
+            "startup.lock" => self.routing_identity.startup_ino,
+            _ => return Err(io::Error::other("unknown routing lock")),
+        };
+        if m.dev() != self.routing_identity.directory_dev
+            || m.ino() != expected
+            || fs::metadata(&path)?.ino() != expected
+        {
+            return Err(io::Error::other("routing lock replaced"));
+        }
+        file.try_lock().map_err(|error| match error {
+            std::fs::TryLockError::WouldBlock => {
+                io::Error::new(io::ErrorKind::WouldBlock, "registered owner busy")
+            }
+            std::fs::TryLockError::Error(error) => error,
+        })?;
         Ok(file)
     }
     pub fn publication(&self) -> PathBuf {

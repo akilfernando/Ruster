@@ -5930,6 +5930,16 @@ pub fn run(path: PathBuf) -> Result<(), String> {
 }
 fn run_session(session: Session) -> Result<(), String> {
     #[cfg(unix)]
+    let bootstrap = if std::env::var_os("RUSTER_PROJECT_STARTUP").is_some() {
+        let raw = std::env::var("RUSTER_PROJECT_BOOTSTRAP").map_err(|e| e.to_string())?;
+        let bootstrap: crate::project_startup::Bootstrap =
+            serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+        bootstrap.validate().map_err(|e| e.to_string())?;
+        Some(bootstrap)
+    } else {
+        None
+    };
+    #[cfg(unix)]
     let _registered_owner = if let Some(raw) = std::env::var_os("RUSTER_PROJECT_STARTUP") {
         let startup: crate::project_startup::Startup =
             serde_json::from_str(&raw.to_string_lossy()).map_err(|e| e.to_string())?;
@@ -5991,6 +6001,10 @@ fn run_session(session: Session) -> Result<(), String> {
                 #[cfg(not(feature = "inspection"))]
                 ruster_render::install(render);
                 eprintln!("Scene editor adapter: {:?}", render.adapter.get_info());
+            }
+            #[cfg(unix)]
+            if let Some(bootstrap) = &bootstrap {
+                bootstrap.validate()?;
             }
             let mut host = Host {
                 input: Default::default(),

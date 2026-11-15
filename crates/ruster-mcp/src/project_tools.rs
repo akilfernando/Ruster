@@ -130,7 +130,12 @@ impl Project {
         };
         startup.validate()?;
         let _start = startup.lock("startup.lock")?;
-        if let Ok(owner) = startup.lock("owner.lock") {
+        let owner = match startup.lock("owner.lock") {
+            Ok(owner) => Some(owner),
+            Err(error) if error.kind() == io::ErrorKind::WouldBlock => None,
+            Err(error) => return Err(error),
+        };
+        if let Some(owner) = owner {
             drop(owner);
             // No registered native owner: only this explicitly pinned launch is allowed.
             let mut command = std::process::Command::new(&startup.native_binary);
@@ -154,6 +159,10 @@ impl Project {
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
+            command.env(
+                "RUSTER_PROJECT_BOOTSTRAP",
+                serde_json::to_string(&crate::project_startup::Bootstrap::capture()?)?,
+            );
             let mut child = command.spawn()?;
             let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
             loop {
@@ -161,17 +170,15 @@ impl Project {
                     return Err(io::Error::other("registered native startup failed"));
                 }
                 if let Ok(publication) = startup.read(&self.id, &self.scene_id) {
-                    if publication.native_pid != child.id() {
-                        return Err(io::Error::other(
-                            "publication is not the launched native child",
-                        ));
+                    if publication.native_pid == child.id() {
+                        self.locator = publication.locator;
+                        self.binding = publication.binding;
+                        std::thread::spawn(move || {
+                            let _ = child.wait();
+                        });
+                        return Ok(());
                     }
-                    self.locator = publication.locator;
-                    self.binding = publication.binding;
-                    std::thread::spawn(move || {
-                        let _ = child.wait();
-                    });
-                    return Ok(());
+                    // An old publication never becomes the launched owner.
                 }
                 if std::time::Instant::now() >= deadline {
                     // Do not kill an editor that might contain human work. Retain its
@@ -287,12 +294,65 @@ mod tests {
 
     #[test]
     fn registered_saved_project_needs_no_per_run_locator() {
-        let record = json!({"id":"one","name":"One","scene_id":"scene-one","startup":{"scene_path":"/private/one.scene.json","native_binary":"/private/ruster-editor","state_directory":"/private/routing","binary_identity":{"dev":1,"ino":2,"len":3,"mtime":4,"mtime_nsec":5}}});
+        let record = json!({"id":"one","name":"One","scene_id":"scene-one","startup":{"scene_path":"/private/one.scene.json","native_binary":"/private/ruster-editor","state_directory":"/private/routing","binary_identity":{"dev":1,"ino":2,"len":3,"mtime":4,"mtime_nsec":5},"routing_identity":{"directory_dev":1,"directory_ino":2,"owner_ino":3,"startup_ino":4}}});
         let registry = Registry::parse(&json!({"projects":[record]}).to_string());
         assert!(
             registry.is_ok(),
             "saved-project registration must not require a per-run locator"
         );
+    }
+
+    #[test]
+    fn cancelled_or_expired_bootstrap_cannot_publish_a_native_owner() {
+        let valid = crate::project_startup::Bootstrap::capture().unwrap();
+        assert!(valid.validate().is_ok());
+        let mut invalid = serde_json::to_value(&valid).unwrap();
+        invalid["process_start"] = json!("not-this-adapter");
+        let invalid: crate::project_startup::Bootstrap = serde_json::from_value(invalid).unwrap();
+        assert!(invalid.validate().is_err());
+        let mut expired = serde_json::to_value(&valid).unwrap();
+        expired["deadline_ms"] = json!(0);
+        let expired: crate::project_startup::Bootstrap = serde_json::from_value(expired).unwrap();
+        assert!(expired.validate().is_err());
+    }
+
+    #[test]
+    fn routing_lock_replacement_cannot_launch_a_second_owner() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = tempfile::tempdir().unwrap();
+        fs::set_permissions(root.path(), fs::Permissions::from_mode(0o700)).unwrap();
+        let binary = root.path().join("native");
+        fs::write(&binary, "#!/bin/sh\nexit 0\n").unwrap();
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700)).unwrap();
+        let scene = root.path().join("scene.json");
+        fs::write(&scene, "{}").unwrap();
+        let mut raw = json!({"scene_path":scene,"native_binary":binary,"state_directory":root.path(),"binary_identity":crate::project_startup::BinaryIdentity::read(&binary).unwrap()});
+        // Registration pins both routing lock files, not just a replaceable path.
+        for name in ["owner.lock", "startup.lock"] {
+            fs::write(root.path().join(name), "").unwrap();
+            fs::set_permissions(root.path().join(name), fs::Permissions::from_mode(0o600)).unwrap();
+        }
+        raw["routing_identity"] = json!({"directory_dev":fs::metadata(root.path()).unwrap().dev(),"directory_ino":fs::metadata(root.path()).unwrap().ino(),"owner_ino":fs::metadata(root.path().join("owner.lock")).unwrap().ino(),"startup_ino":fs::metadata(root.path().join("startup.lock")).unwrap().ino()});
+        let startup: crate::project_startup::Startup =
+            serde_json::from_value(raw).expect("registered routing identities must be supported");
+        let owner = startup.lock("owner.lock").unwrap();
+        assert!(startup.lock("owner.lock").is_err());
+        fs::rename(
+            root.path().join("owner.lock"),
+            root.path().join("original-owner.lock"),
+        )
+        .unwrap();
+        fs::write(root.path().join("owner.lock"), "").unwrap();
+        fs::set_permissions(
+            root.path().join("owner.lock"),
+            fs::Permissions::from_mode(0o600),
+        )
+        .unwrap();
+        assert!(
+            startup.lock("owner.lock").is_err(),
+            "replacement lock must not release the original native owner"
+        );
+        drop(owner);
     }
 
     #[test]
