@@ -11,7 +11,7 @@ inventory, not a competing active schedule.
 - **Where we have been and why:** [development decision record](ROADMAP-REVIEW.md#development-decision-record--2026-11-15), including a clearly labeled retrospective and the convergence decision.
 - **What is actually implemented/tested/blocked:** [STATUS](STATUS.md) and its linked evidence.
 - **Architecture contracts:** [decision records](decisions/); the roadmap links them rather than duplicating their specifications.
-- **Working convergence home:** `feat/cumulative-editor-20261115`. Protected feedback candidates remain frozen references, not alternative permanent products. This branch is not a canonical merge, installed build or release.
+- **Working convergence home:** `feat/cumulative-editor-20261115`. Protected feedback candidates remain frozen references, not alternative permanent products. Its default native editor is now installed as a partial cumulative handoff; this is not a canonical merge, full MCP/browser promotion or release.
 
 ### Starting point: source progress is not delivered parity
 
@@ -29,11 +29,12 @@ usability remains unaccepted. Capture completion/service pacing remains unsplit.
 
 The qualified hierarchy repairs are already present under cherry-picked commits;
 source comparison, not ancestry alone, establishes that. The cumulative editor's
-native compound edit/history/Save/fresh-reopen now passes, but visual qualification
-is HELD by a collider guide that uses local instead of resolved-world pose. No
-cumulative installation has been verified in this run. The delivery gap therefore
-includes qualification, runtime/launcher choice and installed experience, not
-simply missing source merges.
+native compound edit/history/Save/fresh-reopen passes. The discovered grouped
+collider-guide defect is repaired and its changed native visual behavior passes;
+parent changed-risk review is GO, with the final close-selector harness failure
+retained. The default native editor is now installed with rollback, verified hash
+and a no-GUI executable smoke. Human acceptance and the remaining MCP/browser
+workflow are still open. The gap was not simply missing source merges.
 
 ### Immediate convergence milestone
 
@@ -44,7 +45,7 @@ per-run connection capabilities.
 
 | Workstream | Next bounded outcome | Current state / acceptance gate |
 | --- | --- | --- |
-| Cumulative engine/editor | Native nested groups, supported nonuniform leaves/attached light, shared transforms/history, Save and fresh reopen in the current cumulative candidate | Native edit/history/Save/fresh graphical reopen PASS; byte-exact document/history and matching mesh pixels. **HELD/stopped**: grouped collider guide is displaced (local/world pose routing). Repair with grouped-owner RED/GREEN and matched-build native visual proof; desktop released, not installed. |
+| Cumulative engine/editor | Native nested groups, supported nonuniform leaves/attached light, shared transforms/history, Save and fresh reopen in the current cumulative candidate | Functional compound PASS; grouped-guide repair has RED/GREEN, native visual proof and parent changed-risk GO. Default native candidate **INSTALLED** with verified rollback/hash/help smoke; no extra GUI launch, physical-human acceptance pending. Final visual-run close-selector failure is preserved, not relabeled normal close. |
 | Managed ChatGPT startup | A closed registered project opens through the stable MCP invocation, then native/browser consent and the internal-browser handoff work | Desktop-variable forwarding corrected; later actual-client startup failure remains **UNRESOLVED**, diagnosis queued. No silent fallback launch or approval. |
 | Normal browser navigation | Responsive orbit/pan/zoom/Fit and shared selection in the normal connection route, with full-quality current native pixels | Source review/live capability pass; latency improved but usability **HELD**. Diagnose the measured capture seam or perform a coordinated representative visibility comparison before another redesign. |
 | Intended browser editing | Bring intended human manipulation/shared Undo into this same route rather than leaving it fixture-only | **QUEUED**, not provided by the preview/navigation grant. Define the bounded interaction and truthful native permission text before implementation; AI authors through direct MCP. |

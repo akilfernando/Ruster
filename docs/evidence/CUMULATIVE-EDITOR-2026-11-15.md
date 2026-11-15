@@ -1,7 +1,8 @@
 # Cumulative native editor candidate — 2026-11-15
 
-**Prior native functional journey PASS; grouped guide repair and changed native visual proof now pass. Parent changed-risk review/promotion remain pending.**
-The final section records the repair; earlier failures and visual hold below remain historical evidence.
+**Current: parent changed-risk GO; default cumulative native candidate installed with verified rollback/hash/help smoke. Human acceptance remains pending.**
+See the final [native-only promotion](#native-only-promotion-and-parent-review--2026-11-15).
+Earlier failures, visual holds and installation-pending statements below are the preserved chronology, not the current delivery state.
 Fresh idle-window run `native-3` supersedes the admission blocker below; prior failures remain preserved.
 Candidate `90ceccf2ba8aade6588b11d99802be6daab7406c`, product source
 `167d12353d606efc83a3ba957c81e64d54846c3d`, exclusive branch
@@ -254,3 +255,26 @@ replacement, managed-startup repair or browser responsiveness acceptance. Main o
 Telegram completion, the independent changed-risk review and any install/promotion
 choice. `installed=false`; human acceptance, actual managed ChatGPT startup and
 329ms normal-browser usability remain separate holds.
+
+## Native-only promotion and parent review — 2026-11-15
+
+Parent independently reviewed the complete owning diff, shared world/spatial
+contract, old/corrected PNGs and matched artifact receipts. Scoped repair GO;
+both new artifact hashes and each583-input set match. This is not a new full-run
+pass: the close-selector finalization failure remains preserved. A separate
+selector-corrected runner is prepared and syntax-checked only, not executed.
+
+Under standing installation permission, default release source `fbdcbf7`, SHA256
+`9e5d1c34aca6acf7b2398d09466ac3b7618c879c7d4e3e52715e0dd8823737d7`, is atomically
+installed at `~/.local/bin/ruster-editor`. Installed hash and no-GUI `--help`
+exit0/scene-option smoke pass. Previous binary and desktop entry are verified in
+`~/.local/share/rusterize/rollback/20261115-170813-pre-cumulative-fbdcbf7/`.
+The first installer attempt hit a directory-fsync wrapper error and verified
+rollback; the corrected raw-descriptor fsync attempt passes. No GUI launch,
+project/preference/recovery change or frozen ChatGPT entry replacement occurred.
+
+Raw local receipts: `collider-repair/parent-changed-risk-review.{md,json}` and
+`collider-repair/native-install-receipt.json`. `installed=true` for the native
+candidate only; physical-human acceptance and the managed-startup/browser
+convergence gates remain open. The normal application entry uses this candidate;
+the frozen older ChatGPT trial still uses its own registered binary.

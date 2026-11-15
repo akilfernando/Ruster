@@ -1,5 +1,29 @@
 # Current project status
 
+## Partial cumulative native handoff installed — 2026-11-15
+
+Parent changed-risk review is **GO** for collider repair `fbdcbf7`, after complete
+owning diff, runtime-contract and old/corrected PNG review. Both default and
+inspection artifacts and each 583-input build receipt independently match.
+The default non-inspection release is atomically installed at
+`~/.local/bin/ruster-editor`, source `fbdcbf793ec4c287d95f74a3885b3fd2179003c0`, SHA256
+`9e5d1c34aca6acf7b2398d09466ac3b7618c879c7d4e3e52715e0dd8823737d7`.
+Installed hash and `--help` exit 0/scene argument recognition pass. No GUI was
+launched after releasing the desktop. Existing desktop entry, user projects,
+preferences/recovery and frozen ChatGPT configuration/artifacts are unchanged.
+Rollback binary and desktop entry are verified under
+`~/.local/share/rusterize/rollback/20261115-170813-pre-cumulative-fbdcbf7/`.
+An initial installer directory-fsync wrapper failed and rolled back correctly;
+the corrected low-level fsync installation then passed readback/smoke. Raw receipt
+is `collider-repair/native-install-receipt.json` in the cumulative audit.
+
+This delivers the native cumulative editor, **not complete convergence**.
+The source/functional/changed-visual evidence is reconciled; the visual runner's
+final close-selector failure remains failed, with separate verified cleanup.
+The selector is corrected in a new offline-only runner; no new close pass claimed.
+Physical-human acceptance, actual ChatGPT cold startup and 329 ms browser usability
+remain open. Old recorded `installed=false` sections below describe earlier stages.
+
 ## Roadmap and development decision continuity — 2026-11-15
 
 Akil confirms convergence toward one cumulative editor/engine/MCP/browser delivery
@@ -12,7 +36,7 @@ process lessons and the short format for future entries. Existing architecture
 contracts and technical evidence remain separate; no new planning service or
 whole-engine scope is activated. Project development guidance now requires upkeep.
 This is documentation/process work, not a passed cumulative journey or install.
-The fresh idle-window repair below resolves the collider visual hold; independent changed-risk review and promotion remain pending.
+The fresh idle-window repair resolves the collider visual hold; parent changed-risk GO and partial native promotion are recorded above.
 
 ## Cumulative native editor candidate — 2026-11-15
 
@@ -34,10 +58,10 @@ suffix; no close event was delivered. Exact-owned SIGTERM cleanup then verified
 process/window/listener/observer absence, removed disposable runtime/profile roots,
 released the gate and preserved desktop/focus/cursor. No repeat native session.
 Prior complete native history/Save/fresh-reopen proof remains reused, not rerun.
-Computer-free handoff preceded offline image checks/docs. Parent changed-risk review
-and any install/promotion remain pending; no independent review is self-claimed.
-`installed=false`; human acceptance pending. Actual ChatGPT managed startup and
-329ms normal-browser usability remain separate holds.
+Computer-free handoff preceded offline image checks/docs. Parent changed-risk
+review is GO and the default native editor is installed as recorded above; human
+acceptance remains pending. Actual ChatGPT managed startup and329ms normal-browser
+usability remain separate holds. The full visual runner is not called passing.
 [RED/GREEN, exact builds, visual checks, failure and cleanup](evidence/CUMULATIVE-EDITOR-2026-11-15.md#grouped-collider-guide-repair-and-changed-native-proof--2026-11-15).
 
 ## Coherent workspace frame transaction — 2026-11-15

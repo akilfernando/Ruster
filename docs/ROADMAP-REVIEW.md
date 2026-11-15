@@ -699,6 +699,32 @@ a normal-close route. Parent changed-risk review, actual managed ChatGPT startup
 329ms browser usability, human acceptance and installation remain separate gates.
 [Repair, changed proof and retained failure](evidence/CUMULATIVE-EDITOR-2026-11-15.md#grouped-collider-guide-repair-and-changed-native-proof--2026-11-15).
 
+### Decision 2026-11-15-02: partial native promotion, not full convergence
+
+**Authority/rationale:** Akil's standing permission covers installing Rusterize
+development builds with rollback. Root selects a native-only promotion after the
+cumulative functional journey and the owning collider-guide repair pass their
+scoped checks and parent changed-risk review. Do not hold useful native delivery
+indefinitely behind unfinished browser responsiveness, but do not advertise those
+browser or managed-startup outcomes as delivered.
+
+**Observed outcome:** default non-inspection source `fbdcbf7` is atomically installed
+through the existing application entry. Its exact release hash and no-GUI `--help`
+smoke pass; previous executable/desktop entry are backed up and verified. The first
+installer attempt rolled back after a directory-fsync wrapper error; the corrected
+attempt passes. No project, preference, recovery or frozen ChatGPT entry is changed.
+No further desktop test runs after the computer-free notification. Physical-human
+acceptance remains pending. The changed visual runner's final close-selector failure
+is retained; a new selector-fixed runner is only syntax-checked, not executed.
+
+**Lesson/revisit:** source, combined qualification, installed native delivery and
+full client parity are different states. Record partial promotion visibly rather
+than leaving every new native feature in an audit binary or overstating completion.
+Binary rollback does not convert newly saved grouped scenes back to older formats.
+Actual managed startup, browser usability and explicit browser-edit permission
+remain convergence gates. Local raw receipts: `collider-repair/parent-changed-risk-review.*`
+and `collider-repair/native-install-receipt.json` in the cumulative audit.
+
 ### Process evaluation to carry forward
 
 - **What helped:** isolated checkpoints protected accepted feedback, source/patch comparison avoided a redundant merge, and owning regressions caught consequential history/precision/authority defects.
