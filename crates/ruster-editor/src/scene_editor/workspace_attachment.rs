@@ -74,7 +74,7 @@ impl Framing {
 }
 fn send(socket: &mut UnixStream, value: &Value) -> io::Result<()> {
     let body = serde_json::to_vec(value)?;
-    if body.is_empty() || body.len() > 8 * 1024 * 1024 {
+    if body.is_empty() || body.len() > super::capture_commands::WORKSPACE_REPLY_LIMIT {
         return Err(io::Error::other("workspace reply length"));
     }
     let bytes = [
