@@ -1,5 +1,11 @@
 # Current project status
 
+## Parent repair of independent-review counterexamples — 2026-11-15
+
+The delegated repair stopped with a provider HTTP400 after adding the exact far-descendant test; parent preserved that test and completed the repair directly. The exact reparent counterexample now fails before the fix and passes afterward. Reparent validates every affected world pose and the flattened f32 target matrices, not just the moved group, before atomic swap; its existing tolerance is not loosened. Signed-boundary selection tests reproduce f64 coordinates rounding back inside the f32 domain; requested local translation is now checked before conversion. Detached group IDs with spaces, separators, non-ASCII characters or overlength reproduce the grammar gap; admission now reuses production `validate_id`.
+
+All three observed failures are retained as RED logs; the first exact-name test invocation selected zero tests and is retained as a preparation, not a passing regression. The runnable assembly example, five example cases, two actual render/spatial consumer cases, affected strict Clippy/format and seven package/export tests pass on the repaired helper. No new full-workspace run, GPU appearance, instance-normal preparation, production hierarchy/history/schema or actual editor/MCP integration is claimed. The prototype's scale/light/depth/tolerance choices remain experimental and require the existing architecture decision gate before production adoption.
+
 ## Nested assembly core investigation — 2026-11-15
 
 **Runnable example/test-only prototype, not integrated F4a.** Latest user request

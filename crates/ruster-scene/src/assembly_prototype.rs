@@ -174,11 +174,9 @@ impl Assembly {
         let mut ids = BTreeSet::new();
         let mut memo = BTreeMap::new();
         for group in &self.groups {
-            if group.id.is_empty()
-                || self.scene.target_transform(&group.id).is_some()
-                || !ids.insert(&group.id)
-            {
-                return Err("duplicate or empty group identity".into());
+            ruster_scene::validate_id(&group.id).map_err(|error| error.to_string())?;
+            if self.scene.target_transform(&group.id).is_some() || !ids.insert(&group.id) {
+                return Err("duplicate group identity".into());
             }
         }
         for (child, parent) in &self.parents {
@@ -255,6 +253,7 @@ impl Assembly {
     }
 
     pub fn reparent(&mut self, id: &str, parent: Option<&str>) -> Result<(), String> {
+        let flat_before = self.flatten()?;
         let worlds = self.worlds()?;
         let before = *worlds
             .get(id)
@@ -281,9 +280,23 @@ impl Assembly {
         } else {
             staged.parents.remove(id);
         }
-        staged.flatten()?;
-        if !matrices_close(before.matrix(), staged.worlds()?[id].matrix()) {
-            return Err("reparent exceeds prototype world-preservation tolerance".into());
+        let flat_after = staged.flatten()?;
+        let after = staged.worlds()?;
+        // Quantizing a group can amplify a tiny rotation error at a distant
+        // descendant. Preserve the entire closure, including the f32 poses
+        // actually handed to existing production consumers, before swapping.
+        for (target, pose) in &worlds {
+            if !matrices_close(pose.matrix(), after[target].matrix()) {
+                return Err("reparent exceeds prototype world-preservation tolerance".into());
+            }
+            if let Some(old) = flat_before.target_transform(target) {
+                let new = flat_after
+                    .target_transform(target)
+                    .ok_or_else(|| format!("missing staged target {target}"))?;
+                if !matrices_close(matrix(old), matrix(new)) {
+                    return Err("reparent exceeds flattened descendant tolerance".into());
+                }
+            }
         }
         *self = staged;
         Ok(())
@@ -316,9 +329,11 @@ impl Assembly {
                     / worlds[parent].scale
             });
             let local = staged.local_mut(id)?;
-            local.translation = (DVec3::from_array(local.translation.map(f64::from)) + delta)
-                .as_vec3()
-                .to_array();
+            let translation = DVec3::from_array(local.translation.map(f64::from)) + delta;
+            if !translation.is_finite() || translation.abs().max_element() > 10_000.0 {
+                return Err("selection translation exceeds prototype numeric bounds".into());
+            }
+            local.translation = translation.as_vec3().to_array();
         }
         staged.flatten()?;
         *self = staged;

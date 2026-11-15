@@ -41,6 +41,21 @@ fn rejected_edits_preserve_the_complete_assembly() {
         assert!(assembly.edit(change).is_err());
         assert_eq!(assembly, original);
     }
+    for id in [
+        "invalid id with spaces".into(),
+        "bad/id".into(),
+        "λ".into(),
+        "x".repeat(129),
+    ] {
+        assert!(assembly
+            .edit(|a| a.groups.push(Group {
+                id,
+                parent: None,
+                local: Transform::default(),
+            }))
+            .is_err());
+        assert_eq!(assembly, original);
+    }
     for (target, parent) in [
         ("root", Some("hinge")),
         ("hinge", Some("hinge")),
@@ -58,6 +73,20 @@ fn rejected_edits_preserve_the_complete_assembly() {
         .translate_selection(&["root"], [f64::INFINITY, 0.0, 0.0])
         .is_err());
     assert_eq!(assembly, original);
+
+    // Requested f64 coordinates must be admitted before f32 rounding. Both
+    // signed limits would otherwise round an out-of-range request back inside.
+    for sign in [-1.0, 1.0] {
+        let mut edge = fixture();
+        edge.parents.clear();
+        edge.scene.objects[0].transform.translation = [(sign * 10_000.0) as f32, 0.0, 0.0];
+        edge.flatten().unwrap();
+        let original = edge.clone();
+        assert!(edge
+            .translate_selection(&["left"], [sign * 0.00001, 0.0, 0.0])
+            .is_err());
+        assert_eq!(edge, original);
+    }
 }
 
 #[test]
@@ -134,6 +163,26 @@ fn selected_ancestor_covers_descendants_once_in_world_space() {
         before,
         matrix(&assembly.flatten().unwrap().objects[0].transform)
     ));
+
+    // Independent review's exact admitted far-descendant counterexample.
+    let mut assembly = fixture();
+    let v = 663_f32 * 0.001;
+    assembly.parents.remove("bulb");
+    assembly.groups[0].local.rotation = [v, v * 0.7, -v * 0.33];
+    assembly.groups[1].local.rotation = [-v * 0.2, v * 0.3, v * 0.8];
+    assembly.scene.objects[0].transform.translation = [1000.0, -700.0, 900.0];
+    assembly.groups.push(Group {
+        id: "destination".into(),
+        parent: None,
+        local: Transform {
+            rotation: [v * 0.11, -v * 0.56, v * 0.31],
+            ..Transform::default()
+        },
+    });
+    assembly.flatten().unwrap();
+    let original = assembly.clone();
+    assert!(assembly.reparent("hinge", Some("destination")).is_err());
+    assert_eq!(assembly, original);
 }
 
 #[test]
