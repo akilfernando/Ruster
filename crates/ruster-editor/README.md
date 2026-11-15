@@ -606,6 +606,12 @@ be explicitly refreshed. The object/group list follows the existing bounded
 full source resolution/lossless RGBA (4MiB PNG cap, no quality fallback); MCP's
 thumbnail API is unchanged. This is on-demand native-frame delivery, not smooth
 viewport/ChatGPT usability acceptance. See [qualification and limits](../../docs/evidence/WORKSPACE-CONTROLS-2026-11-15.md).
+The private native companion now combines optional camera/Fit/pick/select,
+coherent scene/view observation and capture reservation in one restricted owner
+turn. Capture still completes through ordinary post-layout/current-painted checks;
+a later capture failure does not undo or replay an applied control. No asynchronous
+GPU wait holds publication authorization. [Repair verification and live-measurement
+hold](../../docs/evidence/WORKSPACE-FRAME-TRANSACTION-2026-11-15.md).
 Do not replace the frozen startup human-trial command/artifacts with this candidate.
 
 V1 foundation note2026-11-05 (accepted source252fe48): Save writes Scene6 and export requires a current descriptor2/opaque-material runtime kit. Old pinned evaluation artifacts retain their original contracts. Material controls and native direct/MCP creation/export journeys now pass within their recorded scope. Real recovery, default standalone appearance and named focused/resource checks are recorded in [V1 acceptance](../../docs/evidence/V1-readiness.md), with physical-human/broader hardware and peak-memory limits explicit. Do not infer that workflow from historical Scene5 export evidence.

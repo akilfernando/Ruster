@@ -2,7 +2,7 @@
 
 ## Coherent workspace frame transaction — 2026-11-15
 
-**RUNNING, bounded responsiveness repair.** The companion now reserves one native
+**Implementation pushed; live qualification BLOCKED by desktop guard.** The companion now reserves one native
 frame transaction containing an optional closed camera/Fit/pick/select control,
 coherent scene/view metadata and full-resolution capture-start. Native exact
 attachment/browser/publication authority and existing freshness/draft/input guards
@@ -18,9 +18,15 @@ focus/compositor experiment or human/ChatGPT usability claim. Reassess after30mi
 without integration or two same-seam failures. HTTP source-derived RED observed
 four expected failures for redundant native turns; changed HTTP tests pass6/6
 normally and with optimized children. Extended native owning control regression
-passes. Checkpoint precedes private optimized qualification; final measurements
-and changed-risk review remain pending. New evidence only:
-`/home/akilf/Projects/Ruster-Audits/workspace-controls-20261115/frame-transaction/`.
+passes; full affected editor180tests, capture4tests, default/inspection strict
+Clippy and formatting pass. Private optimized artifact built from167d123; no live
+measurement completed. Two baseline preparations stopped before measurement: a
+`/proc/fd` race repaired in the audit runner, then unexplained desktop-guard refusal.
+No GUI retries followed the guard refusal. Independent owned cleanup and16frozen
+startup pins pass; original release artifact preserved. Same-build old/new protocol
+runner is prepared, not qualified. Desktop revalidation, actual measurements and
+parent changed-risk review remain pending. No performance improvement is claimed.
+[Exact evidence, blocker and continuation](evidence/WORKSPACE-FRAME-TRANSACTION-2026-11-15.md).
 
 ## Normal workspace non-authored controls — 2026-11-15
 
