@@ -7,27 +7,90 @@ mod support;
 #[test]
 fn assembly_gate_render_consumers_share_the_flattened_world() {
     let mut assembly = support::fixture();
-    for phase in 0..3 {
+    assembly.scene.objects[0].transform.rotation = [0.3, -0.2, 0.4];
+    for phase in 0..4 {
         if phase == 1 {
-            assembly
-                .edit(|a| {
-                    a.groups[0].local.translation = [-2.0, 1.0, 3.0];
-                    a.groups[1].local.rotation = [0.2, -0.4, 1.1];
-                })
-                .unwrap();
+            assembly.groups[0].local.translation = [-2.0, 1.0, 3.0];
+            assembly.groups[1].local.rotation = [0.2, -0.4, 1.1];
         }
         if phase == 2 {
-            assembly
-                .edit(|a| a.groups[0].local.scale = [2.0; 3])
-                .unwrap();
+            assembly.groups[0].local.scale = [2.0; 3];
         }
-        let flat = assembly.flatten().unwrap();
+        if phase == 3 {
+            assembly.groups[0].local = ruster_scene::Transform {
+                translation: [9999., 0., 0.],
+                ..Default::default()
+            };
+            assembly.groups[1].local = Default::default();
+            assembly.scene.objects[0].transform.translation = [-9999., 0., 0.];
+            if let ruster_scene::Lighting::Authored { lights, .. } = &mut assembly.scene.lighting {
+                lights.get_mut("bulb").unwrap().transform.translation = [-9999., 0.5, 0.];
+            }
+        }
+        // Production Session/resolver, not the prototype flattening helper.
+        let mut scene = assembly.scene.clone();
+        scene.hierarchy.parents = assembly.parents.clone();
+        for group in &assembly.groups {
+            scene.hierarchy.groups.insert(
+                group.id.clone(),
+                ruster_scene::Group {
+                    name: None,
+                    transform: group.local.clone(),
+                },
+            );
+            if let Some(parent) = &group.parent {
+                scene
+                    .hierarchy
+                    .parents
+                    .insert(group.id.clone(), parent.clone());
+            }
+        }
+        let session = ruster_scene::Session::new(scene).unwrap();
+        if phase == 3 {
+            let before = session.snapshot_bytes().unwrap();
+            assert!(session
+                .scene()
+                .admit_transform_requests(&[(
+                    "root".into(),
+                    ruster_scene::TransformRequest {
+                        translation: [9999.0001, 0., 0.],
+                        rotation: [0.; 3],
+                        scale: [1.; 3],
+                    }
+                )])
+                .is_err());
+            assert_eq!(session.snapshot_bytes().unwrap(), before);
+        }
+        let poses = session.scene().resolve_poses().unwrap();
+        let mut flat = session.scene().clone();
+        for object in &mut flat.objects {
+            object.transform = poses.transforms[&object.id].clone();
+        }
+        if let ruster_scene::Lighting::Authored { lights, .. } = &mut flat.lighting {
+            for (id, light) in lights {
+                light.transform = poses.transforms[id].clone();
+            }
+        }
+        flat.hierarchy = Default::default();
         let object = &flat.objects[0];
-        let actual = model(object).as_dmat4();
+        // Exact f32 model and inverse-transpose used by production Instance.
+        let (actual_model, actual_normal) = instance_matrices(object);
+        let actual = actual_model.as_dmat4();
         let expected = support::matrix(&assembly.groups[0].local)
             * support::matrix(&assembly.groups[1].local)
             * support::matrix(&assembly.scene.objects[0].transform);
         assert!(support::matrices_close(expected, actual), "phase {phase}");
+        let expected_normal = glam::DMat3::from_mat4(expected).inverse().transpose();
+        for (a, b) in expected_normal
+            .to_cols_array()
+            .into_iter()
+            .zip(actual_normal.as_dmat3().to_cols_array())
+        {
+            assert!(
+                (a - b).abs() <= 2e-6 * a.abs().max(1.),
+                "phase {phase}: normal {a} != {b}"
+            );
+        }
         let collider = object
             .collider
             .unwrap()
@@ -68,7 +131,16 @@ fn assembly_gate_render_consumers_share_the_flattened_world() {
             .1;
         let expected_bulb = (support::matrix(&assembly.groups[0].local)
             * support::matrix(&assembly.groups[1].local))
-        .transform_point3(DVec3::new(1.0, 0.5, 0.0));
+        .transform_point3(DVec3::from_array(
+            assembly
+                .scene
+                .lighting
+                .light("bulb")
+                .unwrap()
+                .transform
+                .translation
+                .map(f64::from),
+        ));
         assert!(
             (Vec3::from(bulb.transform.translation).as_dvec3() - expected_bulb).length() < 2e-6
         );

@@ -635,6 +635,11 @@ impl Camera {
 #[cfg(test)]
 mod assembly_gate_tests;
 
+fn instance_matrices(object: &Object) -> (Mat4, Mat3) {
+    let matrix = model(object);
+    (matrix, Mat3::from_mat4(matrix).inverse().transpose())
+}
+
 fn model(object: &Object) -> Mat4 {
     let t = &object.transform;
     Mat4::from_scale_rotation_translation(
@@ -1164,8 +1169,7 @@ pub fn render_viewport_with_materials(
                 instances: Vec::new(),
                 range: 0..0,
             });
-        let matrix = model(object);
-        let normal = Mat3::from_mat4(matrix).inverse().transpose();
+        let (matrix, normal) = instance_matrices(object);
         let mut color = object.color;
         if selected.contains(&object.id.as_str()) {
             for channel in &mut color[..3] {
