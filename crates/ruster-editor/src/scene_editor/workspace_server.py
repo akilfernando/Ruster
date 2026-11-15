@@ -1,9 +1,12 @@
 """Host-owned loopback HTTP companion. No MCP client, consent or native owner claim."""
+import atexit
 import hashlib
 from http.cookies import SimpleCookie
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import json
 import os
+from pathlib import Path
+import stat
 import secrets
 import select
 import socket
@@ -43,12 +46,33 @@ def send(sock, value, deadline):
         data = data[n:]
 
 
+def endpoint_identity(path):
+    directory = path.parent.lstat()
+    endpoint = path.lstat()
+    if not stat.S_ISDIR(directory.st_mode) or stat.S_IMODE(directory.st_mode) != 0o700 or directory.st_uid != os.getuid() or not stat.S_ISSOCK(endpoint.st_mode) or stat.S_IMODE(endpoint.st_mode) != 0o600 or endpoint.st_uid != os.getuid():
+        raise ValueError('private native workspace endpoint required')
+    return directory.st_dev, directory.st_ino, endpoint.st_dev, endpoint.st_ino
+
+
+def cleanup_endpoint(path, identity):
+    # Native EOF also occurs on Host death, when Rust destructors cannot run.
+    # Remove only the original private socket and an otherwise empty owner root.
+    try:
+        if endpoint_identity(path) != identity: return
+        path.unlink()
+        path.parent.rmdir()
+    except (OSError, ValueError):
+        pass
+
+
 def main():
     config = json.loads(sys.stdin.buffer.readline(256*1024))
     bridge = socket.socket(socket.AF_UNIX)
     bridge.connect(config['socket'])
     pid, uid, _ = struct.unpack('3i', bridge.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, 12))
     if (pid, uid) != (config['native_pid'], config['native_uid']): raise ValueError('native peer mismatch')
+    endpoint = Path(config['socket'])
+    atexit.register(cleanup_endpoint, endpoint, endpoint_identity(endpoint))
     send(bridge, {'challenge':config['challenge'], 'binding':config['binding'], 'attachment':config['attachment']}, time.monotonic()+2)
     if receive(bridge, time.monotonic()+2) != {'authenticated':True}: raise ValueError('attachment refused')
     nonce = secrets.token_urlsafe(20)
