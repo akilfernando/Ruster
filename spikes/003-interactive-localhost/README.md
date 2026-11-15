@@ -1,5 +1,9 @@
 # Interactive localhost workspace — bounded disposable slice
 
+## Opt-in cadence / process measurements — 2026-11-15
+
+The isolated measurement continuation adds Idle/Movement20-second HUD captures and credential-free JSON export, without changing native rendering or ordinary connection/commands. See [measurement launch, procedure, definitions, resource coverage and actual evidence](MEASUREMENT.md). Parent review precedes a fresh actual-ChatGPT measurement; qualification leaves no live demo.
+
 ## Persistent native connection — qualified 2026-11-15
 
 This continuation supersedes earlier file-transport/performance-follow-up descriptions **for this isolated candidate only**. Browser HTTP now uses one explicitly bound persistent Unix-domain connection to the exact native fixture. No per-camera/command/frame/status payload files, reconnect, file fallback or authored replay. Bounded length framing, absolute deadlines, partial IO/EOF cleanup and a bounded IO worker keep incomplete socket reads/writes off native editor processing. Browser controls/renderer/history/quality are unchanged; native waits are request-wakeable, not busy-spin. Existing first-exact-MCP-owner approval is now consumed once inside the explicitly granted native fixture rather than polled by the HTTP server. This remains disposable cooperative-user authority, not production consent.

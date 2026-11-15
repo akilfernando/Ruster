@@ -7,6 +7,7 @@
 <details><summary>Native receipt / outcomes</summary><pre id="details"></pre></details>
 <script nonce="NONCE">
 'use strict';
+/* MEASUREMENT_SCRIPT */
 let current=null,busy=false,draft=null,sequence=0,background=false,autoEnabled=false,autoTimer=null,autoDelay=750,paintRequest=null;
 const samples=[],outcomes=[];
 const $=id=>document.getElementById(id);
@@ -23,11 +24,11 @@ $('details').textContent=JSON.stringify({scene:s,view:v,draft_reserved:current.d
 async function operate(op,args={},automatic=false,inputTiming=null){if(op!=='viewport_camera')cancelCamera();const id=++sequence,start=performance.now();if(busy){const r={id,op,status:'busy-refused'};outcomes.push(r);if(outcomes.length>64)outcomes.shift();$('status').textContent='Busy: request explicitly refused, not queued or retried.';return r}busy=true;background=automatic;$('status').textContent=`Pending ${op}; previous frame is stale/unconfirmed.`;show();let row={id,op,status:'accepted'};outcomes.push(row);if(outcomes.length>64)outcomes.shift();try{const response=await fetch('/operation',{method:'POST',headers:{'Content-Type':'application/json','X-Workspace-Capability':$('capability').value},signal:AbortSignal.timeout(10000),body:JSON.stringify({op,args})});if(!response.ok)throw Error('HTTP '+response.status+'; no automatic retry');const next=await response.json();if(!next.response?.ok)throw Error(next.response?.error?.code||next.error||'native refusal');
 if(op==='draft_begin')draft={source:next,object_id:next.view.active_object_id};if(op==='scene_transform'||op==='draft_cancel')draft=null;
 const img=new Image();img.src='data:image/png;base64,'+next.png;await img.decode();$('frame').src=img.src;current=next;
-row.status='completed';row.commit_ms=next.commit_ms;row.request_to_decoded_ms=performance.now()-start;row.decoded_at=performance.now();if(inputTiming){row.first_input_to_decoded_ms=row.decoded_at-inputTiming.first;row.latest_input_to_decoded_ms=row.decoded_at-inputTiming.latest;}samples.push({...row,revision:next.scene.revision,view_revision:next.view.view_revision});if(samples.length>64)samples.shift();$('status').textContent=`Completed ${op}. Committed revision ${next.scene.revision}; decoded native frame. ${row.request_to_decoded_ms.toFixed(1)} ms request→decoded (not physical display).`;
+window.viewportMeasurement?.decoded();row.status='completed';row.commit_ms=next.commit_ms;row.request_to_decoded_ms=performance.now()-start;row.decoded_at=performance.now();if(inputTiming){row.first_input_to_decoded_ms=row.decoded_at-inputTiming.first;row.latest_input_to_decoded_ms=row.decoded_at-inputTiming.latest;}samples.push({...row,revision:next.scene.revision,view_revision:next.view.view_revision});if(samples.length>64)samples.shift();$('status').textContent=`Completed ${op}. Committed revision ${next.scene.revision}; decoded native frame. ${row.request_to_decoded_ms.toFixed(1)} ms request→decoded (not physical display).`;
 $('presentation').textContent=`Decoded native frame ${next.native_frame}, revision ${next.scene.revision}. Paint opportunity pending.`;
-if(paintRequest!==null)cancelAnimationFrame(paintRequest);paintRequest=requestAnimationFrame(()=>{if(current===next)$('presentation').textContent=`Native frame ${next.native_frame}, revision ${next.scene.revision}: browser paint opportunity observed (not physical visibility).`});
+if(paintRequest!==null)cancelAnimationFrame(paintRequest);paintRequest=requestAnimationFrame(()=>{if(current===next){window.viewportMeasurement?.paint(next.png,row);$('presentation').textContent=`Native frame ${next.native_frame}, revision ${next.scene.revision}: browser paint opportunity observed (not physical visibility).`}});
 return row;
-}catch(error){if(automatic)autoEnabled=false;row.status='failed';row.error=String(error);$('status').textContent=`Failed ${op}: ${error}. Prior frame is stale; draft input preserved. No retry.`;return row}finally{busy=false;background=false;show()}}
+}catch(error){window.viewportMeasurement?.disconnect();if(automatic)autoEnabled=false;row.status='failed';row.error=String(error);$('status').textContent=`Failed ${op}: ${error}. Prior frame is stale; draft input preserved. No retry.`;return row}finally{busy=false;background=false;show()}}
 $('connect').onclick=async()=>{if(busy){await operate('refresh');return}autoEnabled=false;const r=await operate('refresh');if(r.status==='completed'){autoEnabled=true;autoDelay=750;scheduleAuto()}};$('undo').onclick=()=>current&&operate('scene_undo',pins());$('clear').onclick=()=>current&&operate('scene_select',{...pins(true),object_ids:[]});
 // Native conventions: right orbit; middle / Shift-right pan; wheel zoom.
 // Only camera deltas coalesce in one bounded slot; authored operations never queue.
@@ -83,7 +84,7 @@ async function checkAuto(){
   if(!response.ok){if(response.status===403)autoEnabled=false;throw Error('HTTP '+response.status)}
   const s=await response.json();if(s.session_token!==current.view.session_token){autoEnabled=false;throw Error('Native session changed; reconnect explicitly')}
   changed=s.revision!==current.view.revision||s.view_revision!==current.view.view_revision||s.draft_reserved!==current.draft_reserved;autoDelay=750;
- }catch(error){autoDelay=Math.min(30000,autoDelay*2);$('status').textContent='Automatic observation unavailable; previous frame unconfirmed. '+error}
+ }catch(error){if(!autoEnabled)window.viewportMeasurement?.disconnect();autoDelay=Math.min(30000,autoDelay*2);$('status').textContent='Automatic observation unavailable; previous frame unconfirmed. '+error}
  finally{busy=false}
  if(changed&&autoEnabled&&!document.hidden&&navigator.onLine)await operate('refresh',{},true);
  scheduleAuto();

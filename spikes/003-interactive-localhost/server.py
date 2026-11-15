@@ -15,6 +15,7 @@ import tempfile
 import time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 from bridge import send, receive, authenticate
+from metrics import ProcessMetrics
 
 ROOT = Path(__file__).resolve().parent
 
@@ -82,9 +83,16 @@ def main():
             self.end_headers(); self.wfile.write(body)
         def do_GET(self):
             if self.path != '/' or self.headers.get('Host') != authority: return self.reply(403,b'{}')
-            self.reply(200, (ROOT/'workspace.html').read_text().replace('NONCE',nonce).encode(), 'text/html; charset=utf-8')
+            self.reply(200, (ROOT/'workspace.html').read_text().replace('/* MEASUREMENT_SCRIPT */', (ROOT/'measurement.js').read_text()).replace('NONCE',nonce).encode(), 'text/html; charset=utf-8')
         def do_POST(self):
             if self.headers.get('Host') != authority or self.headers.get('Origin') != 'http://'+authority or not hmac.compare_digest(self.headers.get('X-Workspace-Capability',''),token): return self.reply(403,b'{"error":"denied"}')
+            if self.path == '/metrics':
+                if host.poll() is not None or bridge is None:
+                    return self.reply(503, b'{"error":"owner stopped"}')
+                try:
+                    return self.reply(200, json.dumps(metrics.sample()).encode())
+                except (OSError, ValueError):
+                    return self.reply(503, b'{"error":"owned metrics unavailable"}')
             if self.path == '/status':
                 # Same capability/origin boundary; observe only this exact native owner.
                 # Never dispatch a render or consume an MCP adapter owner for polling.
@@ -120,6 +128,7 @@ def main():
         incarnation = json.loads(Path(state()['locator']).read_text())['incarnation']
         peer_pid = authenticate(bridge, host.pid, bridge_token, incarnation)
         listener.close()
+        metrics = ProcessMetrics(host.pid)
         server=BoundedServer(('127.0.0.1',0),Handler); server.timeout=.1
         authority='127.0.0.1:'+str(server.server_port)
         info={'url':'http://'+authority+'/', 'run':str(run), 'pid':os.getpid(), 'native_pid':host.pid,'locator':state()['locator'], 'fixture_authority_only':True, 'transport':'persistent-unix-stream', 'socket_path':str(socket_path), 'peer_pid':peer_pid, 'incarnation':incarnation}
