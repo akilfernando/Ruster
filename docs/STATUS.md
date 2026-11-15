@@ -23,9 +23,11 @@ unchanged); owning HTTP6tests pass normally and with optimized children.
 request→decoded median670.7ms (594.3–733.9ms), not focused/release/FPS/ChatGPT evidence.
 Original startup trial, commands/artifacts and accepted fixture remain immutable;
 15 original pins independently match. Failed preparations and exact cleanup are
-retained; no process/demo/endpoint remains. Parent changed-risk review is QUEUED
-before human handoff. Physical/default/actual ChatGPT controls and usable navigation
-acceptance remain unqualified, independently of the frozen startup connection trial.
+retained; no process/demo/endpoint remains. Completed independent changed-risk
+review is **GO for bounded capability safety**; product source is unchanged. Usability
+remains **HELD**, with matched optimized measurement/phase diagnosis RUNNING.
+Physical/default/actual ChatGPT controls and usable navigation acceptance remain
+unqualified, independently of the frozen startup connection trial.
 [Exact source/artifacts, proof, latency and exclusions](evidence/WORKSPACE-CONTROLS-2026-11-15.md).
 
 ## Registered saved-project startup — 2026-11-15

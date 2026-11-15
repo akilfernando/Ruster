@@ -138,8 +138,17 @@ reacquisition. Failed-run locator leftovers were removed only after original
 UID/mode/device/inode/binding and absent-process/kernel-owner checks. All journeys
 report preserved desktop and removed private Chromium profiles. No endpoint is live.
 
-**Automated bounded capability exit COMPLETE.** Parent consequential changed-risk
-review is QUEUED before any human controls handoff. Actual physical/default/ChatGPT
-navigation usability and optimized/focused responsiveness remain unqualified; the
-frozen startup trial must not be replaced or silently upgraded to this candidate.
-No background implementation, demo or lease remains running.
+**Automated bounded capability exit COMPLETE; independent changed-risk review GO
+for capability safety.** The source-informed Astra review completed normally with
+verified actual model/low wire effort and unchanged product pins; it found no
+concrete changed-code blocker. Verdict and runtime receipt are in audit
+`controls-review-result.md` / `controls-review-receipt.json`. Its non-mutating guard
+helper suggestion is optional, not a required repair. No repeated test matrix or
+unchanged-source review is needed.
+
+**Usability remains HELD.** Matched genuinely optimized measurement and dominant-
+phase diagnosis are RUNNING separately, without changing product code or pixel
+quality. Actual physical/default/ChatGPT navigation usability remains unqualified;
+the frozen startup trial must not be replaced or silently upgraded to this candidate.
+No live human demo or lease is running; qualification resources are owned by the
+bounded optimized-measurement worker and must be reconciled on completion.
