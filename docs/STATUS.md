@@ -53,15 +53,22 @@ native/adapter/listener absence, no cleanup hold, original desktop/cursor/lock,
 QA release and unchanged installed hash independently pass. Computer-free notice
 sent; no more desktop work is authorized by assumption after that handoff.
 
-**RUNNING:** one TDD ready-result progress repair (`deleg_bb6dfa43`) in isolated
-`fix/capture-ready-progress-20261115`. Target: an already-authorized exact-ID
-capture-inspect turn may adopt already-produced pixels before its reply, rather
-than return pending just before UI-only adoption and wait another owner turn.
-Keep complete existing guards and never issue screenshots/certify layout from
-logic. No global repaint/PNG/transport/authority change; actual benefit still
-requires matched measurement. Baseline source/artifact/helper and live feedback
-candidate stay frozen. Final whole inspection failure stays visible; human
-responsiveness remains failed. Qualified changes feed the cumulative line.
+**First repair implemented/headlessly verified:** isolated candidate `95622f2`
+lets an already-authorized exact-ID/matching-token capture inspect drain a ready
+receiver through the unchanged validation path and return ready in the same turn.
+Screenshot issuance/fresh layout remain UI-only. Existing real-encoder seam goes
+RED pending→GREEN ready without another UI pass. Final5 capture tests pass under
+each feature configuration; broader12 capture-related and2 workspace tests,
+strict Clippy both configurations and format pass. These cohorts overlap; no
+whole-suite pass or speedup claim. Original asset-retirement failure remains.
+
+**RUNNING:** optimized comparison build `proc_1ba8a874ca61` and Astra changed-risk
+review `proc_87f8ac4615b8`, actual model/wire effort verified. Root reviews complete
+one-file diff and source pins; review/measurement still precede integration.
+No further native test is running; a fresh opportunity is needed after the prior
+all-clear. Keep baseline source/artifact/helper and actual-client candidate frozen.
+Preserve fidelity, privacy, ownership, native input and idle policy; quantify the
+repair against the same finite cohort before claiming improvement.
 
 Raw user/identity receipts: cumulative audit `startup-provenance/` files
 `actual-client-managed-start-user-receipt.json`,
