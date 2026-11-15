@@ -1,5 +1,20 @@
 # Current project status
 
+## Original-precision native manipulation repair — 2026-11-15
+
+**Bounded repair verified; hierarchy milestone still incomplete.** The existing
+hierarchy gizmo test reproduces parent X9999 / leaf-local X1 / world X10000 with
+original f64 +1e-8 motion (RED), including ancestor-selected descendant closure.
+World requests now use the existing resolver before candidate f32 conversion;
+rotation/scale share this admission. Stored/local checks remain. Translation
+offsets share the repaired Gesture path and parse f64 (separate observed RED).
+Complete snapshot and gesture candidate/proxy remain unchanged on refusal;
+valid no-op/inward controls and all eight manipulation tests pass. The affected
+change gate passes; raw logs are in the existing hierarchy audit directory.
+Independent STDIO deferred-Save/fresh-open qualification is RUNNING in this
+continuation, separately from the still-pending ordinary-native visual journey.
+No native visual, f32-normal, budget or independent-review completion claimed.
+
 ## Integrated assembly implementation checkpoint — 2026-11-15
 
 **WIP, approved milestone incomplete.** Production Scene topology/resolution now

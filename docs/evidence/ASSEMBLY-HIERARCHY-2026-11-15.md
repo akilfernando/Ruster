@@ -1,6 +1,16 @@
 # Integrated assembly hierarchy — WIP evidence, 2026-11-15
 
 Status: working production integration checkpoint, **not completed milestone acceptance**.
+
+Continuation: original-precision gizmo admission repaired with actual
+`gizmo-original-red.log` and `gizmo-original-green-2.log` (eight manipulation
+cases passed). Offset parsing had the same seam: `offset-original-red.log`
+records its independent RED; repaired offsets use the same f64 Gesture route.
+`precision-gate.log` records the affected final change gate passing. The first
+GREEN preparation failed to compile two existing Euler-helper assertions after
+its return type became f64; retained separately, not counted as a behavior pass.
+No tolerance changes; snapshot/candidate/proxy atomic refusal asserted. STDIO
+and native visual acceptance below remain separate, pending exits.
 Authority: [accepted bounded decision](../decisions/2026-11-15-bounded-assembly-hierarchy.md).
 Exclusive source: `/home/akilf/Projects/rusterize-assembly-hierarchy-20261115`,
 branch `feat/assembly-hierarchy-20261115`; initial source `8dacf8f`, first pushed

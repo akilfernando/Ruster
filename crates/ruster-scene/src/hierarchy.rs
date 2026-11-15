@@ -226,6 +226,52 @@ impl Scene {
     pub fn resolve_poses(&self) -> Result<ResolvedPoses, SceneError> {
         self.resolve_requested(&BTreeMap::new())
     }
+    /// Admit original-precision world edits, including unselected descendants.
+    pub fn admit_world_transform_requests(
+        &self,
+        requests: &[(String, TransformRequest)],
+    ) -> Result<(), SceneError> {
+        let ids = requests
+            .iter()
+            .map(|(id, _)| id.clone())
+            .collect::<Vec<_>>();
+        let normalized = self.normalize_assembly_selection(&ids)?;
+        let old = self.resolve_poses()?;
+        let mut locals = Vec::new();
+        for (id, t) in requests.iter().filter(|(id, _)| normalized.contains(id)) {
+            let [x, y, z] = t.rotation;
+            let world = Pose {
+                position: DVec3::from_array(t.translation),
+                rotation: DQuat::from_euler(EulerRot::ZYX, z, y, x),
+                scale: DVec3::from_array(t.scale),
+            };
+            world.stored()?;
+            let local = if let Some(parent) = self.hierarchy.parents.get(id) {
+                let p = old.poses[parent];
+                Pose {
+                    position: (p.rotation.inverse() * (world.position - p.position)) / p.scale,
+                    rotation: (p.rotation.inverse() * world.rotation).normalize(),
+                    scale: if self.lighting.light(id).is_some() {
+                        DVec3::ONE
+                    } else {
+                        world.scale / p.scale
+                    },
+                }
+            } else {
+                world
+            };
+            let (z, y, x) = local.rotation.to_euler(EulerRot::ZYX);
+            locals.push((
+                id.clone(),
+                TransformRequest {
+                    translation: local.position.to_array(),
+                    rotation: [x, y, z],
+                    scale: local.scale.to_array(),
+                },
+            ));
+        }
+        self.admit_transform_requests(&locals)
+    }
     /// Validate every requested local and complete world closure before f32 storage.
     pub fn admit_transform_requests(
         &self,

@@ -29,13 +29,13 @@ fn rotation(t: &Transform) -> DQuat {
     let [x, y, z] = t.rotation.map(f64::from);
     DQuat::from_rotation_z(z) * DQuat::from_rotation_y(y) * DQuat::from_rotation_x(x)
 }
-fn nearby_euler(q: DQuat, original: [f32; 3]) -> [f32; 3] {
+fn nearby_euler(q: DQuat, original: [f32; 3]) -> [f64; 3] {
     let old = Transform {
         rotation: original,
         ..Default::default()
     };
     if q.dot(rotation(&old)).abs() >= 1.0 - 1e-12 {
-        return original;
+        return original.map(f64::from);
     }
     let m = DMat3::from_quat(q.normalize());
     let y = (-m.x_axis.z).clamp(-1.0, 1.0).asin();
@@ -57,17 +57,17 @@ fn nearby_euler(q: DQuat, original: [f32; 3]) -> [f32; 3] {
         ],
     ]
     .into_iter()
-    .map(|angles| std::array::from_fn(|i| close(angles[i], original[i]) as f32))
-    .min_by(|a: &[f32; 3], b: &[f32; 3]| {
-        let cost = |v: [f32; 3]| {
+    .map(|angles| std::array::from_fn(|i| close(angles[i], original[i])))
+    .min_by(|a: &[f64; 3], b: &[f64; 3]| {
+        let cost = |v: [f64; 3]| {
             v.into_iter()
                 .zip(original)
-                .map(|(a, b)| f64::from(a - b).powi(2))
+                .map(|(a, b)| (a - f64::from(b)).powi(2))
                 .sum::<f64>()
         };
         cost(*a).total_cmp(&cost(*b))
     })
-    .unwrap_or(original)
+    .unwrap_or(original.map(f64::from))
 }
 // Resolve the whole bounded selection before any transform/draft mutation.
 // An absent or repeated target must never become a partial mixed transaction.
@@ -152,6 +152,9 @@ pub(super) struct Gesture {
 impl Gesture {
     #[cfg(test)]
     fn begin(session: &Session, ids: &[String]) -> Result<Self, String> {
+        Self::begin_translation(session, ids)
+    }
+    fn begin_translation(session: &Session, ids: &[String]) -> Result<Self, String> {
         Self::configured(session, ids, Tool::Translate, Pivot::Center, false)
     }
     fn configured(
@@ -189,7 +192,7 @@ impl Gesture {
             current_proxy: proxy,
         })
     }
-    fn transform(&mut self, proxy: GizmoTransform) -> Result<(), String> {
+    fn transform(&mut self, scene: &Scene, proxy: GizmoTransform) -> Result<(), String> {
         let p = DVec3::from(self.proxy.translation);
         let translation = DVec3::from(proxy.translation) - p;
         let q_start = DQuat::from(self.proxy.rotation).normalize();
@@ -212,17 +215,20 @@ impl Gesture {
             );
         }
         let unchanged_rotation = delta.dot(DQuat::IDENTITY).abs() >= 1.0 - 1e-12;
-        let candidate = self
+        let requests = self
             .start
             .iter()
             .map(|(id, original)| {
-                let mut next = original.clone();
+                let mut next = ruster_scene::TransformRequest {
+                    translation: original.translation.map(f64::from),
+                    rotation: original.rotation.map(f64::from),
+                    scale: original.scale.map(f64::from),
+                };
                 let position = DVec3::from_array(original.translation.map(f64::from));
                 match self.tool {
                     Tool::Translate => {
                         if translation != DVec3::ZERO {
-                            next.translation =
-                                (position + translation).to_array().map(|v| v as f32);
+                            next.translation = (position + translation).to_array();
                         }
                     }
                     Tool::Rotate => {
@@ -234,27 +240,41 @@ impl Gesture {
                             };
                             next.rotation = nearby_euler(next_q, original.rotation);
                             if self.pivot != Pivot::Individual {
-                                next.translation =
-                                    (p + delta * (position - p)).to_array().map(|v| v as f32);
+                                next.translation = (p + delta * (position - p)).to_array();
                             }
                         }
                     }
                     Tool::Scale => {
                         if scale != DVec3::ONE {
                             next.scale = (DVec3::from_array(original.scale.map(f64::from)) * scale)
-                                .to_array()
-                                .map(|v| v as f32);
+                                .to_array();
                             if self.pivot != Pivot::Individual {
-                                next.translation =
-                                    (p + (position - p) * scale.x).to_array().map(|v| v as f32);
+                                next.translation = (p + (position - p) * scale.x).to_array();
                             }
                         }
                     }
                 }
-                next.validate().map_err(|e| e.to_string())?;
                 Ok((id.clone(), next))
             })
-            .collect::<Result<_, String>>()?;
+            .collect::<Result<Vec<_>, String>>()?;
+        scene
+            .admit_world_transform_requests(&requests)
+            .map_err(|e| e.to_string())?;
+        let candidate = requests
+            .into_iter()
+            .map(|(id, t)| {
+                let t = Transform {
+                    translation: t.translation.map(|v| v as f32),
+                    rotation: t.rotation.map(|v| v as f32),
+                    scale: t.scale.map(|v| v as f32),
+                };
+                t.validate().map_err(|e| e.to_string())?;
+                Ok((id, t))
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        scene
+            .local_edits_for_world(&candidate)
+            .map_err(|e| e.to_string())?;
         self.candidate = candidate;
         self.current_proxy = proxy;
         Ok(())
@@ -948,34 +968,21 @@ impl Manipulation {
         Ok(())
     }
     pub fn apply_delta(&self, session: &mut Session) -> Result<(), String> {
-        selected_transforms(session.scene(), &self.ids)?;
-        let normalized = session
-            .scene()
-            .normalize_assembly_selection(&self.ids)
-            .map_err(|e| e.to_string())?;
-        let poses = session.scene().resolve_poses().map_err(|e| e.to_string())?;
-        let selected = normalized.iter().map(|id| &poses.transforms[id]);
-        let mut delta = [0.0_f32; 3];
+        let mut gesture = Gesture::begin_translation(session, &self.ids)?;
+        let mut proxy = gesture.proxy;
+        let mut delta = [0.0_f64; 3];
         for (axis, text) in self.delta.iter().enumerate() {
             delta[axis] = text
                 .trim()
-                .parse::<f32>()
+                .parse::<f64>()
                 .map_err(|_| "Enter finite translation offsets.".to_string())?;
             if !delta[axis].is_finite() {
                 return Err("Enter finite translation offsets.".into());
             }
         }
-        let mut edits = Vec::with_capacity(self.ids.len());
-        for (id, original) in normalized.iter().zip(selected) {
-            let mut transform = original.clone();
-            for (value, offset) in transform.translation.iter_mut().zip(delta) {
-                *value += offset;
-            }
-            edits.push((id.clone(), transform));
-        }
-        session
-            .edit_world_transforms(session.scene().revision, &edits)
-            .map_err(|e| e.to_string())?;
+        proxy.translation = (DVec3::from(proxy.translation) + DVec3::from_array(delta)).into();
+        gesture.transform(session.scene(), proxy)?;
+        gesture.commit(session)?;
         Ok(())
     }
     pub fn transient_scene(&self, scene: &Scene) -> Option<Scene> {
@@ -1094,7 +1101,7 @@ impl Manipulation {
         }
         if let Some((_, values)) = result {
             if let Some(gesture) = &mut self.gesture {
-                if let Err(error) = gesture.transform(values[0]) {
+                if let Err(error) = gesture.transform(session.scene(), values[0]) {
                     self.cancel();
                     return Err(error);
                 }
@@ -1167,7 +1174,7 @@ mod tests {
         );
         let mut moved = gesture.proxy;
         moved.translation = (p + DVec3::new(2., 0., 0.)).into();
-        gesture.transform(moved).unwrap();
+        gesture.transform(session.scene(), moved).unwrap();
         let before = session.snapshot_bytes().unwrap();
         gesture.commit(&mut session).unwrap();
         let world = session.scene().resolve_poses().unwrap().transforms["box"].translation;
@@ -1194,8 +1201,33 @@ mod tests {
                 },
             )
             .unwrap();
+        for ids in [vec!["box".into()], vec!["assembly".into(), "box".into()]] {
+            let mut gesture = Gesture::begin(&session, &ids).unwrap();
+            let before = session.snapshot_bytes().unwrap();
+            let candidate = gesture.candidate.clone();
+            let current_proxy = gesture.current_proxy;
+            let mut moved = gesture.proxy;
+            moved.translation.x += 1e-8;
+            assert!(
+                gesture.transform(session.scene(), moved).is_err(),
+                "original f64 world closure must reject outward motion"
+            );
+            assert_eq!(gesture.candidate, candidate);
+            assert_eq!(gesture.current_proxy, current_proxy);
+            assert_eq!(session.snapshot_bytes().unwrap(), before);
+            gesture.transform(session.scene(), gesture.proxy).unwrap();
+            moved.translation.x -= 1e-8 + 1.0;
+            gesture.transform(session.scene(), moved).unwrap();
+        }
         let mut m = Manipulation::default();
         m.select_only(Some("box".into()));
+        m.delta[0] = "0.00000001".into();
+        let before = session.snapshot_bytes().unwrap();
+        assert!(
+            m.apply_delta(&mut session).is_err(),
+            "offsets must admit the original world request"
+        );
+        assert_eq!(session.snapshot_bytes().unwrap(), before);
         m.reset_precision(session.scene()).unwrap();
         m.precision[0] = "1.00000001".into();
         m.edited[0] = true;
@@ -1233,7 +1265,7 @@ mod tests {
             let mut g = Gesture::configured(&session, &ids, Tool::Rotate, pivot, false).unwrap();
             let mut proxy = g.proxy;
             proxy.rotation = (delta * DQuat::from(proxy.rotation)).into();
-            g.transform(proxy).unwrap();
+            g.transform(session.scene(), proxy).unwrap();
             let p = DVec3::from(g.proxy.translation);
             for ((_, actual), original) in g.candidate.iter().zip(&scene.objects) {
                 assert_orientation(actual.rotation, delta * rotation(&original.transform));
@@ -1252,7 +1284,7 @@ mod tests {
             let mut scale = Gesture::configured(&session, &ids, Tool::Scale, pivot, false).unwrap();
             let mut proxy = scale.proxy;
             proxy.scale = DVec3::splat(2.0).into();
-            scale.transform(proxy).unwrap();
+            scale.transform(session.scene(), proxy).unwrap();
             let p = DVec3::from(scale.proxy.translation);
             for ((_, actual), original) in scale.candidate.iter().zip(&scene.objects) {
                 assert_eq!(actual.rotation, original.transform.rotation);
@@ -1274,7 +1306,7 @@ mod tests {
         let local_delta = DQuat::from_rotation_x(0.8);
         let mut proxy = g.proxy;
         proxy.rotation = (DQuat::from(proxy.rotation) * local_delta).into();
-        g.transform(proxy).unwrap();
+        g.transform(session.scene(), proxy).unwrap();
         for ((_, actual), original) in g.candidate.iter().zip(&scene.objects) {
             assert_eq!(actual.translation, original.transform.translation);
             assert_orientation(actual.rotation, rotation(&original.transform) * local_delta);
@@ -1283,7 +1315,7 @@ mod tests {
             Gesture::configured(&session, &ids, Tool::Scale, Pivot::Individual, true).unwrap();
         let mut proxy = scale.proxy;
         proxy.scale = DVec3::new(2.0, 3.0, 0.5).into();
-        scale.transform(proxy).unwrap();
+        scale.transform(session.scene(), proxy).unwrap();
         for ((_, actual), original) in scale.candidate.iter().zip(&scene.objects) {
             assert_eq!(actual.translation, original.transform.translation);
             assert_eq!(actual.rotation, original.transform.rotation);
@@ -1291,16 +1323,16 @@ mod tests {
         }
         let before = scale.candidate.clone();
         proxy.scale = DVec3::ZERO.into();
-        assert!(scale.transform(proxy).is_err());
+        assert!(scale.transform(session.scene(), proxy).is_err());
         assert_eq!(scale.candidate, before);
         let mut unsupported =
             Gesture::configured(&session, &ids, Tool::Scale, Pivot::Center, false).unwrap();
         let mut proxy = unsupported.proxy;
         proxy.scale = DVec3::new(1.0, 2.0, 1.0).into();
-        assert!(unsupported.transform(proxy).is_err());
+        assert!(unsupported.transform(session.scene(), proxy).is_err());
         for tool in [Tool::Rotate, Tool::Scale] {
             let mut g = Gesture::configured(&session, &ids, tool, Pivot::Center, true).unwrap();
-            g.transform(g.proxy).unwrap();
+            g.transform(session.scene(), g.proxy).unwrap();
             assert_eq!(g.start, g.candidate);
         }
         for y in [
@@ -1316,12 +1348,12 @@ mod tests {
             };
             let q = rotation(&t);
             assert_eq!(
-                nearby_euler(-q, original),
+                nearby_euler(-q, original).map(|v| v as f32),
                 original,
                 "equivalent quaternion signs preserve stored Euler bits"
             );
             let next = (DQuat::from_rotation_z(0.01) * q).normalize();
-            assert_orientation(nearby_euler(next, original), next);
+            assert_orientation(nearby_euler(next, original).map(|v| v as f32), next);
         }
     }
 
@@ -1555,7 +1587,7 @@ mod tests {
             Gesture::configured(&session, &ids, Tool::Translate, Pivot::Center, false).unwrap();
         let mut proxy = gesture.proxy;
         proxy.translation = (DVec3::from(proxy.translation) + DVec3::new(0.5, -0.25, 1.)).into();
-        gesture.transform(proxy).unwrap();
+        gesture.transform(session.scene(), proxy).unwrap();
         m.gesture = Some(gesture);
         // Same-revision live properties are intentional here: a transform-only
         // preview must clone current lighting, not replace it with an old map.
@@ -1610,7 +1642,7 @@ mod tests {
             Gesture::configured(&session, &ids, Tool::Rotate, Pivot::Individual, true).unwrap();
         let mut proxy = rotation.proxy;
         proxy.rotation = (DQuat::from(proxy.rotation) * DQuat::from_rotation_y(0.25)).into();
-        rotation.transform(proxy).unwrap();
+        rotation.transform(session.scene(), proxy).unwrap();
         for (id, next) in &rotation.candidate {
             assert_eq!(
                 next.translation,
