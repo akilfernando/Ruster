@@ -120,11 +120,13 @@ impl Host {
             egui::Window::new("AI connection")
                 .id(id.with("window"))
                 .open(&mut open)
+                .vscroll(true)
+                .max_height((ctx.content_rect().height() - 80.0).max(200.0))
                 .show(&ctx, |ui| {
                     self.connection_status_ui(ui);
                     self.binding_controls_ui(ui, &mut state);
                 });
-            state.open = open;
+            state.open &= open;
             if !open {
                 state.preview = None;
             }
@@ -134,6 +136,25 @@ impl Host {
 
     pub(super) fn binding_controls_ui(&mut self, ui: &mut egui::Ui, state: &mut NativeUi) {
         let ctx = ui.ctx().clone();
+        if let Some((bridge, request)) = self.bridge.as_mut().and_then(|bridge| {
+            let request = bridge.browser_request()?;
+            Some((bridge, request))
+        }) {
+            ui.separator();
+            ui.heading("Approve pending browser for this project?");
+            ui.label(format!("Browser verification code: {}", &request.id[..12]));
+            ui.label(&request.context);
+            ui.label("Compare the code with your browser. This is not verified application provenance. Approval permits reading and editing this exact native project/session for at most 30 minutes. Reload is automatic; Disconnect AI revokes it. Pending requests expire after 2 minutes. Denial requires a fresh native connection.");
+            if ui.button("Approve this browser/project once").clicked()
+                && bridge.approve_browser(&request)
+            {
+                state.open = false;
+            }
+            if ui.button("Deny pending browser").clicked() {
+                bridge.deny_browser();
+            }
+        }
+
         ui.label(format!("Project: {}", self.editor.document_label()));
         ui.label(format!("Scene: {}", self.editor.session.scene().id));
         ui.label(format!(
@@ -156,22 +177,6 @@ impl Host {
             ui.label(
                 "Owner identity is socket-bound, not executable provenance or client registration.",
             );
-        }
-        if let Some((bridge, request)) = self.bridge.as_mut().and_then(|bridge| {
-            let request = bridge.browser_request()?;
-            Some((bridge, request))
-        }) {
-            ui.separator();
-            ui.heading("Approve pending browser for this project?");
-            ui.label(format!("Browser verification code: {}", &request.id[..12]));
-            ui.label(&request.context);
-            ui.label("Compare the code with your browser. This is not verified application provenance. Approval permits reading and editing this exact native project/session for at most 30 minutes. Reload is automatic; Disconnect AI revokes it. Pending requests expire after 2 minutes. Denial requires a fresh native connection.");
-            if ui.button("Approve this browser/project once").clicked() {
-                bridge.approve_browser(&request);
-            }
-            if ui.button("Deny pending browser").clicked() {
-                bridge.deny_browser();
-            }
         }
         let action = match self.connection_state() {
             "retired" => Some("Connect AI"),
