@@ -163,10 +163,13 @@ fn direct_image_host_fixture() {
     let nonce = locator_value["incarnation"].as_str().unwrap().to_string();
     let transport = interactive.then(|| stream::Bridge::connect(&nonce));
     let mut reservation: Option<(String, String, String)> = None;
+    let mut translate: Option<(String, Value, Instant)> = None;
     let deadline = Instant::now() + Duration::from_secs(if interactive { 1800 } else { 180 });
     let mut previous = None;
     let mut count = 0;
     let mut delivered_crop = None;
+    let mut delivered_frame = None;
+    let mut release_next = None;
     let mut pending_pick_response = None;
     let mut fixture_approved = false;
     while Instant::now() < deadline
@@ -194,10 +197,24 @@ fn direct_image_host_fixture() {
             std::fs::remove_file(out.join("approve.json")).unwrap();
         }
         if out.join("revoke").exists() {
+            host.editor.manipulation.cancel();
+            translate = None;
             host.disconnect_adapter();
+            release_next = Some(egui::Pos2::ZERO);
             std::fs::remove_file(out.join("revoke")).unwrap();
         }
         let mut pointer = None;
+        let mut translate_pointer = release_next.take().map(|pos| (pos, Some(false)));
+        let mut translate_op = None;
+        if translate
+            .as_ref()
+            .is_some_and(|(_, _, at)| at.elapsed() > Duration::from_secs(5))
+            || (translate.is_some() && !host.bridge.as_ref().is_some_and(|b| b.authority().live()))
+        {
+            host.editor.manipulation.cancel();
+            translate = None;
+            translate_pointer = Some((egui::Pos2::ZERO, Some(false)));
+        }
         let request = transport.as_ref().and_then(|t| t.requests.try_recv().ok());
         let (status_request, request) = match request {
             Some(request) if request["op"] == "status" => (true, None),
@@ -213,6 +230,64 @@ fn direct_image_host_fixture() {
                 failure("revoked")
             } else if op == "refresh" {
                 json!({"ok":true})
+            } else if op.starts_with("translate_") {
+                let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
+                let v = &view["result"];
+                if op == "translate_cancel" {
+                    host.editor.manipulation.cancel();
+                    translate = None;
+                    translate_pointer = Some((egui::Pos2::ZERO, Some(false)));
+                    json!({"ok":true})
+                } else if !matches!(op, "translate_begin" | "translate_move" | "translate_end") {
+                    failure("forbidden_operation")
+                } else if delivered_crop != host.editor.captures.rect {
+                    failure("stale_frame")
+                } else if let Ok(position) = pick_position(&args, delivered_crop) {
+                    if op == "translate_begin" {
+                        if translate.is_some() || host.editor.view_guard().is_err() {
+                            failure("drafts_pending")
+                        } else if args["expected_session_token"] != v["session_token"]
+                            || args["expected_revision"] != v["revision"]
+                            || args["expected_view_revision"] != v["view_revision"]
+                            || !args["gesture_id"].is_string()
+                            || args["expected_native_frame"].as_u64() != delivered_frame
+                            || host.editor.manipulation.ids.len() != 1
+                        {
+                            failure("stale_gesture")
+                        } else {
+                            host.editor.manipulation.tool = crate::manipulation::Tool::Translate;
+                            translate = Some((
+                                args["gesture_id"].as_str().unwrap().into(),
+                                v.clone(),
+                                Instant::now(),
+                            ));
+                            translate_pointer = Some((position, Some(true)));
+                            translate_op = Some(op.to_string());
+                            json!({"ok":true})
+                        }
+                    } else if let Some((id, pin, at)) = &mut translate {
+                        if args["gesture_id"] != *id
+                            || pin["session_token"] != v["session_token"]
+                            || pin["revision"] != v["revision"]
+                            || pin["view_revision"] != v["view_revision"]
+                            || pin["selected_object_ids"] != v["selected_object_ids"]
+                        {
+                            failure("stale_gesture")
+                        } else {
+                            *at = Instant::now();
+                            translate_pointer = Some((position, None));
+                            if op == "translate_end" {
+                                release_next = Some(position);
+                            }
+                            translate_op = Some(op.to_string());
+                            json!({"ok":true})
+                        }
+                    } else {
+                        failure("gesture_required")
+                    }
+                } else {
+                    failure("invalid_coordinates")
+                }
             } else if op == "viewport_pick" {
                 if delivered_crop != host.editor.captures.rect {
                     failure("stale_frame")
@@ -318,6 +393,17 @@ fn direct_image_host_fixture() {
             ..Default::default()
         };
         let mut raw = raw;
+        if let Some((pos, pressed)) = translate_pointer {
+            raw.events.push(egui::Event::PointerMoved(pos));
+            if let Some(pressed) = pressed {
+                raw.events.push(egui::Event::PointerButton {
+                    pos,
+                    button: egui::PointerButton::Primary,
+                    pressed,
+                    modifiers: egui::Modifiers::NONE,
+                });
+            }
+        }
         if let Some(pos) = pointer {
             raw.events.push(egui::Event::PointerMoved(pos));
             for pressed in [true, false] {
@@ -335,6 +421,19 @@ fn direct_image_host_fixture() {
             host.editor.ui(ui);
             host.editor.poll_capture(ui.ctx());
             host.service_bridge(ui.ctx());
+        });
+        let local = local.map(|(mut response, ms)| {
+            if translate_op.as_deref() == Some("translate_begin")
+                && !host.editor.manipulation.active()
+            {
+                translate = None;
+                response = json!({"ok":false,"error":{"code":"not_native_handle"}});
+                release_next = Some(egui::Pos2::ZERO);
+            }
+            if translate_op.as_deref() == Some("translate_end") {
+                translate = None;
+            }
+            (response, ms)
         });
         let ui_ms = frame_started.elapsed().as_secs_f64() * 1000.;
         let callbacks = full
@@ -448,8 +547,10 @@ fn direct_image_host_fixture() {
         let color_ms = color_started.elapsed().as_secs_f64() * 1000.;
         // Native queued selection is applied after this frame's viewport draw.
         // Deliver the following rendered frame, never old pixels with new selection.
-        let local = if pointer.is_some() {
-            pending_pick_response = local;
+        let local = if pointer.is_some() || translate_pointer.is_some() {
+            if local.is_some() {
+                pending_pick_response = local;
+            }
             None
         } else {
             local.or_else(|| pending_pick_response.take())
@@ -458,6 +559,7 @@ fn direct_image_host_fixture() {
             use base64::Engine as _;
             let rect = host.editor.captures.rect.unwrap();
             delivered_crop = Some(rect);
+            delivered_frame = Some(count);
             let x = rect.min.x.ceil() as usize;
             let y = rect.min.y.ceil() as usize;
             let width = (rect.max.x.floor() as usize).saturating_sub(x);
@@ -482,7 +584,7 @@ fn direct_image_host_fixture() {
             let encode_ms = encode_started.elapsed().as_secs_f64() * 1000.;
             let scene = host.editor.command(&nonce, "scene_inspect", json!({}));
             let view = host.editor.command(&nonce, "viewport_inspect", json!({}));
-            let reply = json!({"response":response,"scene":scene["result"],"view":view["result"],"commit_ms":commit_ms,"native_frame":count,"phases_ms":{"ui":ui_ms,"render_readback":readback_ms,"color_conversion":color_ms,"crop":crop_ms,"png":encode_ms},"png":base64::engine::general_purpose::STANDARD.encode(png),"fixture_authority_only":true,"draft_reserved":reservation.is_some()});
+            let reply = json!({"response":response,"scene":scene["result"],"view":view["result"],"translate_active":host.editor.manipulation.active(),"undo_len":host.editor.session.undo_len(),"redo_len":host.editor.session.redo_len(),"preview_objects":host.editor.manipulation.transient_scene(host.editor.session.scene()).map(|s| s.objects),"commit_ms":commit_ms,"native_frame":count,"phases_ms":{"ui":ui_ms,"render_readback":readback_ms,"color_conversion":color_ms,"crop":crop_ms,"png":encode_ms},"png":base64::engine::general_purpose::STANDARD.encode(png),"fixture_authority_only":true,"draft_reserved":reservation.is_some()});
             transport.as_ref().unwrap().reply(reply);
         }
         for callback in callbacks {
@@ -496,6 +598,7 @@ fn direct_image_host_fixture() {
             std::thread::sleep(Duration::from_millis(10));
         }
     }
+    host.editor.manipulation.cancel();
     drop(transport);
     host.disconnect_adapter();
     let until = Instant::now() + Duration::from_secs(3);
@@ -505,5 +608,5 @@ fn direct_image_host_fixture() {
     }
     assert!(host.bridge.is_none() && !locator.exists());
     assert!(metrics.lock().unwrap().frames > 0);
-    std::fs::write(out.join("cleanup.json"),json!({"retired":true,"locator_absent":!locator.exists(),"revision":host.editor.session.scene().revision,"objects":host.editor.session.scene().objects,"gpu":render.adapter.get_info().name}).to_string()).unwrap();
+    std::fs::write(out.join("cleanup.json"),json!({"retired":true,"locator_absent":!locator.exists(),"translate_active":host.editor.manipulation.active(),"undo_len":host.editor.session.undo_len(),"redo_len":host.editor.session.redo_len(),"revision":host.editor.session.scene().revision,"objects":host.editor.session.scene().objects,"gpu":render.adapter.get_info().name}).to_string()).unwrap();
 }

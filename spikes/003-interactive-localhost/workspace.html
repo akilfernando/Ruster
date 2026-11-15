@@ -1,7 +1,7 @@
 <!doctype html><html lang="en"><meta charset="utf-8"><title>Rusterize local workspace fixture</title>
 <style>body{background:#141820;color:#dce4ee;font:14px system-ui;margin:20px}button,input{background:#252e3e;color:inherit;border:1px solid #53617a;border-radius:5px;padding:8px;margin:3px}button{cursor:pointer}button:disabled,input:disabled{opacity:.5;cursor:default}header{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.warning{color:#eabd70}main{display:grid;grid-template-columns:minmax(400px,1fr) 310px;gap:16px}img{width:100%;height:auto;border:1px solid #53617a}fieldset{border:1px solid #53617a;margin:12px 0}input[type=number]{width:48px}fieldset label{display:inline-flex;align-items:center;gap:2px}#objects button{display:block;width:96%;text-align:left}#objects .selected{border:2px solid #73b5ff}#status{min-height:42px;white-space:pre-wrap}#identity{overflow-wrap:anywhere}.subtle{color:#a7b7c9}details{margin:14px 0}pre{white-space:pre-wrap;overflow-wrap:anywhere} @media(max-width:850px){main{grid-template-columns:1fr}}</style>
-<h1>Rusterize · local workspace</h1><p class="warning">Disposable fixture grant only — not production human consent. Native Vulkan pixels; click a rendered object to select, or background to clear. Native overlay controls are not browser authoring tools. No model round trip.</p>
-<header><label>Local capability <input id="capability" type="password" autocomplete="off"></label><button id="connect">Connect / refresh</button><button id="undo">Shared Undo</button><span id="receipt">Disconnected</span></header><p id="status" role="status">Enter the capability from this session's private capability.secret.</p>
+<h1>Rusterize · local workspace</h1><p class="warning">Disposable fixture grant only — not production human consent. Native Vulkan pixels and native Translate handles. No model round trip. Rotation/Scale drag are not bridged.</p>
+<header><label>Local capability <input id="capability" type="password" autocomplete="off"></label><button id="connect">Connect / refresh</button><button id="undo">Shared Undo</button><label><input type="checkbox" id="translate">Translate handles (Escape cancels)</label><span id="receipt">Disconnected</span></header><p id="status" role="status">Enter the capability from this session's private capability.secret.</p>
 <main><section><nav aria-label="Camera"><button data-camera="left">Orbit left</button><button data-camera="right">Orbit right</button><button data-camera="up">Orbit up</button><button data-camera="down">Orbit down</button><button data-camera="panleft">Pan left</button><button data-camera="panright">Pan right</button><button data-camera="in">Zoom in</button><button data-camera="out">Zoom out</button></nav><img id="frame" alt="Native rendered scene, awaiting connection"><p id="presentation" class="subtle">No frame.</p></section>
 <aside><h2>Objects</h2><div id="objects"></div><button id="clear">Clear selection</button><h2>Inspector</h2><p id="identity">Nothing selected</p><button id="begin">Edit transform</button><form id="inspector"><div id="fields"></div><button id="apply" type="submit" disabled>Apply (Enter)</button><button id="cancel" type="button" disabled>Cancel (Escape)</button></form><p id="draft" class="warning"></p></aside></main>
 <details><summary>Native receipt / outcomes</summary><pre id="details"></pre></details>
@@ -36,7 +36,7 @@ const frame=$('frame');frame.draggable=false;frame.style.touchAction='none';fram
 frame.insertAdjacentHTML('afterend','<p class="subtle">Right-drag: orbit · Middle-drag or Shift-right-drag: pan · Wheel: zoom · Primary click: select. Dragging never selects. Navigation displays successive authoritative native frames; no client-side scene or interpolated camera.</p>');
 function cancelCamera(){cameraEpoch++;cameraIntent=null;clearTimeout(cameraTimer);cameraTimer=null;const g=gesture;gesture=null;if(g&&frame.hasPointerCapture(g.id))frame.releasePointerCapture(g.id)}
 function queueCamera(mode,dx,dy,height){
- if(!current||!autoEnabled||document.hidden||!navigator.onLine)return;
+ if(!current||!autoEnabled||translation||document.hidden||!navigator.onLine)return;
  if(cameraIntent&&cameraIntent.mode!==mode){$('status').textContent='Finish current camera gesture first.';return}
  const p=cameraIntent||(cameraIntent={mode,dx:0,dy:0,height,first:performance.now(),latest:performance.now()});p.dx+=dx;p.dy+=dy;p.latest=performance.now();
  if(Math.abs(p.dx)>4096||Math.abs(p.dy)>4096){cancelCamera();$('status').textContent='Camera input bound exceeded; unsent navigation canceled.';return}
@@ -56,16 +56,23 @@ async function flushCamera(){
  if(epoch===cameraEpoch)scheduleCamera();
 }
 frame.oncontextmenu=e=>e.preventDefault();
-frame.onpointerdown=e=>{if(e.pointerType!=='mouse'||!current||!autoEnabled||gesture||cameraIntent||cameraFlight||busy)return;e.preventDefault();gesture={id:e.pointerId,button:e.button,mode:e.button===1||(e.button===2&&e.shiftKey)?'pan':e.button===2?'orbit':null,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,dragged:false};frame.setPointerCapture(e.pointerId)};
-frame.onpointermove=e=>{const g=gesture;if(!g||g.id!==e.pointerId)return;e.preventDefault();if(!g.dragged&&Math.hypot(e.clientX-g.x,e.clientY-g.y)<4)return;const dx=e.clientX-g.lastX,dy=e.clientY-g.lastY;g.lastX=e.clientX;g.lastY=e.clientY;g.dragged=true;if(g.mode)queueCamera(g.mode,dx,dy,frame.clientHeight)};
-frame.onpointerup=e=>{const g=gesture;if(!g||g.id!==e.pointerId)return;frame.onpointermove(e);gesture=null;if(frame.hasPointerCapture(g.id))frame.releasePointerCapture(g.id);if(g.button!==0||g.dragged)return;
+frame.onpointerdown=e=>{if(e.pointerType!=='mouse'||!current||!autoEnabled||gesture||translation||cameraIntent||cameraFlight||busy)return;e.preventDefault();if(e.button===0&&$('translate').checked){startTranslation(e);return}gesture={id:e.pointerId,button:e.button,mode:e.button===1||(e.button===2&&e.shiftKey)?'pan':e.button===2?'orbit':null,x:e.clientX,y:e.clientY,lastX:e.clientX,lastY:e.clientY,dragged:false};frame.setPointerCapture(e.pointerId)};
+frame.onpointermove=e=>{if(translation){if(translation.pointer===e.pointerId){translation.latest=imagePoint(e);pumpTranslation()}return}const g=gesture;if(!g||g.id!==e.pointerId)return;e.preventDefault();if(!g.dragged&&Math.hypot(e.clientX-g.x,e.clientY-g.y)<4)return;const dx=e.clientX-g.lastX,dy=e.clientY-g.lastY;g.lastX=e.clientX;g.lastY=e.clientY;g.dragged=true;if(g.mode)queueCamera(g.mode,dx,dy,frame.clientHeight)};
+frame.onpointerup=e=>{if(translation){const g=translation;if(g.pointer!==e.pointerId)return;g.latest=imagePoint(e);g.end=true;if(frame.hasPointerCapture(g.pointer))frame.releasePointerCapture(g.pointer);pumpTranslation();return}const g=gesture;if(!g||g.id!==e.pointerId)return;frame.onpointermove(e);gesture=null;if(frame.hasPointerCapture(g.id))frame.releasePointerCapture(g.id);if(g.button!==0||g.dragged)return;
  const r=frame.getBoundingClientRect(),x=(e.clientX-r.left-frame.clientLeft)*frame.naturalWidth/frame.clientWidth,y=(e.clientY-r.top-frame.clientTop)*frame.naturalHeight/frame.clientHeight;
  operate('viewport_pick',{...pins(true),x,y,image_width:frame.naturalWidth,image_height:frame.naturalHeight});
 };
-frame.onpointercancel=cancelCamera;frame.onlostpointercapture=()=>{if(gesture)cancelCamera()};
-frame.addEventListener('wheel',e=>{e.preventDefault();if(gesture)return;const unit=e.deltaMode===1?16:e.deltaMode===2?frame.clientHeight:1;queueCamera('zoom',0,e.deltaY*unit,frame.clientHeight)},{passive:false});
-addEventListener('blur',cancelCamera);addEventListener('pagehide',cancelCamera);
-addEventListener('keydown',e=>{if(e.key==='Escape')cancelCamera()});
+frame.onpointercancel=()=>{cancelCamera();cancelTranslation()};frame.onlostpointercapture=()=>{if(gesture)cancelCamera();if(translation&&!translation.end)cancelTranslation()};
+frame.addEventListener('wheel',e=>{e.preventDefault();if(gesture||translation)return;const unit=e.deltaMode===1?16:e.deltaMode===2?frame.clientHeight:1;queueCamera('zoom',0,e.deltaY*unit,frame.clientHeight)},{passive:false});
+// One native gesture, one in-flight request, one latest absolute preview intent.
+// Release/cancel are explicit terminal operations, never camera aggregates/replays.
+let translation=null;
+function imagePoint(e){const r=frame.getBoundingClientRect();return {x:Math.max(0,Math.min(frame.naturalWidth-1,(e.clientX-r.left-frame.clientLeft)*frame.naturalWidth/frame.clientWidth)),y:Math.max(0,Math.min(frame.naturalHeight-1,(e.clientY-r.top-frame.clientTop)*frame.naturalHeight/frame.clientHeight)),image_width:frame.naturalWidth,image_height:frame.naturalHeight}}
+async function startTranslation(e){const g=translation={pointer:e.pointerId,id:crypto.randomUUID(),flight:true,latest:null,end:false,cancel:false};frame.setPointerCapture(e.pointerId);const r=await operate('translate_begin',{...pins(true),expected_native_frame:current.native_frame,...imagePoint(e),gesture_id:g.id});g.flight=false;if(r.status!=='completed'){g.cancel=true}pumpTranslation()}
+async function pumpTranslation(){const g=translation;if(!g||g.flight)return;let op,args={gesture_id:g.id};if(g.cancel)op='translate_cancel';else if(g.latest){op=g.end?'translate_end':'translate_move';Object.assign(args,g.latest);g.latest=null}else return;g.flight=true;const r=await operate(op,args);g.flight=false;if(op==='translate_cancel'||op==='translate_end'){translation=null;if(frame.hasPointerCapture(g.pointer))frame.releasePointerCapture(g.pointer);return}if(r.status!=='completed')g.cancel=true;pumpTranslation()}
+function cancelTranslation(){if(translation){translation.cancel=true;pumpTranslation()}}
+addEventListener('blur',()=>{cancelCamera();cancelTranslation()});addEventListener('pagehide',()=>{cancelCamera();cancelTranslation()});
+addEventListener('keydown',e=>{if(e.key==='Escape'){cancelCamera();cancelTranslation()}});
 $('begin').onclick=()=>current&&operate('draft_begin',{...pins(true),object_id:current.view.active_object_id});
 $('cancel').onclick=()=>operate('draft_cancel');
 $('inspector').onsubmit=e=>{e.preventDefault();if(!draft)return;const transform={};for(const group of ['translation','rotation','scale'])transform[group]=[0,1,2].map(i=>Number($(group+i).value));if(Object.values(transform).flat().some(v=>!Number.isFinite(v))){$('status').textContent='Finite numbers required; draft preserved.';return}operate('scene_transform',{...pins(false,draft.source),object_id:draft.object_id,transform})};
@@ -76,7 +83,7 @@ for(const button of document.querySelectorAll('[data-camera]'))button.onclick=()
 function scheduleAuto(){clearTimeout(autoTimer);autoTimer=null;if(autoEnabled&&!document.hidden&&navigator.onLine)autoTimer=setTimeout(checkAuto,autoDelay)}
 async function checkAuto(){
  if(!autoEnabled||document.hidden||!navigator.onLine)return;
- if(busy||gesture||cameraFlight||cameraIntent){scheduleAuto();return}busy=true;
+ if(busy||gesture||translation||cameraFlight||cameraIntent){scheduleAuto();return}busy=true;
  let changed=false;
  try{
   const response=await fetch('/status',{method:'POST',headers:{'X-Workspace-Capability':$('capability').value},signal:AbortSignal.timeout(3000)});
@@ -88,5 +95,5 @@ async function checkAuto(){
  if(changed&&autoEnabled&&!document.hidden&&navigator.onLine)await operate('refresh',{},true);
  scheduleAuto();
 }
-for(const event of ['visibilitychange','online','offline'])addEventListener(event,()=>{if(document.hidden||!navigator.onLine){cancelCamera();clearTimeout(autoTimer);autoTimer=null;$('presentation').textContent='Preview unconfirmed while hidden/offline.'}else scheduleAuto()});
+for(const event of ['visibilitychange','online','offline'])addEventListener(event,()=>{if(document.hidden||!navigator.onLine){cancelCamera();cancelTranslation();clearTimeout(autoTimer);autoTimer=null;$('presentation').textContent='Preview unconfirmed while hidden/offline.'}else scheduleAuto()});
 </script></html>
