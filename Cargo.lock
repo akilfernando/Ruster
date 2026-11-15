@@ -3091,6 +3091,7 @@ dependencies = [
 name = "ruster-behavior"
 version = "0.1.0"
 dependencies = [
+ "glam 0.30.10",
  "mlua",
  "parry3d-f64",
  "ruster-scene",

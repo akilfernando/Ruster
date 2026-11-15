@@ -18,6 +18,8 @@ use ruster_scene::{
 };
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
+mod assembly_gate_tests;
 pub mod debug;
 pub mod spatial;
 mod state;

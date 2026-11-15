@@ -1,5 +1,24 @@
 # Current project status
 
+## Nested assembly core investigation — 2026-11-15
+
+**Runnable example/test-only prototype, not integrated F4a.** Latest user request
+resumes bounded engine/editor scene-composition investigation alongside ChatGPT
+MCP work; historical F4a proposal/API/schema choices are not blanket-approved.
+Exclusive branch `prototype/assembly-core-20261115` starts at native candidate
+`14cd60e97fb4c91a8511954b255ec2c7a0f07d1e`; canonical dirty status/attachments
+and other feature checkouts remain untouched. One resolver flattens two groups,
+nonuniform geometry/box collider and an attached point light into existing
+Scene18. Root movement/hinge rotation pass actual CPU render model/Fit/pick/light
+packet and production SpatialWorld overlap/sweep oracles. Seven focused cases,
+runnable example and strict affected all-target Clippy pass. Numeric rounding
+rejection has observed RED/GREEN evidence. [Contract, assumptions and evidence](evidence/F4A-CORE-PROTOTYPE-2026-11-15.md).
+
+**RUNNING within this bounded child:** full change gate and durable checkpoint.
+Production hierarchy/history/format migration, ordinary editor and MCP actions,
+script coordinate semantics, recovery/save/export and native/GPU appearance
+remain unimplemented/unqualified. No install/merge/release or desktop input.
+
 ## Persistent localhost bridge — 2026-11-15
 
 **COMPLETE bounded implementation; no live demo.** Isolated `feat/persistent-local-bridge-20261115` replaces camera/command/frame/status files with one exact-native-PID/UID/token/incarnation-bound Unix stream, bounded framing/deadlines and an IO worker; editor dispatch is nonblocking and request-wakeable. No silent fallback, authored replay, browser 3D engine or production authority change. Actual final native/browser/MCP drag/settle/pick/draft/shared-Undo/stale/access/revocation journey passes; kernel watch records zero fixture-root filesystem opens/creates/writes/renames/deletes during hot camera/frame/status traffic. Initial/fixed-camera/selected lossless PNGs match file-control byte-for-byte. Three real native fault journeys cover incomplete-header timeout (MCP remains responsive), oversized framing and EOF cleanup. [Architecture, remaining lifecycle files, hashes, tests and limitations](evidence/PERSISTENT-BRIDGE-2026-11-15.md).

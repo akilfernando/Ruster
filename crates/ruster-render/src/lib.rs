@@ -632,6 +632,9 @@ impl Camera {
         }
     }
 }
+#[cfg(test)]
+mod assembly_gate_tests;
+
 fn model(object: &Object) -> Mat4 {
     let t = &object.transform;
     Mat4::from_scale_rotation_translation(
