@@ -38,7 +38,8 @@ read back before browser qualification.
 - `cargo build --locked -p ruster-editor -p ruster-mcp --message-format=json`:
   ordinary native/adapter binaries build, with compiler JSON and artifact pins in
   `build-normal-resume.*` and the manifest. No native window was launched.
-- Existing `qualify.py --pairing-only`, output `resume-journey/`: pending refuses
+- Existing `qualify.py --pairing-only`, outputs `resume-journey/` and final
+  `resume-final-journey/`: pending refuses
   reads, explicit exact fixture approval, automatic native pixels, real saved
   project_list/project_connect and direct MCP transform, observer sees revision1,
   browser Shared Undo reaches revision2, reload automatically authenticates with
@@ -48,9 +49,13 @@ read back before browser qualification.
   camera/picking/drafts/shared history and Host/Origin/capability refusals; it is
   not browser-pairing consent or a replacement for the paired journey.
 
-Adapter SHA-256:
-`06c6dcdaeb80652bad7b21acb1b6cf5369616ee1af0c41d69bd8bd143e1d26fe`.
-Both journeys report full owned resource cleanup. Independent readback checks
+Pinned rebuilt adapter `adapter-resume` SHA-256:
+`e54551c562f852e021806bb4750c309afbe62c3e7b08d6a729ef2949b612646b`.
+Initial paired run used the retained earlier build hash
+`06c6dcdaeb80652bad7b21acb1b6cf5369616ee1af0c41d69bd8bd143e1d26fe`;
+normal build produced a distinct debug artifact, so the final paired journey was
+rerun with the immutable rebuilt adapter copy. Legacy journey uses the same
+rebuilt adapter bytes. All journeys report full owned resource cleanup. Independent readback checks
 exact native/server PID absence, listener refusal and capability/locator/socket
 absence, then reacquires the shared gate. No endpoint remains live.
 
@@ -96,7 +101,7 @@ Developer-only paired journey (acquires the existing QA gate itself):
 ```sh
 python3 spikes/003-interactive-localhost/qualify.py \
   --host-binary /home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/browser-pairing/host-resume \
-  --adapter /home/akilf/Projects/rusterize-prompt-connect-20261115/target/debug/ruster-mcp \
+  --adapter /home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/browser-pairing/adapter-resume \
   --output /home/akilf/Projects/Ruster-Audits/prompt-connect-20261115/browser-pairing/new-owned-run \
   --pairing-only
 ```
