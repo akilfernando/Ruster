@@ -1,5 +1,9 @@
 # Current project status
 
+## CPU runtime-input fixture diagnosis and repair — 2026-11-15
+
+Isolated test-only follow-up reproduces the ownership assertion naturally with returned `Busy` and deterministically with a held input slot, not demonstrated splitter navigation. The existing focus/gesture case now orders worker tick admission, strengthens actual Response/focused-ID checks and separately requires contended key-up to revoke ownership and reject the old lease. Production guards/camera code are unchanged. Final focused50/50 and one fresh full default gate pass (361Rust/30Python,5existing ignores, strict checks and downstream/doc-test completion,68.71s). [Evidence and historical-cause limit](evidence/RUNTIME-INPUT-OWNERSHIP-2026-11-15.md). Original `check.log` remains FAILED; its exact uninstrumented cause cannot be proven retroactively. Parent owns independent review/integration; no merge/release/install or performance-checkout modification.
+
 ## ChatGPT usability accepted by user report — 2026-11-15
 
 Akil tested this optimized/completion-paced candidate in the actual ChatGPT built-in browser and reported: “significantly better. this feels usable.” The earlier click/orbit/pan/wheel behavior was already user-confirmed correct; this report accepts the improved subjective responsiveness. It is explicit user validation, not an independently measured ChatGPT frame rate or physical display latency. The retained owned-browser comparative traces remain separate evidence.
