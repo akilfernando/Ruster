@@ -12,6 +12,9 @@ use std::{
 };
 
 const MAX_PNG: usize = 40_000;
+// Existing workspace wire ceiling (also enforced by workspace_attachment::send).
+// This is not the MCP thumbnail response budget.
+pub(super) const WORKSPACE_REPLY_LIMIT: usize = 8 * 1024 * 1024;
 static NEXT_CAPTURE: AtomicU64 = AtomicU64::new(1);
 static READBACK_BUSY: AtomicBool = AtomicBool::new(false);
 struct ReadbackPermit;
@@ -480,7 +483,14 @@ impl SceneEditor {
                         }
                     }
 
-                    if serde_json::to_vec(&value).map_or(true, |v| v.len() > 64_000) {
+                    // Budget follows the original retained request, never caller
+                    // JSON, the inspecting route or the mutable ownership flag.
+                    let output_limit = if pending.full_resolution {
+                        WORKSPACE_REPLY_LIMIT
+                    } else {
+                        64_000
+                    };
+                    if serde_json::to_vec(&value).map_or(true, |v| v.len() > output_limit) {
                         value = json!({"capture_id":pending.id.to_string(),"status":"failed","reason":"capture_output_limit"});
                     }
                     self.captures.completed = Some((pending.id, pin, value));
@@ -1470,6 +1480,119 @@ mod tests {
     }
 
     #[test]
+    fn runtime_return_does_not_revive_adopted_authored_capture() {
+        let _owner = CAPTURE_TEST_OWNER.lock().unwrap();
+        for case in [
+            "visible", "frame", "tick", "run", "stale", "commit", "scene",
+        ] {
+            let mut editor =
+                SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
+            editor.navigation.reset = false;
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(100., 100.));
+            editor.captures.rect = Some(rect);
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            output.textures_delta.clear();
+            editor.export_context = Some(ctx);
+            editor.runtime.frame = Some(crate::behavior_worker::Frame {
+                commit_revision: 0,
+                last_step_commit_revision: None,
+                commit_revision_required: false,
+                command_schema_hash: None,
+                authoring: Arc::new(Default::default()),
+                state: Arc::new(ruster_behavior::RuntimeState::default()),
+                query_observations: None,
+                input: None,
+                key: crate::behavior_worker::RunKey::default(),
+                tick: 7,
+                scene: Arc::new(editor.session.scene().clone()),
+            });
+            let original = editor.runtime.frame.clone();
+            let pin = editor.capture_pin();
+            assert!(pin.resources.is_empty());
+            let start = editor.capture_command("owner", "viewport_capture_start", &json!({
+                "expected_session_token":"owner", "expected_revision":pin.revision.to_string(),
+                "expected_view_revision":pin.view.to_string()
+            })).unwrap();
+            let id = start["capture_id"].clone();
+            let (sender, receiver) = mpsc::channel();
+            editor.captures.pending.as_mut().unwrap().receiver = Some(receiver);
+            sender
+                .send(capture_image(
+                    &Arc::new(egui::ColorImage::filled([100, 100], egui::Color32::GREEN)),
+                    rect,
+                    1.,
+                    false,
+                ))
+                .unwrap();
+            assert_eq!(
+                editor
+                    .capture_command(
+                        "owner",
+                        "viewport_capture_inspect",
+                        &json!({"capture_id":id})
+                    )
+                    .unwrap()["status"],
+                "ready"
+            );
+            let before = (
+                editor.navigation.camera,
+                editor.manipulation.ids.clone(),
+                editor.session.snapshot_bytes().unwrap(),
+                editor.session.undo_len(),
+                editor.session.redo_len(),
+            );
+            match case {
+                "visible" => editor.runtime.visible = true,
+                "frame" => editor.runtime.frame = None,
+                "tick" => editor.runtime.frame.as_mut().unwrap().tick += 1,
+                "run" => editor.runtime.frame.as_mut().unwrap().key.reset_epoch += 1,
+                "stale" => editor.runtime.stale = !editor.runtime.stale,
+                "commit" => editor.runtime.frame.as_mut().unwrap().commit_revision += 1,
+                "scene" => {
+                    editor.runtime.frame.as_mut().unwrap().scene =
+                        Arc::new(editor.session.scene().clone())
+                }
+                _ => unreachable!(),
+            }
+            assert!(editor.capture_resources().is_empty());
+            editor.observe_view();
+            editor.runtime.visible = false;
+            editor.runtime.stale = pin.runtime_stale;
+            editor.runtime.frame = original;
+            editor.observe_view();
+            for op in ["viewport_capture_inspect", "viewport_capture_pick"] {
+                let args = if op.ends_with("pick") {
+                    json!({"capture_id":id,"u":0.5,"v":0.5})
+                } else {
+                    json!({"capture_id":id})
+                };
+                assert_eq!(
+                    editor.capture_command("owner", op, &args).unwrap_err().0,
+                    "stale_capture",
+                    "{case}: {op}"
+                );
+            }
+            assert_eq!(
+                before,
+                (
+                    editor.navigation.camera,
+                    editor.manipulation.ids.clone(),
+                    editor.session.snapshot_bytes().unwrap(),
+                    editor.session.undo_len(),
+                    editor.session.redo_len()
+                )
+            );
+        }
+    }
+
+    #[test]
     fn layout_return_does_not_revive_completed_capture() {
         let mut editor =
             SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
@@ -1512,6 +1635,127 @@ mod tests {
             assert!(!clear_layers(ui.ctx()));
         });
         output.textures_delta.clear();
+    }
+
+    #[test]
+    fn adoption_preserves_workspace_budget_without_elevating_thumbnail_origin() {
+        let _owner = CAPTURE_TEST_OWNER.lock().unwrap();
+        let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::vec2(256., 256.));
+        let mut image = egui::ColorImage::filled([256, 256], egui::Color32::TRANSPARENT);
+        let mut noise = 1u32;
+        for pixel in &mut image.pixels {
+            noise ^= noise << 13;
+            noise ^= noise >> 17;
+            noise ^= noise << 5;
+            let [r, g, b, _] = noise.to_le_bytes();
+            *pixel = egui::Color32::from_rgb(r, g, b);
+        }
+        let encoded = capture_image(&Arc::new(image), rect, 1., true).unwrap();
+        let original_bytes = base64::engine::general_purpose::STANDARD
+            .decode(encoded["image_base64"].as_str().unwrap())
+            .unwrap();
+        assert!(serde_json::to_vec(&encoded).unwrap().len() > 64_000);
+        assert!(original_bytes.len() <= 4 * 1024 * 1024);
+        for case in [
+            "workspace",
+            "thumbnail",
+            "spoof_route",
+            "metadata",
+            "transport",
+        ] {
+            let workspace = matches!(case, "workspace" | "metadata" | "transport");
+            let mut editor =
+                SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
+            editor.navigation.reset = false;
+            editor.captures.rect = Some(rect);
+            let ctx = egui::Context::default();
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(rect),
+                    ..Default::default()
+                },
+                |_| {},
+            );
+            output.textures_delta.clear();
+            editor.export_context = Some(ctx);
+            if case == "metadata" {
+                editor.manipulation.ids = vec!["x".repeat(128); 256];
+            }
+            let pin = editor.capture_pin();
+            let start = editor.capture_command_inner("owner", "viewport_capture_start", &json!({
+                "expected_session_token":"owner", "expected_revision":pin.revision.to_string(),
+                "expected_view_revision":pin.view.to_string()
+            }), workspace).unwrap();
+            let id = start["capture_id"].clone();
+            let (sender, receiver) = mpsc::channel();
+            editor.captures.pending.as_mut().unwrap().receiver = Some(receiver);
+            let mut payload = encoded.clone();
+            if case == "transport" {
+                payload["image_base64"] = json!("x".repeat(8 * 1024 * 1024));
+            }
+            sender.send(Ok(payload)).unwrap();
+            // Caller JSON and the inspect route cannot elevate the retained origin.
+            assert_eq!(
+                editor
+                    .capture_command_inner(
+                        "owner",
+                        "viewport_capture_inspect",
+                        &json!({"capture_id":id,"full_resolution":true}),
+                        workspace
+                    )
+                    .unwrap_err()
+                    .0,
+                "invalid_arguments"
+            );
+            assert_eq!(
+                editor
+                    .capture_command_inner(
+                        "owner",
+                        "viewport_capture_inspect",
+                        &json!({"capture_id":id}),
+                        !workspace
+                    )
+                    .unwrap_err()
+                    .0,
+                "capture_not_owned"
+            );
+            assert!(editor.captures.pending.is_some());
+            if case == "spoof_route" {
+                editor.captures.workspace_owned = true;
+            }
+            let ready = editor
+                .capture_command_inner(
+                    "owner",
+                    "viewport_capture_inspect",
+                    &json!({"capture_id":id}),
+                    workspace || case == "spoof_route",
+                )
+                .unwrap();
+            if case == "workspace" {
+                assert_eq!(ready["status"], "ready");
+                assert_eq!(ready["image_base64"], encoded["image_base64"]);
+                assert_eq!(
+                    base64::engine::general_purpose::STANDARD
+                        .decode(ready["image_base64"].as_str().unwrap())
+                        .unwrap(),
+                    original_bytes
+                );
+                assert_eq!(ready["width"], 256);
+                assert_eq!(ready["height"], 256);
+            } else {
+                assert_eq!(ready["status"], "failed", "{case}");
+                assert_eq!(
+                    ready["reason"],
+                    if case == "metadata" {
+                        "grounding_metadata_limit"
+                    } else {
+                        "capture_output_limit"
+                    },
+                    "{case}"
+                );
+                assert!(ready.get("image_base64").is_none());
+            }
+        }
     }
 
     #[test]

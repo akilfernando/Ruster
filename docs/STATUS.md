@@ -2,11 +2,30 @@
 
 ## MCP capture-bound visual grounding — 2026-11-15
 
-**First source slice implemented; CPU verification only; NOT integrated, GPU/client-qualified or installed.** Isolated branch `feat/mcp-visual-grounding-20261115` extends the existing ready observation with immutable selection/camera/matrices and adds read-only `viewport_capture_pick`. Exact thumbnail integer sampling/crop/source-pixel-center/DPI feeds native hierarchy/mesh picking against fresh-only authored state. Runtime images remain available with explicitly unsupported grounding. Native authority identity and captured session guard both pending and completed reads; native revocation cancels retained capture state. Layout/matrix/DPI/resource identity changes also advance view revision, preventing observed A→B→A revival. Extra metadata8KiB, MCP PNG40000bytes/512per side and native response64000bytes fail explicitly; malformed PNG cannot become metadata-only success.
+**First source slice implemented; CPU verification only; NOT integrated, GPU/client-qualified or installed.** Isolated branch `feat/mcp-visual-grounding-20261115` extends the existing ready observation with immutable selection/camera/matrices and adds read-only `viewport_capture_pick`. Exact thumbnail integer sampling/crop/source-pixel-center/DPI feeds native hierarchy/mesh picking against fresh-only authored state. Runtime images remain available with explicitly unsupported grounding. Native authority identity and captured session guard both pending and completed reads; native revocation cancels retained capture state. Layout/matrix/DPI/resource identity changes also advance view revision, preventing observed A→B→A revival. Extra metadata8KiB and MCP PNG40000bytes/512per side/native response64000bytes fail explicitly; full-resolution workspace captures retain the existing4MiB PNG and8MiB serialized transport limits. Malformed PNG cannot become metadata-only success.
 
 Behavioral RED receipts cover completed wrong-owner leakage, missing capture metadata, layout-return revival, MCP query schema, malformed-image success and changed resolved-resource adoption. GREEN CPU checks cover actual encoder/adoption dispatch, frontmost same-color geometry under a translated parent in perspective/orthographic narrow views, background miss vs invalid projection/runtime/coordinates, exact thumbnail sampling at fractional DPI, native-authority replacement/revocation and unchanged scene bytes/selection/camera/dirty/Undo/Redo. Production paint-receipt refusal is retained; synthetic encoder/adoption seams are not GPU or actual-client evidence.
 
 Audit (private): `/home/akilf/Projects/Ruster-Audits/cumulative-editor-20261115/mcp-visual-grounding/`; final command results and exact source hashes in its `manifest.json`. Scoped default/inspection package checks, strict Clippy and formatting recorded there. Parent owns independent ownership/freshness review, integration and source-matched native/current-client qualification. Frozen accepted native trial, live endpoints/enrollment/configuration, desktop and installed artifacts were untouched. Historical inspection asset-retirement failure remains causally unresolved; a current passing suite does not diagnose it. No broad workspace/GPU/optimized-build gate was run for this bounded slice.
+
+**Independent review repair — 2026-11-15:** the two P1 findings are repaired on
+`fix/mcp-visual-grounding-review-20261115`, not yet integrated or re-reviewed.
+Observed runtime visibility, staleness, retained frame/run/tick/commit and scene/
+authoring identities advance the existing monotonic view revision, including
+hidden retained-frame changes; returning to authored display cannot revive an
+adopted capture. Output budgeting follows retained `Pending.full_resolution`,
+not caller JSON, inspection route or `workspace_owned`. Workspace transport and
+adoption share the pre-existing8MiB ceiling; extra grounding metadata remains
+independently capped at8KiB. Two behavioral regressions were each observed RED
+before the corresponding fix and GREEN afterward. Focused capture18 and view2
+pass separately in default and inspection builds; workspace attachment2 passes;
+MCP29 unit plus1 integration pass. These cohorts overlap and are not summed.
+Strict editor Clippy (all targets) default/inspection and formatting pass.
+[Repair evidence and exact commands](verification/2026-11-15-visual-grounding-review-repairs.md).
+Private repair logs, checks and hash manifest: audit `review-repairs/`.
+Independent closeout review, source-matched optimized build and actual native/
+ChatGPT image-plus-point qualification remain parent-owned gates. No live,
+GUI/GPU, enrollment, installation or frozen-trial changes were made.
 
 ## Cumulative native AI workspace integration — 2026-11-15
 

@@ -24,6 +24,9 @@ struct ViewSnapshot {
     screen: Option<eframe::egui::Rect>,
     resources: Vec<(u8, String, usize)>,
     matrices: Option<ruster_render::CameraMatrices>,
+    runtime_visible: bool,
+    runtime_stale: bool,
+    runtime_frame: Option<(crate::behavior_worker::RunKey, u64, u64, usize, usize)>,
 }
 
 fn fail(code: &str) -> (String, String) {
@@ -89,6 +92,19 @@ impl SceneEditor {
                 .as_ref()
                 .map(eframe::egui::Context::viewport_rect),
             matrices: self.captures.view.zip(self.captures.projection),
+            // Observe retained frames even while authored display is selected.
+            // The monotonically advanced revision must not return to A after B.
+            runtime_visible: self.runtime.visible,
+            runtime_stale: self.runtime.stale,
+            runtime_frame: self.runtime.frame.as_ref().map(|frame| {
+                (
+                    frame.key,
+                    frame.tick,
+                    frame.commit_revision,
+                    std::sync::Arc::as_ptr(&frame.scene) as usize,
+                    std::sync::Arc::as_ptr(&frame.authoring) as usize,
+                )
+            }),
         };
         if self
             .view_state
