@@ -1,5 +1,23 @@
 # Current project status
 
+## Cumulative native editor candidate — 2026-11-15
+
+**BLOCKED/stopped before launch by physical-activity admission; not qualified.**
+Candidate `90ceccf` already contains the accepted hierarchy repairs and current
+normal-workspace controls. All585 tracked non-documentation build/source inputs
+match the existing optimized artifact checkout; both release artifact hashes and
+all16 frozen original pins remain verified. No product changes or broad matrix
+rerun. Exact-runtime native Driver imports and runner compilation passed.
+A first audit-only special-workspace lookup error was repaired before launch;
+the next admission observed `resumed` and stopped without retry. Zero native
+sessions/complete cumulative journeys; no browser/adapter launched. Desktop
+preserved, owned preparation/observer processes absent and shared gate independently
+reacquired/released before docs. Native group edit → Undo/Redo → Save → fresh
+reopen exact history/render/selection, plus bounded same-compound interop, remain
+NOT RUN on this cumulative candidate. `installed=false`, user acceptance pending;
+normal-workspace usability and actual ChatGPT managed startup remain separate holds.
+[Source equivalence, retained failures, cleanup and next finite gate](evidence/CUMULATIVE-EDITOR-2026-11-15.md).
+
 ## Coherent workspace frame transaction — 2026-11-15
 
 **Same-build optimized legacy/new qualification COMPLETE; measured response improves,
