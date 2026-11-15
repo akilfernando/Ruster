@@ -19,5 +19,5 @@ if(typeof document!=='undefined'){
  document.getElementById('measureIdle').onclick=()=>start('idle');document.getElementById('measureMovement').onclick=()=>start('movement');document.getElementById('measureStop').onclick=()=>finish();
  document.getElementById('measureExport').onclick=()=>{if(!capture.report)return;const url=URL.createObjectURL(new Blob([JSON.stringify(capture.report,null,2)],{type:'application/json'}));const link=document.createElement('a');link.href=url;link.download='rusterize-'+capture.report.label+'-measurement.json';link.click();setTimeout(()=>URL.revokeObjectURL(url),1000)};
  for(const event of ['visibilitychange','offline','pagehide'])addEventListener(event,()=>{if(document.hidden||!navigator.onLine||event==='pagehide')finish(document.hidden?'hidden':'disconnect')});
- window.viewportMeasurement={capture,start,finish,decoded:()=>capture.decoded(),paint:(png,row)=>{capture.paint(png,row,performance.now(),document.hidden);if(!capture.active&&capture.report)finish(capture.report.stop_reason)},disconnect:()=>finish('disconnect')};
+ window.viewportMeasurement={capture,start,finish,decoded:()=>capture.decoded(),paint:(png,row)=>{if(!capture.active)return;capture.paint(png,row,performance.now(),document.hidden);if(!capture.active&&capture.report)finish(capture.report.stop_reason)},disconnect:()=>finish('disconnect')};
 }

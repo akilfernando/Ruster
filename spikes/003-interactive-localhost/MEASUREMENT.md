@@ -44,6 +44,8 @@ Browser/ChatGPT CPU/RAM cannot be attributed cleanly from this backend and are e
 
 Instrumentation overhead is unquantified: exact string comparison once per delivered paint opportunity, bounded numeric allocation, and at most1Hz two-process stat/smaps_rollup reads; no builds, GPU profiling loops or independent render requests while measuring. Samples are shared-host-load observations, not performance-isolated benchmarks. MedianCPU summaries are distributions of actual delta intervals, not an assertion of whole-app/browser utilization.
 
+Parent inactive-path review found that a completed report was being rendered again on each later viewport frame. A Node VM regression reproduced 1,000 unnecessary report rewrites; an early inactive return now eliminates that report/cleanup work. The regression and existing focused tests pass. This bounds the inactive path but does not establish negligible overhead during active capture; no matched overlay-on/off browser benchmark or new actual-ChatGPT measurement is claimed. The overlay stays optional and does not gate engine/editor or native-gizmo development.
+
 ## Exercised evidence
 
 Final unchanged native artifact SHA256 `c8ddfe105df2fb2be6bd6ade568d1b1fe51922504519e1cc83db399ce47d77f7`; existing native/source qualification is reused. Audit root `/home/akilf/Projects/Ruster-Audits/viewport-metrics-20261115/` contains two successful real headless native/browser journeys; `journey-2-final/result.json` pins exact final HUD/server/native/harness hashes. No failed journey. First run predates only the added compact resource summaries; final run qualifies those too.
