@@ -19,10 +19,29 @@ one actual-STDIO regression, strict all-target Clippy and format. Installed nati
 hash remains `9e5d1c34…`; no desktop/native editor, GPU, client config, registration,
 user state, frozen artifact or resource-limit change. No new real-client trial.
 
-**Next gate:** parent changed-risk acceptance and deliberate adapter promotion;
-only then correlate the actual failure's servicing PID/start/attempt before a
-coordinated cold-start trial. No root cause or FD/driver/sandbox theory established.
-Work here is complete; desktop/client qualification is HELD, not running.
+Parent changed-risk review is **GO** for this bounded additive discriminator;
+40 recorded input hashes and both debug artifact copies independently match.
+An actual optimized non-inspection adapter is built from `ba2ad0f` (SHA256
+`16243907275a506d2f9dd361f753fa662e906db654cf1341cd7d6170dca54bcb`).
+Its real initialize/tools-list/project-list smoke passes with88 unique tools,
+matching live PID/start and zero prepare attempts; clean EOF exits0. No Native
+editor/GPU or client configuration is touched. Native owning source matches the
+installed reviewed default binary; no editor rebuild is needed.
+
+A fresh disposable cumulative trial is staged, **not activated**, with this
+adapter and the exact same native image as installed. Its literal connector
+command also passes metadata-only discovery. A pinned trusted diagnostic native
+launcher captures stderr privately to a0600 regular file, independent of adapter
+lifetime; only its native `--help` path has run, not GUI startup. This temporary
+trial wrapper is not production logging or proof of cold startup. Original trial
+artifacts/registration and real ChatGPT entry remain unchanged.
+
+**Next client gate:** deliberately load the staged connector, verify its actual
+PID/start/attempt and desktop environment via discovery first, then permit one
+registered start-or-attach attempt with real consent. Missing diagnostics or a
+cached failed instance means stop, not another blind retry. No root cause or
+FD/driver/sandbox theory is established. Actual-client qualification waits for
+Akil's next hands-on window; no further desktop test is running.
 [Contract, raw receipts and limits](evidence/CUMULATIVE-EDITOR-2026-11-15.md#adapter-local-startup-provenance--2026-11-15).
 
 ## Partial cumulative native handoff installed — 2026-11-15

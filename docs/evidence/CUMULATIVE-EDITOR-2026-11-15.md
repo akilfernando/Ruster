@@ -344,3 +344,35 @@ promotion. Compare PID/start/attempt in actual invocation responses, not just a
 new process's existence or a prior discovery. Actual-client cold startup remains
 unresolved; root cause, changed-risk acceptance and a new desktop trial are not
 claimed. Exit-cause/stderr architecture is deferred beyond this discriminator.
+
+### Parent acceptance and staged client check
+
+Parent reviews the complete owning production diff and actual STDIO test:
+**GO for the bounded additive diagnostics**, not actual-client cold startup.
+All40 recorded inputs and the tested/preserved debug artifacts hash-match.
+Fresh/cached fields represent existing adapter state; no authorization, prepare
+policy or retry behavior changes.
+
+Release source `ba2ad0f` compiles with opt-level3, no debug assertions or optional
+features, SHA256 `16243907275a506d2f9dd361f753fa662e906db654cf1341cd7d6170dca54bcb`.
+Actual STDIO initialize,88 unique tool schemas and project_list pass. Returned
+PID/start match the live smoke process; attempt0/no child/no cached failure;
+EOF exit0. Native package inputs are unchanged from installed `fbdcbf7`.
+
+The audit's `next-client-trial/` stages a fresh disposable project/registration,
+private preferences/recovery and a connector for the current adapter/native
+pair. Native bytes match the installed default editor. Literal-command metadata
+passes without native startup or publication. The trusted native wrapper pins
+that image and captures only native stderr in an owner-private regular file;
+it does not depend on an adapter pipe and never grants consent. Its separate
+`--help` smoke verifies execution, stdout and0600/0700 log permissions with no GUI.
+That is not qualification of its live diagnostic startup. Logs are temporary
+owned trial diagnostics, not a new production logging platform.
+
+Raw receipts under `startup-provenance/`: `parent-changed-risk-review.json`,
+`release-build-receipt.json`, `release-readonly-smoke.json`,
+`next-client-trial-receipt.json`, `diagnostic-native-launcher-help-smoke.json`.
+No real client entry was changed or new editor window opened. When the human
+returns, verify the actual client's discriminator/desktop environment before
+one authorized cold-start attempt; do not infer its owner from another process
+or ask for a blind retry. Original startup and controls-usability holds remain.
