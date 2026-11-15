@@ -40,18 +40,16 @@ browser exit. `red-saved` rejects an unassociated scene; `green-saved` passes us
 an exact registered saved project. Earlier failed preparation used a non-inspection
 binary; a subsequent stream-schema refusal is retained and repaired without
 reconnect/replay. All journey cleanup receipts close native0, server/browser/adapter,
-remove profile/capability/locator/socket, and reacquire the QA gate. Initial attempts
-to run final native-widget/change gates are **NOT RUN**: another native hierarchy
-owner holds the shared QA lock; empty logs are lock refusals, not passes.
-A bounded 90-second wait also refused. Work is **BLOCKED/stopped at this safe
-checkpoint**, not running in the background. Final added native-widget/expiry
-assertions, test-only transport API exposure and legacy-mode polling cancellation
-still need final-source compilation/qualification once that owner releases the
-lock. Four existing Python stream tests and `git diff --check` pass. Current
-source hashes, retained logs, qualified earlier artifact and independent exact
-native/server PID, locator/socket absence and listener-refusal checks are pinned
-in `browser-pairing/manifest.json` in the audit above. No lease was extended and
-no other owner's resources were touched.
+remove profile/capability/locator/socket, and reacquire the QA gate. Historical lock-blocked preparations remain **NOT RUN**, not empty-log passes.
+They are superseded by final-source resumption: native widget/expiry tests,
+affected default/inspection lint/build/tests and both existing browser journeys
+now pass. The Rust2021 compilation error and its repair are retained. See the
+[current final-source evidence and exact ordinary-native attachment blocker](../../docs/evidence/BROWSER-PAIRING-2026-11-15.md).
+Current source/artifact/log pins and independent exact PID/listener/locator/socket/
+capability cleanup are in `browser-pairing/manifest.json` in the audit above.
+No lease was extended and no other owner's resources were touched. Ordinary HTTP
+attachment, endpoint publication and actual ChatGPT onboarding are still BLOCKED;
+no fixture API was promoted to production and no workspace URL was invented.
 
 
 ## Prompt-project connection contract — 2026-11-15

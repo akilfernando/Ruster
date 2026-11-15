@@ -2,17 +2,36 @@
 
 ## Browser pairing resumption — 2026-11-15
 
-Shared QA gate acquired normally after the prior owner released it. Exact source
-first failed compilation: native browser controls used Rust2024 let-chains in this
-Rust2021 crate. Replaced only that expression with equivalent Option composition.
-Inspection test binary now compiles; real native widget consent and exact-context
-one-shot denial/expiry regressions each pass (one test selected each). Raw retained
-RED/fixed compiler JSON and logs: `browser-pairing/build-resume*.{log,jsonl}`;
-`widget-resume.log`, `expiry-resume.log` in the audit below. Browser final-source
-journey and affected gates are RUNNING, not yet accepted. Prior cumulative work
-~31minutes carries forward; reassess after20more minutes without a qualified exit.
-Next bounded seam is ordinary native Host/HTTP attachment and exact project URL;
-fixture success must not be reported as finished onboarding.
+**Final-source fixture qualification COMPLETE; ordinary-native HTTP attachment
+BLOCKED/stopped at a precise transport interface.** Shared QA gate acquired
+normally. Initial exact-source compile exposed Rust2024 let-chains in this
+Rust2021 crate; equivalent Option composition repairs that error. Pushed source
+`8cb09df` passes real native widget consent and exact-context denial/expiry,
+default+inspection strict all-target editor Clippy, inspection editor181passed/
+6existing ignores, four Python stream tests, ordinary native/adapter builds and
+both existing paired and complete legacy-capability browser journeys. No broad
+workspace rerun solely due to owner change. Earlier lock-empty logs remain
+NOT RUN, and the new compile RED is retained.
+
+Paired exit: saved registered project → pending refusal → exact **fixture** browser
+approval → automatic native pixels → real project_connect/MCP transform observed
+→ browser Shared Undo → reload with empty capability field → Disconnect refusal.
+Host SHA `7dda796dcfbb7677692d6e2d8044f6d2fdece5ce3fe5fca6b9b8fc3cb91051fd`.
+Independent exact PID/listener/locator/socket/capability cleanup checks pass for
+both journeys and the gate is reacquired. No live endpoint, lease extension,
+physical human approval or actual ChatGPT onboarding claim.
+
+Cheap normal-route inventory confirms production Bridge accepts exactly one
+approved MCP owner and capability-bound command envelope. Normal Host has no HTTP
+attachment/endpoint owner; browser request/auth and synchronous workspace stream
+remain test-only. The missing restricted workspace attachment must share native
+identity/lifetime without stealing/duplicating the MCP owner. Publishing a registry
+URL or dropping cfg now would fake the handoff; no URL was invented and no new
+protocol introduced. Per the bounded assignment, return the compiled checkpoint
+and [precise source/interface blocker, commands, evidence and remaining actual
+user steps](evidence/BROWSER-PAIRING-2026-11-15.md). Parent transport/integration
+continuation is QUEUED, not running. Prior ~31minutes carries forward; the resumed
+final-source browser exit completed before the20minute reassessment trigger.
 
 ## Browser pairing — integrated fixture exit, 2026-11-15
 
@@ -54,18 +73,16 @@ browser exit. `red-saved` rejects an unassociated scene; `green-saved` passes us
 an exact registered saved project. Earlier failed preparation used a non-inspection
 binary; a subsequent stream-schema refusal is retained and repaired without
 reconnect/replay. All journey cleanup receipts close native0, server/browser/adapter,
-remove profile/capability/locator/socket, and reacquire the QA gate. Initial attempts
-to run final native-widget/change gates are **NOT RUN**: another native hierarchy
-owner holds the shared QA lock; empty logs are lock refusals, not passes.
-A bounded 90-second wait also refused. Work is **BLOCKED/stopped at this safe
-checkpoint**, not running in the background. Final added native-widget/expiry
-assertions, test-only transport API exposure and legacy-mode polling cancellation
-still need final-source compilation/qualification once that owner releases the
-lock. Four existing Python stream tests and `git diff --check` pass. Current
-source hashes, retained logs, qualified earlier artifact and independent exact
-native/server PID, locator/socket absence and listener-refusal checks are pinned
-in `browser-pairing/manifest.json` in the audit above. No lease was extended and
-no other owner's resources were touched.
+remove profile/capability/locator/socket, and reacquire the QA gate. Historical lock-blocked preparations remain **NOT RUN**, not empty-log passes.
+They are superseded by final-source resumption: native widget/expiry tests,
+affected default/inspection lint/build/tests and both existing browser journeys
+now pass. The Rust2021 compilation error and its repair are retained. See the
+[current final-source evidence and exact ordinary-native attachment blocker](evidence/BROWSER-PAIRING-2026-11-15.md).
+Current source/artifact/log pins and independent exact PID/listener/locator/socket/
+capability cleanup are in `browser-pairing/manifest.json` in the audit above.
+No lease was extended and no other owner's resources were touched. Ordinary HTTP
+attachment, endpoint publication and actual ChatGPT onboarding are still BLOCKED;
+no fixture API was promoted to production and no workspace URL was invented.
 
 
 ## Exact-project MCP connection — safe partial, 2026-11-15
