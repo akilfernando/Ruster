@@ -277,12 +277,52 @@ impl Scene {
                 },
             ));
         }
-        self.admit_transform_requests(&locals)
+        // Match the caller's actual route: narrow world fields first, then
+        // invert the parent and store locals. Narrowing requested locals instead
+        // is a different scene, especially for cancellation near the origin.
+        let worlds = requests
+            .iter()
+            .filter(|(id, _)| normalized.contains(id))
+            .map(|(id, t)| {
+                (
+                    id.clone(),
+                    Transform {
+                        translation: t.translation.map(|v| v as f32),
+                        rotation: t.rotation.map(|v| v as f32),
+                        scale: t.scale.map(|v| v as f32),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        let staged_locals = self.local_edits_for_world(&worlds)?;
+        self.admit_transform_storage(&locals, &staged_locals)
     }
     /// Validate every requested local and complete world closure before f32 storage.
     pub fn admit_transform_requests(
         &self,
         requests: &[(String, TransformRequest)],
+    ) -> Result<(), SceneError> {
+        let edits = requests
+            .iter()
+            .map(|(id, t)| {
+                (
+                    id.clone(),
+                    Transform {
+                        translation: t.translation.map(|v| v as f32),
+                        rotation: t.rotation.map(|v| v as f32),
+                        scale: t.scale.map(|v| v as f32),
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        self.admit_transform_storage(requests, &edits)
+    }
+    /// Compare the original f64 closure with the exact local fields the caller
+    /// will store (including native angle conversion and world inversion).
+    pub fn admit_transform_storage(
+        &self,
+        requests: &[(String, TransformRequest)],
+        edits: &[(String, Transform)],
     ) -> Result<(), SceneError> {
         let mut overrides = BTreeMap::new();
         for (id, t) in requests {
@@ -319,7 +359,25 @@ impl Scene {
                 },
             );
         }
-        self.resolve_requested(&overrides)?;
+        let requested = self.resolve_requested(&overrides)?;
+        let mut staged = self.clone();
+        for (id, transform) in edits {
+            staged.set_local(id, transform.clone())?;
+        }
+        staged.validate()?;
+        let stored = staged.resolve_poses()?;
+        for (id, pose) in &requested.poses {
+            if !close(pose.matrix(), stored.poses[id].matrix())
+                || !close(
+                    pose.matrix(),
+                    Pose::from_local(&stored.transforms[id]).matrix(),
+                )
+            {
+                return Err(invalid(
+                    "requested hierarchy closure exceeds descendant storage tolerance",
+                ));
+            }
+        }
         Ok(())
     }
     fn resolve_requested(

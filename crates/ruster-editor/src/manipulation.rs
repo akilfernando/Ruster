@@ -606,7 +606,7 @@ impl Manipulation {
         if !self.precision_pending() {
             return Ok(());
         }
-        if !session.scene().hierarchy.is_empty() {
+        let requests = if !session.scene().hierarchy.is_empty() {
             let requests = self
                 .ids
                 .iter()
@@ -643,11 +643,10 @@ impl Manipulation {
                     Ok((id.clone(), requested))
                 })
                 .collect::<Result<Vec<_>, String>>()?;
-            session
-                .scene()
-                .admit_transform_requests(&requests)
-                .map_err(|e| e.to_string())?;
-        }
+            Some(requests)
+        } else {
+            None
+        };
         let mut values = [0.0_f32; 9];
         for (i, text) in self
             .precision
@@ -685,6 +684,12 @@ impl Manipulation {
                 Ok((id.clone(), next))
             })
             .collect::<Result<_, String>>()?;
+        if let Some(requests) = requests {
+            session
+                .scene()
+                .admit_transform_storage(&requests, &edits)
+                .map_err(|e| e.to_string())?;
+        }
         session
             .edit_transforms(
                 self.precision_revision
@@ -1273,6 +1278,47 @@ mod tests {
             moved.translation.x += 1e-8 + 1.;
             gesture.transform(session.scene(), moved).unwrap();
         }
+        session
+            .edit(session.scene().revision, "assembly", &Transform::default())
+            .unwrap();
+        session
+            .edit(
+                session.scene().revision,
+                "box",
+                &Transform {
+                    translation: [-9999., 0., 0.],
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+        let before = session.snapshot_bytes().unwrap();
+        let mut gesture = Gesture::begin(&session, &["assembly".into(), "box".into()]).unwrap();
+        assert_eq!(gesture.start.len(), 1);
+        let candidate = gesture.candidate.clone();
+        let current_proxy = gesture.current_proxy;
+        let mut moved = gesture.proxy;
+        moved.translation.x = 9999.0001;
+        assert!(
+            gesture.transform(session.scene(), moved).is_err(),
+            "original cancellation-sensitive descendant must survive world narrowing"
+        );
+        assert_eq!(gesture.candidate, candidate);
+        assert_eq!(gesture.current_proxy, current_proxy);
+        assert_eq!(session.snapshot_bytes().unwrap(), before);
+        gesture.transform(session.scene(), gesture.proxy).unwrap();
+        moved.translation.x = 9999.;
+        gesture.transform(session.scene(), moved).unwrap();
+        let mut m = Manipulation::default();
+        m.select_only(Some("assembly".into()));
+        m.delta[0] = "9999.0001".into();
+        assert!(m.apply_delta(&mut session).is_err());
+        assert_eq!(session.snapshot_bytes().unwrap(), before);
+        m.reset_precision(session.scene()).unwrap();
+        m.precision[0] = "9999.0001".into();
+        m.edited[0] = true;
+        m.precision_revision = Some(session.scene().revision);
+        assert!(m.apply_precision(&mut session).is_err());
+        assert_eq!(session.snapshot_bytes().unwrap(), before);
     }
 
     fn assert_orientation(actual: [f32; 3], expected: DQuat) {
