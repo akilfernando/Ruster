@@ -21,8 +21,30 @@ Engine. It observed the deliberate X=4 and total=4 mismatch against X=2 and
 total=2, then passed after a fresh Reset with speed repaired. A separate live
 preview stayed at tick 1, X=1 and total=1, with byte-identical authored state.
 The exact private probe, output and initial fixture diagnostics are in that
-audit. Shared assertions and package checks are now under implementation,
-with the editor and guarded MCP work following the same runner contract.
+audit.
+
+Shared runner/package checkpoint `5ebfcf5` and editor export checkpoint
+`69cabc4` implement the deployment route. The first production export
+tracer passed with the remapped matched kit. It preserved exact Scene21
+and case bytes, ran pass and deliberate assertion-failure archives after
+relocation, rejected a check on the old kit before publication, and retained
+old-kit no-case packaging. Referenced PNG replacement made a case stale
+before execution. A malformed relocated sidecar returned invalid-case.
+See `export-tracer-1.log` and `relocation-1/verification.json` in the audit.
+The adopted pins cover canonical Session and action map, verified resource
+IDs/bytes/interpretations and exact tick. Case SHA in the package receipts
+covers the selected sidecar bytes. Deployment keeps Descriptor5 and requires
+the new runtime capability for an included case.
+
+On the same optimized runtime, 2/120-frame checks measured 2.345/5.467 ms
+median full-process wall time with 959/969-byte reports in the interleaved
+audit. A separate repeated cohort shows broader process variation. Peak
+RSS used a separate wait4 probe and had 8,360/8,450 KiB medians. Six in-flight
+runner cancellations returned cancelled at committed ticks 2–4 and joined
+0.120–0.184 ms after the flag. See `runner-cost.json`,
+`runner-rss-wait4.json`, `cancel-stress/probe-results.json`. This is
+runner responsiveness and fixture cost. Native keyboard/control evidence
+and final actual STDIO are still in progress.
 
 ## Post-GLB research and next-work recommendation — 2026-11-16
 
