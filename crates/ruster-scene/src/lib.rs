@@ -19,6 +19,8 @@ pub const GROUP_ROTATION_FORMAT_VERSION: u32 = 20;
 pub const PLAYER_VIEW_FORMAT_VERSION: u32 = 21;
 pub const MAX_MATERIALS: usize = 64;
 
+mod imported;
+pub use imported::ImportedPlacement;
 mod hierarchy;
 pub use hierarchy::{Group, Hierarchy, ResolvedPoses, TransformRequest};
 mod authoring;

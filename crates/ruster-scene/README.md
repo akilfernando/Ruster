@@ -1,5 +1,31 @@
 # Generic authored scenes
 
+## Static imported placement (2026-11-16)
+
+`Session::place_imported(expected_revision, ImportedPlacement)` inserts a complete
+static model as ordinary scene values in one revision and Undo entry. The request
+contains `root_id`, `root: Group`, descendant `hierarchy`, mesh `objects`, and new
+scene `materials`. The hierarchy excludes the placement root from its group map;
+every descendant has a parent leading to that root. IDs must be fresh across
+current and reversible history. Mesh objects cannot carry procedural primitives
+or colliders in this placement request. The caller validates resource existence;
+the scene validates the closed hierarchy, materials, numeric bounds, combined
+capacity and staged history admission. Failures leave the document unchanged.
+
+The importer owns its canonical source template and resource payloads. Placement
+is an explicit scene copy, not an ongoing prefab link: the root and copied local
+values remain ordinarily editable. Resource-only reimport preserves stable mesh
+and texture IDs and never rewrites copied transforms or material settings. Source
+structure/settings compatibility belongs to the asset importer. This API adds no
+wire variant or format version; existing hierarchy, object and material history
+encode placement and survive save/reopen with Undo/Redo.
+
+Focused verification: `cargo test -p ruster-scene
+imported_placement_atomic_history_and_closure --locked` passed on 2026-11-16,
+covering closed-tree and stale-revision rejection, overflow, unchanged snapshots
+on failure, one-step Undo/Redo across reopen, historical ID reservation and explicit
+child editing with stable resource references. Strict package Clippy passed.
+
 ## Bounded hierarchy capability (format 19, WIP)
 
 `Scene.hierarchy` owns `groups: BTreeMap<String, Group>` and target→group `parents`. `Group` stores an optional display name and local Transform. Only groups parent; geometry leaves support existing nonuniform scale, groups require positive exactly uniform scale, and the Sun remains root. Point lights inherit spatial placement but retain authored range/intensity and unit scale. `Scene::resolve_poses` returns an invocation-local world observation; roots are copied exactly. No retained cache is introduced.
