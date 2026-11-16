@@ -21,6 +21,14 @@
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
 
+## Linux launcher icon — 2026-11-16
+
+The Rot Engine desktop entry uses the current red mushroom with transparent
+padding. Local installation preserves the desktop ID and launch command.
+Desktop entry validation, desktop icon name resolution, installed PNG
+comparison and icon cache validation passed. The live launcher was left closed
+during verification.
+
 ## Import and dialog refinement — 2026-11-16
 
 Content now opens a source-first Import Asset form with a Linux file picker,
