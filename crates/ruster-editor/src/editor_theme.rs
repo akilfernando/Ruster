@@ -4,6 +4,10 @@
 //! active palette through [`colors`]/[`palette`] so labels, warnings and axis
 //! tints stay readable after the creator switches themes.
 use eframe::egui::{self, Color32, CornerRadius, FontId, Stroke, Theme, Vec2};
+#[cfg(unix)]
+use egui::class::HasClasses;
+use egui::theme::{DefaultStyle, StyleProvider};
+use egui::widget_style::{ButtonStyle, StyleArgs, WidgetState};
 
 /// The creator's theme preference. `System` follows the platform report and
 /// falls back to Dark when the platform reports nothing.
@@ -187,6 +191,7 @@ pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
         };
     });
     ctx.data_mut(|data| data.insert_temp(choice_id(), choice));
+    ctx.replace_widget_theme::<ButtonStyle>(EditorButtons);
 }
 
 fn visuals(p: &Palette, theme: Theme) -> egui::Visuals {
@@ -234,6 +239,62 @@ fn visuals(p: &Palette, theme: Theme) -> egui::Visuals {
     visuals.widgets.active.bg_stroke = Stroke::new(1.5, p.accent);
     visuals.widgets.open = visuals.widgets.active;
     visuals
+}
+
+// Use egui's default sizing, classes and hit areas. Change only button paint,
+// leaving the shared contrast borders available to checkboxes and text fields.
+struct EditorButtons;
+
+impl StyleProvider<ButtonStyle> for EditorButtons {
+    fn style(&mut self, args: &StyleArgs<'_>) -> ButtonStyle {
+        let mut button: ButtonStyle = DefaultStyle.style(args);
+        if args.state != WidgetState::Active {
+            button.atom_layout.frame = button
+                .atom_layout
+                .frame
+                .apply_stroke_and_expansion_without_layout_shift(Stroke::NONE, 0.0);
+        }
+        #[cfg(unix)]
+        if args.classes.has_class(ROT_BADGE) {
+            let p = palette(args.ctx);
+            let resting = if args.classes.has_class(ROT_CONNECTED) {
+                p.selection
+            } else {
+                p.surface.lerp_to_gamma(p.accent, 0.13)
+            };
+            let emphasis = match args.state {
+                WidgetState::Hovered => 0.035,
+                WidgetState::Active => 0.05,
+                _ => 0.0,
+            };
+            button.atom_layout.frame.fill = resting.lerp_to_gamma(p.accent, emphasis);
+            button.atom_layout.text_style.color = p.accent;
+        }
+        button
+    }
+}
+
+#[cfg(unix)]
+const ROT_BADGE: &str = "rot_badge";
+#[cfg(unix)]
+const ROT_CONNECTED: &str = "rot_connected";
+
+#[cfg(unix)]
+pub fn rot_badge(button: egui::Button<'_>, connected: bool) -> egui::Button<'_> {
+    button
+        .corner_radius(8.0)
+        .with_class(ROT_BADGE)
+        .with_class_if(ROT_CONNECTED, connected)
+}
+
+/// Menu text is quiet at rest and uses egui's normal hover and focus states.
+pub fn text_menu(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mut egui::Ui)) {
+    let button = egui::Button::new(label).frame_when_inactive(false);
+    if egui::containers::menu::is_in_menu(ui) {
+        egui::containers::menu::SubMenuButton::from_button(button).ui(ui, contents);
+    } else {
+        egui::containers::menu::MenuButton::from_button(button).ui(ui, contents);
+    }
 }
 
 /// A local primary action with explicit hover, pressed and keyboard-focus states.

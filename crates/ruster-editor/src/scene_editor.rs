@@ -3600,7 +3600,7 @@ impl SceneEditor {
         selected
     }
     fn create_menu(&mut self, ui: &mut egui::Ui) {
-        ui.menu_button("Create", |ui| {
+        crate::editor_theme::text_menu(ui, "Create", |ui| {
             if let Some(action) = Self::create_entries(ui) {
                 self.queued_context = Some((None, action));
             }
@@ -5105,7 +5105,7 @@ impl SceneEditor {
         if ui.available_width() < 265.0 {
             ui.horizontal(|ui| {
                 crate::branding::mark(ui, 20.0);
-                ui.menu_button("Menu", |ui| {
+                crate::editor_theme::text_menu(ui, "Menu", |ui| {
                     self.scene_menu_contents(ui, true);
                 });
                 if crate::editor_theme::primary_button(ui, "Save").clicked() {
@@ -5130,7 +5130,7 @@ impl SceneEditor {
             if !overflow {
                 crate::branding::mark(ui, if compact { 20.0 } else { 27.0 });
             }
-            ui.menu_button("File", |ui| {
+            crate::editor_theme::text_menu(ui, "File", |ui| {
                 for (label, action) in [
                     ("New scene", Action::New),
                     ("Open scene…", Action::Open),
@@ -5162,7 +5162,7 @@ impl SceneEditor {
                 self.command_menu_item(ui, "Close window", Action::Quit);
             });
             self.create_menu(ui);
-            ui.menu_button("Edit", |ui| {
+            crate::editor_theme::text_menu(ui, "Edit", |ui| {
                 if ui
                     .add_enabled(
                         self.hud_draft.is_some() || self.hud_editable(),
@@ -5232,7 +5232,7 @@ impl SceneEditor {
                     }
                 });
             });
-            ui.menu_button("View", |ui| {
+            crate::editor_theme::text_menu(ui, "View", |ui| {
                 self.player_view_controls(ui, true);
                 ui.separator();
                 if ui.button("AI workspace").clicked() {
@@ -5293,7 +5293,7 @@ impl SceneEditor {
                     }
                 });
             });
-            ui.menu_button("Content", |ui| {
+            crate::editor_theme::text_menu(ui, "Content", |ui| {
                 if ui.button("Assets / import…").clicked() {
                     self.asset_dialog = true;
                     self.asset_rename_intent = false;
@@ -5307,7 +5307,7 @@ impl SceneEditor {
                 self.shader_tools_ui(ui);
             });
             if !compact {
-                ui.menu_button("Help", |ui| {
+                crate::editor_theme::text_menu(ui, "Help", |ui| {
                     if ui.button("About Rot Engine").clicked() {
                         open_about = true;
                         ui.close();

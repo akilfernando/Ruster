@@ -54,6 +54,18 @@ inspection confirmed the single mark at 640×480, 1280×800 and 1600×1000 and
 opened About. The compact-layout regression test and release build passed.
 The revised release is installed through the existing launcher.
 
+The header menus now appear as text at rest. The shared button style uses
+subtle fills for ordinary actions and keeps visible keyboard focus. Text
+fields, checkboxes and structural borders keep their contrast. Primary
+buttons use stronger fills. Rot uses a tinted status badge with distinct
+connected, inactive and error text. The browser workspace follows the same
+button hierarchy. Native dark and light captures and the scoped menu and
+Rot connection interactions are in `quiet-controls-final/` in the audit
+directory. The workspace change gate, optimized release build and installed
+launcher executable smoke passed. The compact layout test initially caught a
+badge wrapper that changed the runtime header height. The final badge styles
+the existing button directly and passes that regression check.
+
 ## Rot Engine rebrand — 2026-11-16
 
 The [Rot Engine identity](branding/rot/README.md) supplies the launcher

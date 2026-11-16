@@ -50,14 +50,16 @@ fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
 
 #[cfg(unix)]
 pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui::Response {
-    let button = if state == "Connected" {
+    let palette = editor_theme::colors(ui);
+    let connected = state == "Connected";
+    let button = if connected {
         let mut text = egui::text::LayoutJob::default();
         text.append(
             "◆  ROT",
             0.0,
             egui::TextFormat {
                 font_id: egui::FontId::proportional(15.0),
-                color: egui::Color32::from_rgb(255, 90, 94),
+                color: palette.accent,
                 italics: true,
                 extra_letter_spacing: -0.35,
                 ..Default::default()
@@ -68,13 +70,11 @@ pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui:
             0.0,
             egui::TextFormat {
                 font_id: egui::FontId::proportional(12.0),
-                color: egui::Color32::from_rgb(241, 232, 227),
+                color: palette.text,
                 ..Default::default()
             },
         );
         egui::Button::new(text)
-            .fill(egui::Color32::from_rgb(50, 22, 24))
-            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 56, 60)))
     } else if state == "Disconnected" {
         egui::Button::new("Rot inactive")
     } else {
@@ -93,7 +93,7 @@ pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui:
             }
         ))
     };
-    ui.add(button)
+    ui.add(editor_theme::rot_badge(button, connected))
         .on_hover_text(format!("Rot connection · {state}"))
 }
 
