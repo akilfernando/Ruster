@@ -243,10 +243,14 @@ impl SceneEditor {
             }
             self.observe_view();
         }
-        let camera = self.navigation.camera.map(|state| {
-            json!({"target":state.target,"yaw":state.yaw,"pitch":state.pitch,
+        let camera = self
+            .navigation
+            .camera
+            .filter(|_| !self.navigation.player_view)
+            .map(|state| {
+                json!({"target":state.target,"yaw":state.yaw,"pitch":state.pitch,
                 "distance":state.distance,"orthographic":state.orthographic})
-        });
+            });
         let value = json!({
             "session_token":token,
             "revision":self.session.scene().revision.to_string(),

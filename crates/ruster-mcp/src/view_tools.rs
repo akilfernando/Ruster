@@ -35,7 +35,7 @@ fn fields(name: &str) -> Option<&'static [&'static str]> {
 
 pub fn list() -> Vec<Value> {
     [
-        ("viewport_inspect", "Inspect the actual known viewport camera, bounded selection, human input guard and scene/view identities. Camera is null before the first rendered viewport. No screenshot or authored/runtime mutation."),
+        ("viewport_inspect", "Inspect the viewport mode, Scene View camera, bounded selection, human input guard and scene/view identities. Camera is null before the first rendered Scene View and in Player View. Use player_view_inspect for player framing."),
         ("viewport_camera", "Set exact transient camera target, yaw/pitch in radians, distance and projection using freshly inspected scene/view identities. Rejects human drafts, dialogs and active viewport input; leaves authored history/runtime unchanged."),
         ("viewport_player_view", "Switch the transient editor viewport between scene navigation and committed player framing. Use current scene and view identities. Leaves Play/Pause and Scene View framing unchanged."),
         ("scene_select", "Replace transient editor selection with zero to256 distinct existing object IDs. Array order determines active object (last). Rejects stale scene/view identities, human drafts/dialogs/input. Does not frame the camera or edit authored history/runtime."),

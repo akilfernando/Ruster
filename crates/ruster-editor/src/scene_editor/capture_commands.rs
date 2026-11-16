@@ -45,6 +45,7 @@ struct Pin {
     view: u64,
     tick: u64,
     runtime: bool,
+    player_view: bool,
     runtime_stale: bool,
     asset_revision: Option<u64>,
     shader_revision: u64,
@@ -58,6 +59,18 @@ struct Pin {
     screen: Option<egui::Rect>,
     resources: Vec<(u8, String, usize)>,
 }
+impl Pin {
+    fn grounding_refusal(&self) -> Option<&'static str> {
+        if self.player_view {
+            Some("player_view_grounding_unsupported")
+        } else if self.runtime {
+            Some("runtime_grounding_unsupported")
+        } else {
+            None
+        }
+    }
+}
+
 struct Owner {
     token: String,
     #[cfg(unix)]
@@ -172,6 +185,7 @@ impl SceneEditor {
                 .filter(|_| self.runtime.visible)
                 .map_or(0, |frame| frame.tick),
             runtime: self.runtime.visible,
+            player_view: self.navigation.player_view,
             runtime_stale: self.runtime.stale,
             asset_revision: self.assets.as_ref().map(|assets| assets.revision()),
             shader_revision: self.shader_revision,
@@ -182,7 +196,10 @@ impl SceneEditor {
                 .filter(|_| self.runtime.visible)
                 .map(|frame| frame.key),
             rect: self.captures.rect,
-            camera: self.navigation.camera,
+            camera: self
+                .navigation
+                .camera
+                .filter(|_| !self.navigation.player_view),
             selection: self.manipulation.ids.clone(),
             active: self.selected.clone(),
             matrices: self.captures.view.zip(self.captures.projection),
@@ -383,8 +400,8 @@ impl SceneEditor {
         Ok(json!({"capture_id":id.to_string(),"status":"pending"}))
     }
     fn capture_pick(&self, pin: &Pin, value: &Value, args: &Value) -> Result<Value> {
-        if pin.runtime {
-            return Err(fail("runtime_grounding_unsupported"));
+        if let Some(reason) = pin.grounding_refusal() {
+            return Err(fail(reason));
         }
         let rect = pin.rect.ok_or_else(|| fail("invalid_geometry"))?;
         let camera = pin.camera.ok_or_else(|| fail("invalid_geometry"))?;
@@ -587,14 +604,16 @@ fn clear_layers(ctx: &egui::Context) -> bool {
 }
 
 fn grounding_metadata(pin: &Pin) -> Value {
+    let reason = pin.grounding_refusal();
     json!({
         "grounding_version":1,
         "selected_object_ids":pin.selection.iter().take(256).collect::<Vec<_>>(),
         "selected_count":pin.selection.len(), "selection_truncated":pin.selection.len()>256,
         "active_object_id":pin.active,
         "display_mode":if pin.runtime {"runtime"} else {"authored"},
-        "grounding":{"status":if pin.runtime {"unsupported"} else {"available"},
-            "reason":if pin.runtime {Some("runtime_grounding_unsupported")} else {None},
+        "view_mode":if pin.player_view {"player"} else {"scene"},
+        "grounding":{"status":if reason.is_some() {"unsupported"} else {"available"},
+            "reason":reason,
             "domain":"scene_geometry", "excluded":["gizmos","HUD","outlines","light_icons","grid"],
             "pixel_provenance_guaranteed":false},
         "camera":pin.camera.map(|c|json!({"target":c.target,"yaw":c.yaw,"pitch":c.pitch,"distance":c.distance,"orthographic":c.orthographic})),
@@ -717,6 +736,67 @@ fn capture_image(
 mod tests {
     use super::*;
     static CAPTURE_TEST_OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    #[test]
+    fn player_view_capture_reports_real_matrices_and_refuses_scene_grounding() {
+        let mut editor =
+            SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
+        let view = ruster_scene::PlayerView {
+            anchor: ruster_scene::PlayerAnchor::Fixed {
+                position: [0., 1., 0.],
+            },
+            yaw: 0.,
+            pitch: 0.,
+            distance: 6.,
+            vertical_fov_degrees: 60.,
+        };
+        editor.session.set_player_view(0, Some(view)).unwrap();
+        editor.navigation.camera = Some(ruster_render::CameraState {
+            target: [1., 2., 3.],
+            yaw: 0.4,
+            pitch: 0.2,
+            distance: 10.,
+            orthographic: true,
+        });
+        let old_pin = editor.capture_pin();
+        editor.set_player_preview(true);
+        let resolved = editor
+            .session
+            .scene()
+            .resolve_player_view()
+            .unwrap()
+            .unwrap();
+        let projection = ruster_render::player_view_projection(resolved, 4. / 3.).unwrap();
+        editor.captures.view = Some(projection.view);
+        editor.captures.projection = Some(projection.projection);
+
+        let pin = editor.capture_pin();
+        assert_ne!(old_pin.view, pin.view);
+        let metadata = grounding_metadata(&pin);
+        assert_eq!(metadata["view_mode"], "player");
+        assert_eq!(metadata["grounding"]["status"], "unsupported");
+        assert_eq!(
+            metadata["grounding"]["reason"],
+            "player_view_grounding_unsupported"
+        );
+        assert!(metadata["camera"].is_null());
+        assert_eq!(metadata["view_matrix"], json!(projection.view));
+        assert_eq!(metadata["projection_matrix"], json!(projection.projection));
+        assert_eq!(
+            editor
+                .capture_pick(&pin, &metadata, &json!({"u":0.5,"v":0.5}))
+                .unwrap_err()
+                .0,
+            "player_view_grounding_unsupported"
+        );
+        editor.set_player_preview(false);
+        let restored = editor.capture_pin();
+        assert_eq!(old_pin.camera, restored.camera);
+        assert_eq!(
+            grounding_metadata(&restored)["grounding"]["status"],
+            "available"
+        );
+    }
+
     #[test]
     fn capture_identity_and_single_lease_survive_scene_replacement() {
         let _owner = CAPTURE_TEST_OWNER.lock().unwrap();
