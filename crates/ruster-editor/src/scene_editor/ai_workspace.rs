@@ -90,15 +90,7 @@ impl SceneEditor {
     fn ai_tools(&mut self, ui: &mut egui::Ui) {
         ui.add_enabled_ui(self.guard().is_ok() && !self.runtime.visible, |ui| {
             ui.horizontal_wrapped(|ui| {
-                use crate::manipulation::Tool;
-                ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move");
-                ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate");
-                ui.add_enabled_ui(
-                    self.manipulation.scale_allowed(self.session.scene()),
-                    |ui| {
-                        ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale");
-                    },
-                );
+                self.manipulation_mode_buttons(ui);
                 if ui.button("Frame").clicked() {
                     self.queued_action = Some(Action::Frame);
                 }

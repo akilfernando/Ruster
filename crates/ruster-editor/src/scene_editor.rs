@@ -42,6 +42,7 @@ mod runtime_transform_ui;
 mod save_commands;
 mod shadow_feedback;
 mod sidebars;
+mod toolbar_icons;
 mod view_commands;
 #[cfg(unix)]
 mod workspace_attachment;
@@ -2366,6 +2367,33 @@ impl SceneEditor {
             ui.label("Uniform scale").on_hover_text("Choose Local and Individual origins for nonuniform scaling. World nonuniform scaling would require shear.");
         }
     }
+    fn manipulation_mode_buttons(&mut self, ui: &mut egui::Ui) {
+        use crate::manipulation::Tool;
+        use toolbar_icons::Icon;
+        for (tool, action, icon) in [
+            (Tool::Translate, Action::Move, Icon::Move),
+            (Tool::Rotate, Action::Rotate, Icon::Rotate),
+            (Tool::Scale, Action::Scale, Icon::Scale),
+        ] {
+            let enabled =
+                tool != Tool::Scale || self.manipulation.scale_allowed(self.session.scene());
+            let response = icon.button(
+                ui,
+                enabled,
+                Some(self.manipulation.tool == tool),
+                &self.workspace.shortcut_text(action),
+            );
+            if !enabled {
+                response
+                    .clone()
+                    .on_disabled_hover_text("Lights use intensity and range instead of scale.");
+            }
+            if response.clicked() {
+                self.manipulation.tool = tool;
+            }
+        }
+    }
+
     fn manipulation_tools_ui(&mut self, ui: &mut egui::Ui) {
         let editable = self.guard().is_ok() && !self.runtime.visible;
         let compact = ui.available_width() < 560.0;
@@ -2374,20 +2402,7 @@ impl SceneEditor {
                 ui.spacing_mut().item_spacing.x = 4.0;
                 ui.spacing_mut().button_padding.x = 6.0;
             }
-            use crate::manipulation::Tool;
-            ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move")
-                .on_hover_text(self.workspace.shortcut_text(Action::Move));
-            ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate")
-                .on_hover_text(self.workspace.shortcut_text(Action::Rotate));
-            ui.add_enabled_ui(
-                self.manipulation.scale_allowed(self.session.scene()),
-                |ui| {
-                    ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale")
-                        .on_hover_text(self.workspace.shortcut_text(Action::Scale));
-                },
-            )
-            .response
-            .on_hover_text("Lights use intensity and range instead of scale.");
+            self.manipulation_mode_buttons(ui);
             if compact {
                 let label = match (self.manipulation.local, self.manipulation.snap) {
                     (true, true) => "Local · Snap",
@@ -2404,6 +2419,20 @@ impl SceneEditor {
             }
         });
     }
+    fn runtime_toolbar(&mut self, ui: &mut egui::Ui, blocked: bool) {
+        let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
+        if let Some(key) = self.runtime.controls_with_sounds(
+            ui,
+            &self.session,
+            self.generation,
+            blocked,
+            &shortcut,
+            self.assets.as_ref(),
+        ) {
+            self.capture_reset_assets(key);
+        }
+    }
+
     fn manipulation_ui(&mut self, ui: &mut egui::Ui) {
         let pending = self.manipulation.offset_pending();
         if pending {
@@ -3719,23 +3748,29 @@ impl SceneEditor {
         ui.horizontal_wrapped(|ui| {
             self.create_menu(ui);
             self.new_group_button(ui);
-            if ui
-                .add_enabled(
-                    !self.manipulation.ids.is_empty(),
-                    egui::Button::new("Duplicate"),
-                )
-                .clicked()
-            {
-                self.queued_context = Some((None, ContextAction::Duplicate));
-            }
-            if ui
-                .add_enabled(
-                    !self.manipulation.ids.is_empty(),
-                    egui::Button::new("Delete"),
-                )
-                .clicked()
-            {
-                self.queued_context = Some((None, ContextAction::Delete));
+            for (icon, action, context) in [
+                (
+                    toolbar_icons::Icon::Duplicate,
+                    Action::Duplicate,
+                    ContextAction::Duplicate,
+                ),
+                (
+                    toolbar_icons::Icon::Delete,
+                    Action::Delete,
+                    ContextAction::Delete,
+                ),
+            ] {
+                if icon
+                    .button(
+                        ui,
+                        !self.manipulation.ids.is_empty(),
+                        None,
+                        &self.workspace.shortcut_text(action),
+                    )
+                    .clicked()
+                {
+                    self.queued_context = Some((None, context));
+                }
             }
         });
         let hidden = self
@@ -5633,36 +5668,58 @@ impl SceneEditor {
             if !self.player_preview_available() {
                 self.set_player_preview(false);
             }
-            if !self.ai_workspace {
-                ui.horizontal_wrapped(|ui| {
-                    ui.spacing_mut().item_spacing.x = 5.0;
-                    // The View menu exposes these controls on narrow windows.
-                    if ctx.content_rect().width() >= 900.0 {
-                        self.player_view_controls(ui, false);
-                        ui.separator();
-                    }
-                    if !self.navigation.player_view {
-                        self.manipulation_tools_ui(ui);
-                    }
-                });
-            }
             let document_blocked =
                 about_open || self.guard().is_err() || self.manipulation.offset_pending();
             if document_blocked || self.input_actions_open {
                 self.runtime.cancel_control_focus();
             }
             let blocked = document_blocked || self.asset_busy();
-            let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
-            if !self.ai_workspace || self.runtime.has_worker() {
-                if let Some(key) = self.runtime.controls_with_sounds(
-                    ui,
-                    &self.session,
-                    self.generation,
-                    blocked,
-                    &shortcut,
-                    self.assets.as_ref(),
-                ) {
-                    self.capture_reset_assets(key);
+            let width = ui.available_width();
+            if !self.ai_workspace && width >= 1540.0 {
+                let runtime_width = 580.0;
+                let tools_width = 600.0;
+                let tools_x =
+                    ui.cursor().min.x + (width - runtime_width - tools_width) * 0.5 + 140.0;
+                let runtime_x = ui.cursor().min.x + width - runtime_width;
+                ui.horizontal_top(|ui| {
+                    self.player_view_controls(ui, false);
+                    if !self.navigation.player_view {
+                        ui.add_space((tools_x - ui.next_widget_position().x).max(0.0));
+                        ui.allocate_ui_with_layout(
+                            egui::vec2(tools_width, ui.spacing().interact_size.y),
+                            egui::Layout::left_to_right(egui::Align::Center),
+                            |ui| {
+                                self.manipulation_tools_ui(ui);
+                            },
+                        );
+                    }
+                    ui.add_space((runtime_x - ui.next_widget_position().x).max(0.0));
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(runtime_width, ui.spacing().interact_size.y),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            self.runtime_toolbar(ui, blocked);
+                        },
+                    );
+                });
+            } else {
+                if !self.ai_workspace {
+                    ui.horizontal_wrapped(|ui| {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+                        // The View menu retains the camera controls on narrow windows.
+                        if ctx.content_rect().width() >= 900.0 {
+                            self.player_view_controls(ui, false);
+                            ui.add_space(12.0);
+                            ui.separator();
+                            ui.add_space(8.0);
+                        }
+                        if !self.navigation.player_view {
+                            self.manipulation_tools_ui(ui);
+                        }
+                    });
+                }
+                if !self.ai_workspace || self.runtime.has_worker() {
+                    self.runtime_toolbar(ui, blocked);
                 }
             }
             self.runtime.observe(
@@ -6502,7 +6559,7 @@ mod tests {
                             return None;
                         };
                         let label = text.galley.job.text.as_str();
-                        ["Save", "Move", "Space", "Reset"]
+                        ["Save", "Scene View", "Space", "Reset"]
                             .contains(&label)
                             .then_some((
                                 label.to_owned(),
@@ -6577,14 +6634,13 @@ mod tests {
                 let chrome = chrome.borrow();
                 assert!(!chrome.contains_key("Save"), "Save belongs in File");
                 assert!(
-                    chrome["Space"].left() > chrome["Move"].right()
-                        && chrome["Space"].top() < chrome["Move"].bottom(),
-                    "wide tool options sit beside transforms in the contextual toolbar: {:?}",
+                    chrome["Scene View"].right() < chrome["Space"].left()
+                        && chrome["Space"].right() < chrome["Reset"].left()
+                        && chrome["Reset"].left() > wide_size.x * 0.6
+                        && chrome["Scene View"].top() < chrome["Reset"].bottom()
+                        && chrome["Reset"].top() < chrome["Scene View"].bottom(),
+                    "wide view, tools, and runtime groups share one row: {:?}",
                     *chrome
-                );
-                assert!(
-                    chrome["Reset"].top() > chrome["Move"].bottom(),
-                    "playback occupies the next toolbar row"
                 );
             }
             let normal_size = egui::vec2(1280.0, 800.0);

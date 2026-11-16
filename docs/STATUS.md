@@ -21,6 +21,16 @@
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
 
+## Editor toolbar refinement — 2026-11-16
+
+Move, Rotate, Scale, Edit Player View, Duplicate and Delete use icons in the
+workspace. Tooltips and accessibility labels preserve their names. Wide
+windows lay out view modes, transform tools and runtime controls in one row
+with space between groups. Compact windows retain the stacked arrangement.
+The editor change gate passed (208 tests, 13 ignored). Native captures at
+1280×800 and 1600×1000 verified placement, rotation selection and camera dialog
+access. The optimized editor is installed.
+
 ## Rot connection presentation — 2026-11-16
 
 The enrolled path uses the exact registered project and existing explicit client

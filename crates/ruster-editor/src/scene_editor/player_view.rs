@@ -167,10 +167,12 @@ impl SceneEditor {
             self.set_player_preview(true);
             close = true;
         }
-        if ui
-            .add_enabled(!blocked, egui::Button::new("Edit Player View…"))
-            .clicked()
-        {
+        let edit = if menu {
+            ui.add_enabled(!blocked, egui::Button::new("Edit Player View…"))
+        } else {
+            super::toolbar_icons::Icon::Camera.button(ui, !blocked, None, "")
+        };
+        if edit.clicked() {
             let selected = self.selected.as_deref().filter(|id| {
                 let scene = self.session.scene();
                 scene.objects.iter().any(|object| object.id == *id)
