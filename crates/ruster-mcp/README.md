@@ -174,6 +174,29 @@ Capture-ready results now carry `grounding_version:1`, immutable captured select
 
 The screenshot is restricted to this editor's viewport. Floating source/debug windows, menus, tooltips and other non-background egui areas conservatively block observation; close them and inspect again. Other applications and the system clipboard are never captured. Hidden windows may fail to paint before the deadline. See [decision0028](../../docs/decisions/0028-viewport-observation-and-launch-framing.md) for design and verification limits.
 
+## Authored player view
+
+`player_view_inspect({})` returns the current `mode`, `player_view` definition,
+scene and view guards, and `authored_camera` with resolved world anchor and
+column-major view and projection matrices at 4:3 and 16:9. A displayed runtime
+snapshot includes its own camera, tick, captured authored revision and
+`stale` flag. A missing camera is null.
+
+`scene_player_view_set` requires `expected_session_token`, `expected_revision`
+and `player_view`. The view takes `anchor` as either
+`{"type":"fixed","position":[0,1,0]}` or
+`{"type":"follow","target_id":"subject","offset":[0,1,0]}`.
+Supply `yaw` and `pitch` in radians, `distance` in world units and
+`vertical_fov_degrees` in degrees. Pass null to clear. Edits share normal
+scene history, drafts, deletion guards and explicit save authority.
+
+`viewport_player_view` requires the same scene guards plus
+`expected_view_revision` and `mode` (`scene` or `player`). It switches only
+presentation. Use the existing runtime Reset, Play, Pause and Step calls to
+preview the captured scene, including guarded action frames when stepping.
+Export the saved Scene21 view with a kit advertising `authored_player_view`.
+Omit `initial_camera` when the scene has a view.
+
 ## Explicit scene-save authority
 
 To enable saving for a disposable project, choose an existing directory and start the editor with an explicit grant:

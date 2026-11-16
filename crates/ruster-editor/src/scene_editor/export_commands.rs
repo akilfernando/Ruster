@@ -66,6 +66,9 @@ impl SceneEditor {
         initial_camera: Option<ruster_render::CameraState>,
     ) -> std::result::Result<Value, String> {
         self.export_ready(false)?;
+        if initial_camera.is_some() && self.session.scene().player_view.is_some() {
+            return Err("The saved Player View owns playback framing. Export without legacy initial framing.".into());
+        }
         if title.trim().is_empty()
             || title.trim() != title
             || title.len() > 128
@@ -444,8 +447,12 @@ impl SceneEditor {
                     egui::TextEdit::singleline(&mut self.export_destination)
                         .desired_width(ui.available_width()),
                 );
-                let current_view = ui.checkbox(&mut self.export_use_current_view, "Use current view")
+                let has_player_view = self.session.scene().player_view.is_some();
+                let current_view = ui.add_enabled(!has_player_view, egui::Checkbox::new(&mut self.export_use_current_view, "Use current view"))
                     .on_hover_text("Start the exported application with this camera and projection. Requires a current Linux export template.");
+                if has_player_view {
+                    ui.label("The saved Player View controls application framing.");
+                }
                 let blocked = self.export_ready(true).err();
                 if let Some(reason) = &blocked {
                     ui.label(reason);

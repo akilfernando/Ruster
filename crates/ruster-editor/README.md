@@ -628,6 +628,23 @@ The Inspector's **Color** fields edit the active object's tint through shared sc
 
 Native MCP now supports actual viewport thumbnails, guarded camera/selection changes and the same authored color operation. See the [native MCP guide](../ruster-mcp/README.md#viewport-observation-navigation-and-color). Saved headings follow the document filename without changing stable scene identity. **Use current view** in Export explicitly freezes initial application framing; it does not turn every working camera movement into scene data. See the [creator export guide](../../docs/CREATOR-WORKFLOW.md).
 
+### Author a player view
+
+Use **View → Edit Player View…** or the control above a wide viewport. Choose **Fixed** for a world
+position or **Follow** for an Object or Group and a world-space offset.
+Yaw and pitch are entered in radians, distance in world units, and vertical FOV
+in degrees. Enter applies the fields, Escape cancels, and invalid values remain
+in the dialog for repair. **Clear** removes the view as an undoable edit.
+Clear or retarget a live follow reference before deleting its target.
+
+**Scene View** keeps the editor camera and tools. **Player View** previews the
+committed camera and disables editor navigation and picking. Playback remains
+independent of the viewport switch. Reset captures edits for the next Play or
+Step and returns the camera to its starting pose. Use **Control runtime** after
+Play to give the scene keyboard focus, and Escape to release it. Switching back
+to **Scene View** restores the existing navigation camera. Save before export.
+
+
 The isolated normal project-bound browser controls candidate supports right-drag
 orbit, middle/Shift-right-drag pan, wheel zoom, Fit, primary-click surface selection,
 object/group list selection and Clear with no model round trip. Browser controls

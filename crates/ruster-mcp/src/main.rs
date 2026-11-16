@@ -15,6 +15,7 @@ mod hud_tools;
 mod lighting_tools;
 mod material_tools;
 mod persistence_tools;
+mod player_view_tools;
 #[cfg(unix)]
 #[path = "../../support/project_startup.rs"]
 #[allow(dead_code)]
@@ -196,6 +197,9 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             && arguments["project"]
                 .as_str()
                 .is_some_and(|s| !s.is_empty() && s.len() <= 128);
+    }
+    if player_view_tools::supported(name) {
+        return player_view_tools::valid(name, arguments);
     }
     if hud_tools::supported(name) {
         return hud_tools::valid(name, arguments);
@@ -586,6 +590,7 @@ fn tools() -> Value {
     tools.extend(behavior_tools::list());
     tools.extend(runtime_tools::list());
     tools.extend(hud_tools::list());
+    tools.extend(player_view_tools::list());
     tools.push(json!({"name":"project_disconnect","description":"Disconnect this exact epoch. Retains enrollment but invalidates queued work; reconnect only through a later explicit project_connect.","inputSchema":object_schema(json!({}),vec!["connection"])}));
     for tool in &mut tools {
         if !matches!(
@@ -738,6 +743,7 @@ impl Server {
                         && !behavior_tools::supported(name)
                         && !runtime_tools::supported(name)
                         && !hud_tools::supported(name)
+                        && !player_view_tools::supported(name)
                 {
                     Err((-32602, "Unknown tool or tools/call parameters"))
                 } else if !valid_arguments(name, &arguments) {
@@ -1298,7 +1304,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 90);
+        assert_eq!(tools.len(), 93);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1350,6 +1356,7 @@ mod tests {
                 "scene_display_set",
                 "viewport_inspect",
                 "viewport_camera",
+                "viewport_player_view",
                 "scene_select",
                 "viewport_capture_pick",
                 "viewport_capture_start",
@@ -1397,6 +1404,8 @@ mod tests {
                 "hud_panel_inspect",
                 "hud_panel_set",
                 "hud_panel_move",
+                "player_view_inspect",
+                "scene_player_view_set",
                 "project_disconnect"
             ]
         );

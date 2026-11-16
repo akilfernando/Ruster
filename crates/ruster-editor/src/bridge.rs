@@ -1394,7 +1394,7 @@ pub(crate) mod tests {
             .copied()
             .chain(["inspect", "edit", "undo", "redo", "replay"])
             .collect();
-        assert_eq!(operations.len(), 87);
+        assert_eq!(operations.len(), 90);
         for op in operations {
             for bad in ["missing", "wrong", "other_editor"] {
                 let mut request = frame(&handshake_b, op, json!({}));

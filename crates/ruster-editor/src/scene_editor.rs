@@ -30,6 +30,7 @@ mod material_ui;
 mod material_visual_probe;
 mod nonvisual;
 mod persistence_commands;
+mod player_view;
 #[cfg(all(test, feature = "inspection", unix))]
 mod preview_probe;
 mod recovered_input_ui;
@@ -78,6 +79,9 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "scene_collider_set",
     "viewport_inspect",
     "viewport_camera",
+    "viewport_player_view",
+    "player_view_inspect",
+    "scene_player_view_set",
     "scene_select",
     "viewport_capture_start",
     "viewport_capture_inspect",
@@ -508,6 +512,7 @@ pub struct SceneEditor {
     ai_release_navigation: bool,
     ai_drawer_rect: Option<egui::Rect>,
     navigation: ruster_render::NavigationOptions,
+    player_view_draft: Option<player_view::Draft>,
     view_state: view_commands::ViewState,
     captures: capture_commands::Captures,
     queued_selection: Option<(Option<String>, bool)>,
@@ -707,6 +712,7 @@ impl SceneEditor {
             ai_connection_label: "Disconnected",
             ai_connection_requested: false,
             ai_release_navigation: false,
+            player_view_draft: None,
             ai_drawer_rect: None,
             navigation: ruster_render::NavigationOptions {
                 camera,
@@ -767,7 +773,8 @@ impl SceneEditor {
         }
     }
     fn drafts(&self) -> bool {
-        self.hud_draft.is_some()
+        self.player_view_draft.is_some()
+            || self.hud_draft.is_some()
             || self.color_draft.is_some()
             || self.material_draft.is_some()
             || self.lighting_draft.is_some()
@@ -800,6 +807,7 @@ impl SceneEditor {
     }
     fn editing_available_for_recovery(&self) -> bool {
         self.hud_draft.is_none()
+            && self.player_view_draft.is_none()
             && !self.asset_publishing()
             && !self.asset_loading()
             && (self.color_draft.is_none()
@@ -1983,6 +1991,10 @@ impl SceneEditor {
         }
     }
     fn apply(&mut self) -> bool {
+        if self.player_view_draft.is_some() {
+            self.error = "Apply or cancel the Player View edit first.".into();
+            return false;
+        }
         if self.runtime.command_draft_pending() {
             self.error =
                 "Invoke or cancel the pending Application command arguments before other changes."
@@ -3022,6 +3034,9 @@ impl SceneEditor {
         json!({"groups":h.groups.iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"parents":h.parents.iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"group_count":h.groups.len(),"parent_count":h.parents.len(),"next_offset":if start+16<h.groups.len().max(h.parents.len()){Some((start+16).to_string())}else{None}})
     }
     fn execute(&mut self, token: &str, op: &str, args: &Value) -> Result<Value, (String, String)> {
+        if player_view::supported(op) {
+            return self.player_view_command(token, op, args);
+        }
         if matches!(
             op,
             "hud_inspect"
@@ -4610,6 +4625,10 @@ impl SceneEditor {
                     && self.session.redo_len() == 0))
     }
     fn request_close(&mut self) {
+        if self.player_view_draft.is_some() {
+            self.error = "Apply or cancel the Player View edit before closing.".into();
+            return;
+        }
         self.revoke_connection();
         if !self.asset_close_guard() {
             return;
@@ -4661,6 +4680,7 @@ impl SceneEditor {
             || crate::branding::is_about_open(ctx)
             || self.input_actions_open
             || self.hud_open
+            || self.player_view_draft.is_some()
             || self.manipulation.active()
             || self.dialog.is_some()
             || self.export_dialog
@@ -4702,6 +4722,7 @@ impl SceneEditor {
             return;
         }
         if self.close_approved
+            || self.player_view_draft.is_some()
             || self.export_dialog
             || self.workspace.settings_open
             || self.recovery.open
@@ -4807,12 +4828,12 @@ impl SceneEditor {
                 self.sync_draft();
             }
             Action::Frame => {
-                if self.guard().is_ok() {
+                if !self.navigation.player_view && self.guard().is_ok() {
                     self.navigation.frame_selected = true;
                 }
             }
             Action::Projection => {
-                if self.guard().is_ok() {
+                if !self.navigation.player_view && self.guard().is_ok() {
                     self.navigation.toggle_projection = true;
                 }
             }
@@ -4824,7 +4845,7 @@ impl SceneEditor {
             | Action::Bottom
             | Action::Isometric
             | Action::FreeView => {
-                if self.guard().is_ok() {
+                if !self.navigation.player_view && self.guard().is_ok() {
                     self.navigation.view_preset = Some(match action {
                         Action::Front => ruster_render::ViewPreset::Front,
                         Action::Back => ruster_render::ViewPreset::Back,
@@ -5127,6 +5148,8 @@ impl SceneEditor {
                 });
             });
             ui.menu_button("View", |ui| {
+                self.player_view_controls(ui, true);
+                ui.separator();
                 if ui.button("AI workspace").clicked() {
                     self.set_ai_workspace(true, &ui.ctx().clone());
                     ui.close();
@@ -5496,8 +5519,18 @@ impl SceneEditor {
                     .controls(ui, &self.session, self.generation, true, &shortcut);
                 return;
             }
+            if !self.player_preview_available() {
+                self.set_player_preview(false);
+            }
             if !self.ai_workspace {
-                self.manipulation_tools_ui(ui);
+                // Keep the compact viewport budget. The View menu exposes the
+                // same controls at every size.
+                if ctx.content_rect().width() >= 900.0 && ui.available_width() >= 460.0 {
+                    ui.horizontal(|ui| self.player_view_controls(ui, false));
+                }
+                if !self.navigation.player_view {
+                    self.manipulation_tools_ui(ui);
+                }
             }
             let document_blocked =
                 about_open || self.guard().is_err() || self.manipulation.offset_pending();
@@ -5521,15 +5554,21 @@ impl SceneEditor {
                 self.shader_revision,
             );
             self.asset_mark_callback_owners();
-            let transient = if !self.runtime.visible {
+            let transient = if !self.runtime.visible && !self.navigation.player_view {
                 self.manipulation.transient_scene(self.session.scene())
             } else {
                 None
             };
-            let selected: Vec<_> = self.manipulation.ids.iter().map(String::as_str).collect();
+            let player_view = self.navigation.player_view;
+            let selected: Vec<_> = if player_view {
+                Vec::new()
+            } else {
+                self.manipulation.ids.iter().map(String::as_str).collect()
+            };
             self.navigation.show_controls = !self.ai_workspace;
             self.navigation.selection_feedback = true;
-            self.navigation.enabled = !self.ai_release_navigation
+            self.navigation.enabled = !player_view
+                && !self.ai_release_navigation
                 && !self
                     .ai_drawer_rect
                     .is_some_and(|rect| ctx.pointer_hover_pos().is_some_and(|p| rect.contains(p)))
@@ -5553,7 +5592,8 @@ impl SceneEditor {
             let shown_frame = self.runtime.displayed_frame().cloned();
             let mut mixed_fit_error = None;
             let mut mixed_fit_succeeded = false;
-            if self.navigation.frame_selected
+            if !player_view
+                && self.navigation.frame_selected
                 && self
                     .manipulation
                     .ids
@@ -5662,7 +5702,8 @@ impl SceneEditor {
             self.captures.projection = Some(viewport.projection);
             self.captures.receipt = Some(viewport.receipt.clone());
             self.view_state.input_active = ui.input(|input| input.pointer.any_down());
-            let may_draw = !about_open
+            let may_draw = !player_view
+                && !about_open
                 && !self.asset_publishing()
                 && !self.asset_loading()
                 && !self.runtime.visible
@@ -5677,10 +5718,10 @@ impl SceneEditor {
                 && !self.recovery.open
                 && self.recovery_transition.is_none();
             let can_pick = self.navigation.enabled && !self.manipulation.active() && !hud_owns;
-            if !self.runtime.visible {
+            if !player_view && !self.runtime.visible {
                 let active = self.selected.as_slice();
                 collider_viewport::paint(ui, &viewport, authored_view, active);
-            } else if !self.runtime.stale {
+            } else if !player_view && !self.runtime.stale {
                 if let Some(frame) = self
                     .runtime
                     .displayed_frame()
@@ -5699,7 +5740,7 @@ impl SceneEditor {
             }
             // Passive xray icons precede transform handles in paint order;
             // handles retain first refusal on a click, then icons, then surfaces.
-            let light_pick = if !self.runtime.visible {
+            let light_pick = if !player_view && !self.runtime.visible {
                 lighting_viewport::paint_and_pick(
                     ui,
                     &viewport,
@@ -5749,6 +5790,7 @@ impl SceneEditor {
             self.workspace.flush();
         }
         self.show_hud_editor(&ctx);
+        self.show_player_view_editor(&ctx);
         self.rename_dialog(&ctx);
         if self.dialog.is_none() {
             self.path_focused = false;
@@ -9333,28 +9375,34 @@ mod tests {
 
     #[test]
     fn hierarchy_guarded_session_vertical_tracer() {
-        hierarchy_creator_journey(false, false, false);
+        hierarchy_creator_journey(false, false, false, false);
     }
 
     #[test]
     #[ignore = "explicit RUSTER_TEST_MCP_BINARY; actual STDIO fixture approval, not human consent"]
     fn hierarchy_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true, false, false);
+        hierarchy_creator_journey(true, false, false, false);
     }
 
     #[test]
     #[ignore = "explicit RUSTER_TEST_MCP_BINARY; registered-project STDIO fixture, not human consent"]
     fn project_registry_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true, true, false);
+        hierarchy_creator_journey(true, true, false, false);
     }
 
     #[test]
     #[ignore = "explicit source-built adapter, matched RUSTER_RUNTIME_KIT and disposable RUSTER_MCP_EXPORT_DIR"]
     fn group_rotation_stdio_creator_save_and_export() {
-        hierarchy_creator_journey(true, false, true);
+        hierarchy_creator_journey(true, false, true, false);
     }
 
-    fn hierarchy_creator_journey(stdio: bool, registered: bool, moving: bool) {
+    #[test]
+    #[ignore = "explicit source-built adapter, legacy input fixture, matched kit and disposable export directory"]
+    fn player_view_stdio_creator_save_and_export() {
+        hierarchy_creator_journey(true, false, false, true);
+    }
+
+    fn hierarchy_creator_journey(stdio: bool, registered: bool, moving: bool, player_view: bool) {
         use std::io::{BufRead, Write};
         struct Adapter(std::process::Child);
         impl Drop for Adapter {
@@ -9422,17 +9470,25 @@ mod tests {
             }
             value
         }
-        let mut editor = SceneEditor::new(Session::new(Scene::empty("creator-assembly")).unwrap());
         let dir = tempfile::tempdir().unwrap();
-        let path = dir.path().join("assembly.json");
+        let path = dir.path().join("creation.json");
+        let mut editor = if player_view {
+            let fixture = std::env::var_os("RUSTER_TEST_PLAYER_VIEW_SCENE").unwrap();
+            std::fs::copy(fixture, &path).unwrap();
+            SceneEditor::test_loaded(Session::open(&path).unwrap())
+        } else {
+            SceneEditor::new(Session::new(Scene::empty("creator-assembly")).unwrap())
+        };
         if stdio {
             // Disposable fixture setup: establish the directory before consent.
             // The creator's later MCP Save must not rebase an approved owner.
-            editor.save_scene(path.clone()).unwrap();
-            editor.test_finish_asset_work();
+            if !player_view {
+                editor.save_scene(path.clone()).unwrap();
+                editor.test_finish_asset_work();
+            }
             editor.save_grant = Some(persistence_commands::SaveGrant::new(dir.path()).unwrap());
         }
-        if moving {
+        if moving || player_view {
             editor.creation_export =
                 crate::creation_export::Controller::from_environment(true).unwrap();
             assert!(editor.creation_export.runtime_kit().is_some());
@@ -9583,186 +9639,191 @@ mod tests {
             assert_eq!(reply["ok"], true, "{op}: {reply}");
             reply["result"].clone()
         };
-        call(
-            &mut editor,
-            "scene_create",
-            json!({"object_id":"left","name":"Assembly box"}),
-        );
-        call(
-            &mut editor,
-            "scene_group_create",
-            json!({"object_id":"assembly","name":"Assembly"}),
-        );
-        call(
-            &mut editor,
-            "scene_group_create",
-            json!({"object_id":"hinge","name":"Hinge"}),
-        );
-        call(
-            &mut editor,
-            "scene_reparent",
-            json!({"object_id":"hinge","parent_id":"assembly"}),
-        );
-        call(
-            &mut editor,
-            "scene_reparent",
-            json!({"object_id":"left","parent_id":"hinge"}),
-        );
-        call(
-            &mut editor,
-            "scene_transform",
-            json!({"object_id":"left","transform":Transform{translation:[-2.,0.,0.],scale:[1.,2.,3.],..Default::default()}}),
-        );
-        call(
-            &mut editor,
-            "scene_collider_set",
-            json!({"object_id":"left","collider":ruster_scene::Collider{enabled:true,shape:ruster_scene::ColliderShape::Box{half_extents:[0.5;3]},..Default::default()}}),
-        );
-        let point = ruster_scene::Light::point(Some("Attached point".into()));
-        call(
-            &mut editor,
-            "scene_light_create",
-            json!({"light_id":"point","light":point}),
-        );
-        call(
-            &mut editor,
-            "scene_reparent",
-            json!({"object_id":"point","parent_id":"hinge"}),
-        );
-        let before = editor.session.scene().clone();
-        let moved = Transform {
-            translation: [3., 0., 0.],
-            ..Transform::default()
-        };
-        let receipt = call(
-            &mut editor,
-            "scene_transform",
-            json!({"object_id":"assembly","transform":moved}),
-        );
-        assert_eq!(receipt["hierarchy"]["parents"]["left"], "hinge");
-        assert_eq!(receipt["resolved_world"]["left"]["translation"][0], 1.);
-        assert_eq!(receipt["resolved_world"]["point"]["translation"][0], 3.);
-        assert_eq!(receipt["changed_target_count"], 1);
-        assert_eq!(
-            editor.session.scene().lighting.light("point"),
-            before.lighting.light("point"),
-            "range/intensity and authored local stay unchanged"
-        );
-        let stored = editor.session.snapshot_bytes().unwrap();
-        let stale = call(
-            &mut editor,
-            "scene_reparent",
-            json!({"expected_revision":"0","object_id":"left","parent_id":null}),
-        );
-        assert_eq!(stale["error"]["code"], "stale_revision");
-        assert_eq!(editor.session.snapshot_bytes().unwrap(), stored);
-        if stdio {
-            editor.history(false); // Ordinary native Undo, then actual-client Redo.
+        if player_view {
+            player_view_journey(&mut editor, &mut call);
         } else {
-            call(&mut editor, "scene_undo", json!({}));
-        }
-        assert_eq!(editor.session.scene().hierarchy, before.hierarchy);
-        call(&mut editor, "scene_redo", json!({}));
-        call(
-            &mut editor,
-            "scene_transform",
-            json!({"object_id":"hinge","transform":Transform{rotation:[0.,0.,std::f32::consts::FRAC_PI_2],..Default::default()}}),
-        );
-        let world = editor.session.scene().resolve_poses().unwrap().transforms["left"].clone();
-        call(
-            &mut editor,
-            "scene_reparent",
-            json!({"object_id":"left","parent_id":null}),
-        );
-        let detached = editor.session.scene().resolve_poses().unwrap().transforms["left"].clone();
-        assert!(world
-            .translation
-            .into_iter()
-            .zip(detached.translation)
-            .all(|(a, b)| (a - b).abs() < 2e-6));
-        call(&mut editor, "scene_undo", json!({}));
-        assert_eq!(editor.session.scene().hierarchy.parents["left"], "hinge");
-        call(&mut editor, "scene_redo", json!({}));
-        if moving {
-            use base64::{engine::general_purpose::STANDARD, Engine as _};
+            call(
+                &mut editor,
+                "scene_create",
+                json!({"object_id":"left","name":"Assembly box"}),
+            );
+            call(
+                &mut editor,
+                "scene_group_create",
+                json!({"object_id":"assembly","name":"Assembly"}),
+            );
+            call(
+                &mut editor,
+                "scene_group_create",
+                json!({"object_id":"hinge","name":"Hinge"}),
+            );
+            call(
+                &mut editor,
+                "scene_reparent",
+                json!({"object_id":"hinge","parent_id":"assembly"}),
+            );
             call(
                 &mut editor,
                 "scene_reparent",
                 json!({"object_id":"left","parent_id":"hinge"}),
             );
-            let source = "return {update=function(rotation, props, dt, host) if dt > 0 then return {0,0,0} end return rotation end}";
-            let source_fields = json!({"source_id":"turn","label":"Turn","language_id":"lua54",
-                "host_api_version":ruster_behavior::GROUP_ROTATION_HOST_API_VERSION,"text_base64":STANDARD.encode(source)});
-            let mut create = source_fields.clone();
-            create["binding_id"] = "hinge-turn".into();
-            create["target"] = json!({"type":"group","group_id":"hinge"});
-            call(&mut editor, "behavior_create", create);
-            let binding = call(
-                &mut editor,
-                "behavior_binding",
-                json!({"binding_id":"hinge-turn"}),
-            );
-            assert_eq!(
-                binding["target"],
-                json!({"type":"group","group_id":"hinge"})
-            );
-            assert!(binding["object_id"].is_null());
-            call(&mut editor, "scene_undo", json!({}));
-            assert!(editor.session.binding("hinge-turn").is_none());
-            call(&mut editor, "scene_redo", json!({}));
-            assert_eq!(
-                editor.session.binding("hinge-turn").unwrap().target,
-                ruster_scene::BindingTarget::Group("hinge".into())
-            );
-
-            let ctx = editor.export_context.clone().unwrap();
-            editor.poll_runtime(&ctx);
-            let reset = call(&mut editor, "behavior_runtime_reset", json!({}));
-            let wait_for_tick = |editor: &mut SceneEditor, tick| {
-                let deadline = Instant::now() + Duration::from_secs(4);
-                while editor.runtime.frame.as_ref().is_none_or(|frame| {
-                    frame.tick != tick || Some(frame.key) != editor.runtime.current_run()
-                }) {
-                    editor.poll_runtime(&ctx);
-                    assert!(Instant::now() < deadline, "{:?}", editor.runtime.diagnostic);
-                    std::thread::yield_now();
-                }
-            };
-            wait_for_tick(&mut editor, 0);
             call(
                 &mut editor,
-                "behavior_runtime_step",
-                json!({"expected_run_id":reset["run_id"]}),
+                "scene_transform",
+                json!({"object_id":"left","transform":Transform{translation:[-2.,0.,0.],scale:[1.,2.,3.],..Default::default()}}),
             );
-            wait_for_tick(&mut editor, 1);
-            let runtime = call(&mut editor, "behavior_runtime_inspect", json!({}));
-            let group = runtime["groups"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|row| row["id"] == "hinge")
-                .unwrap();
-            assert_eq!(group["local_transform"]["rotation"], json!([0.0, 0.0, 0.0]));
-            assert_ne!(
-                editor.session.scene().hierarchy.groups["hinge"]
-                    .transform
-                    .rotation,
-                [0.0; 3]
+            call(
+                &mut editor,
+                "scene_collider_set",
+                json!({"object_id":"left","collider":ruster_scene::Collider{enabled:true,shape:ruster_scene::ColliderShape::Box{half_extents:[0.5;3]},..Default::default()}}),
             );
-            for (operation, playing) in [
-                ("behavior_runtime_play", true),
-                ("behavior_runtime_pause", false),
-            ] {
+            let point = ruster_scene::Light::point(Some("Attached point".into()));
+            call(
+                &mut editor,
+                "scene_light_create",
+                json!({"light_id":"point","light":point}),
+            );
+            call(
+                &mut editor,
+                "scene_reparent",
+                json!({"object_id":"point","parent_id":"hinge"}),
+            );
+            let before = editor.session.scene().clone();
+            let moved = Transform {
+                translation: [3., 0., 0.],
+                ..Transform::default()
+            };
+            let receipt = call(
+                &mut editor,
+                "scene_transform",
+                json!({"object_id":"assembly","transform":moved}),
+            );
+            assert_eq!(receipt["hierarchy"]["parents"]["left"], "hinge");
+            assert_eq!(receipt["resolved_world"]["left"]["translation"][0], 1.);
+            assert_eq!(receipt["resolved_world"]["point"]["translation"][0], 3.);
+            assert_eq!(receipt["changed_target_count"], 1);
+            assert_eq!(
+                editor.session.scene().lighting.light("point"),
+                before.lighting.light("point"),
+                "range/intensity and authored local stay unchanged"
+            );
+            let stored = editor.session.snapshot_bytes().unwrap();
+            let stale = call(
+                &mut editor,
+                "scene_reparent",
+                json!({"expected_revision":"0","object_id":"left","parent_id":null}),
+            );
+            assert_eq!(stale["error"]["code"], "stale_revision");
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), stored);
+            if stdio {
+                editor.history(false); // Ordinary native Undo, then actual-client Redo.
+            } else {
+                call(&mut editor, "scene_undo", json!({}));
+            }
+            assert_eq!(editor.session.scene().hierarchy, before.hierarchy);
+            call(&mut editor, "scene_redo", json!({}));
+            call(
+                &mut editor,
+                "scene_transform",
+                json!({"object_id":"hinge","transform":Transform{rotation:[0.,0.,std::f32::consts::FRAC_PI_2],..Default::default()}}),
+            );
+            let world = editor.session.scene().resolve_poses().unwrap().transforms["left"].clone();
+            call(
+                &mut editor,
+                "scene_reparent",
+                json!({"object_id":"left","parent_id":null}),
+            );
+            let detached =
+                editor.session.scene().resolve_poses().unwrap().transforms["left"].clone();
+            assert!(world
+                .translation
+                .into_iter()
+                .zip(detached.translation)
+                .all(|(a, b)| (a - b).abs() < 2e-6));
+            call(&mut editor, "scene_undo", json!({}));
+            assert_eq!(editor.session.scene().hierarchy.parents["left"], "hinge");
+            call(&mut editor, "scene_redo", json!({}));
+            if moving {
+                use base64::{engine::general_purpose::STANDARD, Engine as _};
                 call(
                     &mut editor,
-                    operation,
+                    "scene_reparent",
+                    json!({"object_id":"left","parent_id":"hinge"}),
+                );
+                let source = "return {update=function(rotation, props, dt, host) if dt > 0 then return {0,0,0} end return rotation end}";
+                let source_fields = json!({"source_id":"turn","label":"Turn","language_id":"lua54",
+                "host_api_version":ruster_behavior::GROUP_ROTATION_HOST_API_VERSION,"text_base64":STANDARD.encode(source)});
+                let mut create = source_fields.clone();
+                create["binding_id"] = "hinge-turn".into();
+                create["target"] = json!({"type":"group","group_id":"hinge"});
+                call(&mut editor, "behavior_create", create);
+                let binding = call(
+                    &mut editor,
+                    "behavior_binding",
+                    json!({"binding_id":"hinge-turn"}),
+                );
+                assert_eq!(
+                    binding["target"],
+                    json!({"type":"group","group_id":"hinge"})
+                );
+                assert!(binding["object_id"].is_null());
+                call(&mut editor, "scene_undo", json!({}));
+                assert!(editor.session.binding("hinge-turn").is_none());
+                call(&mut editor, "scene_redo", json!({}));
+                assert_eq!(
+                    editor.session.binding("hinge-turn").unwrap().target,
+                    ruster_scene::BindingTarget::Group("hinge".into())
+                );
+
+                let ctx = editor.export_context.clone().unwrap();
+                editor.poll_runtime(&ctx);
+                let reset = call(&mut editor, "behavior_runtime_reset", json!({}));
+                let wait_for_tick = |editor: &mut SceneEditor, tick| {
+                    let deadline = Instant::now() + Duration::from_secs(4);
+                    while editor.runtime.frame.as_ref().is_none_or(|frame| {
+                        frame.tick != tick || Some(frame.key) != editor.runtime.current_run()
+                    }) {
+                        editor.poll_runtime(&ctx);
+                        assert!(Instant::now() < deadline, "{:?}", editor.runtime.diagnostic);
+                        std::thread::yield_now();
+                    }
+                };
+                wait_for_tick(&mut editor, 0);
+                call(
+                    &mut editor,
+                    "behavior_runtime_step",
                     json!({"expected_run_id":reset["run_id"]}),
                 );
-                let deadline = Instant::now() + Duration::from_secs(4);
-                while editor.runtime.is_playing() != playing {
-                    editor.poll_runtime(&ctx);
-                    assert!(Instant::now() < deadline, "{:?}", editor.runtime.diagnostic);
-                    std::thread::yield_now();
+                wait_for_tick(&mut editor, 1);
+                let runtime = call(&mut editor, "behavior_runtime_inspect", json!({}));
+                let group = runtime["groups"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .find(|row| row["id"] == "hinge")
+                    .unwrap();
+                assert_eq!(group["local_transform"]["rotation"], json!([0.0, 0.0, 0.0]));
+                assert_ne!(
+                    editor.session.scene().hierarchy.groups["hinge"]
+                        .transform
+                        .rotation,
+                    [0.0; 3]
+                );
+                for (operation, playing) in [
+                    ("behavior_runtime_play", true),
+                    ("behavior_runtime_pause", false),
+                ] {
+                    call(
+                        &mut editor,
+                        operation,
+                        json!({"expected_run_id":reset["run_id"]}),
+                    );
+                    let deadline = Instant::now() + Duration::from_secs(4);
+                    while editor.runtime.is_playing() != playing {
+                        editor.poll_runtime(&ctx);
+                        assert!(Instant::now() < deadline, "{:?}", editor.runtime.diagnostic);
+                        std::thread::yield_now();
+                    }
                 }
             }
         }
@@ -9777,7 +9838,9 @@ mod tests {
             let saved = call(&mut editor, "scene_persistence_inspect", json!({}));
             assert_eq!(saved["last_committed_save"]["committed"], true);
             let readback = call(&mut editor, "scene_inspect", json!({}));
-            assert_eq!(readback["hierarchy"]["parents"]["point"], "hinge");
+            if !player_view {
+                assert_eq!(readback["hierarchy"]["parents"]["point"], "hinge");
+            }
             assert_eq!(
                 readback["revision"],
                 editor.session.scene().revision.to_string()
@@ -9792,13 +9855,20 @@ mod tests {
         );
         assert_eq!(
             reopened.loaded_format_version(),
-            if moving {
+            if player_view {
+                ruster_scene::PLAYER_VIEW_FORMAT_VERSION
+            } else if moving {
                 ruster_scene::GROUP_ROTATION_FORMAT_VERSION
             } else {
                 ruster_scene::HIERARCHY_FORMAT_VERSION
             }
         );
-        if moving {
+        if moving || player_view {
+            let (title, filename) = if player_view {
+                ("Guarded Player View", "guarded-player-view.tar.gz")
+            } else {
+                ("Guarded Group rotation", "guarded-group-rotation.tar.gz")
+            };
             let ready = call(&mut editor, "creation_export_inspect", json!({}));
             assert_eq!(ready["can_start"], true, "{ready}");
             let receipt = call(
@@ -9809,7 +9879,7 @@ mod tests {
                     "expected_asset_revision":ready["asset_revision"],
                     "expected_shader_revision":ready["shader_revision"],
                     "expected_export_token":ready["export_token"],
-                    "title":"Guarded Group rotation", "filename":"guarded-group-rotation.tar.gz"
+                    "title":title, "filename":filename
                 }),
             );
             let deadline = Instant::now() + Duration::from_secs(12);
@@ -9831,7 +9901,7 @@ mod tests {
                 .creation_export
                 .output_directory()
                 .unwrap()
-                .join("guarded-group-rotation.tar.gz");
+                .join(filename);
             assert!(output.is_file());
             eprintln!("actual STDIO committed archive {}", output.display());
         }
@@ -9877,6 +9947,161 @@ mod tests {
         if stdio {
             eprintln!("STDIO cleanup: adapter reaped, native locator absent");
         }
+    }
+
+    fn player_view_journey(
+        editor: &mut SceneEditor,
+        call: &mut impl FnMut(&mut SceneEditor, &str, Value) -> Value,
+    ) {
+        let initial = call(editor, "player_view_inspect", json!({}));
+        assert!(initial["player_view"].is_null());
+        // The transport fixture owns no renderer; there is no real Fit in flight.
+        editor.navigation.reset = false;
+        let preserved_cam = ruster_render::CameraState {
+            target: [3., 1., 2.],
+            yaw: 0.5,
+            pitch: 0.3,
+            distance: 9.,
+            orthographic: true,
+        };
+        editor.navigation.camera = Some(preserved_cam);
+        let view = json!({"anchor":{"type":"follow","target_id":"subject","offset":[0.0,1.0,0.0]},
+            "yaw":0.0,"pitch":0.0,"distance":6.0,"vertical_fov_degrees":60.0});
+        let revision = editor.session.scene().revision.to_string();
+        let mut invalid = view.clone();
+        invalid["vertical_fov_degrees"] = json!(0);
+        let refused = call(
+            editor,
+            "scene_player_view_set",
+            json!({
+                "expected_revision":revision, "player_view":invalid
+            }),
+        );
+        assert_eq!(refused["error"]["code"], "invalid_player_view");
+        let applied = call(editor, "scene_player_view_set", json!({"player_view":view}));
+        assert_eq!(applied["player_view"], view);
+        assert_eq!(
+            applied["authored_camera"]["resolved"]["anchor"],
+            json!([0.0, 1.0, 0.0])
+        );
+        let refused = call(
+            editor,
+            "scene_delete",
+            json!({
+                "expected_revision":applied["revision"],"object_id":"subject",
+            }),
+        );
+        assert_eq!(refused["ok"], false);
+        assert!(refused["error"]["message"]
+            .as_str()
+            .unwrap()
+            .contains("clear or retarget"));
+        let stale = call(
+            editor,
+            "scene_player_view_set",
+            json!({
+                "expected_revision":initial["revision"],"player_view":null
+            }),
+        );
+        assert_eq!(stale["error"]["code"], "stale_revision");
+        let undone = call(editor, "scene_undo", json!({}));
+        assert!(undone["revision"].is_string());
+        assert!(call(editor, "player_view_inspect", json!({}))["player_view"].is_null());
+        call(editor, "scene_redo", json!({}));
+        let inspected = call(editor, "player_view_inspect", json!({}));
+        assert_eq!(inspected["player_view"], view);
+        let selected = call(
+            editor,
+            "viewport_player_view",
+            json!({
+                "expected_view_revision":inspected["view_revision"],"mode":"player"
+            }),
+        );
+        assert_eq!(selected["view_mode"], "player");
+        assert_eq!(editor.navigation.camera, Some(preserved_cam));
+
+        let reset = call(editor, "behavior_runtime_reset", json!({}));
+        let run_id = reset["run_id"].clone();
+        let wait = |editor: &mut SceneEditor,
+                    call: &mut dyn FnMut(&mut SceneEditor, &str, Value) -> Value,
+                    predicate: &dyn Fn(&Value) -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(4);
+            loop {
+                let state = call(editor, "behavior_runtime_inspect", json!({}));
+                if predicate(&state) {
+                    break state;
+                }
+                assert!(Instant::now() < deadline, "{state}");
+            }
+        };
+        let mut state = wait(editor, call, &|state| {
+            state["ready"] == true && state["tick"] == "0"
+        });
+        for tick in 1..=2 {
+            call(
+                editor,
+                "behavior_runtime_step",
+                json!({
+                    "expected_run_id":run_id,"expected_tick":state["tick"],
+                    "expected_map_identity":state["input"]["map_identity"],"expected_input_epoch":state["input"]["epoch"],
+                    "input_frame":{"move-x":{"type":"axis1d","value":1}}
+                }),
+            );
+            state = wait(editor, call, &|state| {
+                state["busy"] == false
+                    && state["tick"]
+                        .as_str()
+                        .and_then(|value| value.parse::<u64>().ok())
+                        == Some(tick)
+            });
+        }
+        let moved = call(editor, "player_view_inspect", json!({}));
+        assert_eq!(
+            moved["runtime"]["camera"]["resolved"]["anchor"],
+            json!([2.0, 1.0, 0.0])
+        );
+        assert_eq!(
+            moved["runtime"]["camera"]["matrices"][1]["eye"],
+            json!([2.0, 1.0, 6.0])
+        );
+        call(
+            editor,
+            "behavior_runtime_play",
+            json!({"expected_run_id":run_id}),
+        );
+        wait(editor, call, &|state| state["playing"] == true);
+        call(
+            editor,
+            "behavior_runtime_pause",
+            json!({"expected_run_id":run_id}),
+        );
+        wait(editor, call, &|state| {
+            state["playing"] == false && state["busy"] == false
+        });
+
+        let stale_view = call(
+            editor,
+            "viewport_player_view",
+            json!({
+                "expected_revision":moved["revision"],"expected_view_revision":inspected["view_revision"],"mode":"scene"
+            }),
+        );
+        assert_eq!(stale_view["error"]["code"], "stale_view");
+        call(editor, "behavior_runtime_reset", json!({}));
+        wait(editor, call, &|state| {
+            state["ready"] == true && state["tick"] == "0"
+        });
+        let restored = call(editor, "player_view_inspect", json!({}));
+        assert_eq!(restored["runtime"]["camera"], restored["authored_camera"]);
+        let switched = call(
+            editor,
+            "viewport_player_view",
+            json!({
+                "expected_view_revision":restored["view_revision"],"mode":"scene"
+            }),
+        );
+        assert_eq!(switched["view_mode"], "scene");
+        assert_eq!(editor.navigation.camera, Some(preserved_cam));
     }
 
     #[test]

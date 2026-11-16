@@ -24,6 +24,7 @@ struct ViewSnapshot {
     screen: Option<eframe::egui::Rect>,
     resources: Vec<(u8, String, usize)>,
     matrices: Option<ruster_render::CameraMatrices>,
+    player_view: bool,
     runtime_visible: bool,
     runtime_stale: bool,
     runtime_frame: Option<(crate::behavior_worker::RunKey, u64, u64, usize, usize)>,
@@ -33,7 +34,7 @@ fn fail(code: &str) -> (String, String) {
     (code.into(), code.into())
 }
 
-fn number(value: &Value) -> Option<u64> {
+pub(super) fn number(value: &Value) -> Option<u64> {
     let text = value.as_str()?;
     if text.is_empty()
         || (text != "0" && text.starts_with('0'))
@@ -69,7 +70,10 @@ fn camera(value: &Value) -> Option<CameraState> {
 }
 
 pub(super) fn supported(op: &str) -> bool {
-    matches!(op, "viewport_inspect" | "viewport_camera" | "scene_select")
+    matches!(
+        op,
+        "viewport_inspect" | "viewport_camera" | "viewport_player_view" | "scene_select"
+    )
 }
 
 impl SceneEditor {
@@ -77,6 +81,9 @@ impl SceneEditor {
     /// observes real renderer navigation and human selection, including A→B→A
     /// across frames; command-only observation would miss that interleaving.
     pub(super) fn observe_view(&mut self) {
+        if !self.player_preview_available() {
+            self.set_player_preview(false);
+        }
         let current = ViewSnapshot {
             camera: self.navigation.camera,
             selection: self.manipulation.ids.clone(),
@@ -94,6 +101,7 @@ impl SceneEditor {
             matrices: self.captures.view.zip(self.captures.projection),
             // Observe retained frames even while authored display is selected.
             // The monotonically advanced revision must not return to A after B.
+            player_view: self.navigation.player_view,
             runtime_visible: self.runtime.visible,
             runtime_stale: self.runtime.stale,
             runtime_frame: self.runtime.frame.as_ref().map(|frame| {
@@ -151,6 +159,12 @@ impl SceneEditor {
                 "expected_view_revision",
                 "camera",
             ],
+            "viewport_player_view" => &[
+                "expected_session_token",
+                "expected_revision",
+                "expected_view_revision",
+                "mode",
+            ],
             "scene_select" => &[
                 "expected_session_token",
                 "expected_revision",
@@ -186,7 +200,21 @@ impl SceneEditor {
                 return Err(fail("stale_view"));
             }
             self.view_guard()?;
-            if op == "viewport_camera" {
+            if op == "viewport_player_view" {
+                if self.runtime.input_owned() {
+                    return Err(fail("view_input_pending"));
+                }
+                let player = match args["mode"].as_str() {
+                    Some("scene") => false,
+                    Some("player") if self.player_preview_available() => true,
+                    Some("player") => return Err(fail("player_view_unavailable")),
+                    _ => return Err(fail("invalid_arguments")),
+                };
+                self.set_player_preview(player);
+            } else if op == "viewport_camera" {
+                if self.navigation.player_view {
+                    return Err(fail("player_view_locked"));
+                }
                 let state = camera(&args["camera"]).ok_or_else(|| fail("invalid_camera"))?;
                 self.navigation.camera = Some(state);
             } else {
@@ -224,6 +252,7 @@ impl SceneEditor {
             "revision":self.session.scene().revision.to_string(),
             "view_revision":self.view_state.revision.to_string(),
             "camera":camera,
+            "view_mode":if self.navigation.player_view {"player"} else {"scene"},
             "selected_object_ids":self.manipulation.ids.iter().take(256).collect::<Vec<_>>(),
             "selected_count":self.manipulation.ids.len(),
             "selection_truncated":self.manipulation.ids.len()>256,
