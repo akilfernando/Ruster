@@ -778,3 +778,56 @@ legacy mesh/texture operations retain `asset`. `scene_model_place` requires
 `asset_id`, with optional string `name` (ordinary scene name rules). Its result
 contains `root_id`, `asset_id`, `revision` and `asset_revision`. Placement retains
 the normal session, draft, dialog and publication guards and selects its new root.
+
+## Repeatable play checks (2026-11-16)
+
+Use **File → Play checks…** for one named check beside the saved scene. **New
+check** starts two neutral input frames and an exact completed-tick expectation.
+Add actions to individual frames; their initial Axis/Button type comes from the
+saved Input Actions map. Add final expectations for completed tick, an object's
+translation, or a creator state field. Numeric and vector equality has an explicit
+tolerance; numeric state also supports a range. Checks are capped at 120 frames,
+eight assertions and 64 KiB. They exercise production fixed-step playback, not
+rendering quality or general gameplay correctness.
+
+Choose **Capture current identity**, review the expected values, then **Save
+check**. Capturing changes scene/source/resource/input-map identity only; it never
+accepts current runtime output as an expectation. **Reopen check** loads the saved
+`.play-check.json` beside the scene (for example `beacon.play-check.json` for
+`beacon.json`). Existing files must be reopened before replacement; external
+changes refuse rather than silently overwrite. Save is atomic, with a final
+baseline and saved-scene recheck. A non-cooperating process racing the final rename
+is outside the existing same-user file contract. Scene replacement cancels an
+active operation. Save check and creation export exclude one another's writes.
+
+**Run saved check** always reads the saved sidecar and runs a separate production
+runtime. Unapplied scene drafts, authored history, the live preview and native
+input ownership are not changed by starting or inspecting the job. It requires a
+saved scene and waits for scene/content save/open work to finish. Legacy scenes
+below format11 need an ordinary Save first so packaged checks use the editor's
+exact fixed quantum. **Cancel operation** requests cancellation; a job that already
+finished retains its known result. Pass, expectation failure, stale case, invalid
+case, script error, cancellation and timeout remain distinct. Results identify
+expected/actual values and the completed tick. Preparation/file errors remain
+visible separately. A check does not automatically retarget after source edits:
+repair, save the scene, explicitly capture its identity and review/save the check.
+
+Tab traverses the form and buttons, Enter activates a focused button or commits a
+numeric field, and Escape closes the dialog while retaining its form. Input frames
+and expectations are typed controls; no expressions or Lua evaluation are entered
+in this dialog. Closing does not cancel an already running check; use its explicit
+Cancel control. The worker requests a repaint at completion, with no UI-thread
+file reads, resource hashing or runtime execution.
+
+Native bridge operations share that host: `play_check_start` requires
+`expected_session_token`, `expected_revision` and `expected_asset_revision`
+(canonical decimal strings for revisions; an absent empty catalog uses `"0"`).
+It returns `operation_id` immediately. `play_check_inspect` accepts optional
+`operation_id` and `details`; detailed assertion values require a selected
+operation ID. Unselected inspection returns bounded summaries of eight retained
+terminal receipts, plus explicitly labelled editor-draft metadata, not a claim
+that an unapplied form is the disk case. `play_check_cancel` requires current
+`expected_session_token` and `operation_id`. Inspect the retained operation after
+transport timeout before retrying. Receipt retention lasts for this editor
+process; crash recovery is not provided. MCP runs the fixed saved case; sidecar
+creation/editing remains ordinary creator authoring.

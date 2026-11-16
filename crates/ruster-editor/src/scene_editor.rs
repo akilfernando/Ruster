@@ -31,6 +31,7 @@ mod material_visual_probe;
 mod model_placement;
 mod nonvisual;
 mod persistence_commands;
+mod play_checks;
 mod player_view;
 #[cfg(all(test, feature = "inspection", unix))]
 mod preview_probe;
@@ -87,6 +88,9 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "viewport_capture_start",
     "viewport_capture_inspect",
     "viewport_capture_pick",
+    "play_check_inspect",
+    "play_check_start",
+    "play_check_cancel",
     "creation_export_inspect",
     "creation_export_start",
     "creation_export_cancel",
@@ -458,6 +462,7 @@ pub struct SceneEditor {
     #[cfg(test)]
     save_shader_reset_failure: Option<String>,
     creation_export: crate::creation_export::Controller,
+    play_checks: play_checks::Host,
     export_context: Option<egui::Context>,
     export_dialog: bool,
     export_title: String,
@@ -591,6 +596,7 @@ impl SceneEditor {
     fn test_finish_asset_work(&mut self) {
         let ctx = self.export_context.clone().unwrap_or_default();
         self.export_context = Some(ctx.clone());
+        self.poll_play_checks();
         let deadline = Instant::now() + Duration::from_secs(3);
         while (self.asset_busy() || self.asset_paint_cleanup_pending()) && Instant::now() < deadline
         {
@@ -664,6 +670,7 @@ impl SceneEditor {
             #[cfg(test)]
             save_shader_reset_failure: None,
             creation_export: crate::creation_export::Controller::disabled(),
+            play_checks: play_checks::Host::default(),
             export_context: None,
             export_dialog: false,
             export_use_current_view: false,
@@ -1670,6 +1677,7 @@ impl SceneEditor {
     ) {
         self.revoke_connection();
         self.creation_export.scene_replaced();
+        self.play_checks.scene_replaced();
         self.remember_camera();
         self.runtime
             .stop(self.generation, self.session.scene().revision);
@@ -1722,6 +1730,7 @@ impl SceneEditor {
                     &mut self.creation_export,
                     crate::creation_export::Controller::disabled(),
                 );
+                next.play_checks = std::mem::take(&mut self.play_checks);
                 next.export_context = self.export_context.take();
                 next.workspace = std::mem::replace(&mut self.workspace, Workspace::detached());
                 next.workspace.welcome = clipboard
@@ -1966,7 +1975,7 @@ impl SceneEditor {
         self.baseline_fields = self.draft.clone();
     }
     fn guard(&self) -> Result<(), String> {
-        if self.export_dialog {
+        if self.export_dialog || self.play_checks.open {
             return Err("recovery_pending".into());
         }
         self.guard_except_export_dialog()
@@ -3082,6 +3091,12 @@ impl SceneEditor {
                 | "hud_panel_move"
         ) {
             return self.hud_command(token, op, args);
+        }
+        if matches!(
+            op,
+            "play_check_inspect" | "play_check_start" | "play_check_cancel"
+        ) {
+            return self.play_check_command(token, op, args);
         }
         if matches!(
             op,
@@ -4720,6 +4735,7 @@ impl SceneEditor {
             || self.manipulation.active()
             || self.dialog.is_some()
             || self.export_dialog
+            || self.play_checks.open
             || self.close_pending
             || self.close_approved
             || self.rename_pending
@@ -4737,6 +4753,11 @@ impl SceneEditor {
         let Some(action) = self.queued_action.take() else {
             return;
         };
+        // An owned play-check modal must reject queued document actions before
+        // they revoke connection authority or cancel another operation.
+        if self.play_checks.open {
+            return;
+        }
         if matches!(action, Action::New | Action::Open) {
             self.revoke_connection();
         }
@@ -5095,6 +5116,10 @@ impl SceneEditor {
                 ] {
                     self.command_menu_item(ui, label, action);
                 }
+                if ui.button("Play checks…").clicked() {
+                    self.open_play_checks();
+                    ui.close();
+                }
                 self.recent_scenes_menu(ui, "Recent scenes");
                 ui.separator();
                 if ui.button("Recovery checkpoints…").clicked() {
@@ -5411,6 +5436,7 @@ impl SceneEditor {
         }
         let ctx = ui.ctx().clone();
         self.export_context = Some(ctx.clone());
+        self.poll_play_checks();
         self.asset_begin_root_frame(&ctx);
         self.asset_frame(&ctx, false);
         let focused = ctx.input(|input| input.focused);
@@ -5900,6 +5926,7 @@ impl SceneEditor {
             });
         }
         self.content_ui(&ctx);
+        self.play_checks_ui(&ctx);
         self.recovered_input_window(&ctx);
         if self.input_actions_open {
             self.runtime.release_input(&ctx);
@@ -8710,14 +8737,15 @@ mod tests {
     #[test]
     fn modal_shortcuts_preserve_pending_name_and_recovery_intent() {
         let ctx = egui::Context::default();
-        for modal in 0..4 {
+        for modal in 0..5 {
             let mut e = SceneEditor::new(Session::new(Scene::demo()).unwrap());
             e.name_text = "Unapplied name".into();
             match modal {
                 0 => e.rename_pending = true,
                 1 => e.new_scene_pending = true,
                 2 => e.asset_dialog = true,
-                _ => e.dialog = Some(true),
+                3 => e.dialog = Some(true),
+                _ => e.play_checks.open = true,
             }
             let mut output = ctx.run_ui(
                 egui::RawInput {
@@ -8741,6 +8769,17 @@ mod tests {
             assert_eq!(e.session.scene().revision, 0);
             assert!(e.session.path().is_none());
             assert_eq!(e.dialog, if modal == 3 { Some(true) } else { None });
+            if modal == 4 {
+                for action in [Action::New, Action::Open] {
+                    e.queued_action = Some(action);
+                    e.process_queued_action();
+                    assert!(e.play_checks.open);
+                    assert!(!e.new_scene_pending);
+                    assert!(e.dialog.is_none());
+                    assert_eq!(e.name_text, "Unapplied name");
+                    assert_eq!(e.session.scene().revision, 0);
+                }
+            }
         }
     }
 
