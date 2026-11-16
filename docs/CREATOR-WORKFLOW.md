@@ -121,3 +121,23 @@ the behavior. For Linux export use a current runtime kit advertising
 `kinematic_move_and_slide`, then run the relocated application's
 `--play-check`. Older kits can still package compatible scenes without API7.
 See the [Lua contract](../crates/ruster-behavior/README.md#opt-in-api7-kinematic-move-and-slide).
+
+## One-shot sound feedback
+
+Copy a short PCM16 WAV into the project. In **Content**, import the file
+with a stable asset ID. On a Lua behavior, use **Add property** and choose
+**Sound**. Give it a name, choose the WAV from the Sound selector and set
+gain from 0 to 1. Enter commits the focused field and Escape cancels its
+draft. Save the scene, Reset, Play and use the normal runtime controls.
+
+Call `host.play_sound("confirm")` in the enabled behavior's update when
+the action or owned state crosses the desired edge. `confirm` is the
+Sound property name. Use named input and earlier committed state to
+distinguish a new press from a held key. **Runtime → Audio** shows the
+output status and latest committed cue count. The audio output status
+and the simulation receipt describe different stages of the request.
+
+A Linux export with sound uses a kit advertising `one_shot_audio`.
+A saved play check can assert the triggering state or count and runs
+silently. For device playback, run the exported application and use its
+**Control runtime** button to claim keyboard input.

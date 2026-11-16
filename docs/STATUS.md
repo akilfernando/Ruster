@@ -1,13 +1,25 @@
 # Current project status
 
-## Packaged one-shot audio goal active — 2026-11-16
+## Packaged one-shot audio integrated locally — 2026-11-16
 
-Astra selected [packaged audio feedback](plans/PACKAGED-AUDIO-FEEDBACK.md).
-Root coordinates the isolated `feat/packaged-audio-20261116` slice from
-`f731b6b`. A disposable CPAL/Hound probe reached a private PipeWire sink
-and its monitor captured the expected short waveform. The system default
-sink stayed unchanged. The production Lua commit tracer, creator
-authoring routes and relocated app still need verification.
+The [plan](plans/PACKAGED-AUDIO-FEEDBACK.md) and
+[decision](decisions/2026-11-16-packaged-audio-feedback.md) cover short PCM
+WAV feedback from Lua4/5/7, owned cues and silent deterministic replay.
+Ordinary native import, typed cue repair, Save/reopen and held-key audio
+passed. Guarded real STDIO independently authored, verified a silent
+paused Step, saved and exported. The relocated Linux app preserved exact
+WAV and scene bytes, passed its check and played the named keyboard cue
+through an isolated PipeWire sink. Prior kits refused audio before
+publication. No-audio Descriptor5 output matched the prior kit.
+
+Full change gate and captured native log checks passed. No-audio release
+Step medians were 19.264 and 19.258 µs before and after. A committed cue
+took 21.002 µs. One cold live submission took 27.97 ms including device
+initialization. Device setup currently happens on first use. Output
+qualification covers PipeWire's PulseAudio route using float PCM.
+See the [qualification evidence](evidence/PACKAGED-AUDIO-FEEDBACK-2026-11-16.md).
+Imported transform animation remains the next provisional roadmap
+candidate.
 
 ## Kinematic move-and-slide integrated locally — 2026-11-16
 

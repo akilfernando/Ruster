@@ -33,6 +33,14 @@ Inspected owning sources: `crates/ruster-scene/src/lib.rs` and `authoring.rs`, `
 
 Navigation/pathfinding, terrain/world tools, particles/VFX, cinematics and networking are additional application-dependent tracks. Proper 2D tooling is a separate product-scope question. Not every engine needs all of them at once; choose them from creations that exercise real needs. Reuse suitable maintained libraries where they fit rather than rebuilding every subsystem.
 
+## Packaged audio — 2026-11-16
+
+[One-shot WAV feedback](decisions/2026-11-16-packaged-audio-feedback.md)
+supports non-positional Lua-triggered playback in editor and relocated
+Linux applications. Native MCP can import assets and author the typed
+property through existing guarded tools. Platform breadth, positional
+sound, mixer buses, looping and streaming remain further work.
+
 ## LOD and ray tracing
 
 LOD reduces geometry detail when it contributes less to the image. Plan mesh LOD alongside visibility culling, texture mipmaps and measured CPU/GPU/memory costs; they address different costs and are not interchangeable. Preserve artist control and source assets. Automatic simplification/import cost, transition artifacts and quality need real asset evidence. Current backface culling, mesh instancing and V2b cached mesh bounds are not evidence of frustum/occlusion culling or LOD support.

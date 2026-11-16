@@ -186,3 +186,15 @@ For that Application, declare a Number `count` state default, Number `start` pro
 Each successful Step advances tick and commit revision. Each successful command, including same-value output, advances only commit revision. `Runtime::last_step_commit_revision()` identifies retained simulation observations. Reset begins0/None, and exhaustion rejects before VM work. Runtime clones share immutable captured current Authoring definitions and isolate later state commits. The capture excludes document history. Final captures can outlive the current run through retained Frames.
 
 `CommandReceipt` includes binding/command, captured catalog hash, normalized input hash, previous/new commit revision and unchanged tick. Its serialized counters are canonical decimal strings. API5 captured state pages require commit pins even when the captured catalog is empty. The generic consumer's `--commands` delivery route and paused native controls are described in [Motion Lab](../../examples/motion-lab/README.md). Both new endpoints and compatibility costs remain subject to F2a qualification.
+
+## Committed one-shot sound cues
+
+A Lua4, Lua5 or Lua7 update with a Sound property can call
+`host.play_sound("property_name")`. A Sound reference contains a stable
+WAV ID and gain. A whole Step may request at most 16 cues. On success,
+the runtime exposes an immutable batch keyed by tick and commit
+revision. Reset trial output is discarded. Failed or cancelled Steps
+publish no new batch. Audio consumers use the runtime's own live
+generation and successful commit to dispatch each batch once. The
+behavior engine and isolated saved checks do not open audio devices.
+See the [audio decision](../../docs/decisions/2026-11-16-packaged-audio-feedback.md).

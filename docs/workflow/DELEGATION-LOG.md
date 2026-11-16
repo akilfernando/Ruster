@@ -1205,3 +1205,17 @@ Whole single-writer elapsed time is available from the audit timestamps (started
 ## External Fable orchestration — 2026-11-12
 
 Explicit user selection: Claude Code `claude-fable-5-2`, high effort, read-only current/next-phase review. Completed in 228 seconds/65 turns with no denied tools; CLI list-price estimate $2.472045, actual billing/subscription impact unknown. Source-based findings identify primitive delivery and texture admission gaps plus stale E1 status. Root confirms Scene 18/export mapping mismatch. No repairs, builds or desktop actions performed; no claim of phase acceptance. [Handoff and bounded worker contracts](../plans/CLAUDE-ORCHESTRATION-2026-11-12.md). External Claude aliases are not Codex spawn options.
+
+## Packaged one-shot audio — 2026-11-16
+
+Astra low independently selected the bounded creator slice and reviewed
+the completed transaction, device lifetime and package closure. The
+review identified float-only device output and first-use frame copying.
+The Linux qualification retains the verified float PCM route and reports
+the measured synchronous first use. Core, WAV catalog, packaging and
+guarded STDIO tasks used bounded inherited development roles. The visual
+editor agent verified keyboard and loopback evidence in disposable
+projects. Root integrated output and export and measured relocated
+playback and Step costs. Earlier default CPAL buffering caused a silent
+trace and was repaired by asking for a short supported device buffer.
+Individual model usage and cost are unavailable.

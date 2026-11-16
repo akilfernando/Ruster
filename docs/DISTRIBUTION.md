@@ -235,3 +235,19 @@ Undo/Redo. The exporter refuses an older kit before staging. Scenes
 without API7 retain their existing kit requirements, including the
 separate `repeatable_play_checks` capability when a saved case is present.
 The capability adds no resources and retains Descriptor5.
+
+### One-shot WAV export
+
+Sound-bearing scenes use Descriptor6 and a kit with `one_shot_audio`.
+The exported WAV closure includes sound IDs retained by authored Undo
+or Redo. The editor and copied helper check compatibility before
+publication. Packages without Sound properties keep the existing
+descriptor selection. Old kits can still package their compatible
+no-audio content.
+
+The Linux audio-enabled editor and Motion Lab build use ALSA development
+headers, as listed in the Linux CI prerequisites. The compiled runtime
+links `libasound.so.2`. Playback was qualified on PipeWire through
+PulseAudio using float PCM; isolated headless replay and saved checks
+leave the device closed. `RUSTER_AUDIO_DEVICE` optionally selects an
+exact PulseAudio output description for the launched process.
