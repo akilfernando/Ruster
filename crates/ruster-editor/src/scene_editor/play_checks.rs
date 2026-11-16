@@ -567,13 +567,31 @@ impl SceneEditor {
             ui.set_width((ctx.content_rect().width()-48.).clamp(280.,620.));
             ui.heading("Play checks");
             ui.label("Run saved input and expectations in an isolated preview. Your scene, edits and current Play session stay unchanged.");
-            egui::ScrollArea::vertical().id_salt("play_check_body").max_height((ctx.content_rect().height()-170.).max(100.)).show(ui,|ui|{
-                ui.horizontal_wrapped(|ui|{
-                    if ui.add_enabled(!busy,egui::Button::new("New check")).clicked(){action=Some("new");}
-                    if ui.add_enabled(!busy,egui::Button::new("Reopen check")).clicked(){action=Some("load");}
-                    if ui.add_enabled(!busy,egui::Button::new("Run saved check")).clicked(){action=Some("run");}
-                    if ui.add_enabled(busy,egui::Button::new("Cancel operation")).clicked(){action=Some("cancel");}
-                });
+            ui.horizontal_wrapped(|ui|{
+                if ui.add_enabled(!busy,egui::Button::new("New check")).clicked(){action=Some("new");}
+                if ui.add_enabled(!busy,egui::Button::new("Reopen check")).clicked(){action=Some("load");}
+                if ui.add_enabled(!busy,egui::Button::new("Run saved check")).clicked(){action=Some("run");}
+                if ui.add_enabled(busy,egui::Button::new("Cancel operation")).clicked(){action=Some("cancel");}
+            });
+            // Results keep their own bounded viewport above the potentially long
+            // case form. Scrolling 120 frames cannot hide completion or failure.
+            egui::ScrollArea::vertical().id_salt("play_check_results")
+                .max_height((ctx.content_rect().height()*0.24).clamp(60.,180.)).show(ui,|ui|{
+                ui.add(egui::Label::new(self.play_checks.message.chars().take(160).collect::<String>()).wrap()).on_hover_text(&self.play_checks.message);
+                if let Some(receipt)=self.play_checks.receipts.iter().rev().find(|receipt|receipt.get("report").is_some()) {
+                    let report=&receipt["report"];
+                    ui.label(format!("Result: {} · completed tick {}",report["status"].as_str().unwrap_or("unknown"),report["completed_tick"]));
+                    if let Some(rows)=report["results"].as_array(){
+                        for row in rows.iter().filter(|row|row["passed"]!=true).chain(rows.iter().filter(|row|row["passed"]==true)) {
+                            ui.add(egui::Label::new(assertion_label(row)).wrap());
+                        }
+                    }
+                    if let Some(text)=report["diagnostic"].as_str(){ui.add(egui::Label::new(text).wrap());}
+                }
+            });
+            ui.separator();
+            egui::ScrollArea::vertical().id_salt("play_check_body")
+                .max_height((ctx.content_rect().height()-ui.min_rect().height()-110.).max(80.)).show(ui,|ui|{
                 ui.add_enabled_ui(!busy,|ui|{
                     if let Some(case)=&mut self.play_checks.draft {
                         ui.label("Check name");
@@ -587,19 +605,6 @@ impl SceneEditor {
                         });
                     } else {ui.label("Create a check or reopen this scene's .play-check.json file.");}
                 });
-                ui.separator();
-                ui.add(egui::Label::new(&self.play_checks.message).wrap());
-                if let Some(receipt)=self.play_checks.receipts.back() {
-                    if let Some(report)=receipt.get("report") {
-                        ui.label(format!("Result: {} · completed tick {}",report["status"].as_str().unwrap_or("unknown"),report["completed_tick"]));
-                        if let Some(rows)=report["results"].as_array(){
-                            for row in rows {
-                                ui.add(egui::Label::new(assertion_label(row)).wrap());
-                            }
-                        }
-                        if let Some(text)=report["diagnostic"].as_str(){ui.add(egui::Label::new(text).wrap());}
-                    }
-                }
             });
             if ui.button("Close play checks").clicked(){close=true;}
         });
@@ -690,31 +695,10 @@ fn edit_frames(
                 ui.push_id(id, |ui| {
                     ui.horizontal_wrapped(|ui| {
                         ui.label(id);
-                        egui::ComboBox::from_id_salt("kind")
-                            .selected_text(match value {
-                                ActionValue::Axis1d { .. } => "Axis",
-                                ActionValue::Button(_) => "Button",
-                            })
-                            .show_ui(ui, |ui| {
-                                if ui
-                                    .selectable_label(
-                                        matches!(value, ActionValue::Axis1d { .. }),
-                                        "Axis",
-                                    )
-                                    .clicked()
-                                {
-                                    *value = ActionValue::Axis1d { value: 0 };
-                                }
-                                if ui
-                                    .selectable_label(
-                                        matches!(value, ActionValue::Button(_)),
-                                        "Button",
-                                    )
-                                    .clicked()
-                                {
-                                    *value = ActionValue::Button(ButtonState::default());
-                                }
-                            });
+                        ui.label(match value {
+                            ActionValue::Axis1d { .. } => "Axis",
+                            ActionValue::Button(_) => "Button",
+                        });
                         match value {
                             ActionValue::Axis1d { value } => {
                                 ui.add(egui::DragValue::new(value).range(-1..=1));
@@ -780,11 +764,14 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                             )
                             .clicked()
                         {
-                            expectation.select = Selection::Tick;
-                            expectation.comparison = Comparison::Equals {
-                                expected: StateValue::Number(0.),
-                                tolerance: None,
-                            };
+                            if !matches!(expectation.select, Selection::Tick) {
+                                expectation.select = Selection::Tick;
+                                expectation.comparison = Comparison::Equals {
+                                    expected: StateValue::Number(0.),
+                                    tolerance: None,
+                                };
+                            }
+                            ui.close();
                         }
                         if ui
                             .selectable_label(
@@ -793,13 +780,16 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                             )
                             .clicked()
                         {
-                            expectation.select = Selection::Translation {
-                                object_id: String::new(),
-                            };
-                            expectation.comparison = Comparison::Equals {
-                                expected: StateValue::Vec3([0.; 3]),
-                                tolerance: Some(0.0001),
-                            };
+                            if !matches!(expectation.select, Selection::Translation { .. }) {
+                                expectation.select = Selection::Translation {
+                                    object_id: String::new(),
+                                };
+                                expectation.comparison = Comparison::Equals {
+                                    expected: StateValue::Vec3([0.; 3]),
+                                    tolerance: Some(0.0001),
+                                };
+                            }
+                            ui.close();
                         }
                         if ui
                             .selectable_label(
@@ -808,10 +798,13 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                             )
                             .clicked()
                         {
-                            expectation.select = Selection::State {
-                                binding_id: String::new(),
-                                field: String::new(),
-                            };
+                            if !matches!(expectation.select, Selection::State { .. }) {
+                                expectation.select = Selection::State {
+                                    binding_id: String::new(),
+                                    field: String::new(),
+                                };
+                            }
+                            ui.close();
                         }
                     });
                 if ui
@@ -834,34 +827,44 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                     ui.add(egui::TextEdit::singleline(field).char_limit(64));
                 }
             }
-            egui::ComboBox::from_id_salt("comparison")
-                .selected_text(match expectation.comparison {
-                    Comparison::Equals { .. } => "Equals",
-                    Comparison::Range { .. } => "Numeric range",
-                })
-                .show_ui(ui, |ui| {
-                    if ui
-                        .selectable_label(
-                            matches!(expectation.comparison, Comparison::Equals { .. }),
-                            "Equals",
-                        )
-                        .clicked()
-                    {
-                        expectation.comparison = Comparison::Equals {
-                            expected: StateValue::Number(0.),
-                            tolerance: None,
-                        };
-                    }
-                    if ui
-                        .selectable_label(
-                            matches!(expectation.comparison, Comparison::Range { .. }),
-                            "Numeric range",
-                        )
-                        .clicked()
-                    {
-                        expectation.comparison = Comparison::Range { min: 0., max: 1. };
-                    }
-                });
+            if matches!(expectation.select, Selection::State { .. }) {
+                egui::ComboBox::from_id_salt("comparison")
+                    .selected_text(match expectation.comparison {
+                        Comparison::Equals { .. } => "Equals",
+                        Comparison::Range { .. } => "Numeric range",
+                    })
+                    .show_ui(ui, |ui| {
+                        if ui
+                            .selectable_label(
+                                matches!(expectation.comparison, Comparison::Equals { .. }),
+                                "Equals",
+                            )
+                            .clicked()
+                        {
+                            if !matches!(expectation.comparison, Comparison::Equals { .. }) {
+                                expectation.comparison = Comparison::Equals {
+                                    expected: StateValue::Number(0.),
+                                    tolerance: None,
+                                };
+                            }
+                            ui.close();
+                        }
+                        if ui
+                            .selectable_label(
+                                matches!(expectation.comparison, Comparison::Range { .. }),
+                                "Numeric range",
+                            )
+                            .clicked()
+                        {
+                            if !matches!(expectation.comparison, Comparison::Range { .. }) {
+                                expectation.comparison = Comparison::Range { min: 0., max: 1. };
+                            }
+                            ui.close();
+                        }
+                    });
+            } else {
+                ui.label("Equals");
+            }
             match &mut expectation.comparison {
                 Comparison::Range { min, max } => {
                     ui.horizontal_wrapped(|ui| {
@@ -875,32 +878,39 @@ fn edit_expectations(ui: &mut egui::Ui, expectations: &mut Vec<Expectation>) {
                     expected,
                     tolerance,
                 } => {
-                    egui::ComboBox::from_id_salt("value_type")
-                        .selected_text(match expected {
-                            StateValue::Number(_) => "Number",
-                            StateValue::Vec3(_) => "Vector",
-                            StateValue::Bool(_) => "Boolean",
-                            StateValue::Text(_) => "Text",
-                        })
-                        .show_ui(ui, |ui| {
-                            for (label, value) in [
-                                ("Number", StateValue::Number(0.)),
-                                ("Vector", StateValue::Vec3([0.; 3])),
-                                ("Boolean", StateValue::Bool(false)),
-                                ("Text", StateValue::Text(String::new())),
-                            ] {
-                                if ui
-                                    .selectable_label(
-                                        std::mem::discriminant(expected)
-                                            == std::mem::discriminant(&value),
-                                        label,
-                                    )
-                                    .clicked()
-                                {
-                                    *expected = value;
+                    if matches!(expectation.select, Selection::State { .. }) {
+                        egui::ComboBox::from_id_salt("value_type")
+                            .selected_text(match expected {
+                                StateValue::Number(_) => "Number",
+                                StateValue::Vec3(_) => "Vector",
+                                StateValue::Bool(_) => "Boolean",
+                                StateValue::Text(_) => "Text",
+                            })
+                            .show_ui(ui, |ui| {
+                                for (label, value) in [
+                                    ("Number", StateValue::Number(0.)),
+                                    ("Vector", StateValue::Vec3([0.; 3])),
+                                    ("Boolean", StateValue::Bool(false)),
+                                    ("Text", StateValue::Text(String::new())),
+                                ] {
+                                    if ui
+                                        .selectable_label(
+                                            std::mem::discriminant(expected)
+                                                == std::mem::discriminant(&value),
+                                            label,
+                                        )
+                                        .clicked()
+                                    {
+                                        if std::mem::discriminant(expected)
+                                            != std::mem::discriminant(&value)
+                                        {
+                                            *expected = value;
+                                        }
+                                        ui.close();
+                                    }
                                 }
-                            }
-                        });
+                            });
+                    }
                     ui.horizontal_wrapped(|ui| {
                         ui.label("Expected");
                         match expected {
@@ -1023,6 +1033,131 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
     }
+    #[test]
+    fn result_header_and_committed_dropdowns_stay_visible() {
+        fn frame(
+            ctx: &egui::Context,
+            events: Vec<egui::Event>,
+            mut paint: impl FnMut(&mut egui::Ui),
+        ) -> Vec<egui::epaint::ClippedShape> {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900., 700.),
+                    )),
+                    focused: true,
+                    events,
+                    ..Default::default()
+                },
+                |ui| paint(ui),
+            );
+            output.textures_delta.clear();
+            output.shapes
+        }
+        fn text_rect(shapes: &[egui::epaint::ClippedShape], prefix: &str) -> egui::Rect {
+            shapes
+                .iter()
+                .find_map(|shape| match &shape.shape {
+                    egui::Shape::Text(text) if text.galley.job.text.starts_with(prefix) => {
+                        let rect = egui::Rect::from_min_size(text.pos, text.galley.size());
+                        assert!(
+                            shape.clip_rect.contains_rect(rect),
+                            "{prefix} must be fully visible"
+                        );
+                        Some(rect)
+                    }
+                    _ => None,
+                })
+                .unwrap_or_else(|| panic!("missing {prefix}"))
+        }
+        let ctx = egui::Context::default();
+        let mut expectations = vec![Expectation {
+            select: Selection::Tick,
+            comparison: Comparison::Equals {
+                expected: StateValue::Number(2.),
+                tolerance: None,
+            },
+        }];
+        let click = |point, pressed| egui::Event::PointerButton {
+            pos: point,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        let mut shapes = frame(&ctx, vec![], |ui| edit_expectations(ui, &mut expectations));
+        for (current, choice) in [
+            ("Completed tick", "Creator state"),
+            ("Equals", "Numeric range"),
+            ("Numeric range", "Equals"),
+            ("Number", "Boolean"),
+        ] {
+            let point = text_rect(&shapes, current).center();
+            frame(
+                &ctx,
+                vec![egui::Event::PointerMoved(point), click(point, true)],
+                |ui| edit_expectations(ui, &mut expectations),
+            );
+            frame(&ctx, vec![click(point, false)], |ui| {
+                edit_expectations(ui, &mut expectations)
+            });
+            shapes = frame(&ctx, vec![], |ui| edit_expectations(ui, &mut expectations));
+            assert!(egui::Popup::is_any_open(&ctx));
+            let point = text_rect(&shapes, choice).center();
+            frame(
+                &ctx,
+                vec![egui::Event::PointerMoved(point), click(point, true)],
+                |ui| edit_expectations(ui, &mut expectations),
+            );
+            frame(&ctx, vec![click(point, false)], |ui| {
+                edit_expectations(ui, &mut expectations)
+            });
+            shapes = frame(&ctx, vec![], |ui| edit_expectations(ui, &mut expectations));
+            assert!(
+                !egui::Popup::is_any_open(&ctx),
+                "selection {choice} must close its popup"
+            );
+        }
+        assert!(matches!(
+            expectations[0].comparison,
+            Comparison::Equals {
+                expected: StateValue::Bool(false),
+                ..
+            }
+        ));
+        let ctx = egui::Context::default();
+        let mut editor = SceneEditor::new(Session::new(ruster_scene::Scene::demo()).unwrap());
+        editor.new_play_check();
+        editor.play_checks.open = true;
+        editor.play_checks.draft.as_mut().unwrap().frames = vec![ActionFrame::default(); 120];
+        editor.play_checks.message = "Check failed; expected 3, observed 2.".into();
+        editor.play_checks.receipts.push_back(
+            json!({"report":{"status":"assertion_failed","completed_tick":2,"results":[]}}),
+        );
+        for _ in 0..3 {
+            frame(&ctx, vec![], |_| editor.play_checks_ui(&ctx));
+        }
+        let shapes = frame(&ctx, vec![], |_| editor.play_checks_ui(&ctx));
+        let result = text_rect(&shapes, "Result: assertion_failed");
+        let form = text_rect(&shapes, "Check name");
+        assert!(result.max.y < form.min.y);
+        text_rect(&shapes, "Run saved check");
+        text_rect(&shapes, "Close play checks");
+        frame(
+            &ctx,
+            vec![egui::Event::Key {
+                key: egui::Key::Escape,
+                physical_key: None,
+                pressed: true,
+                repeat: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+            |_| editor.play_checks_ui(&ctx),
+        );
+        assert!(!editor.play_checks.open);
+        assert_eq!(editor.play_checks.draft.as_ref().unwrap().frames.len(), 120);
+    }
+
     #[test]
     fn saved_check_host_preserves_drafts_preview_and_receipts() {
         let root = tempfile::tempdir().unwrap();
