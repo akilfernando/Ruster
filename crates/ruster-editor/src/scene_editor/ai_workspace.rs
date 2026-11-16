@@ -35,23 +35,13 @@ impl SceneEditor {
                     self.set_ai_workspace(false, &ctx);
                 }
                 #[cfg(unix)]
-                crate::branding::connection_indicator(ui, self.ai_connection_label, true);
-                for action in [Action::Undo, Action::Save] {
-                    if ui
-                        .button(if action == Action::Save {
-                            if self.session.is_dirty() || self.session.path().is_none() {
-                                "Save •"
-                            } else {
-                                "Save"
-                            }
-                        } else {
-                            "Undo"
-                        })
-                        .on_hover_text(self.workspace.shortcut_text(action))
-                        .clicked()
-                    {
-                        self.queued_action = Some(action);
-                    }
+                crate::branding::connection_indicator(ui, self.ai_connection_label);
+                if ui
+                    .button("Undo")
+                    .on_hover_text(self.workspace.shortcut_text(Action::Undo))
+                    .clicked()
+                {
+                    self.queued_action = Some(Action::Undo);
                 }
                 ui.menu_button("…", |ui| {
                     if !wide {
@@ -403,10 +393,10 @@ mod tests {
                     })
                     .collect();
                 output.textures_delta.clear();
-                for label in ["Save", "Undo", "Full editor"] {
+                for label in ["Undo", "Full editor"] {
                     let rect = labels
                         .iter()
-                        .find(|(text, _)| *text == label || (label == "Save" && *text == "Save •"))
+                        .find(|(text, _)| *text == label)
                         .unwrap_or_else(|| panic!("missing {label}"))
                         .1;
                     assert!(

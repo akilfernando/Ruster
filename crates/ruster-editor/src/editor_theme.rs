@@ -4,8 +4,6 @@
 //! active palette through [`colors`]/[`palette`] so labels, warnings and axis
 //! tints stay readable after the creator switches themes.
 use eframe::egui::{self, Color32, CornerRadius, FontId, Stroke, Theme, Vec2};
-#[cfg(unix)]
-use egui::class::HasClasses;
 use egui::theme::{DefaultStyle, StyleProvider};
 use egui::widget_style::{ButtonStyle, StyleArgs, WidgetState};
 
@@ -254,28 +252,6 @@ impl StyleProvider<ButtonStyle> for EditorButtons {
                 .frame
                 .apply_stroke_and_expansion_without_layout_shift(Stroke::NONE, 0.0);
         }
-        #[cfg(unix)]
-        if args.classes.has_class(ROT_BADGE) {
-            let p = palette(args.ctx);
-            let connected = args.classes.has_class(ROT_CONNECTED);
-            let resting = if connected {
-                ROT_RED
-            } else if args.ctx.theme() == Theme::Light {
-                rgb(0xe1e1e3)
-            } else {
-                rgb(0x363638)
-            };
-            button.atom_layout.frame.fill = if args.state == WidgetState::Hovered {
-                resting.lerp_to_gamma(p.text, 0.07)
-            } else {
-                resting
-            };
-            if args.state == WidgetState::Active {
-                button.atom_layout.frame.stroke.color =
-                    if connected { ROT_ON_RED } else { p.secondary };
-            }
-            button.atom_layout.text_style.color = if connected { ROT_ON_RED } else { p.text };
-        }
         button
     }
 }
@@ -283,22 +259,6 @@ impl StyleProvider<ButtonStyle> for EditorButtons {
 /// Sampled from the opaque face of the bundled mushroom artwork.
 #[cfg(unix)]
 pub const ROT_RED: Color32 = rgb(0xfa2934);
-#[cfg(unix)]
-pub const ROT_ON_RED: Color32 = rgb(0x180709);
-
-#[cfg(unix)]
-const ROT_BADGE: &str = "rot_badge";
-#[cfg(unix)]
-const ROT_CONNECTED: &str = "rot_connected";
-
-#[cfg(unix)]
-pub fn rot_badge(button: egui::Button<'_>, connected: bool) -> egui::Button<'_> {
-    button
-        .corner_radius(8.0)
-        .with_class(ROT_BADGE)
-        .with_class_if(ROT_CONNECTED, connected)
-}
-
 /// Menu text is quiet at rest and uses egui's normal hover and focus states.
 pub fn text_menu(ui: &mut egui::Ui, label: &str, contents: impl FnOnce(&mut egui::Ui)) {
     let button = egui::Button::new(label).frame_when_inactive(false);

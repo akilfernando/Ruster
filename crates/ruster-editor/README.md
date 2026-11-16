@@ -12,7 +12,7 @@ Current source saves ordinary flat documents as Scene18. Static assemblies and r
 
 ## Full editor workspace
 
-The header holds the scene title, Rot connection status and Save. The **Rot** indicator reflects connection status. Open **File → Advanced → Rot connection…** for manual connection controls, browser approval or diagnostics. Use the toolbars for Scene and Player views, transforms, snapping, playback and view shortcuts. Objects and Inspector overlay one continuous Scene viewport. Their controls scroll above the fade, and the exposed viewport below either panel supports the same navigation as the center. The world grid follows the Scene camera. The editor’s Scene view uses a neutral grey background and a Rot-red selection outline. Content retains its existing search, import and asset controls. Open **Help → About** for the running build version.
+The header shows the scene title and a mushroom that reflects Rot connection status. The mushroom is grey when inactive and red when connected. Save is available in **File** and through its keyboard shortcut. Open **File → Advanced → Rot connection…** for manual connection controls, browser approval or diagnostics. Use the toolbars for Scene and Player views, transforms, snapping, playback and view shortcuts. Objects and Inspector overlay one continuous Scene viewport. Their controls scroll above the fade, and the exposed viewport below either panel supports the same navigation as the center. The world grid follows the Scene camera. The editor’s Scene view uses a neutral grey background and a Rot-red selection outline. Content retains its existing search, import and asset controls. Open **Help → About** for the running build version.
 
 ## Bounded assembly hierarchy — implementation WIP
 
@@ -33,7 +33,7 @@ switches the existing window. **Full editor** returns without recreating the
 session, history, selection or camera. Connecting to a running editor keeps its
 current layout.
 
-At reduced widths, one essential header retains project/unsaved state, Save, Undo,
+At reduced widths, one essential header retains project/unsaved state, Undo,
 AI status and Full editor; **…** holds secondary tools/actions. Wider windows expose
 the existing transform/navigation actions directly. Objects, Selection and Content
 reuse existing controls in a collapsed, bounded overlay drawer, not permanent

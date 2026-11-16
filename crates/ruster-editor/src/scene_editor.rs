@@ -5146,13 +5146,13 @@ impl SceneEditor {
     fn scene_menus(&mut self, ui: &mut egui::Ui) {
         if ui.available_width() < 265.0 {
             ui.horizontal(|ui| {
-                crate::branding::mark(ui, 20.0);
                 crate::editor_theme::text_menu(ui, "Menu", |ui| {
                     self.scene_menu_contents(ui, true);
                 });
-                if crate::editor_theme::primary_button(ui, "Save").clicked() {
-                    self.queued_action = Some(Action::Save);
-                }
+                #[cfg(unix)]
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    crate::branding::connection_indicator(ui, self.ai_connection_label);
+                });
             });
         } else {
             self.scene_menu_contents(ui, false);
@@ -5168,9 +5168,6 @@ impl SceneEditor {
             if compact {
                 ui.spacing_mut().button_padding.x = 3.0;
                 ui.spacing_mut().item_spacing.x = 3.0;
-            }
-            if !overflow {
-                crate::branding::mark(ui, if compact { 20.0 } else { 27.0 });
             }
             crate::editor_theme::text_menu(ui, "File", |ui| {
                 if ui.button("Switch Project…").clicked() {
@@ -5408,11 +5405,12 @@ impl SceneEditor {
                 self.document_label()
             );
             let room = ui.available_size_before_wrap().x;
+            let status_room = 24.0 + 2.0 * ui.spacing().item_spacing.x;
             if !compact && room > 390.0 {
                 let title_width = 220.0;
                 let centered =
                     ui.max_rect().center().x - ui.next_widget_position().x - title_width * 0.5;
-                ui.add_space(centered.clamp(0.0, (room - title_width - 164.0).max(0.0)));
+                ui.add_space(centered.clamp(0.0, (room - title_width - status_room).max(0.0)));
                 ui.allocate_ui_with_layout(
                     egui::vec2(title_width, ui.spacing().interact_size.y),
                     egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
@@ -5422,20 +5420,21 @@ impl SceneEditor {
                     },
                 );
                 let trailing = ui.available_size_before_wrap().x;
-                ui.add_space((trailing - 164.0).max(0.0));
-            } else {
+                ui.add_space((trailing - status_room).max(0.0));
+            } else if overflow {
                 ui.add(egui::Label::new(&title).truncate())
                     .on_hover_text(&title);
+            } else {
+                let width = (room - status_room).clamp(30.0, 220.0);
+                ui.add_sized(
+                    [width, ui.spacing().interact_size.y],
+                    egui::Label::new(&title).truncate(),
+                )
+                .on_hover_text(&title);
             }
             #[cfg(unix)]
-            {
-                crate::branding::connection_indicator(ui, self.ai_connection_label, false);
-            }
-            if crate::editor_theme::primary_button(ui, "Save")
-                .on_hover_text(self.workspace.shortcut_text(Action::Save))
-                .clicked()
-            {
-                self.queued_action = Some(Action::Save);
+            if !overflow {
+                crate::branding::connection_indicator(ui, self.ai_connection_label);
             }
         };
         if overflow {
@@ -6570,18 +6569,13 @@ mod tests {
                 asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("triangle · Mesh · Ready") && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
                 viewport.expect("production viewport callback must remain present")
             };
-            // The full-width toolbar keeps contextual groups adjacent and
-            // leaves Save aligned to the end of the header.
+            // The full-width toolbar keeps contextual groups adjacent.
             let wide_size = egui::vec2(2554.0, 1390.0);
             frame(&mut editor, wide_size);
             frame(&mut editor, wide_size);
             {
                 let chrome = chrome.borrow();
-                assert!(
-                    chrome["Save"].right() > wide_size.x - 80.0,
-                    "wide Save stays at the document end, not packed beside menus: {:?}",
-                    *chrome
-                );
+                assert!(!chrome.contains_key("Save"), "Save belongs in File");
                 assert!(
                     chrome["Space"].left() > chrome["Move"].right()
                         && chrome["Space"].top() < chrome["Move"].bottom(),

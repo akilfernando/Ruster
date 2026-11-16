@@ -38,6 +38,15 @@ and adapter are staged in the redesign audit's `indicator-release/` folder.
 The initial workspace test run hit the prior asset retirement assertion. The
 repeat reused the same source and the editor suite passed all 208 enabled tests.
 
+The editor header now uses a single mushroom at the right for Rot status.
+Inactive is grey and connected uses the logo red. Hover and accessibility
+text report the full state. Save remains in File and on its shortcut. Objects
+and Inspector retain their fades and resize interactions with borderless fills.
+Native inspection captured inactive and connected states over a disposable
+real MCP connection and located Save under File. The affected gate passed
+(208 editor tests, 13 ignored), including compact layout after reserving the
+icon's width in the header. The optimized release is installed.
+
 ## Project picker — 2026-11-16
 
 Ordinary cold startup opens Recent and All Projects with Open Project and New

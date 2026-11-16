@@ -114,16 +114,6 @@ impl SceneSidebars {
             let mut content = panel.rect.shrink(8.0);
             content.max.y = (content.max.y - fade_height).max(content.min.y);
             let palette = crate::editor_theme::colors(ui);
-            let radius = match panel.side {
-                Side::Left => egui::CornerRadius {
-                    se: 7,
-                    ..Default::default()
-                },
-                Side::Right => egui::CornerRadius {
-                    sw: 7,
-                    ..Default::default()
-                },
-            };
             let painter = ui.painter().with_clip_rect(panel.rect);
             paint_fill(&painter, panel.rect, fade_height, palette.surface);
 
@@ -147,12 +137,6 @@ impl SceneSidebars {
                 }
             }
 
-            painter.rect_stroke(
-                panel.rect,
-                radius,
-                egui::Stroke::new(1.0, palette.control_border),
-                egui::StrokeKind::Inside,
-            );
             if !self.constrained {
                 let mut handle = panel.rect;
                 match panel.side {

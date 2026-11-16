@@ -22,12 +22,20 @@ pub fn window_icon() -> Arc<IconData> {
 }
 
 /// Upload the supplied artwork once per context.
-fn texture(ctx: &egui::Context) -> TextureHandle {
-    let key = egui::Id::unique("rot_mushroom_texture");
+fn texture(ctx: &egui::Context, monochrome: bool) -> TextureHandle {
+    let key = egui::Id::unique(("rot_mushroom_texture", monochrome));
     if let Some(texture) = ctx.data(|data| data.get_temp::<TextureHandle>(key)) {
         return texture;
     }
-    let icon = eframe::icon_data::from_png_bytes(MUSHROOM).expect("bundled Rot Engine logo is PNG");
+    let mut icon =
+        eframe::icon_data::from_png_bytes(MUSHROOM).expect("bundled Rot Engine logo is PNG");
+    if monochrome {
+        for pixel in icon.rgba.as_chunks_mut::<4>().0 {
+            // Keep the artwork's alpha and shading so the same mark can be tinted.
+            let value = pixel[0].saturating_add(5);
+            pixel[..3].fill(value);
+        }
+    }
     let image =
         ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba);
     let texture = ctx.load_texture("Rot Engine mushroom", image, TextureOptions::LINEAR);
@@ -40,7 +48,7 @@ pub fn mark(ui: &mut egui::Ui, size: f32) {
 }
 
 fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
-    let texture = texture(ui.ctx());
+    let texture = texture(ui.ctx(), false);
     let source = texture.size_vec2();
     let scale = size / source.x.max(source.y);
     egui::Frame::new().inner_margin(padding).show(ui, |ui| {
@@ -49,56 +57,23 @@ fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
 }
 
 #[cfg(unix)]
-pub fn connection_indicator(ui: &mut egui::Ui, state: &str, compact: bool) {
-    let connected = state == "Connected";
-    let button = if connected {
-        let mut text = egui::text::LayoutJob::default();
-        text.append(
-            "◆  ROT",
-            0.0,
-            egui::TextFormat {
-                font_id: egui::FontId::proportional(15.0),
-                color: editor_theme::ROT_ON_RED,
-                italics: true,
-                extra_letter_spacing: -0.35,
-                ..Default::default()
-            },
-        );
-        text.append(
-            "  active",
-            0.0,
-            egui::TextFormat {
-                font_id: egui::FontId::proportional(12.0),
-                color: editor_theme::ROT_ON_RED,
-                ..Default::default()
-            },
-        );
-        egui::Button::new(text)
-    } else if state == "Disconnected" {
-        egui::Button::new("Rot inactive")
+pub fn connection_indicator(ui: &mut egui::Ui, state: &str) {
+    let texture = texture(ui.ctx(), true);
+    let source = texture.size_vec2();
+    let color = if state == "Connected" {
+        editor_theme::ROT_RED
+    } else if ui.visuals().dark_mode {
+        egui::Color32::from_gray(151)
     } else {
-        egui::Button::new(format!(
-            "Rot · {}",
-            if compact {
-                match state {
-                    "Approval required (manual)" => "Pending",
-                    "Disconnected / retiring" => "Retiring",
-                    "Access revoked" => "Revoked",
-                    "Connection error" => "Error",
-                    _ => state,
-                }
-            } else {
-                state
-            }
-        ))
+        egui::Color32::from_gray(99)
     };
-    let response = ui.add(editor_theme::rot_badge(
-        button.sense(egui::Sense::hover()),
-        connected,
-    ));
-    response.widget_info(|| {
-        egui::WidgetInfo::labeled(egui::Role::Label, true, format!("Rot connection · {state}"))
-    });
+    let label = format!("Rot connection · {state}");
+    ui.add(
+        egui::Image::new((texture.id(), source * (24.0 / source.y)))
+            .alt_text(&label)
+            .tint(color),
+    )
+    .on_hover_text(label);
 }
 
 pub fn is_about_open(ctx: &egui::Context) -> bool {
@@ -155,34 +130,25 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn rot_badge_preserves_connection_state_in_text() {
-        for (state, label) in [
-            ("Connected", "◆  ROT  active"),
-            ("Disconnected", "Rot inactive"),
-            ("Connection error", "Rot · Connection error"),
+    fn rot_indicator_tints_the_mushroom_for_each_connection_state() {
+        for (state, color) in [
+            ("Connected", editor_theme::ROT_RED),
+            ("Disconnected", egui::Color32::from_gray(151)),
+            ("Connection error", egui::Color32::from_gray(151)),
         ] {
             let ctx = egui::Context::default();
             editor_theme::configure(&ctx);
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                connection_indicator(ui, state, false);
+                connection_indicator(ui, state);
             });
             output.textures_delta.clear();
+            let meshes = ctx.tessellate(output.shapes, output.pixels_per_point);
             assert!(
-                output.shapes.iter().any(|shape| {
-                    matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == label)
+                meshes.iter().any(|shape| {
+                    matches!(&shape.primitive, egui::epaint::Primitive::Mesh(mesh)
+                    if mesh.vertices.iter().any(|vertex| vertex.color == color))
                 }),
-                "missing text for {state}"
-            );
-            let fill = if state == "Connected" {
-                editor_theme::ROT_RED
-            } else {
-                egui::Color32::from_rgb(0x36, 0x36, 0x38)
-            };
-            assert!(
-                output.shapes.iter().any(|shape| {
-                    matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == fill)
-                }),
-                "missing status fill for {state}"
+                "missing mushroom tint for {state}"
             );
         }
     }
