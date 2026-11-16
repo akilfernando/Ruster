@@ -230,6 +230,48 @@ fn contact_geometry(
         .then(|| (point, normal.normalize()))
 }
 
+fn contact_geometries(
+    observation: &QueryObservation,
+    scene: &Scene,
+    committed_tick: u64,
+) -> Vec<(DVec3, DVec3)> {
+    if let QueryResult::MoveAndSlide {
+        probe_id, result, ..
+    } = &observation.query
+    {
+        if observation.scene_revision != scene.revision
+            || observation.snapshot_tick.checked_add(1) != Some(committed_tick)
+            || !scene.objects.iter().any(|object| &object.id == probe_id)
+        {
+            return Vec::new();
+        }
+        return result
+            .contacts
+            .iter()
+            .take(ruster_behavior::spatial::MAX_SLIDE_CONTACTS)
+            .filter_map(|contact| {
+                if !scene
+                    .objects
+                    .iter()
+                    .any(|object| object.id == contact.target_id)
+                {
+                    return None;
+                }
+                let point = DVec3::from_array(contact.point);
+                let normal = DVec3::from_array(contact.normal);
+                (point.is_finite()
+                    && normal.is_finite()
+                    && normal.length_squared().is_finite()
+                    && normal.length_squared() > 0.0)
+                    .then(|| (point, normal.normalize()))
+            })
+            .collect();
+    }
+    contact_geometry(observation, scene, committed_tick)
+        .into_iter()
+        .collect()
+}
+
 /// Caller must pass a committed, valid, nonstale runtime Frame's Scene/tick and
 /// its own observations, after checking run/generation authority. This helper
 /// never reads a worker or infers freshness from a viewport prepare receipt.
@@ -251,57 +293,57 @@ pub(super) fn paint_contacts(
         .iter()
         .take(ruster_behavior::MAX_SPATIAL_QUERIES as usize)
     {
-        let Some((point, normal)) = contact_geometry(observation, captured_scene, committed_tick)
-        else {
-            continue;
-        };
-        let Some((screen, _)) = lighting_viewport::project(viewport.rect, vp, point) else {
-            continue;
-        };
-        let initial = matches!(&observation.query, QueryResult::Sweep { result, .. } if result.outcome == SweepOutcome::InitialOverlap);
-        let color = if initial {
-            egui::Color32::from_rgb(245, 110, 115)
-        } else {
-            egui::Color32::from_rgb(245, 180, 70)
-        };
-        painter.circle_filled(screen, 5.0, egui::Color32::BLACK);
-        painter.circle_stroke(screen, 3.5, egui::Stroke::new(1.75, color));
-        if let Some([a, b]) =
-            lighting_viewport::segment(viewport.rect, vp, point, point + normal * 0.5)
-        {
-            let direction = b - a;
-            if direction.length_sq() > 0.01 {
-                painter.arrow(
-                    screen,
-                    direction.normalized() * 24.0,
-                    egui::Stroke::new(1.75, color),
-                );
+        for (point, normal) in contact_geometries(observation, captured_scene, committed_tick) {
+            let Some((screen, _)) = lighting_viewport::project(viewport.rect, vp, point) else {
+                continue;
+            };
+            let initial = matches!(&observation.query, QueryResult::Sweep { result, .. } if result.outcome == SweepOutcome::InitialOverlap);
+            let color = if initial {
+                egui::Color32::from_rgb(245, 110, 115)
             } else {
-                painter.text(
-                    screen + egui::vec2(0.0, 10.0),
-                    egui::Align2::CENTER_TOP,
-                    if view.transform_vector3(normal).z > 0.0 {
-                        "⊙"
-                    } else {
-                        "⊗"
-                    },
-                    egui::TextStyle::Body.resolve(ui.style()),
-                    color,
-                );
+                egui::Color32::from_rgb(245, 180, 70)
+            };
+            painter.circle_filled(screen, 5.0, egui::Color32::BLACK);
+            painter.circle_stroke(screen, 3.5, egui::Stroke::new(1.75, color));
+            if let Some([a, b]) =
+                lighting_viewport::segment(viewport.rect, vp, point, point + normal * 0.5)
+            {
+                let direction = b - a;
+                if direction.length_sq() > 0.01 {
+                    painter.arrow(
+                        screen,
+                        direction.normalized() * 24.0,
+                        egui::Stroke::new(1.75, color),
+                    );
+                } else {
+                    painter.text(
+                        screen + egui::vec2(0.0, 10.0),
+                        egui::Align2::CENTER_TOP,
+                        if view.transform_vector3(normal).z > 0.0 {
+                            "⊙"
+                        } else {
+                            "⊗"
+                        },
+                        egui::TextStyle::Body.resolve(ui.style()),
+                        color,
+                    );
+                }
             }
+            label(
+                ui,
+                &painter,
+                viewport.rect,
+                screen,
+                if initial {
+                    "Initial overlap"
+                } else if matches!(observation.query, QueryResult::MoveAndSlide { .. }) {
+                    "Slide contact"
+                } else {
+                    "Query contact"
+                }
+                .into(),
+            );
         }
-        label(
-            ui,
-            &painter,
-            viewport.rect,
-            screen,
-            if initial {
-                "Initial overlap"
-            } else {
-                "Query contact"
-            }
-            .into(),
-        );
     }
 }
 
@@ -500,7 +542,27 @@ mod tests {
         observation.scene_revision = 1;
         assert!(contact_geometry(&observation, &scene, 3).is_none());
         observation.scene_revision = 0;
+        observation.query = QueryResult::MoveAndSlide {
+            probe_id: "probe".into(),
+            delta: [1., 0., 1.],
+            result: ruster_behavior::spatial::SlideResult {
+                outcome: ruster_behavior::spatial::SlideOutcome::Slid,
+                suggested_translation: Some([0., 0., 1.]),
+                blocking_id: None,
+                contacts: vec![
+                    ruster_behavior::spatial::SlideContact {
+                        target_id: "wall".into(),
+                        point: [0.; 3],
+                        normal: [-1., 0., 0.],
+                        clearance: 0.0001,
+                    };
+                    4
+                ],
+            },
+        };
+        assert_eq!(contact_geometries(&observation, &scene, 3).len(), 4);
+        assert!(contact_geometries(&observation, &scene, 2).is_empty());
         scene.objects.pop();
-        assert!(contact_geometry(&observation, &scene, 3).is_none());
+        assert!(contact_geometries(&observation, &scene, 3).is_empty());
     }
 }

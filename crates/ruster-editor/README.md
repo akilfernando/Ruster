@@ -831,3 +831,9 @@ that an unapplied form is the disk case. `play_check_cancel` requires current
 transport timeout before retrying. Receipt retention lasts for this editor
 process; crash recovery is not provided. MCP runs the fixed saved case; sidecar
 creation/editing remains ordinary creator authoring.
+
+### Kinematic sphere movement
+
+Select an object with an enabled **Blocker Sphere** collider and use **Behavior → Add behavior… → Lua kinematic mover**. The API7 template preserves the authored pose on Reset. Set its `axis_x` and `axis_z` text properties to saved Axis action IDs and `speed` to scene units per second; an empty axis name is neutral. Use the existing Inputs editor to author keys. Apply source changes with Ctrl+Enter; ordinary property Enter/Escape, Save, Undo and reopen behavior remains shared.
+
+This bounded mover requires a flat scene, uniform sphere scale and a single enabled mover; other blockers must remain stationary. Play/Step reports **Clear**, **Slid** or **Stopped**. **Runtime → Spatial feedback** shows requested displacement, safe translation and up to four contacts with stable target IDs, points, normals and clearance. The viewport draws these contacts using the existing freshness checks. Initial overlap, precision and iteration failures leave the previous committed runtime intact; previous feedback remains explicitly marked when stale. Legacy sweeps and sensors retain their own query behavior.

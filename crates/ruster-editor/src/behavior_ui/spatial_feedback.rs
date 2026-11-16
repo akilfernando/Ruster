@@ -1,6 +1,27 @@
 //! Read-only presentation of the last committed spatial-query snapshot.
 use super::*;
-use ruster_behavior::{spatial::SweepOutcome, QueryObservation, QueryResult};
+use ruster_behavior::{
+    spatial::{SlideOutcome, SweepOutcome},
+    QueryObservation, QueryResult,
+};
+
+fn slide_status(outcome: SlideOutcome) -> &'static str {
+    match outcome {
+        SlideOutcome::Clear => "Clear",
+        SlideOutcome::Slid => "Slid",
+        SlideOutcome::Stopped => "Stopped",
+        SlideOutcome::InitialOverlap => "Initial overlap",
+        SlideOutcome::PrecisionLimited => "Precision limited",
+        SlideOutcome::IterationLimit => "Iteration limit",
+    }
+}
+fn query_kind(query: &QueryResult) -> u8 {
+    match query {
+        QueryResult::Sweep { .. } => 0,
+        QueryResult::Overlap { .. } => 1,
+        QueryResult::MoveAndSlide { .. } => 2,
+    }
+}
 
 fn description(observation: &QueryObservation, scene: &ruster_scene::Scene) -> String {
     let name = |id: &str| {
@@ -31,6 +52,14 @@ fn description(observation: &QueryObservation, scene: &ruster_scene::Scene) -> S
                 }
             }
         }
+        QueryResult::MoveAndSlide {
+            probe_id, result, ..
+        } => format!(
+            "{} · {} · {} contacts",
+            name(probe_id),
+            slide_status(result.outcome),
+            result.contacts.len()
+        ),
         QueryResult::Overlap { result } => format!(
             "{} · {}",
             name(&result.sensor_id),
@@ -57,12 +86,14 @@ impl RuntimeUi {
         } else {
             // Names and geometry stay in the hover/menu. The primary states must
             // remain readable in the fixed Control row at compact viewport widths.
-            let mut states = Vec::with_capacity(2);
-            let mut details = Vec::with_capacity(2);
-            for sweep in [true, false] {
-                if let Some(observation) = queries.iter().rev().find(|observation| {
-                    matches!(observation.query, QueryResult::Sweep { .. }) == sweep
-                }) {
+            let mut states = Vec::with_capacity(3);
+            let mut details = Vec::with_capacity(3);
+            for kind in 0..3 {
+                if let Some(observation) = queries
+                    .iter()
+                    .rev()
+                    .find(|observation| query_kind(&observation.query) == kind)
+                {
                     states.push(match &observation.query {
                         QueryResult::Sweep { result, .. } => match result.outcome {
                             SweepOutcome::Clear => "Clear",
@@ -70,6 +101,7 @@ impl RuntimeUi {
                             SweepOutcome::InitialOverlap => "Inside",
                             SweepOutcome::PrecisionLimited => "Limited",
                         },
+                        QueryResult::MoveAndSlide { result, .. } => slide_status(result.outcome),
                         QueryResult::Overlap { result } => {
                             if result.overlapping {
                                 "Occupied"
@@ -122,7 +154,9 @@ impl RuntimeUi {
                         "Previous scene snapshot · Reset required",
                     );
                 }
-                ui.label("Queries inspect the scene. Your script chooses movement.");
+                ui.label(if matches!(queries[*selected].query, QueryResult::MoveAndSlide {..}) {
+                    "Kinematic movement commits the safe translation and preserves rotation and scale."
+                } else { "Queries inspect the scene. Your script chooses movement." });
                 ui.horizontal(|ui| {
                     let previous =
                         ui.add_enabled(*selected > 0, egui::Button::new("Previous query"));
@@ -180,6 +214,19 @@ impl RuntimeUi {
                         if matches!(result.outcome, SweepOutcome::InitialOverlap) {
                             ui.label("Move the probe out of the blocker, then Reset.");
                         }
+                    }
+                    QueryResult::MoveAndSlide { delta, result, .. } => {
+                        ui.label(format!("Requested displacement {delta:?}"));
+                        ui.label(format!("Safe translation {:?}", result.suggested_translation));
+                        egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
+                            for contact in result.contacts.iter().take(ruster_behavior::spatial::MAX_SLIDE_CONTACTS) {
+                                let name = frame.scene.objects.iter().find(|object| object.id == contact.target_id).map(|object| object.display_name()).unwrap_or(&contact.target_id);
+                                ui.add(egui::Label::new(format!("{name} · {}", contact.target_id)).wrap());
+                                ui.label(format!("Contact {:?}", contact.point));
+                                ui.label(format!("Normal {:?}", contact.normal));
+                                ui.label(format!("Clearance {} scene units", contact.clearance));
+                            }
+                        });
                     }
                     QueryResult::Overlap { result } => {
                         ui.label(format!(
@@ -248,6 +295,25 @@ mod tests {
                 &captured.scene
             ),
             "Inspection probe · sweep blocked by Thin barrier"
+        );
+        let mut slide = captured.query_observations.as_ref().unwrap()[0].clone();
+        slide.query = QueryResult::MoveAndSlide {
+            probe_id: "probe".into(),
+            delta: [1., 0., 1.],
+            result: ruster_behavior::spatial::SlideResult {
+                outcome: SlideOutcome::Slid,
+                suggested_translation: Some([0., 0., 1.]),
+                contacts: vec![],
+                blocking_id: None,
+            },
+        };
+        assert_eq!(
+            description(&slide, &captured.scene),
+            "Inspection probe · Slid · 0 contacts"
+        );
+        assert_ne!(
+            query_kind(&slide.query),
+            query_kind(&captured.query_observations.as_ref().unwrap()[0].query)
         );
         let ctx = egui::Context::default();
         for (width, stale) in [(900.0, false), (300.0, true)] {
