@@ -12,9 +12,8 @@ structure-preserving refresh and one atomic catalog generation. A Blender
 fixture family with real A/B exports, reordered B, and malformed and missing
 part variants is pinned under
 `/home/akilf/Projects/Ruster-Audits/static-glb-20261116.hJqwVv`.
-The asset owner is implementing the catalog portion in
-`feat/static-glb-20261116`. The fixture exists and no production import
-acceptance is claimed. The documentation lane verifies links and whitespace.
+Implementation and qualification run in `feat/static-glb-20261116`.
+The documentation lane verifies links and whitespace.
 
 Scene checkpoint `e2a7bcf` adds one guarded atomic placement command with
 ordinary scene hierarchy, material and object history, using the current
@@ -25,9 +24,7 @@ values. Existing Group scale rules apply. The focused
 passed, as did strict scene Clippy. The case verifies failure atomicity,
 stale revisions, Undo/Redo and reopen. The independent Blender source oracle
 passed on both versions and reordered B, checking nested world poses,
-mesh extents, material settings and embedded PNG. The editor mapping and
-actual package tracer are being wired against the in-progress catalog API.
-The production data-path tracer in `71c3e93` passed with the real
+mesh extents, material settings and embedded PNG. The production data-path tracer in `71c3e93` passed with the real
 Blender assets, scene editor export controller and matched Linux kit.
 Import A and reordered reimport B preserved exact Scene21 bytes, placement
 history, Group behavior and Player View reference. Malformed and
@@ -38,9 +35,31 @@ against both source revisions, checked the revised embedded texture,
 and ran Reset and Step in all three relocated archives. Step rotated the
 creator-owned root while the follow camera retained the expected anchor.
 See `production-tracer-1.log`, `production-relocation-1.log` and the
-`production-tracer-1` artifacts in the same audit. The staged editor
-authority path and an injected publication failure are still being
-implemented, alongside ordinary editor and guarded MCP authoring.
+`production-tracer-1` artifacts in the same audit. The staged
+asset path in `98459d0` also passed strict Clippy, 20 asset tests and
+both explicit Blender cases. A successful preparation followed by a real
+generation-write obstruction left the A catalog and payloads intact after
+an empty-cache reopen. Removing the obstruction allowed one explicit B
+adoption. Additional review identified placeability validation boundaries
+now being tightened.
+
+Editor checkpoint `2a77fa7` and MCP checkpoint `9eed35b` implement the
+ordinary and guarded operations. Editor tests passed 201 with 10 ignored
+plus its explicit real GLB command test. MCP passed 30 unit and one startup
+integration case. Strict package Clippy passed for both. The full native
+editor and real GLB STDIO journeys remain pending. See the
+[resource generation decision](decisions/2026-11-16-static-glb-resource-generations.md).
+
+On the two-part fixture, the optimized synchronous production path on CPU0
+had medians of 6.50 ms import, 8.06 ms reimport and 0.70 ms empty-cache reopen
+(22 measured, three initial samples excluded). Decoded payloads retained
+2,592 mesh bytes and 84 texture bytes, excluding allocator and metadata
+overhead. Native matched A/B viewport runs used an existing audit observer at
+2333×1529 with 4× MSAA. CPU prepare medians across two runs per version were
+27.38–54.33 µs (A) and 36.31–50.40 µs (B). GPU scene medians were 72.704 µs
+throughout. The overlapping small sample is descriptive, and the observer
+uses a matched runtime build rather than the editor. Raw files and hashes are
+`asset-bench-1.csv`, `asset-bench.sha256` and `glb-native-cost.json`.
 
 ## Authored player view integrated locally — 2026-11-16
 

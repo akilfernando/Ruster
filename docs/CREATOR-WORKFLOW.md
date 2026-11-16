@@ -30,6 +30,30 @@ Export cleanup update2026-11-09. A committed archive is ready while the worker r
 
 The artifact contains exact saved scene bytes/history plus only the current runtime mesh and assigned-material texture closure. It is a runnable application, not a relocated editable project: assets referenced only by historical undo entries or unused materials are not copied. Export does not include unrelated project files.
 
+## Iterate on a static Blender model
+
+Save the scene in your project, then put a supported self-contained GLB
+source under that directory. Use **Content → Import / source tools…** to
+register it with a stable asset ID. **Place** on the model row inserts an
+editable copy of its hierarchy and materials under a new creator-owned
+Group. Move that Group or attach a supported behavior and Player View target
+using the normal editor controls.
+
+When the source geometry or embedded base-color image changes, overwrite
+the editable GLB and use the model row's **Refresh**. Keep the source node
+paths, transforms and material settings equivalent. **Reset** refreshes an
+active preview. A malformed or structurally incompatible source keeps the
+last accepted version available. Repair the source and Refresh, or import a
+structurally different model with a fresh identity. When copying an editable
+project, include its asset catalog and `.ruster-models` directory.
+
+Save, then use the normal export dialog. The relocated app runs with
+generated mesh and texture resources from the accepted GLB generation. The
+original modelling file and Blender are unnecessary for app playback.
+See the [asset guide](../crates/ruster-assets/README.md#static-glb-source-generations)
+for the bounded format and the [MCP guide](../crates/ruster-mcp/README.md)
+for the guarded equivalent.
+
 ## Perform the same export through MCP
 
 Launch the editor with explicit existing directory grants:
