@@ -127,6 +127,15 @@ impl BehaviorSource {
     }
 }
 
+/// The authored asset and gain of a named sound cue on one behavior binding.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SoundRef {
+    #[serde(deserialize_with = "Deserialize::deserialize")]
+    pub asset_id: Option<String>,
+    pub gain: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(
     tag = "type",
@@ -141,6 +150,7 @@ pub enum PropertyValue {
     Vec3([f64; 3]),
     ObjectRef(Option<String>),
     AssetRef(Option<String>),
+    SoundRef(SoundRef),
 }
 impl PropertyValue {
     pub fn validate(&self) -> Result<(), SceneError> {
@@ -157,6 +167,16 @@ impl PropertyValue {
                 ))
             }
             Self::ObjectRef(Some(id)) | Self::AssetRef(Some(id)) => validate_id(id)?,
+            Self::SoundRef(sound) => {
+                if !(0.0..=1.0).contains(&sound.gain) {
+                    return Err(SceneError::Invalid(
+                        "sound gain requires a finite value in 0..=1".into(),
+                    ));
+                }
+                if let Some(id) = &sound.asset_id {
+                    validate_id(id)?;
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -439,9 +459,16 @@ impl Authoring {
     }
     pub(crate) fn has_asset_references(&self) -> bool {
         self.bindings.values().any(|b| {
-            b.properties
-                .values()
-                .any(|v| matches!(v, PropertyValue::AssetRef(Some(_))))
+            b.properties.values().any(|v| {
+                matches!(
+                    v,
+                    PropertyValue::AssetRef(Some(_))
+                        | PropertyValue::SoundRef(SoundRef {
+                            asset_id: Some(_),
+                            ..
+                        })
+                )
+            })
         })
     }
 }

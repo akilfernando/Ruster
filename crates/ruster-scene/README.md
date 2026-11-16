@@ -181,6 +181,15 @@ Property values use tagged objects: `{"type":"number","value":2.0}`, `{"type":"b
 
 Object deletion removes owned bindings in the same undo change. Single/group duplication clones bindings under newly allocated binding IDs, shares their sources and remaps ObjectRef values within the copied selection (including self references); external and unresolved references remain intact. Undo restores exact original bindings/properties together with object order. `contains_source_id`, `contains_binding_id`, `allocate_source_ids` and `allocate_binding_ids` expose identity reservations; object allocation also reserves dangling ObjectRef IDs. Current data and retained history reserve referenced IDs, preventing accidental retargeting. Explicit source/binding upsert can repair an intentionally named missing identity. AssetRef properties in current/history values count for `has_asset_references()`.
 
+A named audio cue uses
+`{"type":"sound_ref","value":{"asset_id":"confirmation","gain":0.5}}`.
+Both fields are required. The asset ID can be null while unassigned, and
+gain must be finite in the inclusive range 0 to 1. `Session::sound_asset_references()`
+collects all assigned IDs through current bindings and both sides of retained
+Undo and Redo. A separate presence flag also detects unassigned definitions.
+Disabled bindings remain part of the export asset and capability closure.
+
+
 V5 history is a flat nonrecursive record with optional nonempty `scene`, `sources` and `bindings` delta arrays. Scene entries retain the previous compact scalar/group representations. Source/binding entries hold `id`, `before` and `after` values (null means absent); text is initially retained in full within the aggregate1MiB budget. Frontends should coalesce transient text editing before committing; no blob store or compression was introduced. Undo admission retains the largest restorable authored payload as well as retained delta text; old history may expire sooner for large source/property edits. If trimming all older Undo entries still cannot fit the newest complete change, failure preserves current state/history and the eviction counter. Source editing must coalesce frontend drafts before commit and surface byte-pressure history reduction; the core exposes that reduction but does not invent a UI notice.
 
 The CLI reports byte-pressure removal on stderr after a successful save, retaining its existing revision line on stdout. The editor shows a nonmodal notice; its successful command responses expose the cumulative session count as `history_evictions`.

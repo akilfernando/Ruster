@@ -75,6 +75,30 @@ fails the transaction with a diagnostic. The prior committed transform,
 typed state, tick and observations remain available. See the
 [scope and decision](../../docs/decisions/2026-11-16-kinematic-move-and-slide.md).
 
+## Authored one-shot sound cues
+
+Add an assigned `sound_ref` property to a binding running Lua API4, API5 or
+API7. Its property name is the cue name and its value pins an authored audio
+asset ID and gain. A fixed update can request it with an existing input edge.
+
+```lua
+if dt > 0 and host.button("confirm").pressed then
+    host.play_sound("confirmation")
+end
+```
+
+`host.play_sound` is available to fixed-update bindings declaring sound
+properties. It resolves the name in the current binding and stages the
+authored cue. Unknown and unassigned names fail the update, as does exceeding
+the shared 16-request limit. A Reset validation trial may stage requests but
+discards them. Initialization and paused commands have no sound host function.
+
+A successful Step exposes a nonempty `Runtime::audio_batch()` tagged with its
+tick and commit revision. A silent successful Step clears the receipt. A
+failed Step preserves the previous receipt and commits nothing. Output owners
+dispatch only on successful Steps and use their runtime generation plus the
+commit revision as the consumption key. The engine performs no device I/O.
+
 ## P2a spatial-query development
 
 Updated2026-11-07. The API3vertical slice is accepted within [P2a](../../docs/plans/P2A-SPATIAL-QUERIES.md). Direct creator controls, exact package/native parity and measured quality gates pass within the [final acceptance](../../docs/evidence/P2a-readiness.md) scope. API1and API2environments retain their existing contracts. API3also exposes the same Button/Axis facilities.

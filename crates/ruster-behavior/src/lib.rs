@@ -20,6 +20,10 @@ use sha2::{Digest, Sha256};
 
 #[cfg(test)]
 mod assembly_gate_tests;
+mod audio;
+#[cfg(test)]
+mod audio_tests;
+pub use audio::{AudioBatch, AudioCue, MAX_AUDIO_REQUESTS_PER_STEP};
 pub mod debug;
 pub mod play_check;
 pub mod spatial;
@@ -215,6 +219,8 @@ pub struct Runtime {
     commit_revision_required: bool,
     command_schema: Option<(String, String)>,
     query_observations: Vec<QueryObservation>,
+    audio_batch: Option<AudioBatch>,
+    has_sound_binding: bool,
     kinematic_owner: Option<KinematicOwner>,
     state: Arc<RuntimeState>,
 }
@@ -256,6 +262,11 @@ impl Runtime {
     pub fn scene(&self) -> &Scene {
         &self.scene
     }
+    /// Last fixed Step's successful audio requests. Reset and silent commits have
+    /// no batch. Failed updates leave it unchanged and never authorize playback.
+    pub fn audio_batch(&self) -> Option<&AudioBatch> {
+        self.audio_batch.as_ref()
+    }
     pub fn tick(&self) -> u64 {
         self.tick
     }
@@ -273,6 +284,7 @@ struct HostInput<'a> {
     api_version: u32,
     frame: &'a ValidatedActionFrame,
     spatial: Option<&'a QueryInvocation>,
+    audio: Option<&'a RefCell<Vec<AudioCue>>>,
     binding_id: &'a str,
     state: &'a RuntimeState,
 }
@@ -281,6 +293,7 @@ struct TickInput<'a> {
     state: &'a RuntimeState,
     frame: &'a ValidatedActionFrame,
     spatial: Option<&'a QueryInvocation>,
+    audio: Option<&'a RefCell<Vec<AudioCue>>>,
 }
 /// Owned by one thread; Lua/Rc intentionally prevent Send/Sync. No scheduler is included.
 pub struct Engine {
@@ -596,7 +609,15 @@ impl Engine {
             Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
         })?;
         let queries = self.query_invocation(scene, authoring, 0, kinematic_owner.as_ref())?;
+        let has_sound_binding = authoring.bindings.values().any(|binding| {
+            binding.enabled
+                && binding
+                    .properties
+                    .values()
+                    .any(|property| matches!(property, PropertyValue::SoundRef(_)))
+        });
         let mut trial_scene = None;
+        let audio = RefCell::new(Vec::new());
         for (id, binding) in &authoring.bindings {
             if !binding.enabled {
                 continue;
@@ -611,6 +632,7 @@ impl Engine {
                     state: &state,
                     frame: &input,
                     spatial: queries.as_ref(),
+                    audio: has_sound_binding.then_some(&audio),
                 },
             )?;
             if let Some(transform) = output.transform {
@@ -666,6 +688,8 @@ impl Engine {
             }),
             command_schema: lifecycle::catalog_identity(authoring)?,
             query_observations: Vec::new(),
+            audio_batch: None,
+            has_sound_binding,
             kinematic_owner,
             state,
         })
@@ -719,6 +743,7 @@ impl Engine {
             runtime.kinematic_owner.as_ref(),
         )?;
         let mut group_changed = false;
+        let audio = RefCell::new(Vec::new());
         for (id, binding) in &runtime.authoring.bindings {
             if !binding.enabled {
                 continue;
@@ -733,6 +758,7 @@ impl Engine {
                     state: &runtime.state,
                     frame: &input,
                     spatial: queries.as_ref(),
+                    audio: runtime.has_sound_binding.then_some(&audio),
                 },
             )?;
             if let Some(transform) = output.transform {
@@ -790,6 +816,12 @@ impl Engine {
         self.check_cancelled()?;
         let observations =
             queries.map_or_else(Vec::new, |queries| queries.observations.into_inner());
+        let cues = audio.into_inner();
+        runtime.audio_batch = (!cues.is_empty()).then_some(AudioBatch {
+            tick: next,
+            commit_revision,
+            cues,
+        });
         runtime.scene = staged;
         runtime.tick = next;
         runtime.commit_revision = commit_revision;
@@ -897,6 +929,7 @@ impl Engine {
                     api_version: source.host_api_version,
                     frame: tick_input.frame,
                     spatial: tick_input.spatial,
+                    audio: tick_input.audio,
                     binding_id: id,
                     state: tick_input.state,
                 },
@@ -950,6 +983,7 @@ impl Engine {
                 api_version: HOST_API_VERSION,
                 frame: &neutral,
                 spatial: None,
+                audio: None,
                 binding_id: "",
                 state: &RuntimeState::default(),
             },
@@ -980,6 +1014,13 @@ impl Engine {
                 Ok((|| -> Result<BindingOutput, Diagnostic> {
                     let (environment, host) = environment(&self.lua, scope, &snapshot, host_input)
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+                    if let Some(cues) = host_input.audio.filter(|_| {
+                        matches!(host_input.api_version,
+                            STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION | KINEMATIC_HOST_API_VERSION)
+                    }) {
+                        audio::install_sound_host(scope, &host, host_input.binding_id, properties, cues)
+                            .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
+                    }
                     main.set_environment(environment)
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     self.debug_phase(Phase::Module);
@@ -1330,6 +1371,12 @@ fn property_value(lua: &Lua, property: &PropertyValue) -> mlua::Result<Value> {
         PropertyValue::Bool(b) => Value::Boolean(*b),
         PropertyValue::Text(s) => Value::String(lua.create_string(s)?),
         PropertyValue::Vec3(v) => Value::Table(lua.create_sequence_from(*v)?),
+        PropertyValue::SoundRef(sound) => {
+            let value = lua.create_table()?;
+            value.raw_set("asset_id", sound.asset_id.as_deref())?;
+            value.raw_set("gain", sound.gain)?;
+            Value::Table(value)
+        }
         PropertyValue::ObjectRef(id) | PropertyValue::AssetRef(id) => match id {
             Some(id) => Value::String(lua.create_string(id)?),
             None => Value::Nil,

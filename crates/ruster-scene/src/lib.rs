@@ -3,7 +3,7 @@
 //! Public values permit code-first construction. Call `validate` at ingestion;
 //! [`Session`] validates transactional edits and owns bounded persisted history.
 
-use std::collections::{BTreeMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashSet};
 use std::ffi::OsString;
 use std::fmt;
 use std::fs::{File, OpenOptions};
@@ -1067,9 +1067,16 @@ impl Change {
                 .flat_map(|d| [&d.before, &d.after])
                 .flatten()
                 .any(|b| {
-                    b.properties
-                        .values()
-                        .any(|v| matches!(v, PropertyValue::AssetRef(Some(_))))
+                    b.properties.values().any(|v| {
+                        matches!(
+                            v,
+                            PropertyValue::AssetRef(Some(_))
+                                | PropertyValue::SoundRef(SoundRef {
+                                    asset_id: Some(_),
+                                    ..
+                                })
+                        )
+                    })
                 })
     }
     fn object_ids(&self) -> impl Iterator<Item = &str> {
@@ -2102,6 +2109,13 @@ fn allocate_ids(
         .collect())
 }
 
+/// Current and retained-history requirements for authored sound delivery.
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct SoundAssetReferences {
+    pub uses_sound: bool,
+    pub assets: BTreeSet<String>,
+}
+
 /// Authored state with bounded object, name, transform, color and mesh deltas. Runtime state belongs elsewhere.
 #[derive(Clone, Debug)]
 pub struct Session {
@@ -2607,6 +2621,30 @@ impl Session {
                 .flat_map(|delta| [&delta.before, &delta.after])
                 .flatten()
                 .any(matches)
+    }
+
+    /// Sound definitions and asset closure include disabled bindings and both
+    /// sides of retained history so a later Undo or Redo can restore a cue.
+    pub fn sound_asset_references(&self) -> SoundAssetReferences {
+        let bindings = self.authoring().bindings.values().chain(
+            self.document
+                .undo
+                .iter()
+                .chain(&self.document.redo)
+                .flat_map(|change| &change.bindings)
+                .flat_map(|delta| [&delta.before, &delta.after])
+                .flatten(),
+        );
+        let mut references = SoundAssetReferences::default();
+        for property in bindings.flat_map(|binding| binding.properties.values()) {
+            if let PropertyValue::SoundRef(sound) = property {
+                references.uses_sound = true;
+                if let Some(id) = &sound.asset_id {
+                    references.assets.insert(id.clone());
+                }
+            }
+        }
+        references
     }
 
     fn reserved_source_ids(&self) -> HashSet<&str> {
@@ -3790,6 +3828,69 @@ impl Preview {
 
 #[cfg(test)]
 mod tests {
+
+    #[test]
+    fn sound_refs_roundtrip_and_retain_delivery_requirements_in_history() {
+        let value = |asset_id| {
+            PropertyValue::SoundRef(SoundRef {
+                asset_id,
+                gain: 0.5,
+            })
+        };
+        assert!(serde_json::from_str::<PropertyValue>(
+            r#"{"type":"sound_ref","value":{"gain":1}}"#
+        )
+        .is_err());
+        let mut scene = Scene::empty("audio");
+        scene.objects.push(Object::cube("speaker", None));
+        let mut session = Session::new(scene).unwrap();
+        let mut binding = BehaviorBinding {
+            target: BindingTarget::Object("speaker".into()),
+            source_id: "source".into(),
+            enabled: false,
+            properties: BTreeMap::from([("cue".into(), value(None))]),
+            commands: Default::default(),
+            state_defaults: Default::default(),
+        };
+        assert!(PropertyValue::SoundRef(SoundRef {
+            asset_id: None,
+            gain: 1.1
+        })
+        .validate()
+        .is_err());
+        let mut revision = session
+            .set_binding(0, "binding", Some(binding.clone()))
+            .unwrap();
+        assert_eq!(
+            session.sound_asset_references(),
+            SoundAssetReferences {
+                uses_sound: true,
+                assets: Default::default(),
+            }
+        );
+
+        binding
+            .properties
+            .insert("cue".into(), value(Some("clip".into())));
+        revision = session
+            .set_binding(revision, "binding", Some(binding))
+            .unwrap();
+        revision = session.undo(revision).unwrap();
+        let refs = SoundAssetReferences {
+            uses_sound: true,
+            assets: ["clip".into()].into(),
+        };
+        assert_eq!(session.sound_asset_references(), refs);
+        revision = session.redo(revision).unwrap();
+        session.set_binding(revision, "binding", None).unwrap();
+        assert!(session.authoring().bindings.is_empty());
+        assert_eq!(
+            Session::from_snapshot_bytes(&session.snapshot_bytes().unwrap())
+                .unwrap()
+                .sound_asset_references(),
+            refs,
+        );
+    }
     #[test]
     fn hierarchy_refusals_preserve_document_history_and_save_authority() {
         let mut session = Session::new(Scene::demo()).unwrap();
