@@ -1,5 +1,26 @@
 # Current project status
 
+## Resume here — 2026-11-16
+
+- Open `/home/akilf/Projects/rusterize-cumulative-editor-20261115` on
+  `feat/cumulative-editor-20261115`. Today's verified implementation
+  ends at `b8157b9`. The separate `/home/akilf/Projects/Rusterize`
+  checkout is on `claude/e1-editor-feedback` and contains local edits
+  and attachments.
+- The working branch is local. The live origin branch was checked at
+  `5e83590`. Both feature worktrees are clean and their commits are
+  in the cumulative branch. Keep the audit paths beside the retained
+  evidence.
+- Development stopped with the kinematic and WAV goals closed. Imported
+  GLB transform animation is the next provisional candidate. Start by
+  checking the existing GLB generation/reimport and runtime transform
+  owners before scoping one named clip with play, pause, reset and
+  relocated delivery.
+- Keep the pending human editor walkthrough and audio device breadth
+  separate from the completed automated checks. The latest audio
+  evidence records a 28 ms first live submission and a float-PCM
+  PipeWire/PulseAudio qualification scope.
+
 ## Packaged one-shot audio integrated locally — 2026-11-16
 
 The [plan](plans/PACKAGED-AUDIO-FEEDBACK.md) and
