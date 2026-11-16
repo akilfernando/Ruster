@@ -380,10 +380,21 @@ impl SceneEditor {
             .ok_or("Save the scene before creating a play check")?
             .to_owned();
         let (mesh, texture) = crate::creation_export::scene_dependencies(self.session.scene())?;
-        let ids = mesh.union(&texture).cloned().collect();
+        let sound = self.session.sound_asset_references().assets;
+        let ids = mesh.iter().chain(&texture).chain(&sound).cloned().collect();
+        if !sound.is_disjoint(&mesh) || !sound.is_disjoint(&texture) {
+            return Err("WAV assets must use distinct IDs from meshes and textures.".into());
+        }
+        if let Some(store) = &self.assets {
+            for id in &sound {
+                if store.sound(id).is_none() {
+                    return Err(format!("Sound {id} has no accepted WAV content."));
+                }
+            }
+        }
         let assets = match &self.assets {
             Some(store) => Some(store.export_snapshot(&ids).map_err(|e| e.to_string())?),
-            None if mesh.is_empty() && texture.is_empty() => None,
+            None if mesh.is_empty() && texture.is_empty() && sound.is_empty() => None,
             None => {
                 return Err("Project assets unavailable; reopen or repair content first.".into())
             }

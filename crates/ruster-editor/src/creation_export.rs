@@ -759,6 +759,7 @@ fn checked_kit_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
 }
 
 const KINEMATIC_CAPABILITY: &str = "kinematic_move_and_slide";
+const AUDIO_CAPABILITY: &str = "one_shot_audio";
 
 #[derive(Debug)]
 struct VerifiedKit {
@@ -766,6 +767,7 @@ struct VerifiedKit {
     runtime_hash: String,
     play_check_compatible: bool,
     kinematic_compatible: bool,
+    audio_compatible: bool,
 }
 
 // Verify fixed Python code before Python can import it. The configured kit is
@@ -898,8 +900,15 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!(KINEMATIC_CAPABILITY));
+    let mut audio_profile = kinematic_profile.clone();
+    audio_profile["descriptor_version"] = json!(6);
+    audio_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!(AUDIO_CAPABILITY));
     let supplied_profile = &manifest["profile"];
-    let kinematic_compatible = supplied_profile == &kinematic_profile;
+    let audio_compatible = supplied_profile == &audio_profile;
+    let kinematic_compatible = supplied_profile == &kinematic_profile || audio_compatible;
     let play_check_compatible = supplied_profile == &play_check_profile || kinematic_compatible;
     let player_view_compatible = supplied_profile == &player_view_profile || play_check_compatible;
     let hierarchy_compatible = supplied_profile == &static_assembly_profile
@@ -1157,6 +1166,7 @@ fn verify_helpers(
         runtime_hash: runtime_hash.ok_or("runtime kit lacks executable inventory")?,
         play_check_compatible,
         kinematic_compatible,
+        audio_compatible,
     })
 }
 
@@ -1196,6 +1206,18 @@ fn prepare(
         );
     }
     let (mesh_ids, texture_ids) = scene_dependencies(captured.scene())?;
+    let sound = captured.sound_asset_references();
+    let sound_ids = &sound.assets;
+    if !sound_ids.is_disjoint(&mesh_ids) || !sound_ids.is_disjoint(&texture_ids) {
+        return Err("WAV assets require distinct IDs from meshes and textures.".into());
+    }
+    for id in sound_ids {
+        if request.assets.as_ref().and_then(|assets| assets.kind(id))
+            != Some(ruster_assets::AssetKind::Sound)
+        {
+            return Err(format!("Accepted WAV asset is unavailable for {id}"));
+        }
+    }
     let source_ids = request
         .assets
         .as_ref()
@@ -1206,7 +1228,14 @@ fn prepare(
                 .collect::<BTreeSet<_>>()
         })
         .unwrap_or_default();
-    if source_ids != mesh_ids.union(&texture_ids).cloned().collect() {
+    if source_ids
+        != mesh_ids
+            .iter()
+            .chain(&texture_ids)
+            .chain(sound_ids)
+            .cloned()
+            .collect()
+    {
         return Err(
             "Accepted asset sources differ from the captured scene dependency closure.".into(),
         );
@@ -1233,6 +1262,7 @@ fn prepare(
         runtime_hash,
         play_check_compatible,
         kinematic_compatible,
+        audio_compatible,
     } = verify_helpers(
         &request.runtime_kit,
         request.initial_camera.is_some(),
@@ -1244,6 +1274,12 @@ fn prepare(
     );
     if kinematic && !kinematic_compatible {
         return Err("Runtime kit does not support Lua API7 kinematic move-and-slide; prepare a current Linux runtime kit".into());
+    }
+    if sound.uses_sound && !audio_compatible {
+        return Err(
+            "Runtime kit does not support one-shot WAV audio; prepare a current Linux runtime kit"
+                .into(),
+        );
     }
     if saved_check.is_some() && !play_check_compatible {
         return Err("Runtime kit does not support repeatable play checks; prepare a current Linux runtime kit".into());
@@ -1264,11 +1300,13 @@ fn prepare(
     fs::write(content.join("scene.json"), scene_bytes).map_err(|e| e.to_string())?;
     let mut meshes = BTreeMap::new();
     let mut textures = BTreeMap::new();
+    let mut sounds = BTreeMap::new();
     let mut check_resources = BTreeMap::new();
     let mut source_paths = BTreeMap::new();
     for (ids, folder, extension) in [
         (&mesh_ids, "meshes", "obj"),
         (&texture_ids, "textures", "png"),
+        (sound_ids, "sounds", "wav"),
     ] {
         if !ids.is_empty() {
             fs::create_dir(content.join(folder)).map_err(|e| e.to_string())?;
@@ -1309,6 +1347,8 @@ fn prepare(
                                 )
                             })?,
                         )
+                    } else if sound_ids.contains(id) {
+                        ruster_assets::ResourcePin::sound(&source)
                     } else {
                         ruster_assets::ResourcePin::texture(
                             &source,
@@ -1323,6 +1363,8 @@ fn prepare(
                 }
                 if mesh_ids.contains(id) {
                     meshes.insert(id.to_owned(), record);
+                } else if sound_ids.contains(id) {
+                    sounds.insert(id.to_owned(), record);
                 } else {
                     textures.insert(id.to_owned(), record);
                 }
@@ -1363,8 +1405,16 @@ fn prepare(
     if schema >= 2 {
         content_manifest["textures"] = json!(textures);
     }
+    let mut capabilities = Vec::new();
     if kinematic {
-        content_manifest["required_runtime_capabilities"] = json!([KINEMATIC_CAPABILITY]);
+        capabilities.push(KINEMATIC_CAPABILITY);
+    }
+    if sound.uses_sound {
+        content_manifest["sounds"] = json!(sounds);
+        capabilities.push(AUDIO_CAPABILITY);
+    }
+    if !capabilities.is_empty() {
+        content_manifest["required_runtime_capabilities"] = json!(capabilities);
     }
     let check_hash = if let Some((case, bytes)) = saved_check {
         let resources = ruster_assets::resource_identity(&check_resources);

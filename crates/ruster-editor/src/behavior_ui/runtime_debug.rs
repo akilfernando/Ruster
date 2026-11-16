@@ -494,6 +494,17 @@ impl RuntimeUi {
         session: &Session,
         generation: u64,
     ) -> Result<Value, String> {
+        self.runtime_api_with_sounds(op, args, session, generation, None)
+    }
+
+    pub(crate) fn runtime_api_with_sounds(
+        &mut self,
+        op: &str,
+        args: &Value,
+        session: &Session,
+        generation: u64,
+        assets: Option<&ruster_assets::AssetStore>,
+    ) -> Result<Value, String> {
         let current = self.worker.as_ref().map(VmWorker::current_key);
         let supplied = if op == "behavior_runtime_step" {
             let present = [
@@ -605,10 +616,20 @@ impl RuntimeUi {
                 .frame
                 .as_ref()
                 .map_or(0, |frame| frame.state.binding_ids().count());
-            return Ok(
-                json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some()||self.hud_activation_busy(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
-                "groups":groups,"group_count":group_count,"next_group_offset":(offset.saturating_add(16)<group_count).then(||offset.saturating_add(16).to_string()),"state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())}),
-            );
+            let mut report = json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some()||self.hud_activation_busy(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
+                "groups":groups,"group_count":group_count,"next_group_offset":(offset.saturating_add(16)<group_count).then(||offset.saturating_add(16).to_string()),"state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())});
+            if let Some(audio) = self
+                .worker
+                .as_ref()
+                .zip(current)
+                .and_then(|(worker, key)| worker.audio_report(key))
+            {
+                report["audio"] = json!({
+                    "output_status": audio.status,
+                    "last_committed_batch": audio.last_batch.as_deref(),
+                });
+            }
+            return Ok(report);
         }
         if op == "behavior_breakpoints" {
             let points:Vec<_> = self.debug.points.iter().skip(offset).take(16).map(|point|json!({"source_id":point.source_id,"source_hash":point.source_hash,"line":point.line.to_string(),"binding_id":point.binding_id})).collect();
@@ -716,7 +737,13 @@ impl RuntimeUi {
                     .context
                     .clone()
                     .ok_or("Native UI context unavailable")?;
-                self.reset(&ctx, session, generation)?
+                self.reset_with_sounds(
+                    &ctx,
+                    session,
+                    generation,
+                    assets
+                        .map_or_else(Default::default, ruster_assets::AssetStore::sound_snapshots),
+                )?
             }
             Operation::Stop => {
                 self.stop(generation, session.scene().revision);

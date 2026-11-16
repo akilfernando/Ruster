@@ -5,7 +5,7 @@ This inventory covers every external package in the locked workspace resolution,
 Cargo's declared SPDX license expression is metadata supplied by each package. Its presence is not an independent license review or certification.
 Project source licensing does not change the licenses of dependencies.
 
-External locked package versions: **454**. Packages with no discovered readable license text: **65**.
+External locked package versions: **479**. Packages with no discovered readable license text: **71**.
 
 | Package | Version | Cargo source | Declared license expression | Upstream repository |
 | --- | --- | --- | --- | --- |
@@ -22,6 +22,8 @@ External locked package versions: **454**. Packages with no discovered readable 
 | adler2 | 2.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `0BSD OR MIT OR Apache-2.0` | [https://github.com/oyvindln/adler2](https://github.com/oyvindln/adler2) |
 | ahash | 0.8.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/tkaitchuck/ahash](https://github.com/tkaitchuck/ahash) |
 | allocator-api2 | 0.2.21 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/zakarumych/allocator-api2](https://github.com/zakarumych/allocator-api2) |
+| alsa | 0.11.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0/MIT` | [https://github.com/diwic/alsa-rs](https://github.com/diwic/alsa-rs) |
+| alsa-sys | 0.4.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/diwic/alsa-sys](https://github.com/diwic/alsa-sys) |
 | android-activity | 0.6.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-mobile/android-activity](https://github.com/rust-mobile/android-activity) |
 | android-properties | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/miklelappo/android-properties](https://github.com/miklelappo/android-properties) |
 | android_system_properties | 0.1.6 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/nical/android_system_properties](https://github.com/nical/android_system_properties) |
@@ -42,6 +44,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | async-signal | 0.2.14 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/async-signal](https://github.com/smol-rs/async-signal) |
 | async-task | 4.7.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/async-task](https://github.com/smol-rs/async-task) |
 | async-trait | 0.1.92 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/async-trait](https://github.com/dtolnay/async-trait) |
+| atomic-arena | 0.1.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/tesselode/atomic-arena](https://github.com/tesselode/atomic-arena) |
 | atomic-waker | 1.1.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/atomic-waker](https://github.com/smol-rs/atomic-waker) |
 | atspi | 0.29.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/odilia-app/atspi](https://github.com/odilia-app/atspi) |
 | atspi-common | 0.13.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/odilia-app/atspi](https://github.com/odilia-app/atspi) |
@@ -87,6 +90,8 @@ External locked package versions: **454**. Packages with no discovered readable 
 | core-foundation-sys | 0.8.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
 | core-graphics | 0.23.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
 | core-graphics-types | 0.1.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/core-foundation-rs](https://github.com/servo/core-foundation-rs) |
+| coreaudio-rs | 0.14.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/RustAudio/coreaudio-rs.git](https://github.com/RustAudio/coreaudio-rs.git) |
+| cpal | 0.18.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://github.com/RustAudio/cpal](https://github.com/RustAudio/cpal) |
 | cpufeatures | 0.2.17 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/utils](https://github.com/RustCrypto/utils) |
 | crc32fast | 1.5.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/srijs/rust-crc32fast](https://github.com/srijs/rust-crc32fast) |
 | crossbeam-utils | 0.8.23 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/crossbeam-rs/crossbeam](https://github.com/crossbeam-rs/crossbeam) |
@@ -96,6 +101,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | darling | 0.21.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
 | darling_core | 0.21.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
 | darling_macro | 0.21.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/TedDriggs/darling](https://github.com/TedDriggs/darling) |
+| dasp_sample | 0.11.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rustaudio/sample.git](https://github.com/rustaudio/sample.git) |
 | digest | 0.10.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RustCrypto/traits](https://github.com/RustCrypto/traits) |
 | dispatch | 0.2.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [http://github.com/SSheldon/rust-dispatch](http://github.com/SSheldon/rust-dispatch) |
 | dispatch2 | 0.3.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
@@ -114,6 +120,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | emath | 0.37.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/emilk/egui/tree/main/crates/emath](https://github.com/emilk/egui/tree/main/crates/emath) |
 | ena | 0.14.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/ena](https://github.com/rust-lang/ena) |
 | endi | 1.1.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/zeenix/endi](https://github.com/zeenix/endi) |
+| enum-primitive-derive | 0.3.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://gitlab.com/cardoe/enum-primitive-derive.git](https://gitlab.com/cardoe/enum-primitive-derive.git) |
 | enum_dispatch | 0.3.13 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://gitlab.com/antonok/enum_dispatch](https://gitlab.com/antonok/enum_dispatch) |
 | enumflags2 | 0.7.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/meithecatte/enumflags2](https://github.com/meithecatte/enumflags2) |
 | enumflags2_derive | 0.7.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/meithecatte/enumflags2](https://github.com/meithecatte/enumflags2) |
@@ -142,10 +149,14 @@ External locked package versions: **454**. Packages with no discovered readable 
 | foreign-types-macros | 0.2.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/sfackler/foreign-types](https://github.com/sfackler/foreign-types) |
 | foreign-types-shared | 0.3.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/sfackler/foreign-types](https://github.com/sfackler/foreign-types) |
 | fs2 | 0.4.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/danburkert/fs2-rs](https://github.com/danburkert/fs2-rs) |
+| futures | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
+| futures-channel | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | futures-core | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
+| futures-executor | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | futures-io | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | futures-lite | 2.6.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/smol-rs/futures-lite](https://github.com/smol-rs/futures-lite) |
 | futures-macro | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
+| futures-sink | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | futures-task | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | futures-util | 0.3.34 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/futures-rs](https://github.com/rust-lang/futures-rs) |
 | generic-array | 0.14.7 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/fizyk20/generic-array.git](https://github.com/fizyk20/generic-array.git) |
@@ -157,6 +168,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | glam | 0.30.10 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/bitshifter/glam-rs](https://github.com/bitshifter/glam-rs) |
 | glam | 0.32.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/bitshifter/glam-rs](https://github.com/bitshifter/glam-rs) |
 | glam | 0.33.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/bitshifter/glam-rs](https://github.com/bitshifter/glam-rs) |
+| glam | 0.34.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/bitshifter/glam-rs](https://github.com/bitshifter/glam-rs) |
 | glamx | 0.3.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dimforge/glamx](https://github.com/dimforge/glamx) |
 | glifo | 0.3.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/linebender/vello](https://github.com/linebender/vello) |
 | glow | 0.17.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0 OR Zlib` | [https://github.com/grovesNL/glow](https://github.com/grovesNL/glow) |
@@ -176,6 +188,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | heapless | 0.8.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-embedded/heapless](https://github.com/rust-embedded/heapless) |
 | hermit-abi | 0.5.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/hermit-os/hermit-rs](https://github.com/hermit-os/hermit-rs) |
 | hex | 0.4.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/KokaKiwi/rust-hex](https://github.com/KokaKiwi/rust-hex) |
+| hound | 3.5.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://github.com/ruuda/hound](https://github.com/ruuda/hound) |
 | ident_case | 1.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/TedDriggs/ident_case](https://github.com/TedDriggs/ident_case) |
 | image | 0.25.10 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/image-rs/image](https://github.com/image-rs/image) |
 | indexmap | 2.14.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/indexmap-rs/indexmap](https://github.com/indexmap-rs/indexmap) |
@@ -189,6 +202,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | jobserver | 0.1.35 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/jobserver-rs](https://github.com/rust-lang/jobserver-rs) |
 | js-sys | 0.3.107 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys](https://github.com/wasm-bindgen/wasm-bindgen/tree/master/crates/js-sys) |
 | khronos_api | 3.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://github.com/brendanzab/gl-rs/](https://github.com/brendanzab/gl-rs/) |
+| kira | 0.12.6 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/tesselode/kira](https://github.com/tesselode/kira) |
 | kurbo | 0.13.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/linebender/kurbo](https://github.com/linebender/kurbo) |
 | libc | 0.2.191 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/libc](https://github.com/rust-lang/libc) |
 | libloading | 0.8.9 | `registry+https://github.com/rust-lang/crates.io-index` | `ISC` | [https://github.com/nagisa/rust_libloading/](https://github.com/nagisa/rust_libloading/) |
@@ -202,6 +216,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | log | 0.4.35 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/log](https://github.com/rust-lang/log) |
 | lua-src | 551.0.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mlua-rs/lua-src-rs](https://github.com/mlua-rs/lua-src-rs) |
 | luajit-src | 210.7.4+c6ffc14 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mlua-rs/luajit-src-rs](https://github.com/mlua-rs/luajit-src-rs) |
+| mach2 | 0.6.0 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-2-Clause OR MIT OR Apache-2.0` | [https://github.com/JohnTitor/mach2](https://github.com/JohnTitor/mach2) |
 | malloc_buf | 0.0.6 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/SSheldon/malloc_buf](https://github.com/SSheldon/malloc_buf) |
 | memchr | 2.8.3 | `registry+https://github.com/rust-lang/crates.io-index` | `Unlicense OR MIT` | [https://github.com/BurntSushi/memchr](https://github.com/BurntSushi/memchr) |
 | memmap2 | 0.9.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/RazrFalcon/memmap2-rs](https://github.com/RazrFalcon/memmap2-rs) |
@@ -209,6 +224,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | miniz_oxide | 0.8.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
 | miniz_oxide | 0.9.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Zlib OR Apache-2.0` | [https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide](https://github.com/Frommi/miniz_oxide/tree/master/miniz_oxide) |
 | mint | 0.5.9 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/kvark/mint](https://github.com/kvark/mint) |
+| mio | 1.2.5 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/tokio-rs/mio](https://github.com/tokio-rs/mio) |
 | mlua | 0.12.2 | `vendored:third_party/mlua` | `MIT` | [https://github.com/mlua-rs/mlua](https://github.com/mlua-rs/mlua) |
 | mlua-sys | 0.13.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mlua-rs/mlua](https://github.com/mlua-rs/mlua) |
 | moxcms | 0.8.1 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-3-Clause OR Apache-2.0` | [https://github.com/awxkee/moxcms.git](https://github.com/awxkee/moxcms.git) |
@@ -220,6 +236,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | nohash-hasher | 0.2.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/paritytech/nohash-hasher](https://github.com/paritytech/nohash-hasher) |
 | nom | 8.0.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/rust-bakery/nom](https://github.com/rust-bakery/nom) |
 | num-complex | 0.4.6 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-num/num-complex](https://github.com/rust-num/num-complex) |
+| num-derive | 0.4.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-num/num-derive](https://github.com/rust-num/num-derive) |
 | num-derive | 0.5.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-num/num-derive](https://github.com/rust-num/num-derive) |
 | num-traits | 0.2.19 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-num/num-traits](https://github.com/rust-num/num-traits) |
 | num_enum | 0.7.6 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-3-Clause OR MIT OR Apache-2.0` | [https://github.com/illicitonion/num_enum](https://github.com/illicitonion/num_enum) |
@@ -230,8 +247,12 @@ External locked package versions: **454**. Packages with no discovered readable 
 | objc2 | 0.6.5 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-app-kit | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-app-kit | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
+| objc2-audio-toolbox | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
+| objc2-avf-audio | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-cloud-kit | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-contacts | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
+| objc2-core-audio | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
+| objc2-core-audio-types | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-core-data | 0.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-core-foundation | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
 | objc2-core-graphics | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `Zlib OR Apache-2.0 OR MIT` | [https://github.com/madsmtm/objc2](https://github.com/madsmtm/objc2) |
@@ -261,6 +282,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | parking_lot | 0.12.5 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |
 | parking_lot_core | 0.9.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/Amanieu/parking_lot](https://github.com/Amanieu/parking_lot) |
 | parry3d-f64 | 0.31.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0` | [https://github.com/dimforge/parry](https://github.com/dimforge/parry) |
+| pastey | 0.2.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/as1100k/pastey](https://github.com/as1100k/pastey) |
 | peniko | 0.6.1 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/linebender/peniko](https://github.com/linebender/peniko) |
 | percent-encoding | 2.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/servo/rust-url/](https://github.com/servo/rust-url/) |
 | petgraph | 0.8.3 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/petgraph/petgraph](https://github.com/petgraph/petgraph) |
@@ -285,6 +307,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | proc-macro-crate | 3.5.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/bkchr/proc-macro-crate](https://github.com/bkchr/proc-macro-crate) |
 | proc-macro2 | 1.0.107 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/proc-macro2](https://github.com/dtolnay/proc-macro2) |
 | profiling | 1.0.18 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/aclysma/profiling](https://github.com/aclysma/profiling) |
+| pulseaudio | 0.3.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/colinmarc/pulseaudio-rs](https://github.com/colinmarc/pulseaudio-rs) |
 | pxfm | 0.1.30 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-3-Clause OR Apache-2.0` | [https://github.com/awxkee/pxfm](https://github.com/awxkee/pxfm) |
 | quick-error | 2.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [http://github.com/tailhook/quick-error](http://github.com/tailhook/quick-error) |
 | quick-xml | 0.41.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/tafia/quick-xml](https://github.com/tafia/quick-xml) |
@@ -303,6 +326,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | rhai_codegen | 3.3.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rhaiscript/rhai](https://github.com/rhaiscript/rhai) |
 | robust | 1.2.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/georust/robust](https://github.com/georust/robust) |
 | rstar | 0.13.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/georust/rstar](https://github.com/georust/rstar) |
+| rtrb | 0.4.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/mgeier/rtrb](https://github.com/mgeier/rtrb) |
 | rustc-hash | 1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0/MIT` | [https://github.com/rust-lang-nursery/rustc-hash](https://github.com/rust-lang-nursery/rustc-hash) |
 | rustc-hash | 2.1.3 | `registry+https://github.com/rust-lang/crates.io-index` | `Apache-2.0 OR MIT` | [https://github.com/rust-lang/rustc-hash](https://github.com/rust-lang/rustc-hash) |
 | rustc_version | 0.4.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/djc/rustc-version-rs](https://github.com/djc/rustc-version-rs) |
@@ -366,6 +390,7 @@ External locked package versions: **454**. Packages with no discovered readable 
 | transform-gizmo | 0.11.0 | `vendored:third_party/transform-gizmo` | `MIT OR Apache-2.0` | [https://github.com/urholaukkarinen/transform-gizmo](https://github.com/urholaukkarinen/transform-gizmo) |
 | transform-gizmo-egui | 0.11.0 | `vendored:third_party/transform-gizmo-egui` | `MIT OR Apache-2.0` | [https://github.com/urholaukkarinen/transform-gizmo](https://github.com/urholaukkarinen/transform-gizmo) |
 | tree_magic_mini | 3.2.2 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/mbrubeck/tree_magic/](https://github.com/mbrubeck/tree_magic/) |
+| triple_buffer | 9.0.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MPL-2.0` | [https://github.com/HadrienG2/triple-buffer](https://github.com/HadrienG2/triple-buffer) |
 | ttf-parser | 0.25.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/harfbuzz/ttf-parser](https://github.com/harfbuzz/ttf-parser) |
 | type-map | 0.5.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/kardeiz/type-map](https://github.com/kardeiz/type-map) |
 | typenum | 1.20.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/paholg/typenum](https://github.com/paholg/typenum) |
@@ -486,6 +511,7 @@ No readable matching source text was found for the following packages; metadata 
 - `block2 0.5.1`
 - `block2 0.6.2`
 - `clipboard-win 5.4.3`
+- `dasp_sample 0.11.0`
 - `dispatch 0.2.0`
 - `dispatch2 0.3.1`
 - `ecolor 0.37.0`
@@ -501,6 +527,7 @@ No readable matching source text was found for the following packages; metadata 
 - `jni-macros 0.22.4`
 - `jni-sys-macros 0.4.1`
 - `khronos_api 3.1.0`
+- `kira 0.12.6`
 - `malloc_buf 0.0.6`
 - `mlua-sys 0.13.0`
 - `ndk 0.9.0`
@@ -511,8 +538,12 @@ No readable matching source text was found for the following packages; metadata 
 - `objc2 0.6.5`
 - `objc2-app-kit 0.2.2`
 - `objc2-app-kit 0.3.2`
+- `objc2-audio-toolbox 0.3.2`
+- `objc2-avf-audio 0.3.2`
 - `objc2-cloud-kit 0.2.2`
 - `objc2-contacts 0.2.2`
+- `objc2-core-audio 0.3.2`
+- `objc2-core-audio-types 0.3.2`
 - `objc2-core-data 0.2.2`
 - `objc2-core-foundation 0.3.2`
 - `objc2-core-graphics 0.3.2`

@@ -9,6 +9,7 @@ use std::sync::{
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
+use ruster_app::audio::{Output as AudioOutput, OutputStatus, Sounds};
 use ruster_behavior::debug::{
     Breakpoint, DebugError, DebugHandle, DebugRunId, DebugSession, Resume, StopId, StopSnapshot,
 };
@@ -44,6 +45,12 @@ pub(super) struct Frame {
     pub input: Option<Arc<LastConsumedInput>>,
     pub query_observations: Option<Arc<[ruster_behavior::QueryObservation]>>,
 }
+#[derive(Clone, Debug)]
+pub(super) struct AudioReport {
+    pub status: OutputStatus,
+    pub last_batch: Option<Arc<ruster_behavior::AudioBatch>>,
+}
+
 pub(super) type InputMapIdentity = [u8; 32];
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 #[serde(rename_all = "snake_case")]
@@ -143,6 +150,7 @@ pub(super) enum Command {
         key: RunKey,
         scene: Arc<Scene>,
         authoring: Arc<Authoring>,
+        sounds: Sounds,
     },
     Play {
         key: RunKey,
@@ -347,6 +355,7 @@ struct Shared {
     input_enabled: AtomicBool,
     input: Mutex<Option<InputSlot>>,
     latest: Mutex<Option<Frame>>,
+    audio_report: Mutex<Option<(RunKey, AudioReport)>>,
     debugger: Mutex<Option<(RunKey, DebugHandle)>>,
     // A generation mismatch logically clears points on New/Open. Epoch/revision
     // changes in the same document preserve the exact hash-bound configuration.
@@ -439,6 +448,7 @@ impl Worker {
             input_enabled: AtomicBool::new(false),
             input: Mutex::new(None),
             latest: Mutex::new(None),
+            audio_report: Mutex::new(None),
             debugger: Mutex::new(None),
             breakpoints: Mutex::new((0, Vec::new())),
             #[cfg(test)]
@@ -945,6 +955,16 @@ impl Worker {
             None
         }
     }
+    pub fn audio_report(&self, key: RunKey) -> Option<AudioReport> {
+        if !self.accepts(key) {
+            return None;
+        }
+        let report = self.shared.audio_report.try_lock().ok()?;
+        report
+            .as_ref()
+            .filter(|(owner, _)| *owner == key)
+            .map(|(_, report)| report.clone())
+    }
     /// Explicit stale inspection if the shared slot has not been consumed. UI should
     /// retain its last accepted Arc itself and label its key after invalidation/failure.
     #[cfg(test)]
@@ -986,6 +1006,9 @@ struct Execution {
     last_input: Option<Arc<LastConsumedInput>>,
     published_scene: Option<Arc<Scene>>,
     published_queries: Option<Arc<[ruster_behavior::QueryObservation]>>,
+    audio: AudioOutput,
+    audio_enabled: bool,
+    audio_last_batch: Option<Arc<ruster_behavior::AudioBatch>>,
 }
 impl Execution {
     fn info(&self) -> Option<RunInfo> {
@@ -994,7 +1017,32 @@ impl Execution {
             tick: r.tick(),
         })
     }
+    fn stop_audio(&mut self, shared: &Shared) {
+        self.audio.stop();
+        self.audio_enabled = false;
+        self.audio_last_batch = None;
+        *shared
+            .audio_report
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = None;
+    }
+
+    fn report_audio(&mut self, shared: &Shared, key: RunKey) {
+        if !self.audio_enabled || !active(shared, key) {
+            return;
+        }
+        let report = AudioReport {
+            status: self.audio.status(),
+            last_batch: self.audio_last_batch.clone(),
+        };
+        *shared
+            .audio_report
+            .lock()
+            .unwrap_or_else(|p| p.into_inner()) = Some((key, report));
+    }
+
     fn stop(&mut self, shared: &Shared) {
+        self.stop_audio(shared);
         let _ = shared.revoke_input(true);
         self.playing = false;
         self.due = None;
@@ -1120,11 +1168,15 @@ fn process(
     }
     match command {
         Command::Reset {
-            scene, authoring, ..
+            scene,
+            authoring,
+            sounds,
+            ..
         } => {
             let _ = shared.revoke_input(true);
             execution.playing = false;
             execution.due = None;
+            execution.stop_audio(shared);
             if scene.revision != key.authored_revision {
                 return Some(reject(
                     execution,
@@ -1160,6 +1212,14 @@ fn process(
                     Vec::new()
                 }
             };
+            let audio_enabled = points.is_empty()
+                && authoring.bindings.values().any(|binding| {
+                    binding.enabled
+                        && binding
+                            .properties
+                            .values()
+                            .any(|value| matches!(value, ruster_scene::PropertyValue::SoundRef(_)))
+                });
             let (session, handle) =
                 if points.is_empty() {
                     (None, None)
@@ -1231,6 +1291,18 @@ fn process(
                     execution.runtime = Some(runtime);
                     execution.key = Some(key);
                     execution.last_input = None;
+                    if audio_enabled {
+                        let weak = Arc::downgrade(shared);
+                        let guard = Arc::new(move || {
+                            weak.upgrade().is_some_and(|shared| {
+                                active(&shared, key) && !shared.cancel.load(Ordering::SeqCst)
+                            })
+                        });
+                        execution.audio.reset_scoped(sounds, Some(guard));
+                        execution.audio.pause(true);
+                        execution.audio_enabled = true;
+                        execution.report_audio(shared, key);
+                    }
                     frame(shared, execution, repaint, false);
                     Some(Event::Reset {
                         key,
@@ -1358,6 +1430,7 @@ fn process(
             let _ = shared.revoke_input(true);
             execution.playing = false;
             execution.due = None;
+            execution.stop_audio(shared);
             Some(Event::State {
                 key,
                 state: State::Invalidated,
@@ -1478,6 +1551,8 @@ fn process(
             }
             match operation {
                 Operation::Play => {
+                    execution.audio.pause(false);
+                    execution.report_audio(shared, key);
                     if !execution.playing {
                         execution.playing = true;
                         execution.due =
@@ -1503,6 +1578,8 @@ fn process(
                     let _ = shared.revoke_input(true);
                     execution.playing = false;
                     execution.due = None;
+                    execution.audio.pause(true);
+                    execution.report_audio(shared, key);
                     Some(Event::State {
                         key,
                         state: State::Paused,
@@ -1513,6 +1590,8 @@ fn process(
                     let _ = shared.revoke_input(true);
                     execution.playing = false;
                     execution.due = None;
+                    execution.audio.pause(true);
+                    execution.report_audio(shared, key);
                     step(execution, shared, repaint)
                 }
                 _ => unreachable!(),
@@ -1620,6 +1699,21 @@ fn step_with_admitted(
                 execution.playing = false;
                 execution.due = None;
             }
+            if execution.audio_enabled {
+                if let Some(batch) = execution.runtime.as_ref()?.audio_batch() {
+                    if execution.playing {
+                        execution.audio.consume(
+                            batch.commit_revision,
+                            batch
+                                .cues
+                                .iter()
+                                .map(|cue| (cue.asset_id.as_str(), cue.gain)),
+                        );
+                    }
+                    execution.audio_last_batch = Some(Arc::new(batch.clone()));
+                }
+                execution.report_audio(shared, key);
+            }
             frame(shared, execution, repaint, false);
             if pause && was_playing {
                 return Some(Event::State {
@@ -1638,6 +1732,7 @@ fn step_with_admitted(
             let _ = shared.revoke_input(true);
             execution.playing = false;
             execution.due = None;
+            execution.stop_audio(shared);
             Some(Event::Error {
                 key,
                 operation: Operation::Step,
@@ -1677,6 +1772,9 @@ fn run(
         last_input: None,
         published_scene: None,
         published_queries: None,
+        audio: AudioOutput::default(),
+        audio_enabled: false,
+        audio_last_batch: None,
     };
     let mut pending: Option<Event> = None;
     loop {
@@ -1686,6 +1784,9 @@ fn run(
         if execution.key.is_some_and(|key| !active(&shared, key)) {
             execution.playing = false;
             execution.due = None;
+            if execution.audio_enabled {
+                execution.stop_audio(&shared);
+            }
         }
         if pending
             .as_ref()
@@ -2083,6 +2184,7 @@ mod tests {
                 key,
                 scene,
                 authoring,
+                sounds: Sounds::new(),
             })
             .unwrap();
         assert!(
@@ -2731,6 +2833,7 @@ mod tests {
                     key,
                     scene: scene.clone(),
                     authoring: authoring.clone(),
+                    sounds: Sounds::new(),
                 })
                 .unwrap();
             assert!(matches!(wait_event(&worker, &pulses), Event::Reset { .. }));
@@ -2864,6 +2967,7 @@ mod tests {
                 key: old,
                 scene: scene.clone(),
                 authoring: authoring.clone(),
+                sounds: Sounds::new(),
             })
             .unwrap();
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -2902,6 +3006,7 @@ mod tests {
                 key,
                 scene,
                 authoring,
+                sounds: Sounds::new(),
             })
             .unwrap();
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -2965,6 +3070,7 @@ mod tests {
                 key: attempted,
                 scene: scene.clone(),
                 authoring: Arc::new(invalid),
+                sounds: Sounds::new(),
             })
             .unwrap();
         match wait_event(&worker, &pulses) {

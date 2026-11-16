@@ -27,7 +27,7 @@ jobs:
       - name: Install native build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install --no-install-recommends -y pkg-config libwayland-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev libvulkan-dev
+          sudo apt-get install --no-install-recommends -y pkg-config libwayland-dev libxkbcommon-dev libxcb-shape0-dev libxcb-xfixes0-dev libvulkan-dev libasound2-dev
       - name: Install pinned Rust toolchain
         run: rustup toolchain install 1.99.1 --profile minimal --component rustfmt --component clippy
       - name: Cache Cargo builds

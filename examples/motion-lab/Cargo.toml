@@ -18,7 +18,7 @@ default = []
 inspection = ["ruster-app/inspection"]
 
 [dependencies]
-ruster-app = { path = "../../crates/ruster-app" }
+ruster-app = { path = "../../crates/ruster-app", features = ["audio-output"] }
 ruster-scene = { path = "../../crates/ruster-scene" }
 ruster-script = { path = "../../crates/ruster-script" }
 ruster-behavior = { path = "../../crates/ruster-behavior" }

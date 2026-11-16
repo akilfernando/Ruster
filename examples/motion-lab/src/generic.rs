@@ -1,7 +1,8 @@
 //! Read-only authored-scene consumer. The generic editor owns editing and persistence.
 
-use std::{path::Path, time::Duration};
+use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
+use ruster_app::audio::{Output as AudioOutput, OutputStatus};
 use ruster_app::hud::{paint_hud, HudPresentationMode};
 use ruster_app::{egui, Application, Content, MeshMap, Step, TextureMap};
 use ruster_behavior::{Diagnostic, Engine, Limits, Runtime};
@@ -56,6 +57,8 @@ pub struct GenericMotionLab {
     command_receipt: Option<ruster_behavior::CommandReceipt>,
     hud_cache: HudCache,
     hud_controls: HudControls,
+    sounds: BTreeMap<String, Arc<ruster_assets::AudioClip>>,
+    audio: AudioOutput,
 }
 
 impl GenericMotionLab {
@@ -98,6 +101,8 @@ impl GenericMotionLab {
             command_receipt: None,
             hud_cache: HudCache::default(),
             hud_controls: HudControls::default(),
+            sounds: BTreeMap::new(),
+            audio: AudioOutput::default(),
         })
     }
 
@@ -320,6 +325,15 @@ impl GenericMotionLab {
         Ok(())
     }
 
+    pub fn set_sounds(&mut self, sounds: BTreeMap<String, Arc<ruster_assets::AudioClip>>) {
+        self.sounds = sounds;
+        self.audio.stop();
+    }
+
+    pub fn audio_batch(&self) -> Option<&ruster_behavior::AudioBatch> {
+        self.runtime.as_ref()?.audio_batch()
+    }
+
     /// Explicit caller reload; retained runtime remains visible but stale until successful Reset.
     /// The generic editor remains the authoring surface.
     pub fn replace_session(&mut self, session: Session) -> Result<(), String> {
@@ -336,6 +350,7 @@ impl GenericMotionLab {
         self.command_ui = CommandUi::default();
         self.command_receipt = None;
         self.hud_cache.clear();
+        self.audio.stop();
         self.session = session;
         self.needs_reset = true;
         self.diagnostic = None;
@@ -383,6 +398,7 @@ impl Application for GenericMotionLab {
     }
 
     fn reset(&mut self) -> Result<(), String> {
+        self.audio.stop();
         self.cancel_action_input();
         self.cancel_hud_input();
         self.hud_controls.reset();
@@ -425,12 +441,30 @@ impl Application for GenericMotionLab {
         *self.content.scene_mut() = candidate.scene().clone();
         self.hud_cache.clear();
         self.runtime = Some(candidate);
+        self.audio.reset(self.sounds.clone());
+        self.audio.pause(true);
         self.run_epoch = next_epoch;
         self.command_receipt = None;
         self.action_keys = keys;
         self.needs_reset = false;
         self.diagnostic = None;
         Ok(())
+    }
+
+    fn playback_changed(&mut self, playing: bool) {
+        self.audio.pause(!playing);
+    }
+
+    fn live_step_committed(&mut self) {
+        if let Some(batch) = self.runtime.as_ref().and_then(Runtime::audio_batch) {
+            self.audio.consume(
+                batch.commit_revision,
+                batch
+                    .cues
+                    .iter()
+                    .map(|cue| (cue.asset_id.as_str(), cue.gain)),
+            );
+        }
     }
 
     fn buffered_viewport_input(&self) -> bool {
@@ -531,6 +565,7 @@ impl Application for GenericMotionLab {
             .step_with_input(runtime, &input);
         if result.is_err() {
             self.cancel_action_input();
+            self.audio.stop();
             self.needs_reset = true;
         }
         self.report(result)?;
@@ -557,6 +592,15 @@ impl Application for GenericMotionLab {
 
     fn ui(&mut self, ui: &mut egui::Ui) -> Result<(), String> {
         self.hud_action_status(ui);
+        let audio_notice = match self.audio.status() {
+            OutputStatus::Unavailable => Some("Audio output unavailable."),
+            OutputStatus::MissingAsset => Some("A sound cue's WAV is unavailable."),
+            OutputStatus::VoiceLimit => Some("Audio voice limit reached. A cue was dropped."),
+            _ => None,
+        };
+        if let Some(notice) = audio_notice {
+            ui.colored_label(ui.visuals().warn_fg_color, notice);
+        }
         if let Some(title) = &self.creation_title {
             ui.heading(title);
             self.action_help(ui);

@@ -4302,11 +4302,13 @@ impl SceneEditor {
                                 &row.label,
                             )
                             .truncate()
-                            .sense(if available {
-                                egui::Sense::click_and_drag()
-                            } else {
-                                egui::Sense::click()
-                            }),
+                            .sense(
+                                if available && row.info.kind != ruster_assets::AssetKind::Sound {
+                                    egui::Sense::click_and_drag()
+                                } else {
+                                    egui::Sense::click()
+                                },
+                            ),
                         )
                         .on_hover_text(&row.label);
                     if response.clicked() {
@@ -5581,9 +5583,14 @@ impl SceneEditor {
                 // Stop remains available for an older retained runtime while
                 // Reset and playback edits wait for content authority.
                 let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
-                let _ = self
-                    .runtime
-                    .controls(ui, &self.session, self.generation, true, &shortcut);
+                let _ = self.runtime.controls_with_sounds(
+                    ui,
+                    &self.session,
+                    self.generation,
+                    true,
+                    &shortcut,
+                    self.assets.as_ref(),
+                );
                 return;
             }
             if !self.player_preview_available() {
@@ -5607,10 +5614,14 @@ impl SceneEditor {
             let blocked = document_blocked || self.asset_busy();
             let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
             if !self.ai_workspace || self.runtime.has_worker() {
-                if let Some(key) =
-                    self.runtime
-                        .controls(ui, &self.session, self.generation, blocked, &shortcut)
-                {
+                if let Some(key) = self.runtime.controls_with_sounds(
+                    ui,
+                    &self.session,
+                    self.generation,
+                    blocked,
+                    &shortcut,
+                    self.assets.as_ref(),
+                ) {
                     self.capture_reset_assets(key);
                 }
             }

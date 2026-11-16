@@ -1,4 +1,6 @@
 //! Bounded Linux application host: application-owned behavior, shared Vulkan rendering.
+#[cfg(feature = "audio-output")]
+pub mod audio;
 pub mod creation;
 pub use ruster_render::player_view_projection;
 mod host;
@@ -176,6 +178,10 @@ pub trait Application: 'static {
     fn content(&self) -> &Content;
     fn tick(&mut self, step: Step) -> Result<(), String>;
     fn reset(&mut self) -> Result<(), String>;
+    /// A committed host transition. Live output may pause or resume here.
+    fn playback_changed(&mut self, _playing: bool) {}
+    /// Called after a running Step and Content validation both succeed.
+    fn live_step_committed(&mut self) {}
     fn ui(&mut self, _ui: &mut egui::Ui) -> Result<(), String> {
         Ok(())
     }
@@ -291,6 +297,9 @@ impl<A: Application> Runtime<A> {
         if !running {
             self.app.cancel_action_input();
         }
+        if self.running != running {
+            self.app.playback_changed(running);
+        }
         self.running = running;
         self.accumulator = Duration::ZERO;
     }
@@ -307,6 +316,9 @@ impl<A: Application> Runtime<A> {
             self.app.tick(Step { tick, dt: self.dt })?;
             self.app.content().validate()?;
             self.tick = tick;
+            if self.running {
+                self.app.live_step_committed();
+            }
             if self.app.completed() {
                 self.set_running(false);
             }

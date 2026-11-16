@@ -563,6 +563,7 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         manifest.load_textures(&root)?,
         tick_duration,
     )?;
+    app.set_sounds(manifest.load_sounds(&root)?);
     app.set_creation_presentation(manifest.title.clone());
     if options.headless {
         let HeadlessRun {
@@ -603,6 +604,9 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             "runtime_scene": app.content().scene(),
             "input": input,
         });
+        if let Some(batch) = app.audio_batch() {
+            output["audio_batch"] = serde_json::to_value(batch).map_err(|e| e.to_string())?;
+        }
         if !app.session().authoring().hud.is_default() {
             output["authored_hud"] = serde_json::to_value(&app.session().authoring().hud)
                 .map_err(|error| error.to_string())?;
@@ -789,6 +793,12 @@ fn execute_play_check(options: &Options) -> Result<bool, String> {
             .unwrap_or(TextureRole::BaseColor);
         pins.insert(id.clone(), ResourcePin::texture(&bytes, role));
     }
+    if let Some(sounds) = &manifest.sounds {
+        for (id, path) in sounds {
+            let bytes = root.read(path, ruster_assets::MAX_SOUND_SOURCE_BYTES)?;
+            pins.insert(id.clone(), ResourcePin::sound(&bytes));
+        }
+    }
     let tick_nanos =
         u64::try_from(manifest.tick_duration().as_nanos()).map_err(|error| error.to_string())?;
     let report = play_check::run(
@@ -814,7 +824,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation", "authored_player_view", "repeatable_play_checks", "kinematic_move_and_slide"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation", "authored_player_view", "repeatable_play_checks", "kinematic_move_and_slide", "one_shot_audio"],
             })
         );
         return;

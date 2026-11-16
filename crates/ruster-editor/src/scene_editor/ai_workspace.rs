@@ -78,12 +78,13 @@ impl SceneEditor {
                     self.tool_options_ui(ui);
                     let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
                     let blocked = self.guard().is_err();
-                    if let Some(key) = self.runtime.controls(
+                    if let Some(key) = self.runtime.controls_with_sounds(
                         ui,
                         &self.session,
                         self.generation,
                         blocked,
                         &shortcut,
+                        self.assets.as_ref(),
                     ) {
                         self.capture_reset_assets(key);
                     }

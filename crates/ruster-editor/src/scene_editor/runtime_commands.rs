@@ -201,7 +201,13 @@ impl SceneEditor {
         self.observe_runtime();
         let mut value = self
             .runtime
-            .runtime_api(op, args, &self.session, self.generation)
+            .runtime_api_with_sounds(
+                op,
+                args,
+                &self.session,
+                self.generation,
+                self.assets.as_ref(),
+            )
             .map_err(|message| {
                 (
                     if matches!(

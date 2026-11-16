@@ -314,6 +314,54 @@
         }
       ],
       "notes": "Published crate omits readable license files. Its .cargo_vcs_info.json records commit72ca121d1c0f835e1a3bb975d45fd1b115da1b95 and path rstar. The upstream crate manifest matches version0.13.1 and MIT OR Apache-2.0. Exact root LICENSE-MIT bytes match Git blobc2ddafbb7dbb8d8d667ef6acb0c38cda8f03fbd4. The complete commit tree has no NOTICE file."
+    },
+    {
+      "path": "licenses/kira-LICENSE-MIT.txt",
+      "sha256": "1d075e895672c131d6adda4c0d03933e4162ca732d8c99b0cc497af884b8e703",
+      "source": "https://raw.githubusercontent.com/tesselode/kira/b0325713c2cf090f980b46246505509f838d48f5/LICENSE-MIT",
+      "accessed": "2026-11-16",
+      "packages": [
+        {
+          "name": "kira",
+          "version": "0.12.6"
+        }
+      ]
+    },
+    {
+      "path": "licenses/kira-LICENSE-APACHE.txt",
+      "sha256": "85bb5389360900e5ef360073a906f7ff6c2866995743242671091f376fe2c92d",
+      "source": "https://raw.githubusercontent.com/tesselode/kira/b0325713c2cf090f980b46246505509f838d48f5/LICENSE-APACHE",
+      "accessed": "2026-11-16",
+      "packages": [
+        {
+          "name": "kira",
+          "version": "0.12.6"
+        }
+      ]
+    },
+    {
+      "path": "licenses/dasp_sample-LICENSE-MIT.txt",
+      "sha256": "b1d6df41ed3aa96806e74c729444d7c121d90e6660a6aed01d298e03fde475a0",
+      "source": "https://raw.githubusercontent.com/RustAudio/sample/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-MIT",
+      "accessed": "2026-11-16",
+      "packages": [
+        {
+          "name": "dasp_sample",
+          "version": "0.11.0"
+        }
+      ]
+    },
+    {
+      "path": "licenses/dasp_sample-LICENSE-APACHE.txt",
+      "sha256": "756c8d2ab2dc24f256e1455b5f03937f4933d83d7bc9f2d55009fc962377d512",
+      "source": "https://raw.githubusercontent.com/RustAudio/sample/97c3bb9b2363c0b46ac1633858bf1054fd02a980/LICENSE-APACHE",
+      "accessed": "2026-11-16",
+      "packages": [
+        {
+          "name": "dasp_sample",
+          "version": "0.11.0"
+        }
+      ]
     }
   ]
 }
