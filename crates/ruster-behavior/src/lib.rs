@@ -21,6 +21,7 @@ use sha2::{Digest, Sha256};
 #[cfg(test)]
 mod assembly_gate_tests;
 pub mod debug;
+pub mod play_check;
 pub mod spatial;
 mod state;
 pub use state::RuntimeState;

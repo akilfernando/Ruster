@@ -392,6 +392,54 @@ struct ExportSource {
     model_id: Option<String>,
 }
 
+/// A verified source payload plus its immutable render interpretation.
+/// Use ids as BTreeMap keys to hash the same closure in the editor and package.
+#[derive(Clone, Copy)]
+pub struct ResourcePin {
+    source_sha256: [u8; 32],
+    interpretation: u8,
+}
+
+impl ResourcePin {
+    pub fn mesh(bytes: &[u8], policy: MeshNormalPolicy) -> Self {
+        let interpretation = match policy {
+            MeshNormalPolicy::Flat => 1,
+            MeshNormalPolicy::AuthoredWhenComplete => 2,
+        };
+        Self {
+            source_sha256: Sha256::digest(bytes).into(),
+            interpretation,
+        }
+    }
+
+    pub fn texture(bytes: &[u8], role: TextureRole) -> Self {
+        let interpretation = match role {
+            TextureRole::BaseColor => 3,
+            TextureRole::Roughness => 4,
+        };
+        Self {
+            source_sha256: Sha256::digest(bytes).into(),
+            interpretation,
+        }
+    }
+}
+
+pub fn resource_identity(resources: &BTreeMap<String, ResourcePin>) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"ruster-resource-closure-v1");
+    for (id, resource) in resources {
+        digest.update((id.len() as u64).to_be_bytes());
+        digest.update(id.as_bytes());
+        digest.update([resource.interpretation]);
+        digest.update(resource.source_sha256);
+    }
+    format!("{:x}", digest.finalize())
+}
+
+pub fn empty_resource_identity() -> String {
+    resource_identity(&BTreeMap::new())
+}
+
 impl ExportSnapshot {
     pub fn revision(&self) -> u64 {
         self.revision
@@ -412,6 +460,28 @@ impl ExportSnapshot {
     /// Frozen interpretation of an accepted texture; meshes/unknown IDs return None.
     pub fn texture_role(&self, id: &str) -> Option<TextureRole> {
         self.sources.get(id).and_then(|source| source.texture_role)
+    }
+
+    /// Verify the accepted closure before pinning payload and interpretation.
+    pub fn resource_identity(&self) -> Result<String, AssetError> {
+        let mut resources = BTreeMap::new();
+        self.read_verified_sources(|id, bytes| {
+            let pin = if let Some(policy) = self.mesh_normal_policy(id) {
+                ResourcePin::mesh(&bytes, policy)
+            } else if let Some(role) = self.texture_role(id) {
+                ResourcePin::texture(&bytes, role)
+            } else {
+                return Err(error(format!(
+                    "resource {id:?} has no accepted interpretation"
+                )));
+            };
+            resources.insert(id.to_owned(), pin);
+            Ok(())
+        })?;
+        if resources.len() != self.sources.len() {
+            return Err(error("accepted resource closure incomplete"));
+        }
+        Ok(resource_identity(&resources))
     }
 
     /// Read at most MAX_ASSETS sources, using the mesh/texture source-byte bounds. Catalog
@@ -1492,6 +1562,35 @@ fn obj_index(word: &str, count: usize) -> Result<usize, AssetError> {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn resource_identity_pins_id_bytes_and_import_interpretation() {
+        use super::*;
+        let closure = |id: &str, bytes: &[u8], policy| {
+            resource_identity(&BTreeMap::from([(
+                id.into(),
+                ResourcePin::mesh(bytes, policy),
+            )]))
+        };
+        let flat = closure("mesh", b"triangle", MeshNormalPolicy::Flat);
+        assert_ne!(flat, empty_resource_identity());
+        assert_ne!(flat, closure("other", b"triangle", MeshNormalPolicy::Flat));
+        assert_ne!(flat, closure("mesh", b"changed", MeshNormalPolicy::Flat));
+        assert_ne!(
+            flat,
+            closure("mesh", b"triangle", MeshNormalPolicy::AuthoredWhenComplete)
+        );
+        assert_ne!(
+            resource_identity(&BTreeMap::from([(
+                "image".into(),
+                ResourcePin::texture(b"same", TextureRole::BaseColor)
+            )])),
+            resource_identity(&BTreeMap::from([(
+                "image".into(),
+                ResourcePin::texture(b"same", TextureRole::Roughness)
+            )]))
+        );
+    }
+
     // Export must preserve the editor's accepted source/catalog identity without
     // touching project state or pulling unrelated catalog assets into a package.
     #[test]
