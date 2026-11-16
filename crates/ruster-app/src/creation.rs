@@ -2,11 +2,12 @@
 //! The supported scene document owns authored state; this is not a second project editor.
 use crate::{MeshMap, ResourceRoot, TextureMap};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, path::Path, time::Duration};
+use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
 pub const DESCRIPTOR_NAME: &str = "app.json";
 pub const FORMAT: &str = "ruster-application";
-pub const VERSION: u32 = 5;
+pub const NO_AUDIO_VERSION: u32 = 5;
+pub const VERSION: u32 = 6;
 pub const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
@@ -63,9 +64,16 @@ pub struct CreationManifest {
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
-        deserialize_with = "unique_texture_roles"
+        deserialize_with = "unique_optional_mapping"
     )]
     pub texture_roles: Option<BTreeMap<String, ruster_assets::TextureRole>>,
+    /// Descriptor6 carries the exact authored and retained-history WAV closure.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "unique_optional_mapping"
+    )]
+    pub sounds: Option<BTreeMap<String, String>>,
     /// Descriptors1–4 keep their original integer-millisecond contract.
     #[serde(
         default,
@@ -73,7 +81,7 @@ pub struct CreationManifest {
         deserialize_with = "present_tick"
     )]
     pub tick_millis: Option<u64>,
-    /// Descriptor5 carries the exact editor/export fixed quantum.
+    /// Descriptor5 and later carry the exact editor/export fixed quantum.
     #[serde(
         default,
         skip_serializing_if = "Option::is_none",
@@ -107,11 +115,12 @@ where
     unique_mapping(deserializer)
 }
 
-fn unique_texture_roles<'de, D>(
+fn unique_optional_mapping<'de, D, T>(
     deserializer: D,
-) -> Result<Option<BTreeMap<String, ruster_assets::TextureRole>>, D::Error>
+) -> Result<Option<BTreeMap<String, T>>, D::Error>
 where
     D: serde::Deserializer<'de>,
+    T: Deserialize<'de>,
 {
     // A present null must not become an omitted old-descriptor field.
     unique_mapping(deserializer).map(Some)
@@ -126,7 +135,7 @@ where
     impl<'de, T: Deserialize<'de>> serde::de::Visitor<'de> for Unique<T> {
         type Value = BTreeMap<String, T>;
         fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-            formatter.write_str("at most 64 unique mesh IDs and relative resource paths")
+            formatter.write_str("at most 64 unique resource IDs")
         }
         fn visit_map<M: serde::de::MapAccess<'de>>(
             self,
@@ -136,7 +145,9 @@ where
             while let Some((id, source)) = map.next_entry::<String, T>()? {
                 if values.len() >= ruster_assets::MAX_ASSETS || values.insert(id, source).is_some()
                 {
-                    return Err(serde::de::Error::custom("too many or duplicate mesh IDs"));
+                    return Err(serde::de::Error::custom(
+                        "too many or duplicate resource IDs",
+                    ));
                 }
             }
             Ok(values)
@@ -164,7 +175,7 @@ impl CreationManifest {
     pub fn validate(&self) -> Result<(), String> {
         if self.format != FORMAT || !(1..=VERSION).contains(&self.version) {
             return Err(
-                "Unsupported application descriptor; expected ruster-application version 1 through 5"
+                "Unsupported application descriptor; expected ruster-application version 1 through 6"
                     .into(),
             );
         }
@@ -189,6 +200,12 @@ impl CreationManifest {
                 return Err("Descriptor4 and later require exactly one role per texture".into());
             }
         }
+        if (self.version == VERSION) != self.sounds.is_some() {
+            return Err(
+                "Descriptor6 requires sounds, including an empty map; descriptors1–5 omit it"
+                    .into(),
+            );
+        }
         if self.title.trim().is_empty()
             || self.title.trim() != self.title
             || self.title.len() > 128
@@ -198,20 +215,37 @@ impl CreationManifest {
         }
         match (self.version, self.tick_millis, self.tick_nanos) {
             (1..=4, Some(millis), None) if (1..=1000).contains(&millis) => {},
-            (5, None, Some(nanos)) if (1_000_000..=1_000_000_000).contains(&nanos) => {},
-            _ => return Err("Descriptors1–4 require only tick_millis (1–1000); Descriptor5 requires only tick_nanos (1000000–1000000000).".into()),
+            (5..=VERSION, None, Some(nanos)) if (1_000_000..=1_000_000_000).contains(&nanos) => {},
+            _ => return Err("Descriptors1–4 require only tick_millis (1–1000); Descriptors5–6 require only tick_nanos (1000000–1000000000).".into()),
         }
         if let Some(camera) = self.initial_camera {
             camera.camera_state()?;
         }
         resource_path(&self.scene)?;
-        if self.meshes.len() + self.textures.len() > ruster_assets::MAX_ASSETS {
-            return Err("Application mesh mappings exceed 64".into());
+        let sound_count = self.sounds.as_ref().map_or(0, BTreeMap::len);
+        if self.meshes.len() + self.textures.len() + sound_count > ruster_assets::MAX_ASSETS {
+            return Err("Application resource mappings exceed 64".into());
         }
-        for (id, path) in self.meshes.iter().chain(&self.textures) {
+        for (id, path) in self
+            .meshes
+            .iter()
+            .chain(&self.textures)
+            .chain(self.sounds.iter().flatten())
+        {
             // Use the scene owner's identity grammar rather than a new dialect.
             ruster_scene::validate_id(id).map_err(|error| error.to_string())?;
             resource_path(path)?;
+        }
+        if let Some(sounds) = &self.sounds {
+            let mut paths = std::collections::BTreeSet::new();
+            for (id, path) in sounds {
+                if self.meshes.contains_key(id) || self.textures.contains_key(id) {
+                    return Err("Sound IDs cannot overlap mesh or texture mappings".into());
+                }
+                if !path.ends_with(".wav") || !paths.insert(path) {
+                    return Err("Application sounds require unique WAV resource paths".into());
+                }
+            }
         }
         Ok(())
     }
@@ -235,8 +269,10 @@ impl CreationManifest {
         {
             return Err("Nanosecond ticks require descriptor version 5".into());
         }
-        if raw["version"].as_u64() == Some(5) && raw.get("tick_millis").is_some() {
-            return Err("Descriptor5 uses tick_nanos; tick_millis must be absent".into());
+        if raw["version"].as_u64().is_some_and(|version| version >= 5)
+            && raw.get("tick_millis").is_some()
+        {
+            return Err("Descriptors5–6 use tick_nanos; tick_millis must be absent".into());
         }
         let manifest: Self = serde_json::from_slice(&bytes)
             .map_err(|error| format!("Invalid {DESCRIPTOR_NAME}: {error}"))?;
@@ -247,7 +283,7 @@ impl CreationManifest {
     pub fn tick_duration(&self) -> Duration {
         match (self.version, self.tick_millis, self.tick_nanos) {
             (1..=4, Some(millis), None) => Duration::from_millis(millis),
-            (5, None, Some(nanos)) => Duration::from_nanos(nanos),
+            (5..=VERSION, None, Some(nanos)) => Duration::from_nanos(nanos),
             // Invalid caller-constructed DTOs cannot select a fallback unit;
             // load/validate rejects them, and runtime scheduling rejects zero.
             _ => Duration::ZERO,
@@ -259,6 +295,18 @@ impl CreationManifest {
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
         let session = ruster_scene::Session::from_snapshot_bytes(&bytes)
             .map_err(|error| error.to_string())?;
+        let referenced = session.sound_asset_references();
+        match &self.sounds {
+            Some(sounds) if referenced.uses_sound && sounds.keys().eq(referenced.assets.iter()) => {
+            }
+            None if !referenced.uses_sound => {}
+            _ => {
+                return Err(
+                    "Application sound mappings differ from the scene and its retained history"
+                        .into(),
+                )
+            }
+        }
         if self.initial_camera.is_some() && session.scene().player_view.is_some() {
             return Err(
                 "Remove legacy initial camera framing when the scene owns a player view".into(),
@@ -289,6 +337,26 @@ impl CreationManifest {
             return Err("Scene10 roughness_maps requires descriptor version 4".into());
         }
         Ok(session)
+    }
+
+    pub fn load_sounds(
+        &self,
+        root: &ResourceRoot,
+    ) -> Result<BTreeMap<String, Arc<ruster_assets::AudioClip>>, String> {
+        self.validate()?;
+        let mut sounds = BTreeMap::new();
+        let mut total_bytes = 0;
+        for (id, path) in self.sounds.iter().flatten() {
+            let source = root.read(path, ruster_assets::MAX_SOUND_SOURCE_BYTES)?;
+            let clip = ruster_assets::decode_wav(&source)
+                .map_err(|error| format!("sound {id}: {error}"))?;
+            total_bytes += clip.payload_bytes();
+            if total_bytes > ruster_assets::MAX_SOUND_RESOLVED_BYTES {
+                return Err("Application WAV samples exceed 64 MiB".into());
+            }
+            sounds.insert(id.clone(), Arc::new(clip));
+        }
+        Ok(sounds)
     }
 
     pub fn load_textures(&self, root: &ResourceRoot) -> Result<TextureMap, String> {
@@ -338,6 +406,100 @@ mod tests {
     use super::*;
     use crate::Content;
 
+    #[test]
+    fn descriptor6_requires_exact_sound_history_and_valid_wav() {
+        use ruster_scene::{
+            BehaviorBinding, BindingTarget, Object, PropertyValue, Scene, Session, SoundRef,
+        };
+        let project = tempfile::tempdir().unwrap();
+        let root = ResourceRoot::new(project.path()).unwrap();
+        let scene_path = project.path().join("scene.json");
+        let descriptor_path = project.path().join(DESCRIPTOR_NAME);
+        let source = project.path().join("cue.wav");
+        let mut scene = Scene::empty("audio");
+        scene.objects.push(Object::cube("speaker", None));
+        let mut session = Session::new(scene).unwrap();
+        let mut raw = serde_json::json!({
+            "format": FORMAT, "version": NO_AUDIO_VERSION, "title": "Audio",
+            "scene": "scene.json", "tick_nanos": 16_666_667,
+            "meshes": {}, "texture_roles": {}
+        });
+        let write = |value: &serde_json::Value| {
+            std::fs::write(&descriptor_path, serde_json::to_vec(value).unwrap()).unwrap();
+        };
+        session.save(&scene_path).unwrap();
+        write(&raw);
+        let legacy = CreationManifest::load(&root).unwrap();
+        assert!(legacy.load_sounds(&root).unwrap().is_empty());
+        legacy.load_session(&root).unwrap();
+        raw["sounds"] = serde_json::json!({});
+        write(&raw);
+        assert!(CreationManifest::load(&root).is_err());
+        raw["version"] = VERSION.into();
+        write(&raw);
+        assert!(CreationManifest::load(&root)
+            .unwrap()
+            .load_session(&root)
+            .is_err());
+
+        let mut binding = BehaviorBinding {
+            target: BindingTarget::Object("speaker".into()),
+            source_id: "unbound".into(),
+            enabled: false,
+            properties: BTreeMap::from([(
+                "cue".into(),
+                PropertyValue::SoundRef(SoundRef {
+                    asset_id: None,
+                    gain: 1.,
+                }),
+            )]),
+            commands: Default::default(),
+            state_defaults: Default::default(),
+        };
+        let revision = session
+            .set_binding(0, "binding", Some(binding.clone()))
+            .unwrap();
+        session.save(&scene_path).unwrap();
+        CreationManifest::load(&root)
+            .unwrap()
+            .load_session(&root)
+            .unwrap();
+        assert!(legacy.load_session(&root).is_err());
+
+        binding.properties.insert(
+            "cue".into(),
+            PropertyValue::SoundRef(SoundRef {
+                asset_id: Some("beep".into()),
+                gain: 0.5,
+            }),
+        );
+        let revision = session
+            .set_binding(revision, "binding", Some(binding))
+            .unwrap();
+        session.undo(revision).unwrap();
+        session.save(&scene_path).unwrap();
+        assert!(CreationManifest::load(&root)
+            .unwrap()
+            .load_session(&root)
+            .is_err());
+        raw["sounds"] = serde_json::json!({"beep": "cue.wav"});
+        write(&raw);
+        let manifest = CreationManifest::load(&root).unwrap();
+        manifest.load_session(&root).unwrap();
+        assert!(manifest.load_sounds(&root).is_err());
+        std::fs::write(&source, b"invalid").unwrap();
+        assert!(manifest.load_sounds(&root).is_err());
+        // PCM16 mono at 8000 Hz, one zero-valued frame.
+        std::fs::write(source, b"RIFF\x26\0\0\0WAVEfmt \x10\0\0\0\x01\0\x01\0\x40\x1f\0\0\x80\x3e\0\0\x02\0\x10\0data\x02\0\0\0\0\0").unwrap();
+        assert_eq!(
+            manifest.load_sounds(&root).unwrap()["beep"].frames.as_ref(),
+            [[0.; 2]]
+        );
+        raw["sounds"] = serde_json::Value::Null;
+        write(&raw);
+        assert!(CreationManifest::load(&root).is_err());
+    }
+
     // Protect descriptor interpretation/resource confinement, not the existing
     // scene, OBJ parser or Lua evaluation matrices.
     #[test]
@@ -357,13 +519,14 @@ mod tests {
         .unwrap();
         let manifest = CreationManifest {
             format: FORMAT.into(),
-            version: VERSION,
+            version: NO_AUDIO_VERSION,
             title: "My creation 世界".into(),
             scene: "scene.json".into(),
             meshes: [("marker".into(), "marker.obj".into())].into(),
             mesh_normal_policies: [("marker".into(), ruster_assets::MeshNormalPolicy::Flat)].into(),
             textures: BTreeMap::new(),
             texture_roles: Some(BTreeMap::new()),
+            sounds: None,
             tick_millis: None,
             tick_nanos: Some(16_666_667),
             initial_camera: None,
@@ -792,7 +955,7 @@ mod tests {
             legacy.validate().is_err(),
             "texture resources must not hide under descriptor1"
         );
-        legacy.version = VERSION;
+        legacy.version = NO_AUDIO_VERSION;
         legacy.tick_millis = None;
         legacy.tick_nanos = manifest.tick_nanos;
         legacy.mesh_normal_policies = manifest.mesh_normal_policies.clone();

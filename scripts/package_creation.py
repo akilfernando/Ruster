@@ -35,6 +35,7 @@ MAX_MESHES = 64
 MAX_OBJECTS = 256
 MAX_MATERIALS = 64
 MAX_TEXTURE_BYTES = 8 * MIB
+MAX_SOUND_BYTES = 2 * MIB
 PROFILE = {"format": "ruster-runtime", "version": 1,
            "descriptor_format": "ruster-application", "descriptor_version": 1,
            "os": "linux", "arch": "x86_64"}
@@ -84,6 +85,11 @@ KINEMATIC_PROFILE = {
     **PLAY_CHECK_PROFILE,
     "capabilities": [*PLAY_CHECK_PROFILE["capabilities"], KINEMATIC_CAPABILITY],
 }
+AUDIO_CAPABILITY = "one_shot_audio"
+AUDIO_PROFILE = {
+    **KINEMATIC_PROFILE, "descriptor_version": 6,
+    "capabilities": [*KINEMATIC_PROFILE["capabilities"], AUDIO_CAPABILITY],
+}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -92,6 +98,7 @@ KIT_FILES = frozenset(("runtime", "README.txt") + LICENSE_FILES + HELPER_FILES)
 HASH = re.compile(r"[0-9a-f]{64}\Z")
 MESH_PATH = re.compile(r"meshes/[0-9]{4}\.obj\Z")
 TEXTURE_PATH = re.compile(r"textures/[0-9]{4}\.png\Z")
+SOUND_PATH = re.compile(r"sounds/[0-9]{4}\.wav\Z")
 IDENTITY = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 
 
@@ -197,7 +204,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE, AUDIO_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -1180,6 +1187,43 @@ def requires_kinematic_motion(document: dict) -> bool:
     return False
 
 
+def scene_sound_references(document: dict) -> tuple[bool, set[str]]:
+    """Collect typed WAV dependencies, including both sides of retained binding history."""
+    def binding_records():
+        authoring = document.get("authoring")
+        if isinstance(authoring, dict):
+            yield from authoring.get("bindings", {}).values()
+        for stack in ("undo", "redo"):
+            changes = document.get(stack, [])
+            for change in changes if isinstance(changes, list) else []:
+                if isinstance(change, dict):
+                    for delta in change.get("bindings", []):
+                        for side in ("before", "after"):
+                            if delta.get(side) is not None:
+                                yield delta[side]
+
+    uses_sound, sound_ids = False, set()
+    for binding in binding_records():
+        properties = binding.get("properties", {})
+        if not isinstance(properties, dict):
+            continue  # Legacy binding admission belongs to the runtime.
+        for property_value in properties.values():
+            if not isinstance(property_value, dict) or property_value.get("type") != "sound_ref":
+                continue
+            uses_sound = True
+            exact_fields(property_value, {"type", "value"}, "sound property")
+            cue = property_value["value"]
+            exact_fields(cue, {"asset_id", "gain"}, "sound reference")
+            if type(cue["gain"]) not in (int, float) or not 0 <= cue["gain"] <= 1:
+                raise ValueError("sound gain requires a number in 0..=1")
+            asset_id = cue["asset_id"]
+            if asset_id is not None:
+                if not isinstance(asset_id, str) or not IDENTITY.fullmatch(asset_id):
+                    raise ValueError("invalid sound identity")
+                sound_ids.add(asset_id)
+    return uses_sound, sound_ids
+
+
 def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, dict, dict[str, tuple[int, str, str]]]:
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
@@ -1190,7 +1234,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
-    optional = {"initial_camera", "play_check_sha256", "required_runtime_capabilities"} & content.keys()
+    optional = {"initial_camera", "play_check_sha256", "required_runtime_capabilities", "sounds"} & content.keys()
     exact_fields(content, fields | optional, "content")
     if "play_check_sha256" in content and (
         not isinstance(content["play_check_sha256"], str) or not HASH.fullmatch(content["play_check_sha256"])
@@ -1212,10 +1256,17 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     document = decode(scene_data, "authored scene")
     mesh_ids, texture_ids = scene_dependencies(document)
     required = [KINEMATIC_CAPABILITY] if requires_kinematic_motion(document) else []
+    uses_sound, sound_ids = scene_sound_references(document)
+    if uses_sound:
+        if schema != 17:
+            raise ValueError("sound properties require content schema17 and Scene21")
+        required.append(AUDIO_CAPABILITY)
+    if uses_sound != ("sounds" in content):
+        raise ValueError("content sounds must be present exactly for authored or retained sound properties")
     if content.get("required_runtime_capabilities", []) != required or (
         "required_runtime_capabilities" in content and not required
     ):
-        raise ValueError("content runtime requirements do not match its Lua API7 source/history")
+        raise ValueError("content runtime requirements do not match its authored features and history")
     if content.get("initial_camera") is not None and document["scene"].get("player_view") is not None:
         raise ValueError("Remove legacy initial camera framing when the scene owns a player view")
     if (schema == 1 and document["format_version"] > 5
@@ -1237,15 +1288,19 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
             or schema == 17 and document["format_version"] != 21):
         raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13; schema10 requires Scene14; schema11 requires Scene15; schema12 requires Scene16; schema13 requires Scene17; schema14 requires Scene18; schema15 requires Scene19; schema16 requires Scene20; schema17 requires Scene21")
     meshes, textures = content["meshes"], content.get("textures", {})
-    if (not isinstance(meshes, dict) or not isinstance(textures, dict)
-            or len(meshes) + len(textures) > MAX_MESHES):
+    sounds = content.get("sounds", {})
+    if (not isinstance(meshes, dict) or not isinstance(textures, dict) or not isinstance(sounds, dict)
+            or len(meshes) + len(textures) + len(sounds) > MAX_MESHES):
         raise ValueError("content exceeds 64 combined asset mappings")
     if set(meshes) != mesh_ids or set(textures) != texture_ids or set(meshes) & set(textures):
         raise ValueError("content mappings differ from the current scene mesh/texture dependency closure")
+    if set(sounds) != sound_ids or sound_ids.intersection(mesh_ids | texture_ids):
+        raise ValueError("content sounds differ from the scene/historical sound dependency closure or overlap render IDs")
     texture_roles = scene_texture_roles(document)
     source_specs = {}
     for kind, records, pattern, maximum in (("mesh", meshes, MESH_PATH, MIB),
-                                            ("texture", textures, TEXTURE_PATH, MAX_TEXTURE_BYTES)):
+                                            ("texture", textures, TEXTURE_PATH, MAX_TEXTURE_BYTES),
+                                            ("sound", sounds, SOUND_PATH, MAX_SOUND_BYTES)):
         for identity, record in records.items():
             cancelled(cancel_file)
             expected = ({"path", "sha256"}
@@ -1371,15 +1426,18 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     schema = content["schema"]
     supplied_profile = kit["profile"]
     case_hash = content.get("play_check_sha256")
-    if content.get("required_runtime_capabilities") and supplied_profile != KINEMATIC_PROFILE:
+    required = content.get("required_runtime_capabilities", [])
+    if AUDIO_CAPABILITY in required and supplied_profile != AUDIO_PROFILE:
+        raise ValueError("runtime kit does not support one-shot audio; prepare a current runtime kit")
+    if KINEMATIC_CAPABILITY in required and supplied_profile not in (KINEMATIC_PROFILE, AUDIO_PROFILE):
         raise ValueError("runtime kit does not support Lua API7 kinematic move-and-slide; prepare a current runtime kit")
-    if case_hash is not None and supplied_profile not in (PLAY_CHECK_PROFILE, KINEMATIC_PROFILE):
+    if case_hash is not None and supplied_profile not in (PLAY_CHECK_PROFILE, KINEMATIC_PROFILE, AUDIO_PROFILE):
         raise ValueError("runtime kit does not support repeatable_play_checks; prepare a current runtime kit")
-    if schema == 17 and supplied_profile not in (PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE):
+    if schema == 17 and supplied_profile not in (PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE, AUDIO_PROFILE):
         raise ValueError("runtime kit does not support Scene21 authored_player_view; prepare a current runtime kit")
-    if schema == 16 and supplied_profile not in (ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE):
+    if schema == 16 and supplied_profile not in (ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE, AUDIO_PROFILE):
         raise ValueError("runtime kit does not support Scene20 group_local_rotation; prepare a current runtime kit")
-    hierarchy_profiles = (STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE)
+    hierarchy_profiles = (STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE, AUDIO_PROFILE)
     if schema == 15 and supplied_profile not in hierarchy_profiles:
         raise ValueError("runtime kit does not support Scene19 static_assembly_hierarchy; prepare a current runtime kit")
     profile = PRIMITIVE_PROFILE if supplied_profile in hierarchy_profiles else supplied_profile
@@ -1412,6 +1470,8 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     if camera is not None and profile not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
     descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5, 10: 5, 11: 5, 12: 5, 13: 5, 14: 5, 15: 5, 16: 5, 17: 5}[schema]
+    if AUDIO_CAPABILITY in required:
+        descriptor_version = 6
     tick_field = "tick_nanos" if schema >= 7 else "tick_millis"
     fixed_dt = content[tick_field] / (1_000_000_000 if schema >= 7 else 1000)
     descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
@@ -1425,6 +1485,9 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     if schema >= 2:
         descriptor["textures"] = {identity: "resources/" + record["path"]
                                   for identity, record in content["textures"].items()}
+    if descriptor_version == 6:
+        descriptor["sounds"] = {identity: "resources/" + record["path"]
+                                for identity, record in content["sounds"].items()}
     if camera is not None:
         descriptor["initial_camera"] = camera
     with tempfile.TemporaryDirectory(prefix="ruster-creation-") as temporary:
@@ -1452,6 +1515,8 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                   "Linux x86_64; native graphics require a Vulkan-capable driver and desktop session.\n"
                   "ELF prerequisites: " + json.dumps(requirements, sort_keys=True) + "\n"
                   "The saved authored scene bytes and mapped original content resources accompany this runtime.\n")
+        if AUDIO_CAPABILITY in required:
+            readme += "Native one-shot playback uses a Linux audio device. Headless runs remain silent.\n"
         if case_hash is not None:
             readme += "Run ./application --play-check for the saved check and its JSON result.\n"
         package_app.put(stage, "README.txt", readme.encode())

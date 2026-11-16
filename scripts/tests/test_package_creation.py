@@ -57,6 +57,110 @@ class CreationDistributionTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "runtime requirements"):
                     package_creation.source_content(root, None)
 
+    def test_sound_closure_gates_old_kits_and_preserves_no_audio_descriptor(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            document = {"format": "ruster-scene", "format_version": 21,
+                        "scene": {"objects": []}, "undo": [], "redo": [],
+                        "authoring": {"sources": {"plain": {
+                            "language_id": "lua54", "host_api_version": 7,
+                            "text": "-- property-like sound_ref text"
+                        }}, "bindings": {}}}
+            features = [package_creation.KINEMATIC_CAPABILITY]
+            content = {"schema": 17, "title": "Audio", "tick_nanos": 16666667,
+                       "meshes": {}, "textures": {}, "required_runtime_capabilities": features}
+
+            def stage():
+                scene_bytes = package_creation.encoded(document)
+                (root / "scene.json").write_bytes(scene_bytes)
+                content["scene_sha256"] = package_creation.sha256(scene_bytes)
+                (root / "content.json").write_bytes(package_creation.encoded(content))
+                return scene_bytes
+
+            def run_stub(profile, filename):
+                load = {"profile": profile, "elf": {}, "dependencies": []}
+                payload = dict.fromkeys(("runtime", *package_creation.LICENSE_FILES), b"fixture")
+                scene = package_creation.typed_scene(document)
+                response = {"mode": "creation", "title": "Audio", "tick": "0",
+                            "fixed_dt": 0.016666667, "runtime_scene": scene, "authored_scene": scene,
+                            "authored_actions": {}, "runtime_state": {
+                                owner: {} for owner in document["authoring"]["bindings"]},
+                            "initialized": True, "commit_revision": "0", "last_step_commit_revision": None,
+                            "command_receipt": None, "command_receipts": [], "captured_commands": [],
+                            "hud_presentation": "committed", "hud_activation_receipts": [], "hud": {"panels": []}}
+                output = root / filename
+                with patch.object(package_creation, "load_kit", return_value=(load, payload, "kit")), \
+                        patch.object(package_creation, "run_runtime", return_value=response):
+                    package_creation.package(root, root, output)
+                return output
+
+            previous, current = package_creation.KINEMATIC_PROFILE, package_creation.AUDIO_PROFILE
+            package_creation.check_profile(previous)
+            package_creation.check_profile(current)
+            self.assertEqual(previous["descriptor_version"], 5)
+            self.assertEqual(current["descriptor_version"], 6)
+            stage()
+            for profile, filename in ((previous, "old.tar.gz"), (current, "new-legacy.tar.gz")):
+                with tarfile.open(run_stub(profile, filename)) as archive:
+                    manifest = json.load(archive.extractfile("application/app.json"))
+                    self.assertEqual(manifest["version"], 5)
+                    self.assertNotIn("sounds", manifest)
+
+            def binding(asset_id):
+                return {"object_id": "speaker", "source_id": "plain", "enabled": False,
+                        "properties": {"cue": {"type": "sound_ref", "value": {
+                            "asset_id": asset_id, "gain": 0.5}}}}
+
+            document["authoring"]["bindings"]["trigger"] = binding(None)
+            stage()
+            with self.assertRaisesRegex(ValueError, "content sounds"):
+                package_creation.source_content(root, None)
+            content["sounds"] = {}
+            features.append(package_creation.AUDIO_CAPABILITY)
+            stage()
+            with self.assertRaisesRegex(ValueError, "does not support one-shot audio"):
+                run_stub(previous, "refused.tar.gz")
+            self.assertFalse((root / "refused.tar.gz").exists())
+            with tarfile.open(run_stub(current, "unbound.tar.gz")) as archive:
+                self.assertEqual(json.load(archive.extractfile("application/app.json"))["sounds"], {})
+
+            document["undo"] = [{"bindings": [{"id": "old", "before": binding("intro")}]}]
+            document["redo"] = [{"bindings": [{"id": "new", "after": binding("tail")}]}]
+            def write_wav(name, sample):
+                path = f"sounds/{name}.wav"
+                frames = struct.pack("<h", sample)
+                data = (struct.pack("<4sI4s4sIHHIIHH4sI", b"RIFF", 38, b"WAVE", b"fmt ",
+                                    16, 1, 1, 8000, 16000, 2, 16, b"data", 2) + frames)
+                package_app.put(root, path, data)
+                return {"path": path, "sha256": package_creation.sha256(data)}, data
+            intro, intro_bytes = write_wav("0000", 123)
+            tail, tail_bytes = write_wav("0001", -321)
+            content["sounds"] = {"intro": intro}
+            stage()
+            with self.assertRaisesRegex(ValueError, "sound dependency closure"):
+                package_creation.source_content(root, None)
+            content["sounds"]["tail"] = tail
+            features.reverse()
+            stage()
+            with self.assertRaisesRegex(ValueError, "runtime requirements"):
+                package_creation.source_content(root, None)
+            features.reverse()
+            exact_scene = stage()
+            with tarfile.open(run_stub(current, "with-audio.tar.gz")) as archive:
+                manifest = json.load(archive.extractfile("application/app.json"))
+                self.assertEqual(manifest["version"], 6)
+                self.assertEqual(manifest["sounds"], {"intro": "resources/sounds/0000.wav",
+                                                      "tail": "resources/sounds/0001.wav"})
+                self.assertEqual(archive.extractfile("application/resources/scene.json").read(), exact_scene)
+                self.assertEqual(archive.extractfile("application/" + manifest["sounds"]["intro"]).read(),
+                                 intro_bytes)
+                self.assertEqual(archive.extractfile("application/" + manifest["sounds"]["tail"]).read(),
+                                 tail_bytes)
+            (root / tail["path"]).write_bytes(b"wrong")
+            with self.assertRaisesRegex(ValueError, "sound checksum mismatch"):
+                run_stub(current, "bad-wav.tar.gz")
+            self.assertFalse((root / "bad-wav.tar.gz").exists())
+
     def test_hierarchy_content_or_history_requires_scene19(self):
         for version in (18, 19):
             for history in (False, True):
