@@ -16,6 +16,7 @@ use std::{
 };
 
 use eframe::egui;
+use ruster_behavior::play_check::{sidecar_path, CheckIdentity, PlayCheck, MAX_CASE_BYTES};
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use tempfile::TempDir;
@@ -763,7 +764,7 @@ fn verify_helpers(
     kit: &Path,
     initial_camera: bool,
     scene_version: u32,
-) -> Result<(String, String), String> {
+) -> Result<(String, String, bool), String> {
     let raw = read_regular(&kit.join("runtime.json"), MAX_DOCUMENT)?;
     let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
     if manifest["schema"] != 1
@@ -877,8 +878,14 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!("authored_player_view"));
+    let mut play_check_profile = player_view_profile.clone();
+    play_check_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!("repeatable_play_checks"));
     let supplied_profile = &manifest["profile"];
-    let player_view_compatible = supplied_profile == &player_view_profile;
+    let play_check_compatible = supplied_profile == &play_check_profile;
+    let player_view_compatible = supplied_profile == &player_view_profile || play_check_compatible;
     let hierarchy_compatible = supplied_profile == &static_assembly_profile
         || supplied_profile == &animated_assembly_profile
         || player_view_compatible;
@@ -1132,7 +1139,22 @@ fn verify_helpers(
     Ok((
         digest(&raw),
         runtime_hash.ok_or("runtime kit lacks executable inventory")?,
+        play_check_compatible,
     ))
+}
+
+fn read_export_play_check(scene: &Path) -> Result<Option<(PlayCheck, Vec<u8>)>, String> {
+    let path = sidecar_path(scene);
+    match fs::symlink_metadata(&path) {
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("Cannot inspect saved play check: {error}")),
+        Ok(_) => {}
+    }
+    let bytes = ruster_assets::read_regular_file(&path, MAX_CASE_BYTES)
+        .map_err(|error| format!("Cannot read saved play check: {error}"))?;
+    let case =
+        PlayCheck::decode(&bytes).map_err(|error| format!("Invalid saved play check: {error}"))?;
+    Ok(Some((case, bytes)))
 }
 
 fn prepare(
@@ -1185,11 +1207,18 @@ fn prepare(
         }
     }
     cancelled(cancel)?;
-    let (kit_hash, runtime_hash) = verify_helpers(
+    let saved_check = read_export_play_check(&request.scene_path)?;
+    if saved_check.is_some() && scene_version < 11 {
+        return Err("Exporting a saved play check requires Scene11 or newer with the editor's exact fixed tick.".into());
+    }
+    let (kit_hash, runtime_hash, play_check_compatible) = verify_helpers(
         &request.runtime_kit,
         request.initial_camera.is_some(),
         scene_version,
     )?;
+    if saved_check.is_some() && !play_check_compatible {
+        return Err("Runtime kit does not support repeatable play checks; prepare a current Linux runtime kit".into());
+    }
     let temporary = Staging::new(
         tempfile::Builder::new()
             .prefix(".ruster-export-")
@@ -1206,6 +1235,7 @@ fn prepare(
     fs::write(content.join("scene.json"), scene_bytes).map_err(|e| e.to_string())?;
     let mut meshes = BTreeMap::new();
     let mut textures = BTreeMap::new();
+    let mut check_resources = BTreeMap::new();
     let mut source_paths = BTreeMap::new();
     for (ids, folder, extension) in [
         (&mesh_ids, "meshes", "obj"),
@@ -1239,6 +1269,28 @@ fn prepare(
                             "Accepted texture is missing its import role".into(),
                         )
                     })?);
+                }
+                if saved_check.is_some() {
+                    let pin = if mesh_ids.contains(id) {
+                        ruster_assets::ResourcePin::mesh(
+                            &source,
+                            assets.mesh_normal_policy(id).ok_or_else(|| {
+                                ruster_assets::AssetError(
+                                    "Accepted mesh lacks a normal policy".into(),
+                                )
+                            })?,
+                        )
+                    } else {
+                        ruster_assets::ResourcePin::texture(
+                            &source,
+                            assets.texture_role(id).ok_or_else(|| {
+                                ruster_assets::AssetError(
+                                    "Accepted texture lacks a texture role".into(),
+                                )
+                            })?,
+                        )
+                    };
+                    check_resources.insert(id.to_owned(), pin);
                 }
                 if mesh_ids.contains(id) {
                     meshes.insert(id.to_owned(), record);
@@ -1282,6 +1334,19 @@ fn prepare(
     if schema >= 2 {
         content_manifest["textures"] = json!(textures);
     }
+    let check_hash = if let Some((case, bytes)) = saved_check {
+        let resources = ruster_assets::resource_identity(&check_resources);
+        let identity = CheckIdentity::capture(&captured, resources, tick_nanos)?;
+        if case.identity != identity {
+            return Err("Saved play check is stale. Open Play checks to capture the current identity and save again.".into());
+        }
+        let hash = digest(&bytes);
+        fs::write(content.join("play-check.json"), bytes).map_err(|e| e.to_string())?;
+        content_manifest["play_check_sha256"] = json!(hash);
+        Some(hash)
+    } else {
+        None
+    };
     let initial_camera = request.initial_camera.map(camera_value);
     if let Some(camera) = &initial_camera {
         content_manifest["initial_camera"] = camera.clone();
@@ -1348,6 +1413,9 @@ fn prepare(
     }
     let receipt: Value =
         serde_json::from_slice(&stdout).map_err(|e| format!("invalid helper receipt: {e}"))?;
+    if receipt.get("play_check_sha256") != check_hash.as_ref().map(|hash| json!(hash)).as_ref() {
+        return Err("Packaging receipt does not match the staged play check".into());
+    }
     validate_receipt(
         &receipt,
         &archive,
@@ -1608,6 +1676,151 @@ fn publish(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "explicit saved play-check fixture, real old/current runtime kits and disposable output"]
+    fn saved_check_uses_matched_export_and_frozen_resources() {
+        use ruster_behavior::play_check::{Comparison, Expectation, Selection, FORMAT, VERSION};
+        use ruster_scene::{Session, StateValue};
+
+        let fixture = PathBuf::from(std::env::var_os("RUSTER_TEST_PLAY_CHECK_FIXTURE").unwrap());
+        let project = PathBuf::from(std::env::var_os("RUSTER_TEST_PLAY_CHECK_OUTPUT").unwrap());
+        let current_kit = PathBuf::from(std::env::var_os("RUSTER_TEST_PLAY_CHECK_KIT").unwrap());
+        let older_kit = PathBuf::from(std::env::var_os("RUSTER_TEST_PLAY_CHECK_OLD_KIT").unwrap());
+        fs::create_dir(&project).unwrap();
+        for leaf in [
+            "scene.json",
+            "marker.obj",
+            "paint.png",
+            ".ruster-assets.json",
+        ] {
+            fs::copy(
+                fixture.join("resource-fixture/before").join(leaf),
+                project.join(leaf),
+            )
+            .unwrap();
+        }
+        let saved = project.join("scene.json");
+        let saved_bytes = fs::read(&saved).unwrap();
+        let case_path = sidecar_path(&saved);
+        let session = Session::open(&saved).unwrap();
+        let mut assets = ruster_assets::AssetStore::open(&project).unwrap();
+        let ids = ["marker".into(), "paint".into()].into_iter().collect();
+        let accepted = assets.export_snapshot(&ids).unwrap();
+        let check_identity = CheckIdentity::capture(
+            &session,
+            accepted.resource_identity().unwrap(),
+            ruster_behavior::DEFAULT_FIXED_TICK
+                .as_nanos()
+                .try_into()
+                .unwrap(),
+        )
+        .unwrap();
+        let mut case = PlayCheck {
+            format: FORMAT.into(),
+            version: VERSION,
+            name: "Two steps".into(),
+            identity: check_identity,
+            frames: serde_json::from_slice(&fs::read(fixture.join("input.json")).unwrap()).unwrap(),
+            expectations: vec![
+                Expectation {
+                    select: Selection::Translation {
+                        object_id: "subject".into(),
+                    },
+                    comparison: Comparison::Equals {
+                        expected: StateValue::Vec3([2., 0., 0.]),
+                        tolerance: None,
+                    },
+                },
+                Expectation {
+                    select: Selection::State {
+                        binding_id: "subject-movement".into(),
+                        field: "total".into(),
+                    },
+                    comparison: Comparison::Equals {
+                        expected: StateValue::Number(2.),
+                        tolerance: None,
+                    },
+                },
+            ],
+        };
+        let request = |kit: &Path, name: &str, snapshot| Request {
+            identity: identity(),
+            title: "Play check package tracer".into(),
+            scene_path: saved.clone(),
+            scene_bytes: session.snapshot_bytes().unwrap(),
+            assets: Some(snapshot),
+            destination: project.join(format!("{name}.tar.gz")),
+            runtime_kit: kit.to_owned(),
+            mcp_scope: false,
+            initial_camera: None,
+        };
+        let cancel = AtomicBool::new(false);
+        let directory = DirectoryGrant::new(&project).unwrap();
+        let export = |kit: &Path, name: &str| {
+            let prepared = prepare(
+                request(kit, name, accepted.clone()),
+                directory.clone(),
+                &cancel,
+            )
+            .unwrap();
+            let (staging, publication) = prepared.into_parts();
+            let receipt = publish(publication, &identity(), &cancel).unwrap();
+            staging.cleanup().unwrap();
+            receipt
+        };
+
+        assert!(export(&older_kit, "no-case")
+            .get("play_check_sha256")
+            .is_none());
+        let pass_bytes = case.encode().unwrap();
+        fs::write(&case_path, &pass_bytes).unwrap();
+        let error = prepare(
+            request(&older_kit, "old-kit", accepted.clone()),
+            directory.clone(),
+            &cancel,
+        )
+        .err()
+        .unwrap();
+        assert!(
+            error.contains("does not support repeatable play checks"),
+            "{error}"
+        );
+        assert_eq!(
+            export(&current_kit, "pass")["play_check_sha256"],
+            digest(&pass_bytes)
+        );
+        case.expectations[1].comparison = Comparison::Equals {
+            expected: StateValue::Number(3.),
+            tolerance: None,
+        };
+        let failure_bytes = case.encode().unwrap();
+        fs::write(&case_path, &failure_bytes).unwrap();
+        assert_eq!(
+            export(&current_kit, "assertion-fail")["play_check_sha256"],
+            digest(&failure_bytes)
+        );
+
+        fs::copy(
+            fixture.join("resource-fixture/after/paint.png"),
+            project.join("paint.png"),
+        )
+        .unwrap();
+        assets.refresh("paint").unwrap();
+        let stale = assets.export_snapshot(&ids).unwrap();
+        let error = prepare(
+            request(&current_kit, "stale-resource", stale),
+            directory,
+            &cancel,
+        )
+        .err()
+        .unwrap();
+        assert!(error.contains("Saved play check is stale"), "{error}");
+        assert!(!project.join("old-kit.tar.gz").exists());
+        assert!(!project.join("stale-resource.tar.gz").exists());
+        assert_eq!(fs::read(saved).unwrap(), saved_bytes);
+        fs::write(project.join("pass-case.json"), pass_bytes).unwrap();
+    }
+
     #[test]
     #[ignore = "explicit RUSTER_TEST_STATIC_KIT, RUSTER_TEST_PRIMITIVE_KIT and RUSTER_TEST_ASSEMBLY_SCENE"]
     fn static_assembly_uses_real_export_and_relocated_runtime() {
