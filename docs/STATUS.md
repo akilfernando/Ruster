@@ -42,6 +42,12 @@ inspection`. Earlier gate failures in badge test setup, short-window layout
 and renderer fixture constructors were corrected. The human walkthrough and
 live connected-badge visual check remain open.
 
+The Linux release build from `7f8eae1` was installed behind the existing
+**Rot Engine** launcher on 2026-11-16. `cargo build --release --locked -p
+ruster-editor` passed, and the installed executable opened a native editor
+window on isolated workspace 2 while preserving desktop focus. The previous
+binary and launch receipt are retained in the same audit directory.
+
 ## Rot Engine rebrand — 2026-11-16
 
 The [Rot Engine identity](branding/rot/README.md) supplies the launcher
