@@ -69,7 +69,7 @@ Start the editor without a scene argument to see the Rot Engine start screen. **
 
 **View → Theme** and **File → Workspace and shortcuts…** select **System**, **Dark**, **Light** or **OLED black (dark)**. The choice applies immediately and is saved with workspace preferences; files without a theme keep Dark. System follows the platform's reported light/dark mode and falls back to Dark when none is reported. The 3D viewport and its overlays are not themed.
 
-The in-app mark and lockup switch between the supplied Rot on-dark and on-light artwork. The native window and Linux launcher share the pack’s dark 128 px app tile. The workspace uses the on-dark vector mark and the same graphite, frost and oxide palette.
+The mark in the editor, welcome screen and About dialog switches between the supplied Rot on-dark and on-light artwork. The native window and Linux launcher share the pack’s dark 128 px app tile. The workspace uses the on-dark vector mark and the same graphite, frost and oxide palette.
 
 On Linux, install the desktop entry and icon to make the same mark available to the application menu. The entry expects `ruster-editor` on the desktop session's PATH.
 

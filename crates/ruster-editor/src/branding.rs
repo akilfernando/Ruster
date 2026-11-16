@@ -8,8 +8,6 @@ use crate::editor_theme;
 const ICON: &[u8] = include_bytes!("../assets/org.ruster.editor.png");
 const MARK_DARK: &[u8] = include_bytes!("../assets/rot-mark-on-dark.png");
 const MARK_LIGHT: &[u8] = include_bytes!("../assets/rot-mark-on-light.png");
-const LOCKUP_DARK: &[u8] = include_bytes!("../assets/rot-lockup-on-dark.png");
-const LOCKUP_LIGHT: &[u8] = include_bytes!("../assets/rot-lockup-on-light.png");
 const ABOUT: &str = "rusterize_about";
 
 /// The dark app tile, also installed as the Linux launcher icon.
@@ -47,11 +45,11 @@ pub fn mark(ui: &mut egui::Ui, size: f32) {
     ui.add(egui::Image::new((texture.id(), source * scale)).alt_text("Rot Engine logo"));
 }
 
-pub fn lockup(ui: &mut egui::Ui) {
-    let texture = texture(ui.ctx(), "Rot Engine lockup", LOCKUP_DARK, LOCKUP_LIGHT);
-    let source = texture.size_vec2();
-    let size = source * (48.0 / source.y).min(ui.available_width().max(1.0) / source.x);
-    ui.add(egui::Image::new((texture.id(), size)).alt_text("Rot Engine"));
+pub fn identity(ui: &mut egui::Ui) {
+    ui.horizontal(|ui| {
+        mark(ui, 48.0);
+        ui.heading("Rot Engine");
+    });
 }
 
 pub fn is_about_open(ctx: &egui::Context) -> bool {
@@ -74,7 +72,7 @@ pub fn show_about(ctx: &egui::Context) {
     }
     let response = egui::Modal::new(egui::Id::unique(ABOUT)).show(ctx, |ui| {
         ui.set_width((ctx.content_rect().width() - 32.0).clamp(120.0, 280.0));
-        lockup(ui);
+        identity(ui);
         ui.weak(concat!("Version ", env!("CARGO_PKG_VERSION")));
         ui.hyperlink_to("Source and documentation", env!("CARGO_PKG_REPOSITORY"));
         ui.separator();

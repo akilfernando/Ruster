@@ -5083,10 +5083,10 @@ impl SceneEditor {
     }
 
     fn scene_welcome(&mut self, ui: &mut egui::Ui) {
-        let full_lockup = ui.available_width() >= 510.0 && ui.available_height() >= 390.0;
+        let show_identity = ui.available_width() >= 510.0 && ui.available_height() >= 390.0;
         ui.horizontal_wrapped(|ui| {
-            if full_lockup {
-                crate::branding::lockup(ui);
+            if show_identity {
+                crate::branding::identity(ui);
             } else {
                 crate::branding::mark(ui, 24.0);
             }
@@ -5094,7 +5094,7 @@ impl SceneEditor {
                 self.queued_action = Some(Action::Open);
             }
             self.create_menu(ui);
-            if full_lockup {
+            if show_identity {
                 self.recent_scenes_menu(ui, "Recent");
             }
         });

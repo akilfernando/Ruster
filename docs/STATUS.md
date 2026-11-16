@@ -20,7 +20,7 @@
 ## Rot Engine rebrand — 2026-11-16
 
 The [Rot Engine identity](branding/rot/README.md) supplies the launcher
-tile, editor mark, About lockup and oxide controls. Dark and light
+tile, monogram and oxide controls. Dark and light
 welcome and About variants were verified in disposable native windows.
 The installed release launched as **Rot Engine Editor** on the isolated
 workspace. Runtime windows and packaging use the same product name.

@@ -2,7 +2,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/branding/rot/rot-on-dark.svg">
-  <img alt="Rot Engine" src="docs/branding/rot/rot-on-light.svg" width="280">
+  <img alt="Rot Engine" src="docs/branding/rot/rot-on-light.svg" width="96">
 </picture>
 
 An open-source Rust/Vulkan engine project for interactive simulation and visualization. Games are the first proving ground; the shared scene and tooling are designed to support other interactive applications too.
