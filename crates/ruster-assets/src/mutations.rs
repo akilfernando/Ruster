@@ -127,9 +127,9 @@ impl Snapshot {
     }
 }
 #[derive(Debug)]
-struct PreparedRegistry {
-    registry: Registry,
-    bytes: Vec<u8>,
+pub(super) struct PreparedRegistry {
+    pub(super) registry: Registry,
+    pub(super) bytes: Vec<u8>,
 }
 #[derive(Debug)]
 enum Plan {
@@ -410,7 +410,7 @@ impl AssetStore {
             self.identity = AssetStateIdentity::new();
         }
     }
-    fn install_registry(&mut self, prepared: PreparedRegistry) {
+    pub(super) fn install_registry(&mut self, prepared: PreparedRegistry) {
         self.registry = prepared.registry;
         self.baseline = Some(prepared.bytes);
         self.identity = AssetStateIdentity::new();
@@ -446,7 +446,7 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
             };
             validate_id(id)?;
             validate_relative(source)?;
-            if store.registry.assets.contains_key(id) {
+            if store.registry.has_asset_id(id) {
                 return Err(error(format!("asset ID {id:?} already exists")));
             }
             if store.registry.assets.values().any(|record| {
@@ -458,7 +458,7 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
                     "source {source:?} is already registered with this import interpretation; use its existing asset ID"
                 )));
             }
-            if store.registry.assets.len() >= MAX_ASSETS {
+            if store.registry.asset_count() >= MAX_ASSETS {
                 return Err(error("asset catalog limit (64) reached"));
             }
         }
@@ -498,8 +498,8 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
     }
     Ok(())
 }
-fn encode_registry(mut registry: Registry) -> Result<PreparedRegistry, AssetError> {
-    registry.version = 4;
+pub(super) fn encode_registry(mut registry: Registry) -> Result<PreparedRegistry, AssetError> {
+    registry.version = if registry.models.is_empty() { 4 } else { 5 };
     registry.revision = registry
         .revision
         .checked_add(1)

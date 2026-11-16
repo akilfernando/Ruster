@@ -3080,6 +3080,7 @@ name = "ruster-assets"
 version = "0.1.0"
 dependencies = [
  "fs2",
+ "glam 0.30.10",
  "png",
  "serde",
  "serde_json",
