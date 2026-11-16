@@ -99,9 +99,11 @@ impl Icon {
                     })
                     .collect();
                 let end = points[16];
+                let back = (points[15] - end).normalized();
+                let wing = egui::vec2(-back.y, back.x) * 2.6;
                 painter.add(egui::Shape::line(points, stroke));
-                line(end, end + egui::vec2(-3.0, -3.0));
-                line(end, end + egui::vec2(-3.0, 3.0));
+                line(end, end + back * 4.2 + wing);
+                line(end, end + back * 4.2 - wing);
             }
             Self::Scale => {
                 rect(point(-7., -3.), point(3., 7.));

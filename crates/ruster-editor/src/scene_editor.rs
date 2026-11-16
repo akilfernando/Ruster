@@ -5595,8 +5595,11 @@ impl SceneEditor {
             let remaining = ui.available_height();
             // Reserve 160 points for compact tools/runtime/view chrome and
             // about 180 for the viewport, after global status/menu bars.
-            let max_height = (remaining - 340.0).clamp(32.0, 200.0);
-            let default_height = (ctx.content_rect().height() * 0.25).clamp(80.0, 200.0);
+            let max_height = (remaining - 340.0).clamp(32.0, 280.0);
+            let min_height = (ctx.content_rect().height() * 0.15)
+                .clamp(96.0, 160.0)
+                .min(max_height);
+            let default_height = (ctx.content_rect().height() * 0.22).clamp(108.0, 250.0);
             let preferred_height = egui::containers::panel::PanelState::load(
                 &ctx,
                 ui.scope_id().with("content_browser"),
@@ -5613,9 +5616,10 @@ impl SceneEditor {
                 egui::Panel::bottom("content_browser")
                     .default_size(preferred_height)
                     .resizable(true)
-                    .size_range(32.0..=max_height)
+                    .size_range(min_height..=max_height)
             };
             panel.show(ui, |ui| {
+                ui.set_min_height(ui.available_height());
                 egui::ScrollArea::vertical()
                     .id_salt("content_panel_scroll")
                     .min_scrolled_height(0.0)
@@ -5996,6 +6000,7 @@ impl SceneEditor {
             }
             self.paint_hud_overlay(ui, hud_rect, shown_frame.as_ref());
             sidebars.show(self, ui);
+            sidebars::round_viewport(ui, hud_rect);
         });
         self.process_queued_selection();
         self.observe_view();
@@ -11597,7 +11602,7 @@ mod tests {
                         && shape.clip_rect.top() >= pinned.bottom();
                     is_inspector.then_some(shape.clip_rect)
                 })
-                .expect("Inspector must expose its scroll clip above the panel fade");
+                .expect("Inspector must expose its scroll clip");
             assert!(
                 scroll_clip.height() >= 26.0,
                 "recovery navigation must leave a usable Inspector scroll region at {size:?}: {scroll_clip:?}"

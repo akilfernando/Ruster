@@ -21,6 +21,16 @@
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
 
+## Viewport and dock refinement — 2026-11-16
+
+Objects and Inspector now extend to the Content dock with opaque fills. The
+resizable Content dock starts taller, and the exposed viewport has four
+rounded corners. The Rotate icon follows the direction of its arc. The
+existing viewport projection and compact panel constraints remain in use.
+The affected change gate passed (208 editor tests, 13 ignored). Native
+captures confirmed the layout at 1280×800 and 1600×1000. The optimized release
+is installed.
+
 ## Editor toolbar refinement — 2026-11-16
 
 Move, Rotate, Scale, Edit Player View, Duplicate and Delete use icons in the

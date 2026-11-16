@@ -13,7 +13,6 @@ pub(super) struct SceneSidebars {
     panels: [Option<Panel>; 2],
     visible_scene: egui::Rect,
     constrained: bool,
-    fade_height: f32,
 }
 
 impl SceneSidebars {
@@ -24,14 +23,9 @@ impl SceneSidebars {
             (!editor.ai_workspace && prefs.hierarchy_visible).then_some(prefs.hierarchy_width),
             (!editor.ai_workspace && prefs.inspector_visible).then_some(prefs.inspector_width),
         );
-        // Scale the decorative area down first so compact Inspectors retain
-        // their fixed recovery controls and a useful scroll region.
-        let decoration = ((viewport.height() - 155.0) / 65.0).clamp(0.0, 1.0);
-        let exposed = decoration * 35.0;
-        let fade_height = decoration * 30.0;
         let mut visible_scene = viewport;
         let mut panel = |width: f32, side: Side, inspector| {
-            if width <= 0.0 || viewport.height() <= exposed {
+            if width <= 0.0 || viewport.height() <= 0.0 {
                 return None;
             }
             // Keep at least one unoccluded column even on forcibly tiny windows.
@@ -53,7 +47,7 @@ impl SceneSidebars {
             };
             let rect = egui::Rect::from_min_max(
                 egui::pos2(left, viewport.top()),
-                egui::pos2(right, viewport.bottom() - exposed),
+                egui::pos2(right, viewport.bottom()),
             );
             Some(Panel {
                 rect,
@@ -69,7 +63,6 @@ impl SceneSidebars {
             panels,
             visible_scene,
             constrained,
-            fade_height,
         }
     }
 
@@ -94,7 +87,7 @@ impl SceneSidebars {
         })
     }
 
-    /// This uninterrupted crop excludes editor controls and their translucent fill.
+    /// This crop excludes the opaque side panels and their controls.
     /// Picking and Fit continue to use the full scene rectangle and projection.
     pub(super) fn visible_scene(&self) -> egui::Rect {
         self.visible_scene
@@ -110,12 +103,9 @@ impl SceneSidebars {
             let id = ui.scope_id().with(name);
             ui.interact(panel.rect, id.with("panel"), egui::Sense::click_and_drag());
 
-            let fade_height = self.fade_height;
-            let mut content = panel.rect.shrink(8.0);
-            content.max.y = (content.max.y - fade_height).max(content.min.y);
+            let content = panel.rect.shrink(8.0);
             let palette = crate::editor_theme::colors(ui);
-            let painter = ui.painter().with_clip_rect(panel.rect);
-            paint_fill(&painter, panel.rect, fade_height, palette.surface);
+            ui.painter().rect_filled(panel.rect, 0.0, palette.surface);
 
             if content.is_positive() {
                 let mut child = ui.new_child(
@@ -168,22 +158,36 @@ impl SceneSidebars {
     }
 }
 
-fn paint_fill(painter: &egui::Painter, rect: egui::Rect, height: f32, color: egui::Color32) {
-    let fade_top = rect.bottom() - height;
-    let top = egui::Rect::from_min_max(rect.min, egui::pos2(rect.right(), fade_top));
-    painter.rect_filled(top, 0.0, color);
-    let mut fade = egui::Mesh::default();
-    for (position, color) in [
-        (top.left_bottom(), color),
-        (top.right_bottom(), color),
-        (rect.right_bottom(), egui::Color32::TRANSPARENT),
-        (rect.left_bottom(), egui::Color32::TRANSPARENT),
-    ] {
-        fade.colored_vertex(position, color);
+/// Cover the outside of each small corner arc with the surrounding chrome.
+/// The renderer, picking and capture still agree on the rectangular viewport.
+pub(super) fn round_viewport(ui: &egui::Ui, rect: egui::Rect) {
+    let radius = (rect.width().min(rect.height()) * 0.5).clamp(0.0, 7.0);
+    if radius <= 0.0 {
+        return;
     }
-    fade.add_triangle(0, 1, 2);
-    fade.add_triangle(0, 2, 3);
-    painter.add(fade);
+    let color = crate::editor_theme::colors(ui).surface;
+    let mut mask = egui::Mesh::default();
+    for (corner, inward) in [
+        (rect.left_top(), egui::vec2(1.0, 1.0)),
+        (rect.right_top(), egui::vec2(-1.0, 1.0)),
+        (rect.right_bottom(), egui::vec2(-1.0, -1.0)),
+        (rect.left_bottom(), egui::vec2(1.0, -1.0)),
+    ] {
+        let start = mask.vertices.len() as u32;
+        mask.colored_vertex(corner, color);
+        for step in 0..=8 {
+            let angle = std::f32::consts::FRAC_PI_2 * step as f32 / 8.0;
+            let offset = egui::vec2(
+                inward.x * (1.0 - angle.cos()),
+                inward.y * (1.0 - angle.sin()),
+            );
+            mask.colored_vertex(corner + offset * radius, color);
+        }
+        for step in 0..8 {
+            mask.add_triangle(start, start + 1 + step, start + 2 + step);
+        }
+    }
+    ui.painter().add(mask);
 }
 
 #[cfg(test)]
@@ -191,7 +195,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn panel_fade_blocks_zoom_but_exposed_strip_uses_the_full_scene_camera() {
+    fn full_height_panels_block_zoom_while_center_uses_the_scene_camera() {
         let mut editor =
             SceneEditor::new(ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap());
         let ctx = egui::Context::default();
@@ -225,10 +229,9 @@ mod tests {
         assert_eq!(inspector.right(), viewport.right());
         assert_eq!(crop.left(), hierarchy.right());
         assert_eq!(crop.right(), inspector.left());
-        assert_eq!(viewport.bottom() - hierarchy.bottom(), 35.0);
+        assert_eq!(viewport.bottom(), hierarchy.bottom());
         assert_eq!(hierarchy.bottom(), inspector.bottom());
 
-        let point = |y| egui::pos2(hierarchy.center().x, y);
         let wheel = |pos| {
             vec![
                 egui::Event::PointerMoved(pos),
@@ -242,13 +245,16 @@ mod tests {
             ]
         };
         let camera = editor.navigation.camera.unwrap();
-        let fade = point(hierarchy.bottom() - 12.0);
-        frame(&mut editor, wheel(fade));
+        let panel_bottom = egui::pos2(hierarchy.center().x, hierarchy.bottom() - 12.0);
+        frame(&mut editor, wheel(panel_bottom));
         assert_eq!(editor.navigation.camera.unwrap(), camera);
 
-        let exposed = point(hierarchy.bottom() + 12.0);
-        frame(&mut editor, vec![egui::Event::PointerMoved(exposed)]);
-        frame(&mut editor, wheel(exposed));
+        let viewport_bottom = egui::pos2(crop.center().x, crop.bottom() - 12.0);
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(viewport_bottom)],
+        );
+        frame(&mut editor, wheel(viewport_bottom));
         assert!(editor.navigation.camera.unwrap().distance < camera.distance);
 
         let player_view = ruster_scene::PlayerView {
