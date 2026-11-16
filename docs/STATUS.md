@@ -8,7 +8,14 @@ normal. The new bounded goal adds reusable tangential motion and corner
 handling without a dynamic physics-world dependency. First proof runs the
 production Lua Step path on diagonal wall, corner and reverse motion, plus
 late-error rollback. Implementation starts in `feat/kinematic-slide-20261116`.
-The production tracer and creator/export evidence are pending.
+Root reproduced the existing API3 sweep on the thin-wall course. Requested
+motion `(4,0,2)` stopped at X=1.64990, Z=0.82495. The independent candidate
+oracle expects the same X clearance and continued travel to Z=2, then
+corner stop and reverse. The baseline, exact hashes and analytic oracle
+for the axis-aligned and shared-yaw cases are retained at
+`/home/akilf/Projects/Ruster-Audits/kinematic-slide-20261116.Okicbf`.
+Astra's initial technical scope uses the pinned Parry path. The new
+production tracer and creator/export evidence are pending.
 
 ## Repeatable play checks integrated locally — 2026-11-16
 

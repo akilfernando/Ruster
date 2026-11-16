@@ -162,7 +162,10 @@ capability remain primary, and checks do not certify a whole game.
 | Alongside subsequent slices | Visual baseline and usability | Normal maps/tangents, metallic/environment lighting and transparency remain required candidate slices; evaluate the next asset's actual fidelity blocker. Preserve keyboard, focus, recovery, ordinary human and MCP parity in every slice. |
 | After representative content | Measured scale/LOD, then later ray tracing | Profile a named useful scene; choose culling/LOD/resource changes against equal-quality evidence. No unsupported Rust performance advantage. |
 
-Rows 2–5 are provisional ordering, not one implementation goal. After each slice,
+The [active kinematic movement goal](plans/KINEMATIC-MOVE-AND-SLIDE.md)
+selects the movement branch of row 2 for one sphere and stationary
+primitive blockers. Existing overlap and typed state cover the selected
+occupancy workflow. Rows 3–5 remain provisional. After each slice,
 compare the next blocker with the remaining [foundation packages](plans/CREATOR-FOUNDATIONS.md)
 and record any reorder and rationale. A short acceptance fixture is not the
 substantial integrated test project: retain the user's foundation-first direction
