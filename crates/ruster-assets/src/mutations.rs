@@ -140,14 +140,21 @@ pub struct AssetAdoption {
 enum Snapshot {
     Mesh(Arc<Mesh>),
     Texture(Arc<Texture>),
+    Sound(Arc<AudioClip>),
 }
 impl Snapshot {
-    fn encode(&self, hash: &str, policy: Option<MeshNormalPolicy>) -> Result<Vec<u8>, AssetError> {
+    fn encode(
+        &self,
+        hash: &str,
+        policy: Option<MeshNormalPolicy>,
+        source: Vec<u8>,
+    ) -> Result<Vec<u8>, AssetError> {
         match self {
             Self::Mesh(mesh) => {
                 encode_mesh_cache(hash, mesh, policy.expect("validated mesh policy"))
             }
             Self::Texture(texture) => texture::encode_cache(hash, texture),
+            Self::Sound(_) => Ok(source),
         }
     }
 }
@@ -272,6 +279,7 @@ impl AssetStore {
             baseline: self.baseline.clone(),
             meshes: self.meshes.clone(),
             textures: self.textures.clone(),
+            sounds: self.sounds.clone(),
             infos: self.infos.clone(),
             identity: self.identity.clone(),
         }
@@ -441,6 +449,16 @@ impl AssetStore {
                 }
                 changed
             }
+            Snapshot::Sound(sound) => {
+                let changed = self
+                    .sounds
+                    .get(id)
+                    .is_none_or(|old| !Arc::ptr_eq(old, &sound));
+                if changed {
+                    self.sounds.insert(id.into(), sound);
+                }
+                changed
+            }
         };
         if changed {
             self.identity = AssetStateIdentity::new();
@@ -541,7 +559,17 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
     Ok(())
 }
 pub(super) fn encode_registry(mut registry: Registry) -> Result<PreparedRegistry, AssetError> {
-    registry.version = if registry.models.is_empty() { 4 } else { 5 };
+    registry.version = if registry
+        .assets
+        .values()
+        .any(|record| record.kind == AssetKind::Sound)
+    {
+        6
+    } else if registry.models.is_empty() {
+        4
+    } else {
+        5
+    };
     registry.revision = registry
         .revision
         .checked_add(1)
@@ -689,11 +717,16 @@ impl AssetRequest {
             }),
             refresh_diagnostic: refresh,
         };
-        let snapshot = if kind == AssetKind::Texture
-            && record.and_then(|r| r.hash.as_ref()) == Some(&hash)
-            && self.store.textures.contains_key(id)
-        {
-            Snapshot::Texture(self.store.textures[id].clone())
+        let unchanged = record.and_then(|r| r.hash.as_ref()) == Some(&hash);
+        let cached = unchanged
+            .then(|| match kind {
+                AssetKind::Texture => self.store.textures.get(id).cloned().map(Snapshot::Texture),
+                AssetKind::Sound => self.store.sounds.get(id).cloned().map(Snapshot::Sound),
+                AssetKind::Mesh => None,
+            })
+            .flatten();
+        let snapshot = if let Some(cached) = cached {
+            cached
         } else {
             let payload = parse_source(source, kind, mesh_normal_policy, texture_role, &bytes)
                 .map_err(failure)?;
@@ -725,10 +758,18 @@ impl AssetRequest {
                         Snapshot::Texture(Arc::new(texture))
                     }
                 }
+                Payload::Sound(sound) => Snapshot::Sound(
+                    self.store
+                        .sounds
+                        .get(id)
+                        .filter(|old| old.as_ref() == &sound)
+                        .cloned()
+                        .unwrap_or_else(|| Arc::new(sound)),
+                ),
             }
         };
         let cache = snapshot
-            .encode(&hash, mesh_normal_policy)
+            .encode(&hash, mesh_normal_policy, bytes)
             .map_err(failure)?;
         let registry = if let Some(record) = record {
             if record.hash.as_ref() == Some(&hash) {
@@ -889,6 +930,7 @@ fn publish_plan(
                     match kind {
                         AssetKind::Mesh => "meshes",
                         AssetKind::Texture => "textures",
+                        AssetKind::Sound => "sounds",
                     },
                     true,
                 )?;
@@ -899,6 +941,7 @@ fn publish_plan(
                     AssetKind::Texture => texture_role
                         .expect("validated texture role")
                         .cache_version(),
+                    AssetKind::Sound => SOUND_CACHE_VERSION,
                 };
                 atomic_write(
                     &directory,

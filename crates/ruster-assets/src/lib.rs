@@ -1,4 +1,4 @@
-//! Bounded, project-local mesh and opaque texture import. Sources are authoritative; caches are disposable.
+//! Bounded, project-local mesh, opaque texture and WAV import. Sources are authoritative; caches are disposable.
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -16,9 +16,14 @@ pub const MAX_TRIANGLES: usize = 32_768;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 pub const MAX_ASSETS: usize = 64;
 pub const MAX_RESOLVED_BYTES: usize = 48 * 1024 * 1024;
+mod audio;
+use audio::SOUND_CACHE_VERSION;
 mod glb;
 mod glb_catalog;
 mod mutations;
+pub use audio::{
+    decode_wav, AudioClip, MAX_SOUND_RESOLVED_BYTES, MAX_SOUND_SECONDS, MAX_SOUND_SOURCE_BYTES,
+};
 pub use glb::{ModelInfo, ModelMaterial, ModelNode, MAX_GLB_SOURCE_BYTES};
 mod texture;
 pub use mutations::{
@@ -93,6 +98,7 @@ impl MeshNormalPolicy {
 pub enum AssetKind {
     Mesh,
     Texture,
+    Sound,
 }
 impl AssetKind {
     fn from_source(source: &str) -> Result<Self, AssetError> {
@@ -100,14 +106,19 @@ impl AssetKind {
             Ok(Self::Mesh)
         } else if source.ends_with(".png") {
             Ok(Self::Texture)
+        } else if source.ends_with(".wav") {
+            Ok(Self::Sound)
         } else {
-            Err(error("source must use a supported .obj or .png extension"))
+            Err(error(
+                "source must use a supported .obj, .png or .wav extension",
+            ))
         }
     }
     fn source_limit(self) -> usize {
         match self {
             Self::Mesh => MAX_SOURCE_BYTES,
             Self::Texture => MAX_TEXTURE_SOURCE_BYTES,
+            Self::Sound => MAX_SOUND_SOURCE_BYTES,
         }
     }
 }
@@ -252,11 +263,21 @@ struct Version3Registry {
 fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     let version = value.get("version").and_then(serde_json::Value::as_u64);
-    if version != Some(5) && value.get("models").is_some() {
-        return Err(error("models require asset catalog version 5"));
+    if !matches!(version, Some(5 | 6)) && value.get("models").is_some() {
+        return Err(error("models require asset catalog version 5 or 6"));
     }
     if let Some(assets) = value.get("assets").and_then(serde_json::Value::as_object) {
         for record in assets.values() {
+            if record.get("kind").and_then(serde_json::Value::as_str) == Some("sound") {
+                if version != Some(6) {
+                    return Err(error("sound assets require asset catalog version 6"));
+                }
+                if record.get("mesh_normal_policy").is_some()
+                    || record.get("texture_role").is_some()
+                {
+                    return Err(error("sound assets omit render interpretation fields"));
+                }
+            }
             if matches!(version, Some(1..=3)) && record.get("texture_role").is_some() {
                 return Err(error("texture_role requires asset catalog version 4"));
             }
@@ -355,9 +376,10 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
 enum Payload {
     Mesh(Mesh),
     Texture(Texture),
+    Sound(AudioClip),
 }
 
-/// A bounded in-memory last-good mesh/texture catalog. Every mutation checks both the
+/// A bounded in-memory last-good mesh, texture and sound catalog. Every mutation checks both the
 /// expected revision and complete on-disk catalog baseline under an advisory lock.
 #[derive(Debug)]
 pub struct AssetStore {
@@ -367,6 +389,7 @@ pub struct AssetStore {
     baseline: Option<Vec<u8>>,
     meshes: BTreeMap<String, Arc<Mesh>>,
     textures: BTreeMap<String, Arc<Texture>>,
+    sounds: BTreeMap<String, Arc<AudioClip>>,
     infos: BTreeMap<String, Arc<AssetInfo>>,
 }
 
@@ -401,6 +424,13 @@ pub struct ResourcePin {
 }
 
 impl ResourcePin {
+    pub fn sound(bytes: &[u8]) -> Self {
+        Self {
+            source_sha256: Sha256::digest(bytes).into(),
+            interpretation: 5,
+        }
+    }
+
     pub fn mesh(bytes: &[u8], policy: MeshNormalPolicy) -> Self {
         let interpretation = match policy {
             MeshNormalPolicy::Flat => 1,
@@ -450,6 +480,11 @@ impl ExportSnapshot {
         self.sources.keys().map(String::as_str)
     }
 
+    /// Kind of a selected accepted resource.
+    pub fn kind(&self, id: &str) -> Option<AssetKind> {
+        self.sources.get(id).map(|source| source.kind)
+    }
+
     /// Frozen interpretation of an accepted mesh; textures/unknown IDs return None.
     pub fn mesh_normal_policy(&self, id: &str) -> Option<MeshNormalPolicy> {
         self.sources
@@ -470,6 +505,8 @@ impl ExportSnapshot {
                 ResourcePin::mesh(&bytes, policy)
             } else if let Some(role) = self.texture_role(id) {
                 ResourcePin::texture(&bytes, role)
+            } else if self.kind(id) == Some(AssetKind::Sound) {
+                ResourcePin::sound(&bytes)
             } else {
                 return Err(error(format!(
                     "resource {id:?} has no accepted interpretation"
@@ -484,7 +521,7 @@ impl ExportSnapshot {
         Ok(resource_identity(&resources))
     }
 
-    /// Read at most MAX_ASSETS sources, using the mesh/texture source-byte bounds. Catalog
+    /// Read at most MAX_ASSETS sources, using the per-kind source-byte bounds. Catalog
     /// equality is checked before and after reading against the editor's exact
     /// accepted baseline. Source hashes preserve that same accepted-content
     /// boundary without parsing the already validated content again. Like the shared
@@ -566,6 +603,7 @@ impl AssetStore {
             baseline,
             meshes: BTreeMap::new(),
             textures: BTreeMap::new(),
+            sounds: BTreeMap::new(),
             infos: BTreeMap::new(),
         };
         // Recover last-good derived content before inspecting mutable sources.
@@ -586,6 +624,9 @@ impl AssetStore {
                             record.texture_role.expect("validated texture role"),
                         )
                         .map(|texture| (Payload::Texture(texture), true)),
+                    AssetKind::Sound => store
+                        .read_sound_cache(hash)
+                        .map(|sound| (Payload::Sound(sound), true)),
                 };
                 if let Ok((payload, current)) = cached {
                     if store.check_payload_budget(&id, &payload).is_ok() {
@@ -603,7 +644,7 @@ impl AssetStore {
                         info.diagnostic = Some(match record.kind {
                             // These bytes are not accepted. Avoid decoding/mip work
                             // whose result would be discarded; Refresh validates them.
-                            AssetKind::Texture => {
+                            AssetKind::Texture | AssetKind::Sound => {
                                 "Source changed; Refresh to validate and accept".into()
                             }
                             // Preserve the existing mesh-open format diagnostics.
@@ -634,6 +675,7 @@ impl AssetStore {
                                         &hash,
                                         record.mesh_normal_policy,
                                         &payload,
+                                        &bytes,
                                     ) {
                                         info.diagnostic =
                                             Some(format!("cache rebuild failed: {e}"));
@@ -683,6 +725,12 @@ impl AssetStore {
     pub fn mesh_snapshots(&self) -> BTreeMap<String, Arc<Mesh>> {
         self.meshes.clone()
     }
+    pub fn sound(&self, id: &str) -> Option<&AudioClip> {
+        self.sounds.get(id).map(Arc::as_ref)
+    }
+    pub fn sound_snapshots(&self) -> BTreeMap<String, Arc<AudioClip>> {
+        self.sounds.clone()
+    }
     pub fn texture(&self, id: &str) -> Option<&Texture> {
         self.textures.get(id).map(Arc::as_ref)
     }
@@ -730,6 +778,7 @@ impl AssetStore {
             if !match record.kind {
                 AssetKind::Mesh => self.meshes.contains_key(id),
                 AssetKind::Texture => self.textures.contains_key(id),
+                AssetKind::Sound => self.sounds.contains_key(id),
             } {
                 return Err(error(format!(
                     "asset {id:?} has no accepted content; repair its source and Refresh before exporting"
@@ -827,6 +876,18 @@ impl AssetStore {
                     ));
                 }
             }
+            Payload::Sound(sound) => {
+                let total = self
+                    .sounds
+                    .iter()
+                    .filter(|(key, _)| key.as_str() != id)
+                    .map(|(_, sound)| sound.payload_bytes())
+                    .sum::<usize>()
+                    + sound.payload_bytes();
+                if total > MAX_SOUND_RESOLVED_BYTES {
+                    return Err(error("resolved WAV samples exceed 64 MiB project limit"));
+                }
+            }
         }
         Ok(())
     }
@@ -846,6 +907,11 @@ impl AssetStore {
                     self.textures.insert(id.into(), Arc::new(texture));
                 }
             }
+            Payload::Sound(sound) => {
+                if self.sounds.get(id).is_none_or(|old| old.as_ref() != &sound) {
+                    self.sounds.insert(id.into(), Arc::new(sound));
+                }
+            }
         }
     }
     fn write_payload_cache(
@@ -853,13 +919,35 @@ impl AssetStore {
         hash: &str,
         policy: Option<MeshNormalPolicy>,
         payload: &Payload,
+        source: &[u8],
     ) -> Result<(), AssetError> {
         match payload {
             Payload::Mesh(mesh) => {
                 self.write_cache(hash, mesh, policy.expect("validated mesh policy"))
             }
             Payload::Texture(texture) => self.write_texture_cache(hash, texture),
+            Payload::Sound(_) => {
+                let directory = self.kind_cache_directory("sounds", true)?;
+                atomic_write(
+                    &directory,
+                    &directory.join(format!("v1-{hash}.bin")),
+                    source,
+                )
+            }
         }
+    }
+    // The accepted encoded WAV is already bounded and smaller than decoded PCM.
+    // Keep a verified byte copy for last-good preview across catalog reopens.
+    fn read_sound_cache(&self, hash: &str) -> Result<AudioClip, AssetError> {
+        let directory = self.kind_cache_directory("sounds", false)?;
+        let cached = read_bounded(
+            &directory.join(format!("v{SOUND_CACHE_VERSION}-{hash}.bin")),
+            MAX_SOUND_SOURCE_BYTES,
+        )?;
+        if digest(&cached) != hash {
+            return Err(error("WAV cache source SHA-256 mismatch"));
+        }
+        decode_wav(&cached)
     }
     fn write_texture_cache(&self, hash: &str, texture: &Texture) -> Result<(), AssetError> {
         let directory = self.kind_cache_directory("textures", true)?;
@@ -1103,6 +1191,7 @@ fn parse_source(
         AssetKind::Texture => {
             decode_png_with_role(bytes, role.expect("validated texture role")).map(Payload::Texture)
         }
+        AssetKind::Sound => decode_wav(bytes).map(Payload::Sound),
     }
     .map_err(|e| error(format!("source {source:?}: {e}")))
 }
@@ -1276,15 +1365,22 @@ fn confined_path(
     Ok(path)
 }
 fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
-    if registry.format != "ruster-assets" || !matches!(registry.version, 1..=5) {
+    if registry.format != "ruster-assets" || !matches!(registry.version, 1..=6) {
         return Err(error(
-            "unsupported asset catalog format/version; expected ruster-assets version 1 through 5",
+            "unsupported asset catalog format/version; expected ruster-assets version 1 through 6",
         ));
     }
     if registry.version == 5 && registry.models.is_empty() {
         return Err(error(
             "unsupported asset catalog version 5 without static models",
         ));
+    }
+    let has_sound = registry
+        .assets
+        .values()
+        .any(|record| record.kind == AssetKind::Sound);
+    if (registry.version == 6) != has_sound {
+        return Err(error("asset catalog version 6 requires sound assets"));
     }
     if registry.asset_count() > MAX_ASSETS {
         return Err(error("asset catalog exceeds 64 assets"));
@@ -1300,12 +1396,12 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
         }
         if (record.kind == AssetKind::Mesh) != record.mesh_normal_policy.is_some() {
             return Err(error(
-                "mesh assets require mesh_normal_policy; textures must omit it",
+                "mesh assets require mesh_normal_policy; non-mesh assets omit it",
             ));
         }
         if (record.kind == AssetKind::Texture) != record.texture_role.is_some() {
             return Err(error(
-                "texture assets require texture_role; meshes must omit it",
+                "texture assets require texture_role; non-texture assets omit it",
             ));
         }
         if !sources.insert((

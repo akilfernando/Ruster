@@ -407,6 +407,7 @@ impl Decoder<'_> {
         match &resource.payload {
             Payload::Mesh(mesh) => self.mesh_bytes += mesh.payload_bytes(),
             Payload::Texture(texture) => self.texture_bytes += texture.payload_bytes(),
+            Payload::Sound(_) => return Err(error("GLB cannot own WAV audio")),
         }
         if self.mesh_bytes > MAX_RESOLVED_BYTES
             || self.texture_bytes > MAX_TEXTURE_RESOLVED_BYTES

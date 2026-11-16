@@ -1,16 +1,17 @@
-# Owned mesh and texture sources
+# Owned mesh, texture and sound sources
 
-`ruster-assets` provides bounded project-local Wavefront OBJ meshes and role-aware PNG textures. Sources remain ordinary creator-owned files. A stable asset ID identifies a typed entry in `.ruster-assets.json` version4 independently of its filename. Genuine catalog1–3 remain readable without an implicit rewrite; their texture interpretation remains BaseColor. V3b adds an explicit immutable Roughness role inside the same texture owner/worker path. These source APIs do not by themselves establish the complete editor/MCP/render/runtime workflow.
+`ruster-assets` provides bounded project-local Wavefront OBJ meshes, role-aware PNG textures and short PCM WAV sounds. Sources remain ordinary creator-owned files. A stable asset ID identifies a typed entry in `.ruster-assets.json` independently of its filename. Genuine catalog1–3 remain readable without an implicit rewrite; their texture interpretation remains BaseColor. V3b adds an explicit immutable Roughness role inside the same texture owner/worker path. These source APIs do not by themselves establish the complete editor/MCP/render/runtime workflow.
 
 ```sh
 cargo run --locked -p ruster-assets -- import /path/to/project roof meshes/roof.obj
 cargo run --locked -p ruster-assets -- import /path/to/project paint textures/paint.png
+cargo run --locked -p ruster-assets -- import /path/to/project cue sounds/cue.wav
 cargo run --locked -p ruster-assets -- inspect /path/to/project
 cargo run --locked -p ruster-assets -- refresh /path/to/project paint
 cargo run --locked -p ruster-assets -- rename /path/to/project paint textures/paint-renamed.png
 ```
 
-Create source directories yourself. Import infers Mesh/Texture from the case-sensitive `.obj`/`.png` extension. `rename` physically moves a source, preserves its ID/kind/accepted hash, and refuses an existing destination or a kind-changing extension. A mesh source may be imported under distinct IDs with different immutable normal policies; a PNG source may have distinct IDs for BaseColor and Roughness. The same source and interpretation cannot be registered twice. Shared-source Rename is rejected rather than orphaning another identity. A no-op Rename remains valid. Import/rename persist the catalog immediately; scene save/Undo is a separate transaction. There is no file watcher or automatic acceptance of changed source bytes.
+Create source directories yourself. Import infers Mesh, Texture or Sound from the case-sensitive `.obj`, `.png` or `.wav` extension. `rename` physically moves a source, preserves its ID/kind/accepted hash, and refuses an existing destination or a kind-changing extension. A mesh source may be imported under distinct IDs with different immutable normal policies; a PNG source may have distinct IDs for BaseColor and Roughness. The same source and interpretation cannot be registered twice. Shared-source Rename is rejected rather than orphaning another identity. A no-op Rename remains valid. Import/rename persist the catalog immediately; scene save/Undo is a separate transaction. There is no file watcher or automatic acceptance of changed source bytes.
 
 ## OBJ and UV policy
 
@@ -44,13 +45,32 @@ A complete chunk preflight checks CRCs, bounded lengths, required header/end, co
 
 BaseColor mip arithmetic and version1 cache bytes are unchanged: average RGB in linear light and encode back to sRGB, using area coverage to retain odd final rows/columns. An equal black/white average encodes188. Roughness uses the same complete area-weighted footprints but averages raw perceptual roughness bytes arithmetically and rounds once; black/white produces128 and `[0,0,255]` along either axis produces85. This is a declared filtering approximation, not exact BRDF integration or specular antialiasing.
 
-`Texture::payload_bytes()` sums actual retained mip bytes. A full2048² R8 chain uses5,592,405bytes; RGBA8 uses four times that. Limits remain24MiB per chain and64MiB across **all accepted latest catalog texture identities, across both roles**; at most64combined mesh/texture records are supported. Distinct roles of the same source count separately. Shared material users do not create another asset owner. The replacement check excludes only the replaced ID before adding its candidate payload.
+`Texture::payload_bytes()` sums actual retained mip bytes. A full2048² R8 chain uses5,592,405bytes; RGBA8 uses four times that. Limits remain24MiB per chain and64MiB across **all accepted latest catalog texture identities, across both roles**; at most64combined asset records are supported. Distinct roles of the same source count separately. Shared material users do not create another asset owner. The replacement check excludes only the replaced ID before adding its candidate payload.
 
 The64MiB figure is not a lifetime/peak bound: staged candidates, decoder buffers, older immutable Arc snapshots, painted/runtime preview owners, retired stores, containers and GPU resources can coexist. The existing single texture map and bounded worker/publication/fenced-retirement ownership remain; no second roughness store or worker is added. A roughness RGB/RGBA decode can temporarily need four output bytes per pixel even though its accepted pixels use R8. That checked raw output is separate from the chain; PNG internal allocations retain the existing32MiB best-effort decoder limit. Root resource verification must account for these owners separately.
 
+## Short WAV sound sources
+
+`decode_wav` accepts RIFF WAV with signed 16-bit PCM, mono or stereo,
+sample rates from 8,000 to 48,000 Hz, and a nonempty duration of at most
+10 seconds. Encoded bytes are limited to 2 MiB. Decode returns immutable
+stereo `f32` frames at the original rate. Mono duplicates its channel.
+Accepted sound identities share a 64 MiB decoded-frame budget in each
+catalog. Transient decode storage and expired snapshots held by other
+owners have separate lifetimes.
+
+`AssetStore::import` selects Sound for `.wav`. The catalog writes
+version 6 only when it contains a WAV record. Sound records omit both
+render interpretation fields. A verified exact-byte copy in
+`.ruster-cache/sounds/v1-HASH.bin` preserves last-good playback across
+reopen. Changed source bytes require Refresh to become the accepted
+source. Export pins the accepted WAV bytes and sound interpretation
+and fails if the source changed. `sound()` borrows the accepted decoded
+clip and `sound_snapshots()` returns shared immutable clips.
+
 ## Catalog, caches and recovery
 
-Asset IDs contain1–128 ASCII letters, digits, `_`, `-`, `.`. Source paths are relative, at most256 bytes, without traversal, reserved `.ruster-` components or symlinks. The catalog is bounded to64KiB. Kind must match source extension. Catalog4 mesh records require `mesh_normal_policy` and must omit `texture_role`; texture records require `texture_role` and must omit `mesh_normal_policy`. Opposite-kind keys reject even when null; missing/null/unknown required interpretations reject. Catalog1/2/3 decode using their exact old shapes, preserving normal-policy migration and defaulting old texture identities to BaseColor. Actual `texture_role` presence under any old label rejects before migration, including null. Open is read only for catalog bytes. A successful catalog-changing mutation writes4; same-content Refresh repairs status/cache without advancing revision or migrating catalog bytes. Unsupported versions reject.
+Asset IDs contain1–128 ASCII letters, digits, `_`, `-`, `.`. Source paths are relative, at most256 bytes, without traversal, reserved `.ruster-` components or symlinks. The catalog is bounded to64KiB. Kind must match source extension. Catalog4 mesh records require `mesh_normal_policy` and must omit `texture_role`; texture records require `texture_role` and must omit `mesh_normal_policy`. Opposite-kind keys reject even when null; missing/null/unknown required interpretations reject. Catalog1/2/3 decode using their exact old shapes, preserving normal-policy migration and defaulting old texture identities to BaseColor. Actual `texture_role` presence under any old label rejects before migration, including null. Open is read only for catalog bytes. A successful catalog-changing mutation writes version 4 for mesh/texture, version 5 for static models, or version 6 when WAV assets are present; same-content Refresh repairs status/cache without advancing revision or migrating catalog bytes. Unsupported versions reject.
 
 A successful import/refresh hashes exact source bytes with SHA-256 and publishes the derived cache before committing catalog bytes. Flat mesh cache writes use `.ruster-cache/meshes/v3-HASH.bin`; AuthoredWhenComplete uses version4. Flat caches2/1 remain readable, without automatic deletion. The116-byte header retains `RUSTMESH`, little-endian version/counts,64 ASCII source-hash bytes and32 binary checksum bytes. In version3, the vertex-count high bit marks a complete UV stream. The payload has six little-endian `f32` values per vertex, then optional two-float UVs per vertex, then `u32` indices. The checksum covers all header fields except itself plus payload. Counts, exact length, geometry and UV validity are checked before use. Serialized mesh cache size remains bounded to16MiB.
 
@@ -68,7 +88,7 @@ Rename rolls its file move back if catalog publication fails and reports both pa
 
 Mutations compare expected revision and the complete on-disk catalog baseline under a project advisory lock. `import_at`, `import_mesh_at`, `import_texture_at`, `refresh_at` and `rename_at` reject stale revisions; convenience methods use the current revision. Session/draft permission guards belong to hosts. The nonblocking lock reports Busy for explicit retry and explicitly unlocks on drop even with inherited/duplicated descriptors. Reopen after a disk conflict. Regular-file preflight avoids blocking on FIFOs; special-file write destinations reject rather than being replaced. Confinement/symlink checks support trusted project use, not a hostile same-user filesystem race sandbox.
 
-`export_snapshot(&BTreeSet<String>)` captures metadata for selected mesh/texture IDs without filesystem I/O. `ExportSnapshot::read_sources()` returns only exact accepted source bytes, using kind-specific bounds/confinement and checking catalog baseline before/after reading. Changed bytes require Refresh. It does not acquire locks, open another store, write caches or include unselected/history-only sources. `ExportSnapshot::texture_role(id)` and `mesh_normal_policy(id)` expose the frozen accepted interpretation without filesystem access. The caller must compute the complete current object/material dependency closure, including inactive authored map slots, and preserve exact roles in delivery descriptors. It must not infer role later from the PNG or omit a roughness reference. This method is not itself an exporter.
+`export_snapshot(&BTreeSet<String>)` captures metadata for selected resource IDs without filesystem I/O. `ExportSnapshot::read_sources()` returns only exact accepted source bytes, using kind-specific bounds/confinement and checking catalog baseline before/after reading. Changed bytes require Refresh. It does not acquire locks, open another store, write caches or include sources outside the selected IDs. `ExportSnapshot::texture_role(id)` and `mesh_normal_policy(id)` expose the frozen accepted interpretation without filesystem access. The caller must compute the complete current object/material dependency closure, including inactive authored map slots, and preserve exact roles in delivery descriptors. It must not infer role later from the PNG or omit a roughness reference. This method is not itself an exporter.
 
 ## Verification
 
