@@ -102,3 +102,22 @@ Historical V2a implementation note2026-11-05 (V2a was subsequently accepted; cur
 
 
 V2b integration2026-11-06: source now saves Scene8/stages content schema4 and requires exact ordered `initial_camera`, `opaque_materials`, `authored_lighting`, `sun_shadows` runtime capabilities. Descriptor2 remains. Every Scene8 rejects old kits before staging/publication even with shadows disabled; older supported content remains compatible with the new kit. This source progression is not complete V2b creator acceptance. Preserve the accepted V1/V2a review artifacts and follow the [bounded V2b plan](plans/V2B-SUN-SHADOWS.md)/[current evidence](evidence/V2B-feasibility.md).
+
+## Keyboard-controlled kinematic mover
+
+In a flat scene, add an enabled blocker sphere to the moving object at a
+uniform scale. Give the obstacles enabled sphere or box blocker colliders.
+The obstacles may be rotated and must stay stationary during the run.
+Create Axis actions with the keys you want for X and Z. Select the mover,
+then choose **Behavior** → **Add behavior…** → **Lua kinematic mover**.
+Set `axis_x` and `axis_z` to the saved Axis IDs, and `speed` to scene units
+per second. A blank axis is neutral. Reset and use scene controls to play,
+or pause and Step. Under **Runtime** → **Spatial feedback**, inspect the
+committed outcome and contact targets, normals and viewport markers.
+
+Save the authored scene before creating a repeatable play check. Expect the
+mover's terminal translation and any declared contact-count state you use in
+the behavior. For Linux export use a current runtime kit advertising
+`kinematic_move_and_slide`, then run the relocated application's
+`--play-check`. Older kits can still package compatible scenes without API7.
+See the [Lua contract](../crates/ruster-behavior/README.md#opt-in-api7-kinematic-move-and-slide).

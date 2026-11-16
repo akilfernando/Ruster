@@ -121,6 +121,23 @@ impl SpatialWorld {
     ) -> Result<SweepResult, String> {
         check_cancel(cancel)?;
         let probe = self.probe(probe_id)?;
+        Self::sweep_probe(probe, &self.blockers(probe_id), delta, false, cancel)
+    }
+
+    fn blockers(&self, probe_id: &str) -> Vec<&Entry> {
+        self.entries
+            .iter()
+            .filter(|entry| entry.id != probe_id && entry.resolved.role == ColliderRole::Blocker)
+            .collect()
+    }
+
+    fn sweep_probe(
+        probe: &Entry,
+        blockers: &[&Entry],
+        delta: [f64; 3],
+        tangent_rounding: bool,
+        cancel: &impl Fn() -> bool,
+    ) -> Result<SweepResult, String> {
         if !delta.iter().all(|value| value.is_finite()) {
             return Err("sweep displacement must be finite".into());
         }
@@ -132,12 +149,7 @@ impl SpatialWorld {
         let desired_sphere = probe.at(desired)?;
         let displacement =
             Vector::from_array(desired_sphere.center) - Vector::from_array(probe.resolved.center);
-        let blockers: Vec<_> = self
-            .entries
-            .iter()
-            .filter(|entry| entry.id != probe_id && entry.resolved.role == ColliderRole::Blocker)
-            .collect();
-        let clearance = effective_clearance(probe, desired, &desired_sphere, &blockers);
+        let clearance = effective_clearance(probe, desired, &desired_sphere, blockers);
         let mut result = SweepResult {
             outcome: SweepOutcome::Clear,
             suggested_translation: Some(desired),
@@ -151,7 +163,7 @@ impl SpatialWorld {
         // First establish true signed initial penetration independently of
         // cast target_distance. Retain these bounded contacts for the t0 proof.
         let mut starts = Vec::with_capacity(blockers.len());
-        for target in &blockers {
+        for target in blockers {
             let contact = contact(&probe.resolved, &target.resolved, clearance, cancel)?;
             if let Some(value) = contact {
                 if !finite_contact(&value) {
@@ -184,13 +196,29 @@ impl SpatialWorld {
                     if !finite_hit(&hit) {
                         return Ok(result.precision_limited_at(&target.id));
                     }
-                    if supporting_plane(
-                        start.as_ref(),
-                        &probe.resolved,
-                        &desired_sphere,
-                        &target.resolved,
-                        clearance,
-                    ) {
+                    let direction = start.as_ref().map(|contact| contact.normal2);
+                    let quantized_tangent = tangent_rounding
+                        && start.as_ref().is_some_and(|contact| {
+                            contact.dist >= 0.0 && contact.dist <= clearance
+                        })
+                        && direction.is_some_and(|normal| {
+                            normal.dot(displacement) >= -0.5 * clearance
+                                && separates_segment(
+                                    normal,
+                                    &probe.resolved,
+                                    &desired_sphere,
+                                    &target.resolved,
+                                )
+                        });
+                    if quantized_tangent
+                        || supporting_plane(
+                            start.as_ref(),
+                            &probe.resolved,
+                            &desired_sphere,
+                            &target.resolved,
+                            clearance,
+                        )
+                    {
                         continue;
                     }
                     if result.target_id.is_none() || hit.time_of_impact < result.fraction {
@@ -285,6 +313,116 @@ impl SpatialWorld {
         Ok(result)
     }
 
+    pub(crate) fn move_and_slide(
+        &self,
+        probe_id: &str,
+        delta: [f64; 3],
+        cancel: &impl Fn() -> bool,
+    ) -> Result<SlideResult, String> {
+        check_cancel(cancel)?;
+        let probe = self.probe(probe_id)?;
+        if probe.resolved.role != ColliderRole::Blocker {
+            return Err("move_and_slide requires an enabled blocker sphere".into());
+        }
+        if !delta
+            .iter()
+            .all(|step| step.is_finite() && step.abs() <= 100.0)
+        {
+            return Err(
+                "move_and_slide displacement components must be finite in -100..=100".into(),
+            );
+        }
+        let blockers = self.blockers(probe_id);
+        let mut moving = Entry {
+            id: probe.id.clone(),
+            resolved: probe.resolved,
+            owner: probe.owner.clone(),
+            collider: probe.collider,
+        };
+        let mut remaining = Vector::from_array(delta);
+        let mut contacts = Vec::<SlideContact>::new();
+        for _ in 0..=MAX_SLIDE_CONTACTS {
+            check_cancel(cancel)?;
+            let requested_end =
+                Vector::from_array(moving.owner.translation.map(f64::from)) + remaining;
+            let sweep = Self::sweep_probe(
+                &moving,
+                &blockers,
+                remaining.to_array(),
+                !contacts.is_empty(),
+                cancel,
+            )?;
+            let Some(suggested) = sweep.suggested_translation else {
+                let outcome = if sweep.outcome == SweepOutcome::InitialOverlap {
+                    SlideOutcome::InitialOverlap
+                } else {
+                    SlideOutcome::PrecisionLimited
+                };
+                return Ok(SlideResult {
+                    outcome,
+                    suggested_translation: None,
+                    contacts,
+                    blocking_id: sweep.target_id,
+                });
+            };
+            if sweep.outcome == SweepOutcome::Clear {
+                let outcome = if suggested == moving.owner.translation && remaining != Vector::ZERO
+                {
+                    SlideOutcome::PrecisionLimited
+                } else if contacts.is_empty() {
+                    SlideOutcome::Clear
+                } else {
+                    SlideOutcome::Slid
+                };
+                return Ok(SlideResult {
+                    suggested_translation: (outcome != SlideOutcome::PrecisionLimited)
+                        .then_some(suggested),
+                    outcome,
+                    contacts,
+                    blocking_id: None,
+                });
+            }
+            if contacts.len() == MAX_SLIDE_CONTACTS {
+                return Ok(SlideResult {
+                    outcome: SlideOutcome::IterationLimit,
+                    suggested_translation: None,
+                    contacts,
+                    blocking_id: sweep.target_id,
+                });
+            }
+            let normal = Vector::from_array(
+                sweep
+                    .normal
+                    .ok_or("move_and_slide cast returned no normal")?,
+            );
+            let normal = normal
+                .try_normalize()
+                .ok_or("move_and_slide cast returned an invalid normal")?;
+            contacts.push(SlideContact {
+                target_id: sweep
+                    .target_id
+                    .ok_or("move_and_slide cast returned no blocker")?,
+                point: sweep.point.ok_or("move_and_slide cast returned no point")?,
+                normal: normal.to_array(),
+                clearance: sweep.clearance,
+            });
+            moving.resolved = moving.at(suggested)?;
+            moving.owner.translation = suggested;
+            let unapplied = requested_end - Vector::from_array(suggested.map(f64::from));
+            remaining = project_contact_cone(unapplied, &contacts);
+            if remaining.length_squared() <= 1e-20 {
+                check_cancel(cancel)?;
+                return Ok(SlideResult {
+                    outcome: SlideOutcome::Stopped,
+                    suggested_translation: Some(suggested),
+                    contacts,
+                    blocking_id: None,
+                });
+            }
+        }
+        unreachable!("bounded solver returns at its contact limit")
+    }
+
     pub(crate) fn overlap(
         &self,
         probe_id: &str,
@@ -319,6 +457,72 @@ impl SpatialWorld {
             signed_distance: value.map(|contact| contact.dist),
         })
     }
+}
+
+pub const MAX_SLIDE_CONTACTS: usize = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SlideOutcome {
+    Clear,
+    Slid,
+    Stopped,
+    InitialOverlap,
+    PrecisionLimited,
+    IterationLimit,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SlideContact {
+    pub target_id: String,
+    pub point: [f64; 3],
+    pub normal: [f64; 3],
+    pub clearance: f64,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize)]
+pub struct SlideResult {
+    pub outcome: SlideOutcome,
+    pub suggested_translation: Option<[f32; 3]>,
+    pub contacts: Vec<SlideContact>,
+    pub blocking_id: Option<String>,
+}
+
+fn project_contact_cone(request: Vector, contacts: &[SlideContact]) -> Vector {
+    let mut normals = [Vector::ZERO; MAX_SLIDE_CONTACTS];
+    let normals = &mut normals[..contacts.len()];
+    for (normal, contact) in normals.iter_mut().zip(contacts) {
+        *normal = Vector::from_array(contact.normal);
+    }
+    let feasible = |candidate: Vector| {
+        let tolerance = 1e-12 * candidate.length();
+        normals
+            .iter()
+            .all(|normal| normal.dot(candidate) >= -tolerance)
+    };
+    if feasible(request) {
+        return request;
+    }
+    // In 3D the nearest feasible point either lies on one constraint plane,
+    // a pair's intersection line, or the cone vertex (zero).
+    let mut best = Vector::ZERO;
+    let mut distance = request.length_squared();
+    let mut consider = |candidate: Vector| {
+        let correction = (request - candidate).length_squared();
+        if correction < distance && feasible(candidate) {
+            best = candidate;
+            distance = correction;
+        }
+    };
+    for (index, normal) in normals.iter().enumerate() {
+        consider(request - *normal * normal.dot(request));
+        for other in &normals[..index] {
+            if let Some(direction) = normal.cross(*other).try_normalize() {
+                consider(direction * direction.dot(request));
+            }
+        }
+    }
+    best
 }
 
 struct SegmentEvidence<'a> {

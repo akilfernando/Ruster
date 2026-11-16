@@ -79,6 +79,11 @@ PLAY_CHECK_PROFILE = {
     **PLAYER_VIEW_PROFILE,
     "capabilities": [*PLAYER_VIEW_PROFILE["capabilities"], "repeatable_play_checks"],
 }
+KINEMATIC_CAPABILITY = "kinematic_move_and_slide"
+KINEMATIC_PROFILE = {
+    **PLAY_CHECK_PROFILE,
+    "capabilities": [*PLAY_CHECK_PROFILE["capabilities"], KINEMATIC_CAPABILITY],
+}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -192,7 +197,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -1149,6 +1154,32 @@ def scene_texture_roles(document: dict) -> dict[str, str]:
     return roles
 
 
+def requires_kinematic_motion(document: dict) -> bool:
+    def is_kinematic_source(source):
+        return (isinstance(source, dict) and source.get("language_id") == "lua54"
+                and type(source.get("host_api_version")) is int
+                and source["host_api_version"] == 7)
+
+    authoring = document.get("authoring", {})
+    sources = authoring.get("sources", {}) if isinstance(authoring, dict) else {}
+    if isinstance(sources, dict) and any(map(is_kinematic_source, sources.values())):
+        return True
+    for stack in ("undo", "redo"):
+        changes = document.get(stack, [])
+        if not isinstance(changes, list):
+            continue
+        for change in changes:
+            deltas = change.get("sources", []) if isinstance(change, dict) else []
+            if not isinstance(deltas, list):
+                continue
+            for delta in deltas:
+                if isinstance(delta, dict) and (
+                    is_kinematic_source(delta.get("before")) or is_kinematic_source(delta.get("after"))
+                ):
+                    return True
+    return False
+
+
 def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, dict, dict[str, tuple[int, str, str]]]:
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
@@ -1159,7 +1190,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
-    optional = {"initial_camera", "play_check_sha256"} & content.keys()
+    optional = {"initial_camera", "play_check_sha256", "required_runtime_capabilities"} & content.keys()
     exact_fields(content, fields | optional, "content")
     if "play_check_sha256" in content and (
         not isinstance(content["play_check_sha256"], str) or not HASH.fullmatch(content["play_check_sha256"])
@@ -1180,6 +1211,11 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
         raise ValueError("scene checksum mismatch")
     document = decode(scene_data, "authored scene")
     mesh_ids, texture_ids = scene_dependencies(document)
+    required = [KINEMATIC_CAPABILITY] if requires_kinematic_motion(document) else []
+    if content.get("required_runtime_capabilities", []) != required or (
+        "required_runtime_capabilities" in content and not required
+    ):
+        raise ValueError("content runtime requirements do not match its Lua API7 source/history")
     if content.get("initial_camera") is not None and document["scene"].get("player_view") is not None:
         raise ValueError("Remove legacy initial camera framing when the scene owns a player view")
     if (schema == 1 and document["format_version"] > 5
@@ -1335,13 +1371,15 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     schema = content["schema"]
     supplied_profile = kit["profile"]
     case_hash = content.get("play_check_sha256")
-    if case_hash is not None and supplied_profile != PLAY_CHECK_PROFILE:
+    if content.get("required_runtime_capabilities") and supplied_profile != KINEMATIC_PROFILE:
+        raise ValueError("runtime kit does not support Lua API7 kinematic move-and-slide; prepare a current runtime kit")
+    if case_hash is not None and supplied_profile not in (PLAY_CHECK_PROFILE, KINEMATIC_PROFILE):
         raise ValueError("runtime kit does not support repeatable_play_checks; prepare a current runtime kit")
-    if schema == 17 and supplied_profile not in (PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE):
+    if schema == 17 and supplied_profile not in (PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE):
         raise ValueError("runtime kit does not support Scene21 authored_player_view; prepare a current runtime kit")
-    if schema == 16 and supplied_profile not in (ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE):
+    if schema == 16 and supplied_profile not in (ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE):
         raise ValueError("runtime kit does not support Scene20 group_local_rotation; prepare a current runtime kit")
-    hierarchy_profiles = (STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE)
+    hierarchy_profiles = (STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE, KINEMATIC_PROFILE)
     if schema == 15 and supplied_profile not in hierarchy_profiles:
         raise ValueError("runtime kit does not support Scene19 static_assembly_hierarchy; prepare a current runtime kit")
     profile = PRIMITIVE_PROFILE if supplied_profile in hierarchy_profiles else supplied_profile

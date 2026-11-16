@@ -32,6 +32,7 @@ fn known_lua_api(language: &str, api: u32) -> bool {
                 | ruster_behavior::STATE_HOST_API_VERSION
                 | ruster_behavior::LIFECYCLE_HOST_API_VERSION
                 | ruster_behavior::GROUP_ROTATION_HOST_API_VERSION
+                | ruster_behavior::KINEMATIC_HOST_API_VERSION
         )
 }
 
@@ -989,6 +990,7 @@ pub(super) fn annotation_hint_for_api(source_id: &str, api: u32) -> Result<Strin
         3 => "RusterHost3",
         4 => "RusterHost4",
         5 => "RusterHost5",
+        7 => "RusterHost7",
         _ => return Err(error(ErrorKind::Invalid, "Unsupported tooling host API")),
     };
     let transform = if matches!(api, 4 | 5) {
@@ -996,7 +998,7 @@ pub(super) fn annotation_hint_for_api(source_id: &str, api: u32) -> Result<Strin
     } else {
         "RusterTransform"
     };
-    let result = if matches!(api, 4 | 5) {
+    let result = if matches!(api, 4 | 5 | 7) {
         "RusterStateUpdate"
     } else {
         "RusterTransform"
@@ -1098,6 +1100,17 @@ const VERSIONED_HOST_TYPES: &str = r#"
 ---@field state table<string,RusterStateValue>? Own known fields only. No transform or other envelope fields.
 ---@alias RusterInitialize fun(props:table<string,any>,host:RusterLifecycleHost):RusterLifecycleUpdate
 ---@alias RusterCommand fun(name:string,args:table<string,RusterStateValue>,props:table<string,any>,host:RusterLifecycleHost):RusterLifecycleUpdate
+---@class RusterSlideContact
+---@field target_id RusterObjectId
+---@field point RusterVec3
+---@field normal RusterVec3
+---@field clearance number
+---@class RusterSlideResult
+---@field outcome 'clear'|'slid'|'stopped'
+---@field suggested_translation RusterVec3
+---@field contacts RusterSlideContact[] Up to four contacts in the committed move.
+---@class RusterHost7:RusterHost4
+---@field move_and_slide fun(displacement:RusterVec3):RusterSlideResult Own enabled Blocker Sphere only; one call per Step, exact returned translation required.
 ---@class RusterHost6
 ---@field sweep fun(probe_id:string,delta:RusterVec3):RusterSweep
 ---@field overlap fun(probe_id:string,position:RusterVec3,sensor_id:string):RusterOverlap
@@ -1466,7 +1479,8 @@ mod tests {
             (4, "lua54", 5, "lua"),
             (5, "lua54", 6, "lua"),
             (6, "future-language", 4, "txt"),
-            (7, "lua54", 7, "txt"),
+            (7, "lua54", 7, "lua"),
+            (8, "lua54", 8, "txt"),
         ] {
             let mut script = source("unfinished source(");
             script.language_id = language.into();
@@ -1479,7 +1493,7 @@ mod tests {
         // Their unchanged version1 manifests remain readable, but neither a
         // fresh Lua destination nor explicit observed-file resolution may hide
         // that prior path. Reconciliation is an explicit creator operation.
-        for api in 2..=6 {
+        for api in 2..=7 {
             let legacy_temp = tempfile::tempdir().unwrap();
             let legacy_context = self::context(legacy_temp.path(), "legacy.scene.json");
             legacy_context.prepare(true).unwrap();
@@ -1974,6 +1988,7 @@ mod tests {
             (3, "RusterHost3", "RusterTransform"),
             (4, "RusterHost4", "RusterStateUpdate"),
             (5, "RusterHost5", "RusterStateUpdate"),
+            (7, "RusterHost7", "RusterStateUpdate"),
         ] {
             let hint = annotation_hint_for_api("source-a", api).unwrap();
             assert!(hint.contains(&format!("---@param host {host_class}\n")));

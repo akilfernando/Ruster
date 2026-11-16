@@ -22,6 +22,41 @@ import package_creation
 
 
 class CreationDistributionTests(unittest.TestCase):
+    def test_kinematic_requirement_covers_current_sources_and_retained_history(self):
+        lua7 = {"language_id": "lua54", "host_api_version": 7, "text": "return {}"}
+        plain = {"language_id": "lua54", "host_api_version": 4, "text": "-- API 7"}
+        for stack, side in ((None, None), ("undo", "before"), ("redo", "after")):
+            with self.subTest(stack=stack), tempfile.TemporaryDirectory() as temporary:
+                root = Path(temporary)
+                document = {"format": "ruster-scene", "format_version": 21,
+                            "scene": {"objects": []}, "undo": [], "redo": [],
+                            "authoring": {"sources": {"unused": plain}, "bindings": {}}}
+                content = {"schema": 17, "title": "Motion", "tick_nanos": 16666667,
+                           "meshes": {}, "textures": {}}
+
+                def stage():
+                    scene_bytes = package_creation.encoded(document)
+                    (root / "scene.json").write_bytes(scene_bytes)
+                    content["scene_sha256"] = package_creation.sha256(scene_bytes)
+                    (root / "content.json").write_bytes(package_creation.encoded(content))
+
+                stage()
+                package_creation.source_content(root, None)
+                content["required_runtime_capabilities"] = [package_creation.KINEMATIC_CAPABILITY]
+                stage()
+                with self.assertRaisesRegex(ValueError, "runtime requirements"):
+                    package_creation.source_content(root, None)
+                if stack is None:
+                    document["authoring"]["sources"]["unused"] = lua7
+                else:
+                    document[stack] = [{"sources": [{"id": "unused", side: lua7}]}]
+                stage()
+                package_creation.source_content(root, None)
+                del content["required_runtime_capabilities"]
+                stage()
+                with self.assertRaisesRegex(ValueError, "runtime requirements"):
+                    package_creation.source_content(root, None)
+
     def test_hierarchy_content_or_history_requires_scene19(self):
         for version in (18, 19):
             for history in (False, True):

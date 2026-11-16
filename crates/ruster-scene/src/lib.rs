@@ -2591,6 +2591,24 @@ impl Session {
             ..Change::default()
         })
     }
+    /// Whether the current or retained authored document carries this source API.
+    /// Unbound/disabled sources and both sides of history remain part of delivery.
+    pub fn uses_behavior_source_api(&self, language_id: &str, version: u32) -> bool {
+        let matches = |source: &BehaviorSource| {
+            source.language_id == language_id && source.host_api_version == version
+        };
+        self.authoring().sources.values().any(matches)
+            || self
+                .document
+                .undo
+                .iter()
+                .chain(&self.document.redo)
+                .flat_map(|change| &change.sources)
+                .flat_map(|delta| [&delta.before, &delta.after])
+                .flatten()
+                .any(matches)
+    }
+
     fn reserved_source_ids(&self) -> HashSet<&str> {
         let mut used: HashSet<_> = self
             .authoring()

@@ -41,6 +41,40 @@ Rust callers use `Engine::step_with_input(&mut Runtime, &ruster_scene::input::Ac
 
 The original library foundation is recorded separately from the subsequent bounded editor/programmatic Step, focus-owned native input and application delivery acceptance. See [I1a readiness](../../docs/evidence/I1A-readiness.md) for the qualified scope.
 
+## Opt-in API7 kinematic move-and-slide
+
+Set `KINEMATIC_HOST_API_VERSION` (7) on one enabled Object binding for an enabled,
+uniformly scaled blocker sphere. The scene must be flat and other enabled
+blockers must be stationary. Sensors remain available to overlap queries.
+The API retains named input, sweep, overlap
+and owned state. One `host.move_and_slide({dx,dy,dz})` call per invocation
+accepts finite displacement components in `-100..=100` scene units.
+Use the returned `suggested_translation` exactly in the complete
+`{transform=o, state={...}}` output. Preserve rotation and scale. With no
+call, preserve the incoming transform. The Reset trial retains the authored
+pose. An update can read two named axes and apply the returned transform.
+
+```lua
+return { update = function(o, p, dt, host)
+  if dt == 0 then return { transform = o } end
+  local distance = 3 * dt
+  local result = host.move_and_slide({
+    host.axis("move-x") * distance, 0, host.axis("move-z") * distance
+  })
+  o.translation = result.suggested_translation
+  return { transform = o }
+end }
+```
+
+On success, `outcome` is `clear`, `slid`, or `stopped`. The copied
+`contacts` array exposes `target_id`, world-space `point`, outward unit
+`normal` and `clearance` for up to four contacts in solver order. Zero motion
+is supported from a valid starting position. Initial overlap, unrepresentable
+movement, an additional contact beyond the bound or invalid transform output
+fails the transaction with a diagnostic. The prior committed transform,
+typed state, tick and observations remain available. See the
+[scope and decision](../../docs/decisions/2026-11-16-kinematic-move-and-slide.md).
+
 ## P2a spatial-query development
 
 Updated2026-11-07. The API3vertical slice is accepted within [P2a](../../docs/plans/P2A-SPATIAL-QUERIES.md). Direct creator controls, exact package/native parity and measured quality gates pass within the [final acceptance](../../docs/evidence/P2a-readiness.md) scope. API1and API2environments retain their existing contracts. API3also exposes the same Button/Axis facilities.

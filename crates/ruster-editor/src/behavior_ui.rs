@@ -7,6 +7,7 @@ mod runtime_debug;
 mod runtime_input;
 mod runtime_state;
 use command_catalog::CommandDraft;
+mod kinematic;
 mod spatial_feedback;
 use eframe::egui;
 use ruster_scene::{
@@ -318,6 +319,7 @@ pub(super) enum Action {
     },
     ExternalStatus,
     Create(String),
+    CreateKinematic(String),
     CreateApplication,
     CreateGroup(String),
     EditCommand(String, Option<String>),
@@ -780,6 +782,7 @@ impl BehaviorUi {
                     .set_command_definition(session.scene().revision, &binding, &command, None)
                     .map_err(|error| error.to_string())?;
             }
+            Action::CreateKinematic(object) => self.create_kinematic(session, object)?,
             Action::CreateGroup(group) => {
                 let source = session
                     .allocate_source_ids(1)
@@ -1264,7 +1267,7 @@ impl BehaviorUi {
                 });
                 if let Some(source)=session.source(&binding.source_id) {
 
-                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION,ruster_behavior::LIFECYCLE_HOST_API_VERSION,ruster_behavior::GROUP_ROTATION_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(ui.visuals().warn_fg_color,"This script version may not run here. Its data is preserved and can still be edited.");}
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION,ruster_behavior::LIFECYCLE_HOST_API_VERSION,ruster_behavior::GROUP_ROTATION_HOST_API_VERSION,ruster_behavior::KINEMATIC_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(ui.visuals().warn_fg_color,"This script version may not run here. Its data is preserved and can still be edited.");}
                 } else {ui.colored_label(ui.visuals().warn_fg_color,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
                 ui.label("Properties");
                 for (name,summary) in &self.property_rows {
@@ -1300,7 +1303,7 @@ impl BehaviorUi {
                 if !assembly {
                 ui.separator();
                 ui.strong("State defaults");
-                ui.label("Authored defaults become committed runtime fields on Reset. API4 returns own-state patches.");
+                ui.label("Authored defaults become committed runtime fields on Reset. Stateful APIs return own-state patches.");
                 for (name, value) in &binding.state_defaults {
                     ui.push_id(("state", id, name), |ui| {
                         ui.horizontal_wrapped(|ui| {
@@ -1385,7 +1388,9 @@ impl BehaviorUi {
                 }
                 egui::CollapsingHeader::new("Script details").id_salt(("behavior_details",id)).show(ui,|ui| {
                     ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
-                    if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));}
+                    if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));
+                        if source.host_api_version==ruster_behavior::KINEMATIC_HOST_API_VERSION {ui.label("Kinematic mover: enabled Blocker Sphere, uniform scale, flat scene. Other blockers stay stationary. Set axis_x / axis_z to saved Axis action IDs; blank means no movement on that axis.");}
+                    }
                     ui.label(format!("{} / {} properties",binding.properties.len(),ruster_scene::MAX_PROPERTIES));
                 });
             } else {
@@ -1403,11 +1408,17 @@ impl BehaviorUi {
                         });
                         ui.close();
                     }
+                    if let BindingTarget::Object(id)=&target {
+                        if ui.button("Lua kinematic mover").on_hover_text("Requires one enabled Blocker Sphere in a flat scene. Other blockers stay stationary.").clicked() {
+                            action=Some(Action::CreateKinematic(id.clone()));ui.close();
+                        }
+                    }
                     ui.menu_button("Attach existing source…",|ui| {
                         let mut any = false;
                         for (id, label) in &self.sources {
                             if session.source(id).is_some_and(|source| {
                                 (source.host_api_version == ruster_behavior::GROUP_ROTATION_HOST_API_VERSION) == assembly
+                                && (source.host_api_version != ruster_behavior::KINEMATIC_HOST_API_VERSION || matches!(target,BindingTarget::Object(_)))
                             }) {
                                 any = true;
                                 if ui.button(label).clicked() {
