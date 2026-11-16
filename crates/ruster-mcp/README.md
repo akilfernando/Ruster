@@ -488,3 +488,38 @@ Static sources use `{"kind":"static","text":"Welcome"}`. State sources use `{"ki
 `hud_inspect.hud_definition` retains the earlier flat settings plus one-row `elements` projection, using that row’s owning panel. Top-level panel metadata is separate. Model/prepared observations retain `resolved.labels` for the paged row, plus their own panel ID and visibility result. A retained deleted row can belong to an older panel. `hud_panel_inspect` supplies bounded panel summaries without repeating row bodies. Views retain their own mode, authored revision, run key, tick and commit revision. Prepared data describes the most recent preparation. GPU completion and visible native interaction require separate evidence. Existing64KiB bridge and256KiB MCP output bounds remain.
 
 The owner rechecks visibility/availability against current committed state, resolves immutable authored arguments and preserves Play/Pause. Presentation overlap/clipping applies to native input. Programmatic calls follow authored availability independently of those presentation bounds. Existing paused Application commands retain exact-commit guards. A rejected/failed action retains committed state. Headless `--hud-activations` retains its bounded32-entry schedule and command/Step ordering. [Generic runtime workflow](../../examples/motion-lab/README.md#state-driven-screens--f3c).
+
+
+### Repeatable saved play checks — 2026-11-16
+
+Three tools share the editor-owned isolated check runner. They use the existing
+project connection/epoch and owner authority; no new filesystem or code-execution
+grant is introduced. The adapter exposes neither case authoring nor caller-chosen
+paths, inline cases, raw scripts or expression evaluation.
+
+| Tool | Arguments beyond the project connection | Result/use |
+| --- | --- | --- |
+| `play_check_inspect` | Optional `operation_id`, optional boolean `details` | Bounded saved-case metadata and active/retained receipts; up to eight retained receipts. `details:true` includes expected/actual assertion values. |
+| `play_check_start` | Required `expected_session_token`, `expected_revision`, `expected_asset_revision` | Starts the current saved fixed-sidecar case; returns `operation_id` and `state:"running"`. Inspect completion. |
+| `play_check_cancel` | Required `expected_session_token`, `operation_id` | Requests cancellation of that exact operation; inspect its retained outcome. |
+
+Revisions and operation IDs are canonical unsigned 64-bit decimal strings, never
+JSON numbers. The session token is a nonempty string of at most 256 UTF-8 bytes.
+Use asset revision `"0"` when the owner reports an absent catalog. Unknown fields,
+null optional values, malformed integers and overflow are rejected by the adapter;
+unknown operation IDs and stale authorities are diagnosed by the owner.
+
+Start requires a saved authored scene and fresh scene/session/catalog identities,
+with no save/open/publication in flight. Human drafts and the existing running
+preview/input are permitted and remain untouched: the check executes in an
+isolated runtime, preserving authored history. Cancel intentionally requires no
+scene revision, allowing cancellation after authoring changes. Inspection is
+read-only. Following an uncertain start response, inspect current/retained state
+before considering a retry; do not assume a timeout means the run never started.
+
+The runner reports the declared assertions and distinguishes failed expectations
+from invalid/stale cases, runtime errors and cancellation. Expectations are never
+automatically refreshed. A pass does not certify appearance or general game
+quality. This wire contract is separate from actual native/client/export
+qualification; see [project status](../../docs/STATUS.md) and the
+[bounded play-check plan](../../docs/plans/REPEATABLE-PLAY-CHECKS.md).
