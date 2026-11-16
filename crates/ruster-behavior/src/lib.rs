@@ -41,6 +41,7 @@ pub const INPUT_HOST_API_VERSION: u32 = 2;
 pub const SPATIAL_HOST_API_VERSION: u32 = 3;
 pub const STATE_HOST_API_VERSION: u32 = 4;
 pub const LIFECYCLE_HOST_API_VERSION: u32 = 5;
+pub use ruster_scene::GROUP_ROTATION_HOST_API_VERSION;
 pub const APPLICATION_TEMPLATE: &str = include_str!("../templates/application.lua");
 pub const MAX_SPATIAL_QUERIES: u32 = 32;
 pub const FOLLOWER_TEMPLATE: &str = include_str!("../templates/follower.lua");
@@ -504,12 +505,13 @@ impl Engine {
                     | SPATIAL_HOST_API_VERSION
                     | STATE_HOST_API_VERSION
                     | LIFECYCLE_HOST_API_VERSION
+                    | GROUP_ROTATION_HOST_API_VERSION
             )
         {
             return Err(Diagnostic::plain(
                 DiagnosticCode::UnsupportedBackend,
                 Phase::Compile,
-                "this provisional backend supports lua54 host API1–5; authored data is preserved",
+                "this provisional backend supports lua54 host API1–6; authored data is preserved",
             ));
         }
         let hash = source_hash(&source.text);
@@ -585,6 +587,7 @@ impl Engine {
         state.validate_total()?;
         let mut trial_state = state.clone();
         let queries = self.query_invocation(scene, authoring, 0)?;
+        let mut trial_scene = None;
         for (id, binding) in &authoring.bindings {
             if !binding.enabled {
                 continue;
@@ -601,9 +604,23 @@ impl Engine {
                     spatial: queries.as_ref(),
                 },
             )?;
+            if let (ruster_scene::BindingTarget::Group(group_id), Some(transform)) =
+                (&binding.target, output.transform)
+            {
+                trial_scene
+                    .get_or_insert_with(|| scene.clone())
+                    .hierarchy
+                    .groups
+                    .get_mut(group_id)
+                    .expect("validated Group owner")
+                    .transform = transform;
+            }
             RuntimeState::apply(&mut trial_state, id, output.state).map_err(|error| {
                 error.context(id, binding, authoring.sources.get(&binding.source_id))
             })?;
+        }
+        if let Some(trial) = trial_scene {
+            validate_group_commit(&trial)?;
         }
         trial_state.validate_total()?;
         self.check_cancelled()?;
@@ -669,6 +686,7 @@ impl Engine {
         let mut staged = runtime.scene.clone();
         let mut staged_state = runtime.state.clone();
         let queries = self.query_invocation(&runtime.scene, &runtime.authoring, runtime.tick)?;
+        let mut group_changed = false;
         for (id, binding) in &runtime.authoring.bindings {
             if !binding.enabled {
                 continue;
@@ -686,12 +704,28 @@ impl Engine {
                 },
             )?;
             if let Some(transform) = output.transform {
-                staged
-                    .objects
-                    .iter_mut()
-                    .find(|object| Some(object.id.as_str()) == binding.object_id())
-                    .expect("validated runtime owner")
-                    .transform = transform;
+                match &binding.target {
+                    ruster_scene::BindingTarget::Object(object_id) => {
+                        staged
+                            .objects
+                            .iter_mut()
+                            .find(|object| object.id == *object_id)
+                            .expect("validated runtime owner")
+                            .transform = transform;
+                    }
+                    ruster_scene::BindingTarget::Group(group_id) => {
+                        staged
+                            .hierarchy
+                            .groups
+                            .get_mut(group_id)
+                            .expect("validated Group owner")
+                            .transform = transform;
+                        group_changed = true;
+                    }
+                    ruster_scene::BindingTarget::Application => {
+                        unreachable!("Application output cannot include a transform")
+                    }
+                }
             }
             RuntimeState::apply(&mut staged_state, id, output.state).map_err(|error| {
                 error.context(
@@ -704,15 +738,19 @@ impl Engine {
         // Returned TRS can invalidate enabled sphere scale even without a query.
         // Definitions are immutable during a Runtime. Existing objects without
         // enabled colliders skip collider resolution.
-        for object in &staged.objects {
-            if let Some(collider) = object.collider.filter(|collider| collider.enabled) {
-                collider.resolve(&object.transform).map_err(|error| {
-                    Diagnostic::plain(
-                        DiagnosticCode::InvalidOutput,
-                        Phase::Commit,
-                        &error.to_string(),
-                    )
-                })?;
+        if group_changed {
+            validate_group_commit(&staged)?;
+        } else {
+            for object in &staged.objects {
+                if let Some(collider) = object.collider.filter(|collider| collider.enabled) {
+                    collider.resolve(&object.transform).map_err(|error| {
+                        Diagnostic::plain(
+                            DiagnosticCode::InvalidOutput,
+                            Phase::Commit,
+                            &error.to_string(),
+                        )
+                    })?;
+                }
             }
         }
         staged_state.validate_total()?;
@@ -745,10 +783,19 @@ impl Engine {
                     "binding source is missing; repair its stable source ID",
                 )
             })?;
+            let group = matches!(binding.target, ruster_scene::BindingTarget::Group(_));
+            if group != (source.host_api_version == GROUP_ROTATION_HOST_API_VERSION) {
+                return Err(Diagnostic::plain(
+                    DiagnosticCode::UnsupportedBackend,
+                    Phase::Compile,
+                    "Group targets require lua54 host API6, which only supports Group targets",
+                ));
+            }
             if !matches!(
                 source.host_api_version,
                 STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
-            ) && (binding.object_id().is_none() || !binding.state_defaults.is_empty())
+            ) && (binding.target == ruster_scene::BindingTarget::Application
+                || !binding.state_defaults.is_empty())
             {
                 return Err(Diagnostic::plain(
                     DiagnosticCode::UnsupportedBackend,
@@ -793,14 +840,20 @@ impl Engine {
                     "behavior cancelled",
                 ));
             }
-            let input = binding.object_id().map(|id| {
-                &snapshot
-                    .objects
-                    .iter()
-                    .find(|object| object.id == id)
-                    .expect("validated runtime owner")
-                    .transform
-            });
+            let input = match &binding.target {
+                ruster_scene::BindingTarget::Object(id) => Some(
+                    &snapshot
+                        .objects
+                        .iter()
+                        .find(|object| object.id == *id)
+                        .expect("validated runtime owner")
+                        .transform,
+                ),
+                ruster_scene::BindingTarget::Group(id) => {
+                    Some(&snapshot.hierarchy.groups[id].transform)
+                }
+                ruster_scene::BindingTarget::Application => None,
+            };
             let result = self.evaluate_with_input(
                 &main,
                 input,
@@ -904,7 +957,13 @@ impl Engine {
                         .raw_get("update")
                         .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?;
                     let object = input
-                        .map(|input| transform_table(&self.lua, input))
+                        .map(|input| {
+                            if host_input.api_version == GROUP_ROTATION_HOST_API_VERSION {
+                                self.lua.create_sequence_from(input.rotation)
+                            } else {
+                                transform_table(&self.lua, input)
+                            }
+                        })
                         .transpose()
                         .map_err(|e| self.error(e, Phase::Update, DiagnosticCode::Runtime))?;
                     let props = self
@@ -929,7 +988,9 @@ impl Engine {
                         return Err(Diagnostic::plain(
                             DiagnosticCode::InvalidOutput,
                             Phase::Output,
-                            if matches!(
+                            if host_input.api_version == GROUP_ROTATION_HOST_API_VERSION {
+                                "API6 update must return a Group-local rotation vector"
+                            } else if matches!(
                                 host_input.api_version,
                                 STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
                             ) {
@@ -939,7 +1000,9 @@ impl Engine {
                             },
                         ));
                     };
-                    let result = if matches!(
+                    let result = if host_input.api_version == GROUP_ROTATION_HOST_API_VERSION {
+                        read_group_rotation(&output, input.expect("Group input"))
+                    } else if matches!(
                         host_input.api_version,
                         STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
                     ) {
@@ -956,6 +1019,32 @@ impl Engine {
             .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?
     }
 }
+fn validate_group_commit(scene: &Scene) -> Result<(), Diagnostic> {
+    scene.resolve_poses().map(|_| ()).map_err(|error| {
+        Diagnostic::plain(
+            DiagnosticCode::InvalidOutput,
+            Phase::Commit,
+            &error.to_string(),
+        )
+    })
+}
+
+fn read_group_rotation(output: &Table, input: &Transform) -> mlua::Result<BindingOutput> {
+    state::plain_table(output)?;
+    let rotation = read_transform_vector(output)?;
+    if rotation.iter().any(|n| n.abs() > 10_000.) {
+        return Err(mlua::Error::runtime(
+            "Group-local rotation must be within ±10000 radians",
+        ));
+    }
+    let mut transform = input.clone();
+    transform.rotation = rotation.map(|radians| radians as f32);
+    Ok(BindingOutput {
+        transform: Some(transform),
+        state: StateFields::new(),
+    })
+}
+
 struct BindingOutput {
     transform: Option<Transform>,
     state: StateFields,
@@ -1078,24 +1167,26 @@ fn environment<'scope, 'env: 'scope>(
 ) -> mlua::Result<(Table, Table)> {
     let environment = base_environment(lua)?;
     let host = lua.create_table()?;
-    host.raw_set(
-        "resolve",
-        scope.create_function(move |lua, id: Option<mlua::LuaString>| {
-            let Some(id) = id else {
-                return Ok(None);
-            };
-            if id.as_bytes().len() > 128 {
-                return Err(mlua::Error::runtime("object reference exceeds128 bytes"));
-            }
-            let id = id.to_str()?;
-            snapshot
-                .objects
-                .iter()
-                .find(|o| o.id == id.as_ref())
-                .map(|o| transform_table(lua, &o.transform))
-                .transpose()
-        })?,
-    )?;
+    if input.api_version != GROUP_ROTATION_HOST_API_VERSION {
+        host.raw_set(
+            "resolve",
+            scope.create_function(move |lua, id: Option<mlua::LuaString>| {
+                let Some(id) = id else {
+                    return Ok(None);
+                };
+                if id.as_bytes().len() > 128 {
+                    return Err(mlua::Error::runtime("object reference exceeds128 bytes"));
+                }
+                let id = id.to_str()?;
+                snapshot
+                    .objects
+                    .iter()
+                    .find(|o| o.id == id.as_ref())
+                    .map(|o| transform_table(lua, &o.transform))
+                    .transpose()
+            })?,
+        )?;
+    }
     // Select from the current validated source on every evaluation, including
     // same-text cache hits. Scoped captures expire before returning to the host.
     if matches!(
@@ -1146,7 +1237,10 @@ fn environment<'scope, 'env: 'scope>(
     }
     if matches!(
         input.api_version,
-        SPATIAL_HOST_API_VERSION | STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+        SPATIAL_HOST_API_VERSION
+            | STATE_HOST_API_VERSION
+            | LIFECYCLE_HOST_API_VERSION
+            | GROUP_ROTATION_HOST_API_VERSION
     ) {
         install_spatial(scope, &host, input)?;
     }
@@ -1182,39 +1276,40 @@ fn property_value(lua: &Lua, property: &PropertyValue) -> mlua::Result<Value> {
         },
     })
 }
-fn read_transform(table: &Table) -> mlua::Result<Transform> {
-    fn vector(table: Table) -> mlua::Result<[f32; 3]> {
-        let mut values = [0.0f32; 3];
-        let mut count = 0;
-        for entry in table.pairs::<Value, Value>() {
-            let (key, value) = entry?;
-            let Value::Integer(index @ 1..=3) = key else {
-                return Err(mlua::Error::runtime(
-                    "transform vector requires only indices1..3",
-                ));
-            };
-            let n = match value {
-                Value::Number(n) => n,
-                Value::Integer(n) => n as f64,
-                _ => return Err(mlua::Error::runtime("transform vector requires numbers")),
-            };
-            if !n.is_finite() {
-                return Err(mlua::Error::runtime("transform vector must be finite"));
-            }
-            values[index as usize - 1] = n as f32;
-            count += 1;
-        }
-        if count != 3 {
+fn read_transform_vector(table: &Table) -> mlua::Result<[f64; 3]> {
+    let mut values = [0.0; 3];
+    let mut count = 0;
+    for entry in table.pairs::<Value, Value>() {
+        let (key, value) = entry?;
+        let Value::Integer(index @ 1..=3) = key else {
             return Err(mlua::Error::runtime(
-                "transform vector requires exactly3 components",
+                "transform vector requires only indices1..3",
             ));
+        };
+        let n = match value {
+            Value::Number(n) => n,
+            Value::Integer(n) => n as f64,
+            _ => return Err(mlua::Error::runtime("transform vector requires numbers")),
+        };
+        if !n.is_finite() {
+            return Err(mlua::Error::runtime("transform vector must be finite"));
         }
-        Ok(values)
+        values[index as usize - 1] = n;
+        count += 1;
     }
+    if count != 3 {
+        return Err(mlua::Error::runtime(
+            "transform vector requires exactly3 components",
+        ));
+    }
+    Ok(values)
+}
+fn read_transform(table: &Table) -> mlua::Result<Transform> {
     let transform = Transform {
-        translation: vector(table.raw_get("translation")?)?,
-        rotation: vector(table.raw_get("rotation")?)?,
-        scale: vector(table.raw_get("scale")?)?,
+        translation: read_transform_vector(&table.raw_get::<Table>("translation")?)?
+            .map(|n| n as f32),
+        rotation: read_transform_vector(&table.raw_get::<Table>("rotation")?)?.map(|n| n as f32),
+        scale: read_transform_vector(&table.raw_get::<Table>("scale")?)?.map(|n| n as f32),
     };
     transform
         .validate()
@@ -1222,6 +1317,8 @@ fn read_transform(table: &Table) -> mlua::Result<Transform> {
     Ok(transform)
 }
 
+#[cfg(test)]
+mod group_rotation_tests;
 #[cfg(test)]
 mod spatial_tests;
 #[cfg(test)]

@@ -163,9 +163,13 @@ impl PropertyValue {
     }
 }
 
+/// Source discriminator for a Group-local rotation binding.
+pub const GROUP_ROTATION_HOST_API_VERSION: u32 = 6;
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum BindingTarget {
     Object(String),
+    Group(String),
     Application,
 }
 
@@ -183,6 +187,13 @@ impl BehaviorBinding {
     pub fn object_id(&self) -> Option<&str> {
         match &self.target {
             BindingTarget::Object(id) => Some(id),
+            BindingTarget::Group(_) | BindingTarget::Application => None,
+        }
+    }
+    /// Object and Group owners share the scene target ID namespace.
+    pub(crate) fn scene_owner_id(&self) -> Option<&str> {
+        match &self.target {
+            BindingTarget::Object(id) | BindingTarget::Group(id) => Some(id),
             BindingTarget::Application => None,
         }
     }
@@ -190,8 +201,13 @@ impl BehaviorBinding {
         self.validate_and_state_bytes().map(|_| ())
     }
     fn validate_and_state_bytes(&self) -> Result<usize, SceneError> {
-        if let Some(id) = self.object_id() {
+        if let Some(id) = self.scene_owner_id() {
             validate_id(id)?;
+        }
+        if matches!(self.target, BindingTarget::Group(_)) && !self.state_defaults.is_empty() {
+            return Err(SceneError::Invalid(
+                "Group rotation bindings cannot own runtime state".into(),
+            ));
         }
         validate_id(&self.source_id)?;
         if self.properties.len() > MAX_PROPERTIES {
@@ -219,8 +235,9 @@ impl BehaviorBinding {
 
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
-enum ApplicationTarget {
+enum TaggedTarget {
     Application {},
+    Group { group_id: String },
 }
 
 // Unlike Option<T>, this distinguishes a missing field from explicit null.
@@ -244,7 +261,7 @@ impl<'de> Deserialize<'de> for BehaviorBinding {
             #[serde(default)]
             object_id: Present<String>,
             #[serde(default)]
-            target: Present<ApplicationTarget>,
+            target: Present<TaggedTarget>,
             source_id: String,
             enabled: bool,
             properties: BTreeMap<String, PropertyValue>,
@@ -256,12 +273,15 @@ impl<'de> Deserialize<'de> for BehaviorBinding {
         let wire = Wire::deserialize(deserializer)?;
         let target = match (wire.object_id, wire.target) {
             (Present::Value(id), Present::Missing) => BindingTarget::Object(id),
-            (Present::Missing, Present::Value(ApplicationTarget::Application {})) => {
+            (Present::Missing, Present::Value(TaggedTarget::Application {})) => {
                 BindingTarget::Application
+            }
+            (Present::Missing, Present::Value(TaggedTarget::Group { group_id })) => {
+                BindingTarget::Group(group_id)
             }
             _ => {
                 return Err(serde::de::Error::custom(
-                    "binding requires exactly one object_id or application target",
+                    "binding requires exactly one object_id or tagged target",
                 ))
             }
         };
@@ -285,8 +305,14 @@ impl Serialize for BehaviorBinding {
         )?;
         match &self.target {
             BindingTarget::Object(id) => wire.serialize_field("object_id", id)?,
+            BindingTarget::Group(id) => wire.serialize_field(
+                "target",
+                &TaggedTarget::Group {
+                    group_id: id.clone(),
+                },
+            )?,
             BindingTarget::Application => {
-                wire.serialize_field("target", &ApplicationTarget::Application {})?
+                wire.serialize_field("target", &TaggedTarget::Application {})?
             }
         }
         wire.serialize_field("source_id", &self.source_id)?;
@@ -324,8 +350,19 @@ impl Authoring {
             && self.hud.is_default()
     }
     pub fn validate(&self, scene: &Scene) -> Result<(), SceneError> {
-        if !self.is_empty() {
-            scene.require_flat()?;
+        if !scene.hierarchy.is_empty()
+            && (!self.actions.is_empty()
+                || !self.hud.is_default()
+                || self
+                    .sources
+                    .values()
+                    .any(|source| source.host_api_version != GROUP_ROTATION_HOST_API_VERSION)
+                || self
+                    .bindings
+                    .values()
+                    .any(|binding| !matches!(binding.target, BindingTarget::Group(_))))
+        {
+            return Err(SceneError::Invalid("live hierarchy accepts only Group-local rotation authoring; Object/Application bindings, input actions and HUD are unsupported".into()));
         }
         crate::input::validate_action_map(&self.actions)?;
         self.hud.validate()?;
@@ -357,6 +394,18 @@ impl Authoring {
                         ));
                     }
                 }
+                BindingTarget::Group(group_id) => {
+                    if !scene.hierarchy.groups.contains_key(group_id) {
+                        return Err(SceneError::Invalid(format!(
+                            "binding {id} Group owner {group_id} does not exist"
+                        )));
+                    }
+                    if !owners.insert(group_id) {
+                        return Err(SceneError::Invalid(
+                            "only one behavior binding per Group is supported".into(),
+                        ));
+                    }
+                }
                 BindingTarget::Application => {
                     if application_owned {
                         return Err(SceneError::Invalid("only one application behavior binding is supported, including disabled bindings".into()));
@@ -380,7 +429,7 @@ impl Authoring {
     }
     pub(crate) fn object_ids(&self) -> impl Iterator<Item = &str> {
         self.bindings.values().flat_map(|b| {
-            b.object_id()
+            b.scene_owner_id()
                 .into_iter()
                 .chain(b.properties.values().filter_map(|v| match v {
                     PropertyValue::ObjectRef(Some(id)) => Some(id.as_str()),
@@ -444,8 +493,14 @@ impl Serialize for BindingSummary {
         wire.serialize_field("id", &self.id)?;
         match &self.target {
             BindingTarget::Object(id) => wire.serialize_field("object_id", id)?,
+            BindingTarget::Group(id) => wire.serialize_field(
+                "target",
+                &TaggedTarget::Group {
+                    group_id: id.clone(),
+                },
+            )?,
             BindingTarget::Application => {
-                wire.serialize_field("target", &ApplicationTarget::Application {})?
+                wire.serialize_field("target", &TaggedTarget::Application {})?
             }
         }
         wire.serialize_field("source_id", &self.source_id)?;

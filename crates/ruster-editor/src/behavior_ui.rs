@@ -1331,7 +1331,7 @@ impl BehaviorUi {
             } else {
                 ui.menu_button("Add behavior…",|ui| {
                     if ui.button(if self.application {"Lua application"}else{"Lua follower"}).clicked() {
-                        action=Some(match &target {BindingTarget::Application=>Action::CreateApplication,BindingTarget::Object(id)=>Action::Create(id.clone())});ui.close();
+                        action=Some(match &target {BindingTarget::Application=>Action::CreateApplication,BindingTarget::Object(id)=>Action::Create(id.clone()),BindingTarget::Group(_)=>unreachable!("Group creation is not presented here")});ui.close();
                     }
                     ui.menu_button("Attach existing source…",|ui| {
                     for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::Attach{target:target.clone(),source:id.clone()});ui.close();}}

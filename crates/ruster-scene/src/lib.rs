@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 /// Flat-scene wire format remains unchanged. Hierarchy is an explicit capability.
 pub const FORMAT_VERSION: u32 = 18;
 pub const HIERARCHY_FORMAT_VERSION: u32 = 19;
+pub const GROUP_ROTATION_FORMAT_VERSION: u32 = 20;
 pub const MAX_MATERIALS: usize = 64;
 
 mod hierarchy;
@@ -518,7 +519,7 @@ impl fmt::Display for SceneError {
             Self::Format(error) => write!(f, "invalid scene JSON: {error}"),
             Self::UnsupportedVersion(version) => write!(
                 f,
-                "unsupported scene version {version}; supported versions are 1 through {HIERARCHY_FORMAT_VERSION}"
+                "unsupported scene version {version}; supported versions are 1 through {GROUP_ROTATION_FORMAT_VERSION}"
             ),
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
             Self::Capacity => write!(f, "authored state and required reversible history exceed 1 MiB; reduce content or edit size before retrying"),
@@ -1048,7 +1049,7 @@ impl Change {
             .flat_map(|d| [&d.before, &d.after])
             .flatten()
             .flat_map(|b| {
-                b.object_id()
+                b.scene_owner_id()
                     .into_iter()
                     .chain(b.properties.values().filter_map(|v| match v {
                         PropertyValue::ObjectRef(Some(id)) => Some(id.as_str()),
@@ -1331,14 +1332,33 @@ impl Document {
         }
     }
     fn required_version(&self) -> u32 {
-        if !self.scene.hierarchy.is_empty()
-            || self
-                .undo
-                .iter()
-                .chain(&self.redo)
-                .flat_map(|c| &c.scene)
-                .any(|d| matches!(d, SceneDelta::Hierarchy { .. }))
+        let history = self.undo.iter().chain(&self.redo);
+        let has_hierarchy = !self.scene.hierarchy.is_empty()
+            || history
+                .clone()
+                .flat_map(|change| &change.scene)
+                .any(|delta| matches!(delta, SceneDelta::Hierarchy { .. }));
+        let groups = |binding: &BehaviorBinding| matches!(binding.target, BindingTarget::Group(_));
+        let group_source = |source: &BehaviorSource| {
+            source.host_api_version == authoring::GROUP_ROTATION_HOST_API_VERSION
+        };
+        if self.authoring.bindings.values().any(groups)
+            || history
+                .clone()
+                .flat_map(|change| &change.bindings)
+                .flat_map(|delta| [&delta.before, &delta.after])
+                .flatten()
+                .any(groups)
+            || has_hierarchy
+                && (self.authoring.sources.values().any(group_source)
+                    || history
+                        .flat_map(|change| &change.sources)
+                        .flat_map(|delta| [&delta.before, &delta.after])
+                        .flatten()
+                        .any(group_source))
         {
+            GROUP_ROTATION_FORMAT_VERSION
+        } else if has_hierarchy {
             HIERARCHY_FORMAT_VERSION
         } else {
             FORMAT_VERSION
@@ -1428,7 +1448,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=19 => serde_json::from_value(value)?,
+            5..=20 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1455,6 +1475,13 @@ impl Document {
         {
             return Err(SceneError::Invalid(
                 "scene v3 does not support grouped history".into(),
+            ));
+        }
+        if version < u64::from(GROUP_ROTATION_FORMAT_VERSION)
+            && document.required_version() == GROUP_ROTATION_FORMAT_VERSION
+        {
+            return Err(SceneError::Invalid(
+                "Group-local rotation authoring or history requires Scene20".into(),
             ));
         }
         document.validate()?;
@@ -7061,7 +7088,7 @@ mod tests {
             br#"{"format_version":1,"id":"logistics","config":{}}"#.to_vec(),
         ];
         let mut value = good.clone();
-        value["format_version"] = (HIERARCHY_FORMAT_VERSION + 1).into();
+        value["format_version"] = (GROUP_ROTATION_FORMAT_VERSION + 1).into();
         cases.push(serde_json::to_vec(&value).unwrap());
         let mut value = good.clone();
         value["unexpected"] = true.into();

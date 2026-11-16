@@ -63,6 +63,7 @@ impl Engine {
                             SPATIAL_HOST_API_VERSION
                                 | STATE_HOST_API_VERSION
                                 | LIFECYCLE_HOST_API_VERSION
+                                | GROUP_ROTATION_HOST_API_VERSION
                         )
                     })
         }) {
