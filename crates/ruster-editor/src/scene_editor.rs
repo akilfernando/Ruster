@@ -9707,7 +9707,7 @@ mod tests {
                 json!({"type":"group","group_id":"hinge"})
             );
             assert!(binding["object_id"].is_null());
-            editor.history(false);
+            call(&mut editor, "scene_undo", json!({}));
             assert!(editor.session.binding("hinge-turn").is_none());
             call(&mut editor, "scene_redo", json!({}));
             assert_eq!(
@@ -9749,6 +9749,22 @@ mod tests {
                     .rotation,
                 [0.0; 3]
             );
+            for (operation, playing) in [
+                ("behavior_runtime_play", true),
+                ("behavior_runtime_pause", false),
+            ] {
+                call(
+                    &mut editor,
+                    operation,
+                    json!({"expected_run_id":reset["run_id"]}),
+                );
+                let deadline = Instant::now() + Duration::from_secs(4);
+                while editor.runtime.is_playing() != playing {
+                    editor.poll_runtime(&ctx);
+                    assert!(Instant::now() < deadline, "{:?}", editor.runtime.diagnostic);
+                    std::thread::yield_now();
+                }
+            }
         }
         if stdio {
             let persistence = call(&mut editor, "scene_persistence_inspect", json!({}));
