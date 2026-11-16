@@ -1,10 +1,13 @@
 //! Admission for the bounded, self-contained static GLB 2.0 subset.
 use super::*;
-use glam::{DQuat, EulerRot};
+use glam::{DMat4, DQuat, DVec3, EulerRot};
 
 pub const MAX_GLB_SOURCE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
-const MAX_DEPTH: usize = 16;
+// Match the scene hierarchy qualification bound, including the creator root
+// and the Group placed around an imported mesh that also has children.
+const MAX_GROUP_LEVELS: usize = 8;
+const MIN_DIELECTRIC_ROUGHNESS: f32 = 0.08;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -313,15 +316,79 @@ impl Node {
             ));
         }
         let (z, y, x) = orientation.normalize().to_euler(EulerRot::ZYX);
+        let stored_scale = scale.map(|n| n as f32);
+        if (self.mesh.is_none() || !self.children.is_empty())
+            && (stored_scale[0] != stored_scale[1] || stored_scale[0] != stored_scale[2])
+        {
+            return Err(error("GLB nodes placed as Groups require positive uniform scale; apply scale in Blender before export"));
+        }
         Ok(ModelNode {
             name: self.name.clone(),
             parent: parent.map(str::to_owned),
             translation: translation.map(|n| n as f32),
             rotation: [x as f32, y as f32, z as f32],
-            scale: scale.map(|n| n as f32),
+            scale: stored_scale,
             mesh_id: None,
             material: None,
         })
+    }
+}
+
+/// Use scene storage precision and nearest-parent-first composition so even
+/// valid local GLB transforms cannot publish an unplaceable resolved pose.
+#[derive(Clone, Copy)]
+struct PlacementPose {
+    translation: DVec3,
+    rotation: DQuat,
+    scale: DVec3,
+}
+
+impl PlacementPose {
+    fn from_local(node: &ModelNode) -> Self {
+        let [x, y, z] = node.rotation.map(f64::from);
+        Self {
+            translation: DVec3::from_array(node.translation.map(f64::from)),
+            rotation: DQuat::from_euler(EulerRot::ZYX, z, y, x),
+            scale: DVec3::from_array(node.scale.map(f64::from)),
+        }
+    }
+
+    fn compose(self, local: Self) -> Self {
+        Self {
+            translation: self.translation + self.rotation * (self.scale * local.translation),
+            rotation: (self.rotation * local.rotation).normalize(),
+            scale: self.scale * local.scale,
+        }
+    }
+
+    fn validate_world(self) -> Result<(), &'static str> {
+        if !self.translation.is_finite()
+            || self.translation.abs().max_element() > 10_000.
+            || !self.rotation.is_finite()
+            || !self.scale.is_finite()
+            || self.scale.min_element() < 0.001
+            || self.scale.max_element() > 1000.
+        {
+            return Err("resolved pose exceeds translation ±10000 or scale 0.001..1000; adjust the source hierarchy");
+        }
+        let (z, y, x) = self.rotation.to_euler(EulerRot::ZYX);
+        let [x, y, z] = [x, y, z].map(|n| f64::from(n as f32));
+        let exact =
+            DMat4::from_scale_rotation_translation(self.scale, self.rotation, self.translation);
+        let stored = DMat4::from_scale_rotation_translation(
+            self.scale.as_vec3().as_dvec3(),
+            DQuat::from_euler(EulerRot::ZYX, z, y, x),
+            self.translation.as_vec3().as_dvec3(),
+        );
+        if !exact
+            .to_cols_array()
+            .into_iter()
+            .zip(stored.to_cols_array())
+            .all(|(a, b)| a.is_finite() && b.is_finite() && (a - b).abs() <= 2e-6 * a.abs().max(1.))
+        {
+            return Err("resolved pose cannot be represented at scene precision; adjust source rotations and scale");
+        }
+        Ok(())
     }
 }
 
@@ -554,11 +621,15 @@ impl Decoder<'_> {
             || material.double_sided
             || surface.metallic_factor != 0.
             || !rgba.iter().all(|v| (0.0..=1.0).contains(v))
-            || !(0.0..=1.0).contains(&roughness)
         {
             return Err(error(
                 "GLB materials require bounded opaque single-sided nonmetallic PBR",
             ));
+        }
+        if !(MIN_DIELECTRIC_ROUGHNESS..=1.0).contains(&roughness) {
+            return Err(error(format!(
+                "GLB material {name:?} roughness must be in 0.08..=1 for scene placement"
+            )));
         }
         let mut definition = ModelMaterial {
             base_color_factor: [rgba[0], rgba[1], rgba[2]],
@@ -612,11 +683,14 @@ impl Decoder<'_> {
         Ok(name)
     }
 
-    fn node(&mut self, index: usize, parent: Option<&str>, depth: usize) -> Result<(), AssetError> {
-        if depth > MAX_DEPTH || !self.seen.insert(index) {
-            return Err(error(
-                "GLB hierarchy is too deep or contains a repeated/cyclic node",
-            ));
+    fn node(
+        &mut self,
+        index: usize,
+        parent: Option<&str>,
+        ancestors: &mut Vec<PlacementPose>,
+    ) -> Result<(), AssetError> {
+        if !self.seen.insert(index) {
+            return Err(error("GLB hierarchy contains a repeated or cyclic node"));
         }
         let node = at(&self.doc.nodes, index, "node")?;
         let name = named(&node.name)?;
@@ -624,7 +698,22 @@ impl Decoder<'_> {
         if self.model.info.nodes.contains_key(&path) {
             return Err(error(format!("duplicate GLB sibling path {path:?}")));
         }
-        let mut definition = node.placement(parent)?;
+        let becomes_group = node.mesh.is_none() || !node.children.is_empty();
+        let group_levels = 1 + ancestors.len() + usize::from(becomes_group);
+        if group_levels > MAX_GROUP_LEVELS {
+            return Err(error(format!("GLB node {path:?} exceeds eight Group levels with the placement root; simplify the source hierarchy")));
+        }
+        let mut definition = node
+            .placement(parent)
+            .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
+        let local = PlacementPose::from_local(&definition);
+        let world = ancestors
+            .iter()
+            .rev()
+            .fold(local, |pose, parent| parent.compose(pose));
+        world
+            .validate_world()
+            .map_err(|e| error(format!("GLB node {path:?}: {e}")))?;
         let children = node.children.clone();
         if let Some(i) = node.mesh {
             let mesh = at(&self.doc.meshes, i, "mesh")?;
@@ -644,9 +733,11 @@ impl Decoder<'_> {
             definition.material = Some(material);
         }
         self.model.info.nodes.insert(path.clone(), definition);
+        ancestors.push(local);
         for child in children {
-            self.node(child, Some(&path), depth + 1)?;
+            self.node(child, Some(&path), ancestors)?;
         }
+        ancestors.pop();
         Ok(())
     }
 }
@@ -702,8 +793,9 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
             resources: BTreeMap::new(),
         },
     };
+    let mut ancestors = Vec::with_capacity(MAX_GROUP_LEVELS);
     for root in roots {
-        decoder.node(root, None, 1)?;
+        decoder.node(root, None, &mut ancestors)?;
     }
     if !decoder
         .model

@@ -166,3 +166,118 @@ fn prepared_glb_publish_failure_preserves_the_active_generation() {
         Some(second.as_ref())
     );
 }
+
+fn model_bytes(nodes: Vec<serde_json::Value>, roughness: f32) -> Vec<u8> {
+    use serde_json::json;
+    let bin = [0.0_f32, 0., 0., 1., 0., 0., 0., 1., 0.]
+        .into_iter()
+        .flat_map(f32::to_le_bytes)
+        .collect::<Vec<_>>();
+    let mut document = serde_json::to_vec(&json!({
+        "asset":{"version":"2.0"},
+        "scenes":[{"nodes":[0]}], "nodes":nodes,
+        "meshes":[{"primitives":[{"attributes":{"POSITION":0},"material":0}]}],
+        "materials":[{"name":"Paint","pbrMetallicRoughness":{"metallicFactor":0,"roughnessFactor":roughness}}],
+        "buffers":[{"byteLength":bin.len()}],
+        "bufferViews":[{"buffer":0,"byteLength":bin.len()}],
+        "accessors":[{"bufferView":0,"componentType":5126,"count":3,"type":"VEC3"}],
+    })).unwrap();
+    document.resize(document.len().next_multiple_of(4), b' ');
+    let total = 28 + document.len() + bin.len();
+    let mut bytes = b"glTF".to_vec();
+    bytes.extend(2_u32.to_le_bytes());
+    bytes.extend((total as u32).to_le_bytes());
+    bytes.extend((document.len() as u32).to_le_bytes());
+    bytes.extend(b"JSON");
+    bytes.extend(document);
+    bytes.extend((bin.len() as u32).to_le_bytes());
+    bytes.extend(b"BIN\0");
+    bytes.extend(bin);
+    bytes
+}
+
+#[test]
+fn import_refuses_unplaceable_materials_and_transforms_before_publication() {
+    use serde_json::json;
+    let depth_chain = |mesh_parent: bool| {
+        let mut nodes: Vec<_> = (0..7)
+            .map(|i| json!({"name":format!("Group{i}"),"children":[i + 1]}))
+            .collect();
+        if mesh_parent {
+            nodes.push(json!({"name":"Wrapper","mesh":0,"children":[8]}));
+            nodes.push(json!({"name":"EmptyChild"}));
+        } else {
+            nodes.push(json!({"name":"Leaf","mesh":0,"scale":[1,2,3]}));
+        }
+        nodes
+    };
+    for (nodes, roughness, diagnostic) in [
+        (
+            vec![json!({"name":"Mesh","mesh":0})],
+            0.07,
+            "roughness must be in 0.08",
+        ),
+        (
+            vec![
+                json!({"name":"MeshWithChild","mesh":0,"scale":[1,2,1],"children":[1]}),
+                json!({"name":"Child"}),
+            ],
+            0.6,
+            "Groups require positive uniform scale",
+        ),
+        (
+            vec![
+                json!({"name":"Group","scale":[1,2,1],"children":[1]}),
+                json!({"name":"Mesh","mesh":0}),
+            ],
+            0.6,
+            "Groups require positive uniform scale",
+        ),
+        (
+            depth_chain(true),
+            0.6,
+            "eight Group levels with the placement root",
+        ),
+        (
+            vec![
+                json!({"name":"Group","translation":[10000,0,0],"children":[1]}),
+                json!({"name":"Mesh","mesh":0,"translation":[1,0,0]}),
+            ],
+            0.6,
+            "resolved pose exceeds translation",
+        ),
+        (
+            vec![
+                json!({"name":"Group","scale":[1000,1000,1000],"children":[1]}),
+                json!({"name":"Mesh","mesh":0,"scale":[1,2,1]}),
+            ],
+            0.6,
+            "resolved pose exceeds translation",
+        ),
+    ] {
+        let directory = tempfile::tempdir().unwrap();
+        fs::write(
+            directory.path().join("model.glb"),
+            model_bytes(nodes, roughness),
+        )
+        .unwrap();
+        let mut store = AssetStore::open(directory.path()).unwrap();
+        let failure = store.import_glb_at(0, "model", "model.glb").unwrap_err();
+        assert!(failure.to_string().contains(diagnostic), "{failure}");
+        assert_eq!(store.revision(), 0);
+        assert!(store.model("model").is_none());
+        assert!(!directory.path().join(".ruster-assets.json").exists());
+        assert!(!directory.path().join(".ruster-models").exists());
+    }
+
+    let directory = tempfile::tempdir().unwrap();
+    fs::write(
+        directory.path().join("model.glb"),
+        model_bytes(depth_chain(false), 0.08),
+    )
+    .unwrap();
+    let mut store = AssetStore::open(directory.path()).unwrap();
+    let accepted = store.import_glb_at(0, "model", "model.glb").unwrap();
+    assert_eq!(accepted.nodes.values().last().unwrap().scale, [1., 2., 3.]);
+    assert_eq!(accepted.materials["Paint"].roughness, 0.08);
+}

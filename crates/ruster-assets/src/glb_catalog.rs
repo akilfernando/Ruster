@@ -228,6 +228,15 @@ impl AssetStore {
         candidate: PreparedModel,
         catalog_published: &mut bool,
     ) -> Result<ModelInfo, AssetError> {
+        self.publish_model_with_registry(candidate, catalog_published, atomic_write)
+    }
+
+    fn publish_model_with_registry(
+        &mut self,
+        candidate: PreparedModel,
+        catalog_published: &mut bool,
+        publish_registry: impl FnOnce(&Path, &Path, &[u8]) -> Result<(), AssetError>,
+    ) -> Result<ModelInfo, AssetError> {
         let PreparedModel {
             bytes,
             decoded,
@@ -253,7 +262,7 @@ impl AssetStore {
         }
         if let Some(registry) = registry {
             if let Err(failure) =
-                atomic_write(&self.root, &self.root.join(REGISTRY), &registry.bytes)
+                publish_registry(&self.root, &self.root.join(REGISTRY), &registry.bytes)
             {
                 if !retained
                     && !self
@@ -332,5 +341,62 @@ impl AssetStore {
             ));
         }
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[ignore = "requires pinned Blender GLB A/B fixtures; injects failure after real generation staging"]
+    fn registry_replacement_failure_after_generation_staging_preserves_active_model() {
+        let fixture = PathBuf::from(std::env::var_os("RUSTER_TEST_GLB_FIXTURES").unwrap());
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("beacon.glb");
+        fs::copy(fixture.join("beacon-A.glb"), &source).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let first = store.import_glb_at(0, "beacon", "beacon.glb").unwrap();
+        let catalog = fs::read(root.path().join(REGISTRY)).unwrap();
+        let old_meshes = store.mesh_snapshots();
+        let old_textures = store.texture_snapshots();
+
+        fs::copy(fixture.join("beacon-B-reordered.glb"), &source).unwrap();
+        let candidate = store.prepare_model("beacon", "beacon.glb").unwrap();
+        let candidate_hash = candidate.decoded.info.hash.clone();
+        let generation =
+            generation_path(&accepted_directory(root.path()).unwrap(), &candidate_hash);
+        assert!(!generation.exists());
+        let mut published = false;
+        let lock = store.guard(1).unwrap();
+        let failure = store
+            .publish_model_with_registry(candidate, &mut published, |_, path, _| {
+                assert_eq!(fs::read(&generation).unwrap(), fs::read(&source).unwrap());
+                assert_eq!(fs::read(path).unwrap(), catalog);
+                Err(error("injected registry replacement failure"))
+            })
+            .unwrap_err();
+        drop(lock);
+        assert_eq!(failure.to_string(), "injected registry replacement failure");
+        assert!(!published);
+        assert!(!generation.exists());
+        assert_eq!(fs::read(root.path().join(REGISTRY)).unwrap(), catalog);
+        assert_eq!(store.revision(), 1);
+        assert_eq!(store.model("beacon"), Some(&first));
+        assert!(!root.path().join(".ruster-cache").exists());
+        let reopened = AssetStore::open(root.path()).unwrap();
+        assert_eq!(reopened.model("beacon"), Some(&first));
+        assert_eq!(reopened.mesh_snapshots(), old_meshes);
+        assert_eq!(reopened.texture_snapshots(), old_textures);
+
+        let second = store.refresh_glb_at(1, "beacon").unwrap();
+        assert_eq!(store.revision(), 2);
+        assert_eq!(second.hash, candidate_hash);
+        assert_eq!(second.nodes, first.nodes);
+        assert_eq!(second.materials, first.materials);
+        assert_eq!(
+            AssetStore::open(root.path()).unwrap().model("beacon"),
+            Some(&second)
+        );
     }
 }
