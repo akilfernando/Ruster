@@ -1,65 +1,77 @@
 # Current project status
 
-## Static GLB import and safe reimport goal active — 2026-11-16
+## Static GLB import and safe reimport integrated locally — 2026-11-16
 
-Astra independently ranked [static glTF import and safe reimport](plans/STATIC-GLTF-REIMPORT.md)
-first after authored player view. The user approved the scope and the goal
-is active. The first check is a real catalog
-import and reimport with reordered source arrays, followed by invalid-source
-rollback. The scope retains ordinary editor recovery and relocated Linux
-delivery as acceptance criteria. Astra's execution plan freezes a
-structure-preserving refresh and one atomic catalog generation. A Blender
-fixture family with real A/B exports, reordered B, and malformed and missing
-part variants is pinned under
+The [goal plan](plans/STATIC-GLTF-REIMPORT.md) and
+[resource generation decision](decisions/2026-11-16-static-glb-resource-generations.md)
+record the supported Blender workflow and implementation boundaries. Source
+from `feat/static-glb-20261116` is merged into the local cumulative branch.
+Catalog v5 owns accepted source generations. Placement makes editable scene
+copies, using the existing scene and runtime wires. Refresh changes the
+shared resource generation. It preserves scene placement, materials,
+behavior bindings and camera targets.
+
+- **Production data path.** The real two-part Blender A/B fixture and
+  reordered B pass import, placement, atomic Undo/Redo and actual
+  packaging at `71c3e93`. Malformed and structural changes refuse. A
+  fresh load with an empty cache restored accepted B. Independent archive
+  verification checked triangle winding, normals, UVs, mesh extents
+  and revised embedded texture against Blender. All three relocated
+  archives ran Reset/Step with the expected Group motion and camera anchor.
+- **Publication and supported subset.** Owning asset checks exercised a
+  real filesystem error before the generation write and a separate
+  injected failure after durable replacement generation staging, before
+  catalog replacement. The original catalog, resource IDs and payloads
+  survived fresh reopen; explicit retry selected the replacement once.
+  Astra reviewed the asset and scene paths and identified an import
+  versus placement mismatch. `9671ed6` aligns roughness, Group scale and
+  depth, world transform bounds and storage precision with placement.
+  The three explicit Blender asset cases passed after the correction.
+- **Ordinary editor.** A pinned inspection build on the RTX 4060 used the
+  normal import, Place, behavior, Player View, Save, Refresh and File
+  export controls. Enter submitted the import, Escape dismissed owned
+  dialogs and Tab traversed export fields. Captures show the larger cap
+  and revised texture after Reset. The UI reported malformed source and
+  kept the accepted revision. A fresh process reopened the saved scene
+  with the failed editable source and an empty cache. Authored bytes
+  stayed identical. The editor archive relocated independently, matched
+  the exact saved bytes and embedded B texture, and ran behavior and
+  camera. The native probe used app-scoped input and restored workspace 1.
+- **Guarded MCP.** A matched real STDIO adapter first refused project
+  commands until the disposable fixture approved its exact owner. It
+  then imported, placed, moved the creator root, authored Group behavior
+  and a follow camera, reimported reordered B, refused malformed source,
+  saved and exported. Fresh readers preserved scene/history and accepted
+  B. The independently relocated archive contained the expected cap
+  geometry and exact embedded texture and ran the authored behavior and
+  camera. The fixture retired its adapter and locator.
+- **Legacy compatibility.** The same native editor opened a retained v4
+  project with four OBJ meshes and three PNG textures. After an ordinary
+  Save and File export, the relocated app ran Step 1 with the same scene
+  and byte-identical resources. The catalog remained v4 and byte-identical.
+  The initial legacy export probe encountered the normal Save precondition.
+  See `native-legacy-3.log` and `legacy-relocation-3.log`.
+- **Measured cost.** Optimized production import, reimport and empty-cache
+  open medians were 4.92, 6.07 and 0.18 ms on CPU0 over 22 measured runs
+  after three excluded initial samples. Decoded payloads retained 2,592
+  mesh bytes and 84 texture bytes, excluding overhead. Paired native A/B
+  runs used a matched audit runtime observer at 2333×1529, 4× MSAA. Two A
+  CPU medians were 27.38 and 54.33 µs and two B medians were 36.31 and
+  50.40 µs. All GPU scene medians were 72.704 µs at the observed timer
+  resolution. Sample sizes and CPU variability limit attribution.
+- **Gates.** Serialized `RUST_TEST_THREADS=1 python3 scripts/check.py --base 005b33b`
+  passed on the feature branch with 422 Rust tests, 17 ignored, 33 Python
+  tests, strict Clippy, format and Markdown in 110.42 s. Explicit asset,
+  production tracer, editor command and GLB STDIO fixture results are
+  recorded separately. Merged Rust sources and lockfile are identical
+  to the qualified feature branch.
+
+Exact artifact hashes, commands, output and observed harness corrections are
+retained under
 `/home/akilf/Projects/Ruster-Audits/static-glb-20261116.hJqwVv`.
-Implementation and qualification run in `feat/static-glb-20261116`.
-The documentation lane verifies links and whitespace.
-
-Scene checkpoint `e2a7bcf` adds one guarded atomic placement command with
-ordinary scene hierarchy, material and object history, using the current
-scene wire. The named source template stays importer-owned. Placement makes
-an editable scene copy, and resource refresh preserves its IDs and local
-values. Existing Group scale rules apply. The focused
-`cargo test -p ruster-scene imported_placement_atomic_history_and_closure --locked`
-passed, as did strict scene Clippy. The case verifies failure atomicity,
-stale revisions, Undo/Redo and reopen. The independent Blender source oracle
-passed on both versions and reordered B, checking nested world poses,
-mesh extents, material settings and embedded PNG. The production data-path tracer in `71c3e93` passed with the real
-Blender assets, scene editor export controller and matched Linux kit.
-Import A and reordered reimport B preserved exact Scene21 bytes, placement
-history, Group behavior and Player View reference. Malformed and
-structurally changed revisions refused and the accepted B resources survived
-a fresh open with an empty cache. The independent relocation verifier
-confirmed actual exported triangle winding, normals, UVs and geometry
-against both source revisions, checked the revised embedded texture,
-and ran Reset and Step in all three relocated archives. Step rotated the
-creator-owned root while the follow camera retained the expected anchor.
-See `production-tracer-1.log`, `production-relocation-1.log` and the
-`production-tracer-1` artifacts in the same audit. The staged
-asset path in `98459d0` also passed strict Clippy, 20 asset tests and
-both explicit Blender cases. A successful preparation followed by a real
-generation-write obstruction left the A catalog and payloads intact after
-an empty-cache reopen. Removing the obstruction allowed one explicit B
-adoption. Additional review identified placeability validation boundaries
-now being tightened.
-
-Editor checkpoint `2a77fa7` and MCP checkpoint `9eed35b` implement the
-ordinary and guarded operations. Editor tests passed 201 with 10 ignored
-plus its explicit real GLB command test. MCP passed 30 unit and one startup
-integration case. Strict package Clippy passed for both. The full native
-editor and real GLB STDIO journeys remain pending. See the
-[resource generation decision](decisions/2026-11-16-static-glb-resource-generations.md).
-
-On the two-part fixture, the optimized synchronous production path on CPU0
-had medians of 6.50 ms import, 8.06 ms reimport and 0.70 ms empty-cache reopen
-(22 measured, three initial samples excluded). Decoded payloads retained
-2,592 mesh bytes and 84 texture bytes, excluding allocator and metadata
-overhead. Native matched A/B viewport runs used an existing audit observer at
-2333×1529 with 4× MSAA. CPU prepare medians across two runs per version were
-27.38–54.33 µs (A) and 36.31–50.40 µs (B). GPU scene medians were 72.704 µs
-throughout. The overlapping small sample is descriptive, and the observer
-uses a matched runtime build rather than the editor. Raw files and hashes are
-`asset-bench-1.csv`, `asset-bench.sha256` and `glb-native-cost.json`.
+See `native-glb-4-files`, `stdio-glb-3.log`, `creator-final-artifacts.sha256`,
+`asset-bench-final.csv` and `glb-native-cost.json`. The cumulative
+integration and test packages are local.
 
 ## Authored player view integrated locally — 2026-11-16
 

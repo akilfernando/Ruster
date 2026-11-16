@@ -121,12 +121,12 @@ a keyboard-controlled subject in preview and relocated Linux playback.
 The [implementation decision](decisions/2026-11-16-authored-player-view.md)
 records the contracts.
 
-### Active parity milestone
+### Static GLB import and safe reimport
 
 [Static glTF import and safe reimport](plans/STATIC-GLTF-REIMPORT.md) covers
 one textured model through placement, source revision, save/reopen and
-standalone delivery. The first proof targets stable resource identity and
-atomic failure recovery.
+standalone delivery. The [verification record](STATUS.md#static-glb-import-and-safe-reimport-integrated-locally--2026-11-16)
+records the production identity and failure recovery checks.
 
 Then select slices from the retained foundation plan: richer content/animation,
 physics/audio and devices/player data, material/lighting completion, measured
