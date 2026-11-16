@@ -118,7 +118,7 @@ The current source adds **Shading → Nonmetallic** and **Roughness** to the Mat
 
 In **Scene display**, explicitly choose **Surface HDR** to enable this surface response and manual **Exposure (EV)**, from−8 to8 stops. Output remains SDR through one fixed display transform. **Legacy SDR** preserves the previous display treatment; it retains nonmetallic material parameters while their highlights/roughness are inactive. Material edits never switch the scene profile automatically. This is direct-lit opaque nonmetallic shading, without metals, environment reflections or normal maps. Custom shaders use their existing SDR lane; unsupported/pending display states have visible feedback from the latest prepared viewport update.
 
-**Content → Assets / import…** offers **Normals** for new OBJ imports: **Authored normals** uses the source's complete vertex-normal stream for smooth surfaces; **Flat normals** keeps hard faces. No supplied normals falls back to flat; partial/invalid normals need repair. The normal policy is fixed per asset ID and shown in Content details. Reimport with a new ID to change it, then assign that mesh; assignment supports Undo. PNG texture imports have no normal setting. Existing accepted flat imports/Refresh retain their policy.
+**Content → Import Asset…** offers **Normals** for new OBJ imports: **Authored normals** uses the source's complete vertex-normal stream for smooth surfaces; **Flat normals** keeps hard faces. No supplied normals falls back to flat; partial/invalid normals need repair. The normal policy is fixed per asset ID and shown in Content details. Reimport with a new ID to change it, then assign that mesh; assignment supports Undo. PNG texture imports have no normal setting. Existing accepted flat imports/Refresh retain their policy.
 
 **PNG interpretation** defaults to **Base color (sRGB)**. Choose **Roughness map (linear)** for grayscale/red-channel finish data; the role is fixed per asset ID and Refresh preserves it. One source can be imported under separate IDs for both interpretations. In Material, choose the matching **Roughness map** slot or **None (clear)**. **Roughness multiplier** scales the map, with the effective result clamped to0.08–1; choose1 explicitly for its full range. Filter and Wrap affect both slots. Diffuse, Legacy SDR and custom shaders retain inactive references without enabling surface shading automatically. Missing maps show a provisional scalar viewport fallback; faithful export requires valid accepted dependencies.
 
@@ -317,16 +317,17 @@ catalog and a v2 scene. Work on a disposable project copy when trying refresh
 or rename. The derived `.ruster-cache/` directory is ignored and rebuildable;
 keep `.ruster-assets.json`, scene files and original sources under version control.
 
-**Content → Import / source tools…** imports a project-relative static GLB model, triangle-only OBJ or explicitly interpreted PNG under a stable asset
-ID. Choose **Assign mesh…** to use it on the selected object; choosing
-**Procedural cube** clears the reference. Mesh assignment shares transform
-Undo/Redo. Import/Refresh/Rename save the catalog immediately and have their own
-revision; scene Undo/Discard does not delete or rename source files. The asset
-window states this boundary before actions.
+**Content → Import Asset…** imports a static GLB model, triangle-only OBJ, PNG
+texture or WAV sound from the project folder. On Linux, use **Browse…** to pick
+a file inside that folder. You can also enter its project-relative path. Leave
+**Asset ID** blank to derive it from the filename, or enter a stable ID of your
+choice. The form shows settings for the selected format. Use **Source maintenance**
+to refresh an existing asset or rename its source. These actions update the asset
+catalog immediately. Scene Undo and Discard apply to scene edits, including mesh
+assignment through **Assign mesh…**.
 
-For a self-contained static `.glb`, enter a stable model ID and source path, then
-press Enter in the source field or choose **Import asset**. Tab traverses controls;
-Escape cancels preparation. GLB imports use source normals/material settings and
+For a self-contained static `.glb`, choose the source and activate **Import asset**.
+Tab traverses the form, and Escape cancels preparation. GLB imports use source normals/material settings and
 reject OBJ normal-policy or PNG texture-role overrides. In **Content → Models**,
 choose **Place** to insert a complete model beneath a selected placement root in
 one scene Undo step. Repeated Place creates independent editable copies with new
@@ -844,7 +845,7 @@ This bounded mover requires a flat scene, uniform sphere scale and a single enab
 
 ### One-shot sound properties
 
-Import a project-relative `.wav` using **Content → Import / source tools…** and a stable asset ID. WAV sources are bounded PCM16 mono/stereo, 8000–48000 Hz, at most 10 seconds and 2 MiB. Content lists the item as **Sound** and supports the same Refresh and source recovery actions as other assets.
+Import a project-relative `.wav` using **Content → Import Asset…** with an optional asset ID. WAV sources are bounded PCM16 mono/stereo, 8000–48000 Hz, at most 10 seconds and 2 MiB. Content lists the item as **Sound** and supports the same Refresh and source recovery actions as other assets.
 
 In **Behavior → Add property**, enter a cue name, choose **Sound**, and add it. **Edit value** offers only Sound catalog entries plus None, and **Gain (0–1)**. Enter applies a focused gain field; Escape reverts it, while an open selector owns its own Enter/Escape. Invalid gain text stays available for repair. Apply, Undo and Save/reopen use the existing property transaction. Missing references remain visible for repair; None is silent.
 

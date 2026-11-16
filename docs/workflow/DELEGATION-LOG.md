@@ -1242,3 +1242,11 @@ projects. Root integrated output and export and measured relocated
 playback and Step costs. Earlier default CPAL buffering caused a silent
 trace and was repaired by asking for a short supported device buffer.
 Individual model usage and cost are unavailable.
+
+## Dialog refinement — 2026-11-16
+
+An inherited editor worker handled the project picker and player-view camera
+dialog plus the shared file-browser result. Root integrated the dialog styling,
+asset import, scene and export forms, and native verification. The worker's
+focused camera keyboard and project lifecycle checks passed. Individual usage
+and cost are unavailable.

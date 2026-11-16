@@ -173,102 +173,148 @@ impl ProjectForm {
         let creating = self.name.is_some();
         let mut session = None;
         let mut close = false;
-        egui::Modal::new(egui::Id::unique("project_form")).show(ctx, |ui| {
-            let width = (ctx.content_rect().width() - 44.0).clamp(115.0, 450.0);
-            ui.set_width(width);
-            ui.heading(if creating {
-                "New Project"
-            } else {
-                "Open Project"
-            });
-            let mut editing = false;
-            if let Some(name) = &mut self.name {
-                let label = ui.label("Project name");
-                let field = ui
-                    .add(
-                        egui::TextEdit::singleline(name)
-                            .desired_width(width)
-                            .char_limit(128),
+        egui::Modal::new(egui::Id::unique("project_form"))
+            .frame(crate::editor_theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                let screen = ctx.content_rect();
+                let width = (screen.width() - 44.0).clamp(115.0, 450.0);
+                ui.set_width(width);
+                let top = ui.cursor().min.y;
+                let (title, description) = if creating {
+                    (
+                        "New Project",
+                        "Create a project folder with its first scene.",
                     )
-                    .labelled_by(label.id);
-                editing = field.has_focus() || field.lost_focus();
-                if std::mem::take(&mut self.focus) {
-                    field.request_focus();
-                }
-            }
-            let label = ui.label(if creating {
-                "Create in"
-            } else {
-                "Scene file or project folder"
-            });
-            let field = ui
-                .add(
-                    egui::TextEdit::singleline(&mut self.path)
-                        .desired_width(width)
-                        .char_limit(4096),
-                )
-                .labelled_by(label.id);
-            editing |= field.has_focus() || field.lost_focus();
-            if std::mem::take(&mut self.focus) {
-                field.request_focus();
-            }
-            #[cfg(target_os = "linux")]
-            self.browse.show(
-                ui,
-                &mut self.path,
-                &mut self.error,
-                if creating {
-                    BrowseKind::Directory
                 } else {
-                    BrowseKind::OpenScene
-                },
-            );
-            if let Some(name) = self.name.as_deref().filter(|n| !n.trim().is_empty()) {
-                ui.weak(
-                    Path::new(&self.path)
-                        .join(name.trim())
-                        .join("scene.json")
-                        .display()
-                        .to_string(),
-                );
-            }
-            if !self.error.is_empty() {
-                ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
-            }
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                let cancel = ui.button("Cancel").clicked()
-                    || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-                let enter = editing
-                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                let submit = crate::editor_theme::primary_button(
-                    ui,
-                    if creating {
-                        "Create Project"
-                    } else {
-                        "Open Project"
-                    },
-                )
-                .clicked();
-                if cancel {
-                    close = true;
-                } else if submit || enter {
-                    let location = Path::new(self.path.trim());
-                    let result = if let Some(name) = &self.name {
-                        create_project(location, name.trim())
-                    } else {
-                        open_project(location)
-                    };
-                    match result {
-                        Ok(opened) => {
-                            session = Some(opened);
-                            close = true;
+                    (
+                        "Open Project",
+                        "Choose a Rot scene file or its project folder.",
+                    )
+                };
+                crate::editor_theme::dialog_header(ui, title, description);
+                let header_height = ui.cursor().min.y - top;
+                let footer_height = if width < 220.0 { 88.0 } else { 52.0 };
+                let editing = egui::ScrollArea::vertical()
+                    .id_salt("project_form_body")
+                    .max_height((screen.height() - header_height - footer_height - 40.0).max(48.0))
+                    .show(ui, |ui| {
+                        crate::editor_theme::dialog_section(
+                            ui,
+                            if creating {
+                                "Project details"
+                            } else {
+                                "Project location"
+                            },
+                        );
+                        let mut editing = false;
+                        if let Some(name) = &mut self.name {
+                            let label = ui.label("Project name");
+                            let field = ui
+                                .add(
+                                    egui::TextEdit::singleline(name)
+                                        .desired_width(ui.available_width())
+                                        .char_limit(128),
+                                )
+                                .labelled_by(label.id);
+                            editing = field.has_focus() || field.lost_focus();
+                            if std::mem::take(&mut self.focus) {
+                                field.request_focus();
+                            }
+                            if field.gained_focus() {
+                                field.scroll_to_me(None);
+                            }
+                            ui.add_space(4.0);
                         }
-                        Err(error) => self.error = error,
+                        let label = ui.label(if creating {
+                            "Parent folder"
+                        } else {
+                            "Scene or folder path"
+                        });
+                        let field = ui
+                            .add(
+                                egui::TextEdit::singleline(&mut self.path)
+                                    .desired_width(ui.available_width())
+                                    .char_limit(4096),
+                            )
+                            .labelled_by(label.id);
+                        editing |= field.has_focus() || field.lost_focus();
+                        if std::mem::take(&mut self.focus) {
+                            field.request_focus();
+                        }
+                        if field.gained_focus() {
+                            field.scroll_to_me(None);
+                        }
+                        #[cfg(target_os = "linux")]
+                        self.browse.show(
+                            ui,
+                            &mut self.path,
+                            &mut self.error,
+                            if creating {
+                                BrowseKind::Directory
+                            } else {
+                                BrowseKind::OpenScene
+                            },
+                        );
+                        if let Some(name) = self.name.as_deref().filter(|n| !n.trim().is_empty()) {
+                            let destination = Path::new(&self.path)
+                                .join(name.trim())
+                                .join("scene.json")
+                                .display()
+                                .to_string();
+                            let surface = crate::editor_theme::colors(ui).surface;
+                            egui::Frame::new()
+                                .fill(surface)
+                                .corner_radius(6.0)
+                                .inner_margin(8.0)
+                                .show(ui, |ui| {
+                                    ui.set_width(ui.available_width());
+                                    ui.weak("First scene");
+                                    ui.add(egui::Label::new(&destination).truncate())
+                                        .on_hover_text(destination);
+                                });
+                        }
+                        if !self.error.is_empty() {
+                            ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
+                        }
+                        editing
+                    })
+                    .inner;
+                ui.add_space(4.0);
+                ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    let cancel = ui.button("Cancel").clicked()
+                        || ui
+                            .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                    let enter = editing
+                        && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                    let submit = crate::editor_theme::primary_button(
+                        ui,
+                        if creating {
+                            "Create Project"
+                        } else {
+                            "Open Project"
+                        },
+                    )
+                    .clicked();
+                    if cancel {
+                        close = true;
+                    } else if submit || enter {
+                        let location = Path::new(self.path.trim());
+                        let result = if let Some(name) = &self.name {
+                            create_project(location, name.trim())
+                        } else {
+                            open_project(location)
+                        };
+                        match result {
+                            Ok(opened) => {
+                                session = Some(opened);
+                                close = true;
+                            }
+                            Err(error) => self.error = error,
+                        }
                     }
-                }
+                });
             });
-        });
         (session, close)
     }
 }
@@ -328,6 +374,7 @@ pub(super) enum BrowseKind {
     Directory,
     OpenScene,
     SaveScene,
+    ImportAsset,
 }
 
 #[cfg(target_os = "linux")]
@@ -347,7 +394,8 @@ impl FileBrowser {
         path: &mut String,
         error: &mut String,
         kind: BrowseKind,
-    ) {
+    ) -> bool {
+        let mut selected = false;
         if let Some(result) = self
             .pending
             .as_ref()
@@ -358,6 +406,7 @@ impl FileBrowser {
                 Ok(Some(picked)) => {
                     *path = picked;
                     error.clear();
+                    selected = true;
                 }
                 Ok(None) => {}
                 Err(message) => *error = message,
@@ -369,6 +418,7 @@ impl FileBrowser {
         {
             self.pending = Some(browse(ui.ctx().clone(), kind));
         }
+        selected
     }
 }
 
@@ -384,6 +434,9 @@ fn browse(ctx: egui::Context, kind: BrowseKind) -> std::sync::mpsc::Receiver<Bro
             }
             BrowseKind::OpenScene => {
                 picker.arg("--title=Choose a Rot scene file");
+            }
+            BrowseKind::ImportAsset => {
+                picker.arg("--title=Choose an asset inside this project");
             }
             BrowseKind::SaveScene => {
                 picker.args([

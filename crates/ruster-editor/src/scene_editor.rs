@@ -574,6 +574,8 @@ pub struct SceneEditor {
     asset_rename_intent: bool,
     asset_id: String,
     asset_source: String,
+    #[cfg(target_os = "linux")]
+    asset_browser: project_picker::FileBrowser,
     asset_normal_policy: ruster_assets::MeshNormalPolicy,
     asset_texture_role: ruster_assets::TextureRole,
     render: Option<eframe::egui_wgpu::RenderState>,
@@ -783,8 +785,10 @@ impl SceneEditor {
             asset_focused: false,
             asset_source_focus: false,
             asset_rename_intent: false,
-            asset_id: "pyramid".into(),
-            asset_source: "meshes/pyramid.obj".into(),
+            asset_id: String::new(),
+            asset_source: String::new(),
+            #[cfg(target_os = "linux")]
+            asset_browser: project_picker::FileBrowser::default(),
             asset_normal_policy: ruster_assets::MeshNormalPolicy::AuthoredWhenComplete,
             asset_texture_role: ruster_assets::TextureRole::BaseColor,
             render: None,
@@ -4227,6 +4231,18 @@ impl SceneEditor {
         #[cfg(feature = "inspection")]
         self.asset_ops.timing_admitted(observed);
     }
+    fn open_asset_import(&mut self) {
+        self.asset_dialog = true;
+        self.asset_focused = false;
+        self.asset_source_focus = true;
+        self.asset_rename_intent = false;
+        self.asset_normal_policy = ruster_assets::MeshNormalPolicy::AuthoredWhenComplete;
+        self.asset_texture_role = ruster_assets::TextureRole::BaseColor;
+        self.asset_id.clear();
+        self.asset_source.clear();
+        self.error.clear();
+    }
+
     fn browser_contents(&mut self, ui: &mut egui::Ui) {
         let wide = ui.available_width() >= 640.0;
         let search_field = |editor: &mut Self, ui: &mut egui::Ui, width| {
@@ -4240,14 +4256,8 @@ impl SceneEditor {
         let search = ui
             .horizontal_wrapped(|ui| {
                 ui.heading("Content");
-                if ui.button("Import / source tools…").clicked() {
-                    self.asset_dialog = true;
-                    self.asset_focused = false;
-                    self.asset_source_focus = false;
-                    self.asset_rename_intent = false;
-                    self.asset_normal_policy =
-                        ruster_assets::MeshNormalPolicy::AuthoredWhenComplete;
-                    self.asset_texture_role = ruster_assets::TextureRole::BaseColor;
+                if crate::editor_theme::primary_button(ui, "Import Asset…").clicked() {
+                    self.open_asset_import();
                 }
                 ui.menu_button("Tools", |ui| self.shader_tools_ui(ui))
                     .response
@@ -4554,122 +4564,232 @@ impl SceneEditor {
                 .is_some_and(|extension| extension == "png"))
         .then_some(self.asset_texture_role)
     }
+    fn asset_import_settings(&mut self, ui: &mut egui::Ui) {
+        if self.import_normal_policy().is_some() {
+            crate::editor_theme::dialog_section(ui, "Mesh import settings");
+            ui.horizontal(|ui| {
+                ui.label("Normals");
+                let focus = combo_focus::ComboFocus::capture(ui, "asset_import_normals");
+                let mut selected = false;
+                let response = egui::ComboBox::from_id_salt("asset_import_normals")
+                    .selected_text(match self.asset_normal_policy {
+                        ruster_assets::MeshNormalPolicy::Flat => "Flat normals",
+                        ruster_assets::MeshNormalPolicy::AuthoredWhenComplete => "Authored normals",
+                    })
+                    .show_ui(ui, |ui| {
+                        for (value, label) in [
+                            (
+                                ruster_assets::MeshNormalPolicy::AuthoredWhenComplete,
+                                "Authored normals",
+                            ),
+                            (ruster_assets::MeshNormalPolicy::Flat, "Flat normals"),
+                        ] {
+                            if ui
+                                .selectable_value(&mut self.asset_normal_policy, value, label)
+                                .clicked()
+                            {
+                                selected = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                focus.restore(ui, &response.response, selected);
+            });
+            ui.weak("Choose Flat for hard faces.").on_hover_text("Authored normals use the complete normals in your OBJ. A mesh with no normals uses flat shading; incomplete normals need repair.");
+        }
+        if self.import_texture_role().is_some() {
+            crate::editor_theme::dialog_section(ui, "Texture import settings");
+            ui.horizontal(|ui| {
+                ui.label("Use as");
+                let focus = combo_focus::ComboFocus::capture(ui, "asset_import_texture_role");
+                let mut selected = false;
+                let response = egui::ComboBox::from_id_salt("asset_import_texture_role")
+                    .selected_text(match self.asset_texture_role {
+                        ruster_assets::TextureRole::BaseColor => "Base color (sRGB)",
+                        ruster_assets::TextureRole::Roughness => "Roughness map (linear)",
+                    })
+                    .show_ui(ui, |ui| {
+                        for (role, label) in [
+                            (ruster_assets::TextureRole::BaseColor, "Base color (sRGB)"),
+                            (
+                                ruster_assets::TextureRole::Roughness,
+                                "Roughness map (linear)",
+                            ),
+                        ] {
+                            if ui
+                                .selectable_value(&mut self.asset_texture_role, role, label)
+                                .clicked()
+                            {
+                                selected = true;
+                                ui.close();
+                            }
+                        }
+                    });
+                focus.restore(ui, &response.response, selected);
+            });
+            ui.weak("Base color uses sRGB. Roughness uses linear values.");
+        }
+    }
+
+    fn close_asset_dialog(&mut self) {
+        self.asset_dialog = false;
+        self.asset_focused = false;
+        self.asset_ops.cancel();
+        #[cfg(target_os = "linux")]
+        {
+            self.asset_browser = project_picker::FileBrowser::default();
+        }
+    }
+
     fn content_ui(&mut self, ctx: &egui::Context) {
         if !self.asset_dialog {
             self.asset_focused = false;
+            #[cfg(target_os = "linux")]
+            {
+                self.asset_browser = project_picker::FileBrowser::default();
+            }
             return;
         }
         let popup_at_start = egui::Popup::is_any_open(ctx);
         if !popup_at_start
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            self.asset_dialog = false;
-            self.asset_focused = false;
-            self.asset_ops.cancel();
+            self.close_asset_dialog();
             return;
         }
-        self.content_search
-            .update(self.assets.as_ref(), &self.content_query);
-        egui::Modal::new(egui::Id::unique("asset_dialog")).show(ctx, |ui| {
+        egui::Modal::new(egui::Id::unique("asset_dialog")).frame(crate::editor_theme::dialog_frame(ctx)).show(ctx, |ui| {
+            use crate::editor_theme::{dialog_header, dialog_section, primary_button};
+            let rename = self.asset_rename_intent;
+            let can_edit = !self.asset_publishing() && !self.asset_loading();
+            let busy = self.asset_ops.busy();
+            let primary = if rename { "Rename asset source" } else { "Import asset" };
             ui.set_width((ctx.content_rect().width() - 48.0).clamp(220.0, 520.0));
-            ui.heading(if self.asset_rename_intent { "Rename asset source" } else { "Project assets" });
-            ui.add_enabled_ui(!self.asset_publishing() && !self.asset_loading(),|ui|{egui::ScrollArea::vertical().id_salt("asset_tools_body").max_height((ctx.content_rect().height() - 110.0).max(80.0)).show(ui, |ui| {
-            ui.label("Content source updates save separately. Scene Undo reverses object and material edits.");
-            ui.label("Stable asset ID");
-            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
-            let mut id_enter = false;
-            if self.asset_rename_intent {
-                ui.label(&self.asset_id);
+            let has_project = self.asset_origin.is_some();
+            dialog_header(ui, primary, if rename {
+                "Move the source within this project. References keep the same asset ID."
             } else {
-                let field = ui.add(egui::TextEdit::singleline(&mut self.asset_id).id(egui::Id::unique("asset_import_id")));
-                id_enter = !popup_at_start && enter && (field.has_focus() || field.lost_focus());
-                if !self.asset_focused && !self.asset_source_focus {
-                    field.request_focus(); self.asset_focused = true;
-                }
+                "Add a GLB, OBJ, PNG or WAV file from your project folder."
+            });
+            if !has_project {
+                ui.weak("Save the scene first to give its assets a project folder.");
             }
-            ui.label(if self.asset_rename_intent { "Project-relative rename destination (same extension)" } else { "Project-relative GLB model, OBJ mesh, PNG texture or WAV sound source" });
-            let source = ui.add(egui::TextEdit::singleline(&mut self.asset_source).id(egui::Id::unique("asset_import_source")));
-            if id_enter || (!self.asset_focused && self.asset_source_focus) {
-                source.request_focus(); source.scroll_to_me(Some(egui::Align::Center)); self.asset_focused = true;
-            }
+            let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
             let mut operation = None;
-            if self.import_normal_policy().is_some() {
-                ui.horizontal(|ui| {
-                    ui.label("Normals");
-                    let focus = combo_focus::ComboFocus::capture(ui, "asset_import_normals");
-                    let mut selected = false;
-                    let response = egui::ComboBox::from_id_salt("asset_import_normals")
-                        .selected_text(match self.asset_normal_policy {
-                            ruster_assets::MeshNormalPolicy::Flat => "Flat normals",
-                            ruster_assets::MeshNormalPolicy::AuthoredWhenComplete => "Authored normals",
-                        }).show_ui(ui, |ui| {
-                            for (value, label) in [
-                                (ruster_assets::MeshNormalPolicy::AuthoredWhenComplete, "Authored normals"),
-                                (ruster_assets::MeshNormalPolicy::Flat, "Flat normals"),
-                            ] {
-                                if ui.selectable_value(&mut self.asset_normal_policy, value, label).clicked() {
-                                    selected = true;
-                                    ui.close();
+            ui.add_enabled_ui(can_edit, |ui| {
+                egui::ScrollArea::vertical().id_salt("asset_tools_body")
+                    .max_height((ctx.content_rect().height() - 175.0).max(70.0))
+                    .show(ui, |ui| {
+                        let label = dialog_section(ui, if rename { "New source path" } else { "Source file" });
+                        let source = ui.horizontal(|ui| {
+                            let source = ui.add(egui::TextEdit::singleline(&mut self.asset_source)
+                                .id(egui::Id::unique("asset_import_source"))
+                                .hint_text(if rename { "Relative path, same extension" } else { "e.g. meshes/prop.glb" })
+                                .desired_width(if rename { f32::INFINITY } else { (ui.available_width() - 90.0).max(90.0) })
+                                .char_limit(256)).labelled_by(label.id);
+                            #[cfg(target_os = "linux")]
+                            if !rename {
+                                let previous = self.asset_source.clone();
+                                if self.asset_browser.show(ui, &mut self.asset_source, &mut self.error, project_picker::BrowseKind::ImportAsset) {
+                                    if let Some(relative) = self.asset_origin.as_ref()
+                                        .and_then(|root| std::path::Path::new(&self.asset_source).strip_prefix(root).ok())
+                                        .and_then(std::path::Path::to_str)
+                                        .filter(|path| !path.is_empty())
+                                    {
+                                        self.asset_source = relative.to_owned();
+                                    } else {
+                                        self.asset_source = previous;
+                                        self.error = "Choose a file inside the current project folder.".into();
+                                    }
                                 }
                             }
-                        });
-                    focus.restore(ui, &response.response, selected);
-                });
-                ui.label("Use authored normals for smooth surfaces, or Flat for hard faces.").on_hover_text("Authored normals use the complete normals in your OBJ. A mesh with no normals uses flat shading; incomplete normals need repair.");
-            }
-            if self.import_texture_role().is_some() {
-                ui.horizontal(|ui| {
-                    ui.label("PNG interpretation");
-                    let focus = combo_focus::ComboFocus::capture(ui, "asset_import_texture_role");
-                    let mut selected = false;
-                    let response = egui::ComboBox::from_id_salt("asset_import_texture_role")
-                        .selected_text(match self.asset_texture_role {
-                            ruster_assets::TextureRole::BaseColor => "Base color (sRGB)",
-                            ruster_assets::TextureRole::Roughness => "Roughness map (linear)",
-                        }).show_ui(ui, |ui| {
-                            for (role, label) in [
-                                (ruster_assets::TextureRole::BaseColor, "Base color (sRGB)"),
-                                (ruster_assets::TextureRole::Roughness, "Roughness map (linear)"),
-                            ] {
-                                if ui.selectable_value(&mut self.asset_texture_role, role, label).clicked() { selected = true; ui.close(); }
+                            source
+                        }).inner;
+                        if !self.asset_focused && (self.asset_source_focus || rename) {
+                            source.request_focus();
+                            self.asset_focused = true;
+                        }
+                        let mut id_enter = false;
+                        let id_label = dialog_section(ui, "Asset ID");
+                        if rename {
+                            ui.label(&self.asset_id);
+                        } else {
+                            let field = ui.add(egui::TextEdit::singleline(&mut self.asset_id)
+                                .id(egui::Id::unique("asset_import_id"))
+                                .hint_text("Optional · defaults to filename")
+                                .desired_width(f32::INFINITY).char_limit(128)).labelled_by(id_label.id);
+                            if !self.asset_focused {
+                                field.request_focus();
+                                self.asset_focused = true;
                             }
-                        });
-                    focus.restore(ui, &response.response, selected);
-                });
-                ui.label("Roughness reads grayscale or the red channel as linear values. Import another ID for a different interpretation.");
-                ui.label("This choice applies to Import; Refresh keeps the asset's interpretation.");
+                            id_enter = !popup_at_start && enter && (field.has_focus() || field.lost_focus());
+                            if id_enter {
+                                source.request_focus();
+                            }
+                        }
+                        self.asset_import_settings(ui);
+                        if has_project && !busy && !id_enter && !popup_at_start && !egui::Popup::is_any_open(ctx) && enter
+                            && (source.has_focus() || source.lost_focus())
+                            && !self.asset_source.trim().is_empty() {
+                            operation = Some(if rename { "asset_rename" } else { "asset_import" });
+                        }
+                        if !rename {
+                            ui.collapsing("Source maintenance", |ui| {
+                                ui.weak("Use an existing asset ID. You can also manage a source from its Content row.");
+                                ui.horizontal_wrapped(|ui| {
+                                    if ui.add_enabled(!busy && !self.asset_id.trim().is_empty(), egui::Button::new("Refresh asset")).clicked() {
+                                        operation = Some("asset_refresh");
+                                    }
+                                    if ui.add_enabled(!busy && !self.asset_id.trim().is_empty() && !self.asset_source.trim().is_empty(), egui::Button::new("Rename asset source")).clicked() {
+                                        operation = Some("asset_rename");
+                                    }
+                                });
+                            });
+                        }
+                    });
+            });
+            ui.separator();
+            if !self.error.is_empty() {
+                ui.add(egui::Label::new(egui::RichText::new(&self.error).color(crate::editor_theme::colors(ui).error)).truncate()).on_hover_text(&self.error);
+            } else if busy {
+                ui.label("Preparing asset…");
+            } else if has_project {
+                ui.weak("Asset changes are saved to the project immediately.");
             }
-            if !self.asset_ops.busy() && !id_enter && !popup_at_start && !egui::Popup::is_any_open(ctx) && enter && (source.has_focus() || source.lost_focus()) {
-                operation = Some(if self.asset_rename_intent {"rename"} else {"import"});
-            }
-            ui.add_enabled_ui(!self.asset_ops.busy(),|ui|{ui.horizontal_wrapped(|ui| {
-                if !self.asset_rename_intent {
-                    if ui.button("Import asset").clicked() { operation = Some("import"); }
-                    if ui.button("Refresh asset").clicked() { operation = Some("refresh"); }
+            ui.horizontal_wrapped(|ui| {
+                if ui.button(if busy { "Cancel operation" } else { "Cancel" }).clicked() {
+                    self.close_asset_dialog();
+                    operation = None;
                 }
-                if ui.button("Rename asset source").clicked() { operation = Some("rename"); }
-            });});
+                if !has_project && !rename && !busy && primary_button(ui, "Save scene first…").clicked() {
+                    self.close_asset_dialog();
+                    self.save();
+                }
+                ui.add_enabled_ui(has_project && can_edit && !busy && !self.asset_source.trim().is_empty(), |ui| {
+                    if primary_button(ui, primary).clicked() {
+                        operation = Some(if rename { "asset_rename" } else { "asset_import" });
+                    }
+                });
+            });
             if let Some(op) = operation {
+                if op == "asset_import" && self.asset_id.trim().is_empty() {
+                    let stem = std::path::Path::new(self.asset_source.trim()).file_stem().and_then(|v| v.to_str()).unwrap_or_default();
+                    let suggested: String = stem.chars().take(128).map(|c| {
+                        if c.is_ascii_alphanumeric() || "_-.".contains(c) { c } else { '-' }
+                    }).collect();
+                    if suggested.trim_matches('-').is_empty() {
+                        self.error = "Enter an asset ID using letters, digits, dashes, underscores or dots.".into();
+                        return;
+                    }
+                    self.asset_id = suggested;
+                }
                 #[cfg(feature = "inspection")]
-                let observed = self.asset_ops.timing_begin(match op {"import"=>"asset_import","refresh"=>"asset_refresh",_=>"asset_rename"});
-                let id=self.asset_id.clone();let source=self.asset_source.clone();
-                self.start_human_asset(ctx,match op {"import"=>"asset_import","refresh"=>"asset_refresh",_=>"asset_rename"},&id,&source,true);
+                let observed = self.asset_ops.timing_begin(op);
+                let id = self.asset_id.clone();
+                let source = self.asset_source.clone();
+                self.start_human_asset(ctx, op, &id, &source, true);
                 #[cfg(feature = "inspection")]
                 self.asset_ops.timing_admitted(observed);
             }
-            if let Some(store) = &self.assets {
-                ui.label(format!("Catalog revision {}", store.revision()));
-                egui::ScrollArea::vertical().max_height((ctx.content_rect().height() * 0.25).min(180.0)).show(ui, |ui| {
-                    for row in &self.content_search.rows {
-                        ui.label(&row.label);
-                        if let Some(error) = &row.info.diagnostic { ui.colored_label(crate::editor_theme::colors(ui).error, error); }
-                    }
-                });
-            }
-            if !self.error.is_empty() { ui.add(egui::Label::new(egui::RichText::new(&self.error).color(crate::editor_theme::colors(ui).error)).truncate()).on_hover_text(&self.error); }
-            });
-            });
-            if ui.button("Close assets").clicked() { self.asset_dialog = false; self.asset_focused = false; self.asset_ops.cancel(); }
         });
     }
     fn rename_dialog(&mut self, ctx: &egui::Context) {
@@ -4677,36 +4797,43 @@ impl SceneEditor {
             self.rename_focused = false;
             return;
         }
-        egui::Modal::new(egui::Id::unique("rename_object_dialog")).show(ctx, |ui| {
-            ui.heading("Rename object");
-            ui.label("Display name; the stable object ID stays unchanged.");
-            let enter_pressed =
-                ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
-            let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
-            let edit = ui.add(egui::TextEdit::singleline(&mut self.name_text).char_limit(128));
-            if edit.changed() {
-                self.draft_generation = self.draft_generation.wrapping_add(1);
-            }
-            if !self.rename_focused {
-                edit.request_focus();
-                self.rename_focused = true;
-            }
-            let enter = (edit.has_focus() || edit.lost_focus()) && enter_pressed;
-            if ui.button("Apply name").clicked() || enter {
-                self.rename_pending = false;
-                self.object_action("rename");
-                if !self.error.is_empty() {
-                    self.rename_pending = true;
+        egui::Modal::new(egui::Id::unique("rename_object_dialog"))
+            .frame(crate::editor_theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                crate::editor_theme::dialog_header(
+                    ui,
+                    "Rename object",
+                    "Change the display name. Object references keep working.",
+                );
+                crate::editor_theme::dialog_section(ui, "Display name");
+                let enter_pressed =
+                    ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
+                let escape =
+                    ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
+                let edit = ui.add(egui::TextEdit::singleline(&mut self.name_text).char_limit(128));
+                if edit.changed() {
+                    self.draft_generation = self.draft_generation.wrapping_add(1);
                 }
-            }
-            if ui.button("Cancel rename").clicked() || escape {
-                self.rename_pending = false;
-                self.sync_draft();
-            }
-            if !self.error.is_empty() {
-                ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
-            }
-        });
+                if !self.rename_focused {
+                    edit.request_focus();
+                    self.rename_focused = true;
+                }
+                let enter = (edit.has_focus() || edit.lost_focus()) && enter_pressed;
+                if crate::editor_theme::primary_button(ui, "Apply name").clicked() || enter {
+                    self.rename_pending = false;
+                    self.object_action("rename");
+                    if !self.error.is_empty() {
+                        self.rename_pending = true;
+                    }
+                }
+                if ui.button("Cancel rename").clicked() || escape {
+                    self.rename_pending = false;
+                    self.sync_draft();
+                }
+                if !self.error.is_empty() {
+                    ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
+                }
+            });
         if !self.rename_pending {
             self.rename_focused = false;
         }
@@ -5396,14 +5523,8 @@ impl SceneEditor {
                 });
             });
             crate::editor_theme::text_menu(ui, "Content", |ui| {
-                if ui.button("Assets / import…").clicked() {
-                    self.asset_dialog = true;
-                    self.asset_rename_intent = false;
-                    self.asset_normal_policy =
-                        ruster_assets::MeshNormalPolicy::AuthoredWhenComplete;
-                    self.asset_texture_role = ruster_assets::TextureRole::BaseColor;
-                    self.asset_source_focus = false;
-                    self.asset_focused = false;
+                if ui.button("Import Asset…").clicked() {
+                    self.open_asset_import();
                     ui.close();
                 }
                 self.shader_tools_ui(ui);
@@ -6019,32 +6140,37 @@ impl SceneEditor {
             self.confirm_focused = None;
         }
         if self.new_scene_pending && self.dialog.is_none() {
-            egui::Modal::new(egui::Id::unique("new_scene_dialog")).show(&ctx, |ui| {
-                ui.heading("New scene — unsaved work");
-                ui.label("Save your current scene, discard it, or cancel.");
-                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                    self.new_scene_pending = false;
-                    self.confirm_focused = None;
-                    return;
-                }
-                let save = ui.button("Save before new scene");
-                if self.confirm_focused != Some("new") {
-                    save.request_focus();
-                    self.confirm_focused = Some("new");
-                }
-                if save.clicked() {
-                    self.save_with_continuation(save_commands::Continuation::ThenNew);
-                }
-                if ui.button("Discard and create new scene").clicked() {
-                    self.replace_with_empty();
-                }
-                if ui.button("Cancel new scene").clicked() {
-                    self.new_scene_pending = false;
-                }
-                if !self.error.is_empty() {
-                    ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
-                }
-            });
+            egui::Modal::new(egui::Id::unique("new_scene_dialog"))
+                .frame(crate::editor_theme::dialog_frame(&ctx))
+                .show(&ctx, |ui| {
+                    crate::editor_theme::dialog_header(
+                        ui,
+                        "Unsaved changes",
+                        "Save your current scene before starting a new one.",
+                    );
+                    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                        self.new_scene_pending = false;
+                        self.confirm_focused = None;
+                        return;
+                    }
+                    let save = crate::editor_theme::primary_button(ui, "Save before new scene");
+                    if self.confirm_focused != Some("new") {
+                        save.request_focus();
+                        self.confirm_focused = Some("new");
+                    }
+                    if save.clicked() {
+                        self.save_with_continuation(save_commands::Continuation::ThenNew);
+                    }
+                    if ui.button("Discard and create new scene").clicked() {
+                        self.replace_with_empty();
+                    }
+                    if ui.button("Cancel new scene").clicked() {
+                        self.new_scene_pending = false;
+                    }
+                    if !self.error.is_empty() {
+                        ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
+                    }
+                });
         }
         if let Some(mut form) = self.new_project_form.take() {
             if self.guard().is_ok() && !self.session.is_dirty() && !self.asset_busy() {
@@ -6062,14 +6188,14 @@ impl SceneEditor {
             self.scene_file_browser = project_picker::FileBrowser::default();
         }
         if let Some(open) = self.dialog {
-            egui::Modal::new(egui::Id::unique("scene_path_dialog")).show(&ctx,|ui| {
-                ui.heading(if open {"Open scene"}else{"Save scene as"});
+            egui::Modal::new(egui::Id::unique("scene_path_dialog")).frame(crate::editor_theme::dialog_frame(&ctx)).show(&ctx,|ui| {
+                crate::editor_theme::dialog_header(ui, if open { "Open scene" } else { "Save scene as" }, if open { "Choose a saved scene to open in this editor." } else { "Choose where to save a new copy of this scene." });
                 self.confirm_focused=None;
-                ui.label(if open { "Scene file" } else { "Save location" });
+                let label = crate::editor_theme::dialog_section(ui, if open { "Scene file" } else { "Save location" });
                 let enter_pressed=ui.input(|i|i.key_pressed(egui::Key::Enter)&&i.modifiers.is_none());
                 let cancel=ui.input(|i|i.key_pressed(egui::Key::Escape)&&i.modifiers.is_none());
                 let edit=ui.horizontal(|ui| {
-                    let edit = ui.text_edit_singleline(&mut self.path_text);
+                    let edit = ui.text_edit_singleline(&mut self.path_text).labelled_by(label.id);
                     #[cfg(target_os = "linux")]
                     self.scene_file_browser.show(ui, &mut self.path_text, &mut self.error, if open { project_picker::BrowseKind::OpenScene } else { project_picker::BrowseKind::SaveScene });
                     edit
@@ -6089,7 +6215,8 @@ impl SceneEditor {
                         "Save to new path"
                     };
                     let has_path = !self.path_text.trim().is_empty();
-                    if ui.add_enabled(has_path, egui::Button::new(action_label)).clicked() || (submit && has_path) {
+                    let action = ui.add_enabled_ui(has_path, |ui| crate::editor_theme::primary_button(ui, action_label)).inner;
+                    if action.clicked() || (submit && has_path) {
                         #[cfg(feature = "inspection")]
                         let observed = if open { None } else { self.asset_ops.timing_begin("scene_save") };
                         let path=PathBuf::from(self.path_text.trim());
@@ -6182,31 +6309,37 @@ impl SceneEditor {
         }
         if self.close_pending && self.dialog.is_none() && !self.asset_dialog && !self.rename_pending
         {
-            egui::Modal::new(egui::Id::unique("scene_close_dialog")).show(&ctx, |ui| {
-                ui.label("Save, discard or cancel before closing.");
-                if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
-                    self.close_pending = false;
-                    self.confirm_focused = None;
-                    return;
-                }
-                let save = ui.button("Save and close scene");
-                if self.confirm_focused != Some("close") {
-                    save.request_focus();
-                    self.confirm_focused = Some("close");
-                }
-                if save.clicked() {
-                    self.save_with_continuation(save_commands::Continuation::ThenClose);
-                }
-                if ui.button("Discard and close scene").clicked() {
-                    self.close_approved = true;
-                }
-                if ui.button("Cancel closing scene").clicked() {
-                    self.close_pending = false;
-                }
-                if !self.error.is_empty() {
-                    ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
-                }
-            });
+            egui::Modal::new(egui::Id::unique("scene_close_dialog"))
+                .frame(crate::editor_theme::dialog_frame(&ctx))
+                .show(&ctx, |ui| {
+                    crate::editor_theme::dialog_header(
+                        ui,
+                        "Unsaved changes",
+                        "Save your current scene before closing the editor.",
+                    );
+                    if ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape)) {
+                        self.close_pending = false;
+                        self.confirm_focused = None;
+                        return;
+                    }
+                    let save = crate::editor_theme::primary_button(ui, "Save and close scene");
+                    if self.confirm_focused != Some("close") {
+                        save.request_focus();
+                        self.confirm_focused = Some("close");
+                    }
+                    if save.clicked() {
+                        self.save_with_continuation(save_commands::Continuation::ThenClose);
+                    }
+                    if ui.button("Discard and close scene").clicked() {
+                        self.close_approved = true;
+                    }
+                    if ui.button("Cancel closing scene").clicked() {
+                        self.close_pending = false;
+                    }
+                    if !self.error.is_empty() {
+                        ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
+                    }
+                });
         }
         if !self.close_approved {
             self.recovery_frame(&ctx);
@@ -11040,9 +11173,12 @@ mod tests {
     fn asset_dialog_enter_advances_id_and_popup_owns_dismissal() {
         for png in [false, true] {
             let mut editor = SceneEditor::new(Session::new(Scene::empty("import-focus")).unwrap());
-            if png {
-                editor.asset_source = "pattern.png".into();
+            editor.asset_source = if png {
+                "pattern.png"
+            } else {
+                "meshes/pyramid.obj"
             }
+            .into();
             assert_eq!(
                 editor.asset_texture_role,
                 ruster_assets::TextureRole::BaseColor
@@ -11087,8 +11223,11 @@ mod tests {
                 ctx.memory(|memory| memory.focused()),
                 Some(egui::Id::unique("asset_import_source"))
             );
-            frame(&mut editor, vec![key(egui::Key::Tab)]);
-            frame(&mut editor, vec![]);
+            // Source is followed by Browse (Linux), the optional ID, then the selector.
+            for _ in 0..if cfg!(target_os = "linux") { 3 } else { 2 } {
+                frame(&mut editor, vec![key(egui::Key::Tab)]);
+                frame(&mut editor, vec![]);
+            }
             assert_ne!(
                 ctx.memory(|memory| memory.focused()),
                 Some(egui::Id::unique("asset_import_source"))
@@ -11169,6 +11308,7 @@ mod tests {
                 }
                 std::fs::write(directory.path().join("pattern.png"), bytes).unwrap();
                 editor.assets = Some(AssetStore::open(directory.path()).unwrap());
+                editor.asset_origin = Some(directory.path().to_path_buf());
                 editor.asset_texture_role = ruster_assets::TextureRole::BaseColor;
                 editor.asset_dialog = true;
                 editor.asset_focused = false;

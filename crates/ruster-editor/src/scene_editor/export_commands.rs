@@ -435,32 +435,33 @@ impl SceneEditor {
     pub(super) fn export_frame(&mut self, ctx: &egui::Context) {
         self.export_maintenance();
         if self.export_dialog {
-            egui::Modal::new(egui::Id::unique("creator_export_dialog")).show(ctx, |ui| {
+            egui::Modal::new(egui::Id::unique("creator_export_dialog")).frame(crate::editor_theme::dialog_frame(ctx)).show(ctx, |ui| {
                 ui.set_max_width((ctx.content_rect().width() - 64.0).clamp(200.0, 560.0));
                 // Observe form keys before a text field consumes them. Let buttons
                 // receive keyboard activation before choosing the form action.
                 let enter = ui.input(|i| i.key_pressed(egui::Key::Enter));
                 let escape = ui.input(|i| i.key_pressed(egui::Key::Escape));
-                ui.heading("Export application");
-                ui.label("Title");
+                crate::editor_theme::dialog_header(ui, "Export application", "Package the saved scene as a standalone Linux application.");
+                let title_label = crate::editor_theme::dialog_section(ui, "Application title");
                 let title = ui.add(
                     egui::TextEdit::singleline(&mut self.export_title)
                         .desired_width(ui.available_width()),
-                );
+                ).labelled_by(title_label.id);
                 if !self.export_focused {
                     title.request_focus();
                     self.export_focused = true;
                 }
-                ui.label("Linux export template");
+                let template_label = crate::editor_theme::dialog_section(ui, "Linux export template");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.export_runtime_kit)
                         .desired_width(ui.available_width()),
-                );
-                ui.label("Archive (.tar.gz)");
+                ).labelled_by(template_label.id);
+                let archive_label = crate::editor_theme::dialog_section(ui, "Archive destination (.tar.gz)");
                 ui.add(
                     egui::TextEdit::singleline(&mut self.export_destination)
                         .desired_width(ui.available_width()),
-                );
+                ).labelled_by(archive_label.id);
+                crate::editor_theme::dialog_section(ui, "Starting camera");
                 let has_player_view = self.session.scene().player_view.is_some();
                 let current_view = ui.add_enabled(!has_player_view, egui::Checkbox::new(&mut self.export_use_current_view, "Use current view"))
                     .on_hover_text("Start the exported application with this camera and projection. Requires a current Linux export template.");
@@ -488,12 +489,10 @@ impl SceneEditor {
                         self.export_error = error;
                     }
                 }
+                ui.separator();
                 let (submit, cancel) = ui
-                    .horizontal(|ui| {
-                        let submit = ui.add_enabled(
-                            blocked.is_none(),
-                            egui::Button::new("Export application"),
-                        );
+                    .horizontal_wrapped(|ui| {
+                        let submit = ui.add_enabled_ui(blocked.is_none(), |ui| crate::editor_theme::primary_button(ui, "Export application")).inner;
                         let cancel = ui.button("Cancel");
                         (submit, cancel)
                     })

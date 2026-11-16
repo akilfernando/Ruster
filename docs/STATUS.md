@@ -21,6 +21,24 @@
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
 
+## Import and dialog refinement — 2026-11-16
+
+Content now opens a source-first Import Asset form with a Linux file picker,
+an optional filename-derived asset ID, format-specific settings and one
+primary import action. Source maintenance contains Refresh and Rename.
+Shared headers, sections and action footers also organize the project picker,
+project creation, scene Open and Save As, object rename, unsaved-changes prompt,
+player camera and application export. Specialized forms remain for future UX
+passes.
+
+The affected `python3 scripts/check.py` gate passed formatting, strict Clippy
+and editor tests (208 passed, 13 ignored). The native workspace 2 walkthrough
+verified import through Content using a controlled chooser result, and Open
+Scene dismissal through Escape. Retained images and receipts are under
+`rot-redesign.pVGOGr/curated-dialogs-native` in the local Ruster-Audits directory.
+The optimized release is installed and passed a workspace 2 launch smoke with
+focus preserved. The native chooser window itself awaits a manual check.
+
 ## Viewport and dock refinement — 2026-11-16
 
 Objects and Inspector now extend to the Content dock with opaque fills. The

@@ -201,110 +201,156 @@ impl SceneEditor {
         };
         let scene = self.session.scene();
         let popup_open = egui::Popup::is_any_open(ctx);
-        let modal_width = (ctx.content_rect().width() - 44.).clamp(150., 350.);
-        let field_width = (modal_width - 130.).clamp(56., 152.);
-        let modal = egui::Modal::new(egui::Id::unique("player_view_authoring")).show(ctx, |ui| {
-            ui.set_min_width(modal_width);
-            ui.heading("Player View");
-            let (fixed, follow) = ui
-                .horizontal(|ui| {
-                    (
-                        ui.radio_value(&mut draft.follow, false, "Fixed"),
-                        ui.radio_value(&mut draft.follow, true, "Follow"),
-                    )
-                })
-                .inner;
-            let mut option_focused = fixed.has_focus() || follow.has_focus();
-            if draft.follow {
-                let mut valid = scene
-                    .objects
-                    .iter()
-                    .map(|object| (object.id.as_str(), object.name.as_deref()))
-                    .chain(
-                        scene
-                            .hierarchy
-                            .groups
-                            .iter()
-                            .map(|(id, group)| (id.as_str(), group.name.as_deref())),
-                    );
-                let selected = valid
-                    .clone()
-                    .find(|(id, _)| *id == draft.target)
-                    .map_or_else(
-                        || "Choose target".into(),
-                        |(id, name)| {
-                            name.map_or_else(|| id.to_owned(), |name| format!("{name} ({id})"))
-                        },
-                    );
-                let target = egui::ComboBox::from_id_salt("player_follow_target")
-                    .selected_text(selected)
-                    .height(240.)
-                    .show_ui(ui, |ui| {
-                        for (id, name) in &mut valid {
-                            let label =
-                                name.map_or_else(|| id.to_owned(), |name| format!("{name} ({id})"));
-                            ui.selectable_value(&mut draft.target, id.to_owned(), label);
-                        }
-                    });
-                option_focused |= target.response.has_focus() || target.inner.is_some();
-            }
-            ui.label(if draft.follow {
-                "World-space offset"
-            } else {
-                "World position"
-            });
-            egui::Grid::new("player_view_fields").show(ui, |ui| {
-                let fields = draft.coordinates.iter_mut().zip(["X", "Y", "Z"]).chain(
-                    draft.lens.iter_mut().zip([
-                        "Yaw (rad)",
-                        "Pitch (rad)",
-                        "Distance",
-                        "Vertical FOV (°)",
-                    ]),
+        let screen = ctx.content_rect();
+        let modal_width = (screen.width() - 44.).clamp(145., 390.);
+        let field_width = (modal_width - 144.).clamp(62., 190.);
+        let modal = egui::Modal::new(egui::Id::unique("player_view_authoring"))
+            .frame(crate::editor_theme::dialog_frame(ctx))
+            .show(ctx, |ui| {
+                ui.set_width(modal_width);
+                let top = ui.cursor().min.y;
+                crate::editor_theme::dialog_header(
+                    ui,
+                    "Player View",
+                    "Set the camera for Player View and standalone builds.",
                 );
-                for (field, label) in fields {
-                    let label = ui.label(label);
-                    let field = ui
-                        .add_sized(
-                            [field_width, ui.spacing().interact_size.y],
-                            egui::TextEdit::singleline(field)
-                                .desired_width(field_width)
-                                .char_limit(40),
+                let header_height = ui.cursor().min.y - top;
+                let footer_height = if modal_width < 315.0 { 100.0 } else { 64.0 };
+                let option_focused = egui::ScrollArea::vertical()
+                    .id_salt("player_view_form")
+                    .max_height((screen.height() - header_height - footer_height - 40.0).max(48.0))
+                    .show(ui, |ui| {
+                        crate::editor_theme::dialog_section(ui, "Camera mount");
+                        let (fixed, follow) = ui
+                            .horizontal_wrapped(|ui| {
+                                (
+                                    ui.radio_value(&mut draft.follow, false, "Fixed"),
+                                    ui.radio_value(&mut draft.follow, true, "Follow"),
+                                )
+                            })
+                            .inner;
+                        let mut option_focused = fixed.has_focus() || follow.has_focus();
+                        if draft.follow {
+                            let mut valid =
+                                scene
+                                    .objects
+                                    .iter()
+                                    .map(|object| (object.id.as_str(), object.name.as_deref()))
+                                    .chain(
+                                        scene.hierarchy.groups.iter().map(|(id, group)| {
+                                            (id.as_str(), group.name.as_deref())
+                                        }),
+                                    );
+                            let selected = valid
+                                .clone()
+                                .find(|(id, _)| *id == draft.target)
+                                .map_or_else(
+                                    || "Choose target".into(),
+                                    |(id, name)| {
+                                        name.map_or_else(
+                                            || id.to_owned(),
+                                            |name| format!("{name} ({id})"),
+                                        )
+                                    },
+                                );
+                            let target = egui::ComboBox::from_id_salt("player_follow_target")
+                                .selected_text(selected)
+                                .height(240.)
+                                .show_ui(ui, |ui| {
+                                    for (id, name) in &mut valid {
+                                        let label = name.map_or_else(
+                                            || id.to_owned(),
+                                            |name| format!("{name} ({id})"),
+                                        );
+                                        ui.selectable_value(
+                                            &mut draft.target,
+                                            id.to_owned(),
+                                            label,
+                                        );
+                                    }
+                                });
+                            option_focused |= target.response.has_focus() || target.inner.is_some();
+                        }
+                        let mut add_fields =
+                            |ui: &mut egui::Ui,
+                             section,
+                             id,
+                             fields: &mut [String],
+                             labels: &[&str]| {
+                                crate::editor_theme::dialog_section(ui, section);
+                                egui::Grid::new(id).spacing([12.0, 6.0]).show(ui, |ui| {
+                                    for (field, label) in fields.iter_mut().zip(labels) {
+                                        let label = ui.label(*label);
+                                        let field = ui
+                                            .add_sized(
+                                                [field_width, ui.spacing().interact_size.y],
+                                                egui::TextEdit::singleline(field)
+                                                    .desired_width(field_width)
+                                                    .char_limit(40),
+                                            )
+                                            .labelled_by(label.id);
+                                        if std::mem::take(&mut draft.focus_pending) {
+                                            field.request_focus();
+                                        }
+                                        if field.gained_focus() {
+                                            field.scroll_to_me(None);
+                                        }
+                                        ui.end_row();
+                                    }
+                                });
+                            };
+                        add_fields(
+                            ui,
+                            if draft.follow {
+                                "World-space offset"
+                            } else {
+                                "World position"
+                            },
+                            "player_view_coordinates",
+                            &mut draft.coordinates,
+                            &["X", "Y", "Z"],
+                        );
+                        add_fields(
+                            ui,
+                            "Orientation and lens",
+                            "player_view_lens",
+                            &mut draft.lens,
+                            &["Yaw (rad)", "Pitch (rad)", "Distance", "Vertical FOV (°)"],
+                        );
+                        option_focused
+                    })
+                    .inner;
+                if !draft.error.is_empty() {
+                    ui.colored_label(ui.visuals().error_fg_color, &draft.error);
+                }
+                ui.separator();
+                let (apply, clear, cancel) = ui
+                    .horizontal_wrapped(|ui| {
+                        (
+                            crate::editor_theme::primary_button(ui, "Apply Player View"),
+                            ui.add_enabled(
+                                scene.player_view.is_some(),
+                                egui::Button::new("Clear Player View"),
+                            ),
+                            ui.button("Cancel"),
                         )
-                        .labelled_by(label.id);
-                    if std::mem::take(&mut draft.focus_pending) {
-                        field.request_focus();
-                    }
-                    ui.end_row();
+                    })
+                    .inner;
+                let escape = !popup_open
+                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                let enter = !popup_open
+                    && !option_focused
+                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                if escape || cancel.clicked() || (enter && cancel.has_focus()) {
+                    Some(Intent::Cancel)
+                } else if clear.clicked() || (enter && clear.has_focus()) {
+                    Some(Intent::Clear)
+                } else if apply.clicked() || enter {
+                    Some(Intent::Apply)
+                } else {
+                    None
                 }
             });
-            if !draft.error.is_empty() {
-                ui.colored_label(ui.visuals().error_fg_color, &draft.error);
-            }
-            let (apply, clear, cancel) = ui
-                .horizontal(|ui| {
-                    (
-                        ui.button("Apply"),
-                        ui.add_enabled(scene.player_view.is_some(), egui::Button::new("Clear")),
-                        ui.button("Cancel"),
-                    )
-                })
-                .inner;
-            let escape = !popup_open
-                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-            let enter = !popup_open
-                && !option_focused
-                && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-            if escape || cancel.clicked() || (enter && cancel.has_focus()) {
-                Some(Intent::Cancel)
-            } else if clear.clicked() || (enter && clear.has_focus()) {
-                Some(Intent::Clear)
-            } else if apply.clicked() || enter {
-                Some(Intent::Apply)
-            } else {
-                None
-            }
-        });
         let result = match modal.inner {
             Some(Intent::Apply) => draft
                 .parse()
