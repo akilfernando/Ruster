@@ -1,6 +1,18 @@
 # Milestone roadmap
 
-## Current delivery roadmap — 2026-11-15
+## Current delivery roadmap — 2026-11-16
+
+**Latest acceptance:** essential MCP visual grounding is source-integrated through
+reviewed `e5e5ad1` (cumulative `66c4c4b`), exact226-file byte equivalence verified.
+Human-operated actual ChatGPT passes image-to-engine-ID points in perspective,
+stale-capture refusal after native Projection change, and a fresh orthographic
+point query. Image/camera/projection/selection pairing and read-only capture-bound
+engine geometry IDs are accepted for authored scenes, not composited-overlay
+ownership. Runtime grounding explicitly remains unsupported; projected bounds,
+annotations and runtime grounding are follow-ons. No further human checks are
+required for this slice. [Dated acceptance/evidence](verification/2026-11-16-human-qualified-visual-grounding-integration.md).
+Normal matched editor/MCP promotion is QUEUED, not installed/released; preserve the
+frozen open human trial. Broader engine/runtime work retains the existing plan.
 
 **Latest user-approved priority:** native-first, viewport-focused Rusterize UI
 alongside ChatGPT. Astra defines interface/implementation, then regular Sol builds.
@@ -58,6 +70,7 @@ an old demo or copying per-run capabilities. Browser viewing is optional.
 | Workstream | Next bounded outcome | Current state / acceptance gate |
 | --- | --- | --- |
 | Native-first AI workspace — PRIMARY | Native viewport-first layout and enrolled registered-project connection, same Session/history | SOURCE INTEGRATED through qualified `1dad9d0`, byte-equivalent in cumulative branch. Astra trust review GO_SCOPED_QUALIFICATION; parent layout review and actual ChatGPT/native layout, image agreement, guarded MCP edit/native Undo PASS for the enrolled fixture. Actual same-conversation close/discard/reconnect PASS at new revision0; parent verifies the same adapter remains alive, old native absent and new reviewed native parented by that adapter, without manual MCP restart. No installed replacement/release or responsiveness benchmark claim. |
+| MCP visual grounding — ESSENTIAL | Pair the actual client's image/context with capture-bound engine IDs, without mutating scene/selection/history | SOURCE INTEGRATED through reviewed `e5e5ad1`, exact bytes in cumulative `66c4c4b`. Astra two-P1 closeout GO_SCOPED_QUALIFICATION; human actual-ChatGPT perspective IDs/background, stale refusal and fresh orthographic point PASS. Authored geometry only, not composited-overlay ownership; runtime explicitly unsupported. No further human gate for this slice; promotion remains separate. |
 | Cumulative engine/editor | Native nested groups, supported nonuniform leaves/attached light, shared transforms/history, Save and fresh reopen in the current cumulative candidate | Functional compound PASS; grouped-guide repair has RED/GREEN, native visual proof and parent changed-risk GO. Default native candidate **INSTALLED** with verified rollback/hash/help smoke; no extra GUI launch, physical-human acceptance pending. Final visual-run close-selector failure is preserved, not relabeled normal close. |
 | Managed ChatGPT startup | Enrolled registered project cold-starts/reopens through the same actual ChatGPT conversation without recurring native approval or manual MCP restart | **PASS for the enrolled native fixture**, including parent-verified same-adapter close/discard/reconnect at revision0. Earlier diagnostic browser journey is historical, not a native-first requirement. General distribution/installation and broader production onboarding remain separate gates. |
 | Browser view — OPTIONAL/DEFERRED | Preserve future browser use cases without blocking native-first | Measured capture repair remains in cumulative source; responsiveness unaccepted. SDK diagnostic build checkpointed/stopped, no backend runtime. Retain code/evidence; revisit on a concrete use case or user direction. |

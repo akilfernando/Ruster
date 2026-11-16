@@ -1,6 +1,48 @@
 # Current project status
 
-## MCP capture-bound visual grounding — 2026-11-15
+## Human-qualified MCP visual grounding integrated — 2026-11-16
+
+**SOURCE INTEGRATED / essential actual-ChatGPT human gates PASS; NOT installed or
+released.** Ordered owned cherry-picks `25f5764`→`b75eed1` and
+`e5e5ad1`→`66c4c4b` extend `feat/cumulative-editor-20261115`. No source feature or
+refactor was added. Exact file-set and byte comparison against frozen reviewed
+`e5e5ad1f96df288e936f0accb86182ce4b85abf7` passes for all226 source-scope files,
+including both current worktrees, all crates/scripts and Cargo manifests/lock.
+Aggregate SHA-256 `e0b693675fec7732869e3ec5f65bae7df47e6bba416bd6036d1b7aa002296d7e`.
+[Acceptance, source receipt, reused checks and limits](verification/2026-11-16-human-qualified-visual-grounding-integration.md).
+
+Independent Astra design/review and two P1 repairs close at
+`GO_SCOPED_QUALIFICATION`. Human-operated actual ChatGPT received perspective
+capture1 with selected/active `left`; image-chosen points resolve blue→`left`,
+orange→`center`, green→`right`, background→miss/null. After the user's native
+Projection toggle, capture1 refuses `stale_capture`; fresh orthographic capture2
+retains `left` selection and its orange-image point resolves `center`. Parent
+matched the native screenshot and independently verified the actual native image
+and adapter/native process identities. This is user-reported actual-client
+acceptance with image/process corroboration, not independent raw MCP wire inspection.
+
+Visual grounding is essential for MCP editing, not an optional future layer.
+The accepted slice pairs immutable image/camera/projection/selection context with
+read-only capture-bound engine geometry IDs. It does not identify composited
+overlay ownership. Authored grounding only; runtime explicitly returns
+`runtime_grounding_unsupported`. Projected bounds, annotations and runtime grounding
+remain follow-ons, not new acceptance blockers. No further human checks are
+required for this slice. Matching original package and final repair checks are
+reused without summing overlapping cohorts or hiding RED/intermediate failures;
+the historical asset-retirement failure remains causally unresolved.
+
+**Remaining:** normal matched editor/MCP promotion is QUEUED for the parent, with
+rollback and changed-surface verification; it was not executed here. Broader
+engine/runtime work retains the existing roadmap scope. The current optimized e5
+human trial remains FROZEN/open for the user. No GUI/GPU/input/capture, live
+configuration/enrollment, artifact, build or process changes were made during
+integration. The normal installed editor was untouched; no installed hash/version
+is inferred from either private trial. Browser remains deferred.
+
+## MCP capture-bound visual grounding — implementation-time checkpoint, 2026-11-15
+
+Historical source/repair checkpoint below; the 2026-11-16 integration and human
+acceptance above supersede its pending integration/review/client gates.
 
 **First source slice implemented; CPU verification only; NOT integrated, GPU/client-qualified or installed.** Isolated branch `feat/mcp-visual-grounding-20261115` extends the existing ready observation with immutable selection/camera/matrices and adds read-only `viewport_capture_pick`. Exact thumbnail integer sampling/crop/source-pixel-center/DPI feeds native hierarchy/mesh picking against fresh-only authored state. Runtime images remain available with explicitly unsupported grounding. Native authority identity and captured session guard both pending and completed reads; native revocation cancels retained capture state. Layout/matrix/DPI/resource identity changes also advance view revision, preventing observed A→B→A revival. Extra metadata8KiB and MCP PNG40000bytes/512per side/native response64000bytes fail explicitly; full-resolution workspace captures retain the existing4MiB PNG and8MiB serialized transport limits. Malformed PNG cannot become metadata-only success.
 

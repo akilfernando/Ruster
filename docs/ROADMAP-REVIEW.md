@@ -906,3 +906,45 @@ After execution, append the observed outcome and process lesson, linking the raw
 technical evidence rather than duplicating it. A routine fix normally updates
 STATUS/evidence only; a changed development direction also updates ROADMAP and
 this record. Preserve superseded decisions with a link to their replacement.
+
+## Essential MCP visual-grounding acceptance/integration — 2026-11-16
+
+**Status/authority:** user authorized source-only integration and acceptance updates
+in the existing cumulative delivery branch, with no changes to the frozen open
+human trial. Independent Astra design/review plus repairs close both P1 findings
+at `GO_SCOPED_QUALIFICATION`. This entry records observed acceptance, not a new
+strategic scope or installation authorization.
+
+**Trigger/outcome:** useful MCP editing needs image-grounded engine identity, not
+only pixels or a model's appearance-based guess. The human operated actual
+ChatGPT on ordinary optimized e5 native: perspective blue/orange/green points
+resolve `left`/`center`/`right`, background misses; after native Projection toggle,
+the old capture is stale and fresh orthographic orange resolves `center` with
+`left` selection retained. Parent corroborated the screenshot and independently
+matched native image/process and adapter parent. This is actual-client user-report
+evidence, not independent raw-wire inspection.
+
+**Alternatives/rationale/decision:** do not defer grounding as optional, replace
+engine IDs with visual guesses, or rerun accepted human gates. Integrate the exact
+reviewed feature then two-P1 repair source as owned cherry-picks `b75eed1` and
+`66c4c4b`, without new code. Exact226-file commit/worktree/file-set equivalence
+passes. Keep immutable image/camera/projection/selection pairing and read-only
+capture-point engine geometry IDs; composited overlays are not object ownership.
+Authored grounding is accepted; runtime explicitly remains unsupported. Projected
+bounds, annotations and runtime grounding remain follow-ons under the existing
+plan, not silent blockers or newly activated work.
+
+**Evidence/uncertainty:** [dated receipt](verification/2026-11-16-human-qualified-visual-grounding-integration.md)
+links original package and repaired focused checks, RED→GREEN failures and private
+user receipts. Overlapping cohorts are not summed. Historical asset-retirement
+failure remains causally unresolved. Source-matched evidence is reused; no build,
+GUI/GPU/input/capture, config/enrollment, artifact or process changes here.
+
+**Consequences/exit:** this essential human gate is complete; no further human
+checks for this slice. Parent-owned normal matched editor/MCP promotion is QUEUED,
+with rollback and changed-surface verification, not executed or called installed.
+The current human trial stays frozen/open. Do not infer an installed hash/version
+from private trials. Browser stays deferred; broader engine/runtime planning is
+unchanged. Revisit grounding scope only for a concrete follow-on requirement or
+observed defect. Lesson: preserve distinct source, CPU, actual-client human and
+installation receipts; acceptance does not require redundant test/build churn.
