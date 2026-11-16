@@ -59,6 +59,14 @@ fn target(args: &Value) -> Result<BindingTarget> {
         (None, Some(value)) if value == &json!({"type":"application"}) => {
             Ok(BindingTarget::Application)
         }
+        (None, Some(value))
+            if value.as_object().is_some_and(|target| target.len() == 2)
+                && value["type"] == "group" =>
+        {
+            let id = string(value, "group_id")?;
+            ruster_scene::validate_id(id).map_err(|_| error("invalid_arguments"))?;
+            Ok(BindingTarget::Group(id.into()))
+        }
         _ => Err(error("invalid_arguments")),
     }
 }
@@ -190,9 +198,14 @@ impl SceneEditor {
                     .session
                     .binding(string(args, "binding_id")?)
                     .ok_or_else(|| error("binding_not_found"))?;
+                let target = match &binding.target {
+                    BindingTarget::Object(_) => Value::Null,
+                    BindingTarget::Application => json!({"type":"application"}),
+                    BindingTarget::Group(id) => json!({"type":"group","group_id":id}),
+                };
                 let properties:Vec<_> = binding.properties.iter().skip(offset).take(16).map(|(name,value)| json!({"name":name,"type":match value {PropertyValue::Number(_)=>"number",PropertyValue::Bool(_)=>"bool",PropertyValue::Text(_)=>"text",PropertyValue::Vec3(_)=>"vec3",PropertyValue::ObjectRef(_)=>"object_ref",PropertyValue::AssetRef(_)=>"asset_ref"}})).collect();
                 return Ok(
-                    json!({"session_token":token,"revision":revision.to_string(),"binding_id":args["binding_id"],"object_id":binding.object_id(),"target":binding.object_id().is_none().then(||json!({"type":"application"})),"source_id":binding.source_id,"enabled":binding.enabled,"properties":properties,"property_count":binding.properties.len(),"commands":binding.commands.iter().skip(offset).take(16).map(|(id,definition)|json!({"command_id":id,"argument_count":definition.arguments.len()})).collect::<Vec<_>>(),"command_count":binding.commands.len(),"command_schema_hash":format!("{:x}",Sha256::digest(serde_json::to_vec(&binding.commands).expect("valid catalog"))),"state_defaults":binding.state_defaults.iter().skip(offset).take(16).map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>(),"state_default_count":binding.state_defaults.len(),"next_state_offset":(offset.saturating_add(16)<binding.state_defaults.len()).then(||(offset+16).to_string()),"next_offset":(offset.saturating_add(16)<binding.properties.len()).then(||(offset+16).to_string())}),
+                    json!({"session_token":token,"revision":revision.to_string(),"binding_id":args["binding_id"],"object_id":binding.object_id(),"target":target,"source_id":binding.source_id,"enabled":binding.enabled,"properties":properties,"property_count":binding.properties.len(),"commands":binding.commands.iter().skip(offset).take(16).map(|(id,definition)|json!({"command_id":id,"argument_count":definition.arguments.len()})).collect::<Vec<_>>(),"command_count":binding.commands.len(),"command_schema_hash":format!("{:x}",Sha256::digest(serde_json::to_vec(&binding.commands).expect("valid catalog"))),"state_defaults":binding.state_defaults.iter().skip(offset).take(16).map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>(),"state_default_count":binding.state_defaults.len(),"next_state_offset":(offset.saturating_add(16)<binding.state_defaults.len()).then(||(offset+16).to_string()),"next_offset":(offset.saturating_add(16)<binding.properties.len()).then(||(offset+16).to_string())}),
                 );
             }
             "behavior_state_default" => {

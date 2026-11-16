@@ -586,6 +586,18 @@ impl RuntimeUi {
                 .frame
                 .as_ref()
                 .map_or(0, |frame| frame.scene.objects.len());
+            let groups: Vec<_> = self
+                .frame
+                .iter()
+                .flat_map(|frame| frame.scene.hierarchy.groups.iter())
+                .skip(offset)
+                .take(16)
+                .map(|(id, group)| json!({"id":id,"local_transform":group.transform}))
+                .collect();
+            let group_count = self
+                .frame
+                .as_ref()
+                .map_or(0, |frame| frame.scene.hierarchy.groups.len());
             let owners=self.frame.as_ref().map(|frame|frame.state.binding_ids().skip(offset).take(16)
                 .map(|id|json!({"binding_id":id,"source_hash":frame.state.source_hash(id),
                     "schema_hash":frame.state.schema_hash(id),"command_schema_hash":frame.authoring.bindings.get(id).filter(|binding|binding.target==BindingTarget::Application).and(frame.command_schema_hash.as_deref()),"field_count":frame.state.binding(id).map_or(0,|fields|fields.len())})).collect::<Vec<_>>()).unwrap_or_default();
@@ -595,7 +607,7 @@ impl RuntimeUi {
                 .map_or(0, |frame| frame.state.binding_ids().count());
             return Ok(
                 json!({"run_id":current.map(run_id),"frame_run_id":self.frame.as_ref().map(|frame|run_id(frame.key)),"stale":self.stale,"visible":self.visible,"ready":self.ready,"playing":self.playing,"busy":self.pending.is_some()||self.awaiting.is_some()||self.hud_activation_busy(),"debug_stop_id":self.debug_snapshot().map(|stop|stop.stop.get().to_string()),"tick":self.frame.as_ref().map(|frame|frame.tick.to_string()),"commit_revision":self.frame.as_ref().map(|frame|frame.commit_revision.to_string()),"commit_revision_required":self.frame.as_ref().is_some_and(|frame|frame.commit_revision_required),"last_step_commit_revision":self.frame.as_ref().and_then(|frame|frame.last_step_commit_revision).map(|value|value.to_string()),"status":self.status,"diagnostic":self.diagnostic,"operation":receipt,"recent_operations":self.debug.recent.iter().map(Receipt::value).collect::<Vec<_>>(),"input":input_meta,"last_committed_input":last_input,"query_observations":query_page,"query_observation_count":queries.len(),"next_query_offset":(offset.saturating_add(16)<queries.len()).then(||offset.saturating_add(16).to_string()),"input_observation":"Input and query snapshots describe last_step_commit_revision, preserved across commands.","objects":objects,"object_count":total,"next_offset":(offset.saturating_add(16)<total).then(||offset.saturating_add(16).to_string()),
-                "state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())}),
+                "groups":groups,"group_count":group_count,"next_group_offset":(offset.saturating_add(16)<group_count).then(||offset.saturating_add(16).to_string()),"state_owners":owners,"state_snapshot_status":self.state_snapshot_status(),"state_captured_revision":self.frame.as_ref().map(|frame|frame.key.authored_revision.to_string()),"state_owner_count":owner_count,"next_state_owner_offset":(offset.saturating_add(16)<owner_count).then(||offset.saturating_add(16).to_string())}),
             );
         }
         if op == "behavior_breakpoints" {

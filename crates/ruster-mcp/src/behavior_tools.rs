@@ -5,9 +5,9 @@ const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_source","Read one embedded source as base64 UTF-8 with SHA256; no filesystem access.",&["source_id"]),
     ("behavior_source_set","Upsert embedded source data, including unfinished code. Shared Undo; no compilation or execution.",&["source_id","label","language_id","host_api_version","text_base64"]),
     ("behavior_source_remove","Remove embedded source; dependent bindings remain repairable. Shared Undo.",&["source_id"]),
-    ("behavior_create","Atomically create a fresh source and enabled binding in one Undo entry. Supply exactly one object_id or target:{type:application}; at most one Application binding exists including disabled bindings.",&["source_id","binding_id","label","language_id","host_api_version","text_base64"]),
+    ("behavior_create","Atomically create a fresh source and enabled binding in one Undo entry. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians.",&["source_id","binding_id","label","language_id","host_api_version","text_base64"]),
     ("behavior_binding","Read owner/source metadata,16 property names/types and16 authored state defaults. The same offset selects each page; next_offset and next_state_offset are separate.",&["binding_id"]),
-    ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining properties and state defaults. Supply exactly one object_id or target:{type:application}. Shared Undo.",&["binding_id","source_id","enabled"]),
+    ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining properties and state defaults. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians. Shared Undo.",&["binding_id","source_id","enabled"]),
     ("behavior_binding_remove","Detach one behavior binding. Shared Undo; source stays available.",&["binding_id"]),
     ("behavior_property","Read one typed property or null for absent; no complete property-map response.",&["binding_id","name"]),
     ("behavior_property_set","Set one typed property or use null to remove. Shared Undo, no execution.",&["binding_id","name","value"]),
@@ -99,7 +99,13 @@ fn valid_action_definition(value: &Value) -> bool {
 }
 fn shape(field: &str) -> Value {
     match field {
-        "target" => super::object_schema(json!({"type":{"const":"application"}}), vec!["type"]),
+        "target" => json!({"oneOf":[
+            super::object_schema(json!({"type":{"const":"application"}}), vec!["type"]),
+            super::object_schema(json!({
+                "type":{"const":"group"},
+                "group_id":{"type":"string","minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$"}
+            }), vec!["type","group_id"])
+        ]}),
         "expected_revision" | "offset" => {
             json!({"type":"string","pattern":"^(0|[1-9][0-9]*)$","maxLength":20})
         }
@@ -208,6 +214,15 @@ pub fn list() -> Vec<Value> {
         json!({"name":name,"description":description,"inputSchema":schema,"annotations":{"readOnlyHint":matches!(*name,"behavior_inspect"|"behavior_source"|"behavior_binding"|"behavior_property"|"behavior_action"|"behavior_state_default"|"behavior_command"),"openWorldHint":false}})
     }).collect()
 }
+fn valid_stable_id(value: &Value) -> bool {
+    value.as_str().is_some_and(|id| {
+        !id.is_empty()
+            && id.len() <= 128
+            && id
+                .bytes()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
+    })
+}
 pub fn valid(name: &str, args: &Value) -> bool {
     let Some(required) = fields(name) else {
         return false;
@@ -228,7 +243,14 @@ pub fn valid(name: &str, args: &Value) -> bool {
             return false;
         }
         match field.as_str() {
-            "target" => value == &json!({"type":"application"}),
+            "target" => {
+                value == &json!({"type":"application"})
+                    || value.as_object().is_some_and(|target| {
+                        super::exact_keys(target, &["type", "group_id"], &[])
+                            && target["type"] == "group"
+                            && valid_stable_id(&target["group_id"])
+                    })
+            }
             "expected_revision" | "offset" => super::canonical_u64(value),
             "host_api_version" => value
                 .as_u64()
@@ -242,13 +264,7 @@ pub fn valid(name: &str, args: &Value) -> bool {
                     })
             }
             "definition" => valid_action_definition(value),
-            "action_id" => value.as_str().is_some_and(|id| {
-                !id.is_empty()
-                    && id.len() <= 128
-                    && id
-                        .bytes()
-                        .all(|byte| byte.is_ascii_alphanumeric() || b"-_.".contains(&byte))
-            }),
+            "action_id" => valid_stable_id(value),
             "kind" => value
                 .as_str()
                 .is_some_and(|v| ["sources", "bindings", "actions", "diagnostics"].contains(&v)),
@@ -393,6 +409,12 @@ mod tests {
         application.as_object_mut().unwrap().remove("target");
         assert!(valid("behavior_binding_set", &application));
         application.as_object_mut().unwrap().remove("object_id");
+        assert!(!valid("behavior_binding_set", &application));
+        application["target"] = json!({"type":"group","group_id":"hinge"});
+        assert!(valid("behavior_binding_set", &application));
+        application["target"]["group_id"] = "not an ID".into();
+        assert!(!valid("behavior_binding_set", &application));
+        application["target"] = json!({"type":"group","group_id":"hinge","extra":false});
         assert!(!valid("behavior_binding_set", &application));
         let mut state = json!({"expected_session_token":"session","expected_revision":"0",
             "binding_id":"application","name":"elapsed","value":{"type":"number","value":0.0}});

@@ -3831,17 +3831,15 @@ impl SceneEditor {
     }
     fn behavior_inspector_ui(&mut self, ui: &mut egui::Ui) {
         let editable = self.behavior_editable();
-        let behavior_object = self.selected.as_deref().filter(|id| {
-            self.session
-                .scene()
-                .objects
-                .iter()
-                .any(|object| object.id == *id)
+        let behavior_target = self.selected.as_deref().filter(|id| {
+            let scene = self.session.scene();
+            scene.hierarchy.groups.contains_key(*id)
+                || scene.objects.iter().any(|object| object.id == *id)
         });
         if let Some(action) = self.behavior.inspector(
             ui,
             &self.session,
-            behavior_object,
+            behavior_target,
             self.assets.as_ref(),
             self.generation,
             editable,
@@ -4014,11 +4012,13 @@ impl SceneEditor {
         {
             ui.label(format!("Active object: {}", object.display_name()));
         }
-        if self
-            .selected
-            .as_deref()
-            .is_some_and(|id| self.session.scene().lighting.light(id).is_none())
-        {
+        if self.selected.as_deref().is_some_and(|id| {
+            self.session
+                .scene()
+                .objects
+                .iter()
+                .any(|object| object.id == id)
+        }) {
             ui.strong("Mesh");
             self.mesh_reference_ui(ui);
             self.collider_inspector_ui(ui);
@@ -9333,22 +9333,28 @@ mod tests {
 
     #[test]
     fn hierarchy_guarded_session_vertical_tracer() {
-        hierarchy_creator_journey(false, false);
+        hierarchy_creator_journey(false, false, false);
     }
 
     #[test]
     #[ignore = "explicit RUSTER_TEST_MCP_BINARY; actual STDIO fixture approval, not human consent"]
     fn hierarchy_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true, false);
+        hierarchy_creator_journey(true, false, false);
     }
 
     #[test]
     #[ignore = "explicit RUSTER_TEST_MCP_BINARY; registered-project STDIO fixture, not human consent"]
     fn project_registry_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true, true);
+        hierarchy_creator_journey(true, true, false);
     }
 
-    fn hierarchy_creator_journey(stdio: bool, registered: bool) {
+    #[test]
+    #[ignore = "explicit source-built adapter, matched RUSTER_RUNTIME_KIT and disposable RUSTER_MCP_EXPORT_DIR"]
+    fn group_rotation_stdio_creator_save_and_export() {
+        hierarchy_creator_journey(true, false, true);
+    }
+
+    fn hierarchy_creator_journey(stdio: bool, registered: bool, moving: bool) {
         use std::io::{BufRead, Write};
         struct Adapter(std::process::Child);
         impl Drop for Adapter {
@@ -9390,8 +9396,8 @@ mod tests {
                 })
             };
             let deadline = Instant::now() + Duration::from_secs(4);
+            let ctx = egui::Context::default();
             while !worker.is_finished() {
-                let ctx = egui::Context::default();
                 bridge.dispatch_request(|host, op, args, lease| {
                     if op == "scene_save" {
                         editor.dispatch_save_request(&ctx, host, &args, lease);
@@ -9399,6 +9405,8 @@ mod tests {
                         lease.run_immediate(|| editor.command(host, op, args));
                     }
                 });
+                editor.poll_runtime(&ctx);
+                editor.export_maintenance();
                 editor.asset_nonvisual_frame(&ctx, true);
                 editor.recovery.poll(&ctx);
                 editor.process_recovery_ack();
@@ -9423,6 +9431,12 @@ mod tests {
             editor.save_scene(path.clone()).unwrap();
             editor.test_finish_asset_work();
             editor.save_grant = Some(persistence_commands::SaveGrant::new(dir.path()).unwrap());
+        }
+        if moving {
+            editor.creation_export =
+                crate::creation_export::Controller::from_environment(true).unwrap();
+            assert!(editor.creation_export.runtime_kit().is_some());
+            assert!(editor.creation_export.output_directory().is_some());
         }
         let mut bridge = crate::bridge::Bridge::start_for(
             egui::Context::default(),
@@ -9669,6 +9683,73 @@ mod tests {
         call(&mut editor, "scene_undo", json!({}));
         assert_eq!(editor.session.scene().hierarchy.parents["left"], "hinge");
         call(&mut editor, "scene_redo", json!({}));
+        if moving {
+            use base64::{engine::general_purpose::STANDARD, Engine as _};
+            call(
+                &mut editor,
+                "scene_reparent",
+                json!({"object_id":"left","parent_id":"hinge"}),
+            );
+            let source = "return {update=function(rotation, props, dt, host) if dt > 0 then return {0,0,0} end return rotation end}";
+            let source_fields = json!({"source_id":"turn","label":"Turn","language_id":"lua54",
+                "host_api_version":ruster_behavior::GROUP_ROTATION_HOST_API_VERSION,"text_base64":STANDARD.encode(source)});
+            let mut create = source_fields.clone();
+            create["binding_id"] = "hinge-turn".into();
+            create["target"] = json!({"type":"group","group_id":"hinge"});
+            call(&mut editor, "behavior_create", create);
+            let binding = call(
+                &mut editor,
+                "behavior_binding",
+                json!({"binding_id":"hinge-turn"}),
+            );
+            assert_eq!(
+                binding["target"],
+                json!({"type":"group","group_id":"hinge"})
+            );
+            assert!(binding["object_id"].is_null());
+            editor.history(false);
+            assert!(editor.session.binding("hinge-turn").is_none());
+            call(&mut editor, "scene_redo", json!({}));
+            assert_eq!(
+                editor.session.binding("hinge-turn").unwrap().target,
+                ruster_scene::BindingTarget::Group("hinge".into())
+            );
+
+            let ctx = editor.export_context.clone().unwrap();
+            editor.poll_runtime(&ctx);
+            let reset = call(&mut editor, "behavior_runtime_reset", json!({}));
+            let wait_for_tick = |editor: &mut SceneEditor, tick| {
+                let deadline = Instant::now() + Duration::from_secs(4);
+                while editor.runtime.frame.as_ref().is_none_or(|frame| {
+                    frame.tick != tick || Some(frame.key) != editor.runtime.current_run()
+                }) {
+                    editor.poll_runtime(&ctx);
+                    assert!(Instant::now() < deadline, "{:?}", editor.runtime.diagnostic);
+                    std::thread::yield_now();
+                }
+            };
+            wait_for_tick(&mut editor, 0);
+            call(
+                &mut editor,
+                "behavior_runtime_step",
+                json!({"expected_run_id":reset["run_id"]}),
+            );
+            wait_for_tick(&mut editor, 1);
+            let runtime = call(&mut editor, "behavior_runtime_inspect", json!({}));
+            let group = runtime["groups"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|row| row["id"] == "hinge")
+                .unwrap();
+            assert_eq!(group["local_transform"]["rotation"], json!([0.0, 0.0, 0.0]));
+            assert_ne!(
+                editor.session.scene().hierarchy.groups["hinge"]
+                    .transform
+                    .rotation,
+                [0.0; 3]
+            );
+        }
         if stdio {
             let persistence = call(&mut editor, "scene_persistence_inspect", json!({}));
             call(
@@ -9695,8 +9776,49 @@ mod tests {
         );
         assert_eq!(
             reopened.loaded_format_version(),
-            ruster_scene::HIERARCHY_FORMAT_VERSION
+            if moving {
+                ruster_scene::GROUP_ROTATION_FORMAT_VERSION
+            } else {
+                ruster_scene::HIERARCHY_FORMAT_VERSION
+            }
         );
+        if moving {
+            let ready = call(&mut editor, "creation_export_inspect", json!({}));
+            assert_eq!(ready["can_start"], true, "{ready}");
+            let receipt = call(
+                &mut editor,
+                "creation_export_start",
+                json!({
+                    "expected_persistence_token":ready["persistence_token"],
+                    "expected_asset_revision":ready["asset_revision"],
+                    "expected_shader_revision":ready["shader_revision"],
+                    "expected_export_token":ready["export_token"],
+                    "title":"Guarded Group rotation", "filename":"guarded-group-rotation.tar.gz"
+                }),
+            );
+            let deadline = Instant::now() + Duration::from_secs(12);
+            loop {
+                let state = call(
+                    &mut editor,
+                    "creation_export_inspect",
+                    json!({"operation_id":receipt["operation_id"]}),
+                );
+                match state["operation"]["state"].as_str() {
+                    Some("committed") => break,
+                    Some("failed" | "cancelled") => panic!("{state}"),
+                    _ => {}
+                }
+                assert!(Instant::now() < deadline, "{state}");
+                std::thread::sleep(Duration::from_millis(25));
+            }
+            let output = editor
+                .creation_export
+                .output_directory()
+                .unwrap()
+                .join("guarded-group-rotation.tar.gz");
+            assert!(output.is_file());
+            eprintln!("actual STDIO committed archive {}", output.display());
+        }
         drop(call);
         if registered {
             bridge.disconnect();

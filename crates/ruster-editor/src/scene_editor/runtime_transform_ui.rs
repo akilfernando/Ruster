@@ -18,6 +18,7 @@ impl SceneEditor {
                     "Stale retained frame"
                 },
             ));
+            let mut group_local = false;
             let target = self.selected.as_deref().and_then(|id| {
                 // Match the authored target kind as well as its stable ID.
                 // A retained frame can belong to an older Scene incarnation.
@@ -34,6 +35,14 @@ impl SceneEditor {
                         .iter()
                         .find(|object| object.id == id)
                         .map(|object| &object.transform)
+                } else if self.session.scene().hierarchy.groups.contains_key(id) {
+                    group_local = true;
+                    frame
+                        .scene
+                        .hierarchy
+                        .groups
+                        .get(id)
+                        .map(|group| &group.transform)
                 } else if self.session.scene().lighting.light(id).is_some() {
                     frame.scene.lighting.light(id).map(|light| &light.transform)
                 } else {
@@ -41,7 +50,7 @@ impl SceneEditor {
                 }
             });
             if let Some(transform) = target {
-                transform_rows(ui, transform);
+                transform_rows(ui, transform, group_local);
             } else {
                 ui.label("The selected target is not present in this runtime frame.");
             }
@@ -61,13 +70,21 @@ impl SceneEditor {
     }
 }
 
-fn transform_rows(ui: &mut egui::Ui, transform: &Transform) {
-    for (row, values) in [
-        ("Position", transform.translation),
+fn transform_rows(ui: &mut egui::Ui, transform: &Transform, group_local: bool) {
+    if group_local {
+        ui.label("Group-local pose");
+    }
+    let rotation = if group_local {
+        ("Local rotation (radians)", transform.rotation)
+    } else {
         (
             "Rotation (degrees)",
             transform.rotation.map(f32::to_degrees),
-        ),
+        )
+    };
+    for (row, values) in [
+        ("Position", transform.translation),
+        rotation,
         ("Scale", transform.scale),
     ] {
         ui.label(row);

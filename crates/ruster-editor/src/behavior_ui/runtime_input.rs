@@ -315,21 +315,37 @@ impl RuntimeUi {
                                 else { "Last committed input is unavailable for this snapshot." });
                         }
                         ui.separator();
-                        ui.heading("Object transforms");
+                        ui.heading(if frame.scene.hierarchy.is_empty() {
+                            "Object transforms"
+                        } else {
+                            "Group transforms"
+                        });
                         let bindings = &session.authoring().bindings;
                         let count = bindings.values().filter(|binding| binding.enabled).count();
                         if count == 0 { ui.label("No enabled behavior bindings."); }
                         if count > 16 { ui.label(format!("Showing the first 16 of {count} enabled bindings.")); }
                         for (id, binding) in bindings.iter().filter(|(_, binding)| binding.enabled).take(16) {
-                            if let Some(object) = frame.scene.objects.iter().find(|object| Some(object.id.as_str()) == binding.object_id()) {
-                                ui.strong(format!("{} · {id}", object.display_name()));
-                                ui.label(format!("Position {:.3?}", object.transform.translation));
-                                ui.label(format!("Rotation {:.3?}", object.transform.rotation));
-                            } else {
-                                ui.label(match binding.object_id() {
-                                    Some(object)=>format!("{id} · Object {object} unavailable in this snapshot."),
-                                    None=>format!("{id} · Application behavior"),
-                                });
+                            match &binding.target {
+                                ruster_scene::BindingTarget::Object(owner) => {
+                                    if let Some(object) = frame.scene.objects.iter().find(|object| object.id == *owner) {
+                                        ui.strong(format!("{} · {id}", object.display_name()));
+                                        ui.label(format!("Position {:.3?}", object.transform.translation));
+                                        ui.label(format!("Rotation {:.3?}", object.transform.rotation));
+                                    } else {
+                                        ui.label(format!("{id} · Object {owner} unavailable in this snapshot."));
+                                    }
+                                }
+                                ruster_scene::BindingTarget::Group(owner) => {
+                                    if let Some(group) = frame.scene.hierarchy.groups.get(owner) {
+                                        ui.strong(format!("{} · {id}", group.name.as_deref().unwrap_or(owner)));
+                                        ui.label(format!("Group-local rotation (radians) {:.3?}", group.transform.rotation));
+                                    } else {
+                                        ui.label(format!("{id} · Group {owner} unavailable in this snapshot."));
+                                    }
+                                }
+                                ruster_scene::BindingTarget::Application => {
+                                    ui.label(format!("{id} · Application behavior"));
+                                }
                             }
                         }
                         }

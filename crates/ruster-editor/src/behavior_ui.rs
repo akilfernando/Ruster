@@ -319,6 +319,7 @@ pub(super) enum Action {
     ExternalStatus,
     Create(String),
     CreateApplication,
+    CreateGroup(String),
     EditCommand(String, Option<String>),
     ApplyCommand,
     CancelCommand,
@@ -779,6 +780,48 @@ impl BehaviorUi {
                     .set_command_definition(session.scene().revision, &binding, &command, None)
                     .map_err(|error| error.to_string())?;
             }
+            Action::CreateGroup(group) => {
+                let source = session
+                    .allocate_source_ids(1)
+                    .map_err(|error| error.to_string())?
+                    .remove(0);
+                let binding = session
+                    .allocate_binding_ids(1)
+                    .map_err(|error| error.to_string())?
+                    .remove(0);
+                let api = ruster_behavior::GROUP_ROTATION_HOST_API_VERSION;
+                let template = r#"return {
+    update = function(rotation, props, dt, host)
+        rotation[3] = (rotation[3] + dt) % 6.283185307179586
+        return rotation
+    end
+}
+"#;
+                session
+                    .create_behavior(
+                        session.scene().revision,
+                        &source,
+                        BehaviorSource {
+                            label: Some("Group rotation".into()),
+                            language_id: ruster_behavior::LANGUAGE_ID.into(),
+                            host_api_version: api,
+                            text: annotated_template(&source, api, template)?,
+                        },
+                        &binding,
+                        BehaviorBinding {
+                            target: BindingTarget::Group(group),
+                            source_id: source.clone(),
+                            enabled: true,
+                            properties: BTreeMap::new(),
+                            commands: Default::default(),
+                            state_defaults: BTreeMap::new(),
+                        },
+                    )
+                    .map_err(|error| error.to_string())?;
+                self.load_source(session, &source);
+                self.source_open = true;
+                self.source_focus = true;
+            }
             Action::CreateApplication => {
                 let source = session
                     .allocate_source_ids(1)
@@ -1053,10 +1096,13 @@ impl BehaviorUi {
         self.refresh_assets(assets);
         ui.separator();
         ui.strong("Behavior");
-        ui.horizontal_wrapped(|ui| {
-            ui.selectable_value(&mut self.application, false, "Selected object behavior");
-            ui.selectable_value(&mut self.application, true, "Application behavior");
-        });
+        let assembly = !session.scene().hierarchy.is_empty();
+        if !assembly {
+            ui.horizontal_wrapped(|ui| {
+                ui.selectable_value(&mut self.application, false, "Selected object behavior");
+                ui.selectable_value(&mut self.application, true, "Application behavior");
+            });
+        }
         let mut action = None;
         let mut property_changed = false;
         if self.source_dirty
@@ -1156,20 +1202,32 @@ impl BehaviorUi {
                 action = Some(Action::CancelStateAdd);
             }
         }
-        let target = if self.application {
+        let target = if assembly {
+            object
+                .filter(|id| session.scene().hierarchy.groups.contains_key(*id))
+                .map(|id| BindingTarget::Group(id.into()))
+        } else if self.application {
             Some(BindingTarget::Application)
         } else {
             object.map(|id| BindingTarget::Object(id.into()))
         };
         let Some(target) = target else {
             if !self.pending() {
-                ui.weak("Select an object to add a behavior.");
+                ui.weak(if assembly {
+                    "Select a Group to add a rotation behavior."
+                } else {
+                    "Select an object to add a behavior."
+                });
             }
             if !self.error.is_empty() {
                 ui.colored_label(ui.visuals().error_fg_color, &self.error);
             }
             return action;
         };
+        if assembly {
+            ui.label("Group-local rotation (radians)");
+            ui.small("Lua API6 returns X, Y and Z rotation. Position and scale stay fixed.");
+        }
         let attached = session
             .authoring()
             .bindings
@@ -1206,7 +1264,7 @@ impl BehaviorUi {
                 });
                 if let Some(source)=session.source(&binding.source_id) {
 
-                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION,ruster_behavior::LIFECYCLE_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(ui.visuals().warn_fg_color,"This script version may not run here. Its data is preserved and can still be edited.");}
+                    if source.language_id!=ruster_behavior::LANGUAGE_ID||![ruster_behavior::HOST_API_VERSION,ruster_behavior::INPUT_HOST_API_VERSION,ruster_behavior::SPATIAL_HOST_API_VERSION,ruster_behavior::STATE_HOST_API_VERSION,ruster_behavior::LIFECYCLE_HOST_API_VERSION,ruster_behavior::GROUP_ROTATION_HOST_API_VERSION].contains(&source.host_api_version) {ui.colored_label(ui.visuals().warn_fg_color,"This script version may not run here. Its data is preserved and can still be edited.");}
                 } else {ui.colored_label(ui.visuals().warn_fg_color,"Script source is missing. Repair the source or detach this behavior; its properties are preserved.");}
                 ui.label("Properties");
                 for (name,summary) in &self.property_rows {
@@ -1239,6 +1297,7 @@ impl BehaviorUi {
                     action=Some(Action::AddProperty(id.clone(),self.new_property.clone(),value));
                 }
                 });
+                if !assembly {
                 ui.separator();
                 ui.strong("State defaults");
                 ui.label("Authored defaults become committed runtime fields on Reset. API4 returns own-state patches.");
@@ -1323,6 +1382,7 @@ impl BehaviorUi {
                     self.changed();
                 }
                 if let Some(command_action)=self.command_catalog(ui,session,id,binding,generation) {action=Some(command_action);}
+                }
                 egui::CollapsingHeader::new("Script details").id_salt(("behavior_details",id)).show(ui,|ui| {
                     ui.label(format!("Attachment: {id}"));ui.label(format!("Source: {}",binding.source_id));
                     if let Some(source)=session.source(&binding.source_id) {ui.label(format!("Language {} · host API {}",source.language_id,source.host_api_version));}
@@ -1330,12 +1390,33 @@ impl BehaviorUi {
                 });
             } else {
                 ui.menu_button("Add behavior…",|ui| {
-                    if ui.button(if self.application {"Lua application"}else{"Lua follower"}).clicked() {
-                        action=Some(match &target {BindingTarget::Application=>Action::CreateApplication,BindingTarget::Object(id)=>Action::Create(id.clone()),BindingTarget::Group(_)=>unreachable!("Group creation is not presented here")});ui.close();
+                    let create_label = match &target {
+                        BindingTarget::Application => "Lua application",
+                        BindingTarget::Object(_) => "Lua follower",
+                        BindingTarget::Group(_) => "Lua Group rotation",
+                    };
+                    if ui.button(create_label).clicked() {
+                        action = Some(match &target {
+                            BindingTarget::Application => Action::CreateApplication,
+                            BindingTarget::Object(id) => Action::Create(id.clone()),
+                            BindingTarget::Group(id) => Action::CreateGroup(id.clone()),
+                        });
+                        ui.close();
                     }
                     ui.menu_button("Attach existing source…",|ui| {
-                    for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::Attach{target:target.clone(),source:id.clone()});ui.close();}}
-                        if self.sources.is_empty() {ui.label("No sources in this scene.");}
+                        let mut any = false;
+                        for (id, label) in &self.sources {
+                            if session.source(id).is_some_and(|source| {
+                                (source.host_api_version == ruster_behavior::GROUP_ROTATION_HOST_API_VERSION) == assembly
+                            }) {
+                                any = true;
+                                if ui.button(label).clicked() {
+                                    action = Some(Action::Attach { target: target.clone(), source: id.clone() });
+                                    ui.close();
+                                }
+                            }
+                        }
+                        if !any { ui.label("No compatible sources in this scene."); }
                     });
                     ui.menu_button("Browse embedded sources…",|ui| {for (id,label) in &self.sources {if ui.button(label).clicked() {action=Some(Action::OpenSource(id.clone()));ui.close();}}});
                 });
@@ -2336,6 +2417,51 @@ mod tests {
         output.textures_delta.clear();
         action
     }
+    #[test]
+    fn ordinary_group_authoring_keeps_local_api_and_invalid_source_repairable() {
+        let mut session = Session::new(ruster_scene::Scene::demo()).unwrap();
+        session
+            .create_group(0, "hinge", Some("Hinge".into()))
+            .unwrap();
+        let mut editor = BehaviorUi::default();
+        editor
+            .execute(Action::CreateGroup("hinge".into()), &mut session)
+            .unwrap();
+        let binding = session.authoring().bindings.values().next().unwrap();
+        assert_eq!(binding.target, BindingTarget::Group("hinge".into()));
+        let source_id = binding.source_id.clone();
+        let initial = session.source(&source_id).unwrap().clone();
+        assert_eq!(
+            initial.host_api_version,
+            ruster_behavior::GROUP_ROTATION_HOST_API_VERSION
+        );
+        let mut runtime = ruster_behavior::Engine::new(Default::default()).unwrap();
+        let mut running = runtime.reset(session.scene(), session.authoring()).unwrap();
+        runtime.step(&mut running).unwrap();
+        assert!(running.scene().hierarchy.groups["hinge"].transform.rotation[2] > 0.);
+        let ctx = egui::Context::default();
+        source_frame(&ctx, &mut editor, vec![]);
+        source_frame(
+            &ctx,
+            &mut editor,
+            vec![egui::Event::Text("\nreturn {update = function(".into())],
+        );
+        assert!(editor.pending());
+        assert_eq!(session.source(&source_id).unwrap(), &initial);
+        let action = source_frame(
+            &ctx,
+            &mut editor,
+            key(egui::Key::Enter, egui::Modifiers::CTRL),
+        )
+        .unwrap();
+        assert!(matches!(action, Action::ApplySource));
+        editor.execute(action, &mut session).unwrap();
+        assert!(runtime.reset(session.scene(), session.authoring()).is_err());
+        session.undo(session.scene().revision).unwrap();
+        assert_eq!(session.source(&source_id).unwrap(), &initial);
+        assert!(runtime.reset(session.scene(), session.authoring()).is_ok());
+    }
+
     #[test]
     fn embedded_source_focus_applies_unfinished_data_and_recovery_preserves_typed_drafts() {
         let mut session = Session::new(ruster_scene::Scene::demo()).unwrap();

@@ -31,6 +31,7 @@ fn known_lua_api(language: &str, api: u32) -> bool {
                 | ruster_behavior::SPATIAL_HOST_API_VERSION
                 | ruster_behavior::STATE_HOST_API_VERSION
                 | ruster_behavior::LIFECYCLE_HOST_API_VERSION
+                | ruster_behavior::GROUP_ROTATION_HOST_API_VERSION
         )
 }
 
@@ -976,6 +977,12 @@ pub(super) fn source_class_name(source_id: &str) -> Result<String, FilesError> {
 }
 pub(super) fn annotation_hint_for_api(source_id: &str, api: u32) -> Result<String, FilesError> {
     id(source_id)?;
+    if api == ruster_behavior::GROUP_ROTATION_HOST_API_VERSION {
+        return Ok(format!(
+            "---@param rotation RusterVec3 Group-local radians\n---@param props {}\n---@param dt number\n---@param host RusterHost6\n---@return RusterVec3\n",
+            source_class_name(source_id)?
+        ));
+    }
     let host = match api {
         1 => "RusterHost",
         2 => "RusterHost2",
@@ -1091,6 +1098,9 @@ const VERSIONED_HOST_TYPES: &str = r#"
 ---@field state table<string,RusterStateValue>? Own known fields only. No transform or other envelope fields.
 ---@alias RusterInitialize fun(props:table<string,any>,host:RusterLifecycleHost):RusterLifecycleUpdate
 ---@alias RusterCommand fun(name:string,args:table<string,RusterStateValue>,props:table<string,any>,host:RusterLifecycleHost):RusterLifecycleUpdate
+---@class RusterHost6
+---@field sweep fun(probe_id:string,delta:RusterVec3):RusterSweep
+---@field overlap fun(probe_id:string,position:RusterVec3,sensor_id:string):RusterOverlap
 ---@class RusterHost5:RusterHost4
 ---@class RusterHost4:RusterHost3
 ---@field state fun(name:string):RusterStateValue Copied tick-start own field, missing fields fail.
@@ -1454,8 +1464,9 @@ mod tests {
             (2, "lua54", 3, "lua"),
             (3, "lua54", 4, "lua"),
             (4, "lua54", 5, "lua"),
-            (5, "lua54", 6, "txt"),
+            (5, "lua54", 6, "lua"),
             (6, "future-language", 4, "txt"),
+            (7, "lua54", 7, "txt"),
         ] {
             let mut script = source("unfinished source(");
             script.language_id = language.into();
@@ -1468,7 +1479,7 @@ mod tests {
         // Their unchanged version1 manifests remain readable, but neither a
         // fresh Lua destination nor explicit observed-file resolution may hide
         // that prior path. Reconciliation is an explicit creator operation.
-        for api in 2..=5 {
+        for api in 2..=6 {
             let legacy_temp = tempfile::tempdir().unwrap();
             let legacy_context = self::context(legacy_temp.path(), "legacy.scene.json");
             legacy_context.prepare(true).unwrap();
