@@ -49,7 +49,7 @@ fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
 }
 
 #[cfg(unix)]
-pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui::Response {
+pub fn connection_indicator(ui: &mut egui::Ui, state: &str, compact: bool) {
     let connected = state == "Connected";
     let button = if connected {
         let mut text = egui::text::LayoutJob::default();
@@ -92,8 +92,13 @@ pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui:
             }
         ))
     };
-    ui.add(editor_theme::rot_badge(button, connected))
-        .on_hover_text(format!("Rot connection · {state}"))
+    let response = ui.add(editor_theme::rot_badge(
+        button.sense(egui::Sense::hover()),
+        connected,
+    ));
+    response.widget_info(|| {
+        egui::WidgetInfo::labeled(egui::Role::Label, true, format!("Rot connection · {state}"))
+    });
 }
 
 pub fn is_about_open(ctx: &egui::Context) -> bool {
@@ -159,7 +164,7 @@ mod tests {
             let ctx = egui::Context::default();
             editor_theme::configure(&ctx);
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                connection_button(ui, state, false);
+                connection_indicator(ui, state, false);
             });
             output.textures_delta.clear();
             assert!(

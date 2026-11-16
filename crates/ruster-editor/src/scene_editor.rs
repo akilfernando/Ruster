@@ -5218,6 +5218,17 @@ impl SceneEditor {
                     self.workspace.settings_open = true;
                     ui.close();
                 }
+                ui.menu_button("Advanced", |ui| {
+                    #[cfg(unix)]
+                    if ui.button("Rot connection…").clicked() {
+                        self.ai_connection_requested = true;
+                        ui.close();
+                    }
+                    if !self.ai_workspace && ui.button("AI workspace").clicked() {
+                        self.set_ai_workspace(true, &ui.ctx().clone());
+                        ui.close();
+                    }
+                });
                 if compact && ui.button("About Rot Engine").clicked() {
                     open_about = true;
                     ui.close();
@@ -5298,10 +5309,6 @@ impl SceneEditor {
             crate::editor_theme::text_menu(ui, "View", |ui| {
                 self.player_view_controls(ui, true);
                 ui.separator();
-                if ui.button("AI workspace").clicked() {
-                    self.set_ai_workspace(true, &ui.ctx().clone());
-                    ui.close();
-                }
                 if !self.ai_workspace {
                     let mut visibility_changed = false;
                     for (label, visible) in [
@@ -5422,10 +5429,7 @@ impl SceneEditor {
             }
             #[cfg(unix)]
             {
-                if crate::branding::connection_button(ui, self.ai_connection_label, false).clicked()
-                {
-                    self.ai_connection_requested = true;
-                }
+                crate::branding::connection_indicator(ui, self.ai_connection_label, false);
             }
             if crate::editor_theme::primary_button(ui, "Save")
                 .on_hover_text(self.workspace.shortcut_text(Action::Save))
@@ -6348,7 +6352,8 @@ fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
                     let mut editor = SceneEditor::new(session);
                     #[cfg(feature = "inspection")]
                     editor.asset_ops.probe.attach_metrics(metrics);
-                    editor.ai_workspace = std::env::var("RUSTER_WORKSPACE").as_deref() == Ok("ai");
+                    editor.ai_workspace = std::env::var_os("RUSTER_PROJECT_STARTUP").is_none()
+                        && std::env::var("RUSTER_WORKSPACE").as_deref() == Ok("ai");
                     if startup_projects && !mcp_enabled && !editor.ai_workspace {
                         editor.project_picker = Some(project_picker::ProjectPicker::default());
                         cc.egui_ctx.set_zoom_factor(editor.workspace.prefs.scale);

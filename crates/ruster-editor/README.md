@@ -12,7 +12,7 @@ Current source saves ordinary flat documents as Scene18. Static assemblies and r
 
 ## Full editor workspace
 
-The header holds the scene title, Rot connection status and Save. Click **Rot** to toggle the connection panel. It docks to the right at wide sizes and below the header at compact sizes. Expand **Connection details** for session and adapter diagnostics. Use the toolbars for Scene and Player views, transforms, snapping, playback and view shortcuts. Objects and Inspector overlay one continuous Scene viewport. Their controls scroll above the fade, and the exposed viewport below either panel supports the same navigation as the center. The world grid follows the Scene camera. The editor’s Scene view uses a neutral grey background and a Rot-red selection outline. Content retains its existing search, import and asset controls. Open **Help → About** for the running build version.
+The header holds the scene title, Rot connection status and Save. The **Rot** indicator reflects connection status. Open **File → Advanced → Rot connection…** for manual connection controls, browser approval or diagnostics. Use the toolbars for Scene and Player views, transforms, snapping, playback and view shortcuts. Objects and Inspector overlay one continuous Scene viewport. Their controls scroll above the fade, and the exposed viewport below either panel supports the same navigation as the center. The world grid follows the Scene camera. The editor’s Scene view uses a neutral grey background and a Rot-red selection outline. Content retains its existing search, import and asset controls. Open **Help → About** for the running build version.
 
 ## Bounded assembly hierarchy — implementation WIP
 
@@ -27,11 +27,11 @@ To animate a hinge, select the Group in Objects, then choose **Behavior → Add 
 
 ## Native AI workspace — headless implementation candidate
 
-Ordinary native startup remains Full editor. **View → AI workspace** switches the
-existing window; **Full editor** returns without recreating Session, history,
-selection or camera. New enrolled managed owners receive a presentation-only
-`RUSTER_WORKSPACE=ai` hint. No new CLI flag is passed to old registered binaries,
-and attachment never rearranges an already-open human owner.
+The full editor is the default after project selection and when a trusted
+connector starts a registered project. **File → Advanced → AI workspace**
+switches the existing window. **Full editor** returns without recreating the
+session, history, selection or camera. Connecting to a running editor keeps its
+current layout.
 
 At reduced widths, one essential header retains project/unsaved state, Save, Undo,
 AI status and Full editor; **…** holds secondary tools/actions. Wider windows expose
@@ -44,9 +44,9 @@ AI drafts keep Selection visible and cannot be silently hidden by closing its dr
 
 Remappable shortcuts, native picking/gizmos/navigation, Save/history, recovery, close
 safety, diagnostics and active-runtime Stop use their existing owners in both modes.
-The **Rot** status button exposes Disconnect and explicit project/all-project persistent
-revoke. Trusted enrolled connections do not ask for recurring native approval; the
-manual controls below remain a distinct legacy path. Save/export/execution grants
+Connect to an enrolled project from the AI client by choosing its registered name.
+That path asks for no recurring native approval. **File → Advanced → Rot connection…**
+contains Disconnect and persistent revoke for a project or the registry. Save/export/execution grants
 are unchanged. Browser preview and model image reception are not prerequisites for
 local native interaction.
 
@@ -57,7 +57,7 @@ This is not native-human usability or actual ChatGPT/image acceptance.
 
 ## Legacy local AI binding — CP2 candidate
 
-In generic scene mode on Unix, the **Rot** status button opens the local connection controls. **Connect AI** previews the intended project/editor session and requires confirmation before starting a listener. When an adapter arrives, **Review adapter approval** previews its exact socket owner identity and local PID; confirmation approves only that owner for that project generation. Cancel/Escape grants nothing. **Disconnect AI** immediately revokes authority and lets the existing lifecycle retire the listener/publication owner asynchronously. Reconnection never implicitly retargets an old owner.
+In generic scene mode on Unix, **File → Advanced → Rot connection…** opens the local connection controls. **Connect AI** previews the intended project/editor session and requires confirmation before starting a listener. When an adapter arrives, **Review adapter approval** previews its exact socket owner identity and local PID; confirmation approves only that owner for that project generation. Cancel/Escape grants nothing. **Disconnect AI** immediately revokes authority and lets the existing lifecycle retire the listener/publication owner asynchronously. Reconnection never implicitly retargets an old owner.
 
 Asset catalog changes may persist immediately before Save; Save/export destinations still require separate grants. These controls do not register or restart Hermes, edit client configuration, or establish adapter executable provenance. Automatic registration remains fail-closed. This is an implementation candidate, not native workflow acceptance; [qualification boundary](../../docs/evidence/E2A-CP2-NATIVE-ROUTE-2026-11-14.md).
 

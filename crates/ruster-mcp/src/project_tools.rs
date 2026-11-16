@@ -213,9 +213,7 @@ impl Project {
                 .stdout(std::process::Stdio::null())
                 .stderr(std::process::Stdio::null());
             if let Some(path) = &self.enrollment {
-                command
-                    .env("RUSTER_CONNECTOR_ENROLLMENT", path)
-                    .env("RUSTER_WORKSPACE", "ai");
+                command.env("RUSTER_CONNECTOR_ENROLLMENT", path);
             }
             command.env(
                 "RUSTER_PROJECT_BOOTSTRAP",

@@ -35,10 +35,7 @@ impl SceneEditor {
                     self.set_ai_workspace(false, &ctx);
                 }
                 #[cfg(unix)]
-                if crate::branding::connection_button(ui, self.ai_connection_label, true).clicked()
-                {
-                    self.ai_connection_requested = true;
-                }
+                crate::branding::connection_indicator(ui, self.ai_connection_label, true);
                 for action in [Action::Undo, Action::Save] {
                     if ui
                         .button(if action == Action::Save {

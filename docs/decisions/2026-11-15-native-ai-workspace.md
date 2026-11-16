@@ -28,7 +28,7 @@ Selection summary                         Saved / actionable notice
 - Preserve remappable native navigation/picking/gizmos, W/E/R/F and existing save/history shortcuts, text focus, Enter and Escape. Runtime active status/Stop, errors, recovery and close safety stay available.
 - Do not overwrite normal panel visibility/width preferences to hide them. Initial mode/drawer state may be window-local; future persistence belongs to optional workspace preferences, not scene format.
 - Mode changes do not rebuild Session/renderer, mutate authored revision, clear selection/camera/history or grant authority. Release held navigation; defer during manipulation/modal, preserve drafts and never hide the only unresolved draft editor.
-- Normal native startup remains Full editor. New managed owners request AI workspace. Existing exact owners connect without rearranging human work; a visible layout switch remains optional. No moving/tiling/focusing other applications.
+- Ordinary and managed projects open in the full editor. The Rot indicator is the sole connection chrome in normal editing. File → Advanced contains the optional AI layout and manual connection administration. Existing owners retain their layout when connecting. This 2026-11-16 refinement supersedes the original managed AI-workspace default. No moving/tiling/focusing other applications.
 
 ## Trust and connection contract
 

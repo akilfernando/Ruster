@@ -115,8 +115,8 @@ impl Host {
         self.workspace = if self.workspace_enabled {
             match workspace_attachment::WorkspaceAttachment::start(&self.editor, &bridge, ctx) {
                 Ok(workspace) => workspace,
-                Err(_) => {
-                    self.editor.notice="Optional browser preview unavailable; native AI connection is independent.".into();
+                Err(error) => {
+                    log::warn!("Optional Rot browser preview unavailable: {error}");
                     None
                 }
             }

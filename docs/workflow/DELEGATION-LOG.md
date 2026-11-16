@@ -1,5 +1,12 @@
 # Delegation outcomes
 
+## 2026-11-16 — Rot connection presentation
+
+An inherited-model worker reviewed connection UI and ownership read-only. It
+identified both header entry points, the browser approval instructions and the
+optional browser failure notice. Root integrated the changes and verified the
+connection flow. Worker elapsed time and token usage were unavailable.
+
 ## 2026-11-16 — Project picker history
 
 One worker on the inherited model implemented project history in the existing

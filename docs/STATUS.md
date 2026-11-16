@@ -21,6 +21,23 @@
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
 
+## Rot connection presentation — 2026-11-16
+
+The enrolled path uses the exact registered project and existing explicit client
+connect. Everyday editing shows the passive Rot indicator. Managed startup
+uses the full editor. File → Advanced contains the optional AI layout and
+manual connection, browser approval, disconnect and revoke controls. Browser
+startup failures go to the diagnostic log. Enrollment and the installed client
+configuration remain explicit. Existing pinned trial artifacts are retained.
+
+A disposable enrolled project connected and disconnected using the real MCP
+STDIO adapter and native editor on workspace 2. The badge tracked the live
+state without an editor prompt. File → Advanced opened the controls on demand.
+The optimized editor is installed and passed startup smoke. A matched editor
+and adapter are staged in the redesign audit's `indicator-release/` folder.
+The initial workspace test run hit the prior asset retirement assertion. The
+repeat reused the same source and the editor suite passed all 208 enabled tests.
+
 ## Project picker — 2026-11-16
 
 Ordinary cold startup opens Recent and All Projects with Open Project and New
