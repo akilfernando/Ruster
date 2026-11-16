@@ -28,7 +28,6 @@ mod material_commands;
 mod material_ui;
 #[cfg(all(test, feature = "inspection"))]
 mod material_visual_probe;
-#[cfg(test)]
 mod model_placement;
 mod nonvisual;
 mod persistence_commands;
@@ -132,6 +131,7 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "behavior_action_remove",
     "scene_inspect",
     "scene_transform",
+    "scene_model_place",
     "scene_group_create",
     "scene_reparent",
     "scene_create",
@@ -2756,7 +2756,7 @@ impl SceneEditor {
         }
         let err = |code: &str, message: String| (code.to_string(), message);
         let allowed: &[&str] = match op {
-            "asset_inspect" => &["offset"],
+            "asset_inspect" => &["offset", "model_offset"],
             "asset_import" => &[
                 "expected_session_token",
                 "expected_revision",
@@ -2777,6 +2777,13 @@ impl SceneEditor {
                 "expected_revision",
                 "expected_asset_revision",
                 "asset_id",
+            ],
+            "scene_model_place" => &[
+                "expected_session_token",
+                "expected_revision",
+                "expected_asset_revision",
+                "asset_id",
+                "name",
             ],
             "scene_mesh" => &[
                 "expected_session_token",
@@ -2800,7 +2807,7 @@ impl SceneEditor {
             || (op != "asset_inspect"
                 && allowed
                     .iter()
-                    .any(|key| *key != "builtin" && !object.contains_key(*key)))
+                    .any(|key| *key != "builtin" && *key != "name" && !object.contains_key(*key)))
         {
             return Err(err("invalid_arguments", "Unknown argument".into()));
         }
@@ -2841,7 +2848,13 @@ impl SceneEditor {
                 .assets
                 .as_ref()
                 .ok_or_else(|| err("assets_unavailable", self.error.clone()))?;
-            let mut page = asset_inspection::page(store, offset)
+            let model_offset = if args.get("model_offset").is_some() {
+                usize::try_from(number("model_offset")?)
+                    .map_err(|_| err("invalid_arguments", "model_offset exceeds range".into()))?
+            } else {
+                0
+            };
+            let mut page = asset_inspection::page_with_models(store, offset, model_offset)
                 .map_err(|message| err("invalid_arguments", message.into()))?;
             let observation = page
                 .as_object_mut()
@@ -2918,6 +2931,25 @@ impl SceneEditor {
                 "stale_asset_revision",
                 "Inspect asset catalog again".into(),
             ));
+        }
+        if op == "scene_model_place" {
+            let id = args["asset_id"]
+                .as_str()
+                .ok_or_else(|| err("invalid_arguments", "asset_id required".into()))?;
+            let name = args
+                .get("name")
+                .map(|value| {
+                    value
+                        .as_str()
+                        .ok_or_else(|| err("invalid_arguments", "name must be a string".into()))
+                })
+                .transpose()?;
+            let root = self
+                .place_model(id, name)
+                .map_err(|message| err("model_placement_failed", message))?;
+            return Ok(
+                json!({"revision":self.session.scene().revision.to_string(),"asset_revision":expected_asset.to_string(),"root_id":root,"asset_id":id}),
+            );
         }
         if op == "scene_mesh" {
             let id = args["object_id"]
@@ -3102,6 +3134,7 @@ impl SceneEditor {
                 | "asset_refresh"
                 | "asset_rename"
                 | "scene_mesh"
+                | "scene_model_place"
                 | "shader_refresh"
         ) {
             return self.content_command(token, op, args);
@@ -4209,6 +4242,7 @@ impl SceneEditor {
             ui.label("Save or open a scene to use its content catalog.");
             return;
         }
+        self.models_ui(ui);
         let visible = self.content_search.visible.len();
         let count = self.content_search.rows.len();
         if count == 0 {
@@ -4479,7 +4513,7 @@ impl SceneEditor {
                     field.request_focus(); self.asset_focused = true;
                 }
             }
-            ui.label(if self.asset_rename_intent { "Project-relative rename destination (same extension)" } else { "Project-relative OBJ mesh or PNG texture source" });
+            ui.label(if self.asset_rename_intent { "Project-relative rename destination (same extension)" } else { "Project-relative GLB model, OBJ mesh or PNG texture source" });
             let source = ui.add(egui::TextEdit::singleline(&mut self.asset_source).id(egui::Id::unique("asset_import_source")));
             if id_enter || (!self.asset_focused && self.asset_source_focus) {
                 source.request_focus(); source.scroll_to_me(Some(egui::Align::Center)); self.asset_focused = true;

@@ -137,6 +137,109 @@ pub(super) fn model_placement(
     })
 }
 
+impl super::SceneEditor {
+    pub(super) fn place_model(&mut self, id: &str, name: Option<&str>) -> Result<String, String> {
+        self.guard()?;
+        if self.manipulation.offset_pending() {
+            return Err("Apply or cancel the pending transform offset first.".into());
+        }
+        let store = self
+            .assets
+            .as_ref()
+            .ok_or("Open a project with a valid catalog")?;
+        let model = store
+            .model(id)
+            .ok_or("Imported model not found; import its GLB source first")?;
+        for node in model.nodes.values() {
+            if node
+                .mesh_id
+                .as_ref()
+                .is_some_and(|mesh| !self.resolved.contains_key(mesh))
+            {
+                return Err("Model mesh unavailable; refresh its source or reopen the project before placing.".into());
+            }
+        }
+        for material in model.materials.values() {
+            if material
+                .base_color_texture
+                .as_ref()
+                .is_some_and(|texture| !self.resolved_textures.contains_key(texture))
+            {
+                return Err("Model texture unavailable; refresh its source or reopen the project before placing.".into());
+            }
+        }
+        let placement = model_placement(&self.session, model, name.unwrap_or(id).into())
+            .map_err(|error| error.to_string())?;
+        let root = placement.root_id.clone();
+        self.session
+            .place_imported(self.session.scene().revision, placement)
+            .map_err(|error| error.to_string())?;
+        self.select_object(Some(root.clone()), false);
+        self.error.clear();
+        self.notice = format!("Placed {id}. Scene Undo removes this placement; source refresh preserves scene edits. Preview updates on Reset.");
+        Ok(root)
+    }
+
+    pub(super) fn models_ui(&mut self, ui: &mut eframe::egui::Ui) {
+        let query = self.content_query.to_lowercase();
+        // Borrow only bounded row metadata, never copy imported graphs per frame.
+        let rows: Vec<_> = self
+            .assets
+            .as_ref()
+            .into_iter()
+            .flat_map(|store| store.models())
+            .filter(|model| {
+                query.is_empty()
+                    || model.id.to_lowercase().contains(&query)
+                    || model.source.to_lowercase().contains(&query)
+            })
+            .map(|model| (model.id.clone(), model.source.clone(), model.hash.clone()))
+            .collect();
+        if rows.is_empty() {
+            return;
+        }
+        ui.label("Models");
+        let mut place = None;
+        let mut refresh = None;
+        let enabled = self.guard().is_ok() && !self.asset_ops.busy();
+        eframe::egui::ScrollArea::vertical()
+            .id_salt("content_models_scroll")
+            .max_height(150.0)
+            .show(ui, |ui| {
+                for (id, source, hash) in rows {
+                    ui.push_id(&id, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.label(format!("{id} · Model")).on_hover_text(format!(
+                                "Source: {source}\nAccepted revision: {hash}"
+                            ));
+                            if ui
+                                .add_enabled(enabled, eframe::egui::Button::new("Place"))
+                                .clicked()
+                            {
+                                place = Some(id.clone());
+                            }
+                            if ui
+                                .add_enabled(enabled, eframe::egui::Button::new("Refresh"))
+                                .clicked()
+                            {
+                                refresh = Some(id.clone());
+                            }
+                        });
+                    });
+                }
+            });
+        ui.small("Place creates an editable scene copy. Refresh keeps placement and uses the last accepted model if refused.");
+        if let Some(id) = place {
+            if let Err(error) = self.place_model(&id, None) {
+                self.error = format!("Placement refused: {error}. The imported model is retained; repair the scene and retry Place.");
+            }
+        }
+        if let Some(id) = refresh {
+            self.queued_refresh = Some(id);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -149,6 +252,97 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
     use std::{fs, thread};
+
+    // Real asset-to-command boundary: ownership/freshness, repeat placement and
+    // graph-free inspection are distinct from the lower scene transaction test.
+    #[test]
+    #[ignore = "requires pinned Blender GLB family in RUSTER_TEST_GLB_FIXTURE"]
+    fn guarded_model_commands_and_resource_only_refresh() {
+        let fixtures = PathBuf::from(std::env::var_os("RUSTER_TEST_GLB_FIXTURE").unwrap());
+        let dir = tempfile::tempdir().unwrap();
+        fs::copy(fixtures.join("beacon-A.glb"), dir.path().join("model.glb")).unwrap();
+        let path = dir.path().join("scene.json");
+        Session::new(Scene::empty("test"))
+            .unwrap()
+            .save(&path)
+            .unwrap();
+        let mut editor = super::super::SceneEditor::test_loaded(Session::open(&path).unwrap());
+        let token =
+            editor.command("test", "scene_inspect", json!({}))["result"]["session_token"].clone();
+        let import = json!({"expected_session_token":token,"expected_revision":"0","expected_asset_revision":"0","asset_id":"beacon","source":"model.glb"});
+        let mut overrides = import.clone();
+        overrides["normal_policy"] = json!("flat");
+        assert_eq!(
+            editor.command("test", "asset_import", overrides)["error"]["code"],
+            "invalid_arguments"
+        );
+        let result = editor.command("test", "asset_import", import);
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(result["result"]["model"]["id"], "beacon");
+        editor.test_finish_asset_work();
+        let inspection = editor.command("test", "asset_inspect", json!({}));
+        assert_eq!(inspection["result"]["model_count"], 1);
+        assert!(inspection["result"]["models"][0].get("nodes").is_none());
+        assert!(serde_json::to_vec(&inspection).unwrap().len() < 16384);
+        let mut args = json!({"expected_session_token":token,"expected_revision":"0","expected_asset_revision":"1","asset_id":"beacon"});
+        let initial = editor.session.snapshot_bytes().unwrap();
+        for (key, value, code) in [
+            ("expected_session_token", "bad", "stale_session"),
+            ("expected_revision", "8", "stale_revision"),
+            ("expected_asset_revision", "8", "stale_asset_revision"),
+        ] {
+            let mut bad = args.clone();
+            bad[key] = json!(value);
+            assert_eq!(
+                editor.command("test", "scene_model_place", bad)["error"]["code"],
+                code
+            );
+            assert_eq!(editor.session.snapshot_bytes().unwrap(), initial);
+        }
+        let mut bad = args.clone();
+        bad["name"] = Value::Null;
+        assert_eq!(
+            editor.command("test", "scene_model_place", bad)["error"]["code"],
+            "invalid_arguments"
+        );
+        let result = editor.command("test", "scene_model_place", args.clone());
+        assert_eq!(result["ok"], true, "{result}");
+        assert_eq!(
+            editor.selected.as_deref(),
+            result["result"]["root_id"].as_str()
+        );
+        let first = editor.selected.clone();
+        args["expected_revision"] = json!("1");
+        let result = editor.command("test", "scene_model_place", args);
+        assert_eq!(result["ok"], true, "{result}");
+        assert_ne!(editor.selected, first);
+        assert_eq!(editor.session.undo_len(), 2);
+        let placed = editor.session.snapshot_bytes().unwrap();
+        fs::copy(
+            fixtures.join("beacon-B-reordered.glb"),
+            dir.path().join("model.glb"),
+        )
+        .unwrap();
+        let refresh = json!({"expected_session_token":token,"expected_revision":"2","expected_asset_revision":"1","asset_id":"beacon"});
+        let result = editor.command("test", "asset_refresh", refresh.clone());
+        assert_eq!(result["ok"], true, "{result}");
+        editor.test_finish_asset_work();
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), placed);
+        fs::copy(
+            fixtures.join("beacon-malformed.glb"),
+            dir.path().join("model.glb"),
+        )
+        .unwrap();
+        let mut refresh = refresh;
+        refresh["expected_asset_revision"] = json!("2");
+        assert_eq!(
+            editor.command("test", "asset_refresh", refresh)["error"]["code"],
+            "asset_error"
+        );
+        editor.test_finish_asset_work();
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), placed);
+        assert_eq!(editor.assets.as_ref().unwrap().revision(), 2);
+    }
 
     fn refresh_from(
         store: &mut AssetStore,

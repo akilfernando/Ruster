@@ -1820,7 +1820,13 @@ impl SceneEditor {
             .ok_or_else(|| error("invalid_arguments", "asset_id required"))?
             .to_owned();
         let mutation = match op {
-            "asset_refresh" => AssetMutation::Refresh { id },
+            "asset_refresh" => {
+                if store.model(&id).is_some() {
+                    AssetMutation::RefreshGlb { id }
+                } else {
+                    AssetMutation::Refresh { id }
+                }
+            }
             "asset_import" => {
                 let source = args["source"]
                     .as_str()
@@ -1874,6 +1880,11 @@ impl SceneEditor {
                         id,
                         source: source.into(),
                         normal_policy,
+                    }
+                } else if source.ends_with(".glb") {
+                    AssetMutation::ImportGlb {
+                        id,
+                        source: source.into(),
                     }
                 } else {
                     AssetMutation::Import {
@@ -1981,16 +1992,24 @@ impl SceneEditor {
     fn asset_outcome(
         &mut self,
         _op: &str,
-        result: Result<ruster_assets::AssetInfo, ruster_assets::AssetError>,
+        result: Result<ruster_assets::AssetOutcome, ruster_assets::AssetError>,
     ) -> Outcome {
         match result {
-            Ok(info) => {
+            Ok(outcome) => {
                 let revision = self.assets.as_ref().map_or(0, AssetStore::revision);
                 self.error.clear();
-                self.notice = "Content updated; preview unchanged until Reset.".into();
-                Ok(
-                    json!({"asset":info,"asset_revision":revision.to_string(),"scene_revision":self.session.scene().revision.to_string()}),
-                )
+                let mut result = json!({"asset_revision":revision.to_string(),"scene_revision":self.session.scene().revision.to_string()});
+                match outcome {
+                    ruster_assets::AssetOutcome::Asset(info) => {
+                        self.notice = "Content updated; preview unchanged until Reset.".into();
+                        result["asset"] = json!(info);
+                    }
+                    ruster_assets::AssetOutcome::Model(model) => {
+                        self.notice = format!("Model {} accepted. Use Place in Content to create a scene copy; Refresh preserves existing placements. Preview updates on Reset.", model.id);
+                        result["model"] = super::asset_inspection::model_summary(&model);
+                    }
+                }
+                Ok(result)
             }
             Err(failure) => {
                 self.error = failure.to_string();
