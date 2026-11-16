@@ -10,7 +10,7 @@ const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining properties and state defaults. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians. Lua API7 uses object_id for one flat enabled blocker sphere; runtime enforces constrained movement. Shared Undo.",&["binding_id","source_id","enabled"]),
     ("behavior_binding_remove","Detach one behavior binding. Shared Undo; source stays available.",&["binding_id"]),
     ("behavior_property","Read one typed property or null for absent; no complete property-map response.",&["binding_id","name"]),
-    ("behavior_property_set","Set one typed property or use null to remove. Sound uses sound_ref value {asset_id,gain}; gain0..1, nullable stable WAV asset ID. Lua4/5/7 host.play_sound accepts the property name, not an arbitrary path. Known wrong-kind catalog IDs reject; missing IDs stay repairable. Shared Undo, no execution.",&["binding_id","name","value"]),
+    ("behavior_property_set","Set one typed property or use null to remove. Sound uses sound_ref value {asset_id,gain}; gain 0..1, nullable stable WAV asset ID. Lua4/5/7 host.play_sound accepts the property name, not an arbitrary path. Known wrong-kind catalog IDs reject; missing IDs stay repairable. Shared Undo, no execution.",&["binding_id","name","value"]),
     ("behavior_state_default","Read one authored typed state default or null for absent. Runtime values belong to the committed run.",&["binding_id","name"]),
     ("behavior_state_default_set","Set/remove one authored state field through shared Undo. Number, Bool, Text and Vec3 only,64fields/16KiB per owner and1MiB total. Null removes. Requires clean drafts. Current runtime stays unchanged until Reset.",&["binding_id","name","value"]),
     ("behavior_command","Read one complete authored command definition or null for absent; binding summaries expose IDs and argument counts only.",&["binding_id","command_id"]),
@@ -156,7 +156,7 @@ fn shape(field: &str) -> Value {
                     vec!["type", "value"],
                 ));
             }
-            json!({"oneOf":alternatives,"description":"Top-level null removes property. Text limits are UTF-8 bytes; references inside tagged values may be null. sound_ref contains an optional registered WAV asset_id and gain in0..1; host.play_sound uses the binding property name on Lua4/5/7."})
+            json!({"oneOf":alternatives,"description":"Top-level null removes property. Text limits are UTF-8 bytes; references inside tagged values may be null. sound_ref contains an optional registered WAV asset_id and gain in 0..1; host.play_sound uses the binding property name on Lua4/5/7."})
         }
         _ => json!({"type":"string","minLength":1,"maxLength":128}),
     }

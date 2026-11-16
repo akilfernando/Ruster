@@ -2464,7 +2464,7 @@ impl RuntimeUi {
                         OutputStatus::VoiceLimit => "Audio: voice limit reached",
                     });
                     if let Some(batch) = &report.last_batch {
-                        ui.label(format!("Last committed audio batch: {} cues", batch.cues.len()));
+                        ui.label(format!("Last committed audio batch: {} cue{}", batch.cues.len(), if batch.cues.len() == 1 {""} else {"s"}));
                     }
                 }
                 if let Some(frame)=&self.frame {ui.label(format!("Committed tick {}",frame.tick));}

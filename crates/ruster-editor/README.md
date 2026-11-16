@@ -840,7 +840,7 @@ This bounded mover requires a flat scene, uniform sphere scale and a single enab
 
 ### One-shot sound properties
 
-Import a project-relative `.wav` using **Content → Import / source tools…** and a stable asset ID. WAV sources are bounded PCM16 mono/stereo, 8000–48000 Hz, at most10 seconds and2 MiB. Content lists the item as **Sound** and supports the same Refresh and source recovery actions as other assets.
+Import a project-relative `.wav` using **Content → Import / source tools…** and a stable asset ID. WAV sources are bounded PCM16 mono/stereo, 8000–48000 Hz, at most 10 seconds and 2 MiB. Content lists the item as **Sound** and supports the same Refresh and source recovery actions as other assets.
 
 In **Behavior → Add property**, enter a cue name, choose **Sound**, and add it. **Edit value** offers only Sound catalog entries plus None, and **Gain (0–1)**. Enter applies a focused gain field; Escape reverts it, while an open selector owns its own Enter/Escape. Invalid gain text stays available for repair. Apply, Undo and Save/reopen use the existing property transaction. Missing references remain visible for repair; None is silent.
 

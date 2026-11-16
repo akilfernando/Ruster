@@ -1984,6 +1984,7 @@ mod tests {
             "---@field [\"vector\"]? RusterVec3",
             "---@field [\"target\"]? RusterObjectId",
             "---@field [\"asset\"]? RusterAssetId",
+            "---@field [\"chime\"]? RusterSoundRef",
         ] {
             assert!(types.contains(field), "{field}: {types}");
         }
