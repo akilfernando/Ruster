@@ -1,5 +1,15 @@
 # Current project status
 
+## Kinematic move-and-slide goal active — 2026-11-16
+
+Astra selected [bounded kinematic move-and-slide](plans/KINEMATIC-MOVE-AND-SLIDE.md)
+from cumulative `a726d34`. Existing sweeps stop at a blocker and expose its
+normal. The new bounded goal adds reusable tangential motion and corner
+handling without a dynamic physics-world dependency. First proof runs the
+production Lua Step path on diagonal wall, corner and reverse motion, plus
+late-error rollback. Implementation starts in `feat/kinematic-slide-20261116`.
+The production tracer and creator/export evidence are pending.
+
 ## Repeatable play checks integrated locally — 2026-11-16
 
 The [goal plan](plans/REPEATABLE-PLAY-CHECKS.md) and
