@@ -1,8 +1,23 @@
 # Model routing
 
-Checked 2026-11-13 for the current Hermes root session. Historical host snapshots below are retained, not active controls. This is a replaceable snapshot, not a permanent model pin. The policy lives in [the skill](../../skills/ruster-development/SKILL.md).
+Checked 2026-11-16 UTC for the local ChatGPT Codex session. This snapshot describes the session's tools. The policy lives in [the development skill](../../skills/ruster-development/SKILL.md).
 
-## Current routing — Hermes host, 2026-11-13
+## Current routing — Codex host, 2026-11-16
+
+The active collaboration tool exposes these role choices. Starting efforts are project policy or working defaults, separate from tool defaults.
+
+| Role | Available model | Starting effort |
+| --- | --- | --- |
+| Main developer and routine coding | `gpt-6.1-sol` | Low, per project policy |
+| Consequential reasoning and whole-roadmap review | `gpt-6-astra` | Low, per project policy |
+| Bounded mechanical work | `gpt-6-luna` | Medium, the tool default |
+| Visual or computer-use specialist | `gpt-6.1-terra` | Medium as a starting candidate |
+
+The tool also exposes `gpt-6-sol`. All five support low through max, and all except Luna support ultra. There are four total slots including the root. Full-history forks inherit the root model and effort. Explicit model or effort overrides require `fork_turns="none"` and a self-contained brief. Apply the development skill's selective delegation policy within the active session's delegation rules.
+
+Checked the active tool schema and official [model](https://learn.chatgpt.com/docs/models.md) and [subagent](https://learn.chatgpt.com/docs/agent-configuration/subagents.md) guidance. Official guidance starts with client defaults and adjusts by task. Role availability comes from the tool schema. The root model was not independently identified or switched, and no comparative cost or latency was measured.
+
+## Historical routing — Hermes host, 2026-11-13
 
 Root refreshed official [client model guidance](https://learn.chatgpt.com/docs/models.md) and [subagent guidance](https://learn.chatgpt.com/docs/agent-configuration/subagents.md) in this session; children reuse its setup evidence at `/home/akilf/.hermes/cache/develop-setup-20261113/`. Main and the exclusive E1 implementation child run the inherited balanced `gpt-6.1-sol` route. The current Hermes `delegate_task` schema has no per-task model, effort or fork controls; old Codex four-slot/`fork_turns` examples and Claude aliases are not valid Hermes options. Actual Luna/Terra invocations are retained in the root setup evidence; access is distinct from application acceptance.
 

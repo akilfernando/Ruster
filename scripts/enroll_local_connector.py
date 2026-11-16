@@ -113,8 +113,8 @@ def main():
     except (ValueError, TypeError, UnicodeError):
         parser.error("invalid production project registry")
     ids = [p["id"] for p in records]
-    if not 1 <= len(records) <= 32 or len(ids) != len(set(ids)) or any(p not in ids for p in args.project):
-        parser.error("1..32 unique registered projects and exact allowlisted IDs required")
+    if any(project_id not in ids for project_id in args.project):
+        parser.error("each --project must be an exact registered project ID")
     if not bounded_text(args.connector_id, 128):
         parser.error("connector ID must be 1..128 UTF-8 bytes")
     root = Path(args.output)

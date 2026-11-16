@@ -1,5 +1,45 @@
 # Current project status
 
+## Codex worktree handoff — 2026-11-16
+
+Use this cumulative worktree for Codex development. The older feedback checkout
+retains its local status edit and private attachments. Refreshed the
+[model-routing snapshot](workflow/MODEL-ROUTING.md) for the active Codex host.
+This workstation's two optional Codex skill symlinks now resolve to the
+versioned development and testing skills here. The worktree's own `AGENTS.md`
+continues to govern project work. Verified both link targets and documentation
+with the affected Markdown validator and `git diff --check`. No engine checks
+were needed for this documentation and local discovery change.
+
+## Cumulative source and Git audit — 2026-11-16
+
+Audited the cumulative line at `bc91893`, including capture ownership and
+freshness, enrollment validation, Git object integrity and worktree registrations.
+The candidate matched the locally recorded upstream and was 123 commits ahead
+of locally recorded `origin/main`. Pruned the stale registration for the missing
+`/tmp/ruster-m8-debugger-backend` checkout, verified its branch still points to
+`8bbc544`, and removed an empty per-worktree refs directory flagged by Git.
+`git fsck --full --no-dangling` passed, worktree prune dry-run reports no remaining
+entries, and 40 other worktrees remain. Patch-equivalence checks confirmed the
+isolated visual-grounding and AI layout fix patches are represented in cumulative
+history. The runtime-input diagnostic branch retains a separate test-only
+change. Existing branches and evidence worktrees are retained.
+
+Removed duplicate registry count/uniqueness checks in the enrollment CLI,
+keeping the checks in the registry parser and the explicit allowlist check at
+the CLI boundary. Reconciled current roadmap rows with the verified local
+promotion and removed a stray final blank line in CP1 evidence. Main-to-candidate
+diff checking still reports four whitespace lines in two identical upstream
+DejaVu license copies. Their bytes were preserved.
+
+`python3 scripts/check.py --full` passed in 116.88 seconds (411 Rust tests passed,
+8 ignored, 33 Python tests, Markdown, formatting and strict workspace Clippy).
+The full gate started before the Python and roadmap edits. The final Python
+suite passed all 33 tests again, the affected Markdown validator passed after
+the edits, and `git diff --check` passed. Both installed executable hashes
+matched the promotion receipt. No fresh GPU/desktop, inspection-feature,
+hosted CI or exhaustive security qualification was run.
+
 ## Matched editor/MCP installed locally — 2026-11-16
 
 **LOCAL INSTALLATION PASS; not a public release or automatic real-project enrollment.**
