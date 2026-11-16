@@ -42,6 +42,29 @@ explicit input tests resolved package preflight and the tested fixture was
 re-pinned. The first standalone command also verified that requesting
 fewer ticks than supplied frames is rejected, then replayed proper prefixes.
 
+## Ordinary native editor
+
+A disposable workspace-2 editor created the Lua kinematic mover with
+normal controls, used Escape to exit the source view, entered both Axis
+IDs with Enter, saved, and reopened the authored scene. Scoped held-key
+input exercised wall slide, corner stop and movement away. Runtime spatial
+feedback identified the blocker by object label and ID and displayed the
+outcome and normal. The checks verified authored bytes remained identical
+during playback and restored the original desktop. Evidence includes
+`native-audit-07-files`, `native-runtime-03-files`, and
+`native-stop-01-files`. The independently pinned case opened through
+**File** → **Play checks…** → **Reopen check**, then passed at tick 3
+through **Run saved check**. See `native-check-02-files/passed-case.png`.
+Native input was scoped automation for disposable windows. The explicit Save
+control qualified. An early injected Ctrl+S attempt had ambiguous focus
+and did not establish shortcut acceptance. The compact feedback correction
+in `9139c95` removed debug-oriented formatting, added the singular count
+and kept full precision on hover. It passed the focused feedback test,
+strict editor Clippy and the final native held-key screenshot in
+`native-runtime-final-files/slide-feedback.png`. The captured native
+logs passed the Vulkan log scanner. This checks captured messages and
+does not assert a validation layer configuration.
+
 ## Guarded native MCP transport
 
 A disposable real STDIO adapter and explicitly approved owner exercised the

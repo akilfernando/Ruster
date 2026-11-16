@@ -55,10 +55,11 @@ fn description(observation: &QueryObservation, scene: &ruster_scene::Scene) -> S
         QueryResult::MoveAndSlide {
             probe_id, result, ..
         } => format!(
-            "{} · {} · {} contacts",
+            "{} · {} · {} contact{}",
             name(probe_id),
             slide_status(result.outcome),
-            result.contacts.len()
+            result.contacts.len(),
+            if result.contacts.len() == 1 { "" } else { "s" }
         ),
         QueryResult::Overlap { result } => format!(
             "{} · {}",
@@ -216,14 +217,39 @@ impl RuntimeUi {
                         }
                     }
                     QueryResult::MoveAndSlide { delta, result, .. } => {
-                        ui.label(format!("Requested displacement {delta:?}"));
-                        ui.label(format!("Safe translation {:?}", result.suggested_translation));
+                        ui.label(format!(
+                            "Requested displacement [{:.4}, {:.4}, {:.4}]",
+                            delta[0], delta[1], delta[2]
+                        ))
+                        .on_hover_text(format!("{delta:?}"));
+                        if let Some(position) = result.suggested_translation {
+                            ui.label(format!(
+                                "Safe translation [{:.4}, {:.4}, {:.4}]",
+                                position[0], position[1], position[2]
+                            ))
+                            .on_hover_text(format!("{position:?}"));
+                        }
                         egui::ScrollArea::vertical().max_height(180.0).show(ui, |ui| {
-                            for contact in result.contacts.iter().take(ruster_behavior::spatial::MAX_SLIDE_CONTACTS) {
-                                let name = frame.scene.objects.iter().find(|object| object.id == contact.target_id).map(|object| object.display_name()).unwrap_or(&contact.target_id);
-                                ui.add(egui::Label::new(format!("{name} · {}", contact.target_id)).wrap());
-                                ui.label(format!("Contact {:?}", contact.point));
-                                ui.label(format!("Normal {:?}", contact.normal));
+                            for contact in result.contacts.iter()
+                                .take(ruster_behavior::spatial::MAX_SLIDE_CONTACTS)
+                            {
+                                let name = frame.scene.objects.iter()
+                                    .find(|object| object.id == contact.target_id)
+                                    .map(|object| object.display_name())
+                                    .unwrap_or(&contact.target_id);
+                                ui.add(egui::Label::new(format!(
+                                    "{name} · {}", contact.target_id
+                                )).wrap());
+                                ui.label(format!(
+                                    "Contact [{:.4}, {:.4}, {:.4}]",
+                                    contact.point[0], contact.point[1], contact.point[2]
+                                ))
+                                .on_hover_text(format!("{:?}", contact.point));
+                                ui.label(format!(
+                                    "Normal [{:.4}, {:.4}, {:.4}]",
+                                    contact.normal[0], contact.normal[1], contact.normal[2]
+                                ))
+                                .on_hover_text(format!("{:?}", contact.normal));
                                 ui.label(format!("Clearance {} scene units", contact.clearance));
                             }
                         });
@@ -310,6 +336,20 @@ mod tests {
         assert_eq!(
             description(&slide, &captured.scene),
             "Inspection probe · Slid · 0 contacts"
+        );
+        if let QueryResult::MoveAndSlide { result, .. } = &mut slide.query {
+            result
+                .contacts
+                .push(ruster_behavior::spatial::SlideContact {
+                    target_id: "wall".into(),
+                    point: [0.; 3],
+                    normal: [-1., 0., 0.],
+                    clearance: 0.0001,
+                });
+        }
+        assert_eq!(
+            description(&slide, &captured.scene),
+            "Inspection probe · Slid · 1 contact"
         );
         assert_ne!(
             query_kind(&slide.query),

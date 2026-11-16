@@ -1,18 +1,24 @@
 # Current project status
 
-## Kinematic move-and-slide qualification — 2026-11-16
+## Kinematic move-and-slide integrated locally — 2026-11-16
 
-The [current goal](plans/KINEMATIC-MOVE-AND-SLIDE.md) adds bounded Lua API7
-motion for one keyboard-controlled sphere. Core wall, corner, reverse,
-sphere, precision and atomicity checks passed. Guarded real STDIO
-authoring, refusal/repair, save/readback and isolated play checks passed.
-Axis and rotated Linux exports passed after relocation, with legacy sweep
-compatibility and early old-kit rejection. The median wall Step reached
-32.380 µs compared with 27.551 µs for the current sweep fixture. See the
-[decision](decisions/2026-11-16-kinematic-move-and-slide.md) and
+Lua API7 adds one keyboard-controlled sphere mover against stationary
+sphere and rotated-box blockers. The [goal plan](plans/KINEMATIC-MOVE-AND-SLIDE.md)
+and [decision](decisions/2026-11-16-kinematic-move-and-slide.md) define
+the bounds. Core wall, corner, reverse, precision, cancellation and late
+failure rollback passed. Ordinary native controls verified authoring,
+held-key preview, contact feedback, Save/reopen and a passing saved check.
+Guarded real STDIO verified separate authoring, refusal/repair, saved
+check isolation and matched export. Both relocated courses passed. Prior
+kits refused API7 before publishing, and old no-feature sweep delivery
+remained compatible.
+
+The median release wall Step took 32.380 µs with sliding and 27.551 µs
+with the current single sweep. The full change gate and final isolated
+editor feedback checks passed. See the
 [qualification evidence](evidence/KINEMATIC-MOVE-AND-SLIDE-2026-11-16.md).
-Native ordinary-editor qualification and final local integration are in
-progress.
+The roadmap retains packaged audio feedback as a provisional next
+candidate. Select the next goal after checking current creator blockers.
 
 ## Repeatable play checks integrated locally — 2026-11-16
 
