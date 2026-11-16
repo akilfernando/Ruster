@@ -1,5 +1,21 @@
 # Delegation outcomes
 
+## 2026-11-16 — Independent next goal selection
+
+At the user's request Astra compared authored player view, rich import,
+audio, prefab reuse and device input against cumulative source. It selected
+authored player view with existing keyboard actions and independently scoped
+the package and compatibility tracer. Root reconciled the plan with the
+current camera ownership code. No implementation, builds or live tests in
+the assignment. Elapsed and token usage were unavailable.
+
+The implementation owner delivered core, editor/STDIO and capture checkpoints
+`1cd0447`, `819f8b0` and `d985a30`. Astra's independent change review found
+one P1 pairing the Scene View camera with Player View capture matrices.
+The capture patch and owning test corrected that mismatch. Root performed
+native verification, independent package checks and local integration.
+Agent elapsed and token usage were unavailable.
+
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
 ## 2026-11-16 — Assembly runtime implementation and acceptance

@@ -1,5 +1,77 @@
 # Current project status
 
+## Authored player view integrated locally — 2026-11-16
+
+Astra independently selected [authored player view](plans/AUTHORED-PLAYER-VIEW.md)
+after the articulated assembly goal. Source is integrated into the cumulative
+branch through `d985a30`. The [decision](decisions/2026-11-16-authored-player-view.md)
+records Scene21, content schema17, the matched kit and retained descriptor5.
+Creators can save a fixed or follow perspective, use a separate Player View,
+and ship the same scene with the Linux runtime.
+
+- **Runtime and delivery.** Real relocated packages kept exact saved bytes.
+  Keyboard replay moved one subject +2 on X. Three stationary landmarks
+  matched an independent projection calculation at 4:3 and 16:9 at both
+  poses. An API6 hinge moved the followed child anchor from `(6,1,0)` to
+  `(4,3,0)`. Scene18 framing and keyboard playback passed through the old and
+  new package route. The older kit and a conflicting legacy framing option
+  refused before publication. An overflow at anchor X=10001 refused Step 2
+  after a valid Step 1. Owning tests verify atomic scene, state, camera and
+  tick preservation plus Reset. Evidence is in the worker and tracer audits
+  below, including the preliminary reader build error and wrong tick-count
+  input refusal.
+- **Ordinary editor.** The native inspection build from `d985a30` saved
+  Follow Subject with Y offset 1, refused FOV 121 on Enter, repaired it
+  to 55, and retained Undo and Redo through Save. A separate process
+  opened the saved scene and actual focused key events moved the subject
+  from X=0 to X=3. Captures show the same subject framing and landmarks
+  shifting left. Escape released control. Pause, Step, Reset and return
+  to Scene View passed. File export from the normal dialog ran after
+  relocation with byte-identical Scene21 and passed the independent 4:3
+  and 16:9 projection checks at Reset and after +2 X. Workspace 1 was
+  restored. Exact build and artifact hashes, UI captures and harness
+  retries are in `editor-qa` under the viewport audit.
+- **Guarded MCP.** The real STDIO fixture required scoped approval and
+  verified authoring, invalid edits, deletion refusal, stale revisions,
+  Undo/Redo, view switch, keyboard-frame Step, Play/Pause/Reset, save,
+  fresh reopen and asynchronous export. The published Scene21 archive was
+  relocated and matched the independent oracle and the editor camera arrays
+  at both aspects. It retained the exact saved bytes and history. The trace,
+  artifact pins and earlier assertion failures are in the worker audit.
+- **Capture review.** Astra found Player View captures paired displayed
+  matrices with the Scene View camera. `d985a30` pins the displayed matrices,
+  reports geometry picking unavailable in Player View, and retains Scene
+  View picking. `player_view_inspect` supplies the resolved authored view.
+  The regression covers mode-switch freshness and restored Scene View.
+- **Native standalone.** On the exact relocated archive, Tab and Enter
+  claimed runtime controls. A scoped virtual D hold moved the stationary
+  landmark mask while the subject mask retained its centroid and pixel count.
+  Escape released ownership. The process exited normally and workspace 1
+  was restored. The prior XWayland click missed the claim; both attempts
+  are retained. The user's own editor walkthrough is separate.
+- **Matched costs.** Six quiet paired runs took 59.690 ms baseline,
+  60.184 ms candidate no-view and 60.697 ms candidate follow per 5,000 neutral
+  Steps (medians). Native audit builds at 2170×1529, 4× MSAA, equal 45° FOV
+  and RTX 4060 measured process CPU preparation medians of 42.65–43.83 µs
+  before, 43.59–47.72 µs candidate no-view and 44.05–44.83 µs follow.
+  GPU scene medians were 68.61 µs at the observed resolution. The narrow
+  fixture and small sample limit attribution and generalization. Earlier
+  noisy samples and the no-view debug schema mismatch are retained.
+- **Automated gates.** Serialized core workspace gate at `1cd0447` passed
+  417 Rust tests (10 ignored), 33 Python, strict Clippy, format and Markdown
+  in 137.32 s. Final affected gate
+  `RUST_TEST_THREADS=1 python3 scripts/check.py --base 819f8b0` passed
+  201 editor, 30 MCP and one startup integration case with strict Clippy,
+  format and Markdown in 29.79 s. The real player-view STDIO test ran
+  explicitly. The editor gate caught compact viewport height and bridge
+  inventory regressions, both corrected with owning coverage. Native
+  qualification also caught a narrow numeric field, widened in `819f8b0`.
+
+Audit roots under `/home/akilf/Projects/Ruster-Audits` are
+`player-view-worker-EeYkHE`, `player-view-tracer-20261116.9ubxgK` and
+`player-view-viewport.LLoepc`. The local cumulative branch contains this
+slice. The branch is ahead of origin and the test artifacts are local.
+
 ## Articulated assembly delivery accepted for the bounded goal — 2026-11-16
 
 Source integrated locally through `888b4f5`. The [assembly runtime decision](decisions/2026-11-16-group-local-assembly-runtime.md)

@@ -1,5 +1,17 @@
 # Post-M3 roadmap review
 
+## Post-assembly goal selection — 2026-11-16
+
+The user asked Astra to select the next goal independently, plan it, and
+activate it. Astra selected a saved player view with fixed framing and
+deterministic subject follow. Existing keyboard actions and asset workflows
+are enough to demonstrate the outcome. Rich import offers more visual variety
+but currently requires a larger subresource identity and publication contract.
+Audio, prefab reuse and additional device input remain separate. The
+[execution plan](plans/AUTHORED-PLAYER-VIEW.md) defines scope and acceptance.
+The [implementation decision](decisions/2026-11-16-authored-player-view.md)
+records the contracts verified by the tracer.
+
 ## Mature engine parity research — 2026-11-16
 
 The user requested comparison research before choosing next implementation

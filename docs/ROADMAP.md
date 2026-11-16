@@ -113,6 +113,14 @@ articulated delivery passed through matched kits. See the [acceptance record](ST
 larger F4a package, prefabs and scene transitions separate. The evening
 editor familiarity walkthrough is independent of implementation.
 
+### Authored player view
+
+[Authored player view](plans/AUTHORED-PLAYER-VIEW.md) follows the completed
+assembly goal. The selected slice persists and verifies a camera that follows
+a keyboard-controlled subject in preview and relocated Linux playback.
+The [implementation decision](decisions/2026-11-16-authored-player-view.md)
+records the contracts. Richer import remains a candidate for a later goal.
+
 Then select slices from the retained foundation plan: richer content/animation,
 physics/audio and devices/player data, material/lighting completion, measured
 scale/LOD, and later ray tracing. Dependencies may revise the order; record the
