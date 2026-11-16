@@ -43,14 +43,16 @@ The original library foundation is recorded separately from the subsequent bound
 
 ## Opt-in API7 kinematic move-and-slide
 
-Use host API version 7 on one enabled Object binding for an enabled,
+Set `KINEMATIC_HOST_API_VERSION` (7) on one enabled Object binding for an enabled,
 uniformly scaled blocker sphere. The scene must be flat and other enabled
-blockers must be stationary. The API retains named input, sweep, overlap
+blockers must be stationary. Sensors remain available to overlap queries.
+The API retains named input, sweep, overlap
 and owned state. One `host.move_and_slide({dx,dy,dz})` call per invocation
 accepts finite displacement components in `-100..=100` scene units.
 Use the returned `suggested_translation` exactly in the complete
 `{transform=o, state={...}}` output. Preserve rotation and scale. With no
-call, preserve the incoming transform. For example:
+call, preserve the incoming transform. The Reset trial retains the authored
+pose. An update can read two named axes and apply the returned transform.
 
 ```lua
 return { update = function(o, p, dt, host)
@@ -85,32 +87,6 @@ One shared32call allowance covers every binding in a complete Reset trial or fix
 
 Queries inspect geometry and suggest translation. The script chooses its returned transform. Changing rotation/scale after asking a translation query changes geometry beyond the queried path. Initial overlap holds the example until reposition/Reset. The current kernel supports sphere translation against sphere/rotated-box blockers and targeted sphere overlap with sphere/box sensors. [Accepted0038](../../docs/decisions/0038-spatial-query-feasibility.md) records the accepted bounded f64query/f32Scene boundary, support-plane certificate and retained failures.
 
-
-## API7 kinematic sphere movement
-
-Set a Lua source to `KINEMATIC_HOST_API_VERSION` (7). A flat runtime may use
-one enabled Object mover with an enabled blocker sphere and uniform scale.
-Other enabled blockers must remain stationary, so a behavior bound to one
-of those blockers refuses Reset. Sensors are excluded from blocking.
-Existing read-only input, spatial queries, and own typed state are available.
-
-In each nonzero-dt update, compute the desired **world-space displacement**.
-Call `host.move_and_slide({x, y, z})` once and assign its
-`suggested_translation` to the Object transform returned in
-`{transform=object, state=patch}`. Preserve the authored rotation and scale.
-Each displacement component must be finite and within ±100. Leaving the
-transform unchanged without a call is valid. The dt0 Reset trial must retain
-the authored transform.
-
-The result provides `outcome` (`clear`, `slid`, or `stopped`), the
-quantized translation, and up to four ordered contacts with target object ID,
-world contact point, outward normal and clearance. The same data appears
-in committed query observations. The solver uses the immutable tick-start
-world, conservative rounded-segment certification and bounded re-sweeps
-against retained contact planes. Initial overlap, uncertifiable precision,
-exhausted contact budget, and invalid output reject the whole operation.
-A late binding error or cancellation keeps the previously committed tick,
-scene, state and observations.
 
 ## Opt-in API4 owned runtime state
 
