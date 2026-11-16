@@ -53,11 +53,13 @@ impl ModelInfo {
     }
 }
 
+#[derive(Debug)]
 pub(super) struct ModelResource {
     pub bytes: Vec<u8>,
     pub payload: Payload,
 }
 
+#[derive(Debug)]
 pub(super) struct DecodedModel {
     pub info: ModelInfo,
     pub resources: BTreeMap<String, ModelResource>,

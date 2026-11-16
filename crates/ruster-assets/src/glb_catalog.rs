@@ -116,6 +116,13 @@ impl Registry {
     }
 }
 
+#[derive(Debug)]
+pub(super) struct PreparedModel {
+    bytes: Vec<u8>,
+    decoded: DecodedModel,
+    registry: Option<mutations::PreparedRegistry>,
+}
+
 impl AssetStore {
     /// Last accepted definitions and stable resource IDs in named-path order.
     pub fn model(&self, id: &str) -> Option<&ModelInfo> {
@@ -132,25 +139,38 @@ impl AssetStore {
         id: &str,
         source: &str,
     ) -> Result<ModelInfo, AssetError> {
-        self.mutate_model(expected, id, Some(source))
+        self.apply_model_sync(
+            expected,
+            AssetMutation::ImportGlb {
+                id: id.into(),
+                source: source.into(),
+            },
+        )
     }
 
     pub fn refresh_glb_at(&mut self, expected: u64, id: &str) -> Result<ModelInfo, AssetError> {
-        self.mutate_model(expected, id, None)
+        self.apply_model_sync(expected, AssetMutation::RefreshGlb { id: id.into() })
     }
 
-    fn mutate_model(
+    fn apply_model_sync(
         &mut self,
         expected: u64,
-        id: &str,
-        requested_source: Option<&str>,
+        mutation: AssetMutation,
     ) -> Result<ModelInfo, AssetError> {
-        if expected != self.revision() {
-            return Err(error(format!("asset revision conflict: expected {expected}, current {}; inspect and retry explicitly", self.revision())));
+        match self.apply_sync(expected, mutation)? {
+            AssetOutcome::Model(info) => Ok(*info),
+            AssetOutcome::Asset(_) => Err(error("expected a static GLB model outcome")),
         }
+    }
+
+    pub(super) fn validate_model_request(
+        &self,
+        id: &str,
+        source: Option<&str>,
+    ) -> Result<(), AssetError> {
         validate_id(id)?;
-        let prior = self.registry.models.get(id);
-        let source = if let Some(source) = requested_source {
+        if let Some(source) = source {
+            validate_glb_path(source)?;
             if self.registry.has_asset_id(id)
                 || self
                     .registry
@@ -160,12 +180,21 @@ impl AssetStore {
             {
                 return Err(error("GLB model ID or source already registered; use the existing model ID to Refresh"));
             }
-            source
-        } else {
-            &prior
-                .ok_or_else(|| error(format!("unknown GLB model ID {id:?}")))?
-                .source
-        };
+            if self.registry.asset_count() >= MAX_ASSETS {
+                return Err(error("asset catalog limit (64) reached"));
+            }
+        } else if !self.registry.models.contains_key(id) {
+            return Err(error(format!("unknown GLB model ID {id:?}")));
+        }
+        Ok(())
+    }
+
+    pub(super) fn prepare_model(
+        &self,
+        id: &str,
+        source: &str,
+    ) -> Result<PreparedModel, AssetError> {
+        let prior = self.registry.models.get(id);
         let bytes = read_candidate(&self.root, source)?;
         let decoded = glb::decode(id, source, &bytes)?;
         if let Some(prior) = prior {
@@ -183,45 +212,79 @@ impl AssetStore {
         next.validate_models()?;
         self.check_model_budget(&decoded)?;
         let changed = prior.is_none_or(|prior| prior.hash != decoded.info.hash);
-        let prepared = changed
+        let registry = changed
             .then(|| mutations::encode_registry(next))
             .transpose()?;
-        let _lock = self.guard(expected)?;
-        if digest(&read_candidate(&self.root, source)?) != decoded.info.hash {
+        Ok(PreparedModel {
+            bytes,
+            decoded,
+            registry,
+        })
+    }
+
+    /// Publication runs under the existing exact-catalog lock.
+    pub(super) fn publish_model(
+        &mut self,
+        candidate: PreparedModel,
+        catalog_published: &mut bool,
+    ) -> Result<ModelInfo, AssetError> {
+        let PreparedModel {
+            bytes,
+            decoded,
+            registry,
+        } = candidate;
+        let info = &decoded.info;
+        if digest(&read_candidate(&self.root, &info.source)?) != info.hash {
             return Err(error(
                 "GLB source changed during preparation; inspect and retry explicitly",
             ));
         }
-        if let Some(prepared) = prepared {
-            let directory = accepted_directory(&self.root)?;
-            if !directory.exists() {
-                fs::create_dir(&directory)?;
-            }
-            let generation = generation_path(&directory, &decoded.info.hash);
-            let retain = read_bounded(&generation, MAX_GLB_SOURCE_BYTES)
-                .is_ok_and(|current| digest(&current) == decoded.info.hash);
-            if !retain {
-                atomic_write(&directory, &generation, &bytes)?;
-                File::open(&directory)?.sync_all()?;
-                File::open(&self.root)?.sync_all()?;
-            }
-            atomic_write(&self.root, &self.root.join(REGISTRY), &prepared.bytes)?;
-            let old_hash = prior.map(|prior| prior.hash.clone());
-            self.install_registry(prepared);
-            if let Some(old_hash) = old_hash {
-                if !self
-                    .registry
-                    .models
-                    .values()
-                    .any(|model| model.hash == old_hash)
+        let directory = accepted_directory(&self.root)?;
+        if !directory.exists() {
+            fs::create_dir(&directory)?;
+        }
+        let generation = generation_path(&directory, &info.hash);
+        let retained = read_bounded(&generation, MAX_GLB_SOURCE_BYTES)
+            .is_ok_and(|current| digest(&current) == info.hash);
+        if !retained {
+            atomic_write(&directory, &generation, &bytes)?;
+            File::open(&directory)?.sync_all()?;
+            File::open(&self.root)?.sync_all()?;
+        }
+        if let Some(registry) = registry {
+            if let Err(failure) =
+                atomic_write(&self.root, &self.root.join(REGISTRY), &registry.bytes)
+            {
+                if !retained
+                    && !self
+                        .registry
+                        .models
+                        .values()
+                        .any(|model| model.hash == info.hash)
                 {
-                    // Old generations are only redundant after the new catalog is durable.
-                    if File::open(&self.root)
-                        .and_then(|dir| dir.sync_all())
-                        .is_ok()
-                    {
-                        let _ = fs::remove_file(generation_path(&directory, &old_hash));
-                    }
+                    let _ = fs::remove_file(generation);
+                }
+                return Err(failure);
+            }
+            let old_hash = self
+                .registry
+                .models
+                .get(&info.id)
+                .map(|model| model.hash.clone());
+            self.install_registry(registry);
+            *catalog_published = true;
+            if let Some(old_hash) = old_hash {
+                let durable = File::open(&self.root)
+                    .and_then(|dir| dir.sync_all())
+                    .is_ok();
+                if durable
+                    && !self
+                        .registry
+                        .models
+                        .values()
+                        .any(|model| model.hash == old_hash)
+                {
+                    let _ = fs::remove_file(generation_path(&directory, &old_hash));
                 }
             }
         }

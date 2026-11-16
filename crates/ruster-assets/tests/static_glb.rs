@@ -92,3 +92,77 @@ fn real_glb_catalog_refresh_and_reopen() {
         assert_eq!(export.read_sources().unwrap(), sources);
     }
 }
+
+#[test]
+#[ignore = "requires pinned Blender GLB A/B fixtures; actual guarded publish I/O failure"]
+fn prepared_glb_publish_failure_preserves_the_active_generation() {
+    use ruster_assets::{AssetMutation, AssetOutcome};
+    use sha2::{Digest, Sha256};
+
+    let fixture = PathBuf::from(std::env::var_os("RUSTER_TEST_GLB_FIXTURES").unwrap());
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("beacon.glb");
+    fs::copy(fixture.join("beacon-A.glb"), &source).unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let first = store.import_glb_at(0, "beacon", "beacon.glb").unwrap();
+    let old_meshes = store.mesh_snapshots();
+    let old_textures = store.texture_snapshots();
+    let catalog = root.path().join(".ruster-assets.json");
+    let accepted = fs::read(&catalog).unwrap();
+    let candidate = fs::read(fixture.join("beacon-B-reordered.glb")).unwrap();
+    let candidate_hash = format!("{:x}", Sha256::digest(&candidate));
+    fs::write(&source, candidate).unwrap();
+    let request = || AssetMutation::RefreshGlb {
+        id: "beacon".into(),
+    };
+    let prepared = store.request_at(1, request()).unwrap().prepare();
+    let destination = root
+        .path()
+        .join(".ruster-models")
+        .join(format!("{candidate_hash}.glb"));
+    assert!(
+        !destination.exists(),
+        "prepare must not publish a generation"
+    );
+    fs::create_dir(&destination).unwrap();
+
+    let completion = prepared.publish();
+    assert!(!completion.catalog_published());
+    let adoption = store.adopt(completion).unwrap();
+    assert!(adoption
+        .result
+        .unwrap_err()
+        .to_string()
+        .contains("write destination must be a regular file"));
+    assert_eq!(store.revision(), 1);
+    assert_eq!(fs::read(&catalog).unwrap(), accepted);
+    assert_eq!(store.model("beacon"), Some(&first));
+    for (id, mesh) in &old_meshes {
+        assert!(Arc::ptr_eq(mesh, &store.mesh_snapshots()[id]));
+    }
+    for (id, texture) in &old_textures {
+        assert!(Arc::ptr_eq(texture, &store.texture_snapshots()[id]));
+    }
+    assert!(!root.path().join(".ruster-cache").exists());
+    let reopened = AssetStore::open(root.path()).unwrap();
+    assert_eq!(reopened.model("beacon"), Some(&first));
+    assert_eq!(reopened.mesh_snapshots(), old_meshes);
+    assert_eq!(reopened.texture_snapshots(), old_textures);
+
+    fs::remove_dir(&destination).unwrap();
+    let completion = store.request_at(1, request()).unwrap().prepare().publish();
+    assert!(completion.catalog_published());
+    let AssetOutcome::Model(second) = store.adopt(completion).unwrap().result.unwrap() else {
+        panic!("static GLB publication must return a model identity");
+    };
+    assert_eq!(store.revision(), 2);
+    assert_eq!(second.hash, candidate_hash);
+    assert_eq!(second.nodes, first.nodes);
+    assert_eq!(second.materials, first.materials);
+    assert_ne!(store.mesh_snapshots(), old_meshes);
+    assert_ne!(store.texture_snapshots(), old_textures);
+    assert_eq!(
+        AssetStore::open(root.path()).unwrap().model("beacon"),
+        Some(second.as_ref())
+    );
+}

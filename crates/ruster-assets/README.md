@@ -93,3 +93,35 @@ Worker-only `with_current_catalog` checks the exact accepted baseline and retain
 V3a source checks additionally cover policy-aware authored normals, strict catalog3/old-label migration, cache4 identity and frozen `ExportSnapshot::mesh_normal_policy(id)` metadata. Exact acceptance commands/results are recorded in [V3a evidence](../../docs/evidence/V3A-feasibility.md); this API summary does not infer native workflow or hardware support.
 
 V3b's asset foundation keeps BaseColor import/cache behavior while adding explicit immutable raw roughness data, catalog4 and frozen export roles. Its renderer/Scene/history/recovery/editor/MCP/application closure is owned by the approved [Finish Patterns plan](../../docs/plans/V3B-FINISH-PATTERNS.md), not established by this crate patch.
+
+## Static GLB source generations
+
+`AssetMutation::ImportGlb` and `RefreshGlb` use the same revision, staged
+preparation, publication lock and live adoption as individual OBJ and PNG
+assets. Their typed success returns a `ModelInfo`, including the accepted
+SHA-256, stable named node paths, local transforms and material/subresource
+identities. Derived mesh and texture IDs resolve through the existing
+renderer-facing snapshots. Synchronous callers use `import_glb_at` and
+`refresh_glb_at`.
+
+Catalog v5 adds the model records. Legacy-only catalogs still publish v4.
+Each accepted generation is an immutable content-addressed GLB under
+`.ruster-models`. It is project source data and belongs with the catalog when
+copying a project. Disposable caches can be emptied separately. Opening or
+exporting a model uses the verified accepted generation. Changes to the
+editable source file require Refresh, which checks complete structure before
+publication. Broken or missing editable bytes preserve the last accepted
+generation. Refresh requires matching named paths, placements, assignments
+and interpreted material properties. Geometry, normals, UVs and embedded
+PNG pixels can change.
+
+The subset accepts one embedded GLB 2.0 scene and BIN buffer, positive
+bounded TRS, named paths with unique siblings, one triangle primitive on
+each mesh node, and named opaque single-sided nonmetallic materials.
+Base color uses an embedded compatible PNG with TEXCOORD_0, optional repeat
+or clamp on both axes, and supported matching min/mag/mipmap filters. The
+decoder rejects external URIs, extensions, skins, animations, morphs,
+unsupported vertex/material channels and matrices. Derived OBJ preserves
+triangle order and the existing renderer's normal and UV convention;
+the export snapshot passes only the verified generated OBJ/PNG closure to
+the existing standalone resource loader.

@@ -22,7 +22,8 @@ mod mutations;
 pub use glb::{ModelInfo, ModelMaterial, ModelNode, MAX_GLB_SOURCE_BYTES};
 mod texture;
 pub use mutations::{
-    AssetAdoption, AssetCompletion, AssetMutation, AssetRequest, AssetStateIdentity, PreparedAsset,
+    AssetAdoption, AssetCompletion, AssetMutation, AssetOutcome, AssetRequest, AssetStateIdentity,
+    PreparedAsset,
 };
 pub use texture::{
     decode_png, decode_png_with_role, validate_texture, Texture, TextureMip, TextureRole,
@@ -350,7 +351,7 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
         Ok(serde_json::from_slice(bytes)?)
     }
 }
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Payload {
     Mesh(Mesh),
     Texture(Texture),

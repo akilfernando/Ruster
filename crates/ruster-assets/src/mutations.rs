@@ -37,6 +37,13 @@ pub enum AssetMutation {
     Refresh {
         id: String,
     },
+    ImportGlb {
+        id: String,
+        source: String,
+    },
+    RefreshGlb {
+        id: String,
+    },
     Rename {
         id: String,
         source: String,
@@ -49,6 +56,8 @@ impl AssetMutation {
             | Self::ImportMesh { id, .. }
             | Self::ImportTexture { id, .. }
             | Self::Refresh { id }
+            | Self::ImportGlb { id, .. }
+            | Self::RefreshGlb { id }
             | Self::Rename { id, .. } => id,
         }
     }
@@ -88,14 +97,14 @@ pub struct AssetCompletion {
 struct CompletedAsset {
     store: AssetStore,
     origin: AssetStateIdentity,
-    result: Result<AssetInfo, AssetError>,
+    result: Result<AssetOutcome, AssetError>,
     catalog_published: bool,
 }
 impl AssetCompletion {
     pub fn state_identity(&self) -> &AssetStateIdentity {
         &self.inner.origin
     }
-    pub fn result(&self) -> Result<&AssetInfo, &AssetError> {
+    pub fn result(&self) -> Result<&AssetOutcome, &AssetError> {
         self.inner.result.as_ref()
     }
     /// A committed catalog cannot be rolled back by rejecting UI adoption.
@@ -104,9 +113,25 @@ impl AssetCompletion {
     }
 }
 
+/// The accepted identity is distinct from its renderer resources.
+#[derive(Debug)]
+pub enum AssetOutcome {
+    Asset(AssetInfo),
+    Model(Box<ModelInfo>),
+}
+
+impl AssetOutcome {
+    pub fn as_asset(&self) -> Option<&AssetInfo> {
+        match self {
+            Self::Asset(info) => Some(info),
+            Self::Model(_) => None,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct AssetAdoption {
-    pub result: Result<AssetInfo, AssetError>,
+    pub result: Result<AssetOutcome, AssetError>,
     /// Send this store back to a worker for destruction; do not drop it on the UI thread.
     pub retired: AssetStore,
 }
@@ -143,6 +168,7 @@ enum Plan {
         cache: Vec<u8>,
         registry: Option<PreparedRegistry>,
     },
+    Model(Box<glb_catalog::PreparedModel>),
     Rename {
         old_source: String,
         new_source: String,
@@ -265,11 +291,11 @@ impl AssetStore {
 
     /// Synchronous convenience path for CLI/non-UI callers. All work and retired
     /// resource destruction run on the calling thread; editors use staged methods.
-    fn apply_sync(
+    pub(super) fn apply_sync(
         &mut self,
         expected: u64,
         mutation: AssetMutation,
-    ) -> Result<AssetInfo, AssetError> {
+    ) -> Result<AssetOutcome, AssetError> {
         let completion = self.request_at(expected, mutation)?.prepare().publish();
         match self.adopt(completion) {
             Ok(AssetAdoption { result, retired }) => {
@@ -284,6 +310,16 @@ impl AssetStore {
             }
         }
     }
+    fn apply_asset_sync(
+        &mut self,
+        expected: u64,
+        mutation: AssetMutation,
+    ) -> Result<AssetInfo, AssetError> {
+        match self.apply_sync(expected, mutation)? {
+            AssetOutcome::Asset(info) => Ok(info),
+            AssetOutcome::Model(_) => Err(error("expected an OBJ or PNG asset outcome")),
+        }
+    }
     pub fn import(&mut self, id: &str, source: &str) -> Result<AssetInfo, AssetError> {
         self.import_at(self.revision(), id, source)
     }
@@ -293,7 +329,7 @@ impl AssetStore {
         id: &str,
         source: &str,
     ) -> Result<AssetInfo, AssetError> {
-        self.apply_sync(
+        self.apply_asset_sync(
             expected,
             AssetMutation::Import {
                 id: id.into(),
@@ -317,7 +353,7 @@ impl AssetStore {
         source: &str,
         normal_policy: MeshNormalPolicy,
     ) -> Result<AssetInfo, AssetError> {
-        self.apply_sync(
+        self.apply_asset_sync(
             expected,
             AssetMutation::ImportMesh {
                 id: id.into(),
@@ -342,7 +378,7 @@ impl AssetStore {
         source: &str,
         role: TextureRole,
     ) -> Result<AssetInfo, AssetError> {
-        self.apply_sync(
+        self.apply_asset_sync(
             expected,
             AssetMutation::ImportTexture {
                 id: id.into(),
@@ -355,7 +391,7 @@ impl AssetStore {
         self.refresh_at(self.revision(), id)
     }
     pub fn refresh_at(&mut self, expected: u64, id: &str) -> Result<AssetInfo, AssetError> {
-        self.apply_sync(expected, AssetMutation::Refresh { id: id.into() })
+        self.apply_asset_sync(expected, AssetMutation::Refresh { id: id.into() })
     }
     pub fn rename(&mut self, id: &str, source: &str) -> Result<AssetInfo, AssetError> {
         self.rename_at(self.revision(), id, source)
@@ -366,7 +402,7 @@ impl AssetStore {
         id: &str,
         source: &str,
     ) -> Result<AssetInfo, AssetError> {
-        self.apply_sync(
+        self.apply_asset_sync(
             expected,
             AssetMutation::Rename {
                 id: id.into(),
@@ -461,6 +497,12 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
             if store.registry.asset_count() >= MAX_ASSETS {
                 return Err(error("asset catalog limit (64) reached"));
             }
+        }
+        AssetMutation::ImportGlb { source, .. } => {
+            store.validate_model_request(id, Some(source))?;
+        }
+        AssetMutation::RefreshGlb { .. } => {
+            store.validate_model_request(id, None)?;
         }
         AssetMutation::Refresh { .. } => {
             if !store.registry.assets.contains_key(id) {
@@ -560,6 +602,16 @@ impl AssetRequest {
             AssetMutation::ImportTexture { id, source, role } => {
                 self.prepare_content(id, source, AssetKind::Texture, None, Some(*role), None)
             }
+            AssetMutation::ImportGlb { id, source } => self
+                .store
+                .prepare_model(id, source)
+                .map(|candidate| Plan::Model(Box::new(candidate)))
+                .map_err(PreparedFailure::plain),
+            AssetMutation::RefreshGlb { id } => self
+                .store
+                .prepare_model(id, &self.store.registry.models[id].source)
+                .map(|candidate| Plan::Model(Box::new(candidate)))
+                .map_err(PreparedFailure::plain),
             AssetMutation::Refresh { id } => {
                 let record = &self.store.registry.assets[id];
                 self.prepare_content(
@@ -771,7 +823,7 @@ fn publish_failure(
     store: &mut AssetStore,
     mutation: &AssetMutation,
     failure: PreparedFailure,
-) -> Result<AssetInfo, AssetError> {
+) -> Result<AssetOutcome, AssetError> {
     let mut actual = failure.error;
     let mut diagnostic = failure.refresh_diagnostic;
     if let Some(witness) = failure.witness {
@@ -809,9 +861,12 @@ fn publish_plan(
     mutation: &AssetMutation,
     plan: Plan,
     catalog_published: &mut bool,
-) -> Result<AssetInfo, AssetError> {
+) -> Result<AssetOutcome, AssetError> {
     let id = mutation.id();
     match plan {
+        Plan::Model(plan) => store
+            .publish_model(*plan, catalog_published)
+            .map(|info| AssetOutcome::Model(Box::new(info))),
         Plan::Content {
             kind,
             mesh_normal_policy,
@@ -868,7 +923,7 @@ fn publish_plan(
             store.install_snapshot(id, snapshot);
             let info = store.info(id, AssetStatus::Ready, None);
             store.update_info(info.clone());
-            Ok(info)
+            Ok(AssetOutcome::Asset(info))
         }
         Plan::Rename {
             old_source,
@@ -882,7 +937,7 @@ fn publish_plan(
                 return Err(source_changed());
             }
             let Some(next) = registry else {
-                return Ok(store.infos[id].as_ref().clone());
+                return Ok(AssetOutcome::Asset(store.infos[id].as_ref().clone()));
             };
             if fs::symlink_metadata(&new).is_ok() {
                 return Err(error(
@@ -905,7 +960,7 @@ fn publish_plan(
             let mut info = store.infos[id].as_ref().clone();
             info.source = new_source;
             store.update_info(info.clone());
-            Ok(info)
+            Ok(AssetOutcome::Asset(info))
         }
     }
 }
@@ -1279,7 +1334,13 @@ mod tests {
             assert!(Arc::ptr_eq(&color, &store.texture_snapshots()["color"]));
             if case == "success" {
                 assert_eq!(
-                    adoption.result.as_ref().unwrap().texture_role,
+                    adoption
+                        .result
+                        .as_ref()
+                        .unwrap()
+                        .as_asset()
+                        .unwrap()
+                        .texture_role,
                     Some(TextureRole::Roughness)
                 );
                 assert_eq!(store.texture("roughness").unwrap().mips[0].bytes, [128]);
