@@ -2,7 +2,13 @@
 
 ## Current delivery roadmap — 2026-11-16
 
-**Latest acceptance:** essential MCP visual grounding is source-integrated through
+**Latest engine milestone:** static GLB import/safe reimport is locally integrated
+through `b012e50`, following articulated assembly and authored player view.
+Those engine features are qualified cumulative source, not automatically the
+installed editor/MCP pair. The [post-GLB plan](#post-glb-priority-and-next-capabilities--2026-11-16)
+is the current recommended next sequence; no implementation goal starts here.
+
+**Latest actual-client acceptance:** essential MCP visual grounding is source-integrated through
 reviewed `e5e5ad1` (cumulative `66c4c4b`), exact226-file byte equivalence verified.
 Human-operated actual ChatGPT passes image-to-engine-ID points in perspective,
 stale-capture refusal after native Projection change, and a fresh orthographic
@@ -128,11 +134,48 @@ one textured model through placement, source revision, save/reopen and
 standalone delivery. The [verification record](STATUS.md#static-glb-import-and-safe-reimport-integrated-locally--2026-11-16)
 records the production identity and failure recovery checks.
 
-Then select slices from the retained foundation plan: richer content/animation,
-physics/audio and devices/player data, material/lighting completion, measured
-scale/LOD, and later ray tracing. Dependencies may revise the order; record the
-reason. No calendar promise, percentage of engine completion or public release
-is implied.
+### Post-GLB priority and next capabilities — 2026-11-16
+
+The user requested assimilation of the supplied competitive research and a plan
+forward. [Research assimilation](research/AGENT-WORKFLOW-STRATEGY.md) retains the
+report, corrects consequential claims against primary sources and maps its ideas
+to actual `b012e50` owners. The following is Astra's recommended sequence under
+that planning request, not user approval of a new product identity or all future
+subsystem contracts. It supersedes the generic “select next” paragraph here.
+
+**Next bounded recommendation:** [repeatable play checks](plans/REPEATABLE-PLAY-CHECKS.md).
+Turn already working fixed-input playback into one saved creator expectation →
+pass/fail → repair workflow across ordinary editor, MCP and relocated runtime.
+A cheap complete-path probe precedes UI/schema work. Stop/reselect if it requires
+a second runtime or broad verification infrastructure. The opportunity cost is
+one bounded slice before a missing core capability; this is justified only by
+reuse and immediate value to subsequent interaction work. Human UX and gameplay
+capability remain primary, and checks do not certify a whole game.
+
+| Order | Bounded creator outcome to scope next | Selection criterion / dependency |
+| --- | --- | --- |
+| 1 | Repeatable play checks | Reuse existing input, state, atomic Step and package owners. If the probe fails its scope gate, retain developer checks and move to row 2. No general agent platform. |
+| 2 | Collision-aware interaction and useful event feedback | First inspect whether existing primitive queries and state already express the desired contact/occupancy response. If cross-binding ordered notification is the blocker, select a bounded lifecycle/event slice. If reliable movement/contact response is the blocker, select character/kinematic collision with a maintained-library feasibility study. Do not implement both an event bus and rigid-body world by default. |
+| 3 | Packaged audio feedback | A creator imports a sound and triggers it from an existing action/state transition, with stop/pause/reset and bounded playback ownership. Introduce only the required trigger contract; do not make a general event bus a speculative prerequisite. |
+| 4 | Imported transform animation | Build on accepted GLB generations with one named clip, play/pause/reset and reimport/export identity. Resolve source versus authored/runtime transform ownership first. Skeletal data/blending is separate; move it earlier only for a concrete required actor workflow. |
+| 5 | Reusable composition and application continuity | Select prefab/override, scene transition, player save/settings, broader UI or gamepad slices from the actual missing workflow. Static placed GLB copies do not establish live prefabs, and editor Save is not player persistence. |
+| Alongside subsequent slices | Visual baseline and usability | Normal maps/tangents, metallic/environment lighting and transparency remain required candidate slices; evaluate the next asset's actual fidelity blocker. Preserve keyboard, focus, recovery, ordinary human and MCP parity in every slice. |
+| After representative content | Measured scale/LOD, then later ray tracing | Profile a named useful scene; choose culling/LOD/resource changes against equal-quality evidence. No unsupported Rust performance advantage. |
+
+Rows 2–5 are provisional ordering, not one implementation goal. After each slice,
+compare the next blocker with the remaining [foundation packages](plans/CREATOR-FOUNDATIONS.md)
+and record any reorder and rationale. A short acceptance fixture is not the
+substantial integrated test project: retain the user's foundation-first direction
+and revisit that project's coverage before starting it. Broader target/first-run
+qualification continues alongside features; publication remains separate.
+
+Defer multi-agent merging, general query languages/subscriptions, universal edit
+preview, runtime visual grounding and competitive benchmark campaigns until a
+concrete measured workflow needs them. Preserve existing enrolled trust, guarded
+operations, bounded queries and authored visual grounding. Neither the report nor
+this plan authorizes a framework migration, per-edit approval regression, engine
+restart, install, marketing publication or release. No calendar promise or
+percentage of engine completion is implied.
 
 ## Retained capability roadmap
 

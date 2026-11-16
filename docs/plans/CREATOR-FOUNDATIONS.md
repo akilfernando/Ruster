@@ -2,6 +2,20 @@
 
 Prepared2026-11-09 after the user directs work on the remaining significant gaps before a test project. This supersedes the recommendation to begin a substantive creator challenge immediately. The user confirms that scoring, menus and application rules belong to creators. The ordering below is an agent-selected working sequence. Each row requires its own bounded contract, decision and evaluation. F1 is accepted on source `3c8fc8f`, and bounded F2a is accepted on6e44269 with its explicit measured tradeoff. Bounded F3a live HUD is accepted on7b89344 with post-reboot exact-export visual qualification. F3b interactive controls is accepted on2026-11-10 after both creator paths, recovery/repair, exact standalone interaction and frozen cost checks. Later slices require separate planning and source investigation.
 
+
+## Current scheduling overlay — 2026-11-16
+
+The [canonical post-GLB roadmap](../ROADMAP.md#post-glb-priority-and-next-capabilities--2026-11-16)
+now owns next-slice scheduling. Articulated assembly/runtime delivery, authored
+player view and static GLB import/reimport are locally integrated and qualified
+within their linked STATUS evidence. They partially advance F4/F5; they do not
+complete prefabs, scene transitions, animation or the entire foundation baseline.
+Astra recommends one probe-limited repeatable-play-check slice, then concrete
+interaction/event-or-collision, audio and transform-animation work. These are
+planning recommendations with separate implementation boundaries. Existing F1–F3
+acceptance and the package inventory below remain valid. The imported research
+does not defer human editor quality or replace foundation-first development.
+
 ## Outcome and working method
 
 Give creators reusable application facilities through Rust, scripting, direct editing and native MCP. Cover the significant baseline gaps before the later integrated test project. Preserve the accepted editor/recovery/delivery boundaries as these facilities grow.

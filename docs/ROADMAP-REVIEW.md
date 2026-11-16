@@ -994,3 +994,45 @@ from private trials. Browser stays deferred; broader engine/runtime planning is
 unchanged. Revisit grounding scope only for a concrete follow-on requirement or
 observed defect. Lesson: preserve distinct source, CPU, actual-client human and
 installation receipts; acceptance does not require redundant test/build churn.
+
+
+## Post-GLB research assimilation and priority recommendation — 2026-11-16
+
+**Status/authority:** user requested Astra to assimilate the supplied report and
+plan the best next work. This entry records a specialist recommendation and
+documentation update, not implementation approval for every future subsystem,
+a new goal, installation or release. Starting cumulative source is `b012e50`.
+
+**Trigger/evidence:** static GLB follows assembly and authored player view. The
+report argues for reliable agent workflows but assumes a greenfield engine and
+makes unsupported competitor-absence claims. The [research assessment](research/AGENT-WORKFLOW-STRATEGY.md)
+retains the exact report/hash, primary-source corrections and inspected owners.
+Unity already documents shared command IDs/MCP mappings and token-efficiency
+claims; Bevy already has scenes/assets/headless facilities. No exclusivity,
+market demand, deterministic physics or comparative speedup is established.
+
+**Alternatives/rationale:** immediately adding audio/animation/physics gives
+obvious missing capability. A framework migration or broad agent-platform
+investment would interrupt qualified foundations without demonstrated benefit.
+Select one small [repeatable play check proposal](plans/REPEATABLE-PLAY-CHECKS.md)
+only if its early complete-path probe reuses existing runtime/input/export cheaply.
+This gives creators a saved expected-result loop and supports the next interaction
+slice. The root's two equal Scene21 receipts support one-fixture feasibility,
+not general determinism or performance. Decline a second runtime/DSL/scheduler.
+
+**Scope/outcome:** ordinary human and MCP users can run a saved short case,
+understand a deliberate failure, repair it and verify the relocated creation.
+Isolate runs from live history/drafts/preview; preserve existing enrolled trust.
+Cases cover named observations, not all gameplay or visible quality. The canonical
+[roadmap](ROADMAP.md#post-glb-priority-and-next-capabilities--2026-11-16)
+then proposes interaction/event-or-collision, audio, imported transform animation
+and remaining composition/application facilities. Select dependency branches from
+actual blockers instead of building every subsystem preemptively.
+
+**Consequences/revisit:** human UX, Rust/Vulkan, open ownership, native MCP,
+foundation-first work, visual baseline, later LOD/ray tracing and separate release
+authority remain intact. Reassess after 30 minutes without the probe or two failed
+journey attempts; if reuse is not bounded, resume missing core capability work.
+No production code changed, no new engine acceptance or competitive benchmark was
+run. Root reviews documentation and runs the affected documentation lane; detailed
+execution outcomes belong in STATUS after that check.

@@ -1,5 +1,30 @@
 # Current project status
 
+## Post-GLB research and next-work recommendation — 2026-11-16
+
+Astra assimilated the user-supplied report against cumulative `b012e50` and
+current primary documentation. [Assessment/provenance](research/AGENT-WORKFLOW-STRATEGY.md)
+retains the exact report/hash, corrects competitor claims and separates its
+recommendations from accepted requirements. [ROADMAP](ROADMAP.md#post-glb-priority-and-next-capabilities--2026-11-16)
+owns the revised proposed sequence; [review rationale](ROADMAP-REVIEW.md#post-glb-research-assimilation-and-priority-recommendation--2026-11-16)
+records alternatives and scope.
+
+**Next recommendation:** one [repeatable play checks](plans/REPEATABLE-PLAY-CHECKS.md)
+slice, gated by a cheap reuse/isolation probe, then collision/event interaction,
+audio and transform-animation slices chosen by concrete dependencies. Human-only
+editor, native MCP and relocated runtime acceptance remain separate. A broad
+verification platform, engine migration and reduced editor quality are rejected.
+No new implementation goal, production edit, install or release occurred.
+
+Root independently replayed the existing relocated Scene21 fixture twice with
+two action frames: identical 8,091-byte receipts at tick 2. This is supporting
+one-fixture repeatability evidence only; see the research record for audit path.
+The repository Markdown validator and changed-document whitespace check pass.
+The archived source text matches the attachment byte for byte. Verification
+selected the document checks directly because the exact plain-text archive
+triggers the workspace runner's conservative full scope. The milestone entries
+below retain engine implementation and installation qualification.
+
 ## Static GLB import and safe reimport integrated locally — 2026-11-16
 
 The [goal plan](plans/STATIC-GLTF-REIMPORT.md) and

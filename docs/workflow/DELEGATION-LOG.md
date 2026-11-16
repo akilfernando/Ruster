@@ -1,5 +1,14 @@
 # Delegation outcomes
 
+## 2026-11-16 — Competitive report assimilation
+
+Astra read the supplied research, checked consequential claims against primary
+sources, and mapped recommendations to cumulative source `b012e50`. It proposed
+a probe-limited repeatable play check and a provisional gameplay capability
+sequence. Root reran the existing Scene21 input fixture, reconciled the current
+hierarchy and input boundary, and verified the documentation and verbatim source
+archive. Agent elapsed and token usage were unavailable.
+
 ## 2026-11-16 — Independent next goal selection
 
 At the user's request Astra compared authored player view, rich import,
