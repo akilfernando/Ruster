@@ -1,5 +1,12 @@
 # Delegation outcomes
 
+## 2026-11-16 — Project picker history
+
+One worker on the inherited model implemented project history in the existing
+preferences store and checked legacy migration, deduplication and persistence
+past ten projects. Root integrated startup, project creation and native
+verification. Worker elapsed time and token usage were unavailable.
+
 ## 2026-11-16 — Rot Engine editor workspace redesign
 
 One editor and renderer implementation worker used the inherited root model

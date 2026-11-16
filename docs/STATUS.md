@@ -21,6 +21,22 @@
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
 
+## Project picker — 2026-11-16
+
+Ordinary cold startup opens Recent and All Projects with Open Project and New
+Project actions. Existing `--scene` and managed launch routes still open the
+explicit scene. The project identity is its canonical folder, and New Project
+saves the initial scene through the existing scene format. The history
+stores the latest scene per folder and migrates from retained recent paths.
+Older sessions that fell out of the saved recent list can be added through
+Open Project. File → New Project uses the same form when the current scene
+is saved and pending edits are resolved.
+
+The affected change gate passed (208 editor tests, 13 ignored). Native
+inspection created a project, closed the editor normally, then verified it in
+Recent and reopened it through All Projects. Linux release build and launcher
+installation completed. Test captures are in the redesign audit directory.
+
 ## Rot Engine editor workspace redesign — 2026-11-16
 
 The supplied workspace, untitled and About mockups guided the shared graphite

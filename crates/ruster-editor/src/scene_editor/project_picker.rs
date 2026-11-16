@@ -1,0 +1,358 @@
+//! Project selection uses the saved scene's directory as its project root.
+use super::*;
+use std::{fs, path::Path};
+
+#[derive(Default)]
+pub(super) struct ProjectPicker {
+    all: bool,
+    form: Option<ProjectForm>,
+    error: String,
+}
+
+impl ProjectPicker {
+    pub(super) fn show(&mut self, ui: &mut egui::Ui, workspace: &Workspace) -> Option<Session> {
+        let mut chosen = None;
+        egui::CentralPanel::default().show(ui, |ui| {
+            let width = (ui.available_width() - 24.0).clamp(1.0, 820.0);
+            ui.vertical_centered(|ui| {
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, 0.0),
+                    egui::Layout::top_down(egui::Align::Min),
+                    |ui| {
+                        ui.set_width(width);
+                        ui.add_space(20.0);
+                        ui.horizontal(|ui| {
+                            crate::branding::mark(ui, 34.0);
+                            ui.heading("Rot Engine");
+                        });
+                        ui.add_space(18.0);
+                        ui.horizontal_wrapped(|ui| {
+                            ui.heading("Projects");
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    if crate::editor_theme::primary_button(ui, "New Project…")
+                                        .clicked()
+                                    {
+                                        self.form = Some(ProjectForm::new_project());
+                                    }
+                                    if ui.button("Open Project…").clicked() {
+                                        self.form = Some(ProjectForm::open_project());
+                                    }
+                                },
+                            );
+                        });
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.selectable_value(&mut self.all, false, "Recent");
+                            ui.selectable_value(&mut self.all, true, "All Projects");
+                        });
+                        ui.separator();
+                        let projects = &workspace.prefs.projects;
+                        let visible = if self.all {
+                            projects.len()
+                        } else {
+                            projects.len().min(10)
+                        };
+                        if visible == 0 {
+                            ui.weak("Open an existing project or create one to get started.");
+                        }
+                        if !workspace.error.is_empty() {
+                            ui.colored_label(
+                                crate::editor_theme::colors(ui).warning,
+                                &workspace.error,
+                            );
+                        }
+                        if !self.error.is_empty() {
+                            ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
+                        }
+                        egui::ScrollArea::vertical().show_rows(ui, 48.0, visible, |ui, range| {
+                            for path in &projects[range] {
+                                let folder = path.parent().unwrap_or(path);
+                                let name = folder
+                                    .file_name()
+                                    .unwrap_or(folder.as_os_str())
+                                    .to_string_lossy();
+                                let width = ui.available_width();
+                                if ui
+                                    .add_sized(
+                                        [width, 48.0],
+                                        egui::Button::new(format!(
+                                            "{name}  ·  {}",
+                                            folder.display()
+                                        ))
+                                        .truncate(),
+                                    )
+                                    .on_hover_text(path.display().to_string())
+                                    .clicked()
+                                {
+                                    match Session::open(path) {
+                                        Ok(session) => chosen = Some(session),
+                                        Err(error) => {
+                                            self.error = format!(
+                                                "Could not open {}. {error}",
+                                                path.display()
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        });
+                    },
+                );
+            });
+        });
+        if let Some(form) = &mut self.form {
+            let (session, close) = form.show(ui.ctx());
+            if close {
+                self.form = None;
+            }
+            chosen = session.or(chosen);
+        }
+        chosen
+    }
+}
+
+pub(super) struct ProjectForm {
+    name: Option<String>,
+    path: String,
+    error: String,
+    focus: bool,
+    #[cfg(target_os = "linux")]
+    browse: Option<std::sync::mpsc::Receiver<Result<Option<String>, String>>>,
+}
+
+impl ProjectForm {
+    pub(super) fn new_project() -> Self {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .unwrap_or_default();
+        let projects = home.join("Projects");
+        let location = if projects.is_dir() { projects } else { home };
+        Self::new(Some(String::new()), location.display().to_string())
+    }
+
+    fn open_project() -> Self {
+        Self::new(None, String::new())
+    }
+
+    fn new(name: Option<String>, path: String) -> Self {
+        Self {
+            name,
+            path,
+            error: String::new(),
+            focus: true,
+            #[cfg(target_os = "linux")]
+            browse: None,
+        }
+    }
+
+    pub(super) fn show(&mut self, ctx: &egui::Context) -> (Option<Session>, bool) {
+        #[cfg(target_os = "linux")]
+        if let Some(result) = self
+            .browse
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok())
+        {
+            self.browse = None;
+            match result {
+                Ok(Some(path)) => self.path = path,
+                Ok(None) => {}
+                Err(error) => self.error = error,
+            }
+        }
+        let creating = self.name.is_some();
+        let mut session = None;
+        let mut close = false;
+        egui::Modal::new(egui::Id::unique("project_form")).show(ctx, |ui| {
+            let width = (ctx.content_rect().width() - 44.0).clamp(115.0, 450.0);
+            ui.set_width(width);
+            ui.heading(if creating {
+                "New Project"
+            } else {
+                "Open Project"
+            });
+            let mut editing = false;
+            if let Some(name) = &mut self.name {
+                let label = ui.label("Project name");
+                let field = ui
+                    .add(
+                        egui::TextEdit::singleline(name)
+                            .desired_width(width)
+                            .char_limit(128),
+                    )
+                    .labelled_by(label.id);
+                editing = field.has_focus() || field.lost_focus();
+                if std::mem::take(&mut self.focus) {
+                    field.request_focus();
+                }
+            }
+            let label = ui.label(if creating {
+                "Create in"
+            } else {
+                "Scene file or project folder"
+            });
+            let field = ui
+                .add(
+                    egui::TextEdit::singleline(&mut self.path)
+                        .desired_width(width)
+                        .char_limit(4096),
+                )
+                .labelled_by(label.id);
+            editing |= field.has_focus() || field.lost_focus();
+            if std::mem::take(&mut self.focus) {
+                field.request_focus();
+            }
+            #[cfg(target_os = "linux")]
+            if ui
+                .add_enabled(self.browse.is_none(), egui::Button::new("Browse…"))
+                .clicked()
+            {
+                self.browse = Some(browse(ctx.clone(), creating));
+            }
+            if let Some(name) = self.name.as_deref().filter(|n| !n.trim().is_empty()) {
+                ui.weak(
+                    Path::new(&self.path)
+                        .join(name.trim())
+                        .join("scene.json")
+                        .display()
+                        .to_string(),
+                );
+            }
+            if !self.error.is_empty() {
+                ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
+            }
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                let cancel = ui.button("Cancel").clicked()
+                    || ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                let enter = editing
+                    && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
+                let submit = crate::editor_theme::primary_button(
+                    ui,
+                    if creating {
+                        "Create Project"
+                    } else {
+                        "Open Project"
+                    },
+                )
+                .clicked();
+                if cancel {
+                    close = true;
+                } else if submit || enter {
+                    let location = Path::new(self.path.trim());
+                    let result = if let Some(name) = &self.name {
+                        create_project(location, name.trim())
+                    } else {
+                        open_project(location)
+                    };
+                    match result {
+                        Ok(opened) => {
+                            session = Some(opened);
+                            close = true;
+                        }
+                        Err(error) => self.error = error,
+                    }
+                }
+            });
+        });
+        (session, close)
+    }
+}
+
+fn open_project(path: &Path) -> Result<Session, String> {
+    if !path.is_absolute() {
+        return Err("Enter an absolute path to a scene file or project folder.".into());
+    }
+    let scene = if path.is_dir() {
+        path.join("scene.json")
+    } else {
+        path.to_path_buf()
+    };
+    Session::open(&scene).map_err(|error| format!("Could not open {}. {error}", scene.display()))
+}
+
+fn create_project(location: &Path, name: &str) -> Result<Session, String> {
+    if name.is_empty()
+        || name == "."
+        || name == ".."
+        || name
+            .chars()
+            .any(|c| c.is_control() || "<>:\"/\\|?*".contains(c))
+        || name.ends_with('.')
+    {
+        return Err("Enter a project name that can be used as a folder name.".into());
+    }
+    if !location.is_absolute() || !location.is_dir() {
+        return Err("Choose an existing folder for the new project.".into());
+    }
+    let root = location.join(name);
+    let mut session = Session::new(Scene::authored_empty("main")).map_err(|e| e.to_string())?;
+    fs::create_dir(&root).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            format!(
+                "{} already exists. Choose a different name or location.",
+                root.display()
+            )
+        } else {
+            format!("Could not create {}. {error}", root.display())
+        }
+    })?;
+    if let Err(error) = session.save(root.join("scene.json")) {
+        // An empty reservation can be discarded. Preserve any files in the new folder.
+        let _ = fs::remove_dir(&root);
+        return Err(format!(
+            "Could not save the first scene in {}. {error}",
+            root.display()
+        ));
+    }
+    Ok(session)
+}
+
+#[cfg(target_os = "linux")]
+fn browse(
+    ctx: egui::Context,
+    directory: bool,
+) -> std::sync::mpsc::Receiver<Result<Option<String>, String>> {
+    let (tx, rx) = std::sync::mpsc::sync_channel(1);
+    std::thread::spawn(move || {
+        let mut picker = std::process::Command::new("zenity");
+        picker.arg("--file-selection").arg(if directory {
+            "--title=Choose a project location"
+        } else {
+            "--title=Choose a Rot scene file"
+        });
+        if directory {
+            picker.arg("--directory");
+        }
+        let result = match picker.output() {
+            Ok(output) if output.status.success() => String::from_utf8(output.stdout)
+                .map(|path| Some(path.trim_end_matches('\n').to_owned()))
+                .map_err(|error| error.to_string()),
+            Ok(output) if output.status.code() == Some(1) => Ok(None),
+            _ => Err("The system file picker is unavailable. Enter the path directly.".into()),
+        };
+        let _ = tx.send(result);
+        ctx.request_repaint();
+    });
+    rx
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn creates_reopenable_project_without_reusing_existing_folder() {
+        let parent = tempfile::tempdir().unwrap();
+        let created = create_project(parent.path(), "My Project").unwrap();
+        let root = parent.path().join("My Project");
+        assert_eq!(created.path(), Some(root.join("scene.json").as_path()));
+        let bytes = fs::read(created.path().unwrap()).unwrap();
+        assert!(create_project(parent.path(), "My Project").is_err());
+        assert!(create_project(parent.path(), "../escape").is_err());
+        let reopened = open_project(&root).unwrap();
+        assert_eq!(reopened.scene().id, "main");
+        assert_eq!(fs::read(reopened.path().unwrap()).unwrap(), bytes);
+    }
+}

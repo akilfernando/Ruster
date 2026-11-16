@@ -2,9 +2,13 @@
 use eframe::egui;
 use serde_json::{json, Value};
 use std::{
+    collections::HashSet,
     io::Write,
     path::{Path, PathBuf},
 };
+
+const MAX_SETTINGS_BYTES: usize = 64 * 1024;
+const MAX_WORKSPACE_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) enum Action {
@@ -173,6 +177,8 @@ pub(super) struct Preferences {
     pub scale: f32,
     pub movement_speed: f32,
     pub recent: Vec<PathBuf>,
+    /// Most recently opened scene per project directory, newest first.
+    pub projects: Vec<PathBuf>,
     pub cameras: Vec<(PathBuf, ruster_render::CameraState)>,
     pub bindings: Vec<Binding>,
     pub external_editor: crate::behavior_files::LaunchSpec,
@@ -225,6 +231,7 @@ impl Default for Preferences {
             scale: 1.0,
             movement_speed: 4.0,
             recent: Vec::new(),
+            projects: Vec::new(),
             cameras: Vec::new(),
             external_editor: crate::behavior_files::LaunchSpec {
                 executable: PathBuf::from("zeditor"),
@@ -261,17 +268,29 @@ impl Default for Preferences {
 }
 impl Preferences {
     fn json(&self) -> Value {
-        json!({"format":"ruster-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"theme":self.theme.name(),"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
+        json!({"format":"ruster-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"theme":self.theme.name(),"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"projects":self.projects,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
     }
     fn parse(bytes: &[u8]) -> Result<Self, String> {
-        if bytes.len() > 64 * 1024 {
+        if bytes.len() > MAX_WORKSPACE_BYTES {
+            return Err("Editor preferences and project history exceed 1 MiB.".into());
+        }
+        let mut v: Value =
+            serde_json::from_slice(bytes).map_err(|e| format!("Invalid preferences: {e}"))?;
+        let raw_projects = v
+            .as_object_mut()
+            .ok_or("Preferences must be an object.")?
+            .remove("projects");
+        if bytes.len() > MAX_SETTINGS_BYTES
+            && (raw_projects.is_none()
+                || serde_json::to_vec_pretty(&v)
+                    .map_err(|e| e.to_string())?
+                    .len()
+                    > MAX_SETTINGS_BYTES)
+        {
             return Err(
-                "Editor preferences exceed64KiB; reset or reduce recent context before saving."
-                    .into(),
+                "Editor settings exceed 64 KiB; reduce recent context before saving.".into(),
             );
         }
-        let v: Value =
-            serde_json::from_slice(bytes).map_err(|e| format!("Invalid preferences: {e}"))?;
         let keys = [
             "format",
             "version",
@@ -332,6 +351,40 @@ impl Preferences {
                     })
             })
             .collect::<Result<Vec<_>, _>>()?;
+        let projects = match raw_projects {
+            None => {
+                // Legacy files retained only ten recent scene paths.
+                let mut roots = HashSet::new();
+                recent
+                    .iter()
+                    .filter(|path| path.parent().is_some_and(|root| roots.insert(root)))
+                    .cloned()
+                    .collect()
+            }
+            Some(value) => {
+                let mut roots = HashSet::new();
+                value
+                    .as_array()
+                    .ok_or("Project history must be an array.")?
+                    .iter()
+                    .map(|entry| {
+                        let scene = entry
+                            .as_str()
+                            .filter(|s| s.len() <= 4096)
+                            .map(Path::new)
+                            .filter(|path| path.is_absolute())
+                            .ok_or("Invalid project history scene path.")?;
+                        let root = scene
+                            .parent()
+                            .ok_or("Project history requires a scene file.")?;
+                        if !roots.insert(root) {
+                            return Err("Duplicate project directory in project history.");
+                        }
+                        Ok(scene.to_owned())
+                    })
+                    .collect::<Result<Vec<_>, &str>>()?
+            }
+        };
         let raw_cameras = v["cameras"]
             .as_array()
             .filter(|v| v.len() <= 10)
@@ -474,6 +527,7 @@ impl Preferences {
             scale: number("ui_scale", 0.75, 2.0)?,
             movement_speed: number("movement_speed", 0.05, 1000.0)?,
             recent,
+            projects,
             cameras,
             bindings,
             external_editor,
@@ -576,7 +630,7 @@ impl Workspace {
         };
         if let Some(path) = &workspace.storage.path {
             if path.exists() || path.symlink_metadata().is_ok() {
-                match ruster_assets::read_regular_file(path,64*1024) {
+                match ruster_assets::read_regular_file(path,MAX_WORKSPACE_BYTES) {
                     Ok(bytes)=> {match Preferences::parse(&bytes) {Ok(prefs)=>workspace.prefs=prefs,Err(e)=>{workspace.error=e;workspace.recovery_required=true;}}workspace.storage.baseline=Some(bytes);},
                     Err(e)=>workspace.error=format!("Cannot read editor preferences {}: {e}. Move this file aside or repair access, then reopen. Reset cannot replace an unreadable, oversized or nonregular baseline.",path.display()),
                 }
@@ -690,7 +744,7 @@ impl Workspace {
         if path.symlink_metadata().is_ok_and(|m| !m.is_file()) {
             return Err(format!("Preference destination {} must be a regular file. Move it aside or repair access, then reopen.",path.display()));
         }
-        let current = match ruster_assets::read_regular_file(path, 64 * 1024) {
+        let current = match ruster_assets::read_regular_file(path, MAX_WORKSPACE_BYTES) {
             Ok(bytes) => Some(bytes),
             Err(_) if !path.exists() => None,
             Err(e) => return Err(format!("Cannot read preference baseline {}: {e}. Move this file aside or repair access, then reopen; Reset cannot replace an unreadable or oversized baseline.",path.display())),
@@ -767,6 +821,15 @@ impl Workspace {
     }
     fn stage_recent(&mut self, path: &Path) -> bool {
         if let Ok(path) = path.canonicalize() {
+            if !path.to_str().is_some_and(|name| name.len() <= 4096) {
+                return false;
+            }
+            if let Some(root) = path.parent() {
+                self.prefs
+                    .projects
+                    .retain(|scene| scene.parent() != Some(root));
+                self.prefs.projects.insert(0, path.clone());
+            }
             self.prefs.recent.retain(|p| p != &path);
             self.prefs.recent.insert(0, path);
             self.prefs.recent.truncate(10);
@@ -1163,6 +1226,49 @@ mod tests {
             "unrelated widget must retain CtrlEnter ownership"
         );
     }
+    #[test]
+    fn project_history_migrates_recent_and_preserves_more_than_ten_roots() {
+        let home = tempfile::tempdir().unwrap();
+        let state = home.path().join("editor.json");
+        let old_root = home.path().join("existing-project");
+        std::fs::create_dir(&old_root).unwrap();
+        let first = old_root.join("latest.json");
+        let older = old_root.join("older.json");
+        std::fs::write(&first, "scene").unwrap();
+        let mut legacy = Preferences::default().json();
+        legacy.as_object_mut().unwrap().remove("projects");
+        legacy["recent"] = json!([first, older]);
+        std::fs::write(&state, serde_json::to_vec_pretty(&legacy).unwrap()).unwrap();
+        let mut workspace = Workspace::at(Some(state.clone()));
+        assert_eq!(
+            workspace.prefs.projects.as_slice(),
+            std::slice::from_ref(&first)
+        );
+        assert_eq!(workspace.prefs.recent, [first.clone(), older.clone()]);
+
+        for index in 0..12 {
+            let root = home.path().join(format!("project-{index}"));
+            std::fs::create_dir(&root).unwrap();
+            let scene = root.join("scene.json");
+            std::fs::write(&scene, "scene").unwrap();
+            workspace.remember(&scene);
+        }
+        let history = Workspace::at(Some(state.clone()));
+        assert!(history.error.is_empty());
+        assert_eq!(history.prefs.projects.len(), 13);
+        assert_eq!(history.prefs.projects.last(), Some(&first));
+        assert_eq!(history.prefs.recent.len(), 10);
+        assert!(!history.prefs.recent.contains(&first));
+
+        std::fs::write(&older, "scene").unwrap();
+        workspace.remember_saved(&older, None);
+        let history = Workspace::at(Some(state));
+        assert!(history.error.is_empty());
+        assert_eq!(history.prefs.projects.len(), 13);
+        assert_eq!(history.prefs.projects.first(), Some(&older));
+        assert!(!history.prefs.projects.contains(&first));
+    }
+
     #[test]
     fn preferences_roundtrip_recovery_conflict_and_recent_paths() {
         let dir = tempfile::tempdir().unwrap();

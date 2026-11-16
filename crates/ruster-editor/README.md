@@ -1,6 +1,6 @@
 # Rot Engine Editor
 
-The native editor opens a blank generic scene by default. Run `cargo run --locked -p ruster-editor` to start creating without a sample project. It has two modes: generic 3D scenes with M6 content iteration, and the legacy v1 logistics scenario. Start the current content example with:
+The native editor opens a project picker by default. **New Project** creates a named folder and its initial `scene.json`. **Open Project** accepts a scene file or a folder containing `scene.json`. **Recent** displays the latest ten project folders and **All Projects** displays the retained history, with the most recently opened scene per folder. Older preferences seed this history from their saved recent scenes. Linux offers **Browse** through Zenity when available, and the path field also accepts a typed location. From an open editor, **File → New Project…** opens the same form after the current scene is saved and pending edits are resolved. It has two modes: generic 3D scenes with M6 content iteration, and the legacy v1 logistics scenario. Start the current content example with:
 
 ```sh
 cargo run --locked -p ruster-editor -- --scene examples/content/scene.json

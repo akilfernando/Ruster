@@ -35,6 +35,7 @@ mod play_checks;
 mod player_view;
 #[cfg(all(test, feature = "inspection", unix))]
 mod preview_probe;
+mod project_picker;
 mod recovered_input_ui;
 mod runtime_commands;
 mod runtime_transform_ui;
@@ -546,6 +547,8 @@ pub struct SceneEditor {
     notice: String,
     seen_history_evictions: usize,
     path_text: String,
+    startup_projects: Option<project_picker::ProjectPicker>,
+    new_project_form: Option<project_picker::ProjectForm>,
     name_text: String,
     new_scene_pending: bool,
     rename_pending: bool,
@@ -753,6 +756,8 @@ impl SceneEditor {
             notice: "Ready. Right-drag to orbit; scroll to zoom.".into(),
             seen_history_evictions,
             path_text: String::new(),
+            startup_projects: None,
+            new_project_form: None,
             name_text,
             new_scene_pending: false,
             rename_pending: false,
@@ -1989,6 +1994,7 @@ impl SceneEditor {
         if self.drafts() || self.manipulation.active() {
             Err("drafts_pending".into())
         } else if self.dialog.is_some()
+            || self.new_project_form.is_some()
             || self.asset_dialog
             || self.new_scene_pending
             || self.rename_pending
@@ -4722,6 +4728,23 @@ impl SceneEditor {
             self.close_approved = true;
         }
     }
+    fn open_saved_session(&mut self, session: Session) {
+        let render = self.render.clone();
+        if self.shader_revision > 0 {
+            if let Some(render) = &render {
+                if let Err(error) =
+                    ruster_render::refresh_shader(render, ruster_render::default_shader())
+                {
+                    self.error = error;
+                    return;
+                }
+            }
+        }
+        let mut next = Self::with_workspace(session, Workspace::detached());
+        next.render = render;
+        self.begin_replacement(next, None, true, false);
+    }
+
     fn request_new(&mut self) {
         self.revoke_connection();
         self.save_continuation = None;
@@ -4745,6 +4768,7 @@ impl SceneEditor {
             || self.input_actions_open
             || self.hud_open
             || self.player_view_draft.is_some()
+            || self.new_project_form.is_some()
             || self.manipulation.active()
             || self.dialog.is_some()
             || self.export_dialog
@@ -5144,6 +5168,15 @@ impl SceneEditor {
                 crate::branding::mark(ui, if compact { 20.0 } else { 27.0 });
             }
             crate::editor_theme::text_menu(ui, "File", |ui| {
+                if ui.button("New Project…").clicked() {
+                    if self.session.is_dirty() || self.guard().is_err() || self.asset_busy() {
+                        self.error = "Save the current project and finish or cancel pending edits before creating a project.".into();
+                    } else {
+                        self.runtime.release_input(ui.ctx());
+                        self.new_project_form = Some(project_picker::ProjectForm::new_project());
+                    }
+                    ui.close();
+                }
                 for (label, action) in [
                     ("New scene", Action::New),
                     ("Open scene…", Action::Open),
@@ -5931,6 +5964,17 @@ impl SceneEditor {
                 }
             });
         }
+        if let Some(mut form) = self.new_project_form.take() {
+            if self.guard().is_ok() && !self.session.is_dirty() && !self.asset_busy() {
+                let (session, closed) = form.show(&ctx);
+                if !closed {
+                    self.new_project_form = Some(form);
+                }
+                if let Some(session) = session {
+                    self.open_saved_session(session);
+                }
+            }
+        }
         if let Some(open) = self.dialog {
             egui::Modal::new(egui::Id::unique("scene_path_dialog")).show(&ctx,|ui| {
                 ui.heading(if open {"Open scene"}else{"Save scene as"});
@@ -5958,11 +6002,7 @@ impl SceneEditor {
                             if self.asset_loading(){self.cancel_asset_work();}
                             if let Err(error)=self.asset_root_guard(){self.error=error;return;}
                             match Session::open(path) {
-                                Ok(session)=> {
-                                    let render=self.render.clone();
-                                    let reset=if self.shader_revision>0 {render.as_ref().map(|r|ruster_render::refresh_shader(r,ruster_render::default_shader())).unwrap_or(Ok(()))} else {Ok(())};
-                                    match reset {Ok(())=>{let mut next=Self::with_workspace(session,Workspace::detached());next.render=render;next.workspace.welcome=false;self.begin_replacement(next,None,true,false);},Err(error)=>self.error=error}
-                                },
+                                Ok(session) => self.open_saved_session(session),
                                 Err(error)=>self.error=error.to_string()
                             }
                         } else {
@@ -6117,6 +6157,9 @@ impl eframe::App for Host {
         }
     }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if self.editor.startup_projects.is_some() {
+            return;
+        }
         #[cfg(feature = "inspection")]
         if asset_timing::in_real_pass(ctx) {
             self.editor.asset_ops.timing_frame(ctx);
@@ -6126,6 +6169,15 @@ impl eframe::App for Host {
         self.logic_tick(ctx);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+        if let Some(mut picker) = self.editor.startup_projects.take() {
+            if let Some(session) = picker.show(ui, &self.editor.workspace) {
+                self.editor.open_saved_session(session);
+                ui.ctx().request_repaint();
+            } else {
+                self.editor.startup_projects = Some(picker);
+            }
+            return;
+        }
         #[cfg(feature = "inspection")]
         self.editor.asset_ops.timing_frame(ui.ctx());
         #[cfg(unix)]
@@ -6153,13 +6205,16 @@ impl eframe::App for Host {
     }
 }
 pub fn run_empty() -> Result<(), String> {
-    run_session(Session::new(Scene::authored_empty("untitled")).map_err(|e| e.to_string())?)
+    run_session(
+        Session::new(Scene::authored_empty("untitled")).map_err(|e| e.to_string())?,
+        true,
+    )
 }
 pub fn run(path: PathBuf) -> Result<(), String> {
     let session = Session::open(path).map_err(|e| e.to_string())?;
-    run_session(session)
+    run_session(session, false)
 }
-fn run_session(session: Session) -> Result<(), String> {
+fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
     #[cfg(unix)]
     let bootstrap = if std::env::var_os("RUSTER_PROJECT_STARTUP").is_some() {
         let raw = std::env::var("RUSTER_PROJECT_BOOTSTRAP").map_err(|e| e.to_string())?;
@@ -6244,6 +6299,10 @@ fn run_session(session: Session) -> Result<(), String> {
                     #[cfg(feature = "inspection")]
                     editor.asset_ops.probe.attach_metrics(metrics);
                     editor.ai_workspace = std::env::var("RUSTER_WORKSPACE").as_deref() == Ok("ai");
+                    if startup_projects && !mcp_enabled && !editor.ai_workspace {
+                        editor.startup_projects = Some(project_picker::ProjectPicker::default());
+                        cc.egui_ctx.set_zoom_factor(editor.workspace.prefs.scale);
+                    }
                     editor.save_grant = save_grant;
                     editor.creation_export = creation_export;
                     if let Some(path) = editor.session.path() {
