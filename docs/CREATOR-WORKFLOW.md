@@ -54,6 +54,27 @@ See the [asset guide](../crates/ruster-assets/README.md#static-glb-source-genera
 for the bounded format and the [MCP guide](../crates/ruster-mcp/README.md)
 for the guarded equivalent.
 
+## Save and rerun a play check
+
+With a saved Scene11 or newer creation, open **File → Play checks…**.
+Create a check, add ordered named-action frames and choose the final tick,
+translation or typed state values to verify. **Capture current identity**
+pins the current saved scene and its resources. **Save check** writes the
+sibling `<scene-stem>.play-check.json`. Use **Reopen check** to continue
+editing the saved case later.
+
+**Run saved check** starts isolated playback and shows expected and actual
+values. **Cancel operation** stops an active check. When the scene or resources
+change, save the creation, capture its identity again and review the existing
+expectations before saving the check. This keeps failures reproducible while
+you repair the behavior.
+
+Export using a matched kit advertising `repeatable_play_checks`. After
+relocation run `application/application --play-check`. The app prints a
+structured report and exits 0 on pass or 2 on a failed check. You can still
+launch the app normally. The [MCP guide](../crates/ruster-mcp/README.md)
+covers guarded start, inspect and cancel.
+
 ## Perform the same export through MCP
 
 Launch the editor with explicit existing directory grants:
