@@ -28,6 +28,8 @@ mod material_commands;
 mod material_ui;
 #[cfg(all(test, feature = "inspection"))]
 mod material_visual_probe;
+#[cfg(test)]
+mod model_placement;
 mod nonvisual;
 mod persistence_commands;
 mod player_view;
