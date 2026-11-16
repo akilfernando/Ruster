@@ -5089,18 +5089,13 @@ impl SceneEditor {
     }
 
     fn scene_welcome(&mut self, ui: &mut egui::Ui) {
-        let show_identity = ui.available_width() >= 510.0 && ui.available_height() >= 390.0;
+        let show_recent = ui.available_width() >= 510.0 && ui.available_height() >= 390.0;
         ui.horizontal_wrapped(|ui| {
-            if show_identity {
-                crate::branding::identity(ui);
-            } else {
-                crate::branding::mark(ui, 24.0);
-            }
             if crate::editor_theme::primary_button(ui, "Open a scene…").clicked() {
                 self.queued_action = Some(Action::Open);
             }
             self.create_menu(ui);
-            if show_identity {
+            if show_recent {
                 self.recent_scenes_menu(ui, "Recent");
             }
         });
@@ -5109,6 +5104,7 @@ impl SceneEditor {
     fn scene_menus(&mut self, ui: &mut egui::Ui) {
         if ui.available_width() < 265.0 {
             ui.horizontal(|ui| {
+                crate::branding::mark(ui, 20.0);
                 ui.menu_button("Menu", |ui| {
                     self.scene_menu_contents(ui, true);
                 });
@@ -5131,12 +5127,8 @@ impl SceneEditor {
                 ui.spacing_mut().button_padding.x = 3.0;
                 ui.spacing_mut().item_spacing.x = 3.0;
             }
-            if !compact {
-                crate::branding::mark(ui, 27.0);
-                if ui.max_rect().width() >= 1150.0 {
-                    ui.strong("Rot Engine");
-                    ui.separator();
-                }
+            if !overflow {
+                crate::branding::mark(ui, if compact { 20.0 } else { 27.0 });
             }
             ui.menu_button("File", |ui| {
                 for (label, action) in [

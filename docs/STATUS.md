@@ -48,6 +48,12 @@ ruster-editor` passed, and the installed executable opened a native editor
 window on isolated workspace 2 while preserving desktop focus. The previous
 binary and launch receipt are retained in the same audit directory.
 
+The Full editor now shows one mushroom at the left of its header. The
+untitled welcome row shows Open, Create and Recent at normal widths. Native
+inspection confirmed the single mark at 640×480, 1280×800 and 1600×1000 and
+opened About. The compact-layout regression test and release build passed.
+The revised release is installed through the existing launcher.
+
 ## Rot Engine rebrand — 2026-11-16
 
 The [Rot Engine identity](branding/rot/README.md) supplies the launcher

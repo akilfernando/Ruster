@@ -48,13 +48,6 @@ fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
     });
 }
 
-pub fn identity(ui: &mut egui::Ui) {
-    ui.horizontal(|ui| {
-        mark(ui, 48.0);
-        ui.heading("Rot Engine");
-    });
-}
-
 #[cfg(unix)]
 pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui::Response {
     let button = if state == "Connected" {
