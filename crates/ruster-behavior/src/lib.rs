@@ -28,7 +28,9 @@ pub use state::RuntimeState;
 mod lifecycle;
 pub use lifecycle::{CommandReceipt, HudActivation, HudActivationReceipt};
 mod spatial_host;
-use spatial_host::{install_spatial, QueryInvocation};
+use spatial_host::{
+    install_kinematic, install_spatial, kinematic_owner, KinematicOwner, QueryInvocation,
+};
 pub use spatial_host::{QueryObservation, QueryResult};
 
 /// Exact current editor/Scene11 export quantum (~60Hz). The public Engine
@@ -42,6 +44,7 @@ pub const INPUT_HOST_API_VERSION: u32 = 2;
 pub const SPATIAL_HOST_API_VERSION: u32 = 3;
 pub const STATE_HOST_API_VERSION: u32 = 4;
 pub const LIFECYCLE_HOST_API_VERSION: u32 = 5;
+pub const KINEMATIC_HOST_API_VERSION: u32 = 7;
 pub use ruster_scene::GROUP_ROTATION_HOST_API_VERSION;
 pub const APPLICATION_TEMPLATE: &str = include_str!("../templates/application.lua");
 pub const MAX_SPATIAL_QUERIES: u32 = 32;
@@ -212,6 +215,7 @@ pub struct Runtime {
     commit_revision_required: bool,
     command_schema: Option<(String, String)>,
     query_observations: Vec<QueryObservation>,
+    kinematic_owner: Option<KinematicOwner>,
     state: Arc<RuntimeState>,
 }
 impl Runtime {
@@ -507,12 +511,13 @@ impl Engine {
                     | STATE_HOST_API_VERSION
                     | LIFECYCLE_HOST_API_VERSION
                     | GROUP_ROTATION_HOST_API_VERSION
+                    | KINEMATIC_HOST_API_VERSION
             )
         {
             return Err(Diagnostic::plain(
                 DiagnosticCode::UnsupportedBackend,
                 Phase::Compile,
-                "this provisional backend supports lua54 host API1–6; authored data is preserved",
+                "this provisional backend supports lua54 host API1–7; authored data is preserved",
             ));
         }
         let hash = source_hash(&source.text);
@@ -587,7 +592,10 @@ impl Engine {
         }
         state.validate_total()?;
         let mut trial_state = state.clone();
-        let queries = self.query_invocation(scene, authoring, 0)?;
+        let kinematic_owner = kinematic_owner(scene, authoring).map_err(|message| {
+            Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
+        })?;
+        let queries = self.query_invocation(scene, authoring, 0, kinematic_owner.as_ref())?;
         let mut trial_scene = None;
         for (id, binding) in &authoring.bindings {
             if !binding.enabled {
@@ -658,6 +666,7 @@ impl Engine {
             }),
             command_schema: lifecycle::catalog_identity(authoring)?,
             query_observations: Vec::new(),
+            kinematic_owner,
             state,
         })
     }
@@ -703,7 +712,12 @@ impl Engine {
         let snapshot = Arc::new(runtime.scene.clone());
         let mut staged = runtime.scene.clone();
         let mut staged_state = runtime.state.clone();
-        let queries = self.query_invocation(&runtime.scene, &runtime.authoring, runtime.tick)?;
+        let queries = self.query_invocation(
+            &runtime.scene,
+            &runtime.authoring,
+            runtime.tick,
+            runtime.kinematic_owner.as_ref(),
+        )?;
         let mut group_changed = false;
         for (id, binding) in &runtime.authoring.bindings {
             if !binding.enabled {
@@ -812,14 +826,14 @@ impl Engine {
             }
             if !matches!(
                 source.host_api_version,
-                STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+                STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION | KINEMATIC_HOST_API_VERSION
             ) && (binding.target == ruster_scene::BindingTarget::Application
                 || !binding.state_defaults.is_empty())
             {
                 return Err(Diagnostic::plain(
                     DiagnosticCode::UnsupportedBackend,
                     Phase::Compile,
-                    "Application targets and runtime state require lua54 host API4 or API5",
+                    "Application targets require API4/5; runtime state requires API4/5/7",
                 ));
             }
             if !binding.commands.is_empty() && source.host_api_version != LIFECYCLE_HOST_API_VERSION
@@ -1011,7 +1025,7 @@ impl Engine {
                                 "API6 update must return a Group-local rotation vector"
                             } else if matches!(
                                 host_input.api_version,
-                                STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+                                STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION | KINEMATIC_HOST_API_VERSION
                             ) {
                                 "API4 update must return a transform/state envelope"
                             } else {
@@ -1023,7 +1037,7 @@ impl Engine {
                         read_group_rotation(&output, input.expect("Group input"))
                     } else if matches!(
                         host_input.api_version,
-                        STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+                        STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION | KINEMATIC_HOST_API_VERSION
                     ) {
                         read_state_output(&output, input.is_some(), host_input)
                     } else {
@@ -1032,7 +1046,19 @@ impl Engine {
                             state: StateFields::new(),
                         })
                     };
-                    result.map_err(|e| self.error(e, Phase::Output, DiagnosticCode::InvalidOutput))
+                    let result = result.map_err(|e| self.error(e, Phase::Output, DiagnosticCode::InvalidOutput))?;
+                    if host_input.api_version == KINEMATIC_HOST_API_VERSION {
+                        let queries = host_input.spatial.expect("API7 requires spatial snapshot");
+                        let original = input.expect("API7 requires Object input");
+                        let proposed = result.transform.as_ref().expect("API7 requires Object output");
+                        queries.validate_kinematic_output(host_input.binding_id, original, proposed)
+                            .map_err(|message| Diagnostic::plain(DiagnosticCode::InvalidOutput, Phase::Output, &message))?;
+                        if dt == 0. && proposed != original {
+                            return Err(Diagnostic::plain(DiagnosticCode::InvalidOutput, Phase::Output,
+                                "API7 Reset trial must retain the authored transform; move only during nonzero-dt Step"));
+                        }
+                    }
+                    Ok(result)
                 })())
             })
             .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?
@@ -1224,6 +1250,7 @@ fn environment<'scope, 'env: 'scope>(
             | SPATIAL_HOST_API_VERSION
             | STATE_HOST_API_VERSION
             | LIFECYCLE_HOST_API_VERSION
+            | KINEMATIC_HOST_API_VERSION
     ) {
         host.raw_set(
             "button",
@@ -1270,14 +1297,18 @@ fn environment<'scope, 'env: 'scope>(
             | STATE_HOST_API_VERSION
             | LIFECYCLE_HOST_API_VERSION
             | GROUP_ROTATION_HOST_API_VERSION
+            | KINEMATIC_HOST_API_VERSION
     ) {
         install_spatial(scope, &host, input)?;
     }
     if matches!(
         input.api_version,
-        STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION
+        STATE_HOST_API_VERSION | LIFECYCLE_HOST_API_VERSION | KINEMATIC_HOST_API_VERSION
     ) {
         install_state_host(scope, &host, input.state, input.binding_id)?;
+    }
+    if input.api_version == KINEMATIC_HOST_API_VERSION {
+        install_kinematic(scope, &host, input)?;
     }
     Ok((environment, host))
 }
@@ -1348,6 +1379,8 @@ fn read_transform(table: &Table) -> mlua::Result<Transform> {
 
 #[cfg(test)]
 mod group_rotation_tests;
+#[cfg(test)]
+mod kinematic_tests;
 #[cfg(test)]
 mod spatial_tests;
 #[cfg(test)]

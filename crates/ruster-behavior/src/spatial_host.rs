@@ -1,6 +1,6 @@
 //! Invocation-scoped Lua query admission and copied, commit-staged observations.
 use super::*;
-use spatial::{OverlapResult, SpatialWorld, SweepOutcome, SweepResult};
+use spatial::{OverlapResult, SlideOutcome, SlideResult, SpatialWorld, SweepOutcome, SweepResult};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 pub struct QueryObservation {
@@ -32,10 +32,27 @@ pub enum QueryResult {
     Overlap {
         result: OverlapResult,
     },
+    MoveAndSlide {
+        probe_id: String,
+        delta: [f64; 3],
+        result: SlideResult,
+    },
+}
+
+#[derive(Clone, Debug)]
+pub(super) struct KinematicOwner {
+    binding_id: String,
+    object_id: String,
+}
+
+struct Controller {
+    owner: KinematicOwner,
+    translation: Cell<Option<[f32; 3]>>,
 }
 
 pub(super) struct QueryInvocation {
     world: SpatialWorld,
+    controller: Option<Controller>,
     calls: Cell<u32>,
     pub(super) observations: RefCell<Vec<QueryObservation>>,
     cancel: Arc<AtomicBool>,
@@ -51,6 +68,7 @@ impl Engine {
         scene: &Scene,
         authoring: &Authoring,
         snapshot_tick: u64,
+        kinematic_owner: Option<&KinematicOwner>,
     ) -> Result<Option<QueryInvocation>, Diagnostic> {
         if !authoring.bindings.values().any(|binding| {
             binding.enabled
@@ -64,6 +82,7 @@ impl Engine {
                                 | STATE_HOST_API_VERSION
                                 | LIFECYCLE_HOST_API_VERSION
                                 | GROUP_ROTATION_HOST_API_VERSION
+                                | KINEMATIC_HOST_API_VERSION
                         )
                     })
         }) {
@@ -73,9 +92,14 @@ impl Engine {
         let world = SpatialWorld::new(scene).map_err(|message| {
             Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
         })?;
+        let controller = kinematic_owner.cloned().map(|owner| Controller {
+            owner,
+            translation: Cell::new(None),
+        });
         self.check_cancelled()?;
         Ok(Some(QueryInvocation {
             world,
+            controller,
             calls: Cell::new(0),
             observations: RefCell::new(Vec::new()),
             cancel: self.cancel.clone(),
@@ -87,7 +111,83 @@ impl Engine {
     }
 }
 
+pub(super) fn kinematic_owner(
+    scene: &Scene,
+    authoring: &Authoring,
+) -> Result<Option<KinematicOwner>, String> {
+    let mut movers = authoring.bindings.iter().filter(|(_, binding)| {
+        binding.enabled
+            && authoring
+                .sources
+                .get(&binding.source_id)
+                .is_some_and(|source| {
+                    source.language_id == LANGUAGE_ID
+                        && source.host_api_version == KINEMATIC_HOST_API_VERSION
+                })
+    });
+    let Some((binding_id, binding)) = movers.next() else {
+        return Ok(None);
+    };
+    if !scene.hierarchy.is_empty() || movers.next().is_some() {
+        return Err("API7 requires a flat scene and at most one enabled kinematic mover".into());
+    }
+    let object_id = binding
+        .object_id()
+        .ok_or("API7 requires an Object target")?;
+    let mover = scene
+        .objects
+        .iter()
+        .find(|object| object.id == object_id)
+        .ok_or("API7 mover does not exist")?;
+    if !mover.collider.is_some_and(|collider| {
+        collider.enabled
+            && collider.role == ruster_scene::ColliderRole::Blocker
+            && matches!(collider.shape, ruster_scene::ColliderShape::Sphere { .. })
+    }) {
+        return Err("API7 mover requires an enabled blocker sphere with uniform scale".into());
+    }
+    for other in authoring.bindings.values().filter(|other| other.enabled) {
+        if let Some(id) = other.object_id().filter(|id| *id != object_id) {
+            if scene.objects.iter().any(|object| {
+                object.id == id
+                    && object.collider.is_some_and(|collider| {
+                        collider.enabled && collider.role == ruster_scene::ColliderRole::Blocker
+                    })
+            }) {
+                return Err(format!(
+                    "API7 blocker {id:?} must be stationary; disable its behavior binding"
+                ));
+            }
+        }
+    }
+    Ok(Some(KinematicOwner {
+        binding_id: binding_id.to_owned(),
+        object_id: object_id.to_owned(),
+    }))
+}
+
 impl QueryInvocation {
+    pub(super) fn validate_kinematic_output(
+        &self,
+        binding_id: &str,
+        original: &Transform,
+        output: &Transform,
+    ) -> Result<(), String> {
+        let controller = self
+            .controller
+            .as_ref()
+            .filter(|controller| controller.owner.binding_id == binding_id)
+            .ok_or("API7 kinematic ownership unavailable")?;
+        let allowed = controller.translation.get().unwrap_or(original.translation);
+        if output.translation != allowed
+            || output.rotation != original.rotation
+            || output.scale != original.scale
+        {
+            return Err("API7 output must use its exact move_and_slide translation and preserve rotation and scale".into());
+        }
+        Ok(())
+    }
+
     fn cancelled(&self) -> bool {
         let cancelled = self.cancel.load(Ordering::SeqCst)
             || self
@@ -161,6 +261,89 @@ fn query_vector(table: Table) -> mlua::Result<[f64; 3]> {
         ));
     }
     Ok(values)
+}
+
+pub(super) fn install_kinematic<'scope, 'env: 'scope>(
+    scope: &'scope mlua::Scope<'scope, 'env>,
+    host: &Table,
+    input: HostInput<'env>,
+) -> mlua::Result<()> {
+    let queries = input
+        .spatial
+        .ok_or_else(|| mlua::Error::runtime("kinematic snapshot unavailable"))?;
+    let controller = queries
+        .controller
+        .as_ref()
+        .filter(|controller| controller.owner.binding_id == input.binding_id)
+        .ok_or_else(|| mlua::Error::runtime("kinematic ownership unavailable"))?;
+    host.raw_set(
+        "move_and_slide",
+        scope.create_function(move |lua, delta: Value| {
+            if controller.translation.get().is_some() {
+                return Err(mlua::Error::runtime(
+                    "API7 permits only one move_and_slide call per Reset or Step",
+                ));
+            }
+            let Value::Table(delta) = delta else {
+                return Err(mlua::Error::runtime(
+                    "move_and_slide requires a displacement vector",
+                ));
+            };
+            let delta = query_vector(delta)?;
+            queries.admit()?;
+            let result = queries
+                .world
+                .move_and_slide(&controller.owner.object_id, delta, &|| queries.cancelled())
+                .map_err(mlua::Error::runtime)?;
+            let translation = result.suggested_translation.ok_or_else(|| {
+                let status = slide_outcome(result.outcome);
+                let context = result.blocking_id.as_ref().map_or_else(
+                    || " at the requested displacement".into(),
+                    |blocker| format!(" at blocker {blocker:?}"),
+                );
+                mlua::Error::runtime(format!(
+                    "move_and_slide {status}{context}; no movement committed"
+                ))
+            })?;
+            let copied = lua.create_table()?;
+            copied.raw_set("outcome", slide_outcome(result.outcome))?;
+            copied.raw_set(
+                "suggested_translation",
+                lua.create_sequence_from(translation)?,
+            )?;
+            let contacts = lua.create_table()?;
+            for (index, contact) in result.contacts.iter().enumerate() {
+                let value = lua.create_table()?;
+                value.raw_set("target_id", contact.target_id.as_str())?;
+                value.raw_set("point", lua.create_sequence_from(contact.point)?)?;
+                value.raw_set("normal", lua.create_sequence_from(contact.normal)?)?;
+                value.raw_set("clearance", contact.clearance)?;
+                contacts.raw_set(index + 1, value)?;
+            }
+            copied.raw_set("contacts", contacts)?;
+            queries.observe(
+                input.binding_id,
+                QueryResult::MoveAndSlide {
+                    probe_id: controller.owner.object_id.clone(),
+                    delta,
+                    result,
+                },
+            );
+            controller.translation.set(Some(translation));
+            Ok(copied)
+        })?,
+    )
+}
+
+fn slide_outcome(outcome: SlideOutcome) -> &'static str {
+    match outcome {
+        SlideOutcome::Clear => "clear",
+        SlideOutcome::Slid => "slid",
+        SlideOutcome::Stopped => "stopped",
+        SlideOutcome::InitialOverlap => "initial_overlap",
+        SlideOutcome::PrecisionLimited => "precision_limited",
+        SlideOutcome::IterationLimit => "iteration_limit",
+    }
 }
 
 pub(super) fn install_spatial<'scope, 'env: 'scope>(
