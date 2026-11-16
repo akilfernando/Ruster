@@ -7,11 +7,15 @@
   The separate `/home/akilf/Projects/Rusterize` checkout is on
   `claude/e1-editor-feedback` and contains local edits and
   attachments. Keep the audit paths beside the retained evidence.
-- Development stopped with the kinematic and WAV goals closed. Imported
-  GLB transform animation is the next provisional candidate. Start by
-  checking the existing GLB generation/reimport and runtime transform
-  owners before scoping one named clip with play, pause, reset and
-  relocated delivery.
+- Feature work is on hold at the user's request while usage is limited.
+  Make small usability refinements to existing workflows. Imported GLB
+  transform animation stays on the roadmap for when feature work resumes.
+  Kinematic move-and-slide and packaged WAV feedback are closed goals.
+- The first usability pass improves reopening scenes. Recent entries lead
+  with the filename and containing folder, with the full path on hover.
+  The Open dialog names the discard action when changes would be lost.
+  `cargo test --locked -p ruster-editor` passed (206 passed, 13 ignored).
+  This pass is a source checkpoint pending a native walkthrough and install.
 - Keep the pending human editor walkthrough and audio device breadth
   separate from the completed automated checks. The latest audio
   evidence records a 28 ms first live submission and a float-PCM

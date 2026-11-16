@@ -5075,11 +5075,24 @@ impl SceneEditor {
     }
     fn recent_scenes_menu(&mut self, ui: &mut egui::Ui, label: &str) {
         ui.menu_button(label, |ui| {
+            ui.set_max_width(360.0);
             if self.workspace.prefs.recent.is_empty() {
                 ui.label("No recent scenes.");
             }
             for path in &self.workspace.prefs.recent {
-                if ui.button(path.display().to_string()).clicked() {
+                let filename = path
+                    .file_name()
+                    .unwrap_or(path.as_os_str())
+                    .to_string_lossy();
+                let entry = match path.parent().and_then(|folder| folder.file_name()) {
+                    Some(folder) => format!("{filename} · {}", folder.to_string_lossy()),
+                    None => filename.into_owned(),
+                };
+                if ui
+                    .add(egui::Button::new(entry).truncate())
+                    .on_hover_text(path.display().to_string())
+                    .clicked()
+                {
                     self.path_text = path.display().to_string();
                     self.queued_action = Some(Action::Open);
                     ui.close();
@@ -5089,7 +5102,7 @@ impl SceneEditor {
     }
 
     fn scene_welcome(&mut self, ui: &mut egui::Ui) {
-        let show_recent = ui.available_width() >= 510.0 && ui.available_height() >= 390.0;
+        let show_recent = ui.available_width() >= 340.0;
         ui.horizontal_wrapped(|ui| {
             if crate::editor_theme::primary_button(ui, "Open a scene…").clicked() {
                 self.queued_action = Some(Action::Open);
@@ -5925,11 +5938,19 @@ impl SceneEditor {
                 ui.label("Absolute scene path");let enter_pressed=ui.input(|i|i.key_pressed(egui::Key::Enter)&&i.modifiers.is_none());let cancel=ui.input(|i|i.key_pressed(egui::Key::Escape)&&i.modifiers.is_none());let edit=ui.text_edit_singleline(&mut self.path_text);
                 if !self.path_focused {edit.request_focus();self.path_focused=true;}
                 let submit=(edit.has_focus()||edit.lost_focus())&&enter_pressed;
-                if open && (self.session.is_dirty()||self.drafts()) {
+                let discards_changes = open && (self.session.is_dirty() || self.drafts());
+                if discards_changes {
                     ui.colored_label(crate::editor_theme::colors(ui).warning,"Opening discards current unsaved scene and drafts. Cancel to preserve them.");
                 }
                 ui.horizontal(|ui| {
-                    if ui.button(if open {"Open and discard current"}else{"Save to new path"}).clicked()||submit {
+                    let action_label = if discards_changes {
+                        "Open and discard current"
+                    } else if open {
+                        "Open scene"
+                    } else {
+                        "Save to new path"
+                    };
+                    if ui.button(action_label).clicked()||submit {
                         #[cfg(feature = "inspection")]
                         let observed = if open { None } else { self.asset_ops.timing_begin("scene_save") };
                         let path=PathBuf::from(self.path_text.trim());
