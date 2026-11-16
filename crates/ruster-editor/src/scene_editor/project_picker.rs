@@ -5,13 +5,28 @@ use std::{fs, path::Path};
 #[derive(Default)]
 pub(super) struct ProjectPicker {
     all: bool,
+    pub(super) switching: bool,
     form: Option<ProjectForm>,
     error: String,
 }
 
 impl ProjectPicker {
-    pub(super) fn show(&mut self, ui: &mut egui::Ui, workspace: &Workspace) -> Option<Session> {
+    pub(super) fn switch_project() -> Self {
+        Self {
+            switching: true,
+            ..Self::default()
+        }
+    }
+
+    pub(super) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        workspace: &Workspace,
+    ) -> (Option<Session>, bool) {
         let mut chosen = None;
+        let mut back = self.switching
+            && self.form.is_none()
+            && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         egui::CentralPanel::default().show(ui, |ui| {
             let width = (ui.available_width() - 24.0).clamp(1.0, 820.0);
             ui.vertical_centered(|ui| {
@@ -24,6 +39,9 @@ impl ProjectPicker {
                         ui.horizontal(|ui| {
                             crate::branding::mark(ui, 34.0);
                             ui.heading("Rot Engine");
+                            if self.switching && ui.button("Back to Editor").clicked() {
+                                back = true;
+                            }
                         });
                         ui.add_space(18.0);
                         ui.horizontal_wrapped(|ui| {
@@ -109,7 +127,11 @@ impl ProjectPicker {
             }
             chosen = session.or(chosen);
         }
-        chosen
+        if back {
+            (None, true)
+        } else {
+            (chosen, false)
+        }
     }
 }
 
@@ -119,7 +141,7 @@ pub(super) struct ProjectForm {
     error: String,
     focus: bool,
     #[cfg(target_os = "linux")]
-    browse: Option<std::sync::mpsc::Receiver<Result<Option<String>, String>>>,
+    browse: FileBrowser,
 }
 
 impl ProjectForm {
@@ -143,24 +165,11 @@ impl ProjectForm {
             error: String::new(),
             focus: true,
             #[cfg(target_os = "linux")]
-            browse: None,
+            browse: FileBrowser::default(),
         }
     }
 
     pub(super) fn show(&mut self, ctx: &egui::Context) -> (Option<Session>, bool) {
-        #[cfg(target_os = "linux")]
-        if let Some(result) = self
-            .browse
-            .as_ref()
-            .and_then(|receiver| receiver.try_recv().ok())
-        {
-            self.browse = None;
-            match result {
-                Ok(Some(path)) => self.path = path,
-                Ok(None) => {}
-                Err(error) => self.error = error,
-            }
-        }
         let creating = self.name.is_some();
         let mut session = None;
         let mut close = false;
@@ -204,12 +213,16 @@ impl ProjectForm {
                 field.request_focus();
             }
             #[cfg(target_os = "linux")]
-            if ui
-                .add_enabled(self.browse.is_none(), egui::Button::new("Browse…"))
-                .clicked()
-            {
-                self.browse = Some(browse(ctx.clone(), creating));
-            }
+            self.browse.show(
+                ui,
+                &mut self.path,
+                &mut self.error,
+                if creating {
+                    BrowseKind::Directory
+                } else {
+                    BrowseKind::OpenScene
+                },
+            );
             if let Some(name) = self.name.as_deref().filter(|n| !n.trim().is_empty()) {
                 ui.weak(
                     Path::new(&self.path)
@@ -310,20 +323,75 @@ fn create_project(location: &Path, name: &str) -> Result<Session, String> {
 }
 
 #[cfg(target_os = "linux")]
-fn browse(
-    ctx: egui::Context,
-    directory: bool,
-) -> std::sync::mpsc::Receiver<Result<Option<String>, String>> {
+#[derive(Clone, Copy)]
+pub(super) enum BrowseKind {
+    Directory,
+    OpenScene,
+    SaveScene,
+}
+
+#[cfg(target_os = "linux")]
+type BrowseResult = Result<Option<String>, String>;
+
+#[cfg(target_os = "linux")]
+#[derive(Default)]
+pub(super) struct FileBrowser {
+    pending: Option<std::sync::mpsc::Receiver<BrowseResult>>,
+}
+
+#[cfg(target_os = "linux")]
+impl FileBrowser {
+    pub(super) fn show(
+        &mut self,
+        ui: &mut egui::Ui,
+        path: &mut String,
+        error: &mut String,
+        kind: BrowseKind,
+    ) {
+        if let Some(result) = self
+            .pending
+            .as_ref()
+            .and_then(|receiver| receiver.try_recv().ok())
+        {
+            self.pending = None;
+            match result {
+                Ok(Some(picked)) => {
+                    *path = picked;
+                    error.clear();
+                }
+                Ok(None) => {}
+                Err(message) => *error = message,
+            }
+        }
+        if ui
+            .add_enabled(self.pending.is_none(), egui::Button::new("Browse…"))
+            .clicked()
+        {
+            self.pending = Some(browse(ui.ctx().clone(), kind));
+        }
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn browse(ctx: egui::Context, kind: BrowseKind) -> std::sync::mpsc::Receiver<BrowseResult> {
     let (tx, rx) = std::sync::mpsc::sync_channel(1);
     std::thread::spawn(move || {
         let mut picker = std::process::Command::new("zenity");
-        picker.arg("--file-selection").arg(if directory {
-            "--title=Choose a project location"
-        } else {
-            "--title=Choose a Rot scene file"
-        });
-        if directory {
-            picker.arg("--directory");
+        picker.arg("--file-selection");
+        match kind {
+            BrowseKind::Directory => {
+                picker.args(["--directory", "--title=Choose a project location"]);
+            }
+            BrowseKind::OpenScene => {
+                picker.arg("--title=Choose a Rot scene file");
+            }
+            BrowseKind::SaveScene => {
+                picker.args([
+                    "--save",
+                    "--title=Save Rot scene as",
+                    "--filename=scene.json",
+                ]);
+            }
         }
         let result = match picker.output() {
             Ok(output) if output.status.success() => String::from_utf8(output.stdout)

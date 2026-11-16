@@ -37,6 +37,16 @@ inspection created a project, closed the editor normally, then verified it in
 Recent and reopened it through All Projects. Linux release build and launcher
 installation completed. Test captures are in the redesign audit directory.
 
+From the editor, File → Switch Project opens the same picker. Back to Editor
+or Escape returns to the current scene. Saved work and resolved edits are
+required before switching. Open Scene and Save As now offer Browse on Linux
+through the same system chooser used by the project forms. Choosing a path
+keeps the existing confirmation, unsaved-change and destination guards.
+The affected gate passed. Native inspection verified returning to the editor,
+switching to a second fixture project and applying a fixture chooser result.
+The installed release passed startup smoke. Native OS chooser interaction was
+not automated.
+
 ## Rot Engine editor workspace redesign — 2026-11-16
 
 The supplied workspace, untitled and About mockups guided the shared graphite

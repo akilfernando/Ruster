@@ -547,7 +547,9 @@ pub struct SceneEditor {
     notice: String,
     seen_history_evictions: usize,
     path_text: String,
-    startup_projects: Option<project_picker::ProjectPicker>,
+    #[cfg(target_os = "linux")]
+    scene_file_browser: project_picker::FileBrowser,
+    project_picker: Option<project_picker::ProjectPicker>,
     new_project_form: Option<project_picker::ProjectForm>,
     name_text: String,
     new_scene_pending: bool,
@@ -756,7 +758,9 @@ impl SceneEditor {
             notice: "Ready. Right-drag to orbit; scroll to zoom.".into(),
             seen_history_evictions,
             path_text: String::new(),
-            startup_projects: None,
+            #[cfg(target_os = "linux")]
+            scene_file_browser: project_picker::FileBrowser::default(),
+            project_picker: None,
             new_project_form: None,
             name_text,
             new_scene_pending: false,
@@ -1995,6 +1999,7 @@ impl SceneEditor {
             Err("drafts_pending".into())
         } else if self.dialog.is_some()
             || self.new_project_form.is_some()
+            || self.project_picker.is_some()
             || self.asset_dialog
             || self.new_scene_pending
             || self.rename_pending
@@ -5168,6 +5173,18 @@ impl SceneEditor {
                 crate::branding::mark(ui, if compact { 20.0 } else { 27.0 });
             }
             crate::editor_theme::text_menu(ui, "File", |ui| {
+                if ui.button("Switch Project…").clicked() {
+                    if self.needs_recovery() || self.guard().is_err() || self.asset_busy() {
+                        self.error = "Save the current scene and finish or cancel pending edits before switching projects.".into();
+                    } else {
+                        self.runtime.release_input(ui.ctx());
+                        self.runtime.cancel_native_hud_activation();
+                        self.captures.invalidate();
+                        self.project_picker = Some(project_picker::ProjectPicker::switch_project());
+                        ui.ctx().request_repaint();
+                    }
+                    ui.close();
+                }
                 if ui.button("New Project…").clicked() {
                     if self.session.is_dirty() || self.guard().is_err() || self.asset_busy() {
                         self.error = "Save the current project and finish or cancel pending edits before creating a project.".into();
@@ -5975,11 +5992,23 @@ impl SceneEditor {
                 }
             }
         }
+        #[cfg(target_os = "linux")]
+        if self.dialog.is_none() {
+            self.scene_file_browser = project_picker::FileBrowser::default();
+        }
         if let Some(open) = self.dialog {
             egui::Modal::new(egui::Id::unique("scene_path_dialog")).show(&ctx,|ui| {
                 ui.heading(if open {"Open scene"}else{"Save scene as"});
                 self.confirm_focused=None;
-                ui.label("Absolute scene path");let enter_pressed=ui.input(|i|i.key_pressed(egui::Key::Enter)&&i.modifiers.is_none());let cancel=ui.input(|i|i.key_pressed(egui::Key::Escape)&&i.modifiers.is_none());let edit=ui.text_edit_singleline(&mut self.path_text);
+                ui.label(if open { "Scene file" } else { "Save location" });
+                let enter_pressed=ui.input(|i|i.key_pressed(egui::Key::Enter)&&i.modifiers.is_none());
+                let cancel=ui.input(|i|i.key_pressed(egui::Key::Escape)&&i.modifiers.is_none());
+                let edit=ui.horizontal(|ui| {
+                    let edit = ui.text_edit_singleline(&mut self.path_text);
+                    #[cfg(target_os = "linux")]
+                    self.scene_file_browser.show(ui, &mut self.path_text, &mut self.error, if open { project_picker::BrowseKind::OpenScene } else { project_picker::BrowseKind::SaveScene });
+                    edit
+                }).inner;
                 if !self.path_focused {edit.request_focus();self.path_focused=true;}
                 let submit=(edit.has_focus()||edit.lost_focus())&&enter_pressed;
                 let discards_changes = open && (self.session.is_dirty() || self.drafts());
@@ -5994,7 +6023,8 @@ impl SceneEditor {
                     } else {
                         "Save to new path"
                     };
-                    if ui.button(action_label).clicked()||submit {
+                    let has_path = !self.path_text.trim().is_empty();
+                    if ui.add_enabled(has_path, egui::Button::new(action_label)).clicked() || (submit && has_path) {
                         #[cfg(feature = "inspection")]
                         let observed = if open { None } else { self.asset_ops.timing_begin("scene_save") };
                         let path=PathBuf::from(self.path_text.trim());
@@ -6157,7 +6187,12 @@ impl eframe::App for Host {
         }
     }
     fn logic(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        if self.editor.startup_projects.is_some() {
+        if self
+            .editor
+            .project_picker
+            .as_ref()
+            .is_some_and(|picker| !picker.switching)
+        {
             return;
         }
         #[cfg(feature = "inspection")]
@@ -6169,14 +6204,29 @@ impl eframe::App for Host {
         self.logic_tick(ctx);
     }
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
-        if let Some(mut picker) = self.editor.startup_projects.take() {
-            if let Some(session) = picker.show(ui, &self.editor.workspace) {
-                self.editor.open_saved_session(session);
-                ui.ctx().request_repaint();
-            } else {
-                self.editor.startup_projects = Some(picker);
+        if let Some(mut picker) = self.editor.project_picker.take() {
+            if !picker.switching || !ui.input(|input| input.viewport().close_requested()) {
+                let (session, back) = picker.show(ui, &self.editor.workspace);
+                if let Some(session) = session {
+                    if !picker.switching
+                        || (!self.editor.needs_recovery()
+                            && self.editor.guard().is_ok()
+                            && !self.editor.asset_busy())
+                    {
+                        self.editor.open_saved_session(session);
+                    } else {
+                        self.editor.error =
+                            "Resolve pending changes before switching projects.".into();
+                    }
+                } else if !back {
+                    self.editor.project_picker = Some(picker);
+                }
+                self.input.human_pending = false;
+                if self.editor.project_picker.is_none() {
+                    ui.ctx().request_repaint();
+                }
+                return;
             }
-            return;
         }
         #[cfg(feature = "inspection")]
         self.editor.asset_ops.timing_frame(ui.ctx());
@@ -6300,7 +6350,7 @@ fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
                     editor.asset_ops.probe.attach_metrics(metrics);
                     editor.ai_workspace = std::env::var("RUSTER_WORKSPACE").as_deref() == Ok("ai");
                     if startup_projects && !mcp_enabled && !editor.ai_workspace {
-                        editor.startup_projects = Some(project_picker::ProjectPicker::default());
+                        editor.project_picker = Some(project_picker::ProjectPicker::default());
                         cc.egui_ctx.set_zoom_factor(editor.workspace.prefs.scale);
                     }
                     editor.save_grant = save_grant;
