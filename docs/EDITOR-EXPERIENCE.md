@@ -4,6 +4,10 @@ Updated 2026-11-04. **Confirmed user requirement:** an experienced Unity or Unre
 
 This requirement strengthens the [creator ethos](DIRECTION.md#project-ethos-serve-the-creator). It does not assert that the current prototype already meets it. Historical M0–M6 prototype acceptance remains historical; it cannot substitute for editor experience acceptance.
 
+The November 16 [editor workflow comparison](research/EDITOR-WORKFLOW-COMPARISON.md)
+compares Unity, Unreal and Godot conventions and proposes a physical-user
+baseline for the current Full editor and AI workspace.
+
 ## What the requirement means in practice
 
 The following is the working breakdown of that requirement, selected by the agent for implementation planning. It is not an exhaustive list or a claim that the user specified each control. Add overlooked everyday friction when observed; do not use this list as a ceiling.

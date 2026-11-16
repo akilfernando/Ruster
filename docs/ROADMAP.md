@@ -96,14 +96,22 @@ capabilities, but clearly clunky controls must not be labeled accepted.
 5. Reuse matching evidence and fix demonstrated failures. Coordinate the actual desktop opportunity instead of repeatedly attempting a refused guard. Preserve refusals and exact recovery; never lower consent, quality or safety to make a gate pass.
 6. At a meaningful priority, parallel-flow, scope, architecture or promotion decision, update this plan and append the rationale/evaluation to the decision record. Do not produce paperwork for every routine fix.
 
-### After convergence: proposed next engine contract
+### Research before implementation
 
-Recommend completing a bounded assembly runtime/delivery workflow: author a nested
-mechanism, express a group/hinge behavior, run it, and deliver the same supported
-result standalone. This is a **proposal**, not approval of the larger F4a
-scripting/duplication/recovery/export package, prefabs or scene transitions. The
-current bounded hierarchy contract still explicitly rejects unsupported runtime
-and export combinations. Select the next contract before implementing it.
+The [feature parity study](research/MATURE-ENGINE-PARITY.md) proposes a mature
+3D baseline, project-dependent workflows and advanced capabilities. The
+[editor study](research/EDITOR-WORKFLOW-COMPARISON.md) proposes a baseline
+walkthrough for current Rusterize. These are planning inputs for the bounded
+assembly contract below.
+
+### Accepted assembly runtime and delivery contract
+
+The [assembly runtime/delivery plan](plans/ASSEMBLY-RUNTIME-DELIVERY.md) scopes
+the accepted goal: author a nested mechanism, express a Group-local hinge
+behavior, run it, and ship the same result standalone. Static hierarchy and
+articulated delivery passed through matched kits. See the [acceptance record](STATUS.md#articulated-assembly-delivery-accepted-for-the-bounded-goal--2026-11-16). This bounded follow-up leaves the
+larger F4a package, prefabs and scene transitions separate. The evening
+editor familiarity walkthrough is independent of implementation.
 
 Then select slices from the retained foundation plan: richer content/animation,
 physics/audio and devices/player data, material/lighting completion, measured

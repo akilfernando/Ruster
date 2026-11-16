@@ -1,5 +1,21 @@
 # Post-M3 roadmap review
 
+## Mature engine parity research — 2026-11-16
+
+The user requested comparison research before choosing next implementation
+steps. Reviewed Unity, Unreal and Godot documentation for production features
+and editor jobs. The two studies propose workflow parity with a common 3D
+baseline and separate project-dependent and advanced capabilities. This keeps
+delivery, recovery and diagnostics visible alongside engine subsystems.
+Exact vendor feature duplication and an engine-relative completion percentage
+would obscure those creator outcomes. Use a baseline walkthrough to evaluate
+editor familiarity and use completed creator workflows to qualify parity.
+No individual priority, subsystem architecture or implementation milestone
+was approved by this research.
+[Capabilities](research/MATURE-ENGINE-PARITY.md)
+[Editor workflow](research/EDITOR-WORKFLOW-COMPARISON.md)
+
+
 ## Local matched promotion — 2026-11-16
 
 After essential visual grounding passed the finite actual-ChatGPT perspective,

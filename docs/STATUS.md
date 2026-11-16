@@ -1,5 +1,214 @@
 # Current project status
 
+## Articulated assembly delivery accepted for the bounded goal — 2026-11-16
+
+Source integrated locally through `888b4f5`. The [assembly runtime decision](decisions/2026-11-16-group-local-assembly-runtime.md)
+records the Scene20 and matched kit contracts. The [goal plan](plans/ASSEMBLY-RUNTIME-DELIVERY.md)
+records the qualification scope. Root and Astra found no P0/P1 blocker in
+ownership, reachable history, rollback, guarded MCP or package provenance.
+Reparenting after authoring still refuses under the existing scope.
+
+**Ordinary editor.** With the exact production-source inspection build, the
+owned native editor selected a nested Group, created its Lua API6 hinge
+behavior through the Inspector, previewed and saved Scene20, and published an
+archive via the normal File export dialog. The fresh process reopened the
+saved binding without changing bytes. Further native menu Undo/Redo and
+Play/Pause/Step/Reset passed on a disposable copy. Inspected captures show
+paused at tick 35 with local Z ≈0.58333, one Step at tick 36 with Z ≈0.60000,
+and Reset at the authored zero pose. The ordinary source widget separately
+passed invalid-source apply, failed Reset and shared Undo recovery in the
+owning test. Source/editor hashes, actions, saved scene, screenshots and
+archive are in `/home/akilf/Projects/Ruster-Audits/group-native.3H4vds`. Raw
+harness retries retain tree/label and mouse event shape failures, a dropped
+app-scoped Ctrl+S attempt, and an offscreen Inspector selector. The visible
+Save button, bounded scroll and normal close route passed. No physical input
+or preference changes.
+
+**Guarded MCP.** Source-built real STDIO and an owned disposable bridge tested
+unapproved refusal, scoped approval, explicit Group create and readback,
+guarded Undo/Redo, Reset, Step, Play/Pause, Save, fresh-session reopen and
+asynchronous export. Final trace passed in 2.06 seconds and retired its
+adapter/locator. The final archive reran headlessly after extraction to a
+fresh directory and retained Scene20 bytes, authored topology and Undo.
+See `/home/akilf/Projects/Ruster-Audits/group-final-controls.yjZvq5`. The
+ordinary editor archive separately reproduced one authored local-Z increment
+after relocation with exact source bytes and retained Undo. The final
+animated kit repeated the five-case real worker compatibility tracer in
+9.49 seconds, covering grouped Scene19, omitted Group name, current-flat
+Scene19 with retained Redo and Scene18 with old/new kits. The final helper
+also refused the real Scene19-only kit for Scene20 before creating an
+archive. Both logs are retained in the final controls audit. Native NVIDIA
+playback and independent pose/collider/light checks are recorded below.
+
+Affected editor/MCP gate passed 229 Rust tests with 7 ignored, strict Clippy,
+format and Markdown after restoring flat runtime help wording. Core Scene
+and Behavior tests passed 85 cases with strict Clippy. Earlier static
+parallel workspace capture contention remains recorded below. The final
+test-only extension was rerun with real STDIO and the known archive. Final
+format, Markdown and diff checks pass. Workspace 1 is restored and the test
+windows are gone. No installation, remote update or release. The user's
+physical editor walkthrough remains independent.
+
+## Assembly runtime and delivery execution record — 2026-11-16
+
+User requested Astra scope and continuation without waiting for the evening
+walkthrough. The [reviewed execution plan](plans/ASSEMBLY-RUNTIME-DELIVERY.md)
+sets the moving assembly outcome with a static Scene19 delivery checkpoint.
+Codex root owns integration. One implementation owner starts the static path
+in `feat/assembly-runtime-delivery-20261116` from cumulative `5e83590`. Human
+familiarity feedback is independent. The root prepared a numeric hinge fixture
+and independent coordinate oracle under
+`/home/akilf/Projects/Ruster-Audits/assembly-runtime-20261116.0yzyzV`.
+Current baseline CLI reads it and runtime Reset refuses hierarchy as expected.
+
+Static headless checkpoint passes on local source `fe03af7`. The production
+export worker packages five fixtures, including live hierarchy, a Group with
+an omitted optional name, current-flat Scene19 with structural Redo, and
+Scene18 with legacy and new kits. Relocated executables reach tick 2 with
+exact saved scene bytes and matching authored/runtime topology. All Scene19
+cases refuse the old kit before publication. Formatting, strict workspace
+Clippy, Markdown and 33 Python tests pass. Parallel Rust tests fail on
+`capture_busy` in an unchanged workspace-capture test. A serialized workspace
+run passes 410 tests with 9 ignored, and the real-kit tracer passes separately.
+Private receipts are under
+`/home/akilf/Projects/Ruster-Audits/assembly-static-fburIh`. No desktop,
+installation or remote changes. Next checkpoint is the Group-local runtime
+transaction and moving headless tracer. Work remains active on the feature
+branch. No motion, native playback or MCP export acceptance yet.
+
+Captured a matched-comparison baseline before changing the motion path.
+The private audit contains `step_sample.rs`, `flat-step.json`, exact
+release-library and executable pins, and five raw receipt pairs. The harness
+directly times 5,000 production `Engine::step` calls after 500 warmups, using
+the existing Motion Lab flat scene (three objects, two Lua bindings), pinned
+to CPU 0. Baseline warm-process samples span 131.90–133.97 ms per batch
+(median 132.28 ms) and all five final scene/tick outputs match. This measures
+whole CPU-side Step for one fixture. The candidate comparison is pending.
+
+The audit now also contains `verify_hinge_receipt.py` for actual relocated
+Motion Lab creation reports at ticks 0 and 1. It checks topology and the sole
+local-rotation change, then independently derives mesh and collider centers,
+box orientation/extents and light position from the serialized transforms.
+Both synthetic poses pass and a tampered mesh transform is rejected.
+Production receipts and owning collider-query evidence remain pending.
+
+The feature branch now has an in-progress Scene20 export contract: content
+schema16 requires a kit advertising `group_local_rotation`, with descriptor5
+retained. Both Python and the editor worker distinguish that capability
+from static Scene19. The real static kit refused the saved moving fixture
+before creating a destination. All 33 Python tests pass. Scratch fixtures
+cover a quarter-turn and invalid output on the second Step. The pinned
+Scene19 Behavior CLI refuses Scene20 input explicitly. Candidate executable
+build and positive package/playback checks initially remained pending.
+
+Moving headless export now passes. Matched release Motion Lab and schema16
+kit packaged the saved Scene20 fixture. The relocated executable ran ticks 0
+and 1 and kept the source scene bytes exact. The independent receipt verifier
+confirmed +Z quarter-turn, fixed topology, collider center/extents/world long
+axis and mesh/light positions. A first real helper run failed because its
+state-receipt validator forced Scene13 and refused the explicit Group target.
+The final helper validates schema16 binding receipts as Scene20 and passes
+without weakening the Scene13 path for older schemas. The Lua fixture uses a
+numeric literal because the current sandbox has no math table. Build pins,
+hashes and raw reports are retained under
+`/home/akilf/Projects/Ruster-Audits/assembly-runtime-20261116.0yzyzV/moving-package.CbiJIi`.
+The packaging changes are checkpointed at `9ca5e70` on the feature branch.
+The final 33 Python cases and the focused Rust exact runtime profile test
+pass. This used the direct production packager and no native window. Editor/MCP
+authoring and their production export routes remain open.
+
+Core source checkpoint `88934cc` adds explicit Group targets and API6.
+Focused Scene and Behavior tests pass 85 cases, including tick-start collider
+sweeps, exact Reset, cancelled and invalid-output rollback, descendant bound
+rejection at Commit and Scene20 retained history. Package owning tests and
+strict core Clippy passed. The ordinary editor authoring and guarded MCP
+route implementation is underway in the same feature worktree. Guarded real
+STDIO authoring, preview, Undo/Redo, save, fresh-open and export passed.
+The relocated MCP artifact retains exact scene bytes and history and moves
+the hinge from about +π/2 to zero on Step. Final receipts are in
+`/home/akilf/Projects/Ruster-Audits/group-authoring-final-2pf1Qu`; an earlier
+equivalent artifact under `group-authoring-MEHXHi` was separately checked.
+
+Native ordinary-editor pilot selected the Group, used Add behavior and the
+Lua Group rotation template, opened the API6 source window, closed it with
+Escape and used the visible Save button. Confirmed Scene20 on disk, exact
+Group target, unchanged hierarchy, image capture and normal File-menu close.
+Initial harness failures were tree byte serialization, exact label lookup,
+screenshot request shape and Ctrl+S from the app-scoped fixture. The button
+route passed. Evidence is under `group-native.3H4vds/pilot-5*` in the audit
+tree. Final-source native preview, reopen and GUI export remain open.
+
+The relocated application mapped on workspace 2 via a silent owned launch
+and exited 0 after the bounded 240-frame run. NVIDIA RTX 4060 Vulkan and
+effective 4x MSAA were logged. Workspace 1 remained focused and the
+test window exited. The native smoke did not capture pixels or exercise
+editor controls. See `native-smoke/receipt.json` and `native-smoke/native.log`
+under the moving package audit.
+
+Native visual playback independently passes for a framed progressive-motion
+variant packaged with the same executable and kit. Inspected captures at
+ticks 13 and 249 show the box move and turn from upright to horizontal.
+The focused bounded run exited 0 at tick 350 with 1,351 UI frames and no
+unresolved runtime error. Workspace 1 was restored. Private evidence is
+`native-clean.jvd5xz60` under the moving package audit. Earlier capture attempts
+ended before the later capture or timed out after restoring the hidden
+workspace. Visual captures show mesh motion. Collider and attached light
+poses are covered by separate numerical evidence.
+
+
+Six alternating CPU-0 paired runs of the same flat Step fixture returned
+identical scene/tick output. Median per 5,000 Steps was 132.104 ms before and
+131.474 ms on the moving build. The moving fixture also completed one batch
+in 78.567 ms with one Group binding holding the quarter turn after the first
+Step. Different fixture contents preclude a direct performance comparison.
+These are bounded CPU-side observations, with raw samples and pins in the
+assembly runtime audit. No native frame latency is inferred.
+
+
+
+
+## Walkthrough preflight and assembly runtime proposal — 2026-11-16
+
+The user deferred the physical walkthrough until back at the workstation.
+Disposable task card and exact copies live under
+`/home/akilf/Projects/Ruster-Audits/editor-walkthrough-20261116.1TgEKu`.
+`target/debug/ruster-scene inspect` loads both. Selection is a flat Scene1
+fixture with empty history and upgrades on save. Assembly is Scene19 with
+two nested Groups, a box collider and an attached light. Both file hashes
+match the prepared copies after inspection. `ruster-behavior check` accepts
+selection and refuses assembly at Reset (exit 1). Direct Python
+`scene_dependencies` accepts selection and refuses assembly at the Scene1–18
+bound. The initial direct Python probe needed `PYTHONPATH=scripts`.
+
+Four selected default editor tests pass for compact layout restoration,
+hierarchy search/draft preservation, modal shortcut ownership and remapping
+conflicts. After an initial invocation lacked `RUSTER_TEST_MCP_BINARY`,
+`cargo build --locked -p ruster-mcp` plus the explicit matching adapter path
+and `cargo test --locked -p ruster-editor hierarchy_stdio_creator_save_fresh_open -- --ignored`
+passes the real STDIO hierarchy history/save/fresh-open case (0.18 seconds
+test time). This fixture uses scoped test approval. No native window, physical
+input, preference change, package publication or full gate was exercised.
+
+The [assembly runtime and delivery proposal](plans/ASSEMBLY-RUNTIME-DELIVERY.md)
+identifies Scene Authoring, runtime and packaging admission guards. The next
+goal is scoped to a Group-local hinge behavior through one matched Linux kit,
+with explicit world-pose, transactional rollback, old-kit refusal and flat
+compatibility checkpoints. At this preflight checkpoint, it remained proposed and no engine source changed.
+`python3 scripts/check.py --base HEAD` and `git diff --check` pass for the docs.
+
+## Mature engine parity research — 2026-11-16
+
+Compared official Unity, Unreal and Godot documentation against sampled
+cumulative source at `5e83590` and retained creator evidence.
+[Capability parity](research/MATURE-ENGINE-PARITY.md) records the proposed
+mature 3D baseline and project-dependent and advanced coverage.
+[Editor workflow research](research/EDITOR-WORKFLOW-COMPARISON.md) records
+reference conventions, hypotheses and a proposed human walkthrough.
+Next planning decision is which workflow to qualify and when to run the
+editor baseline. No implementation scope activated. Documentation gate
+`python3 scripts/check.py --base HEAD` and `git diff --check` passed.
+No engine tests or new desktop trials were run.
+
 ## Codex worktree handoff — 2026-11-16
 
 Use this cumulative worktree for Codex development. The older feedback checkout

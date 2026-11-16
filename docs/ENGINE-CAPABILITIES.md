@@ -2,6 +2,14 @@
 
 Updated2026-11-10. Root/Astra strategic assessment, with state/UI rows reconciled against accepted F2a source `6e44269`, F3a source `7b89344` F3b production source `2eb37a8` and accepted F3c product source `01fe8f9`. Other rows retain their recorded subsystem evidence. This is a product gap inventory and proposed dependency order, not an approved implementation schedule, feature-parity promise or evidence of support. [STATUS](STATUS.md) owns verified deliveries; [ROADMAP](ROADMAP.md) owns milestones.
 
+For a current cross-engine view, see the
+[November 16 feature parity comparison](research/MATURE-ENGINE-PARITY.md).
+The inventory below retains its dated observations. The cumulative source
+and qualification records supersede its older flat-scene baseline. Bounded
+hierarchy authoring, Undo/Redo and Save/reopen are installed locally, with
+explicit runtime/export limits. See [STATUS](STATUS.md) and the current
+[roadmap](ROADMAP.md) for delivery and the proposed next slice.
+
 ## Confirmed direction versus proposed scope
 
 The user explicitly requires lighting, shaders and textures as core product capabilities, and LOD and ray tracing further down the line. Creator-first design, lean measured implementation and first-class direct-editor/native-MCP workflows remain requirements. V1’s bounded opaque-material/UV/PNG contract, V2a authored diffuse lighting and V2b bounded Sun shadows are accepted within their recorded scopes. V3a direct-lit nonmetallic surfaces are accepted with verified handoff within their bounded scope. Richer material/shading/environment and broader shadow contracts, physics libraries, general asset formats, animation systems and future rendering architecture remain to be selected. Historical M0–M8 checkpoints are narrow prototype achievements, not a complete game-engine baseline.
@@ -96,6 +104,6 @@ Accepted F3b supplies one reusable button→creator command→state/HUD workflow
 
 Source01fe8f9 supports up to four flat panels,32shared rows, Center/corner anchors and typed Boolean panel visibility/button availability through ordinary editor and83-tool native MCP. Creator content owns Welcome→Gameplay→Results→Retry. Current-owner eligibility, disappearing focus/held-input cancellation, conservative transparent overlap, legacy history migration and raw per-panel recovery qualify. Both independently authored projects deliver exact source-hidden/native applications. Bounded CPU and equal-history resource references pass. **Root/Astra accept F3c after the fresh matched-camera idle pair passes.** Both stopped10second/N1observations accumulate zero additional process-counter ticks, within the frozen reference. The earlier mismatched comparison remains rejected and preserved. Arbitrary/nested layout, extra widgets, creator rejection ergonomics, physical-human familiarity and broad hardware/platform qualification retain separate scope. [Current evidence](evidence/F3C-STATE-DRIVEN-SCREENS.md).
 
-## Next proposed foundation — 2026-11-10
+## Historical next foundation proposal — 2026-11-10
 
 Astra/Root recommend [F4a Assembly Groups](plans/F4A-ASSEMBLY-GROUPS.md) for the current flat-composition gap. The proposal covers bounded connected assemblies and shared transform/render/spatial semantics through both creator paths. It supersedes C1a’s historical baseline. Grouping remains unimplemented. Approval is pending and development is paused at the user’s request.

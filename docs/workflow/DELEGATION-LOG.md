@@ -2,6 +2,37 @@
 
 Record meaningful completed work, not every tool call. Unknown metrics remain unknown.
 
+## 2026-11-16 — Assembly runtime implementation and acceptance
+
+The exclusive implementation owner delivered static kit support, transactional
+Group-local rotation and ordinary/guarded authoring. Owning checks exposed an
+API6 tooling annotation refusal and a flat runtime help label regression.
+Both were repaired and verified. Root handled the Scene20 package boundary,
+native and relocated acceptance, a final real-STDIO test extension, and
+integration. Astra completed one read-only changed-risk review with no P0/P1
+finding. Model consumption and end-to-end worker wall time were unavailable.
+See [STATUS](../STATUS.md) for check scopes and retained failures.
+
+## 2026-11-16 — Assembly runtime goal scope
+
+At the user's request, `gpt-6-astra` medium reviewed the next goal read-only.
+It recommended one moving-assembly outcome with static delivery as a real
+intermediate checkpoint. Root verified the implicit Application target
+classification and that Scene19 can come from retained history alone. Both
+insights are now in the plan. No child edits or runtime evidence. Elapsed
+and token usage were unavailable.
+
+## 2026-11-16 — Mature engine parity research
+
+Two bounded read-only Codex assignments used `gpt-6-astra`: capabilities at
+medium, editor workflows at low. Both returned official-source comparisons.
+Root reconciled the findings against cumulative source and retained evidence and
+authored the research records. The capability review exposed the older flat-scene
+inventory baseline. The editor review exposed conflicting Unity/Unreal fly
+bindings and different Play persistence semantics. Both informed the proposed
+tests. No implementation, child repairs, live UI checks or measured model cost.
+Child wall time and token use are unavailable.
+
 ## 2026-11-15 — Actual-client responsiveness regression investigation
 
 Akil reports functional browser controls but a definite regression against his
