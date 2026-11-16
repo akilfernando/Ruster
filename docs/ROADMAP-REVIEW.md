@@ -1,5 +1,23 @@
 # Post-M3 roadmap review
 
+## Local matched promotion — 2026-11-16
+
+After essential visual grounding passed the finite actual-ChatGPT perspective,
+stale-refusal and orthographic checks, the cumulative code was independently
+compared with the qualified source. The next delivery gap was installation, not
+another model review or redundant rebuild. Standing personal-project installation
+authority permitted a reversible local update after verifying no installed-target
+process was running. The qualified optimized editor/MCP pair was staged, hashed,
+installed and scoped-smoked; the old editor was backed up. The frozen trial and
+client configuration were deliberately not migrated, preserving working feedback
+and executable-bound trust. No real project was implicitly enrolled.
+[Observed promotion and limits](verification/2026-11-16-local-native-mcp-promotion.md).
+This closes local binary promotion only, not public release, canonical merge,
+ordinary installed GUI acceptance or broader engine/runtime milestones. Revisit
+normal project onboarding when an intended real project/executable is selected.
+
+## Original review context
+
 Date: 2026-11-04. Status: **accepted by the user** (“ok, let's keep going”). The revision is incorporated into [ROADMAP.md](ROADMAP.md), which is the canonical delivery plan. This review preserves the rationale; its proposal wording below is historical. M0–M3 remain historical deliveries within their recorded limits.
 
 ## Assessment

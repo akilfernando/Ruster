@@ -1,9 +1,23 @@
 # Current project status
 
+## Matched editor/MCP installed locally — 2026-11-16
+
+**LOCAL INSTALLATION PASS; not a public release or automatic real-project enrollment.**
+The normal editor and MCP commands now contain the reviewed, human-qualified
+optimized default pair. Installed hashes match the qualified artifacts, native
+help and actual installed MCP STDIO discovery/clean EOF pass, and the previous
+editor has a verified rollback backup. The existing desktop entry, ChatGPT trial
+configuration, enrolled fixture, projects/preferences and live trial are unchanged.
+[Promotion receipt, checks and limits](verification/2026-11-16-local-native-mcp-promotion.md).
+No GUI was launched for installation; ordinary installed launch with user preferences
+was not re-exercised. The frozen trial remains usable. Real-project enrollment is
+an explicit project/executable choice, not an automatic consequence of installation.
+
 ## Human-qualified MCP visual grounding integrated — 2026-11-16
 
-**SOURCE INTEGRATED / essential actual-ChatGPT human gates PASS; NOT installed or
-released.** Ordered owned cherry-picks `25f5764`→`b75eed1` and
+**Integration-time checkpoint: SOURCE INTEGRATED / essential actual-ChatGPT gates PASS.**
+Installation was pending at this checkpoint and is now completed locally above;
+release remains unclaimed. Ordered owned cherry-picks `25f5764`→`b75eed1` and
 `e5e5ad1`→`66c4c4b` extend `feat/cumulative-editor-20261115`. No source feature or
 refactor was added. Exact file-set and byte comparison against frozen reviewed
 `e5e5ad1f96df288e936f0accb86182ce4b85abf7` passes for all226 source-scope files,

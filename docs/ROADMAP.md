@@ -11,8 +11,11 @@ engine geometry IDs are accepted for authored scenes, not composited-overlay
 ownership. Runtime grounding explicitly remains unsupported; projected bounds,
 annotations and runtime grounding are follow-ons. No further human checks are
 required for this slice. [Dated acceptance/evidence](verification/2026-11-16-human-qualified-visual-grounding-integration.md).
-Normal matched editor/MCP promotion is QUEUED, not installed/released; preserve the
-frozen open human trial. Broader engine/runtime work retains the existing plan.
+Normal matched editor/MCP promotion is locally INSTALLED with rollback and scoped
+post-install checks; this is not a public release or real-project enrollment.
+[Local promotion evidence](verification/2026-11-16-local-native-mcp-promotion.md).
+The frozen open human trial/configuration is preserved. Broader engine/runtime
+work retains the existing plan.
 
 **Latest user-approved priority:** native-first, viewport-focused Rusterize UI
 alongside ChatGPT. Astra defines interface/implementation, then regular Sol builds.
@@ -32,7 +35,7 @@ inventory, not a competing active schedule.
 - **Where we have been and why:** [development decision record](ROADMAP-REVIEW.md#development-decision-record--2026-11-15), including a clearly labeled retrospective and the convergence decision.
 - **What is actually implemented/tested/blocked:** [STATUS](STATUS.md) and its linked evidence.
 - **Architecture contracts:** [decision records](decisions/); the roadmap links them rather than duplicating their specifications.
-- **Working convergence home:** `feat/cumulative-editor-20261115`. Protected feedback candidates remain frozen references, not alternative permanent products. An earlier default native editor was installed as a partial cumulative handoff; the new AI workspace integration is SOURCE-ONLY, with no installed replacement. This is not a canonical merge, full MCP/browser promotion or release.
+- **Working convergence home:** `feat/cumulative-editor-20261115`. Protected feedback candidates remain frozen references, not alternative permanent products. The matched native AI workspace/editor and MCP binaries are now installed locally with verified rollback. The actual ChatGPT trial retains its frozen registration; installing a binary does not enroll arbitrary real projects. This is not a canonical merge, full browser promotion or public release.
 
 ### Starting point before cumulative client trial: source progress is not delivered parity
 
