@@ -9483,18 +9483,26 @@ mod tests {
         hierarchy_creator_journey(true, false, CreatorFixture::StaticGlb);
     }
 
+    #[test]
+    #[ignore = "explicit matched MCP/runtime kit and real Scene21 play-check fixture"]
+    fn saved_play_check_over_real_stdio() {
+        hierarchy_creator_journey(true, false, CreatorFixture::PlayCheck);
+    }
+
     #[derive(PartialEq)]
     enum CreatorFixture {
         Assembly,
         Rotation,
         PlayerView,
         StaticGlb,
+        PlayCheck,
     }
 
     fn hierarchy_creator_journey(stdio: bool, registered: bool, fixture: CreatorFixture) {
         let moving = fixture == CreatorFixture::Rotation;
         let player_view = fixture == CreatorFixture::PlayerView;
         let static_glb = fixture == CreatorFixture::StaticGlb;
+        let play_check = fixture == CreatorFixture::PlayCheck;
         use std::io::{BufRead, Write};
         struct Adapter(std::process::Child);
         impl Drop for Adapter {
@@ -9570,19 +9578,24 @@ mod tests {
             let fixture = std::env::var_os("RUSTER_TEST_PLAYER_VIEW_SCENE").unwrap();
             std::fs::copy(fixture, &path).unwrap();
             SceneEditor::test_loaded(Session::open(&path).unwrap())
+        } else if play_check {
+            let fixtures =
+                PathBuf::from(std::env::var_os("RUSTER_TEST_PLAY_CHECK_FIXTURE").unwrap());
+            std::fs::copy(fixtures.join("scene.json"), &path).unwrap();
+            SceneEditor::test_loaded(Session::open(&path).unwrap())
         } else {
             SceneEditor::new(Session::new(Scene::empty("creator-assembly")).unwrap())
         };
         if stdio {
             // Disposable fixture setup: establish the directory before consent.
             // The creator's later MCP Save must not rebase an approved owner.
-            if !player_view {
+            if !player_view && !play_check {
                 editor.save_scene(path.clone()).unwrap();
                 editor.test_finish_asset_work();
             }
             editor.save_grant = Some(persistence_commands::SaveGrant::new(dir.path()).unwrap());
         }
-        if moving || player_view || static_glb {
+        if moving || player_view || static_glb || play_check {
             editor.creation_export =
                 crate::creation_export::Controller::from_environment(true).unwrap();
             assert!(editor.creation_export.runtime_kit().is_some());
@@ -9735,6 +9748,8 @@ mod tests {
         };
         if player_view {
             player_view_journey(&mut editor, &mut call);
+        } else if play_check {
+            play_check_stdio_journey(&mut editor, &mut call, &path);
         } else if static_glb {
             static_glb_journey(&mut editor, &mut call, dir.path());
         } else {
@@ -9934,7 +9949,7 @@ mod tests {
             let saved = call(&mut editor, "scene_persistence_inspect", json!({}));
             assert_eq!(saved["last_committed_save"]["committed"], true);
             let readback = call(&mut editor, "scene_inspect", json!({}));
-            if !player_view && !static_glb {
+            if !player_view && !static_glb && !play_check {
                 assert_eq!(readback["hierarchy"]["parents"]["point"], "hinge");
             }
             assert_eq!(
@@ -9951,7 +9966,7 @@ mod tests {
         );
         assert_eq!(
             reopened.loaded_format_version(),
-            if player_view || static_glb {
+            if player_view || static_glb || play_check {
                 ruster_scene::PLAYER_VIEW_FORMAT_VERSION
             } else if moving {
                 ruster_scene::GROUP_ROTATION_FORMAT_VERSION
@@ -9959,8 +9974,10 @@ mod tests {
                 ruster_scene::HIERARCHY_FORMAT_VERSION
             }
         );
-        if moving || player_view || static_glb {
-            let (title, filename) = if static_glb {
+        if moving || player_view || static_glb || play_check {
+            let (title, filename) = if play_check {
+                ("Guarded play check", "guarded-play-check.tar.gz")
+            } else if static_glb {
                 ("Guarded static GLB", "guarded-static-glb.tar.gz")
             } else if player_view {
                 ("Guarded Player View", "guarded-player-view.tar.gz")
@@ -10045,6 +10062,123 @@ mod tests {
         if stdio {
             eprintln!("STDIO cleanup: adapter reaped, native locator absent");
         }
+    }
+
+    fn play_check_stdio_journey(
+        editor: &mut SceneEditor,
+        call: &mut impl FnMut(&mut SceneEditor, &str, Value) -> Value,
+        path: &std::path::Path,
+    ) {
+        use ruster_behavior::play_check::{
+            self as check, CheckIdentity, Comparison, Expectation, PlayCheck, Selection,
+        };
+        use ruster_scene::StateValue;
+        let fixtures = PathBuf::from(std::env::var_os("RUSTER_TEST_PLAY_CHECK_FIXTURE").unwrap());
+        let authored = editor.session.snapshot_bytes().unwrap();
+        let authored_on_disk = std::fs::read(path).unwrap();
+        let sidecar = check::sidecar_path(path);
+        let mut case = PlayCheck {
+            format: check::FORMAT.into(),
+            version: check::VERSION,
+            name: "Move and count".into(),
+            identity: CheckIdentity::capture(
+                &editor.session,
+                ruster_assets::empty_resource_identity(),
+                ruster_behavior::DEFAULT_FIXED_TICK
+                    .as_nanos()
+                    .try_into()
+                    .unwrap(),
+            )
+            .unwrap(),
+            frames: serde_json::from_slice(&std::fs::read(fixtures.join("input.json")).unwrap())
+                .unwrap(),
+            expectations: vec![
+                Expectation {
+                    select: Selection::Translation {
+                        object_id: "subject".into(),
+                    },
+                    comparison: Comparison::Equals {
+                        expected: StateValue::Vec3([2., 0., 0.]),
+                        tolerance: None,
+                    },
+                },
+                Expectation {
+                    select: Selection::State {
+                        binding_id: "subject-movement".into(),
+                        field: "total".into(),
+                    },
+                    comparison: Comparison::Equals {
+                        expected: StateValue::Number(3.),
+                        tolerance: None,
+                    },
+                },
+            ],
+        };
+        let start =
+            |editor: &mut SceneEditor,
+             call: &mut dyn FnMut(&mut SceneEditor, &str, Value) -> Value| {
+                let assets = editor.assets.as_ref().map_or(0, AssetStore::revision);
+                call(
+                    editor,
+                    "play_check_start",
+                    json!({"expected_asset_revision":assets.to_string()}),
+                )
+            };
+        let finish = |editor: &mut SceneEditor,
+                      call: &mut dyn FnMut(&mut SceneEditor, &str, Value) -> Value,
+                      id: &Value| {
+            let deadline = Instant::now() + Duration::from_secs(7);
+            loop {
+                let receipt = call(
+                    editor,
+                    "play_check_inspect",
+                    json!({"operation_id":id,"details":true}),
+                );
+                if receipt["state"] != "running" {
+                    return receipt;
+                }
+                assert!(Instant::now() < deadline, "{receipt}");
+                std::thread::sleep(Duration::from_millis(3));
+            }
+        };
+
+        std::fs::write(&sidecar, case.encode().unwrap()).unwrap();
+        let first = start(editor, call);
+        let failure = finish(editor, call, &first["operation_id"]);
+        assert_eq!(failure["report"]["status"], "assertion_failed");
+        assert_eq!(failure["report"]["results"][1]["actual"]["value"], 2.0);
+        assert_eq!(finish(editor, call, &first["operation_id"]), failure);
+        let summary = call(
+            editor,
+            "play_check_inspect",
+            json!({"operation_id":first["operation_id"]}),
+        );
+        assert!(summary["report"].get("results").is_none());
+
+        std::fs::write(&sidecar, b"{").unwrap();
+        let malformed = start(editor, call);
+        let malformed = finish(editor, call, &malformed["operation_id"]);
+        assert_eq!(malformed["report"]["status"], "invalid_case");
+
+        case.expectations[1].comparison = Comparison::Equals {
+            expected: StateValue::Number(2.),
+            tolerance: None,
+        };
+        let good = case.encode().unwrap();
+        case.identity.resources_sha256 = "0".repeat(64);
+        std::fs::write(&sidecar, case.encode().unwrap()).unwrap();
+        let stale = start(editor, call);
+        let stale = finish(editor, call, &stale["operation_id"]);
+        assert_eq!(stale["report"]["status"], "stale");
+        assert_eq!(stale["report"]["completed_tick"], 0);
+
+        std::fs::write(&sidecar, good).unwrap();
+        let repair = start(editor, call);
+        let repair = finish(editor, call, &repair["operation_id"]);
+        assert_eq!(repair["report"]["status"], "passed");
+        assert_eq!(repair["report"]["completed_tick"], 2);
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
+        assert_eq!(std::fs::read(path).unwrap(), authored_on_disk);
     }
 
     fn static_glb_journey(
