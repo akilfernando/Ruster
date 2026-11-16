@@ -2,11 +2,12 @@
 
 ## Current delivery roadmap — 2026-11-16
 
-**Latest engine milestone:** repeatable play checks are locally integrated
-through `8b09ecd`, following static GLB import/safe reimport, articulated
-assembly and authored player view. The [status](STATUS.md) records qualification
-of cumulative source and installed artifacts. The [post-GLB plan](#post-glb-priority-and-next-capabilities--2026-11-16)
-is the current recommended next sequence; no implementation goal starts here.
+**Latest engine milestone:** [bounded kinematic move-and-slide](plans/KINEMATIC-MOVE-AND-SLIDE.md)
+is locally integrated following repeatable play checks, static GLB import,
+articulated assembly and authored player view. The [status](STATUS.md)
+records qualification of cumulative source and artifacts. The
+[post-GLB plan](#post-glb-priority-and-next-capabilities--2026-11-16)
+retains the recommended sequence. Individual follow-on slices are provisional.
 
 **Latest actual-client acceptance:** essential MCP visual grounding is source-integrated through
 reviewed `e5e5ad1` (cumulative `66c4c4b`), exact226-file byte equivalence verified.
@@ -155,17 +156,14 @@ capability remain primary, and checks do not certify a whole game.
 | Order | Bounded creator outcome to scope next | Selection criterion / dependency |
 | --- | --- | --- |
 | 1 | Repeatable play checks | Locally verified through ordinary editor, guarded MCP and relocated runtime. [Acceptance](STATUS.md#repeatable-play-checks-integrated-locally--2026-11-16). |
-| 2 | Collision-aware interaction and useful event feedback | First inspect whether existing primitive queries and state already express the desired contact/occupancy response. If cross-binding ordered notification is the blocker, select a bounded lifecycle/event slice. If reliable movement/contact response is the blocker, select character/kinematic collision with a maintained-library feasibility study. Do not implement both an event bus and rigid-body world by default. |
+| 2 | Collision-aware movement | [Bounded kinematic slide](plans/KINEMATIC-MOVE-AND-SLIDE.md) covers one sphere against stationary primitive blockers. Existing overlap and typed state cover the selected occupancy workflow. Cross-binding event delivery remains a separate candidate when a creator workflow needs it. |
 | 3 | Packaged audio feedback | A creator imports a sound and triggers it from an existing action/state transition, with stop/pause/reset and bounded playback ownership. Introduce only the required trigger contract; do not make a general event bus a speculative prerequisite. |
 | 4 | Imported transform animation | Build on accepted GLB generations with one named clip, play/pause/reset and reimport/export identity. Resolve source versus authored/runtime transform ownership first. Skeletal data/blending is separate; move it earlier only for a concrete required actor workflow. |
 | 5 | Reusable composition and application continuity | Select prefab/override, scene transition, player save/settings, broader UI or gamepad slices from the actual missing workflow. Static placed GLB copies do not establish live prefabs, and editor Save is not player persistence. |
 | Alongside subsequent slices | Visual baseline and usability | Normal maps/tangents, metallic/environment lighting and transparency remain required candidate slices; evaluate the next asset's actual fidelity blocker. Preserve keyboard, focus, recovery, ordinary human and MCP parity in every slice. |
 | After representative content | Measured scale/LOD, then later ray tracing | Profile a named useful scene; choose culling/LOD/resource changes against equal-quality evidence. No unsupported Rust performance advantage. |
 
-The [active kinematic movement goal](plans/KINEMATIC-MOVE-AND-SLIDE.md)
-selects the movement branch of row 2 for one sphere and stationary
-primitive blockers. Existing overlap and typed state cover the selected
-occupancy workflow. Rows 3–5 remain provisional. After each slice,
+Rows 3–5 remain provisional. After each slice,
 compare the next blocker with the remaining [foundation packages](plans/CREATOR-FOUNDATIONS.md)
 and record any reorder and rationale. A short acceptance fixture is not the
 substantial integrated test project: retain the user's foundation-first direction
