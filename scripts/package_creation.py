@@ -28,6 +28,8 @@ MAX_KIT_FILES = 32
 MAX_KIT_BYTES = 300 * MIB
 MAX_BINARY_BYTES = 256 * MIB
 MAX_METADATA_BYTES = MIB
+MAX_PLAY_CHECK_BYTES = 64 * 1024
+PLAY_CHECK_FILE = "play-check.json"
 MAX_NOTICE_BYTES = 8 * MIB
 MAX_MESHES = 64
 MAX_OBJECTS = 256
@@ -72,6 +74,10 @@ ANIMATED_ASSEMBLY_PROFILE = {
 PLAYER_VIEW_PROFILE = {
     **ANIMATED_ASSEMBLY_PROFILE,
     "capabilities": [*ANIMATED_ASSEMBLY_PROFILE["capabilities"], "authored_player_view"],
+}
+PLAY_CHECK_PROFILE = {
+    **PLAYER_VIEW_PROFILE,
+    "capabilities": [*PLAYER_VIEW_PROFILE["capabilities"], "repeatable_play_checks"],
 }
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
@@ -186,7 +192,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -219,7 +225,8 @@ def initial_camera(value: object) -> dict | None:
     return camera
 
 
-def run_runtime(binary: Path, arguments: list[str], cancel_file: Path | None = None) -> dict:
+def run_runtime(binary: Path, arguments: list[str], cancel_file: Path | None = None,
+                allowed_exit: tuple[int, ...] = (0,)) -> dict:
     """Only fixed implementation-owned invocations; always reap our runtime child."""
     cancelled(cancel_file)
     with tempfile.TemporaryDirectory(prefix="ruster-preflight-") as temporary:
@@ -246,7 +253,7 @@ def run_runtime(binary: Path, arguments: list[str], cancel_file: Path | None = N
                 errors = stderr.read(MIB + 1)
                 if len(data) > 4 * MIB or len(errors) > MIB:
                     raise ValueError("runtime preflight output exceeds byte limit")
-                if child.returncode:
+                if child.returncode not in allowed_exit or (child.returncode and not data):
                     raise ValueError("runtime preflight failed: " + errors.decode("utf-8", "replace")[:4096])
                 cancelled(cancel_file)
                 return decode(data, "runtime response")
@@ -1152,7 +1159,13 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
-    exact_fields(content, fields | ({"initial_camera"} if "initial_camera" in content else set()), "content")
+    optional = {"initial_camera", "play_check_sha256"} & content.keys()
+    exact_fields(content, fields | optional, "content")
+    if "play_check_sha256" in content and (
+        not isinstance(content["play_check_sha256"], str) or not HASH.fullmatch(content["play_check_sha256"])
+    ):
+        raise ValueError("invalid play check source checksum")
+
     if "initial_camera" in content:
         content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
@@ -1321,11 +1334,14 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     camera = content.get("initial_camera")
     schema = content["schema"]
     supplied_profile = kit["profile"]
-    if schema == 17 and supplied_profile != PLAYER_VIEW_PROFILE:
+    case_hash = content.get("play_check_sha256")
+    if case_hash is not None and supplied_profile != PLAY_CHECK_PROFILE:
+        raise ValueError("runtime kit does not support repeatable_play_checks; prepare a current runtime kit")
+    if schema == 17 and supplied_profile not in (PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE):
         raise ValueError("runtime kit does not support Scene21 authored_player_view; prepare a current runtime kit")
-    if schema == 16 and supplied_profile not in (ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE):
+    if schema == 16 and supplied_profile not in (ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE):
         raise ValueError("runtime kit does not support Scene20 group_local_rotation; prepare a current runtime kit")
-    hierarchy_profiles = (STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE)
+    hierarchy_profiles = (STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE, PLAYER_VIEW_PROFILE, PLAY_CHECK_PROFILE)
     if schema == 15 and supplied_profile not in hierarchy_profiles:
         raise ValueError("runtime kit does not support Scene19 static_assembly_hierarchy; prepare a current runtime kit")
     profile = PRIMITIVE_PROFILE if supplied_profile in hierarchy_profiles else supplied_profile
@@ -1387,12 +1403,19 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                 raise ValueError(diagnostic)
             package_app.put(stage, "resources/" + name, data)
             del data
+        if case_hash is not None:
+            case_bytes = read_bounded(content_root, PLAY_CHECK_FILE, MAX_PLAY_CHECK_BYTES)
+            if sha256(case_bytes) != case_hash:
+                raise ValueError("play check source checksum mismatch")
+            package_app.put(stage, "resources/" + PLAY_CHECK_FILE, case_bytes)
         package_app.put(stage, "app.json", encoded(descriptor))
         requirements = kit["elf"]
         readme = (content["title"] + "\n\nRun ./application from any working directory.\n"
                   "Linux x86_64; native graphics require a Vulkan-capable driver and desktop session.\n"
                   "ELF prerequisites: " + json.dumps(requirements, sort_keys=True) + "\n"
                   "The saved authored scene bytes and mapped original content resources accompany this runtime.\n")
+        if case_hash is not None:
+            readme += "Run ./application --play-check for the saved check and its JSON result.\n"
         package_app.put(stage, "README.txt", readme.encode())
         result = run_runtime(stage / "application", ["--headless", "--ticks", "0"], cancel_file)
         if (result.get("mode") != "creation" or result.get("title") != content["title"]
@@ -1471,6 +1494,11 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             raise ValueError("runtime preflight did not retain an empty HUD activation history")
         if schema >= 11:
             verify_hud_report(result, document, profile)
+        if case_hash is not None:
+            check = run_runtime(stage / "application", ["--play-check"], cancel_file, allowed_exit=(0, 2))
+            if check.get("status") not in ("passed", "assertion_failed"):
+                message = check.get("diagnostic") or check.get("status") or "missing saved-case result"
+                raise ValueError(f"play check preflight refused: {str(message)[:512]}")
         cancelled(cancel_file)
         manifest = {"schema": 1, "kind": "ruster-creation-package", "application": "application",
                     "target": package_app.TARGET, "title": content["title"],
@@ -1478,6 +1506,8 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                     "scene_sha256": sha256(scene_data), "profile": kit["profile"],
                     "elf": requirements, "dependencies": kit["dependencies"],
                     "files": package_app.file_manifest(stage)}
+        if case_hash is not None:
+            manifest["play_check_sha256"] = case_hash
         manifest_data = encoded(manifest)
         package_app.put(stage, "manifest.json", manifest_data)
         receipt = publish(stage, output, "application", cancel_file)
@@ -1486,6 +1516,8 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                        file_count=len(manifest["files"]) + 1, title=content["title"])
         if camera is not None:
             receipt["initial_camera"] = camera
+        if case_hash is not None:
+            receipt["play_check_sha256"] = case_hash
         return receipt
 
 

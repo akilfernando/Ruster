@@ -26,6 +26,7 @@ Usage: ruster-motion-lab [OPTIONS]
   --generic-demo   Use the embedded Scene5/Lua motion-comparison demo
   --creation-info Print the cumulative runtime profile, including state-driven HUD panels, and exit
   --creation PATH Read an app.json creation descriptor and its relative resources
+  --play-check     Run the packaged play check in isolation; JSON result, exit 2 if unsuccessful
   --resources PATH Explicit read-only mesh resource directory for generic mode
   --mesh ID=PATH   Map a Scene mesh ID to a relative OBJ resource (repeat, at most 64)
   --project PATH   Open an authored Motion Lab project (instead of --script)
@@ -59,6 +60,7 @@ present descriptor is an error. --help does not read application content.";
 #[derive(Default)]
 struct Options {
     headless: bool,
+    play_check: bool,
     ticks: Option<u64>,
     frames: Option<u64>,
     script: Option<PathBuf>,
@@ -86,6 +88,7 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
         match arg.as_str() {
             "--help" | "-h" => return Ok(None),
             "--headless" => options.headless = true,
+            "--play-check" => options.play_check = true,
             "--generic-demo" => options.generic_demo = true,
             "--ticks" | "--frames" | "--script" | "--speed" | "--project" | "--save-project"
             | "--scene" | "--resources" | "--mesh" | "--creation" | "--input-frames"
@@ -159,6 +162,19 @@ fn parse_from(args: impl IntoIterator<Item = String>) -> Result<Option<Options>,
             }
             _ => return Err(format!("Unknown option {arg:?}. See --help.")),
         }
+    }
+    if options.play_check
+        && (has_explicit_content(&options)
+            || options.frames.is_some()
+            || options.ticks.is_some()
+            || options.speed.is_some()
+            || options.input_frames.is_some()
+            || options.commands.is_some()
+            || options.hud_activations.is_some()
+            || options.resources.is_some()
+            || !options.meshes.is_empty())
+    {
+        return Err("--play-check uses only the packaged case, fixed tick and content; supply only --creation app.json if needed".into());
     }
     if options.ticks.is_some_and(|n| n > 10_000)
         || options.frames.is_some_and(|n| !(1..=10_000).contains(&n))
@@ -720,6 +736,75 @@ fn execute_generic(options: Options) -> Result<(), String> {
     }
 }
 
+fn execute_play_check(options: &Options) -> Result<bool, String> {
+    use ruster_assets::{resource_identity, MeshNormalPolicy, ResourcePin, TextureRole};
+    use ruster_behavior::play_check::{self, PlayCheck, Status};
+    use std::{
+        collections::BTreeMap,
+        sync::{atomic::AtomicBool, Arc},
+    };
+
+    let executable = std::env::current_exe().map_err(|error| error.to_string())?;
+    let descriptor = select_creation(options, &executable)?
+        .ok_or("--play-check requires a packaged app.json")?;
+    let parent = descriptor
+        .parent()
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or(Path::new("."));
+    let root = ResourceRoot::new(parent)?;
+    let manifest = CreationManifest::load(&root)?;
+    let session = manifest.load_session(&root)?;
+    let bytes = root.read(play_check::PACKAGED_PATH, play_check::MAX_CASE_BYTES)?;
+    let case = match PlayCheck::decode(&bytes) {
+        Ok(case) => case,
+        Err(diagnostic) => {
+            println!(
+                "{}",
+                serde_json::json!({"status":"invalid_case", "diagnostic":diagnostic})
+            );
+            return Ok(false);
+        }
+    };
+
+    let mut pins = BTreeMap::new();
+    // Ordinary package preflight validates decoded resource content. This
+    // read-only runner verifies exact bytes and interpretation without retaining
+    // renderer resources or building a second preview.
+    for (id, path) in &manifest.meshes {
+        let bytes = root.read(path, ruster_assets::MAX_SOURCE_BYTES)?;
+        let policy = manifest
+            .mesh_normal_policies
+            .get(id)
+            .copied()
+            .unwrap_or(MeshNormalPolicy::Flat);
+        pins.insert(id.clone(), ResourcePin::mesh(&bytes, policy));
+    }
+    for (id, path) in &manifest.textures {
+        let bytes = root.read(path, ruster_assets::MAX_TEXTURE_SOURCE_BYTES)?;
+        let role = manifest
+            .texture_roles
+            .as_ref()
+            .and_then(|roles| roles.get(id))
+            .copied()
+            .unwrap_or(TextureRole::BaseColor);
+        pins.insert(id.clone(), ResourcePin::texture(&bytes, role));
+    }
+    let tick_nanos =
+        u64::try_from(manifest.tick_duration().as_nanos()).map_err(|error| error.to_string())?;
+    let report = play_check::run(
+        &session,
+        &case,
+        &resource_identity(&pins),
+        tick_nanos,
+        Arc::new(AtomicBool::new(false)),
+    );
+    println!(
+        "{}",
+        serde_json::to_string(&report).map_err(|error| error.to_string())?
+    );
+    Ok(report.status == Status::Passed)
+}
+
 fn main() {
     if std::env::args().skip(1).eq(["--creation-info"]) {
         println!(
@@ -729,7 +814,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation", "authored_player_view"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation", "authored_player_view", "repeatable_play_checks"],
             })
         );
         return;
@@ -739,6 +824,11 @@ fn main() {
             println!("{HELP}");
             return;
         }
+        Ok(Some(options)) if options.play_check => match execute_play_check(&options) {
+            Ok(true) => Ok(()),
+            Ok(false) => std::process::exit(2),
+            Err(error) => Err(error),
+        },
         Ok(Some(options)) => execute(options),
         Err(error) => Err(error),
     };
@@ -756,6 +846,23 @@ mod tests {
 
     fn options(args: &[&str]) -> Result<Option<Options>, String> {
         parse_from(args.iter().map(|arg| (*arg).into()))
+    }
+
+    #[test]
+    fn packaged_check_refuses_replay_or_content_overrides() {
+        assert!(options(&["--play-check"]).unwrap().unwrap().play_check);
+        assert!(options(&["--play-check", "--creation", "app.json"]).is_ok());
+        for extra in [
+            ["--ticks", "2"],
+            ["--speed", "1"],
+            ["--scene", "scene.json"],
+            ["--input-frames", "alternative.json"],
+            ["--commands", "commands.json"],
+        ] {
+            let mut args = vec!["--play-check", "--headless"];
+            args.extend(extra);
+            assert!(options(&args).is_err());
+        }
     }
 
     #[test]

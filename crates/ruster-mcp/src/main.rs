@@ -15,6 +15,7 @@ mod hud_tools;
 mod lighting_tools;
 mod material_tools;
 mod persistence_tools;
+mod play_check_tools;
 mod player_view_tools;
 #[cfg(unix)]
 #[path = "../../support/project_startup.rs"]
@@ -224,6 +225,9 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     }
     if capture_tools::supported(name) {
         return capture_tools::valid(name, arguments);
+    }
+    if play_check_tools::supported(name) {
+        return play_check_tools::valid(name, arguments);
     }
     if export_tools::supported(name) {
         return export_tools::valid(name, arguments);
@@ -604,6 +608,7 @@ fn tools() -> Value {
     tools.extend(view_tools::list());
     tools.extend(capture_tools::list());
     tools.extend(export_tools::list());
+    tools.extend(play_check_tools::list());
     tools.extend(persistence_tools::list());
     tools.extend(behavior_tools::list());
     tools.extend(runtime_tools::list());
@@ -758,6 +763,7 @@ impl Server {
                         && !view_tools::supported(name)
                         && !capture_tools::supported(name)
                         && !export_tools::supported(name)
+                        && !play_check_tools::supported(name)
                         && !persistence_tools::supported(name)
                         && !behavior_tools::supported(name)
                         && !runtime_tools::supported(name)
@@ -1323,7 +1329,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 94);
+        assert_eq!(tools.len(), 97);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1384,6 +1390,9 @@ mod tests {
                 "creation_export_inspect",
                 "creation_export_start",
                 "creation_export_cancel",
+                "play_check_inspect",
+                "play_check_start",
+                "play_check_cancel",
                 "scene_persistence_inspect",
                 "scene_save",
                 "behavior_inspect",

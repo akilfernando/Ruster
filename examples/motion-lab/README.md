@@ -8,7 +8,7 @@ A non-game motion comparison application using `ruster-app`, its shared Vulkan v
 
 The descriptor names the creation, supported scene file, mesh-ID/relative-OBJ map and versioned fixed duration (`tick_millis` in descriptors1–4; `tick_nanos` in descriptor5). Descriptor2 adds texture-ID/relative-PNG resources consumed through shared immutable `Content`; descriptor1 remains readable without texture mappings. Scene6 materials and texture snapshots survive Reset and runtime scene replacement. Scene7 adds authored diffuse ambient/directional/point lighting as scene state, without extra descriptor fields or light-marker resources. Scene8 adds directional `kind.shadow` settings: boolean `enabled`, quality `standard`/`high`, and finite `depth_bias_texels`/`normal_bias_texels` in0–4 shadow-texel units. Omitting the whole shadow field selects disabled/standard/0.15/0; a present object must contain all four fields. Disabled nondefault settings remain authored data. Point lights cannot carry shadow settings. Current and reversible-history light definitions in older scene versions reject shadow fields, while unrelated behavior properties named `shadow` retain their existing meaning.
 
-The current runtime advertises the ordered capabilities `initial_camera`, `opaque_materials`, `authored_lighting`, `sun_shadows`, `surface_materials`, `roughness_maps`, `input_actions`, `spatial_queries`, `runtime_state`, `lifecycle_commands`, `runtime_hud`, `runtime_hud_controls`, `runtime_hud_panels`, `builtin_primitives`, `static_assembly_hierarchy`, `group_local_rotation`, `authored_player_view` with descriptor version5. The historical Scene8 route uses content schema4 and its retained sun-shadow profile even with shadows disabled or omitted. Its application descriptor remains version2 with unchanged fields. Current kits also accept supported Scene1–5/schema1, Scene6/schema2 and Scene7/schema3 content with their existing descriptor shapes. Older frozen kits cannot consume Scene8; Scene7 separately requires an authored-lighting-capable kit. Resources resolve beneath the descriptor directory without catalog/cache/lock writes. Headless mode accepts `--headless --ticks N` and reports mode `creation`, title, authored/runtime scenes and tick. Native mode validates Reset at dt0, starts running and uses a quiet creation title/diagnostic panel with shared Run/Pause/Reset controls. No Motion-comparison metrics or authoring guidance appear in creation mode. Other content/speed overrides are rejected, preserving the selected authored content. Existing explicit generic/legacy modes retain their prior behavior.
+The current runtime advertises the ordered capabilities `initial_camera`, `opaque_materials`, `authored_lighting`, `sun_shadows`, `surface_materials`, `roughness_maps`, `input_actions`, `spatial_queries`, `runtime_state`, `lifecycle_commands`, `runtime_hud`, `runtime_hud_controls`, `runtime_hud_panels`, `builtin_primitives`, `static_assembly_hierarchy`, `group_local_rotation`, `authored_player_view`, `repeatable_play_checks` with descriptor version5. The historical Scene8 route uses content schema4 and its retained sun-shadow profile even with shadows disabled or omitted. Its application descriptor remains version2 with unchanged fields. Current kits also accept supported Scene1–5/schema1, Scene6/schema2 and Scene7/schema3 content with their existing descriptor shapes. Older frozen kits cannot consume Scene8; Scene7 separately requires an authored-lighting-capable kit. Resources resolve beneath the descriptor directory without catalog/cache/lock writes. Headless mode accepts `--headless --ticks N` and reports mode `creation`, title, authored/runtime scenes and tick. Native mode validates Reset at dt0, starts running and uses a quiet creation title/diagnostic panel with shared Run/Pause/Reset controls. No Motion-comparison metrics or authoring guidance appear in creation mode. Other content/speed overrides are rejected, preserving the selected authored content. Existing explicit generic/legacy modes retain their prior behavior.
 
 The shared [launch descriptor](../../crates/ruster-app/README.md#creator-launch-resources), prepared runtime kit and shared editor/MCP export command support standalone delivery. The Scene8 migration notes above describe its historical compatibility route. Subsequent bounded exported/native shadow acceptance is recorded in [current status](../../docs/STATUS.md). Scene13 delivery requires content schema9 and the current `runtime_state` profile; descriptor5 remains unchanged.
 
@@ -18,6 +18,31 @@ Descriptor5). A saved player view controls native framing for the committed
 runtime scene, using authored vertical FOV. Legacy initial framing and a saved
 player view cannot coexist. Headless creation output includes `player_view` when
 present, with anchor, eye and shared renderer matrices at 4:3 and 16:9.
+
+## Run the packaged play check
+
+`./application --play-check` runs the bundled `resources/play-check.json`
+against a fresh Lua runtime and prints a compact JSON report. It uses the
+same fixed tick and logical action map as the creation. The command exits
+0 when all assertions pass and 2 on a failed or refused check. A report
+distinguishes a mismatch, stale identity, invalid case, script error,
+cancellation and budget expiry. The default native launch and existing
+headless replay flags continue to work independently.
+
+The check pins the canonical authored scene and embedded sources, action
+map, fixed tick, and sorted exact resource bytes plus mesh normal policy or
+texture role. Editing the scene or changing resources requires reviewing and
+explicitly updating the pin before export. The check never changes
+expectations or writes to the extracted application. Scene content with a
+bundled check requires a kit advertising `repeatable_play_checks`.
+
+Case version1 runs 1–120 committed input frames and then evaluates 1–8
+expectations on the final tick, Object translation or typed state fields.
+Numeric equality supports explicit absolute tolerance for state or
+translation, and numeric state supports ordered inclusive ranges. Lookup
+failure appears as a null actual value. State text display is bounded to
+256 UTF-8 bytes and reports truncation separately. The five-second budget
+is observed between existing bounded Reset and Step transactions.
 
 ## Shared Scene5 motion comparison
 

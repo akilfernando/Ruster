@@ -45,6 +45,9 @@ impl SceneEditor {
         if !self.shader_builtin {
             return Err("Custom shaders cannot be exported yet. Choose the built-in appearance for this session.".into());
         }
+        if self.play_check_write_busy() {
+            return Err("Wait for the play-check save before exporting.".into());
+        }
         if self.creation_export.busy() {
             return Err(
                 "An export is still active. Check its status and wait for it to finish.".into(),
