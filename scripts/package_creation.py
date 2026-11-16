@@ -65,6 +65,10 @@ PRIMITIVE_PROFILE = {**HUD_PANELS_PROFILE,
                      "capabilities": [*HUD_PANELS_PROFILE["capabilities"], "builtin_primitives"]}
 STATIC_ASSEMBLY_PROFILE = {**PRIMITIVE_PROFILE,
                            "capabilities": [*PRIMITIVE_PROFILE["capabilities"], "static_assembly_hierarchy"]}
+ANIMATED_ASSEMBLY_PROFILE = {
+    **STATIC_ASSEMBLY_PROFILE,
+    "capabilities": [*STATIC_ASSEMBLY_PROFILE["capabilities"], "group_local_rotation"],
+}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -178,7 +182,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -681,17 +685,26 @@ def validate_state_fields(document: dict) -> None:
         identity(value["source_id"])
         if type(value["enabled"]) is not bool or not isinstance(value["properties"], dict):
             raise ValueError("invalid binding enabled flag or properties")
+        application_target = False
         if owner == "object_id":
             identity(value[owner])
         else:
-            exact_fields(value[owner], {"type"}, "application target")
-            if value[owner]["type"] != "application":
-                raise ValueError("invalid application target")
+            target = value[owner]
+            if isinstance(target, dict) and target.get("type") == "group":
+                if version < 20:
+                    raise ValueError("Group behavior binding requires Scene20")
+                exact_fields(target, {"type", "group_id"}, "Group target")
+                identity(target["group_id"])
+            else:
+                exact_fields(target, {"type"}, "application target")
+                if target["type"] != "application":
+                    raise ValueError("invalid application target")
+                application_target = True
         lower = typed_fields(value.get("state_defaults", {}))
         commands = value.get("commands", {})
         if not isinstance(commands, dict) or len(commands) > 16:
             raise ValueError("application requires at most16 commands")
-        if commands and owner != "target":
+        if commands and not application_target:
             raise ValueError("nonempty commands require an application binding")
         for command_id, definition in commands.items():
             identity(command_id)
@@ -711,14 +724,15 @@ def validate_state_fields(document: dict) -> None:
         identity(name)
         states[name] = binding(value)
         if version >= 13:
-            if "target" in value:
+            target = value.get("target", {})
+            if target.get("type") == "application":
                 if application:
                     raise ValueError("only one application binding is supported")
                 application = True
             else:
-                owner = value["object_id"]
+                owner = target["group_id"] if target.get("type") == "group" else value["object_id"]
                 if owner in owners:
-                    raise ValueError("only one behavior binding per object is supported")
+                    raise ValueError("only one behavior binding per object or Group is supported")
                 owners.add(owner)
     if sum(lower_bytes(fields) for fields in states.values() if fields) > MIB:
         raise ValueError("state exceeds1MiB per runtime")
@@ -1051,8 +1065,8 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     version = document.get("format_version")
     scene = document.get("scene")
     if (document.get("format") != "ruster-scene" or type(version) is not int
-            or not 1 <= version <= 19 or not isinstance(scene, dict)):
-        raise ValueError("content requires a supported Scene1–19 document")
+            or not 1 <= version <= 20 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–20 document")
     # Older profiles cannot carry topology or its reversible history.
     if version < 19 and ("hierarchy" in scene or any(
             isinstance(change, dict) and (change.get("kind") == "hierarchy" or any(
@@ -1122,7 +1136,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
-    if type(schema) is not int or not 1 <= schema <= 15:
+    if type(schema) is not int or not 1 <= schema <= 16:
         raise ValueError("invalid content schema")
     tick_field = "tick_nanos" if schema >= 7 else "tick_millis"
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
@@ -1157,8 +1171,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
             or schema == 12 and document["format_version"] != 16
             or schema == 13 and document["format_version"] != 17
             or schema == 14 and document["format_version"] != 18
-            or schema == 15 and document["format_version"] != 19):
-        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13; schema10 requires Scene14; schema11 requires Scene15; schema12 requires Scene16; schema13 requires Scene17; schema14 requires Scene18; schema15 requires Scene19")
+            or schema == 15 and document["format_version"] != 19
+            or schema == 16 and document["format_version"] != 20):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13; schema10 requires Scene14; schema11 requires Scene15; schema12 requires Scene16; schema13 requires Scene17; schema14 requires Scene18; schema15 requires Scene19; schema16 requires Scene20")
     meshes, textures = content["meshes"], content.get("textures", {})
     if (not isinstance(meshes, dict) or not isinstance(textures, dict)
             or len(meshes) + len(textures) > MAX_MESHES):
@@ -1284,9 +1299,12 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     camera = content.get("initial_camera")
     schema = content["schema"]
     supplied_profile = kit["profile"]
-    if schema == 15 and supplied_profile != STATIC_ASSEMBLY_PROFILE:
+    if schema == 16 and supplied_profile != ANIMATED_ASSEMBLY_PROFILE:
+        raise ValueError("runtime kit does not support Scene20 group_local_rotation; prepare a current runtime kit")
+    hierarchy_profiles = (STATIC_ASSEMBLY_PROFILE, ANIMATED_ASSEMBLY_PROFILE)
+    if schema == 15 and supplied_profile not in hierarchy_profiles:
         raise ValueError("runtime kit does not support Scene19 static_assembly_hierarchy; prepare a current runtime kit")
-    profile = PRIMITIVE_PROFILE if supplied_profile == STATIC_ASSEMBLY_PROFILE else supplied_profile
+    profile = PRIMITIVE_PROFILE if supplied_profile in hierarchy_profiles else supplied_profile
     if schema == 14 and profile != PRIMITIVE_PROFILE:
         raise ValueError("runtime kit does not support Scene18 builtin_primitives; prepare a current runtime kit")
     if schema == 13 and profile not in (HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
@@ -1315,7 +1333,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
     if camera is not None and profile not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5, 10: 5, 11: 5, 12: 5, 13: 5, 14: 5, 15: 5}[schema]
+    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5, 10: 5, 11: 5, 12: 5, 13: 5, 14: 5, 15: 5, 16: 5}[schema]
     tick_field = "tick_nanos" if schema >= 7 else "tick_millis"
     fixed_dt = content[tick_field] / (1_000_000_000 if schema >= 7 else 1000)
     descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
@@ -1386,7 +1404,8 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             # comparing; int/float JSON representations of one binary64 value
             # may legitimately differ between the authored file and Rust output.
             try:
-                validate_state_fields({"format_version": 13, "authoring": {"bindings": {
+                state_version = 20 if schema == 16 else 13
+                validate_state_fields({"format_version": state_version, "authoring": {"bindings": {
                     identity: {**{key: value for key, value in binding.items() if key != "commands"}, "state_defaults": observed[identity]}
                     for identity, binding in bindings.items() if identity in observed}}})
             except ValueError as error:

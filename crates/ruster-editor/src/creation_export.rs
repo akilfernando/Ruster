@@ -867,25 +867,30 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!("static_assembly_hierarchy"));
+    let mut animated_assembly_profile = static_assembly_profile.clone();
+    animated_assembly_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!("group_local_rotation"));
     let supplied_profile = &manifest["profile"];
-    if scene_version == ruster_scene::HIERARCHY_FORMAT_VERSION
-        && supplied_profile != &static_assembly_profile
+    let hierarchy_compatible = supplied_profile == &static_assembly_profile
+        || supplied_profile == &animated_assembly_profile;
+    if scene_version == ruster_scene::GROUP_ROTATION_FORMAT_VERSION
+        && supplied_profile != &animated_assembly_profile
     {
+        return Err("runtime kit does not support Scene20 group_local_rotation; prepare a current Linux runtime kit".into());
+    }
+    if scene_version == ruster_scene::HIERARCHY_FORMAT_VERSION && !hierarchy_compatible {
         return Err("runtime kit does not support Scene19 static_assembly_hierarchy; prepare a current Linux runtime kit".into());
     }
-    if scene_version >= 18
-        && supplied_profile != &primitive_profile
-        && supplied_profile != &static_assembly_profile
-    {
+    if scene_version >= 18 && supplied_profile != &primitive_profile && !hierarchy_compatible {
         return Err("runtime kit does not support Scene18 builtin_primitives; prepare a current Linux runtime kit".into());
     }
-    // Both exact profiles are compatible with the panel-aware runtime.
-    let profile =
-        if supplied_profile == &primitive_profile || supplied_profile == &static_assembly_profile {
-            &hud_panels_profile
-        } else {
-            supplied_profile
-        };
+    let profile = if supplied_profile == &primitive_profile || hierarchy_compatible {
+        &hud_panels_profile
+    } else {
+        supplied_profile
+    };
     if scene_version >= 17 && profile != &hud_panels_profile {
         return Err("runtime kit does not support Scene17 runtime_hud_panels; prepare a current Linux runtime kit".into());
     }
@@ -1177,7 +1182,7 @@ fn prepare(
     );
     let content = temporary.path().join("content");
     fs::create_dir(&content).map_err(|e| e.to_string())?;
-    let scene_bytes = if scene_version == ruster_scene::HIERARCHY_FORMAT_VERSION {
+    let scene_bytes = if scene_version >= ruster_scene::HIERARCHY_FORMAT_VERSION {
         &saved
     } else {
         &request.scene_bytes
@@ -1245,7 +1250,8 @@ fn prepare(
         17 => 13,
         18 => 14,
         ruster_scene::HIERARCHY_FORMAT_VERSION => 15,
-        _ => return Err("export requires a supported Scene1–19 document".into()),
+        ruster_scene::GROUP_ROTATION_FORMAT_VERSION => 16,
+        _ => return Err("export requires a supported Scene1–20 document".into()),
     };
     let tick_nanos = u64::try_from(ruster_behavior::DEFAULT_FIXED_TICK.as_nanos())
         .map_err(|_| "Default fixed tick exceeds the descriptor nanosecond range")?;
@@ -2023,6 +2029,17 @@ mod tests {
             .push(json!("static_assembly_hierarchy"));
         write(&manifest);
         for version in 1..=19 {
+            verify_helpers(root.path(), true, version).unwrap();
+        }
+        assert!(verify_helpers(root.path(), false, 20)
+            .unwrap_err()
+            .contains("Scene20 group_local_rotation"));
+        manifest["profile"]["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("group_local_rotation"));
+        write(&manifest);
+        for version in 1..=20 {
             verify_helpers(root.path(), true, version).unwrap();
         }
         manifest["profile"]["capabilities"]
