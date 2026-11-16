@@ -1,9 +1,10 @@
-# Repeatable play checks — bounded proposal
+# Repeatable play checks
 
 Prepared 2026-11-16 by Astra after [research assimilation](../research/AGENT-WORKFLOW-STRATEGY.md).
-Status: recommended next slice, not implemented or a newly activated goal.
-Starting cumulative source: `b012e50`. No new architecture decision is accepted
-by this proposal. The root owns implementation selection and cumulative delivery.
+The user approved implementation on 2026-11-16. The goal is active from
+cumulative source `3ca65df`. Root coordinates acceptance and local integration.
+The first runtime probe is underway in `feat/repeatable-play-checks-20261116`.
+Storage and package design remain working proposals pending the probe.
 
 ## Creator outcome and limits
 

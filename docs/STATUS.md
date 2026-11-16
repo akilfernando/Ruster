@@ -1,5 +1,24 @@
 # Current project status
 
+## Repeatable play checks goal active — 2026-11-16
+
+The user approved the [repeatable play checks plan](plans/REPEATABLE-PLAY-CHECKS.md)
+and the goal is active. Implementation starts from `3ca65df` in the isolated
+`feat/repeatable-play-checks-20261116` worktree. The first gate is the
+bounded isolated runtime pass/fail probe, followed by ordinary editor,
+guarded MCP and relocated Linux qualification.
+
+Root prepared a flat Scene21 fixture that uses existing keyboard action frames
+and API4 typed state, with fixture, command receipts and hashes pinned at
+`/home/akilf/Projects/Ruster-Audits/repeatable-play-checks-20261116.soS5hP`.
+The existing runtime executes two supplied frames with subject X=2 and state
+total=2. An isolated copy with speed changed to 2 produces X=4 and total=4;
+the original still gives byte-identical output on a fresh run. The first
+fixture attempt used an untagged property and failed normal scene loading.
+Correcting the fixture to the existing typed property schema resolved it.
+This verifies the starting data and failure oracle. The shared assertion
+runner and its UI, MCP and package routes remain under implementation.
+
 ## Post-GLB research and next-work recommendation — 2026-11-16
 
 Astra assimilated the user-supplied report against cumulative `b012e50` and
