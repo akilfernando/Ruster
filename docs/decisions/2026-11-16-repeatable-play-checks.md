@@ -1,6 +1,6 @@
 # Saved play checks and isolated playback
 
-Implementation in progress on 2026-11-16. The
+Locally integrated and verified on 2026-11-16. The
 [goal plan](../plans/REPEATABLE-PLAY-CHECKS.md) owns the acceptance routes, and
 [status](../STATUS.md) records evidence and integration.
 

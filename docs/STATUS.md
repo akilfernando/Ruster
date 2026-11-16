@@ -1,50 +1,71 @@
 # Current project status
 
-## Repeatable play checks goal active — 2026-11-16
+## Repeatable play checks integrated locally — 2026-11-16
 
-The user approved the [repeatable play checks plan](plans/REPEATABLE-PLAY-CHECKS.md)
-and the goal is active. Implementation starts from `3ca65df` in the isolated
-`feat/repeatable-play-checks-20261116` worktree. The first gate is the
-bounded isolated runtime pass/fail probe, followed by ordinary editor,
-guarded MCP and relocated Linux qualification.
+The [goal plan](plans/REPEATABLE-PLAY-CHECKS.md) and
+[ownership decision](decisions/2026-11-16-repeatable-play-checks.md) describe
+one editable versioned case per saved scene, isolated playback and compact
+typed results. Source is integrated through `8b09ecd`. Scene and runtime
+formats stay at Scene21 and Descriptor5 for the fixture. The matched kit
+adds `repeatable_play_checks`. Reports retain eight operations in the current
+editor scene session, including recovery by known ID after a transport timeout.
 
-Root prepared a flat Scene21 fixture that uses existing keyboard action frames
-and API4 typed state, with fixture, command receipts and hashes pinned at
+- **Runtime.** The flat Scene21 fixture supplies two real named-action frames.
+  A fresh Engine observes X=4 and typed total=4 with deliberate speed 2,
+  then passes X=2 and total=2 after repair and fresh Reset. A separate
+  preview at tick 1 and the authored bytes stay intact. Unit and host cases
+  cover bounded invalid/stale input, script failure, cancellation, explicit
+  re-pin, preserved drafts/history and stable terminal receipts.
+- **Ordinary editor.** The final native inspection build used the normal
+  File menu and typed controls to create a two-frame check, Save, pass,
+  change an expected state value to 3 to expose actual 2, repair, pass,
+  export and reopen. App-scoped keyboard checks verified Tab, Escape, and
+  Ctrl+N ownership. A 120-frame stress case accepted **Cancel operation**.
+  Native qualification found results hidden by the form and a popup that
+  retained focus after selection. `c2a2a56` fixed both, added a focused
+  layout regression, and passed the final native journey. This evidence
+  used scoped injected input in disposable projects.
+- **Guarded MCP.** Real STDIO verified approval refusal, pass/fail, malformed
+  and stale cases, detailed versus bounded summary receipts, retained
+  operation readback, and fresh-open/export. A separate actual native
+  window ran the exact ordinary-editor-authored case over real STDIO while
+  holding gameplay controls. It retained the same live run ID. Keyboard
+  input advanced subject X=3 to X=7 and the preview continued advancing.
+  The check's report exactly matches the relocated native export at tick
+  2. Authored bytes, existing draft tests and workspace restoration passed.
+- **Export.** Ordinary and MCP archives ran after relocation without the
+  editable project or cache. The ordinary archive retained exact scene and
+  case bytes. A real-kit resource tracer also passed with referenced OBJ
+  and PNG, packaged a deliberate assertion failure, and refused an old
+  kit before publication when the case was included. Old-kit no-case
+  playback still passed. Independently changing a script property, texture
+  bytes or mesh normal interpretation gave stale at tick 0. The malformed
+  relocated sidecar gave invalid-case.
+- **Measured cost.** On the same pinned optimized package, interleaved
+  2/120-frame cases took median 2.345/5.467 ms full-process wall time and
+  returned 959/969 bytes. Existing broad replay over the same resources
+  and frames took 2.636/6.782 ms and returned 8,731/8,755 bytes. Separate
+  wait4 runs recorded median peaks of 8,360/8,450 KiB. Six in-flight
+  cancellation samples returned cancelled at committed ticks 2–4 and
+  joined 0.120–0.184 ms after the flag. The 120-frame cost case is an
+  invocation stress variant. These are workload-specific, and the
+  comparison includes startup and reporting, with no VM speed claim.
+- **Gates.** Serialized `python3 scripts/check.py --base 3ca65df` passed
+  with 427 Rust tests, 20 ignored, 33 Python tests, strict Clippy, format
+  and Markdown in 111.16 s before the UI-only fix. The final affected
+  `--base 0304b99` gate passed 203 editor tests, 13 ignored, strict Clippy,
+  format and Markdown in 15.98 s. The separate real-kit and actual STDIO
+  fixture tests ran explicitly. Merged Rust, example and packaging files
+  match the qualified feature branch.
+
+Commands, pins, receipts, timing and harness retries are under
 `/home/akilf/Projects/Ruster-Audits/repeatable-play-checks-20261116.soS5hP`.
-The existing runtime executes two supplied frames with subject X=2 and state
-total=2. An isolated copy with speed changed to 2 produces X=4 and total=4;
-the original still gives byte-identical output on a fresh run. The first
-fixture attempt used an untagged property and failed normal scene loading.
-Correcting the fixture to the existing typed property schema resolved it.
-The subsequent production host probe passed direct Reset/Step on an isolated
-Engine. It observed the deliberate X=4 and total=4 mismatch against X=2 and
-total=2, then passed after a fresh Reset with speed repaired. A separate live
-preview stayed at tick 1, X=1 and total=1, with byte-identical authored state.
-The exact private probe, output and initial fixture diagnostics are in that
-audit.
-
-Shared runner/package checkpoint `5ebfcf5` and editor export checkpoint
-`69cabc4` implement the deployment route. The first production export
-tracer passed with the remapped matched kit. It preserved exact Scene21
-and case bytes, ran pass and deliberate assertion-failure archives after
-relocation, rejected a check on the old kit before publication, and retained
-old-kit no-case packaging. Referenced PNG replacement made a case stale
-before execution. A malformed relocated sidecar returned invalid-case.
-See `export-tracer-1.log` and `relocation-1/verification.json` in the audit.
-The adopted pins cover canonical Session and action map, verified resource
-IDs/bytes/interpretations and exact tick. Case SHA in the package receipts
-covers the selected sidecar bytes. Deployment keeps Descriptor5 and requires
-the new runtime capability for an included case.
-
-On the same optimized runtime, 2/120-frame checks measured 2.345/5.467 ms
-median full-process wall time with 959/969-byte reports in the interleaved
-audit. A separate repeated cohort shows broader process variation. Peak
-RSS used a separate wait4 probe and had 8,360/8,450 KiB medians. Six in-flight
-runner cancellations returned cancelled at committed ticks 2–4 and joined
-0.120–0.184 ms after the flag. See `runner-cost.json`,
-`runner-rss-wait4.json`, `cancel-stress/probe-results.json`. This is
-runner responsiveness and fixture cost. Native keyboard/control evidence
-and final actual STDIO are still in progress.
+See `native-check-final-2-files`, `native-mcp-owner-final-files`,
+`native-relocated-final`, `relocation-1/verification.json`,
+`play-check-stdio-1.log` and `final-play-check-artifacts.sha256`.
+The cumulative integration and qualification artifacts are local.
+The roadmap's next selection is collision-aware interaction and event
+feedback, with the exact scope still to be selected.
 
 ## Post-GLB research and next-work recommendation — 2026-11-16
 

@@ -1,10 +1,11 @@
 # Repeatable play checks
 
 Prepared 2026-11-16 by Astra after [research assimilation](../research/AGENT-WORKFLOW-STRATEGY.md).
-The user approved implementation on 2026-11-16. The goal is active from
-cumulative source `3ca65df`. Root coordinates acceptance and local integration.
-The first runtime probe is underway in `feat/repeatable-play-checks-20261116`.
-Storage and package design remain working proposals pending the probe.
+The user approved implementation on 2026-11-16 from cumulative source
+`3ca65df`. The [acceptance record](../STATUS.md#repeatable-play-checks-integrated-locally--2026-11-16)
+records the locally verified workflow. The
+[ownership decision](../decisions/2026-11-16-repeatable-play-checks.md)
+captures the implemented sidecar, isolation and packaging contracts.
 
 ## Creator outcome and limits
 

@@ -2,10 +2,10 @@
 
 ## Current delivery roadmap — 2026-11-16
 
-**Latest engine milestone:** static GLB import/safe reimport is locally integrated
-through `b012e50`, following articulated assembly and authored player view.
-Those engine features are qualified cumulative source, not automatically the
-installed editor/MCP pair. The [post-GLB plan](#post-glb-priority-and-next-capabilities--2026-11-16)
+**Latest engine milestone:** repeatable play checks are locally integrated
+through `8b09ecd`, following static GLB import/safe reimport, articulated
+assembly and authored player view. The [status](STATUS.md) records qualification
+of cumulative source and installed artifacts. The [post-GLB plan](#post-glb-priority-and-next-capabilities--2026-11-16)
 is the current recommended next sequence; no implementation goal starts here.
 
 **Latest actual-client acceptance:** essential MCP visual grounding is source-integrated through
@@ -143,7 +143,7 @@ to actual `b012e50` owners. The following is Astra's recommended sequence under
 that planning request, not user approval of a new product identity or all future
 subsystem contracts. It supersedes the generic “select next” paragraph here.
 
-**Next bounded recommendation:** [repeatable play checks](plans/REPEATABLE-PLAY-CHECKS.md).
+**Completed bounded slice:** [repeatable play checks](plans/REPEATABLE-PLAY-CHECKS.md).
 Turn already working fixed-input playback into one saved creator expectation →
 pass/fail → repair workflow across ordinary editor, MCP and relocated runtime.
 A cheap complete-path probe precedes UI/schema work. Stop/reselect if it requires
@@ -154,7 +154,7 @@ capability remain primary, and checks do not certify a whole game.
 
 | Order | Bounded creator outcome to scope next | Selection criterion / dependency |
 | --- | --- | --- |
-| 1 | Repeatable play checks | Reuse existing input, state, atomic Step and package owners. If the probe fails its scope gate, retain developer checks and move to row 2. No general agent platform. |
+| 1 | Repeatable play checks | Locally verified through ordinary editor, guarded MCP and relocated runtime. [Acceptance](STATUS.md#repeatable-play-checks-integrated-locally--2026-11-16). |
 | 2 | Collision-aware interaction and useful event feedback | First inspect whether existing primitive queries and state already express the desired contact/occupancy response. If cross-binding ordered notification is the blocker, select a bounded lifecycle/event slice. If reliable movement/contact response is the blocker, select character/kinematic collision with a maintained-library feasibility study. Do not implement both an event bus and rigid-body world by default. |
 | 3 | Packaged audio feedback | A creator imports a sound and triggers it from an existing action/state transition, with stop/pause/reset and bounded playback ownership. Introduce only the required trigger contract; do not make a general event bus a speculative prerequisite. |
 | 4 | Imported transform animation | Build on accepted GLB generations with one named clip, play/pause/reset and reimport/export identity. Resolve source versus authored/runtime transform ownership first. Skeletal data/blending is separate; move it earlier only for a concrete required actor workflow. |
