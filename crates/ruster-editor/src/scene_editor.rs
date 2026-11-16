@@ -398,6 +398,7 @@ impl ContentSearch {
                             };
                             let kind = match info.kind {
                                 ruster_assets::AssetKind::Mesh => "Mesh",
+                                ruster_assets::AssetKind::Sound => "Sound",
                                 ruster_assets::AssetKind::Texture => match info.texture_role {
                                     Some(ruster_assets::TextureRole::Roughness) => {
                                         "Roughness (linear)"
@@ -4261,7 +4262,7 @@ impl SceneEditor {
         let visible = self.content_search.visible.len();
         let count = self.content_search.rows.len();
         if count == 0 {
-            ui.small("Import a mesh or texture to add it to this project.");
+            ui.small("Import a mesh, texture or WAV sound to add it to this project.");
         } else if visible == 0 {
             ui.small("No assets match this search.");
         } else {
@@ -4286,6 +4287,10 @@ impl SceneEditor {
                     let row = &self.content_search.rows[*index];
                     let available = match row.info.kind {
                         ruster_assets::AssetKind::Mesh => self.resolved.contains_key(&row.info.id),
+                        ruster_assets::AssetKind::Sound => self
+                            .assets
+                            .as_ref()
+                            .is_some_and(|store| store.sound(&row.info.id).is_some()),
                         ruster_assets::AssetKind::Texture => {
                             self.resolved_textures.contains_key(&row.info.id)
                         }
@@ -4528,7 +4533,7 @@ impl SceneEditor {
                     field.request_focus(); self.asset_focused = true;
                 }
             }
-            ui.label(if self.asset_rename_intent { "Project-relative rename destination (same extension)" } else { "Project-relative GLB model, OBJ mesh or PNG texture source" });
+            ui.label(if self.asset_rename_intent { "Project-relative rename destination (same extension)" } else { "Project-relative GLB model, OBJ mesh, PNG texture or WAV sound source" });
             let source = ui.add(egui::TextEdit::singleline(&mut self.asset_source).id(egui::Id::unique("asset_import_source")));
             if id_enter || (!self.asset_focused && self.asset_source_focus) {
                 source.request_focus(); source.scroll_to_me(Some(egui::Align::Center)); self.asset_focused = true;
