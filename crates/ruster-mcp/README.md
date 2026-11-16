@@ -144,7 +144,7 @@ The original human connection-trial artifacts have not been upgraded or replaced
 
 Groups require positive uniform scale; leaves retain supported nonuniform scale. Lights follow ancestry without changing range/intensity. Sun parenting and incompatible legacy scripting/authoring/export combinations reject explicitly. Flat documents still save Scene18; topology/retained structural history requires Scene19. [Implemented journeys and exact unqualified native/STDIO boundaries](../../docs/evidence/ASSEMBLY-HIERARCHY-2026-11-15.md). No new actual ChatGPT acceptance is implied.
 
-`ruster-mcp` is a Linux stdio MCP server attached to one explicitly enabled local editor. It preserves the logistics tools `inspect`, `edit`, `undo`, `redo` and `replay`, and adds `scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo` and `scene_replay` for generic scenes, plus object create/display-rename/duplicate/delete and the six bounded content tools below. The editor owns and serializes the actual session operations. Project content tools can import, refresh and rename registered OBJ/PNG sources through the confined asset store; they are not general filesystem access. Ten bounded behavior data tools also share the authored session. Eleven bounded asynchronous runtime/debug tools operate the editor-owned VM. Two explicitly granted persistence tools add generic-scene Save/SaveAs through the same editor lifecycle. No shell, project replacement, expression evaluation or arbitrary variable mutation is exposed.
+`ruster-mcp` is a Linux stdio MCP server attached to one explicitly enabled local editor. It preserves the logistics tools `inspect`, `edit`, `undo`, `redo` and `replay`, and adds `scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo` and `scene_replay` for generic scenes, plus object create/display-rename/duplicate/delete and the bounded content tools below. The editor owns and serializes the actual session operations. Project content tools can import and refresh registered OBJ/PNG sources or bounded static GLB models, and rename OBJ/PNG sources through the confined asset store; they are not general filesystem access. Ten bounded behavior data tools also share the authored session. Eleven bounded asynchronous runtime/debug tools operate the editor-owned VM. Two explicitly granted persistence tools add generic-scene Save/SaveAs through the same editor lifecycle. No shell, project replacement, expression evaluation or arbitrary variable mutation is exposed.
 
 Build from the repository root with `cargo build --locked -p ruster-mcp`. **E2a CP1 changes the editor wire to `ruster-owner-1`; old socket-only adapters fail closed.** For the legacy explicit-locator mode, use a matched editor/adapter and one immutable absolute `RUSTER_MCP_LOCATOR` pointing to the editor-owned private `connection.json`. The locator is nonsecret identity, not a capability. Never select an active/only/newest editor or change the locator per call.
 
@@ -274,19 +274,20 @@ Rename, transform, delete and duplicate reuse the generic tools above, whose wir
 
 ## Content tools and independent revisions
 
-`asset_inspect` accepts optional decimal-string `offset` and returns at most 16 asset records (`id`, `kind`, project-relative `source`, content `hash`, `status`, bounded `diagnostic`). Diagnostic text is limited to256 Unicode characters per record; `diagnostic_truncated` identifies an omitted suffix. The catalog retains the full diagnostic. Its metadata includes `session_token`, scene `revision`, `asset_revision`, `asset_count`, `next_offset`, `shader_revision`, `shader_status` and the fixed shader source name. Follow `next_offset`; restart if session/catalog revisions change across pages. `scene_inspect` also exposes the catalog revision, so assignment preconditions can come from the displayed scene observation. Scene, asset and material inspection share `asset_operation`. While loading, asset inspection returns no catalog authority: null revision/count, empty records and explicit loading state; inspect again after completion.
+`asset_inspect` accepts optional canonical decimal-string `offset` and independent `model_offset` and returns at most 16 asset records (`id`, `kind`, project-relative `source`, content `hash`, `status`, bounded `diagnostic`). Diagnostic text is limited to256 Unicode characters per record; `diagnostic_truncated` identifies an omitted suffix. The catalog retains the full diagnostic. Its metadata includes `session_token`, scene `revision`, `asset_revision`, `asset_count`, `next_offset`, `shader_revision`, `shader_status` and the fixed shader source name. Follow `next_offset`; restart if session/catalog revisions change across pages. Static models have a separate bounded summary page, `models`, with `model_count` and `model_next_offset`; use that cursor as `model_offset`. Summaries expose model identity, source, hash, status and node/material counts without mesh/image payloads. `scene_inspect` also exposes the catalog revision, so assignment preconditions can come from the displayed scene observation. Scene, asset and material inspection share `asset_operation`. While loading, asset inspection returns no catalog authority: null revision/count, empty records and explicit loading state; inspect again after completion.
 
-`asset_import`, `asset_refresh`, `asset_rename` and `scene_mesh` require `expected_session_token`, scene `expected_revision` and `expected_asset_revision`, all revisions as canonical decimal strings. The catalog revision is independent of authored scene revision. Refresh/import/rename update the catalog immediately without changing authored scene revision/history or resetting preview. Failed imports/refreshes retain the last good mesh or texture; inspect the returned diagnostic before recovery. Catalog changes have their own cooperating-writer conflict checks and are not undone by `scene_undo`.
+`asset_import`, `asset_refresh`, `asset_rename`, `scene_model_place` and `scene_mesh` require `expected_session_token`, scene `expected_revision` and `expected_asset_revision`, all revisions as canonical decimal strings. The catalog revision is independent of authored scene revision. Refresh/import/rename update the catalog immediately without changing authored scene revision/history or resetting preview. Failed imports/refreshes retain the last good mesh, texture or complete model generation; inspect the returned diagnostic before recovery. Catalog changes have their own cooperating-writer conflict checks and are not undone by `scene_undo`.
 
 | Tool | Additional arguments | Result |
 | --- | --- | --- |
-| `asset_import` | Stable `asset_id`, project-relative OBJ or PNG `source` | `asset`, `asset_revision`, `scene_revision` |
-| `asset_refresh` | Registered `asset_id` | `asset`, `asset_revision`, `scene_revision` |
+| `asset_import` | Stable `asset_id`, project-relative OBJ, PNG or bounded static GLB `source` | `asset` (OBJ/PNG) or `model` (GLB), `asset_revision`, `scene_revision` |
+| `asset_refresh` | Registered `asset_id` | `asset` (OBJ/PNG) or `model` (GLB), `asset_revision`, `scene_revision` |
+| `scene_model_place` | Registered model `asset_id`, optional root display `name` | Revisioned placement result including `root_id`; ordinary shared scene Undo |
 | `asset_rename` | Registered `asset_id`, new relative `source` | `asset`, `asset_revision`, `scene_revision` |
 | `scene_mesh` | Stable `object_id`, registered `asset_id` or JSON null for cube | `revision`, `asset_revision`, `object_id`, `before`, `after`, `dirty` |
 | `shader_refresh` | `expected_shader_revision` in place of catalog revision | `shader_revision`, `status` |
 
-IDs and paths have bounded JSON string shapes at the adapter boundary. The asset owner enforces stable-ID syntax, project confinement, supported OBJ/PNG formats, resource limits, no-overwrite rename and source/symlink policy. The adapter forwards semantic failures unchanged rather than normalizing paths or substituting preconditions. `scene_mesh` validates registered/resolved assets before changing the authored object, shares native Undo, and leaves the preview snapshot unchanged. `asset_rename` preserves stable asset identity while moving the source; it does not rename scene object IDs.
+IDs and paths have bounded JSON string shapes at the adapter boundary. The asset owner enforces stable-ID syntax, project confinement, supported OBJ/PNG/static GLB formats, resource limits, no-overwrite rename and source/symlink policy. The adapter forwards semantic failures unchanged rather than normalizing paths or substituting preconditions. `scene_mesh` validates registered/resolved assets before changing the authored object, shares native Undo, and leaves the preview snapshot unchanged. `asset_rename` preserves stable asset identity while moving the source; it does not rename scene object IDs.
 
 `shader_refresh` needs the session and authored-scene preconditions plus `expected_shader_revision`; it rejects `expected_asset_revision`. It reads only the project's fixed `scene.wgsl`, validates a candidate pipeline and retains the last good pipeline on failure. This trusted local shader route does not provide general shader/file upload. Stale independent revisions return `stale_asset_revision` or `stale_shader_revision`; asset semantics use `asset_error`, unavailable mesh assignment uses `asset_unavailable`, and shader validation uses `shader_error`. Shape errors use `invalid_arguments`. Inspect after every rejected command or transport timeout before deciding whether to retry.
 
@@ -387,6 +388,34 @@ Omitting the whole `shadow` field selects disabled/Standard/0.15/0. If present, 
 ## V3b foundation (qualification in progress)
 
 The V3b65-tool checkpoint added role-aware PNG import via optional `asset_import.texture_role`, selecting `base_color_srgb` (omitted compatibility default) or `roughness_linear`. Explicit roles are PNG-only; OBJ imports use optional `normal_policy` instead. Null/unknown roles and combining the two interpretation fields reject. Another interpretation requires another immutable asset ID; Refresh preserves accepted interpretation. Asset inspection exposes `texture_role` separately from mesh normal policy.
+
+### Static GLB model workflow — 2026-11-16
+
+`asset_import` accepts a project-relative self-contained static `.glb` source.
+GLB imports reject `normal_policy` and `texture_role`; those remain OBJ-only and
+PNG-only respectively. The model importer supports its declared named hierarchy,
+one triangle primitive per mesh node and opaque nonmetallic material subset with
+embedded PNG base-color textures. Unsupported semantics receive an owner diagnostic.
+External resources, animation, skins, morphs and general PBR conversion are outside
+this bounded contract.
+
+Inspect the model catalog, then call `scene_model_place` with
+`expected_session_token`, `expected_revision`, `expected_asset_revision` and
+`asset_id`. All revision values are canonical decimal strings. Optional `name`
+is a nonempty string of at most 128 UTF-8 bytes (not null); the scene owner checks
+name semantics. The owner generates scene identities and creates ordinary editable
+hierarchy/material copies under a creator-owned root in one atomic Undo entry.
+Placement remains unsaved and does not reimport the model. If placement fails,
+the registered resource remains available for a corrected retry.
+
+`asset_refresh` on the registered model publishes a complete resource generation
+only when named structure, transforms, assignments and material settings remain
+compatible. Geometry, normals, UVs and embedded image bytes may change. Scene-local
+values are not rewritten. Unsupported structural changes require a fresh import;
+a refused refresh retains the previous complete generation. Catalog operations
+are independent of scene Undo. This adapter contract does not by itself establish
+native workflow or exported-application qualification; consult current project
+[status](../../docs/STATUS.md).
 
 `scene_material_set.material` accepts optional `roughness_texture` (stable asset ID or null). This is a full material replacement: omission means no roughness map, as does explicit null. Inspect/copy the complete material before editing fields you intend to preserve. New/changed references and assignments validate the accepted role and complete UVs for all users, including inactive maps. Unchanged broken references remain repairable during unrelated edits. `material_inspect` returns the canonical map reference and a separate availability/role diagnostic; ready asset content does not mean that an inactive/custom display lane renders it. Shared revision/catalog/pending-draft authority is unchanged.
 

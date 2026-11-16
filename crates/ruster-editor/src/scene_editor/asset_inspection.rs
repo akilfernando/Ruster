@@ -45,6 +45,43 @@ pub(super) fn page(store: &AssetStore, offset: usize) -> Result<Value, &'static 
     }))
 }
 
+/// Model source metadata only: never serialize node/material graphs into a page.
+pub(super) fn model_summary(model: &ruster_assets::ModelInfo) -> Value {
+    let source: String = model.source.chars().take(DIAGNOSTIC_CHARS).collect();
+    json!({"id":model.id,"source":source,"source_truncated":source.len()!=model.source.len(),
+        "hash":model.hash,"status":"accepted","node_count":model.nodes.len(),"material_count":model.materials.len()})
+}
+
+pub(super) fn page_with_models(
+    store: &AssetStore,
+    offset: usize,
+    model_offset: usize,
+) -> Result<Value, &'static str> {
+    let mut page = page(store, offset)?;
+    let count = store.models().len();
+    if model_offset > count {
+        return Err("model_offset exceeds count");
+    }
+    let models: Vec<_> = store
+        .models()
+        .skip(model_offset)
+        .take(PAGE_SIZE)
+        .map(model_summary)
+        .collect();
+    let map = page.as_object_mut().expect("page object");
+    map.insert("models".into(), json!(models));
+    map.insert("model_count".into(), json!(count));
+    map.insert(
+        "model_next_offset".into(),
+        json!(if count - model_offset > PAGE_SIZE {
+            Some((model_offset + PAGE_SIZE).to_string())
+        } else {
+            None
+        }),
+    );
+    Ok(page)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

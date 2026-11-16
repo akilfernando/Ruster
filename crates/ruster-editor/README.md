@@ -313,12 +313,30 @@ catalog and a v2 scene. Work on a disposable project copy when trying refresh
 or rename. The derived `.ruster-cache/` directory is ignored and rebuildable;
 keep `.ruster-assets.json`, scene files and original sources under version control.
 
-**Assets…** imports one project-relative triangle-only OBJ or an explicitly interpreted PNG under a stable asset
+**Content → Import / source tools…** imports a project-relative static GLB model, triangle-only OBJ or explicitly interpreted PNG under a stable asset
 ID. Choose **Assign mesh…** to use it on the selected object; choosing
 **Procedural cube** clears the reference. Mesh assignment shares transform
 Undo/Redo. Import/Refresh/Rename save the catalog immediately and have their own
 revision; scene Undo/Discard does not delete or rename source files. The asset
 window states this boundary before actions.
+
+For a self-contained static `.glb`, enter a stable model ID and source path, then
+press Enter in the source field or choose **Import asset**. Tab traverses controls;
+Escape cancels preparation. GLB imports use source normals/material settings and
+reject OBJ normal-policy or PNG texture-role overrides. In **Content → Models**,
+choose **Place** to insert a complete model beneath a selected placement root in
+one scene Undo step. Repeated Place creates independent editable copies with new
+scene IDs and shared resource IDs. Import alone does not place a scene object.
+If placement fails, the accepted model remains in Content for repair and retry.
+
+The model row's tooltip shows source and accepted source hash. **Refresh** runs
+through the existing cancellable content worker and updates the accepted resource
+generation. It preserves scene placement, local edits and authored references;
+use Reset to update the runtime preview. A refused refresh retains the last accepted
+model and reports its error in the footer/Details. Repair the source and refresh
+again. Structural/material-setting changes require a new import; there is no
+prefab propagation or model-source rename in this slice. Generated mesh/texture
+resources remain available for their ordinary assignment workflows.
 
 Edit the source in your preferred tool, then **Refresh mesh asset**. Broken or
 missing sources show diagnostics and retain the accepted mesh when available.
@@ -357,7 +375,7 @@ shows the loaded version and that Save writes Scene14, preserving supported olde
 v2 mesh fields are rejected. Logistics-v1 scenarios remain a separate format.
 
 Native MCP adds `asset_inspect`, `asset_import`, `asset_refresh`, `asset_rename`,
-`scene_mesh` and `shader_refresh`. Use the exact session/scene revision and the
+`scene_mesh`, `scene_model_place` and `shader_refresh`. Use the exact session/scene revision and the
 separate catalog/shader revision returned by inspection. Paths stay inside the
 explicit project root; responses contain metadata/status rather than mesh arrays
 or shader source. A reproducible official-SDK smoke is
@@ -749,3 +767,14 @@ Generated working copies recognize Lua APIs1–6. API6 uses a Group-local rotati
 Root-owned default and inspection checks pass. Native workflow qualification is in progress and tracked in the F2a evidence.
 
 Application command forms retain the selected command through successful same-run commits and Cancel. A new commit refreshes arguments from the captured authored defaults. Reset/run replacement clears the form. A genuinely keyboard-focused Invoke control retains its owner through pending paints and reveals itself once on acknowledgement, unless a new key, pointer, scroll or focus change supersedes that intent. Held activation keys cannot submit another operation.
+
+
+Static GLB bridge additions (2026-11-16): `asset_inspect` accepts independent
+canonical-decimal `offset` and `model_offset` and returns `assets` plus `models`,
+`model_count` and `model_next_offset`. Models contain bounded source metadata and
+accepted hashes, never node/material graphs. GLB import/refresh returns `model`;
+legacy mesh/texture operations retain `asset`. `scene_model_place` requires
+`expected_session_token`, `expected_revision`, `expected_asset_revision` and
+`asset_id`, with optional string `name` (ordinary scene name rules). Its result
+contains `root_id`, `asset_id`, `revision` and `asset_revision`. Placement retains
+the normal session, draft, dialog and publication guards and selects its new root.

@@ -772,7 +772,12 @@ mod tests {
         };
         assert!(completion.catalog_published());
         assert_eq!(
-            completion.result().unwrap().mesh_normal_policy,
+            completion
+                .result()
+                .unwrap()
+                .as_asset()
+                .unwrap()
+                .mesh_normal_policy,
             Some(ruster_assets::MeshNormalPolicy::AuthoredWhenComplete)
         );
         let adoption = store.adopt(completion).unwrap();

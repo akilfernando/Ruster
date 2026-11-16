@@ -16,10 +16,14 @@ pub const MAX_TRIANGLES: usize = 32_768;
 pub const MAX_VERTICES: usize = MAX_TRIANGLES * 3;
 pub const MAX_ASSETS: usize = 64;
 pub const MAX_RESOLVED_BYTES: usize = 48 * 1024 * 1024;
+mod glb;
+mod glb_catalog;
 mod mutations;
+pub use glb::{ModelInfo, ModelMaterial, ModelNode, MAX_GLB_SOURCE_BYTES};
 mod texture;
 pub use mutations::{
-    AssetAdoption, AssetCompletion, AssetMutation, AssetRequest, AssetStateIdentity, PreparedAsset,
+    AssetAdoption, AssetCompletion, AssetMutation, AssetOutcome, AssetRequest, AssetStateIdentity,
+    PreparedAsset,
 };
 pub use texture::{
     decode_png, decode_png_with_role, validate_texture, Texture, TextureMip, TextureRole,
@@ -168,6 +172,8 @@ struct Registry {
     version: u32,
     revision: u64,
     assets: BTreeMap<String, Record>,
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    models: BTreeMap<String, ModelInfo>,
 }
 impl Default for Registry {
     fn default() -> Self {
@@ -176,6 +182,7 @@ impl Default for Registry {
             version: 4,
             revision: 0,
             assets: BTreeMap::new(),
+            models: BTreeMap::new(),
         }
     }
 }
@@ -245,6 +252,9 @@ struct Version3Registry {
 fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     let version = value.get("version").and_then(serde_json::Value::as_u64);
+    if version != Some(5) && value.get("models").is_some() {
+        return Err(error("models require asset catalog version 5"));
+    }
     if let Some(assets) = value.get("assets").and_then(serde_json::Value::as_object) {
         for record in assets.values() {
             if matches!(version, Some(1..=3)) && record.get("texture_role").is_some() {
@@ -268,6 +278,7 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
             format: old.format,
             version: old.version,
             revision: old.revision,
+            models: BTreeMap::new(),
             assets: old
                 .assets
                 .into_iter()
@@ -291,6 +302,7 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
             format: old.format,
             version: old.version,
             revision: old.revision,
+            models: BTreeMap::new(),
             assets: old
                 .assets
                 .into_iter()
@@ -316,6 +328,7 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
             format: old.format,
             version: old.version,
             revision: old.revision,
+            models: BTreeMap::new(),
             assets: old
                 .assets
                 .into_iter()
@@ -338,7 +351,7 @@ fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
         Ok(serde_json::from_slice(bytes)?)
     }
 }
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum Payload {
     Mesh(Mesh),
     Texture(Texture),
@@ -366,6 +379,7 @@ pub struct ExportSnapshot {
     baseline: Option<Vec<u8>>,
     revision: u64,
     sources: BTreeMap<String, ExportSource>,
+    models: BTreeMap<String, ModelInfo>,
 }
 
 #[derive(Clone, Debug)]
@@ -375,6 +389,7 @@ struct ExportSource {
     texture_role: Option<TextureRole>,
     source: String,
     hash: String,
+    model_id: Option<String>,
 }
 
 impl ExportSnapshot {
@@ -423,6 +438,9 @@ impl ExportSnapshot {
     ) -> Result<(), AssetError> {
         self.check_baseline()?;
         for (id, source) in &self.sources {
+            if source.model_id.is_some() {
+                continue;
+            }
             let bytes = read_source_bytes(&self.root, &source.source, source.kind)?;
             if digest(&bytes) != source.hash {
                 return Err(error(format!(
@@ -430,6 +448,19 @@ impl ExportSnapshot {
                 )));
             }
             visit(id, bytes)?;
+        }
+        for (model_id, info) in &self.models {
+            let decoded = glb_catalog::read_accepted(&self.root, info)?;
+            for (id, resource) in decoded.resources {
+                if self
+                    .sources
+                    .get(&id)
+                    .and_then(|source| source.model_id.as_ref())
+                    == Some(model_id)
+                {
+                    visit(&id, resource.bytes)?;
+                }
+            }
         }
         self.check_baseline()?;
         Ok(())
@@ -558,6 +589,7 @@ impl AssetStore {
             }
             store.infos.insert(id, Arc::new(info));
         }
+        store.restore_models()?;
         Ok(store)
     }
 
@@ -595,12 +627,31 @@ impl AssetStore {
             return Err(error("export exceeds 64 assets"));
         }
         let mut sources = BTreeMap::new();
+        let mut models = BTreeMap::new();
         for id in ids {
-            let record = self
-                .registry
-                .assets
-                .get(id)
-                .ok_or_else(|| error(format!("unknown export asset ID {id:?}")))?;
+            let Some(record) = self.registry.assets.get(id) else {
+                let (model, kind) = self
+                    .registry
+                    .model_resource(id)
+                    .ok_or_else(|| error(format!("unknown export asset ID {id:?}")))?;
+                models
+                    .entry(model.id.clone())
+                    .or_insert_with(|| model.clone());
+                sources.insert(
+                    id.clone(),
+                    ExportSource {
+                        kind,
+                        mesh_normal_policy: (kind == AssetKind::Mesh)
+                            .then_some(MeshNormalPolicy::AuthoredWhenComplete),
+                        texture_role: (kind == AssetKind::Texture)
+                            .then_some(TextureRole::BaseColor),
+                        source: model.source.clone(),
+                        hash: model.hash.clone(),
+                        model_id: Some(model.id.clone()),
+                    },
+                );
+                continue;
+            };
             let hash = record.hash.as_ref().ok_or_else(|| {
                 error(format!(
                     "asset {id:?} has no accepted content; Refresh the asset before exporting"
@@ -622,6 +673,7 @@ impl AssetStore {
                     texture_role: record.texture_role,
                     source: record.source.clone(),
                     hash: hash.clone(),
+                    model_id: None,
                 },
             );
         }
@@ -630,6 +682,7 @@ impl AssetStore {
             baseline: self.baseline.clone(),
             revision: self.revision(),
             sources,
+            models,
         })
     }
     /// Borrow metadata in stable asset-ID order without cloning diagnostics.
@@ -1106,25 +1159,36 @@ fn validate_id(id: &str) -> Result<(), AssetError> {
     Ok(())
 }
 fn validate_relative(source: &str) -> Result<(), AssetError> {
+    AssetKind::from_source(source)?;
+    validate_project_relative(source)
+}
+fn validate_project_relative(source: &str) -> Result<(), AssetError> {
     if source.is_empty()
         || source.len() > 256
         || source.contains(['\\', '\0'])
         || Path::new(source)
             .components()
             .any(|c| !matches!(c, Component::Normal(_)))
-        || AssetKind::from_source(source).is_err()
         || source
             .split('/')
             .any(|c| c.is_empty() || c == "." || c == ".." || c.starts_with(".ruster-"))
     {
         return Err(error(
-            "source must be a project-relative .obj/.png path (<=256 bytes), without parent/dot/reserved components or symlinks",
+            "source must be a project-relative path (<=256 bytes), without parent/dot/reserved components or symlinks",
         ));
     }
     Ok(())
 }
 fn confined(root: &Path, source: &str, allow_missing_leaf: bool) -> Result<PathBuf, AssetError> {
     validate_relative(source)?;
+    confined_path(root, source, allow_missing_leaf)
+}
+fn confined_path(
+    root: &Path,
+    source: &str,
+    allow_missing_leaf: bool,
+) -> Result<PathBuf, AssetError> {
+    validate_project_relative(source)?;
     let mut path = root.to_path_buf();
     let parts: Vec<_> = Path::new(source).components().collect();
     for (index, part) in parts.iter().enumerate() {
@@ -1142,12 +1206,17 @@ fn confined(root: &Path, source: &str, allow_missing_leaf: bool) -> Result<PathB
     Ok(path)
 }
 fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
-    if registry.format != "ruster-assets" || !matches!(registry.version, 1..=4) {
+    if registry.format != "ruster-assets" || !matches!(registry.version, 1..=5) {
         return Err(error(
-            "unsupported asset catalog format/version; expected ruster-assets version 1, 2, 3 or 4",
+            "unsupported asset catalog format/version; expected ruster-assets version 1 through 5",
         ));
     }
-    if registry.assets.len() > MAX_ASSETS {
+    if registry.version == 5 && registry.models.is_empty() {
+        return Err(error(
+            "unsupported asset catalog version 5 without static models",
+        ));
+    }
+    if registry.asset_count() > MAX_ASSETS {
         return Err(error("asset catalog exceeds 64 assets"));
     }
     let mut sources = BTreeSet::new();
@@ -1189,6 +1258,7 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
             }
         }
     }
+    registry.validate_models()?;
     Ok(())
 }
 /// Validate bounded indexed triangles, finite positions and unit-length normals.

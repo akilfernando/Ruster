@@ -342,11 +342,18 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
                 || matches!(args["primitive"].as_str(), Some("sphere" | "capsule")));
     }
     if name == "asset_inspect" {
-        return exact_keys(args, &[], &["offset"]) && args.get("offset").is_none_or(canonical_u64);
+        return exact_keys(args, &[], &["offset", "model_offset"])
+            && args.get("offset").is_none_or(canonical_u64)
+            && args.get("model_offset").is_none_or(canonical_u64);
     }
     if matches!(
         name,
-        "asset_import" | "asset_refresh" | "asset_rename" | "scene_mesh" | "shader_refresh"
+        "asset_import"
+            | "asset_refresh"
+            | "asset_rename"
+            | "scene_mesh"
+            | "scene_model_place"
+            | "shader_refresh"
     ) {
         let revision = if name == "shader_refresh" {
             "expected_shader_revision"
@@ -356,7 +363,7 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
         let mut keys = vec!["expected_session_token", "expected_revision", revision];
         match name {
             "asset_import" | "asset_rename" => keys.extend(["asset_id", "source"]),
-            "asset_refresh" => keys.push("asset_id"),
+            "asset_refresh" | "scene_model_place" => keys.push("asset_id"),
             "scene_mesh" => keys.extend(["object_id", "asset_id"]),
             _ => {}
         }
@@ -370,6 +377,8 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             &keys,
             if name == "shader_refresh" {
                 &["builtin"]
+            } else if name == "scene_model_place" {
+                &["name"]
             } else if name == "asset_import" {
                 &["normal_policy", "texture_role"]
             } else {
@@ -383,6 +392,12 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
         }
         match name {
             "shader_refresh" => args.get("builtin").is_none_or(Value::is_boolean),
+            "scene_model_place" => {
+                bounded_string(&args["asset_id"], 128)
+                    && args
+                        .get("name")
+                        .is_none_or(|value| bounded_string(value, 128))
+            }
             "scene_mesh" => {
                 bounded_string(&args["object_id"], 128)
                     && (args["asset_id"].is_null() || bounded_string(&args["asset_id"], 128))
@@ -480,10 +495,11 @@ fn tools() -> Value {
         ("undo", "Undo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("redo", "Redo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("replay", "Replay the inspected authored snapshot in isolation for at most 10000 ticks; return one aggregate state. Does not alter editor playback."),
-        ("asset_inspect", "Inspect one page of up to 16 registered project OBJ meshes and PNG textures with typed status, immutable normal policy/texture role and catalog revision; bounded metadata only."),
-        ("asset_import", "Import one bounded project-relative OBJ mesh or supported PNG texture into the immediately persisted typed catalog. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
-        ("asset_refresh", "Reimport one registered mesh or texture, retaining last-good accepted content on failure. Catalog persists independently of scene history."),
+        ("asset_inspect", "Inspect bounded pages of project meshes/textures and static GLB model summaries with status and catalog revision. offset pages resources; model_offset independently pages models. Follow next_offset/model_next_offset; restart if catalog/session revisions change. No resource payloads."),
+        ("asset_import", "Import one bounded project-relative OBJ mesh, supported PNG texture or self-contained static GLB model into the immediately persisted typed catalog. GLB rejects normal_policy/texture_role; supports a bounded named hierarchy and opaque nonmetallic materials with embedded PNGs. Unsupported semantics reject; place separately with scene_model_place. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
+        ("asset_refresh", "Reimport one registered mesh, texture or static GLB model, retaining last-good accepted content on failure. Model refresh accepts geometry/normal/UV/image changes only with the same named structure, transforms and material settings; it updates resources without rewriting placed scene copies. Catalog persists independently of scene history."),
         ("asset_rename", "Rename one registered OBJ or PNG source within the project without overwrite or changing its extension/kind, preserving stable asset ID; catalog update is independent of scene undo."),
+        ("scene_model_place", "Place a registered static GLB model as ordinary editable scene hierarchy/material copies under a creator-owned root. Requires inspected session, scene and asset revisions plus clean human drafts. Optional name labels the root. One atomic unsaved Undo entry; does not reimport or save. Reimport updates shared resources, not local scene values."),
         ("scene_mesh", "Assign a registered mesh ID or null for procedural cube to one scene object; revisioned shared authored undo. A changed mesh beneath a textured material requires complete UVs; clear the material first to repair. Preview snapshot unchanged."),
         ("shader_refresh", "Refresh the fixed project-local scene.wgsl trusted shader, validating a candidate pipeline and keeping the last good pipeline on error."),
         ("scene_inspect", "Inspect one page of at most 16 authored scene objects, session/revision and mutation guards. Start without offset; use next_offset for subsequent pages."),
@@ -514,13 +530,15 @@ fn tools() -> Value {
         if name == "scene_inspect" || name == "asset_inspect" {
             properties.insert("offset".into(), decimal.clone());
         }
-        if matches!(name,"asset_import"|"asset_refresh"|"asset_rename"|"scene_mesh") {
+        if matches!(name,"asset_import"|"asset_refresh"|"asset_rename"|"scene_mesh"|"scene_model_place") {
             properties.insert("expected_asset_revision".into(),decimal.clone());required.push("expected_asset_revision");
             properties.insert("asset_id".into(),if name=="scene_mesh" {json!({"type":["string","null"],"minLength":1,"maxLength":128})}else{json!({"type":"string","minLength":1,"maxLength":128})});required.push("asset_id");
             if matches!(name,"asset_import"|"asset_rename") {properties.insert("source".into(),json!({"type":"string","minLength":1,"maxLength":256,"description":"Relative project path; no traversal, absolute paths or escaping symlinks."}));required.push("source");}
             if name=="scene_mesh" {properties.insert("object_id".into(),json!({"type":"string","minLength":1,"maxLength":128}));required.push("object_id");}
         }
-        if name=="asset_import" {properties.insert("normal_policy".into(),json!({"type":"string","enum":["flat","authored_when_complete"],"description":"OBJ mesh import interpretation: flat geometric normals, or complete valid authored corner normals with flat fallback when incomplete. Omitted uses the existing flat route; textures reject this field. Import another asset identity to change an accepted interpretation."}));}
+        if name == "asset_inspect" { properties.insert("model_offset".into(), decimal.clone()); }
+        if name == "scene_model_place" { properties.insert("name".into(), json!({"type":"string","minLength":1,"maxLength":128,"description":"Optional display name for the creator-owned placement root."})); }
+        if name=="asset_import" {properties.insert("normal_policy".into(),json!({"type":"string","enum":["flat","authored_when_complete"],"description":"OBJ mesh import interpretation: flat geometric normals, or complete valid authored corner normals with flat fallback when incomplete. Omitted uses the existing flat route; PNG and GLB imports reject this field. Import another asset identity to change an accepted interpretation."}));}
         if name=="asset_import" {properties.insert("texture_role".into(),json!({"type":"string","enum":["base_color_srgb","roughness_linear"],"description":"PNG-only immutable interpretation. Base color decodes sRGB; roughness reads grayscale/red as linear byte/255 and builds arithmetic perceptual-roughness mips. Omission uses base_color_srgb. Cannot combine with normal_policy; use a distinct asset ID for another interpretation of the same source."}));}
         if name=="shader_refresh" {properties.insert("expected_shader_revision".into(),decimal.clone());properties.insert("builtin".into(),json!({"type":"boolean","description":"Explicitly select built-in appearance instead of reading scene.wgsl; preserves the source file."}));required.push("expected_shader_revision");}
         if matches!(name, "scene_create" | "scene_rename" | "scene_duplicate" | "scene_delete") {
@@ -727,6 +745,7 @@ impl Server {
                         "asset_import",
                         "asset_refresh",
                         "asset_rename",
+                        "scene_model_place",
                         "scene_mesh",
                         "shader_refresh",
                     ]
@@ -1304,7 +1323,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 93);
+        assert_eq!(tools.len(), 94);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1325,6 +1344,7 @@ mod tests {
                 "asset_import",
                 "asset_refresh",
                 "asset_rename",
+                "scene_model_place",
                 "scene_mesh",
                 "shader_refresh",
                 "scene_inspect",
@@ -1790,13 +1810,21 @@ mod tests {
         roughness_import["texture_role"] = json!("roughness_linear");
         let mut refresh = import.clone();
         refresh.as_object_mut().unwrap().remove("source");
+        let mut model_import = import.clone();
+        model_import["source"] = json!("models/assembly.glb");
+        let placement = refresh.clone();
+        let mut named_placement = placement.clone();
+        named_placement["name"] = json!("Workshop assembly");
         let mut mesh = refresh.clone();
         mesh["object_id"] = json!("left");
         mesh["asset_id"] = Value::Null;
         let mut shader = common;
         shader["expected_shader_revision"] = json!("9");
         for (name, args) in [
-            ("asset_inspect", json!({"offset":"16"})),
+            ("asset_inspect", json!({"offset":"16", "model_offset":"32"})),
+            ("asset_import", model_import.clone()),
+            ("scene_model_place", placement.clone()),
+            ("scene_model_place", named_placement.clone()),
             ("asset_import", import.clone()),
             ("asset_import", flat_import),
             ("asset_import", authored_import),
@@ -1823,6 +1851,8 @@ mod tests {
         }
         for (name, valid, revision) in [
             ("asset_import", &import, "expected_asset_revision"),
+            ("scene_model_place", &placement, "expected_asset_revision"),
+            ("scene_model_place", &placement, "expected_revision"),
             ("shader_refresh", &shader, "expected_shader_revision"),
         ] {
             for value in [
@@ -1839,7 +1869,7 @@ mod tests {
             missing.as_object_mut().unwrap().remove(revision);
             assert!(!valid_arguments(name, &missing));
             let mut extra = valid.clone();
-            extra[if revision == "expected_asset_revision" {
+            extra[if matches!(revision, "expected_asset_revision" | "expected_revision") {
                 "expected_shader_revision"
             } else {
                 "expected_asset_revision"
@@ -1893,6 +1923,49 @@ mod tests {
             invalid["asset_id"] = value;
             assert!(!valid_arguments("scene_mesh", &invalid));
         }
+        // Model import must not silently inherit OBJ/PNG interpretation options;
+        // placement carries both independent revisions unchanged and a bounded name.
+        for (key, value) in [
+            ("normal_policy", json!("flat")),
+            ("texture_role", json!("base_color_srgb")),
+        ] {
+            let mut invalid = model_import.clone();
+            invalid[key] = value;
+            assert!(!valid_arguments("asset_import", &invalid));
+        }
+        for (key, value) in [
+            ("name", Value::Null),
+            ("name", json!("")),
+            ("name", json!("é".repeat(65))),
+            ("asset_id", Value::Null),
+            ("expected_session_token", json!("")),
+            ("source", json!("models/assembly.glb")),
+        ] {
+            let mut invalid = named_placement.clone();
+            invalid[key] = value;
+            assert!(!valid_arguments("scene_model_place", &invalid));
+        }
+        for key in [
+            "expected_session_token",
+            "expected_revision",
+            "expected_asset_revision",
+            "asset_id",
+        ] {
+            let mut missing = placement.clone();
+            missing.as_object_mut().unwrap().remove(key);
+            assert!(!valid_arguments("scene_model_place", &missing));
+        }
+        for value in [
+            json!(16),
+            Value::Null,
+            json!("01"),
+            json!("18446744073709551616"),
+        ] {
+            assert!(!valid_arguments(
+                "asset_inspect",
+                &json!({"model_offset":value})
+            ));
+        }
         let mut invalid = refresh;
         invalid["asset_id"] = Value::Null;
         assert!(!valid_arguments("asset_refresh", &invalid));
@@ -1936,6 +2009,23 @@ mod tests {
             json!(["base_color_srgb", "roughness_linear"])
         );
         assert_eq!(schema("asset_import")["allOf"].as_array().unwrap().len(), 3);
+        assert_eq!(
+            schema("scene_model_place")["required"],
+            json!([
+                "expected_session_token",
+                "expected_revision",
+                "expected_asset_revision",
+                "asset_id"
+            ])
+        );
+        assert_eq!(
+            schema("scene_model_place")["properties"]["name"]["type"],
+            "string"
+        );
+        assert_eq!(
+            schema("asset_inspect")["properties"]["model_offset"]["type"],
+            "string"
+        );
     }
 
     #[test]
