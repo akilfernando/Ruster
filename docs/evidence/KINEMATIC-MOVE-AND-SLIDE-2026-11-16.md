@@ -61,7 +61,8 @@ Release Engine cohorts used the same geometry/actions and nearly identical
 Lua source. Two sweep cohorts use the old build and the candidate build.
 The third uses move-and-slide on the candidate. Each case has 6,000 measured
 Steps across six alternating-order process cohorts on CPU0 after 200
-warmups per process. Each sample starts from a fresh Reset timed outside
+warmups per process on an Intel Core i9-13900H, Linux 7.3.3 CachyOS,
+Rust 1.99.1. Each sample starts from a fresh Reset timed outside
 Step. The wall case adds a tangential follow-up cast. Every sample checks
 that the terminal transform and observation count stay identical within
 its case. See `matched-step-summary.json` and `compare_step.py`.
