@@ -1016,6 +1016,7 @@ fn property_type(value: &PropertyValue) -> (&'static str, bool) {
         PropertyValue::Vec3(_) => ("RusterVec3", false),
         PropertyValue::ObjectRef(v) => ("RusterObjectId", v.is_none()),
         PropertyValue::AssetRef(v) => ("RusterAssetId", v.is_none()),
+        PropertyValue::SoundRef(_) => ("RusterSoundRef", false),
     }
 }
 fn source_types(source_id: &str, authoring: &Authoring) -> Result<String, FilesError> {
@@ -1115,9 +1116,13 @@ const VERSIONED_HOST_TYPES: &str = r#"
 ---@field sweep fun(probe_id:string,delta:RusterVec3):RusterSweep
 ---@field overlap fun(probe_id:string,position:RusterVec3,sensor_id:string):RusterOverlap
 ---@class RusterHost5:RusterHost4
+---@class RusterSoundRef
+---@field asset_id RusterAssetId? Authored sound; nil is silent.
+---@field gain number Authored gain in 0..1.
 ---@class RusterHost4:RusterHost3
 ---@field state fun(name:string):RusterStateValue Copied tick-start own field, missing fields fail.
 ---@field binding_state fun(binding_id:string,name:string):RusterStateValue Copied tick-start peer field, missing owners/fields fail.
+---@field play_sound fun(property_name:string) Commit a one-shot cue from an own Sound property; no arbitrary asset IDs or paths.
 "#;
 fn tooling_files(authoring: &Authoring) -> Result<GeneratedTooling, FilesError> {
     if authoring.sources.len() > MAX_SOURCES || authoring.bindings.len() > MAX_BINDINGS {
@@ -1925,6 +1930,13 @@ mod tests {
                 PropertyValue::ObjectRef(Some("right".into())),
             ),
             ("asset".into(), PropertyValue::AssetRef(None)),
+            (
+                "chime".into(),
+                PropertyValue::SoundRef(ruster_scene::SoundRef {
+                    asset_id: None,
+                    gain: 0.5,
+                }),
+            ),
         ]);
         authoring.bindings.insert(
             "left-binding".into(),
@@ -1997,6 +2009,8 @@ mod tests {
         assert!(host.contains("---@class RusterHost2:RusterHost"));
         assert!(host.contains("---@class RusterHost3:RusterHost2"));
         assert!(host.contains("---@class RusterHost4:RusterHost3"));
+        assert!(host.contains("---@class RusterSoundRef"));
+        assert!(host.contains("play_sound fun(property_name:string)"));
         assert!(host.contains("binding_state fun(binding_id:string,name:string)"));
         let config: serde_json::Value =
             serde_json::from_slice(&fs::read(&output.config).unwrap()).unwrap();

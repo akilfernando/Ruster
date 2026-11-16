@@ -10,7 +10,7 @@ const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining properties and state defaults. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians. Lua API7 uses object_id for one flat enabled blocker sphere; runtime enforces constrained movement. Shared Undo.",&["binding_id","source_id","enabled"]),
     ("behavior_binding_remove","Detach one behavior binding. Shared Undo; source stays available.",&["binding_id"]),
     ("behavior_property","Read one typed property or null for absent; no complete property-map response.",&["binding_id","name"]),
-    ("behavior_property_set","Set one typed property or use null to remove. Shared Undo, no execution.",&["binding_id","name","value"]),
+    ("behavior_property_set","Set one typed property or use null to remove. Sound uses sound_ref value {asset_id,gain}; gain0..1, nullable stable WAV asset ID. Lua4/5/7 host.play_sound accepts the property name, not an arbitrary path. Known wrong-kind catalog IDs reject; missing IDs stay repairable. Shared Undo, no execution.",&["binding_id","name","value"]),
     ("behavior_state_default","Read one authored typed state default or null for absent. Runtime values belong to the committed run.",&["binding_id","name"]),
     ("behavior_state_default_set","Set/remove one authored state field through shared Undo. Number, Bool, Text and Vec3 only,64fields/16KiB per owner and1MiB total. Null removes. Requires clean drafts. Current runtime stays unchanged until Reset.",&["binding_id","name","value"]),
     ("behavior_command","Read one complete authored command definition or null for absent; binding summaries expose IDs and argument counts only.",&["binding_id","command_id"]),
@@ -140,13 +140,23 @@ fn shape(field: &str) -> Value {
                     "asset_ref",
                     json!({"type":["string","null"],"minLength":1,"maxLength":128}),
                 ),
+                (
+                    "sound_ref",
+                    super::object_schema(
+                        json!({
+                            "asset_id":{"type":["string","null"],"minLength":1,"maxLength":128,"pattern":"^[A-Za-z0-9_.-]+$"},
+                            "gain":{"type":"number","minimum":0,"maximum":1}
+                        }),
+                        vec!["asset_id", "gain"],
+                    ),
+                ),
             ] {
                 alternatives.push(super::object_schema(
                     json!({"type":{"const":tag},"value":value}),
                     vec!["type", "value"],
                 ));
             }
-            json!({"oneOf":alternatives,"description":"Top-level null removes property. Text limits are UTF-8 bytes; references inside tagged values may be null."})
+            json!({"oneOf":alternatives,"description":"Top-level null removes property. Text limits are UTF-8 bytes; references inside tagged values may be null. sound_ref contains an optional registered WAV asset_id and gain in0..1; host.play_sound uses the binding property name on Lua4/5/7."})
         }
         _ => json!({"type":"string","minLength":1,"maxLength":128}),
     }
@@ -160,7 +170,7 @@ pub(super) fn state_arguments_schema() -> Value {
             alternative["type"] != "null"
                 && !matches!(
                     alternative["properties"]["type"]["const"].as_str(),
-                    Some("object_ref" | "asset_ref")
+                    Some("object_ref" | "asset_ref" | "sound_ref")
                 )
         });
     json!({"type":"object","maxProperties":16,
@@ -201,7 +211,7 @@ pub fn list() -> Vec<Value> {
         for field in optional(name) {properties.insert((*field).into(),shape(field));}
         if *name == "behavior_state_default_set" {
             properties.get_mut("value").unwrap()["oneOf"].as_array_mut().unwrap().retain(|value| {
-                !matches!(value["properties"]["type"]["const"].as_str(), Some("object_ref"|"asset_ref"))
+                !matches!(value["properties"]["type"]["const"].as_str(), Some("object_ref"|"asset_ref"|"sound_ref"))
             });
         }
         if *name == "behavior_command_set" {
@@ -283,6 +293,17 @@ pub fn valid(name: &str, args: &Value) -> bool {
                             Some("vec3") => o["value"]
                                 .as_array()
                                 .is_some_and(|v| v.len() == 3 && v.iter().all(Value::is_number)),
+                            Some("sound_ref") => {
+                                name == "behavior_property_set"
+                                    && o["value"].as_object().is_some_and(|sound| {
+                                        super::exact_keys(sound, &["asset_id", "gain"], &[])
+                                            && (sound["asset_id"].is_null()
+                                                || valid_stable_id(&sound["asset_id"]))
+                                            && sound["gain"]
+                                                .as_f64()
+                                                .is_some_and(|gain| (0.0..=1.0).contains(&gain))
+                                    })
+                            }
                             Some("object_ref" | "asset_ref") => {
                                 name != "behavior_state_default_set"
                                     && (o["value"].is_null()
@@ -316,6 +337,22 @@ mod tests {
     fn behavior_tools_forward_encoded_data_and_preserve_preconditions() {
         let args = json!({"expected_session_token":"session","expected_revision":"9007199254740993","source_id":"source","label":null,"language_id":"lua54","host_api_version":1,"text_base64":"AA=="});
         assert!(valid("behavior_source_set", &args));
+        let mut sound = json!({"expected_session_token":"session","expected_revision":"3","binding_id":"application","name":"chime","value":{"type":"sound_ref","value":{"asset_id":"chime","gain":0.5}}});
+        assert!(valid("behavior_property_set", &sound));
+        assert!(!valid("behavior_state_default_set", &sound));
+        for gain in [json!(-0.1), json!(1.1), json!("0.5"), Value::Null] {
+            sound["value"]["value"]["gain"] = gain;
+            assert!(!valid("behavior_property_set", &sound));
+        }
+        sound["value"]["value"]["gain"] = json!(0.5);
+        sound["value"]["value"]["path"] = json!("arbitrary.wav");
+        assert!(!valid("behavior_property_set", &sound));
+        sound["value"]["value"]
+            .as_object_mut()
+            .unwrap()
+            .remove("path");
+        sound["value"]["value"]["asset_id"] = Value::Null;
+        assert!(valid("behavior_property_set", &sound));
         let mut command = json!({"expected_session_token":"session","expected_revision":"3","binding_id":"application","command_id":"reset","definition":{"arguments":{"amount":{"type":"number","value":2.5}}}});
         assert!(valid("behavior_command_set", &command));
         command["definition"]["arguments"]["amount"] = json!({"type":"object_ref","value":null});

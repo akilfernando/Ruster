@@ -203,7 +203,7 @@ impl SceneEditor {
                     BindingTarget::Application => json!({"type":"application"}),
                     BindingTarget::Group(id) => json!({"type":"group","group_id":id}),
                 };
-                let properties:Vec<_> = binding.properties.iter().skip(offset).take(16).map(|(name,value)| json!({"name":name,"type":match value {PropertyValue::Number(_)=>"number",PropertyValue::Bool(_)=>"bool",PropertyValue::Text(_)=>"text",PropertyValue::Vec3(_)=>"vec3",PropertyValue::ObjectRef(_)=>"object_ref",PropertyValue::AssetRef(_)=>"asset_ref"}})).collect();
+                let properties:Vec<_> = binding.properties.iter().skip(offset).take(16).map(|(name,value)| json!({"name":name,"type":match value {PropertyValue::Number(_)=>"number",PropertyValue::Bool(_)=>"bool",PropertyValue::Text(_)=>"text",PropertyValue::Vec3(_)=>"vec3",PropertyValue::ObjectRef(_)=>"object_ref",PropertyValue::AssetRef(_)=>"asset_ref",PropertyValue::SoundRef(_)=>"sound_ref"}})).collect();
                 return Ok(
                     json!({"session_token":token,"revision":revision.to_string(),"binding_id":args["binding_id"],"object_id":binding.object_id(),"target":target,"source_id":binding.source_id,"enabled":binding.enabled,"properties":properties,"property_count":binding.properties.len(),"commands":binding.commands.iter().skip(offset).take(16).map(|(id,definition)|json!({"command_id":id,"argument_count":definition.arguments.len()})).collect::<Vec<_>>(),"command_count":binding.commands.len(),"command_schema_hash":format!("{:x}",Sha256::digest(serde_json::to_vec(&binding.commands).expect("valid catalog"))),"state_defaults":binding.state_defaults.iter().skip(offset).take(16).map(|(name,value)|json!({"name":name,"value":value})).collect::<Vec<_>>(),"state_default_count":binding.state_defaults.len(),"next_state_offset":(offset.saturating_add(16)<binding.state_defaults.len()).then(||(offset+16).to_string()),"next_offset":(offset.saturating_add(16)<binding.properties.len()).then(||(offset+16).to_string())}),
                 );
@@ -335,6 +335,18 @@ impl SceneEditor {
                     } else {
                         let value: PropertyValue = serde_json::from_value(args["value"].clone())
                             .map_err(|_| error("invalid_arguments"))?;
+                        if let PropertyValue::SoundRef(sound) = &value {
+                            if let Some(asset_id) = &sound.asset_id {
+                                if self.assets.as_ref().is_some_and(|store| {
+                                    store.infos().any(|info| {
+                                        &info.id == asset_id
+                                            && info.kind != ruster_assets::AssetKind::Sound
+                                    })
+                                }) {
+                                    return Err(("invalid_arguments".into(),"Sound reference must name a Sound asset; the known catalog entry has another kind".into()));
+                                }
+                            }
+                        }
                         binding.properties.insert(name.into(), value);
                     }
                 }
@@ -613,5 +625,48 @@ mod tests {
             .unwrap()
             .state_defaults
             .is_empty());
+
+        let directory = tempfile::tempdir().unwrap();
+        std::fs::write(
+            directory.path().join("shape.obj"),
+            b"v 0 0 0\nv 1 0 0\nv 0 1 0\nf 1 2 3\n",
+        )
+        .unwrap();
+        let mut store = ruster_assets::AssetStore::open(directory.path()).unwrap();
+        store.import("shape", "shape.obj").unwrap();
+        editor.assets = Some(store);
+        let revision = editor.session.scene().revision;
+        let mut sound = pre(revision);
+        sound["binding_id"] = json!("application");
+        sound["name"] = json!("chime");
+        sound["value"] = json!({"type":"sound_ref","value":{"asset_id":"shape","gain":0.5}});
+        let unchanged = editor.session.snapshot_bytes().unwrap();
+        assert_eq!(
+            editor.command("wire", "behavior_property_set", sound.clone())["error"]["code"],
+            "invalid_arguments"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        sound["value"]["value"]["asset_id"] = json!("unresolved-sound");
+        sound["value"]["value"]["gain"] = json!(1.1);
+        assert_eq!(
+            editor.command("wire", "behavior_property_set", sound.clone())["error"]["code"],
+            "invalid_arguments"
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), unchanged);
+        sound["value"]["value"]["gain"] = json!(0.5);
+        assert_eq!(
+            editor.command("wire", "behavior_property_set", sound)["ok"],
+            true
+        );
+        assert_eq!(
+            editor.command("wire", "scene_undo", pre(editor.session.scene().revision))["ok"],
+            true
+        );
+        assert!(!editor
+            .session
+            .binding("application")
+            .unwrap()
+            .properties
+            .contains_key("chime"));
     }
 }

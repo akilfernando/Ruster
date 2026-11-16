@@ -156,6 +156,10 @@ pub(super) enum ValueDraft {
     Vec3([String; 3]),
     ObjectRef(Option<String>),
     AssetRef(Option<String>),
+    SoundRef {
+        asset_id: Option<String>,
+        gain: String,
+    },
 }
 impl From<&PropertyValue> for ValueDraft {
     fn from(value: &PropertyValue) -> Self {
@@ -166,6 +170,10 @@ impl From<&PropertyValue> for ValueDraft {
             PropertyValue::Vec3(v) => Self::Vec3(v.map(|n| n.to_string())),
             PropertyValue::ObjectRef(id) => Self::ObjectRef(id.clone()),
             PropertyValue::AssetRef(id) => Self::AssetRef(id.clone()),
+            PropertyValue::SoundRef(sound) => Self::SoundRef {
+                asset_id: sound.asset_id.clone(),
+                gain: sound.gain.to_string(),
+            },
         }
     }
 }
@@ -204,6 +212,10 @@ impl ValueDraft {
             Self::Vec3(v) => PropertyValue::Vec3([number(&v[0])?, number(&v[1])?, number(&v[2])?]),
             Self::ObjectRef(id) => PropertyValue::ObjectRef(id.clone()),
             Self::AssetRef(id) => PropertyValue::AssetRef(id.clone()),
+            Self::SoundRef { asset_id, gain } => PropertyValue::SoundRef(ruster_scene::SoundRef {
+                asset_id: asset_id.clone(),
+                gain: number(gain)?,
+            }),
         };
         value.validate().map_err(|error| error.to_string())?;
         Ok(value)
@@ -224,6 +236,11 @@ impl ValueDraft {
                         .bytes()
                         .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
             }),
+            (Self::SoundRef { asset_id, gain }, PropertyValue::SoundRef(_)) => {
+                gain.len() <= 128
+                    && Self::AssetRef(asset_id.clone())
+                        .validate_draft(&PropertyValue::AssetRef(None))
+            }
             _ => false,
         }
     }
@@ -366,7 +383,7 @@ pub(super) struct BehaviorUi {
     cached_revision: Option<u64>,
     sources: Vec<(String, String)>,
     asset_key: Option<(std::path::PathBuf, u64)>,
-    assets: Vec<String>,
+    assets: Vec<(String, bool)>,
     property_rows_key: Option<(u64, String)>,
     property_rows: Vec<(String, String)>,
     new_property: String,
@@ -1135,6 +1152,7 @@ impl BehaviorUi {
                             },
                             property.name
                         ));
+                        let popup_at_start = egui::Popup::is_any_open(ui.ctx());
                         let response = value_ui(
                             ui,
                             &mut property.value,
@@ -1145,6 +1163,8 @@ impl BehaviorUi {
                         );
                         property_changed = response.changed;
                         if editable
+                            && !popup_at_start
+                            && !egui::Popup::is_any_open(ui.ctx())
                             && response.focused
                             && ui.input_mut(|input| {
                                 input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
@@ -1153,6 +1173,8 @@ impl BehaviorUi {
                             action = Some(Action::ApplyProperty);
                         }
                         if editable
+                            && !popup_at_start
+                            && !egui::Popup::is_any_open(ui.ctx())
                             && response.focused
                             && ui.input_mut(|input| {
                                 input.consume_key(egui::Modifiers::NONE, egui::Key::Escape)
@@ -1284,8 +1306,8 @@ impl BehaviorUi {
                 let popup_at_start = egui::Popup::is_any_open(ui.ctx());
                 ui.label("Name");
                 let name = text(ui,&mut self.new_property,128);
-                egui::ComboBox::from_label("Property type").selected_text(["Number","Bool","Text","Vec3","Object reference","Asset reference"][self.new_type]).show_ui(ui,|ui| {
-                    for (index,label) in ["Number","Bool","Text","Vec3","Object reference","Asset reference"].into_iter().enumerate() {ui.selectable_value(&mut self.new_type,index,label);}
+                egui::ComboBox::from_label("Property type").selected_text(["Number","Bool","Text","Vec3","Object reference","Asset reference","Sound"][self.new_type]).show_ui(ui,|ui| {
+                    for (index,label) in ["Number","Bool","Text","Vec3","Object reference","Asset reference","Sound"].into_iter().enumerate() {if ui.selectable_value(&mut self.new_type,index,label).clicked() {ui.close();}}
                 });
                 let enter = ui.is_enabled()
                     && !popup_at_start
@@ -1296,7 +1318,7 @@ impl BehaviorUi {
                         input.consume_key(egui::Modifiers::NONE, egui::Key::Enter)
                     });
                 if ui.button("Add typed property").clicked() || enter {
-                    let value=match self.new_type {0=>PropertyValue::Number(0.0),1=>PropertyValue::Bool(false),2=>PropertyValue::Text(String::new()),3=>PropertyValue::Vec3([0.0;3]),4=>PropertyValue::ObjectRef(None),_=>PropertyValue::AssetRef(None)};
+                    let value=match self.new_type {0=>PropertyValue::Number(0.0),1=>PropertyValue::Bool(false),2=>PropertyValue::Text(String::new()),3=>PropertyValue::Vec3([0.0;3]),4=>PropertyValue::ObjectRef(None),5=>PropertyValue::AssetRef(None),_=>PropertyValue::SoundRef(ruster_scene::SoundRef {asset_id:None,gain:1.0})};
                     action=Some(Action::AddProperty(id.clone(),self.new_property.clone(),value));
                 }
                 });
@@ -1448,7 +1470,13 @@ impl BehaviorUi {
         };
         if changed {
             self.assets = store
-                .map(|store| store.inspect().into_iter().map(|asset| asset.id).collect())
+                .map(|store| {
+                    store
+                        .inspect()
+                        .into_iter()
+                        .map(|asset| (asset.id, asset.kind == ruster_assets::AssetKind::Sound))
+                        .collect()
+                })
                 .unwrap_or_default();
             self.asset_key = store.map(|store| (store.root().to_path_buf(), store.revision()));
         }
@@ -1566,6 +1594,11 @@ fn property_summary(value: &PropertyValue) -> String {
         PropertyValue::Vec3(v) => format!("Vec3: {}, {}, {}", v[0], v[1], v[2]),
         PropertyValue::ObjectRef(id) => format!("Object: {}", id.as_deref().unwrap_or("None")),
         PropertyValue::AssetRef(id) => format!("Asset: {}", id.as_deref().unwrap_or("None")),
+        PropertyValue::SoundRef(sound) => format!(
+            "Sound: {} · gain {}",
+            sound.asset_id.as_deref().unwrap_or("None"),
+            sound.gain
+        ),
     }
 }
 #[derive(Default)]
@@ -1592,7 +1625,7 @@ pub(super) fn value_ui(
     ui: &mut egui::Ui,
     value: &mut ValueDraft,
     session: &Session,
-    assets: &[String],
+    assets: &[(String, bool)],
     generation: u64,
     focus: &mut bool,
 ) -> ValueResponse {
@@ -1666,19 +1699,54 @@ pub(super) fn value_ui(
             }
             ui.small("Choose an object or drop its hierarchy row here.");
         }
+        ValueDraft::SoundRef { asset_id, gain } => {
+            let response = egui::ComboBox::from_label("Sound asset")
+                .selected_text(asset_id.as_deref().unwrap_or("None"))
+                .show_ui(ui, |ui| {
+                    if ui.selectable_value(asset_id, None, "None").clicked() {
+                        result.changed = true;
+                        ui.close();
+                    }
+                    for (id, is_sound) in assets {
+                        if *is_sound
+                            && ui
+                                .selectable_value(asset_id, Some(id.clone()), id)
+                                .clicked()
+                        {
+                            result.changed = true;
+                            ui.close();
+                        }
+                    }
+                })
+                .response;
+            result.field(response, &mut false);
+            ui.label("Gain (0–1)");
+            result.field(text_with_id(ui, gain, 128, id.with("gain")), focus);
+            if asset_id.as_ref().is_some_and(|id| {
+                !assets
+                    .iter()
+                    .any(|(asset, is_sound)| asset == id && *is_sound)
+            }) {
+                ui.colored_label(ui.visuals().warn_fg_color,"Sound reference is missing or is not a sound asset. Import a WAV or choose a replacement.");
+            }
+            ui.small("Lua APIs 4, 5 and 7: host.play_sound(\"property_name\"). None is silent.");
+        }
         ValueDraft::AssetRef(value) => {
             let response = egui::ComboBox::from_label("Asset reference")
                 .selected_text(value.as_deref().unwrap_or("None"))
                 .show_ui(ui, |ui| {
                     result.changed |= ui.selectable_value(value, None, "None").changed();
-                    for id in assets {
+                    for (id, _) in assets {
                         result.changed |=
                             ui.selectable_value(value, Some(id.clone()), id).changed();
                     }
                 })
                 .response;
             result.field(response, focus);
-            if value.as_ref().is_some_and(|id| !assets.contains(id)) {
+            if value
+                .as_ref()
+                .is_some_and(|id| !assets.iter().any(|(asset, _)| asset == id))
+            {
                 ui.colored_label(ui.visuals().warn_fg_color,"Unresolved catalog reference; preserved without rebasing until explicitly changed.");
             }
         }
@@ -1699,6 +1767,7 @@ enum Request {
         key: RunKey,
         scene: Arc<ruster_scene::Scene>,
         authoring: Arc<ruster_scene::Authoring>,
+        sounds: BTreeMap<String, Arc<ruster_assets::AudioClip>>,
     },
     Play(RunKey),
     Pause(RunKey),
@@ -1727,10 +1796,12 @@ impl Request {
                 key,
                 scene,
                 authoring,
+                sounds,
             } => VmCommand::Reset {
                 key: *key,
                 scene: scene.clone(),
                 authoring: authoring.clone(),
+                sounds: sounds.clone(),
             },
             Self::Play(key) => VmCommand::Play { key: *key },
             Self::Pause(key) => VmCommand::Pause { key: *key },
@@ -1960,11 +2031,21 @@ impl RuntimeUi {
         }
         Ok(())
     }
+    #[cfg(test)]
     pub fn reset(
         &mut self,
         ctx: &egui::Context,
         session: &Session,
         generation: u64,
+    ) -> Result<RunKey, String> {
+        self.reset_with_sounds(ctx, session, generation, BTreeMap::new())
+    }
+    pub fn reset_with_sounds(
+        &mut self,
+        ctx: &egui::Context,
+        session: &Session,
+        generation: u64,
+        sounds: BTreeMap<String, Arc<ruster_assets::AudioClip>>,
     ) -> Result<RunKey, String> {
         self.ensure_worker(ctx)?;
         self.supersede_hud_activation("Runtime Reset superseded HUD activation");
@@ -1982,6 +2063,7 @@ impl RuntimeUi {
             key,
             scene: Arc::new(session.scene().clone()),
             authoring,
+            sounds,
         });
         self.begin_reset(key);
         self.diagnostic = None;
@@ -2273,6 +2355,7 @@ impl RuntimeUi {
     pub fn finished(&mut self) -> bool {
         self.worker.as_mut().is_none_or(VmWorker::finished)
     }
+    #[cfg(test)]
     pub fn controls(
         &mut self,
         ui: &mut egui::Ui,
@@ -2280,6 +2363,18 @@ impl RuntimeUi {
         generation: u64,
         blocked: bool,
         focus_shortcut: &str,
+    ) -> Option<RunKey> {
+        self.controls_with_sounds(ui, session, generation, blocked, focus_shortcut, None)
+    }
+    #[allow(clippy::too_many_arguments)]
+    pub fn controls_with_sounds(
+        &mut self,
+        ui: &mut egui::Ui,
+        session: &Session,
+        generation: u64,
+        blocked: bool,
+        focus_shortcut: &str,
+        assets: Option<&ruster_assets::AssetStore>,
     ) -> Option<RunKey> {
         let mut reset = None;
         let focus_controls = std::mem::take(&mut self.focus_controls);
@@ -2303,7 +2398,7 @@ impl RuntimeUi {
                 reset_button.scroll_to_me(Some(egui::Align::Center));
             }
             if reset_button.clicked() {
-                match self.reset(ui.ctx(), session, generation) {
+                match self.reset_with_sounds(ui.ctx(), session, generation, assets.map(ruster_assets::AssetStore::sound_snapshots).unwrap_or_default()) {
                     Ok(key) => {
                         reset = Some(key);
                         self.arm_control_focus(&reset_button, key, Operation::Reset);
@@ -2358,6 +2453,20 @@ impl RuntimeUi {
                 if ui.button("Runtime input help…").clicked(){self.open_input_help(ui.ctx());ui.close();}
                 ui.add_enabled(self.frame.is_some(),egui::Checkbox::new(&mut self.visible,if self.stale {"View retained runtime (stale)"}else{"View runtime"}));
                 self.spatial_feedback_menu(ui);
+                if let Some(report) = self.worker.as_ref().and_then(|worker| worker.audio_report(worker.current_key())) {
+                    use ruster_app::audio::OutputStatus;
+                    ui.label(match report.status {
+                        OutputStatus::Idle => "Audio: ready for first cue",
+                        OutputStatus::Ready => "Audio: output ready",
+                        OutputStatus::Paused => "Audio: paused (Step is silent)",
+                        OutputStatus::Unavailable => "Audio unavailable: no usable output device",
+                        OutputStatus::MissingAsset => "Audio: referenced sound is missing",
+                        OutputStatus::VoiceLimit => "Audio: voice limit reached",
+                    });
+                    if let Some(batch) = &report.last_batch {
+                        ui.label(format!("Last committed audio batch: {} cues", batch.cues.len()));
+                    }
+                }
                 if let Some(frame)=&self.frame {ui.label(format!("Committed tick {}",frame.tick));}
                 if !self.status.is_empty(){ui.label(&self.status);}
                 if let Some(diagnostic)=&self.diagnostic {ui.collapsing("Last failure details",|ui| {
@@ -3075,6 +3184,15 @@ mod tests {
             ("number", PropertyValue::Number(2.0), "-", false),
             ("vector", PropertyValue::Vec3([0.0; 3]), "-", false),
             ("text", PropertyValue::Text("start".into()), " edit", true),
+            (
+                "sound",
+                PropertyValue::SoundRef(ruster_scene::SoundRef {
+                    asset_id: None,
+                    gain: 1.0,
+                }),
+                "-",
+                false,
+            ),
         ] {
             editor
                 .execute(

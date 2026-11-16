@@ -280,8 +280,8 @@ Rename, transform, delete and duplicate reuse the generic tools above, whose wir
 
 | Tool | Additional arguments | Result |
 | --- | --- | --- |
-| `asset_import` | Stable `asset_id`, project-relative OBJ, PNG or bounded static GLB `source` | `asset` (OBJ/PNG) or `model` (GLB), `asset_revision`, `scene_revision` |
-| `asset_refresh` | Registered `asset_id` | `asset` (OBJ/PNG) or `model` (GLB), `asset_revision`, `scene_revision` |
+| `asset_import` | Stable `asset_id`, project-relative OBJ, PNG, PCM16 WAV or bounded static GLB `source` | `asset` (OBJ/PNG/WAV) or `model` (GLB), `asset_revision`, `scene_revision` |
+| `asset_refresh` | Registered `asset_id` | `asset` (OBJ/PNG/WAV) or `model` (GLB), `asset_revision`, `scene_revision` |
 | `scene_model_place` | Registered model `asset_id`, optional root display `name` | Revisioned placement result including `root_id`; ordinary shared scene Undo |
 | `asset_rename` | Registered `asset_id`, new relative `source` | `asset`, `asset_revision`, `scene_revision` |
 | `scene_mesh` | Stable `object_id`, registered `asset_id` or JSON null for cube | `revision`, `asset_revision`, `object_id`, `before`, `after`, `dirty` |
@@ -560,3 +560,5 @@ success contact records. Existing bounded runtime/query inspection and
 saved play checks observe the same production behavior; they do not grant direct
 unconstrained runtime transforms. Native, actual-client and standalone acceptance
 remain separately recorded in [project status](../../docs/STATUS.md).
+
+Sound authoring reuses `asset_import` with `.wav` (no mesh/texture interpretation overrides) and `behavior_property_set` with `{"type":"sound_ref","value":{"asset_id":"chime","gain":0.5}}`. `asset_id` can be null; gain is finite0..1. Exact nested fields are required. A known non-Sound catalog entry rejects, while unresolved IDs remain repairable. Sound references cannot become state fields or command arguments. Lua4/5/7 `host.play_sound("property_name")` resolves the binding's authored reference; callers cannot provide arbitrary paths or runtime gains. Shared guards/history and separate catalog persistence remain unchanged.

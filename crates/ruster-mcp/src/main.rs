@@ -500,7 +500,7 @@ fn tools() -> Value {
         ("redo", "Redo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
         ("replay", "Replay the inspected authored snapshot in isolation for at most 10000 ticks; return one aggregate state. Does not alter editor playback."),
         ("asset_inspect", "Inspect bounded pages of project meshes/textures and static GLB model summaries with status and catalog revision. offset pages resources; model_offset independently pages models. Follow next_offset/model_next_offset; restart if catalog/session revisions change. No resource payloads."),
-        ("asset_import", "Import one bounded project-relative OBJ mesh, supported PNG texture or self-contained static GLB model into the immediately persisted typed catalog. GLB rejects normal_policy/texture_role; supports a bounded named hierarchy and opaque nonmetallic materials with embedded PNGs. Unsupported semantics reject; place separately with scene_model_place. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
+        ("asset_import", "Import one bounded project-relative OBJ mesh, bounded PCM16 WAV sound, supported PNG texture or self-contained static GLB model into the immediately persisted typed catalog. GLB rejects normal_policy/texture_role; supports a bounded named hierarchy and opaque nonmetallic materials with embedded PNGs. Unsupported semantics reject; place separately with scene_model_place. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
         ("asset_refresh", "Reimport one registered mesh, texture or static GLB model, retaining last-good accepted content on failure. Model refresh accepts geometry/normal/UV/image changes only with the same named structure, transforms and material settings; it updates resources without rewriting placed scene copies. Catalog persists independently of scene history."),
         ("asset_rename", "Rename one registered OBJ or PNG source within the project without overwrite or changing its extension/kind, preserving stable asset ID; catalog update is independent of scene undo."),
         ("scene_model_place", "Place a registered static GLB model as ordinary editable scene hierarchy/material copies under a creator-owned root. Requires inspected session, scene and asset revisions plus clean human drafts. Optional name labels the root. One atomic unsaved Undo entry; does not reimport or save. Reimport updates shared resources, not local scene values."),
@@ -1821,6 +1821,8 @@ mod tests {
         refresh.as_object_mut().unwrap().remove("source");
         let mut model_import = import.clone();
         model_import["source"] = json!("models/assembly.glb");
+        let mut sound_import = import.clone();
+        sound_import["source"] = json!("sounds/chime.wav");
         let placement = refresh.clone();
         let mut named_placement = placement.clone();
         named_placement["name"] = json!("Workshop assembly");
@@ -1832,6 +1834,7 @@ mod tests {
         for (name, args) in [
             ("asset_inspect", json!({"offset":"16", "model_offset":"32"})),
             ("asset_import", model_import.clone()),
+            ("asset_import", sound_import.clone()),
             ("scene_model_place", placement.clone()),
             ("scene_model_place", named_placement.clone()),
             ("asset_import", import.clone()),
@@ -1939,8 +1942,11 @@ mod tests {
             ("texture_role", json!("base_color_srgb")),
         ] {
             let mut invalid = model_import.clone();
-            invalid[key] = value;
+            invalid[key] = value.clone();
             assert!(!valid_arguments("asset_import", &invalid));
+            let mut invalid_sound = sound_import.clone();
+            invalid_sound[key] = value;
+            assert!(!valid_arguments("asset_import", &invalid_sound));
         }
         for (key, value) in [
             ("name", Value::Null),
