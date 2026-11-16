@@ -50,7 +50,6 @@ fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
 
 #[cfg(unix)]
 pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui::Response {
-    let palette = editor_theme::colors(ui);
     let connected = state == "Connected";
     let button = if connected {
         let mut text = egui::text::LayoutJob::default();
@@ -59,7 +58,7 @@ pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui:
             0.0,
             egui::TextFormat {
                 font_id: egui::FontId::proportional(15.0),
-                color: palette.accent,
+                color: editor_theme::ROT_ON_RED,
                 italics: true,
                 extra_letter_spacing: -0.35,
                 ..Default::default()
@@ -70,7 +69,7 @@ pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui:
             0.0,
             egui::TextFormat {
                 font_id: egui::FontId::proportional(12.0),
-                color: palette.text,
+                color: editor_theme::ROT_ON_RED,
                 ..Default::default()
             },
         );
@@ -168,6 +167,17 @@ mod tests {
                     matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == label)
                 }),
                 "missing text for {state}"
+            );
+            let fill = if state == "Connected" {
+                editor_theme::ROT_RED
+            } else {
+                egui::Color32::from_rgb(0x36, 0x36, 0x38)
+            };
+            assert!(
+                output.shapes.iter().any(|shape| {
+                    matches!(&shape.shape, egui::Shape::Rect(rect) if rect.fill == fill)
+                }),
+                "missing status fill for {state}"
             );
         }
     }

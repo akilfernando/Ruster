@@ -58,8 +58,10 @@ fn selection_contour(uv: vec2<f32>, color: vec3<f32>, alpha: f32) -> vec3<f32> {
         far_edge = max(far_edge, textureSampleLevel(image, image_sampler, uv + direction * texel * 3.5, 0.0).a);
     }
     let coverage = 1.0 - alpha;
-    let backed = mix(color, vec3<f32>(0.012, 0.018, 0.022), coverage * far_edge);
-    return mix(backed, vec3<f32>(0.18, 0.85, 0.57), coverage * near_edge);
+    let backed = mix(color, vec3<f32>(0.018), coverage * far_edge);
+    // Linear sRGB for the Rot mushroom red (#FA2934).
+    let rot_red = vec3<f32>(0.955973, 0.022174, 0.034340);
+    return mix(backed, rot_red, coverage * near_edge);
 }
 fn displayed_color(uv: vec2<f32>) -> vec4<f32> {
     let color = textureSample(image, image_sampler, uv);

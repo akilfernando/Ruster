@@ -5396,7 +5396,13 @@ impl SceneEditor {
             self.theme_applied = Some(theme);
         }
     }
+    #[cfg(test)]
     fn ui(&mut self, ui: &mut egui::Ui) {
+        self.begin_ui(ui);
+        self.workspace_ui(ui);
+    }
+
+    fn begin_ui(&mut self, ui: &mut egui::Ui) {
         // Keep the supported compact viewport usable while retaining normal-size controls.
         if ui.max_rect().height() < 600.0 {
             ui.spacing_mut().interact_size.y = 28.0;
@@ -5463,7 +5469,6 @@ impl SceneEditor {
             self.runtime.cancel_native_hud_activation();
         }
         self.runtime.input_begin(&ctx, input_blocked);
-        self.route_shortcuts(&ctx);
         egui::Panel::top("scene_top").show(ui, |ui| {
             if self.ai_workspace {
                 self.ai_header(ui);
@@ -5471,6 +5476,11 @@ impl SceneEditor {
                 self.scene_menus(ui);
             }
         });
+    }
+
+    fn workspace_ui(&mut self, ui: &mut egui::Ui) {
+        let ctx = ui.ctx().clone();
+        self.route_shortcuts(&ctx);
         let about_open = crate::branding::is_about_open(&ctx);
         crate::branding::show_about(&ctx);
         if !self.ai_workspace
@@ -6109,9 +6119,10 @@ impl eframe::App for Host {
                 _ => "Disconnected",
             };
         }
+        self.editor.begin_ui(ui);
         #[cfg(unix)]
         self.native_connection_ui(ui);
-        self.editor.ui(ui);
+        self.editor.workspace_ui(ui);
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.
         self.input.human_pending = false;

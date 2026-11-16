@@ -1770,9 +1770,9 @@ impl Target {
             ops: wgpu::Operations {
                 load: wgpu::LoadOp::Clear(if editor_grid {
                     wgpu::Color {
-                        r: 0.018,
-                        g: 0.014,
-                        b: 0.015,
+                        r: 0.016,
+                        g: 0.016,
+                        b: 0.016,
                         a: 1.0,
                     }
                 } else {

@@ -134,12 +134,12 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
                 "runtime selection must retain legacy whitening without editor opt-in"
             );
         }
-        // White, black and mint all receive the same exposure-independent mint
+        // White, black and mint all receive the same exposure-independent red
         // contour; their centers and the nearer occluder remain pixel-identical.
         for x in [14, 96, 178] {
             let p = pixel(1, x, 96);
-            if !(p[1] > p[0] + 25 && p[1] > p[2] + 10) {
-                failures.push(format!("{name}: missing mint contour at {x}: {p:?}"));
+            if !(p[0].saturating_sub(p[1]) > 100 && p[0].saturating_sub(p[2]) > 100) {
+                failures.push(format!("{name}: missing Rot-red contour at {x}: {p:?}"));
             }
         }
         for x in [45, 112, 136, 210] {
@@ -169,7 +169,7 @@ pub(super) fn verify(device: &wgpu::Device, queue: &wgpu::Queue) {
         );
     }
     assert!(failures.is_empty(), "{}", failures.join("\n"));
-    eprintln!("GPU selection: white/black/mint contour, HDR exposure extremes, output transfer, occlusion, interior/clear equivalence and zero selection resource uploads passed");
+    eprintln!("GPU selection: Rot-red contour on white/black/mint surfaces, HDR exposure extremes, output transfer, occlusion, interior/clear equivalence and zero selection resource uploads passed");
 }
 
 fn render(

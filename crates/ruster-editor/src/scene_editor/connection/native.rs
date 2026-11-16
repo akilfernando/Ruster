@@ -113,23 +113,43 @@ impl Host {
             .data_mut(|data| data.get_temp::<NativeUi>(id))
             .unwrap_or_default();
         if std::mem::take(&mut self.editor.ai_connection_requested) {
-            state.open = true;
+            state.open = !state.open;
+            self.editor.runtime.release_input(&ctx);
         }
         if state.open {
-            let mut open = true;
-            egui::Window::new("Rot connection")
-                .id(id.with("window"))
-                .open(&mut open)
-                .vscroll(true)
-                .max_height((ctx.content_rect().height() - 80.0).max(200.0))
-                .show(&ctx, |ui| {
-                    self.connection_status_ui(ui);
-                    self.binding_controls_ui(ui, &mut state);
+            let available = ui.available_size();
+            let panel = if available.x >= 700.0 {
+                egui::Panel::right(id.with("dock"))
+                    .exact_size((available.x * 0.34).clamp(310.0, 416.0))
+            } else {
+                egui::Panel::top(id.with("compact_dock"))
+                    .exact_size((available.y * 0.52).min(280.0))
+            };
+            panel
+                .resizable(false)
+                .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(14)))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.heading("Rot connection");
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui
+                                .button("Close")
+                                .on_hover_text("Close Rot panel")
+                                .clicked()
+                            {
+                                state.open = false;
+                            }
+                        });
+                    });
+                    ui.add_space(6.0);
+                    egui::ScrollArea::vertical().show(ui, |ui| {
+                        self.connection_status_ui(ui);
+                        self.binding_controls_ui(ui, &mut state);
+                    });
                 });
-            state.open &= open;
-            if !open {
-                state.preview = None;
-            }
+        }
+        if !state.open {
+            state.preview = None;
         }
         ctx.data_mut(|data| data.insert_temp(id, state));
     }
@@ -159,29 +179,7 @@ impl Host {
             }
         }
 
-        ui.label(format!("Project: {}", self.editor.document_label()));
-        ui.label(format!("Scene: {}", self.editor.session.scene().id));
-        ui.label(format!(
-            "Editor session: {}",
-            self.editor.connection_incarnation
-        ));
-        ui.label(format!(
-            "Project generation: {}",
-            self.editor.connection_generation
-        ));
-        Self::scene_observation_ui(ui, &self.native_scene_observation(), "");
-        if let Some(bridge) = &self.bridge {
-            ui.label(format!(
-                "Nonsecret locator: {}",
-                bridge.locator_path().display()
-            ));
-        }
-        if let Some((owner, pid)) = self.pending_adapter() {
-            ui.label(format!("Adapter owner: {owner} · local PID {pid}"));
-            ui.label(
-                "Owner identity is socket-bound, not executable provenance or client registration.",
-            );
-        }
+        ui.add_space(4.0);
         let enrolled = std::env::var_os("RUSTER_CONNECTOR_ENROLLMENT").is_some();
         if enrolled {
             ui.label("Use project_connect in the enrolled connector. No native approval is needed; browser access is optional and separate. Disconnect retains enrollment; Revoke removes persistent access.");
@@ -192,7 +190,7 @@ impl Host {
             _ => None,
         };
         if let Some(action) = action.filter(|_| !enrolled) {
-            if ui.button(action).clicked() {
+            if crate::editor_theme::primary_button(ui, action).clicked() {
                 state.preview = Some(self.binding_preview());
                 state.focus_cancel = true;
                 state.notice.clear();
@@ -215,26 +213,60 @@ impl Host {
             state.preview = None;
             self.disconnect_adapter();
         }
-        ui.label("Automatic Hermes registration is unavailable; no client configuration is changed here.");
         if !state.notice.is_empty() {
             ui.label(&state.notice);
         }
+        ui.add_space(8.0);
+        ui.separator();
+        ui.collapsing("Connection details", |ui| {
+            ui.label(format!("Project: {}", self.editor.document_label()));
+            ui.label(format!("Scene: {}", self.editor.session.scene().id));
+            ui.label(format!(
+                "Editor session: {}",
+                self.editor.connection_incarnation
+            ));
+            ui.label(format!(
+                "Project generation: {}",
+                self.editor.connection_generation
+            ));
+            Self::scene_observation_ui(ui, &self.native_scene_observation(), "");
+            if let Some(bridge) = &self.bridge {
+                ui.label(format!(
+                    "Nonsecret locator: {}",
+                    bridge.locator_path().display()
+                ));
+            }
+            if let Some((owner, pid)) = self.pending_adapter() {
+                ui.label(format!("Adapter owner: {owner} · local PID {pid}"));
+                ui.label(
+                    "Owner identity is socket-bound, not executable provenance or client registration.",
+                );
+            }
+            ui.weak("Registration and client reload are separate from editor binding.");
+            ui.weak("Automatic Hermes registration is unavailable. This panel leaves client configuration alone.");
+        });
         if let Some(preview) = state.preview.clone() {
             egui::Modal::new(egui::Id::unique(("ai_binding_consent", &preview.incarnation))).show(&ctx, |ui| {
                 ui.heading(if preview.owner.is_some() { "Approve this exact adapter?" } else { "Start a project-local listener?" });
                 ui.label(format!("Project: {} · Scene: {}", self.editor.document_label(), self.editor.session.scene().id));
-                ui.label(format!("Session: {}\nGeneration: {}", preview.incarnation, preview.generation));
-                Self::scene_observation_ui(ui, &preview.observation, "Frozen ");
-                ui.label(format!("Frozen scene: {}", preview.observation.scene_id));
+                ui.collapsing("Approval details", |ui| {
+                    ui.label(format!("Session: {}\nGeneration: {}", preview.incarnation, preview.generation));
+                    Self::scene_observation_ui(ui, &preview.observation, "Frozen ");
+                    ui.label(format!("Frozen scene: {}", preview.observation.scene_id));
+                });
                 if let Some((owner, pid)) = &preview.owner { ui.label(format!("Adapter: {owner} · local PID {pid}")); }
                 ui.label("Approval grants this adapter authority over this project/session only. No automatic retargeting or reconnect.");
                 ui.label("Asset catalog changes can persist immediately, before Save. Save/export destinations require separate grants.");
-                let cancel = ui.button("Cancel AI connection");
+                let (cancel, confirm) = ui.horizontal_wrapped(|ui| {
+                    let cancel = ui.button("Cancel AI connection");
+                    let confirm = crate::editor_theme::primary_button(ui, "Confirm AI connection");
+                    (cancel, confirm)
+                }).inner;
                 if state.focus_cancel { cancel.request_focus(); state.focus_cancel = false; }
                 let escape = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                 if cancel.clicked() || escape {
                     state.preview = None;
-                } else if ui.button("Confirm AI connection").clicked() {
+                } else if confirm.clicked() {
                     // Taking the frozen preview consumes consent, even on stale refusal.
                     let accepted = self.confirm_binding(state.preview.take().unwrap(), &ctx);
                     state.notice = if accepted { "Local binding action completed. Client registration/reload was not performed." } else { "Connection changed or is unavailable. Consent discarded; review again." }.into();
@@ -488,7 +520,12 @@ mod tests {
         );
         assert_eq!(inspected["result"]["revision"], observation.revision);
         let mut state = NativeUi::default();
+        assert!(!paint(&mut host, &ctx, &mut state, vec![])
+            .iter()
+            .any(|(text, _)| text.contains(&observation.session_token)));
+        click(&mut host, &ctx, &mut state, "Connection details");
         click(&mut host, &ctx, &mut state, "Connect AI");
+        click(&mut host, &ctx, &mut state, "Approval details");
         let painted = paint(&mut host, &ctx, &mut state, vec![]);
         for prefix in ["", "Frozen "] {
             assert!(painted.iter().any(|(text, _)| text

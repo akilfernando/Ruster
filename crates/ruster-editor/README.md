@@ -12,7 +12,7 @@ Current source saves ordinary flat documents as Scene18. Static assemblies and r
 
 ## Full editor workspace
 
-The header holds the scene title, Rot connection status and Save. Use the toolbars for Scene and Player views, transforms, snapping, playback and view shortcuts. Objects and Inspector overlay one continuous Scene viewport. Their controls scroll above the fade, and the exposed viewport below either panel supports the same navigation as the center. The world grid follows the Scene camera and is confined to the editor's Scene view. Content retains its existing search, import and asset controls. Open **Help → About** for the running build version.
+The header holds the scene title, Rot connection status and Save. Click **Rot** to toggle the connection panel. It docks to the right at wide sizes and below the header at compact sizes. Expand **Connection details** for session and adapter diagnostics. Use the toolbars for Scene and Player views, transforms, snapping, playback and view shortcuts. Objects and Inspector overlay one continuous Scene viewport. Their controls scroll above the fade, and the exposed viewport below either panel supports the same navigation as the center. The world grid follows the Scene camera. The editor’s Scene view uses a neutral grey background and a Rot-red selection outline. Content retains its existing search, import and asset controls. Open **Help → About** for the running build version.
 
 ## Bounded assembly hierarchy — implementation WIP
 

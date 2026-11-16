@@ -257,22 +257,34 @@ impl StyleProvider<ButtonStyle> for EditorButtons {
         #[cfg(unix)]
         if args.classes.has_class(ROT_BADGE) {
             let p = palette(args.ctx);
-            let resting = if args.classes.has_class(ROT_CONNECTED) {
-                p.selection
+            let connected = args.classes.has_class(ROT_CONNECTED);
+            let resting = if connected {
+                ROT_RED
+            } else if args.ctx.theme() == Theme::Light {
+                rgb(0xe1e1e3)
             } else {
-                p.surface.lerp_to_gamma(p.accent, 0.13)
+                rgb(0x363638)
             };
-            let emphasis = match args.state {
-                WidgetState::Hovered => 0.035,
-                WidgetState::Active => 0.05,
-                _ => 0.0,
+            button.atom_layout.frame.fill = if args.state == WidgetState::Hovered {
+                resting.lerp_to_gamma(p.text, 0.07)
+            } else {
+                resting
             };
-            button.atom_layout.frame.fill = resting.lerp_to_gamma(p.accent, emphasis);
-            button.atom_layout.text_style.color = p.accent;
+            if args.state == WidgetState::Active {
+                button.atom_layout.frame.stroke.color =
+                    if connected { ROT_ON_RED } else { p.secondary };
+            }
+            button.atom_layout.text_style.color = if connected { ROT_ON_RED } else { p.text };
         }
         button
     }
 }
+
+/// Sampled from the opaque face of the bundled mushroom artwork.
+#[cfg(unix)]
+pub const ROT_RED: Color32 = rgb(0xfa2934);
+#[cfg(unix)]
+pub const ROT_ON_RED: Color32 = rgb(0x180709);
 
 #[cfg(unix)]
 const ROT_BADGE: &str = "rot_badge";

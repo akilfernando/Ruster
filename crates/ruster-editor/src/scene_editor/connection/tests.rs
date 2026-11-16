@@ -214,7 +214,7 @@ fn cp2_local_status_keeps_disconnected_listening_and_revoked_distinct() {
     let locator = host.connect_adapter(&ctx).unwrap();
     let text = paint(&mut host);
     assert!(text.contains("Waiting for an adapter"));
-    assert!(text.contains("Registration and client reload are separate"));
+    assert!(text.contains("Open your AI client to continue."));
     assert!(!text.contains("Connected to this project"));
     let (owner, _) = approved(host.bridge.as_ref().unwrap());
     let text = paint(&mut host);

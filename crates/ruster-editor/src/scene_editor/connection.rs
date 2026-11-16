@@ -169,21 +169,62 @@ impl Host {
     /// Read-only CP2 presentation seam. Registration/reload receipts must be
     /// supplied by the later consent controller, never inferred from a listener.
     pub(super) fn connection_status_ui(&self, ui: &mut egui::Ui) {
-        ui.heading("AI connection");
-        ui.label(match self.connection_state() {
-            "retired" => "Disconnected",
-            "revoked_draining" => "Authority revoked; retiring connection",
-            "access_revoked" => "Persistent access revoked; deliberate re-enrollment required",
-            "connection_error" => {
-                "Enrollment or registered owner identity changed; connection refused"
-            }
-            "listening_unbound" => "Waiting for an adapter",
-            "approval_required" => "Adapter approval required",
-            "bound" => "Connected to this project",
-            _ => "Connection state unavailable",
-        });
-        ui.label("Registration and client reload are separate from editor binding.");
-        ui.label("Asset catalog changes can persist immediately, before Save.");
+        let state = self.connection_state();
+        let (status, description) = match state {
+            "retired" => (
+                "Disconnected",
+                "Connect an AI client to work with this project.",
+            ),
+            "revoked_draining" => (
+                "Authority revoked; retiring connection",
+                "The previous connection is winding down.",
+            ),
+            "access_revoked" => (
+                "Persistent access revoked",
+                "Re-enroll this project to connect again.",
+            ),
+            "connection_error" => (
+                "Connection refused",
+                "Enrollment or the registered owner identity changed.",
+            ),
+            "listening_unbound" => ("Waiting for an adapter", "Open your AI client to continue."),
+            "approval_required" => (
+                "Adapter approval required",
+                "Review the request before granting project access.",
+            ),
+            "bound" => (
+                "Connected to this project",
+                "Asset catalog changes can persist immediately, before Save.",
+            ),
+            _ => ("Connection state unavailable", ""),
+        };
+        let palette = crate::editor_theme::colors(ui);
+        egui::Frame::new()
+            .fill(palette.raised)
+            .corner_radius(8.0)
+            .inner_margin(egui::Margin::same(12))
+            .show(ui, |ui| {
+                ui.set_min_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    let (rect, _) =
+                        ui.allocate_exact_size(egui::vec2(8.0, 8.0), egui::Sense::hover());
+                    let dot = if state == "bound" {
+                        crate::editor_theme::ROT_RED
+                    } else {
+                        palette.secondary
+                    };
+                    ui.painter().circle_filled(rect.center(), 3.5, dot);
+                    ui.strong(status);
+                });
+                if !description.is_empty() {
+                    ui.weak(description);
+                }
+                ui.add_space(4.0);
+                ui.horizontal_wrapped(|ui| {
+                    ui.weak("Project");
+                    ui.label(self.editor.document_label());
+                });
+            });
     }
 
     pub(super) fn connection_state(&self) -> &'static str {

@@ -66,6 +66,19 @@ launcher executable smoke passed. The compact layout test initially caught a
 badge wrapper that changed the runtime header height. The final badge styles
 the existing button directly and passes that regression check.
 
+The Rot badge now toggles a docked connection panel, with status, project and
+connection actions ahead of expandable diagnostics. It is grey when inactive
+and uses the mushroom red (`#FA2934`) when connected. Consent still opens an
+explicit confirmation. Scene View clears to neutral grey and uses the same red
+for its selection outline. The Vulkan probe verified the contour on white,
+black and mint surfaces, HDR exposure extremes, occlusion, unchanged interior
+pixels and resource reuse. The full workspace gate and installed release smoke
+passed. Native inspection verified the dock, hidden diagnostics and Escape
+cancellation at desktop and compact sizes. The rendered background measured
+RGB (34, 34, 34), and the selection included pixels at the exact logo red.
+The active badge color was tested using the connected state fixture. Captures
+and gate logs are in the redesign audit directory.
+
 ## Rot Engine rebrand — 2026-11-16
 
 The [Rot Engine identity](branding/rot/README.md) supplies the launcher
