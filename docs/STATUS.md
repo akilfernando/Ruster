@@ -16,8 +16,13 @@ total=2. An isolated copy with speed changed to 2 produces X=4 and total=4;
 the original still gives byte-identical output on a fresh run. The first
 fixture attempt used an untagged property and failed normal scene loading.
 Correcting the fixture to the existing typed property schema resolved it.
-This verifies the starting data and failure oracle. The shared assertion
-runner and its UI, MCP and package routes remain under implementation.
+The subsequent production host probe passed direct Reset/Step on an isolated
+Engine. It observed the deliberate X=4 and total=4 mismatch against X=2 and
+total=2, then passed after a fresh Reset with speed repaired. A separate live
+preview stayed at tick 1, X=1 and total=1, with byte-identical authored state.
+The exact private probe, output and initial fixture diagnostics are in that
+audit. Shared assertions and package checks are now under implementation,
+with the editor and guarded MCP work following the same runner contract.
 
 ## Post-GLB research and next-work recommendation — 2026-11-16
 
