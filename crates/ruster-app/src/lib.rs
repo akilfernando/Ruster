@@ -1,5 +1,6 @@
 //! Bounded Linux application host: application-owned behavior, shared Vulkan rendering.
 pub mod creation;
+pub use ruster_render::player_view_projection;
 mod host;
 pub mod hud;
 mod resources;

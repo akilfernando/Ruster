@@ -259,6 +259,11 @@ impl CreationManifest {
         let bytes = root.read(&self.scene, ruster_scene::MAX_FILE_BYTES as usize)?;
         let session = ruster_scene::Session::from_snapshot_bytes(&bytes)
             .map_err(|error| error.to_string())?;
+        if self.initial_camera.is_some() && session.scene().player_view.is_some() {
+            return Err(
+                "Remove legacy initial camera framing when the scene owns a player view".into(),
+            );
+        }
         if session.loaded_format_version() >= 17 && self.version < 5 {
             return Err("Scene17 runtime_hud_panels requires descriptor version 5".into());
         }

@@ -344,6 +344,7 @@ impl Clipboard {
                 }
             },
             display: ruster_scene::DisplayProfile::LegacySdr,
+            player_view: None,
             id: "clipboard".into(),
             revision: 0,
             objects: self.objects.clone(),

@@ -58,6 +58,11 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
     {
         return Err("invalid application initial camera".into());
     }
+    if options.initial_camera.is_some() && app.content().scene().player_view.is_some() {
+        return Err(
+            "Remove legacy initial camera framing when the scene owns a player view".into(),
+        );
+    }
     let mut runtime = Runtime::new(app, options.tick_duration)?;
     runtime.set_running(options.start_running);
     if log::set_logger(&DIAGNOSTICS).is_ok() {
@@ -443,6 +448,7 @@ impl<A: Application> Host<A> {
         self.report(valid);
         egui::CentralPanel::default().show(root, |ui| {
             if can_render {
+                self.navigation.player_view = self.runtime.app().content().scene().player_view.is_some();
                 let mut surface = {
                     let app = self.runtime.app();
                     let selected = app.selected();

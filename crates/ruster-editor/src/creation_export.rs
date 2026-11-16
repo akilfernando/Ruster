@@ -872,11 +872,22 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!("group_local_rotation"));
+    let mut player_view_profile = animated_assembly_profile.clone();
+    player_view_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!("authored_player_view"));
     let supplied_profile = &manifest["profile"];
+    let player_view_compatible = supplied_profile == &player_view_profile;
     let hierarchy_compatible = supplied_profile == &static_assembly_profile
-        || supplied_profile == &animated_assembly_profile;
+        || supplied_profile == &animated_assembly_profile
+        || player_view_compatible;
+    if scene_version == ruster_scene::PLAYER_VIEW_FORMAT_VERSION && !player_view_compatible {
+        return Err("runtime kit does not support Scene21 authored_player_view; prepare a current Linux runtime kit".into());
+    }
     if scene_version == ruster_scene::GROUP_ROTATION_FORMAT_VERSION
         && supplied_profile != &animated_assembly_profile
+        && !player_view_compatible
     {
         return Err("runtime kit does not support Scene20 group_local_rotation; prepare a current Linux runtime kit".into());
     }
@@ -1140,6 +1151,11 @@ fn prepare(
     let captured = ruster_scene::Session::from_snapshot_bytes(&request.scene_bytes)
         .map_err(|e| e.to_string())?;
     let scene_version = captured.loaded_format_version();
+    if captured.scene().player_view.is_some() && request.initial_camera.is_some() {
+        return Err(
+            "Remove legacy initial camera framing when the scene owns a player view".into(),
+        );
+    }
     let (mesh_ids, texture_ids) = scene_dependencies(captured.scene())?;
     let source_ids = request
         .assets
@@ -1251,7 +1267,8 @@ fn prepare(
         18 => 14,
         ruster_scene::HIERARCHY_FORMAT_VERSION => 15,
         ruster_scene::GROUP_ROTATION_FORMAT_VERSION => 16,
-        _ => return Err("export requires a supported Scene1–20 document".into()),
+        ruster_scene::PLAYER_VIEW_FORMAT_VERSION => 17,
+        _ => return Err("export requires a supported Scene1–21 document".into()),
     };
     let tick_nanos = u64::try_from(ruster_behavior::DEFAULT_FIXED_TICK.as_nanos())
         .map_err(|_| "Default fixed tick exceeds the descriptor nanosecond range")?;

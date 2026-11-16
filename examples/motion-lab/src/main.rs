@@ -591,6 +591,27 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             output["authored_hud"] = serde_json::to_value(&app.session().authoring().hud)
                 .map_err(|error| error.to_string())?;
         }
+        if let Some(view) = app
+            .content()
+            .scene()
+            .resolve_player_view()
+            .map_err(|error| error.to_string())?
+        {
+            let mut matrices = Vec::new();
+            let mut eye = None;
+            for aspect in [4.0 / 3.0, 16.0 / 9.0] {
+                let camera = ruster_app::player_view_projection(view, aspect)
+                    .ok_or("Resolved player view could not be projected")?;
+                eye = Some(camera.eye);
+                matrices.push(serde_json::json!({
+                    "aspect": aspect, "view": camera.view, "projection": camera.projection
+                }));
+            }
+            output["player_view"] = serde_json::json!({
+                "anchor": view.anchor, "eye": eye, "vertical_fov_degrees": view.vertical_fov_degrees,
+                "matrices": matrices
+            });
+        }
         if let Some(camera) = manifest.initial_camera {
             output["initial_camera"] = serde_json::to_value(camera).map_err(|e| e.to_string())?;
         }
@@ -708,7 +729,7 @@ fn main() {
                 "descriptor_format":ruster_app::creation::FORMAT,
                 "descriptor_version":ruster_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation", "authored_player_view"],
             })
         );
         return;

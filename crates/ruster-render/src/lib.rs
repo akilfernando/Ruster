@@ -395,6 +395,112 @@ impl CameraState {
             && (0.01..=1.0e7).contains(&self.distance)
     }
 }
+/// Checked perspective matrices for authored player views, shared by native
+/// rendering and headless application observations.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PlayerViewProjection {
+    pub eye: [f32; 3],
+    pub view: [[f32; 4]; 4],
+    pub projection: [[f32; 4]; 4],
+}
+
+fn player_view_camera(view: ruster_scene::ResolvedPlayerView) -> Camera {
+    Camera {
+        target: Vec3::from_array(view.anchor),
+        yaw: view.yaw,
+        pitch: view.pitch,
+        distance: view.distance,
+        orthographic: false,
+    }
+}
+
+fn player_matrices(
+    view: ruster_scene::ResolvedPlayerView,
+    aspect: f32,
+) -> Option<(Mat4, Mat4, Mat4)> {
+    if !(0.01..=100.0).contains(&aspect)
+        || !(10.0..=120.0).contains(&view.vertical_fov_degrees)
+        || !(0.1..=1000.0).contains(&view.distance)
+        || !view.pitch.is_finite()
+        || view.pitch.abs() > 89.0_f32.to_radians()
+    {
+        return None;
+    }
+    let camera = player_view_camera(view);
+    if !camera.state().is_valid() {
+        return None;
+    }
+    let (view, projection, overlay) =
+        camera.matrices_with_lens(aspect, view.vertical_fov_degrees.to_radians(), Vec3::Y);
+    (view.is_finite() && projection.is_finite() && overlay.is_finite())
+        .then_some((view, projection, overlay))
+}
+
+pub fn player_view_projection(
+    view: ruster_scene::ResolvedPlayerView,
+    aspect: f32,
+) -> Option<PlayerViewProjection> {
+    let camera = player_view_camera(view);
+    let (view, projection, _) = player_matrices(view, aspect)?;
+    Some(PlayerViewProjection {
+        eye: (camera.target + camera.direction() * camera.distance).to_array(),
+        view: view.to_cols_array_2d(),
+        projection: projection.to_cols_array_2d(),
+    })
+}
+
+#[cfg(test)]
+#[test]
+fn player_view_keeps_vertical_fov_and_rejects_invalid_lenses() {
+    let camera = ruster_scene::ResolvedPlayerView {
+        anchor: [0., 1., 0.],
+        yaw: 0.,
+        pitch: 0.,
+        distance: 6.,
+        vertical_fov_degrees: 60.,
+    };
+    let narrow = player_view_projection(camera, 4. / 3.).unwrap();
+    let wide = player_view_projection(camera, 16. / 9.).unwrap();
+    assert_eq!(narrow.eye, [0., 1., 6.]);
+    assert_eq!(narrow.view, wide.view);
+    assert_eq!(narrow.projection[1][1], wide.projection[1][1]);
+    assert!((wide.projection[0][0] / narrow.projection[0][0] - 0.75).abs() < 1e-6);
+    assert!(player_view_projection(camera, 0.).is_none());
+    assert!(player_view_projection(camera, f32::NAN).is_none());
+    assert!(player_view_projection(
+        ruster_scene::ResolvedPlayerView {
+            distance: 0.,
+            ..camera
+        },
+        1.
+    )
+    .is_none());
+    assert!(player_view_projection(
+        ruster_scene::ResolvedPlayerView {
+            vertical_fov_degrees: 179.,
+            ..camera
+        },
+        1.
+    )
+    .is_none());
+    assert!(player_view_projection(
+        ruster_scene::ResolvedPlayerView {
+            pitch: 89.0_f32.to_radians(),
+            ..camera
+        },
+        1.
+    )
+    .is_some());
+    assert!(player_view_projection(
+        ruster_scene::ResolvedPlayerView {
+            pitch: std::f32::consts::FRAC_PI_2,
+            ..camera
+        },
+        1.
+    )
+    .is_none());
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ViewPreset {
     Front,
@@ -421,6 +527,8 @@ pub struct NavigationOptions {
     pub reset: bool,
     pub movement_speed: f32,
     pub camera: Option<CameraState>,
+    /// Use the committed scene player view without replacing editor navigation.
+    pub player_view: bool,
     pub toggle_projection: bool,
     pub view_preset: Option<ViewPreset>,
     /// A frontend-owned Fit succeeded outside the shared geometry route.
@@ -438,6 +546,7 @@ impl Default for NavigationOptions {
             reset: false,
             movement_speed: 4.0,
             camera: None,
+            player_view: false,
             toggle_projection: false,
             view_preset: None,
             clear_fit_error: false,
@@ -616,17 +725,12 @@ impl Camera {
     }
     /// Separate view and projections keep toolkit clip-depth conventions explicit.
     fn matrices(self, aspect: f32) -> (Mat4, Mat4, Mat4) {
-        let direction = Vec3::new(
-            self.yaw.sin() * self.pitch.cos(),
-            self.pitch.sin(),
-            self.yaw.cos() * self.pitch.cos(),
-        );
-        let view = Mat4::look_to_rh(
-            self.target + direction * self.distance,
-            -direction,
-            self.up(),
-        );
-        let fov = 45.0_f32.to_radians();
+        self.matrices_with_lens(aspect, 45.0_f32.to_radians(), self.up())
+    }
+
+    fn matrices_with_lens(self, aspect: f32, fov: f32, up: Vec3) -> (Mat4, Mat4, Mat4) {
+        let direction = self.direction();
+        let view = Mat4::look_to_rh(self.target + direction * self.distance, -direction, up);
         let near = self.distance * 0.001;
         let far = self.distance * 100.0;
         if self.orthographic {
@@ -819,7 +923,7 @@ pub fn allocate_viewport(
     selected: &[&str],
     navigation: &mut NavigationOptions,
 ) -> ViewportSurface {
-    let navigation_enabled = navigation.enabled;
+    let navigation_enabled = navigation.enabled && !navigation.player_view;
     let camera_id = ui.scope_id().with(("ruster-3d-camera", &scene.id));
     let error_id = camera_id.with("fit-error");
     let stored_camera = ui
@@ -831,7 +935,7 @@ pub fn allocate_viewport(
         .filter(|state| state.is_valid())
         .map(Camera::from_state)
         .or(stored_camera);
-    let mut fitted = previous.is_none();
+    let mut fitted = previous.is_none() && !navigation.player_view;
     let preserved_camera = previous.unwrap_or_default();
     let mut camera = preserved_camera;
     let mut selected_fit = false;
@@ -864,7 +968,7 @@ pub fn allocate_viewport(
     navigation.toggle_projection = false;
     navigation.reset = false;
     navigation.frame_selected = false;
-    if navigation.show_controls {
+    if navigation.show_controls && !navigation.player_view {
         ui.horizontal_wrapped(|ui| {
         if ui
             .add_enabled(
@@ -941,6 +1045,30 @@ pub fn render_viewport_with_materials(
     navigation: &mut NavigationOptions,
     surface: ViewportSurface,
 ) -> ViewportInteraction {
+    let player_view = if navigation.player_view {
+        match scene.resolve_player_view().ok().flatten().and_then(|view| {
+            player_matrices(view, surface.rect.aspect_ratio()).map(|matrices| (view, matrices))
+        }) {
+            Some(view) => Some(view),
+            None => {
+                let message = "Player view unavailable; repair the view or viewport size.";
+                ui.colored_label(egui::Color32::RED, message);
+                return ViewportInteraction {
+                    receipt: FrameReceipt::default(),
+                    rect: surface.rect,
+                    response: surface.response,
+                    picked: None,
+                    fit_attempted: false,
+                    fit_error: Some(message),
+                    view: Mat4::IDENTITY.to_cols_array_2d(),
+                    projection: Mat4::IDENTITY.to_cols_array_2d(),
+                    gizmo_projection: Mat4::IDENTITY.to_cols_array_2d(),
+                };
+            }
+        }
+    } else {
+        None
+    };
     // Resolve once for this invocation. This private render input never enters
     // persistence/export: Scene remains the owner of authored local topology.
     let mut resolved_input;
@@ -1094,20 +1222,27 @@ pub fn render_viewport_with_materials(
             }
         }
     }
-    let (view, projection, gizmo_projection) = match camera.checked_matrices(rect.aspect_ratio()) {
-        Some(matrices) => matrices,
-        None => {
-            camera = accepted_camera;
-            camera.matrices(rect.aspect_ratio())
-        }
+    let (view, projection, gizmo_projection) = if let Some((player, matrices)) = player_view {
+        camera = player_view_camera(player);
+        fit_error = None;
+        matrices
+    } else {
+        let matrices = match camera.checked_matrices(rect.aspect_ratio()) {
+            Some(matrices) => matrices,
+            None => {
+                camera = accepted_camera;
+                camera.matrices(rect.aspect_ratio())
+            }
+        };
+        navigation.camera = Some(camera.state());
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(camera_id, camera));
+        ui.ctx()
+            .data_mut(|data| data.insert_temp(error_id, fit_error));
+        matrices
     };
-    navigation.camera = Some(camera.state());
-    ui.ctx()
-        .data_mut(|data| data.insert_temp(camera_id, camera));
-    ui.ctx()
-        .data_mut(|data| data.insert_temp(error_id, fit_error));
     let view_projection = projection * view;
-    let picked = if !input_owned && response.clicked() {
+    let picked = if !navigation.player_view && !input_owned && response.clicked() {
         response.interact_pointer_pos().and_then(|p| {
             pick(
                 scene,

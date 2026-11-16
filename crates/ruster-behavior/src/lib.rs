@@ -604,23 +604,40 @@ impl Engine {
                     spatial: queries.as_ref(),
                 },
             )?;
-            if let (ruster_scene::BindingTarget::Group(group_id), Some(transform)) =
-                (&binding.target, output.transform)
-            {
-                trial_scene
-                    .get_or_insert_with(|| scene.clone())
-                    .hierarchy
-                    .groups
-                    .get_mut(group_id)
-                    .expect("validated Group owner")
-                    .transform = transform;
+            if let Some(transform) = output.transform {
+                match &binding.target {
+                    ruster_scene::BindingTarget::Group(group_id) => {
+                        trial_scene
+                            .get_or_insert_with(|| scene.clone())
+                            .hierarchy
+                            .groups
+                            .get_mut(group_id)
+                            .expect("validated Group owner")
+                            .transform = transform;
+                    }
+                    ruster_scene::BindingTarget::Object(object_id)
+                        if scene.player_view.is_some() =>
+                    {
+                        trial_scene
+                            .get_or_insert_with(|| scene.clone())
+                            .objects
+                            .iter_mut()
+                            .find(|object| object.id == *object_id)
+                            .expect("validated Object owner")
+                            .transform = transform;
+                    }
+                    _ => {}
+                }
             }
             RuntimeState::apply(&mut trial_state, id, output.state).map_err(|error| {
                 error.context(id, binding, authoring.sources.get(&binding.source_id))
             })?;
         }
         if let Some(trial) = trial_scene {
-            validate_group_commit(&trial)?;
+            if !trial.hierarchy.is_empty() {
+                validate_group_commit(&trial)?;
+            }
+            validate_player_view_commit(&trial)?;
         }
         trial_state.validate_total()?;
         self.check_cancelled()?;
@@ -753,6 +770,7 @@ impl Engine {
                 }
             }
         }
+        validate_player_view_commit(&staged)?;
         staged_state.validate_total()?;
         self.check_cancelled()?;
         let observations =
@@ -1019,6 +1037,16 @@ impl Engine {
             .map_err(|e| self.error(e, Phase::Module, DiagnosticCode::Runtime))?
     }
 }
+fn validate_player_view_commit(scene: &Scene) -> Result<(), Diagnostic> {
+    scene.resolve_player_view().map(|_| ()).map_err(|error| {
+        Diagnostic::plain(
+            DiagnosticCode::InvalidOutput,
+            Phase::Commit,
+            &error.to_string(),
+        )
+    })
+}
+
 fn validate_group_commit(scene: &Scene) -> Result<(), Diagnostic> {
     scene.resolve_poses().map(|_| ()).map_err(|error| {
         Diagnostic::plain(

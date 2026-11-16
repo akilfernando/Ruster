@@ -16,6 +16,7 @@ use serde::{Deserialize, Serialize};
 pub const FORMAT_VERSION: u32 = 18;
 pub const HIERARCHY_FORMAT_VERSION: u32 = 19;
 pub const GROUP_ROTATION_FORMAT_VERSION: u32 = 20;
+pub const PLAYER_VIEW_FORMAT_VERSION: u32 = 21;
 pub const MAX_MATERIALS: usize = 64;
 
 mod hierarchy;
@@ -26,6 +27,8 @@ pub mod hud;
 pub mod input;
 mod lighting;
 mod lighting_authoring;
+mod player_view;
+pub use player_view::{PlayerAnchor, PlayerView, ResolvedPlayerView};
 #[path = "../../support/strict_json.rs"]
 mod strict_json;
 mod surface;
@@ -282,6 +285,8 @@ pub struct Scene {
     pub lighting: Lighting,
     #[serde(default, skip_serializing_if = "DisplayProfile::is_legacy")]
     pub display: DisplayProfile,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub player_view: Option<PlayerView>,
 }
 
 impl Scene {
@@ -294,6 +299,7 @@ impl Scene {
             materials: BTreeMap::new(),
             lighting: Lighting::Legacy,
             display: DisplayProfile::LegacySdr,
+            player_view: None,
         }
     }
 
@@ -313,6 +319,7 @@ impl Scene {
             materials: BTreeMap::new(),
             lighting: Lighting::Legacy,
             display: DisplayProfile::LegacySdr,
+            player_view: None,
             objects: [
                 ("left", [-2.0, 0.0, 0.0], [0.12, 0.58, 0.85, 1.0]),
                 ("center", [0.0, 0.0, 0.0], [0.9, 0.4, 0.16, 1.0]),
@@ -389,7 +396,8 @@ impl Scene {
                 )));
             }
         }
-        self.resolve_poses()?;
+        let poses = self.resolve_poses()?;
+        self.validate_player_view_with_poses(&poses)?;
         for (id, _) in self.lighting.lights() {
             if !ids.insert(id) {
                 return Err(SceneError::Invalid(format!(
@@ -519,7 +527,7 @@ impl fmt::Display for SceneError {
             Self::Format(error) => write!(f, "invalid scene JSON: {error}"),
             Self::UnsupportedVersion(version) => write!(
                 f,
-                "unsupported scene version {version}; supported versions are 1 through {GROUP_ROTATION_FORMAT_VERSION}"
+                "unsupported scene version {version}; supported versions are 1 through {PLAYER_VIEW_FORMAT_VERSION}"
             ),
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
             Self::Capacity => write!(f, "authored state and required reversible history exceed 1 MiB; reduce content or edit size before retrying"),
@@ -639,6 +647,10 @@ enum SceneDelta {
         before: Lighting,
         after: Lighting,
     },
+    PlayerView {
+        before: Option<PlayerView>,
+        after: Option<PlayerView>,
+    },
     Display {
         before: DisplayProfile,
         after: DisplayProfile,
@@ -680,6 +692,10 @@ impl SceneDelta {
                     || before.parents.contains_key(id)
                     || after.parents.contains_key(id)
             }
+            Self::PlayerView { before, after } => [before, after]
+                .into_iter()
+                .flatten()
+                .any(|view| view.followed_target() == Some(id)),
             Self::Display { .. } => false,
         }
     }
@@ -718,6 +734,17 @@ impl SceneDelta {
                 // Coupled transform/component edits validate the complete state
                 // in Change::apply, preserving atomic grouped history.
                 object.collider = *replacement;
+            }
+            Self::PlayerView { before, after } => {
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &scene.player_view != expected {
+                    return Err(inconsistent());
+                }
+                scene.player_view = replacement.clone();
             }
             Self::Display { before, after } => {
                 before.validate()?;
@@ -1163,6 +1190,7 @@ impl From<LegacyDocument> for Document {
                 materials: BTreeMap::new(),
                 lighting: Lighting::Legacy,
                 display: DisplayProfile::LegacySdr,
+                player_view: None,
                 objects: old
                     .scene
                     .objects
@@ -1253,6 +1281,7 @@ impl From<V2Document> for Document {
                 materials: BTreeMap::new(),
                 lighting: Lighting::Legacy,
                 display: DisplayProfile::LegacySdr,
+                player_view: None,
                 objects: old
                     .scene
                     .objects
@@ -1333,6 +1362,14 @@ impl Document {
     }
     fn required_version(&self) -> u32 {
         let history = self.undo.iter().chain(&self.redo);
+        if self.scene.player_view.is_some()
+            || history
+                .clone()
+                .flat_map(|change| &change.scene)
+                .any(|delta| matches!(delta, SceneDelta::PlayerView { .. }))
+        {
+            return PLAYER_VIEW_FORMAT_VERSION;
+        }
         let has_hierarchy = !self.scene.hierarchy.is_empty()
             || history
                 .clone()
@@ -1399,6 +1436,22 @@ impl Document {
             .get("format_version")
             .and_then(|v| v.as_u64())
             .ok_or_else(|| SceneError::Invalid("format_version must be an integer".into()))?;
+        if version < u64::from(PLAYER_VIEW_FORMAT_VERSION)
+            && (value["scene"].get("player_view").is_some()
+                || ["undo", "redo"]
+                    .into_iter()
+                    .flat_map(|stack| value[stack].as_array().into_iter().flatten())
+                    .any(|change| {
+                        change["kind"] == "player_view"
+                            || change["scene"].as_array().is_some_and(|deltas| {
+                                deltas.iter().any(|delta| delta["kind"] == "player_view")
+                            })
+                    }))
+        {
+            return Err(SceneError::Invalid(
+                "Player view or its history requires Scene21".into(),
+            ));
+        }
         if (1..19).contains(&version) {
             hierarchy::reject_legacy_fields(&value)?;
         }
@@ -1448,7 +1501,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=20 => serde_json::from_value(value)?,
+            5..=21 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -1932,6 +1985,8 @@ fn check_serialized_size(
         display: &'a DisplayProfile,
         #[serde(skip_serializing_if = "Hierarchy::is_empty")]
         hierarchy: &'a Hierarchy,
+        #[serde(skip_serializing_if = "Option::is_none")]
+        player_view: &'a Option<PlayerView>,
     }
     impl<'a> From<&'a Scene> for SceneView<'a> {
         fn from(scene: &'a Scene) -> Self {
@@ -1943,6 +1998,7 @@ fn check_serialized_size(
                 lighting: &scene.lighting,
                 display: &scene.display,
                 hierarchy: &scene.hierarchy,
+                player_view: &scene.player_view,
             }
         }
     }
@@ -2738,6 +2794,14 @@ impl Session {
                                 .keys()
                                 .chain(after.groups.keys())
                                 .map(String::as_str),
+                        );
+                    }
+                    SceneDelta::PlayerView { before, after } => {
+                        used.extend(
+                            [before, after]
+                                .into_iter()
+                                .flatten()
+                                .filter_map(PlayerView::followed_target),
                         );
                     }
                     SceneDelta::Display { .. } => {}
@@ -7088,7 +7152,7 @@ mod tests {
             br#"{"format_version":1,"id":"logistics","config":{}}"#.to_vec(),
         ];
         let mut value = good.clone();
-        value["format_version"] = (GROUP_ROTATION_FORMAT_VERSION + 1).into();
+        value["format_version"] = (PLAYER_VIEW_FORMAT_VERSION + 1).into();
         cases.push(serde_json::to_vec(&value).unwrap());
         let mut value = good.clone();
         value["unexpected"] = true.into();
