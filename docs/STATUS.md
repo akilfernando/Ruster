@@ -27,7 +27,20 @@ stale revisions, Undo/Redo and reopen. The independent Blender source oracle
 passed on both versions and reordered B, checking nested world poses,
 mesh extents, material settings and embedded PNG. The editor mapping and
 actual package tracer are being wired against the in-progress catalog API.
-The production import-to-relocated-runtime check remains open.
+The production data-path tracer in `71c3e93` passed with the real
+Blender assets, scene editor export controller and matched Linux kit.
+Import A and reordered reimport B preserved exact Scene21 bytes, placement
+history, Group behavior and Player View reference. Malformed and
+structurally changed revisions refused and the accepted B resources survived
+a fresh open with an empty cache. The independent relocation verifier
+confirmed actual exported triangle winding, normals, UVs and geometry
+against both source revisions, checked the revised embedded texture,
+and ran Reset and Step in all three relocated archives. Step rotated the
+creator-owned root while the follow camera retained the expected anchor.
+See `production-tracer-1.log`, `production-relocation-1.log` and the
+`production-tracer-1` artifacts in the same audit. The staged editor
+authority path and an injected publication failure are still being
+implemented, alongside ordinary editor and guarded MCP authoring.
 
 ## Authored player view integrated locally — 2026-11-16
 
