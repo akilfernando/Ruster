@@ -17,6 +17,31 @@
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
 
+## Rot Engine editor workspace redesign — 2026-11-16
+
+The supplied workspace, untitled and About mockups guided the shared graphite
+shell and the transparent mushroom treatment. The normal editor header exposes
+scene identity, Save and the connection-backed Rot badge. The full editor
+uses one Scene projection behind the scrollable, outlined Objects and Inspector
+overlays. The world guide uses the Scene camera and depth, and Player View
+retains the authored rendering. Existing menus and the Content list retain
+their established actions. The [editor guide](../crates/ruster-editor/README.md#full-editor-workspace)
+describes the layout.
+
+The final artwork adds spacing around the mushroom in native and browser surfaces.
+Native captures at 1280×800 and 1600×1000 show the selected workspace. Untitled
+and About were captured at 1280×800 in dark and light. The disconnected badge
+opened the native connection controls. App-scoped pointer events verified
+panel input isolation and zoom/orbit in the exposed strips. Connected and error
+badge rendering were exercised with state fixtures. Evidence and native logs
+are retained under `/home/akilf/Projects/Ruster-Audits/rot-redesign.pVGOGr`.
+The full `python3 scripts/check.py` gate passed formatting, strict workspace
+Clippy and workspace tests, including 206 editor tests with 13 ignored. The
+native binary was built with `cargo build --locked -p ruster-editor --features
+inspection`. Earlier gate failures in badge test setup, short-window layout
+and renderer fixture constructors were corrected. The human walkthrough and
+live connected-badge visual check remain open.
+
 ## Rot Engine rebrand — 2026-11-16
 
 The [Rot Engine identity](branding/rot/README.md) supplies the launcher

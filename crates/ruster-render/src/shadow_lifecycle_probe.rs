@@ -469,6 +469,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         response: [0.; 4],
     };
     let first = SceneCallback {
+        show_editor_grid: false,
         groups: vec![DrawGroup {
             key: None,
             primitive: None,
@@ -495,6 +496,7 @@ fn verify_rejected_callback_paint(device: &wgpu::Device, queue: &wgpu::Queue) {
         prepared: AtomicBool::new(false),
     };
     let second = SceneCallback {
+        show_editor_grid: false,
         groups: Vec::new(),
         camera: Mat4::from_scale(Vec3::splat(0.5)).to_cols_array(),
         camera_eye_mode: [0., 0., 2., 1.],
@@ -901,6 +903,7 @@ fn verify_asset_submission_backpressure(
             }],
         });
         SceneCallback {
+            show_editor_grid: false,
             groups: vec![DrawGroup {
                 key: Some("epoch-mesh".into()),
                 primitive: None,

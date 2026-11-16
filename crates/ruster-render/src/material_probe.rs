@@ -744,6 +744,7 @@ pub(super) fn verify_lighting(device: &wgpu::Device, queue: &wgpu::Queue, mut r:
         let matrix = model(&scene.objects[0]);
         let normal = Mat3::from_mat4(matrix).inverse().transpose();
         let callback = SceneCallback {
+            show_editor_grid: false,
             groups: vec![DrawGroup {
                 key: Some("lighting-plane".into()),
                 primitive: None,
@@ -1178,6 +1179,7 @@ pub(super) fn verify_surface(device: &wgpu::Device, queue: &wgpu::Queue, samples
             };
             let before = metrics.lock().unwrap().clone();
             let callback = SceneCallback {
+                show_editor_grid: false,
                 groups: (0..if mapped_case { 2 } else { 1 })
                     .map(|index| DrawGroup {
                         key: Some("surface-plane".into()),

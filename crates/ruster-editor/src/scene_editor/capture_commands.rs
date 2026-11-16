@@ -51,6 +51,7 @@ struct Pin {
     shader_revision: u64,
     run: Option<crate::behavior_worker::RunKey>,
     rect: Option<egui::Rect>,
+    visible_crop: Option<egui::Rect>,
     camera: Option<ruster_render::CameraState>,
     selection: Vec<String>,
     active: Option<String>,
@@ -97,6 +98,7 @@ pub(super) struct Captures {
     pending: Option<Pending>,
     completed: Option<(u64, Pin, Value)>,
     pub rect: Option<egui::Rect>,
+    pub visible_crop: Option<egui::Rect>,
     workspace_owned: bool,
     owner: Option<Owner>,
     timing: super::capture_timing::Probe,
@@ -196,6 +198,7 @@ impl SceneEditor {
                 .filter(|_| self.runtime.visible)
                 .map(|frame| frame.key),
             rect: self.captures.rect,
+            visible_crop: self.captures.visible_crop,
             camera: self
                 .navigation
                 .camera
@@ -534,7 +537,12 @@ impl SceneEditor {
         let Some(mut pending) = self.captures.pending.take() else {
             return;
         };
-        if let Some(rect) = self.captures.rect.filter(|_| pending.receiver.is_none()) {
+        if let Some(rect) = self
+            .captures
+            .visible_crop
+            .or(self.captures.rect)
+            .filter(|_| pending.receiver.is_none())
+        {
             let receipt = self.captures.receipt.clone();
             let full_resolution = pending.full_resolution;
             let (sender, receiver) = mpsc::sync_channel(1);
@@ -733,9 +741,11 @@ fn capture_image(
 }
 
 #[cfg(test)]
+pub(super) static CAPTURE_TEST_OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+#[cfg(test)]
 mod tests {
     use super::*;
-    static CAPTURE_TEST_OWNER: std::sync::Mutex<()> = std::sync::Mutex::new(());
     #[test]
     fn player_view_capture_reports_real_matrices_and_refuses_scene_grounding() {
         let mut editor =

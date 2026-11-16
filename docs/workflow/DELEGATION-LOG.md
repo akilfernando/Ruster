@@ -1,5 +1,14 @@
 # Delegation outcomes
 
+## 2026-11-16 — Rot Engine editor workspace redesign
+
+One editor and renderer implementation worker used the inherited root model
+snapshot. It owned the shared Scene surface, sidebar scrolling and pointer
+ownership, and the presentation-only ground grid. It repaired compact recovery
+scrolling, verifier constructors and Player View HUD alignment. Root owned the
+header, theme, branding and native screenshots, and integrated the final checks.
+Worker elapsed time, effort and token usage were unavailable.
+
 ## 2026-11-16 — Competitive report assimilation
 
 Astra read the supplied research, checked consequential claims against primary

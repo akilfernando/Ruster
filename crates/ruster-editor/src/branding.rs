@@ -6,8 +6,7 @@ use eframe::egui::{self, ColorImage, IconData, TextureHandle, TextureOptions};
 use crate::editor_theme;
 
 const ICON: &[u8] = include_bytes!("../assets/org.ruster.editor.png");
-const MARK_DARK: &[u8] = include_bytes!("../assets/rot-mark-on-dark.png");
-const MARK_LIGHT: &[u8] = include_bytes!("../assets/rot-mark-on-light.png");
+const MUSHROOM: &[u8] = include_bytes!("../assets/rot-mushroom.png");
 const ABOUT: &str = "rusterize_about";
 
 /// The dark app tile, also installed as the Linux launcher icon.
@@ -22,27 +21,31 @@ pub fn window_icon() -> Arc<IconData> {
         .clone()
 }
 
-/// Uploads the theme-appropriate logo once per context and variant.
-fn texture(ctx: &egui::Context, name: &'static str, dark: &[u8], light: &[u8]) -> TextureHandle {
-    let light_theme = ctx.theme() == egui::Theme::Light;
-    let key = egui::Id::unique(("rusterize_brand_texture", name, light_theme));
+/// Upload the supplied artwork once per context.
+fn texture(ctx: &egui::Context) -> TextureHandle {
+    let key = egui::Id::unique("rot_mushroom_texture");
     if let Some(texture) = ctx.data(|data| data.get_temp::<TextureHandle>(key)) {
         return texture;
     }
-    let icon = eframe::icon_data::from_png_bytes(if light_theme { light } else { dark })
-        .expect("bundled Rot Engine logo is PNG");
+    let icon = eframe::icon_data::from_png_bytes(MUSHROOM).expect("bundled Rot Engine logo is PNG");
     let image =
         ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba);
-    let texture = ctx.load_texture(name, image, TextureOptions::LINEAR);
+    let texture = ctx.load_texture("Rot Engine mushroom", image, TextureOptions::LINEAR);
     ctx.data_mut(|data| data.insert_temp(key, texture.clone()));
     texture
 }
 
 pub fn mark(ui: &mut egui::Ui, size: f32) {
-    let texture = texture(ui.ctx(), "Rot Engine mark", MARK_DARK, MARK_LIGHT);
+    padded_mark(ui, size, egui::Margin::symmetric(6, 3));
+}
+
+fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
+    let texture = texture(ui.ctx());
     let source = texture.size_vec2();
     let scale = size / source.x.max(source.y);
-    ui.add(egui::Image::new((texture.id(), source * scale)).alt_text("Rot Engine logo"));
+    egui::Frame::new().inner_margin(padding).show(ui, |ui| {
+        ui.add(egui::Image::new((texture.id(), source * scale)).alt_text("Rot Engine logo"));
+    });
 }
 
 pub fn identity(ui: &mut egui::Ui) {
@@ -50,6 +53,55 @@ pub fn identity(ui: &mut egui::Ui) {
         mark(ui, 48.0);
         ui.heading("Rot Engine");
     });
+}
+
+#[cfg(unix)]
+pub fn connection_button(ui: &mut egui::Ui, state: &str, compact: bool) -> egui::Response {
+    let button = if state == "Connected" {
+        let mut text = egui::text::LayoutJob::default();
+        text.append(
+            "◆  ROT",
+            0.0,
+            egui::TextFormat {
+                font_id: egui::FontId::proportional(15.0),
+                color: egui::Color32::from_rgb(255, 90, 94),
+                italics: true,
+                extra_letter_spacing: -0.35,
+                ..Default::default()
+            },
+        );
+        text.append(
+            "  active",
+            0.0,
+            egui::TextFormat {
+                font_id: egui::FontId::proportional(12.0),
+                color: egui::Color32::from_rgb(241, 232, 227),
+                ..Default::default()
+            },
+        );
+        egui::Button::new(text)
+            .fill(egui::Color32::from_rgb(50, 22, 24))
+            .stroke(egui::Stroke::new(1.0, egui::Color32::from_rgb(255, 56, 60)))
+    } else if state == "Disconnected" {
+        egui::Button::new("Rot inactive")
+    } else {
+        egui::Button::new(format!(
+            "Rot · {}",
+            if compact {
+                match state {
+                    "Approval required (manual)" => "Pending",
+                    "Disconnected / retiring" => "Retiring",
+                    "Access revoked" => "Revoked",
+                    "Connection error" => "Error",
+                    _ => state,
+                }
+            } else {
+                state
+            }
+        ))
+    };
+    ui.add(button)
+        .on_hover_text(format!("Rot connection · {state}"))
 }
 
 pub fn is_about_open(ctx: &egui::Context) -> bool {
@@ -71,16 +123,29 @@ pub fn show_about(ctx: &egui::Context) {
         return;
     }
     let response = egui::Modal::new(egui::Id::unique(ABOUT)).show(ctx, |ui| {
-        ui.set_width((ctx.content_rect().width() - 32.0).clamp(120.0, 280.0));
-        identity(ui);
-        ui.weak(concat!("Version ", env!("CARGO_PKG_VERSION")));
-        ui.hyperlink_to("Source and documentation", env!("CARGO_PKG_REPOSITORY"));
-        ui.separator();
-        let close = editor_theme::primary_button(ui, "Close");
-        if ctx.memory(|memory| memory.focused().is_none()) {
-            close.request_focus();
-        }
-        close.clicked()
+        let width = (ctx.content_rect().width() - 48.0).clamp(170.0, 400.0);
+        ui.set_width(width);
+        ui.horizontal(|ui| {
+            padded_mark(
+                ui,
+                if width < 300.0 { 66.0 } else { 122.0 },
+                egui::Margin::symmetric(10, 8),
+            );
+            ui.add_space(8.0);
+            ui.vertical(|ui| {
+                ui.heading("Rot Engine");
+                ui.weak(concat!("Version ", env!("CARGO_PKG_VERSION")));
+                ui.hyperlink_to("Source and documentation", env!("CARGO_PKG_REPOSITORY"));
+                ui.separator();
+                let close = editor_theme::primary_button(ui, "Close");
+                if ctx.memory(|memory| memory.focused().is_none()) {
+                    close.request_focus();
+                }
+                close.clicked()
+            })
+            .inner
+        })
+        .inner
     });
     if response.inner || response.should_close() {
         ctx.data_mut(|data| data.remove::<bool>(egui::Id::unique(ABOUT)));
@@ -90,6 +155,29 @@ pub fn show_about(ctx: &egui::Context) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[test]
+    fn rot_badge_preserves_connection_state_in_text() {
+        for (state, label) in [
+            ("Connected", "◆  ROT  active"),
+            ("Disconnected", "Rot inactive"),
+            ("Connection error", "Rot · Connection error"),
+        ] {
+            let ctx = egui::Context::default();
+            editor_theme::configure(&ctx);
+            let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
+                connection_button(ui, state, false);
+            });
+            output.textures_delta.clear();
+            assert!(
+                output.shapes.iter().any(|shape| {
+                    matches!(&shape.shape, egui::Shape::Text(text) if text.galley.job.text == label)
+                }),
+                "missing text for {state}"
+            );
+        }
+    }
 
     #[test]
     fn about_closes_with_escape_and_focused_enter() {

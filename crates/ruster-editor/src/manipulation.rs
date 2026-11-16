@@ -410,7 +410,7 @@ impl AngleUnit {
 pub(super) fn component_group_width(ui: &egui::Ui) -> f32 {
     let available = ui.available_width().max(1.0);
     let spacing = ui.spacing().item_spacing.x;
-    let columns = ((available + spacing) / (144.0 + spacing))
+    let columns = ((available + spacing) / (90.0 + spacing))
         .floor()
         .clamp(1.0, 3.0);
     ((available - (columns - 1.0) * spacing) / columns).max(1.0)
@@ -1005,11 +1005,22 @@ impl Manipulation {
         scene.preview_world_transforms(&gesture.candidate).ok()
     }
     /// Returns true when the overlay owns the pointer (including a release).
+    #[cfg(test)]
     pub fn draw(
         &mut self,
         ui: &mut egui::Ui,
         viewport: &ruster_render::ViewportInteraction,
         session: &mut Session,
+    ) -> Result<bool, String> {
+        self.draw_with_pointer_block(ui, viewport, session, false)
+    }
+
+    pub fn draw_with_pointer_block(
+        &mut self,
+        ui: &mut egui::Ui,
+        viewport: &ruster_render::ViewportInteraction,
+        session: &mut Session,
+        pointer_blocked: bool,
     ) -> Result<bool, String> {
         if self.ids.is_empty() {
             self.cancel();
@@ -1084,7 +1095,10 @@ impl Manipulation {
                 input.pointer.button_down(egui::PointerButton::Primary),
             )
         });
-        let hovered = !blocked && viewport.response.hovered() && viewport.rect.contains(cursor);
+        let hovered = !blocked
+            && !pointer_blocked
+            && viewport.response.hovered()
+            && viewport.rect.contains(cursor);
         // The viewport already owns pointer routing. Registering another widget
         // at the cursor steals ordinary object clicks, even far from a handle.
         let result = self.gizmo.update(

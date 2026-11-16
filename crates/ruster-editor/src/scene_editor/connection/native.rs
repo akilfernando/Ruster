@@ -112,17 +112,12 @@ impl Host {
         let mut state = ctx
             .data_mut(|data| data.get_temp::<NativeUi>(id))
             .unwrap_or_default();
-        if std::mem::take(&mut self.editor.ai_connection_requested)
-            || (!self.editor.ai_workspace
-                && ui
-                    .button(format!("AI: {}…", self.editor.ai_connection_label))
-                    .clicked())
-        {
+        if std::mem::take(&mut self.editor.ai_connection_requested) {
             state.open = true;
         }
         if state.open {
             let mut open = true;
-            egui::Window::new("AI connection")
+            egui::Window::new("Rot connection")
                 .id(id.with("window"))
                 .open(&mut open)
                 .vscroll(true)

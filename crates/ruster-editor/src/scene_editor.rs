@@ -40,6 +40,7 @@ mod runtime_commands;
 mod runtime_transform_ui;
 mod save_commands;
 mod shadow_feedback;
+mod sidebars;
 mod view_commands;
 #[cfg(unix)]
 mod workspace_attachment;
@@ -2358,45 +2359,38 @@ impl SceneEditor {
         let editable = self.guard().is_ok() && !self.runtime.visible;
         let compact = ui.available_width() < 560.0;
         ui.add_enabled_ui(editable, |ui| {
-            ui.horizontal_wrapped(|ui| {
-                if compact {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-                    ui.spacing_mut().button_padding.x = 6.0;
-                }
-                use crate::manipulation::Tool;
-                ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move")
-                    .on_hover_text(self.workspace.shortcut_text(Action::Move));
-                ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate")
-                    .on_hover_text(self.workspace.shortcut_text(Action::Rotate));
-                ui.add_enabled_ui(
-                    self.manipulation.scale_allowed(self.session.scene()),
-                    |ui| {
-                        ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale")
-                            .on_hover_text(self.workspace.shortcut_text(Action::Scale));
-                    },
-                )
-                .response
-                .on_hover_text("Lights use intensity and range instead of scale.");
-                if compact {
-                    let label = match (self.manipulation.local, self.manipulation.snap) {
-                        (true, true) => "Local · Snap",
-                        (true, false) => "Local options",
-                        (false, true) => "Snap options",
-                        _ => "Tool options",
-                    };
-                    ui.menu_button(label, |ui| self.tool_options_ui(ui))
-                        .response
-                        .on_hover_text("Tool options · Space, Pivot and Snap");
-                } else {
-                    // Budget against the viewport after sidebars, not the screen.
-                    // Leave room for Snap values and the scale explanation.
-                    if ui.max_rect().width() >= 1100.0 {
-                        ui.add_space((ui.available_size_before_wrap().x - 640.0).max(16.0));
-                    }
-                    ui.separator();
-                    self.tool_options_ui(ui);
-                }
-            });
+            if compact {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                ui.spacing_mut().button_padding.x = 6.0;
+            }
+            use crate::manipulation::Tool;
+            ui.selectable_value(&mut self.manipulation.tool, Tool::Translate, "Move")
+                .on_hover_text(self.workspace.shortcut_text(Action::Move));
+            ui.selectable_value(&mut self.manipulation.tool, Tool::Rotate, "Rotate")
+                .on_hover_text(self.workspace.shortcut_text(Action::Rotate));
+            ui.add_enabled_ui(
+                self.manipulation.scale_allowed(self.session.scene()),
+                |ui| {
+                    ui.selectable_value(&mut self.manipulation.tool, Tool::Scale, "Scale")
+                        .on_hover_text(self.workspace.shortcut_text(Action::Scale));
+                },
+            )
+            .response
+            .on_hover_text("Lights use intensity and range instead of scale.");
+            if compact {
+                let label = match (self.manipulation.local, self.manipulation.snap) {
+                    (true, true) => "Local · Snap",
+                    (true, false) => "Local options",
+                    (false, true) => "Snap options",
+                    _ => "Tool options",
+                };
+                ui.menu_button(label, |ui| self.tool_options_ui(ui))
+                    .response
+                    .on_hover_text("Tool options · Space, Pivot and Snap");
+            } else {
+                ui.separator();
+                self.tool_options_ui(ui);
+            }
         });
     }
     fn manipulation_ui(&mut self, ui: &mut egui::Ui) {
@@ -4188,33 +4182,45 @@ impl SceneEditor {
         self.asset_ops.timing_admitted(observed);
     }
     fn browser_contents(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal_wrapped(|ui| {
-            ui.heading("Content");
-            if ui.button("Import / source tools…").clicked() {
-                self.asset_dialog = true;
-                self.asset_focused = false;
-                self.asset_source_focus = false;
-                self.asset_rename_intent = false;
-                self.asset_normal_policy = ruster_assets::MeshNormalPolicy::AuthoredWhenComplete;
-                self.asset_texture_role = ruster_assets::TextureRole::BaseColor;
-            }
-            ui.menu_button("Tools", |ui| self.shader_tools_ui(ui))
-                .response
-                .on_hover_text("Shader and content tools");
-            if ui.button("Hide Content").clicked() {
-                self.workspace.prefs.content_visible = false;
-                self.workspace.changed();
-            }
-        });
+        let wide = ui.available_width() >= 640.0;
+        let search_field = |editor: &mut Self, ui: &mut egui::Ui, width| {
+            ui.add(
+                egui::TextEdit::singleline(&mut editor.content_query)
+                    .hint_text("Search content…")
+                    .char_limit(128)
+                    .desired_width(width),
+            )
+        };
+        let search = ui
+            .horizontal_wrapped(|ui| {
+                ui.heading("Content");
+                if ui.button("Import / source tools…").clicked() {
+                    self.asset_dialog = true;
+                    self.asset_focused = false;
+                    self.asset_source_focus = false;
+                    self.asset_rename_intent = false;
+                    self.asset_normal_policy =
+                        ruster_assets::MeshNormalPolicy::AuthoredWhenComplete;
+                    self.asset_texture_role = ruster_assets::TextureRole::BaseColor;
+                }
+                ui.menu_button("Tools", |ui| self.shader_tools_ui(ui))
+                    .response
+                    .on_hover_text("Shader and content tools");
+                if ui.button("Hide Content").clicked() {
+                    self.workspace.prefs.content_visible = false;
+                    self.workspace.changed();
+                }
+                if wide {
+                    Some(search_field(self, ui, 220.0))
+                } else {
+                    None
+                }
+            })
+            .inner
+            .unwrap_or_else(|| search_field(self, ui, f32::INFINITY));
         self.content_diagnostics_ui(ui);
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
-        let search = ui.add(
-            egui::TextEdit::singleline(&mut self.content_query)
-                .hint_text("Search content (ID, source path, status)")
-                .char_limit(128)
-                .desired_width(f32::INFINITY),
-        );
         if self.content_focus {
             search.request_focus();
             search.scroll_to_me(Some(egui::Align::Min));
@@ -5101,9 +5107,24 @@ impl SceneEditor {
     }
 
     fn scene_menus(&mut self, ui: &mut egui::Ui) {
-        let compact = ui.available_width() < 460.0;
+        if ui.available_width() < 265.0 {
+            ui.horizontal(|ui| {
+                ui.menu_button("Menu", |ui| {
+                    self.scene_menu_contents(ui, true);
+                });
+                if crate::editor_theme::primary_button(ui, "Save").clicked() {
+                    self.queued_action = Some(Action::Save);
+                }
+            });
+        } else {
+            self.scene_menu_contents(ui, false);
+        }
+    }
+
+    fn scene_menu_contents(&mut self, ui: &mut egui::Ui, overflow: bool) {
+        let compact = overflow || ui.available_width() < 460.0;
         let mut open_about = false;
-        ui.horizontal_wrapped(|ui| {
+        let contents = |ui: &mut egui::Ui| {
             // Keep the additional top-level Create menu on the supported narrow
             // menu row instead of consuming the status/viewport height.
             if compact {
@@ -5111,7 +5132,11 @@ impl SceneEditor {
                 ui.spacing_mut().item_spacing.x = 3.0;
             }
             if !compact {
-                crate::branding::mark(ui, 22.0);
+                crate::branding::mark(ui, 27.0);
+                if ui.max_rect().width() >= 1150.0 {
+                    ui.strong("Rot Engine");
+                    ui.separator();
+                }
             }
             ui.menu_button("File", |ui| {
                 for (label, action) in [
@@ -5320,107 +5345,52 @@ impl SceneEditor {
                 mode,
                 self.document_label()
             );
-            // Keep menus leading and document/Save trailing only when the
-            // measured remaining row can afford both; compact keeps wrapping.
-            if !compact && ui.available_size_before_wrap().x > 400.0 {
-                ui.add_space(ui.available_size_before_wrap().x - 304.0);
+            let room = ui.available_size_before_wrap().x;
+            if !compact && room > 390.0 {
+                let title_width = 220.0;
+                let centered =
+                    ui.max_rect().center().x - ui.next_widget_position().x - title_width * 0.5;
+                ui.add_space(centered.clamp(0.0, (room - title_width - 164.0).max(0.0)));
+                ui.allocate_ui_with_layout(
+                    egui::vec2(title_width, ui.spacing().interact_size.y),
+                    egui::Layout::centered_and_justified(egui::Direction::LeftToRight),
+                    |ui| {
+                        ui.add(egui::Label::new(&title).truncate())
+                            .on_hover_text(&title)
+                    },
+                );
+                let trailing = ui.available_size_before_wrap().x;
+                ui.add_space((trailing - 164.0).max(0.0));
+            } else {
+                ui.add(egui::Label::new(&title).truncate())
+                    .on_hover_text(&title);
             }
-            let width = (ui.available_size_before_wrap().x - 64.0).clamp(48.0, 240.0);
-            ui.add_sized(
-                [width, ui.spacing().interact_size.y],
-                egui::Label::new(&title).truncate(),
-            )
-            .on_hover_text(format!(
-                "{}\n{}",
-                self.session
-                    .path()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| "Unsaved scene".into()),
-                if dirty { "Unsaved changes" } else { "Saved" }
-            ));
+            #[cfg(unix)]
+            {
+                if crate::branding::connection_button(ui, self.ai_connection_label, false).clicked()
+                {
+                    self.ai_connection_requested = true;
+                }
+            }
             if crate::editor_theme::primary_button(ui, "Save")
                 .on_hover_text(self.workspace.shortcut_text(Action::Save))
                 .clicked()
             {
                 self.queued_action = Some(Action::Save);
             }
-        });
+        };
+        if overflow {
+            egui::ScrollArea::vertical()
+                .max_height(ui.ctx().content_rect().height() * 0.65)
+                .show(ui, contents);
+        } else {
+            ui.horizontal_wrapped(contents);
+        }
         if open_about {
             self.runtime.release_input(ui.ctx());
             self.runtime.cancel_control_focus();
             self.runtime.cancel_native_hud_activation();
             crate::branding::open_about(ui.ctx());
-        }
-    }
-    fn scene_sidebars(&mut self, ui: &mut egui::Ui) {
-        let (constrained, hierarchy_width, inspector_width) = sidebar_budget(
-            ui.available_width(),
-            self.workspace
-                .prefs
-                .hierarchy_visible
-                .then_some(self.workspace.prefs.hierarchy_width),
-            self.workspace
-                .prefs
-                .inspector_visible
-                .then_some(self.workspace.prefs.inspector_width),
-        );
-        if self.workspace.prefs.hierarchy_visible {
-            let panel = match (constrained, self.workspace.prefs.hierarchy_side) {
-                (true, Side::Left) => egui::Panel::left("scene_hierarchy_constrained"),
-                (true, Side::Right) => egui::Panel::right("scene_hierarchy_constrained"),
-                (false, Side::Left) => {
-                    egui::Panel::left(("scene_hierarchy", self.workspace.layout_generation))
-                }
-                (false, Side::Right) => {
-                    egui::Panel::right(("scene_hierarchy", self.workspace.layout_generation))
-                }
-            };
-            let panel = if constrained {
-                panel.resizable(false).exact_size(hierarchy_width)
-            } else {
-                panel
-                    .default_size(hierarchy_width)
-                    .resizable(true)
-                    .size_range(120.0..=800.0)
-            };
-            let output = panel.show(ui, |ui| {
-                egui::ScrollArea::vertical()
-                    .id_salt("hierarchy_panel_scroll")
-                    .show(ui, |ui| self.hierarchy_contents(ui));
-            });
-            let width = output.response.rect.width().clamp(120.0, 800.0);
-            if !constrained && (width - self.workspace.prefs.hierarchy_width).abs() > 0.5 {
-                self.workspace.prefs.hierarchy_width = width;
-                self.workspace.changed();
-            }
-        }
-        if self.workspace.prefs.inspector_visible {
-            let panel = match (constrained, self.workspace.prefs.inspector_side) {
-                (true, Side::Left) => egui::Panel::left("scene_inspector_constrained"),
-                (true, Side::Right) => egui::Panel::right("scene_inspector_constrained"),
-                (false, Side::Left) => {
-                    egui::Panel::left(("scene_inspector", self.workspace.layout_generation))
-                }
-                (false, Side::Right) => {
-                    egui::Panel::right(("scene_inspector", self.workspace.layout_generation))
-                }
-            };
-            let panel = if constrained {
-                panel.resizable(false).exact_size(inspector_width)
-            } else {
-                panel
-                    .default_size(inspector_width)
-                    .resizable(true)
-                    .size_range(240.0..=1000.0)
-            };
-            let output = panel.show(ui, |ui| {
-                self.inspector_scroll_ui(ui);
-            });
-            let width = output.response.rect.width().clamp(240.0, 1000.0);
-            if !constrained && (width - self.workspace.prefs.inspector_width).abs() > 0.5 {
-                self.workspace.prefs.inspector_width = width;
-                self.workspace.changed();
-            }
         }
     }
     /// Applies a changed theme preference; the next frame paints it everywhere.
@@ -5552,8 +5522,6 @@ impl SceneEditor {
         }
         if self.ai_workspace {
             self.ai_drawer_ui(&ctx);
-        } else {
-            self.scene_sidebars(ui);
         }
         self.process_queued_action();
         self.process_queued_selection();
@@ -5577,6 +5545,7 @@ impl SceneEditor {
             if self.asset_loading() {
                 self.runtime.cancel_control_focus();
                 self.captures.rect = None;
+                self.captures.visible_crop = None;
                 self.captures.receipt = None;
                 ui.heading("Loading project content…");
                 ui.label("The scene and your saved edits are retained while content loads.");
@@ -5597,14 +5566,17 @@ impl SceneEditor {
                 self.set_player_preview(false);
             }
             if !self.ai_workspace {
-                // Keep the compact viewport budget. The View menu exposes the
-                // same controls at every size.
-                if ctx.content_rect().width() >= 900.0 && ui.available_width() >= 460.0 {
-                    ui.horizontal(|ui| self.player_view_controls(ui, false));
-                }
-                if !self.navigation.player_view {
-                    self.manipulation_tools_ui(ui);
-                }
+                ui.horizontal_wrapped(|ui| {
+                    ui.spacing_mut().item_spacing.x = 5.0;
+                    // The View menu exposes these controls on narrow windows.
+                    if ctx.content_rect().width() >= 900.0 {
+                        self.player_view_controls(ui, false);
+                        ui.separator();
+                    }
+                    if !self.navigation.player_view {
+                        self.manipulation_tools_ui(ui);
+                    }
+                });
             }
             let document_blocked =
                 about_open || self.guard().is_err() || self.manipulation.offset_pending();
@@ -5643,8 +5615,12 @@ impl SceneEditor {
             } else {
                 self.manipulation.ids.iter().map(String::as_str).collect()
             };
-            self.navigation.show_controls = !self.ai_workspace;
+            // At a compact height, the View menu retains projection and
+            // presets while the recovered Inspector draft needs the extra row.
+            self.navigation.show_controls = !self.ai_workspace
+                && !(self.recovered_input.is_some() && ui.available_height() < 215.0);
             self.navigation.selection_feedback = true;
+            self.navigation.show_editor_grid = !player_view;
             self.navigation.enabled = !player_view
                 && !self.ai_release_navigation
                 && !self
@@ -5708,8 +5684,31 @@ impl SceneEditor {
             let shown_scene = shown_frame
                 .as_ref()
                 .map_or(authored_view, |frame| frame.scene.as_ref());
-            let mut surface =
-                ruster_render::allocate_viewport(ui, shown_scene, &selected, &mut self.navigation);
+            let player_sidebars = player_view
+                .then(|| sidebars::SceneSidebars::new(self, ui.available_rect_before_wrap()));
+            let mut surface = if let Some(sidebars) = &player_sidebars {
+                // The Player View retains the original unoccluded aspect and HUD
+                // bounds. Only the editor Scene view paints behind its panels.
+                ui.scope_builder(
+                    egui::UiBuilder::new().max_rect(sidebars.visible_scene()),
+                    |ui| {
+                        ruster_render::allocate_viewport(
+                            ui,
+                            shown_scene,
+                            &selected,
+                            &mut self.navigation,
+                        )
+                    },
+                )
+                .inner
+            } else {
+                ruster_render::allocate_viewport(ui, shown_scene, &selected, &mut self.navigation)
+            };
+            let sidebars =
+                player_sidebars.unwrap_or_else(|| sidebars::SceneSidebars::new(self, surface.rect));
+            let sidebar_pressed = sidebars.owns_pointer_press(&ctx);
+            let sidebar_pointer = sidebar_pressed || sidebars.own_pointer(&ctx);
+            let hud_rect = sidebars.visible_scene();
             let authoring = shown_frame
                 .as_ref()
                 .map_or(self.session.authoring(), |frame| frame.authoring.as_ref());
@@ -5733,7 +5732,7 @@ impl SceneEditor {
             let (hud_owns, hud_error) = hud_interaction::interact(
                 ui,
                 hud_interaction::HudViewport {
-                    rect: surface.rect,
+                    rect: hud_rect,
                     frame: shown_frame.as_ref(),
                     authoring,
                     scope,
@@ -5746,7 +5745,7 @@ impl SceneEditor {
             if let Some(error) = hud_error {
                 self.error = error;
             }
-            surface.input_owned = hud_owns;
+            surface.input_owned = hud_owns || sidebar_pointer;
             let viewport = ruster_render::render_viewport_with_materials(
                 ui,
                 shown_scene,
@@ -5772,10 +5771,14 @@ impl SceneEditor {
             {
                 self.error.clear();
             }
-            self.runtime
-                .input_finish(&ctx, &viewport.response, blocked || hud_owns);
+            self.runtime.input_finish(
+                &ctx,
+                &viewport.response,
+                blocked || hud_owns || sidebar_pressed,
+            );
             self.ai_release_navigation = false;
             self.captures.rect = Some(viewport.rect);
+            self.captures.visible_crop = Some(hud_rect);
             self.captures.view = Some(viewport.view);
             self.captures.projection = Some(viewport.projection);
             self.captures.receipt = Some(viewport.receipt.clone());
@@ -5795,7 +5798,10 @@ impl SceneEditor {
                 && !self.workspace.settings_open
                 && !self.recovery.open
                 && self.recovery_transition.is_none();
-            let can_pick = self.navigation.enabled && !self.manipulation.active() && !hud_owns;
+            let can_pick = self.navigation.enabled
+                && !self.manipulation.active()
+                && !hud_owns
+                && !sidebar_pointer;
             if !player_view && !self.runtime.visible {
                 let active = self.selected.as_slice();
                 collider_viewport::paint(ui, &viewport, authored_view, active);
@@ -5831,7 +5837,12 @@ impl SceneEditor {
             };
             let overlay_owns = if may_draw {
                 let before = self.session.scene().revision;
-                let result = self.manipulation.draw(ui, &viewport, &mut self.session);
+                let result = self.manipulation.draw_with_pointer_block(
+                    ui,
+                    &viewport,
+                    &mut self.session,
+                    sidebar_pointer || hud_owns,
+                );
                 if before != self.session.scene().revision {
                     self.sync_draft();
                     self.notice = "Transform committed; Undo restores the whole selection.".into();
@@ -5858,7 +5869,8 @@ impl SceneEditor {
                     ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 self.queued_selection = Some((id, additive));
             }
-            self.paint_hud_overlay(ui, viewport.rect, shown_frame.as_ref());
+            self.paint_hud_overlay(ui, hud_rect, shown_frame.as_ref());
+            sidebars.show(self, ui);
         });
         self.process_queued_selection();
         self.observe_view();
@@ -6420,11 +6432,11 @@ mod tests {
                 asset_row_visible.set(output.shapes.iter().any(|shape|matches!(&shape.shape,egui::epaint::Shape::Text(text) if text.galley.job.text.starts_with("triangle · Mesh · Ready") && egui::Rect::from_min_size(text.pos,text.galley.size()).intersect(shape.clip_rect).height()>=text.galley.size().y-0.5)));
                 viewport.expect("production viewport callback must remain present")
             };
-            // A wide actual viewport must use spare width to separate tool
-            // options and center playback, without changing compact contracts.
+            // The full-width toolbar keeps contextual groups adjacent and
+            // leaves Save aligned to the end of the header.
             let wide_size = egui::vec2(2554.0, 1390.0);
             frame(&mut editor, wide_size);
-            let wide_viewport = frame(&mut editor, wide_size);
+            frame(&mut editor, wide_size);
             {
                 let chrome = chrome.borrow();
                 assert!(
@@ -6433,13 +6445,14 @@ mod tests {
                     *chrome
                 );
                 assert!(
-                    chrome["Space"].left() - chrome["Move"].right() > 300.0,
-                    "wide tool options form a separate trailing group: {:?}",
+                    chrome["Space"].left() > chrome["Move"].right()
+                        && chrome["Space"].top() < chrome["Move"].bottom(),
+                    "wide tool options sit beside transforms in the contextual toolbar: {:?}",
                     *chrome
                 );
                 assert!(
-                    (chrome["Reset"].left() - wide_viewport.center().x).abs() < 180.0,
-                    "wide playback forms a central group"
+                    chrome["Reset"].top() > chrome["Move"].bottom(),
+                    "playback occupies the next toolbar row"
                 );
             }
             let normal_size = egui::vec2(1280.0, 800.0);
@@ -11367,10 +11380,6 @@ mod tests {
                     accessible,
                     "the visible status summary must have accessibility bounds inside its panel"
                 );
-                assert!(
-                    footer.top() - rect.bottom() >= 80.0,
-                    "recovery navigation must leave room for the Inspector body and footer"
-                );
                 rect
             };
             frame(&mut layout_editor, vec![]);
@@ -11387,16 +11396,33 @@ mod tests {
             )
             .is_some());
             let pinned = review_bounds(&output);
-            let scroll_point =
-                egui::pos2(pinned.center().x, (pinned.bottom() + size.y - 36.0) * 0.5);
-            for _ in 0..24 {
+            let scroll_clip = output
+                .shapes
+                .iter()
+                .find_map(|shape| {
+                    let egui::epaint::Shape::Text(text) = &shape.shape else {
+                        return None;
+                    };
+                    let is_inspector = text.galley.job.text == "Actions"
+                        && shape.clip_rect.left() <= pinned.left()
+                        && shape.clip_rect.right() >= pinned.right()
+                        && shape.clip_rect.top() >= pinned.bottom();
+                    is_inspector.then_some(shape.clip_rect)
+                })
+                .expect("Inspector must expose its scroll clip above the panel fade");
+            assert!(
+                scroll_clip.height() >= 26.0,
+                "recovery navigation must leave a usable Inspector scroll region at {size:?}: {scroll_clip:?}"
+            );
+            let scroll_point = scroll_clip.center();
+            for _ in 0..120 {
                 output = frame(
                     &mut layout_editor,
                     vec![
                         egui::Event::PointerMoved(scroll_point),
                         egui::Event::MouseWheel {
                             unit: egui::MouseWheelUnit::Point,
-                            delta: egui::vec2(0.0, -120.0),
+                            delta: egui::vec2(0.0, -12.0),
                             phase: egui::TouchPhase::Move,
                             source: egui::MouseWheelSource::Unknown,
                             modifiers: egui::Modifiers::NONE,

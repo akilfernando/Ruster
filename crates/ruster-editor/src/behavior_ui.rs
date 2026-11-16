@@ -2379,14 +2379,10 @@ impl RuntimeUi {
         let mut reset = None;
         let focus_controls = std::mem::take(&mut self.focus_controls);
         self.maintain_control_focus(ui.ctx());
+        let inline_feedback = ui.available_width() >= 560.0;
         ui.horizontal_wrapped(|ui| {
             ui.spacing_mut().item_spacing.x=4.0;
             ui.spacing_mut().button_padding.x=6.0;
-            // Playback is one central group on a genuinely roomy viewport.
-            // Compact rows retain their leading alignment and wrapping.
-            if ui.available_width() >= 760.0 {
-                ui.add_space((ui.available_width() - 260.0) * 0.5);
-            }
             let reset_button = ui
                 .add_enabled(
                     !blocked && !self.shutdown,
@@ -2478,26 +2474,51 @@ impl RuntimeUi {
                 });}
             });
             self.input_help_menu_response(&runtime_menu.response);
-        });
-        // Always reserve the same ordinary row, including an empty action map.
-        ui.horizontal(|ui| {
-            self.input_control_button(ui, blocked, !session.authoring().actions.is_empty());
-            let status = if self.debug_snapshot().is_some() {
-                Some(("Paused in debugger", "Open Runtime → Behavior debugger for the stopped source, line and tick."))
-            } else if self.stale && self.diagnostic.is_none() {
-                Some(("Reset required", "The scene or its controls changed. Reset to preview the current authored state."))
-            } else { None };
-            if let Some((label, detail)) = status {
-                ui.add_sized(egui::vec2(ui.available_width().max(0.0), ui.spacing().interact_size.y),
-                    egui::Label::new(egui::RichText::new(label).color(ui.visuals().warn_fg_color)).truncate())
-                    .on_hover_text(detail);
-            } else {
-                self.spatial_feedback_summary(ui);
+            if inline_feedback {
+                ui.separator();
+                let width = (ui.available_size_before_wrap().x - 12.0).clamp(150.0, 410.0);
+                ui.allocate_ui_with_layout(
+                    egui::vec2(width, ui.spacing().interact_size.y),
+                    egui::Layout::left_to_right(egui::Align::Center),
+                    |ui| self.control_feedback(ui, blocked, !session.authoring().actions.is_empty()),
+                );
             }
         });
+        if !inline_feedback {
+            ui.horizontal(|ui| {
+                self.control_feedback(ui, blocked, !session.authoring().actions.is_empty())
+            });
+        }
         self.flush();
         self.input_help_window(ui.ctx(), session, generation);
         reset
+    }
+
+    fn control_feedback(&mut self, ui: &mut egui::Ui, blocked: bool, has_actions: bool) {
+        self.input_control_button(ui, blocked, has_actions);
+        let status = if self.debug_snapshot().is_some() {
+            Some((
+                "Paused in debugger",
+                "Open Runtime → Behavior debugger for the stopped source, line and tick.",
+            ))
+        } else if self.stale && self.diagnostic.is_none() {
+            Some((
+                "Reset required",
+                "The scene or its controls changed. Reset to preview the current authored state.",
+            ))
+        } else {
+            None
+        };
+        if let Some((label, detail)) = status {
+            ui.add_sized(
+                egui::vec2(ui.available_width().max(0.0), ui.spacing().interact_size.y),
+                egui::Label::new(egui::RichText::new(label).color(ui.visuals().warn_fg_color))
+                    .truncate(),
+            )
+            .on_hover_text(detail);
+        } else {
+            self.spatial_feedback_summary(ui);
+        }
     }
 }
 

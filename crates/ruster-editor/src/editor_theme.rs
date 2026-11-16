@@ -71,20 +71,20 @@ const fn rgb(hex: u32) -> Color32 {
 }
 
 pub const DARK: Palette = Palette {
-    background: rgb(0x10151b),
-    surface: rgb(0x181f28),
-    raised: rgb(0x202a35),
-    hover: rgb(0x293541),
-    field: rgb(0x121a22),
-    divider: rgb(0x2c3946),
-    control_border: rgb(0x64798b),
-    text: rgb(0xe8eff4),
-    secondary: rgb(0xa6b5c2),
+    background: rgb(0x151314),
+    surface: rgb(0x201d1e),
+    raised: rgb(0x292527),
+    hover: rgb(0x382e30),
+    field: rgb(0x191617),
+    divider: rgb(0x383032),
+    control_border: rgb(0x827574),
+    text: rgb(0xf1e8e3),
+    secondary: rgb(0xb9adaa),
     accent: rgb(0xef9aa2),
     accent_hover: rgb(0xf9b2b7),
     accent_pressed: rgb(0xdd838c),
-    on_accent: rgb(0x10151b),
-    selection: rgb(0x3b292e),
+    on_accent: rgb(0x151314),
+    selection: rgb(0x583439),
     warning: rgb(0xffc078),
     error: rgb(0xff8291),
     axis: [rgb(0xffa2a7), rgb(0x9bddab), rgb(0xa7caff)],
@@ -105,15 +105,15 @@ pub const OLED_BLACK: Palette = Palette {
 
 /// Light chrome uses graphite text and deep oxide accents.
 pub const LIGHT: Palette = Palette {
-    background: rgb(0xe4eaef),
-    surface: rgb(0xf2f5f8),
+    background: rgb(0xeee6e1),
+    surface: rgb(0xf7efeb),
     raised: rgb(0xffffff),
-    hover: rgb(0xe0e7ed),
+    hover: rgb(0xece1de),
     field: rgb(0xffffff),
-    divider: rgb(0xc7d1da),
-    control_border: rgb(0x6a7b8a),
-    text: rgb(0x10151b),
-    secondary: rgb(0x475563),
+    divider: rgb(0xd9c8c4),
+    control_border: rgb(0x7e6967),
+    text: rgb(0x151314),
+    secondary: rgb(0x634f4d),
     accent: rgb(0x96373e),
     accent_hover: rgb(0xa34249),
     accent_pressed: rgb(0x7d2d34),
@@ -216,7 +216,7 @@ fn visuals(p: &Palette, theme: Theme) -> egui::Visuals {
         &mut visuals.widgets.active,
         &mut visuals.widgets.open,
     ] {
-        widget.corner_radius = CornerRadius::same(5);
+        widget.corner_radius = CornerRadius::same(4);
         widget.fg_stroke = Stroke::new(1.0, p.text);
         widget.bg_stroke = Stroke::new(1.0, p.control_border);
         widget.expansion = 0.0;

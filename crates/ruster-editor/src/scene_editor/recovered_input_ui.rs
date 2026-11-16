@@ -61,7 +61,6 @@ impl SceneEditor {
         if self.recovered_input.is_none() {
             return;
         }
-        ui.strong("Recovered action needs review");
         if let Some(name) = self.recovered_visual_name() {
             ui.label(format!(
                 "Finish the recovered {name} edit in the Inspector first."

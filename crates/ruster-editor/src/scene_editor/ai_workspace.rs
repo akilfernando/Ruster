@@ -34,18 +34,8 @@ impl SceneEditor {
                 if ui.button("Full editor").clicked() {
                     self.set_ai_workspace(false, &ctx);
                 }
-                let status = match self.ai_connection_label {
-                    "Connected" => "Connected",
-                    "Approval required (manual)" => "Pending",
-                    "Disconnected / retiring" => "Retiring",
-                    "Access revoked" => "Revoked",
-                    "Connection error" => "Error",
-                    _ => "Offline",
-                };
-                if ui
-                    .button(format!("AI: {status}"))
-                    .on_hover_text(self.ai_connection_label)
-                    .clicked()
+                #[cfg(unix)]
+                if crate::branding::connection_button(ui, self.ai_connection_label, true).clicked()
                 {
                     self.ai_connection_requested = true;
                 }

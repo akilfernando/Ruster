@@ -10,6 +10,10 @@ See [shared scene mode](#shared-3d-scene-mode-m5) and [content iteration](#mesh-
 
 Current source saves ordinary flat documents as Scene18. Static assemblies and retained structural history require Scene19. Group rotation authoring and its retained history require Scene20. Raw drafts remain Recovery15. E1 adds built-in sphere/capsule geometry with content14, the exact cumulative `builtin_primitives` runtime profile and Descriptor5. The Scene17/content13 F3c checkpoint added state-driven panels. F3a/F3b retain their accepted checkpoints. F3c has passed its bounded qualification. [Current status](../../docs/STATUS.md) owns verification and remaining acceptance.
 
+## Full editor workspace
+
+The header holds the scene title, Rot connection status and Save. Use the toolbars for Scene and Player views, transforms, snapping, playback and view shortcuts. Objects and Inspector overlay one continuous Scene viewport. Their controls scroll above the fade, and the exposed viewport below either panel supports the same navigation as the center. The world grid follows the Scene camera and is confined to the editor's Scene view. Content retains its existing search, import and asset controls. Open **Help → About** for the running build version.
+
 ## Bounded assembly hierarchy — implementation WIP
 
 **New group** in the Objects panel creates a scene-owned empty group. Select one target and use the Inspector's parent dropdown to attach it to a group, or choose **Scene root (detach)**. Reparent preserves the complete descendant world closure within a per-matrix-element `2e-6 * max(1, abs(original))` bound or refuses without changing history. This is tolerance-bounded preservation, not bit-exact world preservation; Undo restores the actual stored locals.
@@ -40,7 +44,7 @@ AI drafts keep Selection visible and cannot be silently hidden by closing its dr
 
 Remappable shortcuts, native picking/gizmos/navigation, Save/history, recovery, close
 safety, diagnostics and active-runtime Stop use their existing owners in both modes.
-The **AI: …** button exposes Disconnect and explicit project/all-project persistent
+The **Rot** status button exposes Disconnect and explicit project/all-project persistent
 revoke. Trusted enrolled connections do not ask for recurring native approval; the
 manual controls below remain a distinct legacy path. Save/export/execution grants
 are unchanged. Browser preview and model image reception are not prerequisites for
@@ -53,7 +57,7 @@ This is not native-human usability or actual ChatGPT/image acceptance.
 
 ## Legacy local AI binding — CP2 candidate
 
-In generic scene mode on Unix, **AI: …** opens the local connection controls. **Connect AI** previews the intended project/editor session and requires confirmation before starting a listener. When an adapter arrives, **Review adapter approval** previews its exact socket owner identity and local PID; confirmation approves only that owner for that project generation. Cancel/Escape grants nothing. **Disconnect AI** immediately revokes authority and lets the existing lifecycle retire the listener/publication owner asynchronously. Reconnection never implicitly retargets an old owner.
+In generic scene mode on Unix, the **Rot** status button opens the local connection controls. **Connect AI** previews the intended project/editor session and requires confirmation before starting a listener. When an adapter arrives, **Review adapter approval** previews its exact socket owner identity and local PID; confirmation approves only that owner for that project generation. Cancel/Escape grants nothing. **Disconnect AI** immediately revokes authority and lets the existing lifecycle retire the listener/publication owner asynchronously. Reconnection never implicitly retargets an old owner.
 
 Asset catalog changes may persist immediately before Save; Save/export destinations still require separate grants. These controls do not register or restart Hermes, edit client configuration, or establish adapter executable provenance. Automatic registration remains fail-closed. This is an implementation candidate, not native workflow acceptance; [qualification boundary](../../docs/evidence/E2A-CP2-NATIVE-ROUTE-2026-11-14.md).
 

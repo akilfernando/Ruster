@@ -1,5 +1,6 @@
 //! Shared bounded 3D viewport. No application behavior or editor state lives here.
 mod asset_gpu;
+mod editor_grid;
 #[cfg(test)]
 mod geometry_probe;
 mod lighting_gpu;
@@ -529,6 +530,8 @@ pub enum ViewPreset {
 pub struct NavigationOptions {
     /// Presentation-only: the native compact shell supplies these controls.
     pub show_controls: bool,
+    /// Presentation-only ground guide, depth-tested with the editor scene.
+    pub show_editor_grid: bool,
     /// Opt-in editor contour. Default-off so application selection retains its
     /// existing appearance; this is transient presentation, never scene content.
     pub selection_feedback: bool,
@@ -550,6 +553,7 @@ impl Default for NavigationOptions {
     fn default() -> Self {
         Self {
             show_controls: true,
+            show_editor_grid: false,
             selection_feedback: false,
             enabled: true,
             keyboard_enabled: false,
@@ -1381,6 +1385,7 @@ pub fn render_viewport_with_materials(
             receipt: receipt.clone(),
             groups,
             camera: view_projection.to_cols_array(),
+            show_editor_grid: navigation.show_editor_grid && !navigation.player_view,
             camera_eye_mode: camera.eye_mode(),
             display: scene.display,
             lighting,
@@ -1757,17 +1762,26 @@ struct RetiringTarget {
     completed: Arc<std::sync::atomic::AtomicBool>,
 }
 impl Target {
-    fn color_attachment(&self) -> wgpu::RenderPassColorAttachment<'_> {
+    fn color_attachment(&self, editor_grid: bool) -> wgpu::RenderPassColorAttachment<'_> {
         wgpu::RenderPassColorAttachment {
             view: self.multisample.as_ref().unwrap_or(&self.color),
             resolve_target: self.multisample.as_ref().map(|_| &self.color),
             depth_slice: None,
             ops: wgpu::Operations {
-                load: wgpu::LoadOp::Clear(wgpu::Color {
-                    r: 0.025,
-                    g: 0.035,
-                    b: 0.055,
-                    a: 1.0,
+                load: wgpu::LoadOp::Clear(if editor_grid {
+                    wgpu::Color {
+                        r: 0.018,
+                        g: 0.014,
+                        b: 0.015,
+                        a: 1.0,
+                    }
+                } else {
+                    wgpu::Color {
+                        r: 0.025,
+                        g: 0.035,
+                        b: 0.055,
+                        a: 1.0,
+                    }
                 }),
                 // The resolved single-sample image is always stored by the resolve.
                 store: if self.multisample.is_some() {
@@ -1804,6 +1818,9 @@ struct Resources {
     instances: wgpu::Buffer,
     capacity: usize,
     camera: wgpu::Buffer,
+    camera_layout: wgpu::BindGroupLayout,
+    editor_grid_sdr: Option<wgpu::RenderPipeline>,
+    editor_grid_hdr: Option<wgpu::RenderPipeline>,
     camera_bind: wgpu::BindGroup,
     target: Option<Target>,
     retiring_target: Option<RetiringTarget>,
@@ -1968,6 +1985,9 @@ impl Resources {
             instances,
             capacity: 1,
             camera,
+            camera_layout,
+            editor_grid_sdr: None,
+            editor_grid_hdr: None,
             camera_bind,
             target: None,
             retiring_target: None,
@@ -2466,6 +2486,7 @@ struct SceneCallback {
     receipt: FrameReceipt,
     groups: Vec<DrawGroup>,
     camera: [f32; 16],
+    show_editor_grid: bool,
     camera_eye_mode: [f32; 4],
     display: ruster_scene::DisplayProfile,
     lighting: LightingPacket,
@@ -2646,6 +2667,16 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         queue.write_buffer(&r.camera, 0, bytemuck::cast_slice(&self.camera));
         queue.write_buffer(&r.camera, 64, bytemuck::cast_slice(&self.camera_eye_mode));
         let lighting_uploaded = r.lighting.prepare(queue, &self.lighting);
+        let grid = self.show_editor_grid.then(|| {
+            let slot = if applied_hdr {
+                &mut r.editor_grid_hdr
+            } else {
+                &mut r.editor_grid_sdr
+            };
+            slot.get_or_insert_with(|| {
+                editor_grid::pipeline(device, &r.camera_layout, format, samples)
+            })
+        });
         let target = r.target.as_ref().expect("target just resized");
         let timing = r
             .timestamps
@@ -2676,7 +2707,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("Ruster 3D scene"),
-                color_attachments: &[Some(target.color_attachment())],
+                color_attachments: &[Some(target.color_attachment(self.show_editor_grid))],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &target.depth,
                     depth_ops: Some(wgpu::Operations {
@@ -2710,6 +2741,11 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                 pass.set_vertex_buffer(2, mesh.uvs.as_ref().unwrap_or(&r.zero_uv).slice(..));
                 pass.set_index_buffer(mesh.indices.slice(..), wgpu::IndexFormat::Uint32);
                 pass.draw_indexed(0..mesh.count, 0, group.range.clone());
+            }
+            if let Some(grid) = grid {
+                pass.set_pipeline(grid);
+                pass.set_bind_group(0, &r.camera_bind, &[]);
+                pass.draw(0..editor_grid::VERTICES, 0..1);
             }
         }
         if let Some(t) = timing {
@@ -2785,7 +2821,7 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
         metrics.shadow_detail_limited = shadow.detail_limited;
         metrics.shadow_precision_limited = shadow.precision_limited;
         metrics.texture_bytes = r.materials.bytes();
-        metrics.draw_calls = self.groups.len();
+        metrics.draw_calls = self.groups.len() + usize::from(self.show_editor_grid);
         metrics.objects = instance_count;
         metrics.mesh_bytes = r.builtins.bytes()
             + r.zero_uv.size()
@@ -4006,7 +4042,7 @@ mod tests {
                 {
                     let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                         label: Some("post-rejection render and resize"),
-                        color_attachments: &[Some(target.color_attachment())],
+                        color_attachments: &[Some(target.color_attachment(false))],
                         depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                             view: &target.depth,
                             depth_ops: Some(wgpu::Operations {
