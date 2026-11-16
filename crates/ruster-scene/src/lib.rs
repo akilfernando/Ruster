@@ -17,6 +17,7 @@ pub const FORMAT_VERSION: u32 = 18;
 pub const HIERARCHY_FORMAT_VERSION: u32 = 19;
 pub const GROUP_ROTATION_FORMAT_VERSION: u32 = 20;
 pub const PLAYER_VIEW_FORMAT_VERSION: u32 = 21;
+pub const SOUND_FORMAT_VERSION: u32 = 21;
 pub const MAX_MATERIALS: usize = 64;
 
 mod imported;
@@ -1369,6 +1370,25 @@ impl Document {
             redo: Vec::new(),
         }
     }
+    fn sound_refs(&self) -> impl Iterator<Item = &SoundRef> {
+        self.authoring
+            .bindings
+            .values()
+            .chain(
+                self.undo
+                    .iter()
+                    .chain(&self.redo)
+                    .flat_map(|change| &change.bindings)
+                    .flat_map(|delta| [&delta.before, &delta.after])
+                    .flatten(),
+            )
+            .flat_map(|binding| binding.properties.values())
+            .filter_map(|property| match property {
+                PropertyValue::SoundRef(sound) => Some(sound),
+                _ => None,
+            })
+    }
+
     fn required_version(&self) -> u32 {
         let history = self.undo.iter().chain(&self.redo);
         if self.scene.player_view.is_some()
@@ -1378,6 +1398,9 @@ impl Document {
                 .any(|delta| matches!(delta, SceneDelta::PlayerView { .. }))
         {
             return PLAYER_VIEW_FORMAT_VERSION;
+        }
+        if self.sound_refs().next().is_some() {
+            return SOUND_FORMAT_VERSION;
         }
         let has_hierarchy = !self.scene.hierarchy.is_empty()
             || history
@@ -1537,6 +1560,11 @@ impl Document {
         {
             return Err(SceneError::Invalid(
                 "scene v3 does not support grouped history".into(),
+            ));
+        }
+        if version < u64::from(SOUND_FORMAT_VERSION) && document.sound_refs().next().is_some() {
+            return Err(SceneError::Invalid(
+                "Sound cue properties or their history require Scene21".into(),
             ));
         }
         if version < u64::from(GROUP_ROTATION_FORMAT_VERSION)
@@ -2626,22 +2654,11 @@ impl Session {
     /// Sound definitions and asset closure include disabled bindings and both
     /// sides of retained history so a later Undo or Redo can restore a cue.
     pub fn sound_asset_references(&self) -> SoundAssetReferences {
-        let bindings = self.authoring().bindings.values().chain(
-            self.document
-                .undo
-                .iter()
-                .chain(&self.document.redo)
-                .flat_map(|change| &change.bindings)
-                .flat_map(|delta| [&delta.before, &delta.after])
-                .flatten(),
-        );
         let mut references = SoundAssetReferences::default();
-        for property in bindings.flat_map(|binding| binding.properties.values()) {
-            if let PropertyValue::SoundRef(sound) = property {
-                references.uses_sound = true;
-                if let Some(id) = &sound.asset_id {
-                    references.assets.insert(id.clone());
-                }
+        for sound in self.document.sound_refs() {
+            references.uses_sound = true;
+            if let Some(id) = &sound.asset_id {
+                references.assets.insert(id.clone());
             }
         }
         references
@@ -3844,6 +3861,21 @@ mod tests {
         let mut scene = Scene::empty("audio");
         scene.objects.push(Object::cube("speaker", None));
         let mut session = Session::new(scene).unwrap();
+        assert_eq!(session.save_format_version(), FORMAT_VERSION);
+        let assert_legacy_rejected = |session: &Session| {
+            let mut saved: serde_json::Value =
+                serde_json::from_slice(&session.snapshot_bytes().unwrap()).unwrap();
+            assert_eq!(saved["format_version"], SOUND_FORMAT_VERSION);
+            saved["format_version"] = GROUP_ROTATION_FORMAT_VERSION.into();
+            let error =
+                Session::from_snapshot_bytes(&serde_json::to_vec(&saved).unwrap()).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("Sound cue properties or their history require Scene21"),
+                "{error}"
+            );
+        };
         let mut binding = BehaviorBinding {
             target: BindingTarget::Object("speaker".into()),
             source_id: "source".into(),
@@ -3869,6 +3901,12 @@ mod tests {
             }
         );
 
+        assert_legacy_rejected(&session);
+        revision = session.undo(revision).unwrap();
+        assert!(session.authoring().bindings.is_empty());
+        assert_legacy_rejected(&session);
+        revision = session.redo(revision).unwrap();
+
         binding
             .properties
             .insert("cue".into(), value(Some("clip".into())));
@@ -3884,6 +3922,7 @@ mod tests {
         revision = session.redo(revision).unwrap();
         session.set_binding(revision, "binding", None).unwrap();
         assert!(session.authoring().bindings.is_empty());
+        assert_legacy_rejected(&session);
         assert_eq!(
             Session::from_snapshot_bytes(&session.snapshot_bytes().unwrap())
                 .unwrap()

@@ -188,6 +188,8 @@ gain must be finite in the inclusive range 0 to 1. `Session::sound_asset_referen
 collects all assigned IDs through current bindings and both sides of retained
 Undo and Redo. A separate presence flag also detects unassigned definitions.
 Disabled bindings remain part of the export asset and capability closure.
+Current or historical sound properties require Scene21. Other scenes retain
+the format required by their own data.
 
 
 V5 history is a flat nonrecursive record with optional nonempty `scene`, `sources` and `bindings` delta arrays. Scene entries retain the previous compact scalar/group representations. Source/binding entries hold `id`, `before` and `after` values (null means absent); text is initially retained in full within the aggregate1MiB budget. Frontends should coalesce transient text editing before committing; no blob store or compression was introduced. Undo admission retains the largest restorable authored payload as well as retained delta text; old history may expire sooner for large source/property edits. If trimming all older Undo entries still cannot fit the newest complete change, failure preserves current state/history and the eviction counter. Source editing must coalesce frontend drafts before commit and surface byte-pressure history reduction; the core exposes that reduction but does not invent a UI notice.
