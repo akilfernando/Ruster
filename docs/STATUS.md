@@ -1,5 +1,21 @@
 # Current project status
 
+## Static GLB import and safe reimport goal active — 2026-11-16
+
+Astra independently ranked [static glTF import and safe reimport](plans/STATIC-GLTF-REIMPORT.md)
+first after authored player view. The user approved the scope and the goal
+is active. The first check is a real catalog
+import and reimport with reordered source arrays, followed by invalid-source
+rollback. The scope retains ordinary editor recovery and relocated Linux
+delivery as acceptance criteria. Astra's execution plan freezes a
+structure-preserving refresh and one atomic catalog generation. A Blender
+fixture family with real A/B exports, reordered B, and malformed and missing
+part variants is pinned under
+`/home/akilf/Projects/Ruster-Audits/static-glb-20261116.hJqwVv`.
+The asset owner is implementing the catalog portion in
+`feat/static-glb-20261116`. The fixture exists and no production import
+acceptance is claimed. The documentation lane verifies links and whitespace.
+
 ## Authored player view integrated locally — 2026-11-16
 
 Astra independently selected [authored player view](plans/AUTHORED-PLAYER-VIEW.md)

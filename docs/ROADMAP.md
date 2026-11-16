@@ -119,7 +119,14 @@ editor familiarity walkthrough is independent of implementation.
 assembly goal. The selected slice persists and verifies a camera that follows
 a keyboard-controlled subject in preview and relocated Linux playback.
 The [implementation decision](decisions/2026-11-16-authored-player-view.md)
-records the contracts. Richer import remains a candidate for a later goal.
+records the contracts.
+
+### Active parity milestone
+
+[Static glTF import and safe reimport](plans/STATIC-GLTF-REIMPORT.md) covers
+one textured model through placement, source revision, save/reopen and
+standalone delivery. The first proof targets stable resource identity and
+atomic failure recovery.
 
 Then select slices from the retained foundation plan: richer content/animation,
 physics/audio and devices/player data, material/lighting completion, measured
