@@ -39,13 +39,7 @@ impl SceneEditor {
         if self.manipulation.offset_pending() {
             return Err("Apply or reset the translation offset before exporting.".into());
         }
-        if self.session.save_format_version() == ruster_scene::HIERARCHY_FORMAT_VERSION {
-            return Err("Assembly hierarchy/history is not supported by this runtime/export profile; no flattened delivery is produced.".into());
-        }
-        if self.session.path().is_none()
-            || self.session.is_dirty()
-            || self.session.loaded_format_version() != ruster_scene::FORMAT_VERSION
-        {
+        if self.export_needs_save() {
             return Err("Save the scene before exporting.".into());
         }
         if !self.shader_builtin {
@@ -58,6 +52,12 @@ impl SceneEditor {
         }
         Ok(())
     }
+    fn export_needs_save(&self) -> bool {
+        self.session.path().is_none()
+            || self.session.is_dirty()
+            || self.session.loaded_format_version() != self.session.save_format_version()
+    }
+
     fn start_creation_export(
         &mut self,
         title: String,
@@ -450,10 +450,7 @@ impl SceneEditor {
                 if let Some(reason) = &blocked {
                     ui.label(reason);
                 }
-                if (self.session.path().is_none()
-                    || self.session.is_dirty()
-                    || self.session.loaded_format_version() != ruster_scene::FORMAT_VERSION)
-                    && ui.button("Save scene").clicked()
+                if self.export_needs_save() && ui.button("Save scene").clicked()
                 {
                     self.export_dialog = false;
                     self.save();

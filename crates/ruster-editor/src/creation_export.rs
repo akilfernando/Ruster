@@ -67,7 +67,6 @@ pub(crate) struct Request {
 pub(crate) fn scene_dependencies(
     scene: &ruster_scene::Scene,
 ) -> Result<(BTreeSet<String>, BTreeSet<String>), String> {
-    scene.require_flat().map_err(|e| e.to_string())?;
     scene.validate().map_err(|e| e.to_string())?;
     let meshes: BTreeSet<_> = scene
         .objects
@@ -863,16 +862,30 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!("builtin_primitives"));
+    let mut static_assembly_profile = primitive_profile.clone();
+    static_assembly_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!("static_assembly_hierarchy"));
     let supplied_profile = &manifest["profile"];
-    if scene_version >= 18 && supplied_profile != &primitive_profile {
+    if scene_version == ruster_scene::HIERARCHY_FORMAT_VERSION
+        && supplied_profile != &static_assembly_profile
+    {
+        return Err("runtime kit does not support Scene19 static_assembly_hierarchy; prepare a current Linux runtime kit".into());
+    }
+    if scene_version >= 18
+        && supplied_profile != &primitive_profile
+        && supplied_profile != &static_assembly_profile
+    {
         return Err("runtime kit does not support Scene18 builtin_primitives; prepare a current Linux runtime kit".into());
     }
-    // The exact new profile is backward compatible with the panel-aware runtime.
-    let profile = if supplied_profile == &primitive_profile {
-        &hud_panels_profile
-    } else {
-        supplied_profile
-    };
+    // Both exact profiles are compatible with the panel-aware runtime.
+    let profile =
+        if supplied_profile == &primitive_profile || supplied_profile == &static_assembly_profile {
+            &hud_panels_profile
+        } else {
+            supplied_profile
+        };
     if scene_version >= 17 && profile != &hud_panels_profile {
         return Err("runtime kit does not support Scene17 runtime_hud_panels; prepare a current Linux runtime kit".into());
     }
@@ -1164,7 +1177,12 @@ fn prepare(
     );
     let content = temporary.path().join("content");
     fs::create_dir(&content).map_err(|e| e.to_string())?;
-    fs::write(content.join("scene.json"), &request.scene_bytes).map_err(|e| e.to_string())?;
+    let scene_bytes = if scene_version == ruster_scene::HIERARCHY_FORMAT_VERSION {
+        &saved
+    } else {
+        &request.scene_bytes
+    };
+    fs::write(content.join("scene.json"), scene_bytes).map_err(|e| e.to_string())?;
     let mut meshes = BTreeMap::new();
     let mut textures = BTreeMap::new();
     let mut source_paths = BTreeMap::new();
@@ -1210,7 +1228,7 @@ fn prepare(
             })
             .map_err(|error| error.to_string())?;
     }
-    let scene_hash = digest(&request.scene_bytes);
+    let scene_hash = digest(scene_bytes);
     let schema = match scene_version {
         1..=5 => 1,
         6 => 2,
@@ -1226,13 +1244,14 @@ fn prepare(
         16 => 12,
         17 => 13,
         18 => 14,
-        _ => return Err("export requires a supported Scene1–18 document".into()),
+        ruster_scene::HIERARCHY_FORMAT_VERSION => 15,
+        _ => return Err("export requires a supported Scene1–19 document".into()),
     };
     let tick_nanos = u64::try_from(ruster_behavior::DEFAULT_FIXED_TICK.as_nanos())
         .map_err(|_| "Default fixed tick exceeds the descriptor nanosecond range")?;
     let mut content_manifest = json!({"schema":schema, "title":request.title,
         "scene_sha256":scene_hash, "meshes":meshes});
-    if matches!(schema, 7..=14) {
+    if schema >= 7 {
         content_manifest["tick_nanos"] = json!(tick_nanos);
     } else {
         content_manifest["tick_millis"] = json!(100);
@@ -1567,13 +1586,133 @@ fn publish(
 mod tests {
     use super::*;
     #[test]
-    fn hierarchy_delivery_is_rejected_before_dependency_publication() {
-        let mut session = ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap();
-        session.create_group(0, "assembly", None).unwrap();
-        assert!(
-            scene_dependencies(session.scene()).is_err(),
-            "hierarchy delivery must not flatten"
+    #[ignore = "explicit RUSTER_TEST_STATIC_KIT, RUSTER_TEST_PRIMITIVE_KIT and RUSTER_TEST_ASSEMBLY_SCENE"]
+    fn static_assembly_uses_real_export_and_relocated_runtime() {
+        let root = tempfile::tempdir().unwrap();
+        let kit = PathBuf::from(std::env::var_os("RUSTER_TEST_STATIC_KIT").unwrap());
+        let old_kit = PathBuf::from(std::env::var_os("RUSTER_TEST_PRIMITIVE_KIT").unwrap());
+        let grouped_bytes =
+            fs::read(std::env::var_os("RUSTER_TEST_ASSEMBLY_SCENE").unwrap()).unwrap();
+        let grouped = ruster_scene::Session::from_snapshot_bytes(&grouped_bytes).unwrap();
+        assert!(!grouped.scene().hierarchy.is_empty());
+        let mut imported_document: Value = serde_json::from_slice(&grouped_bytes).unwrap();
+        imported_document["scene"]["hierarchy"]["groups"]
+            .as_object_mut()
+            .unwrap()
+            .values_mut()
+            .next()
+            .unwrap()
+            .as_object_mut()
+            .unwrap()
+            .remove("name");
+        imported_document["undo"] = json!([]);
+        imported_document["redo"] = json!([]);
+        let imported_bytes = serde_json::to_vec_pretty(&imported_document).unwrap();
+        let mut flat = ruster_scene::Session::new(ruster_scene::Scene::demo()).unwrap();
+        flat.create_group(0, "assembly", None).unwrap();
+        flat.undo(1).unwrap();
+        assert!(flat.scene().hierarchy.is_empty());
+        let flat_history = flat.snapshot_bytes().unwrap();
+        assert_eq!(
+            flat.save_format_version(),
+            ruster_scene::HIERARCHY_FORMAT_VERSION
         );
+        let flat_legacy = ruster_scene::Session::new(ruster_scene::Scene::demo())
+            .unwrap()
+            .snapshot_bytes()
+            .unwrap();
+        let cancel = AtomicBool::new(false);
+        for (name, bytes, version, selected_kit) in [
+            (
+                "grouped",
+                grouped_bytes,
+                ruster_scene::HIERARCHY_FORMAT_VERSION,
+                &kit,
+            ),
+            (
+                "imported-group-name",
+                imported_bytes,
+                ruster_scene::HIERARCHY_FORMAT_VERSION,
+                &kit,
+            ),
+            (
+                "history",
+                flat_history,
+                ruster_scene::HIERARCHY_FORMAT_VERSION,
+                &kit,
+            ),
+            (
+                "legacy",
+                flat_legacy.clone(),
+                ruster_scene::FORMAT_VERSION,
+                &old_kit,
+            ),
+            (
+                "current-flat",
+                flat_legacy,
+                ruster_scene::FORMAT_VERSION,
+                &kit,
+            ),
+        ] {
+            let saved = root.path().join(format!("{name}.json"));
+            fs::write(&saved, &bytes).unwrap();
+            let session = ruster_scene::Session::open(&saved).unwrap();
+            assert_eq!(session.loaded_format_version(), version);
+            let destination = root.path().join(format!("{name}.tar.gz"));
+            let request = |runtime_kit: &Path| Request {
+                identity: identity(),
+                title: name.into(),
+                scene_path: saved.clone(),
+                scene_bytes: session.snapshot_bytes().unwrap(),
+                assets: None,
+                destination: destination.clone(),
+                runtime_kit: runtime_kit.into(),
+                mcp_scope: false,
+                initial_camera: None,
+            };
+            let directory = || DirectoryGrant::new(root.path()).unwrap();
+            if version == ruster_scene::HIERARCHY_FORMAT_VERSION {
+                let old = prepare(request(&old_kit), directory(), &cancel)
+                    .err()
+                    .expect("old kit must refuse Scene19");
+                assert!(old.contains("Scene19 static_assembly_hierarchy"), "{old}");
+                assert!(!destination.exists());
+            }
+            let staged = prepare(request(selected_kit), directory(), &cancel).unwrap();
+            let receipt = publish_fixture(staged, &identity(), &cancel).unwrap();
+            assert_eq!(receipt["scene_sha256"], digest(&bytes));
+            let relocated = root.path().join(format!("relocated-{name}"));
+            fs::create_dir(&relocated).unwrap();
+            assert!(Command::new("tar")
+                .arg("-xzf")
+                .arg(&destination)
+                .arg("-C")
+                .arg(&relocated)
+                .status()
+                .unwrap()
+                .success());
+            let app = relocated.join("application");
+            assert_eq!(fs::read(app.join("resources/scene.json")).unwrap(), bytes);
+            let run = Command::new(app.join("application"))
+                .args(["--headless", "--ticks", "2"])
+                .current_dir(root.path())
+                .output()
+                .unwrap();
+            assert!(
+                run.status.success(),
+                "{}",
+                String::from_utf8_lossy(&run.stderr)
+            );
+            let response: Value = serde_json::from_slice(&run.stdout).unwrap();
+            assert_eq!(response["tick"], "2");
+            let expected = serde_json::to_value(session.scene()).unwrap();
+            assert_eq!(response["authored_scene"], expected);
+            assert_eq!(response["runtime_scene"], expected);
+            eprintln!(
+                "{name}: Scene{version}, relocated tick 2, exact scene {}",
+                digest(&bytes)
+            );
+        }
     }
 
     // Real helper IPC must retain renderer f32 identity despite an intermediate
@@ -1873,6 +2012,17 @@ mod tests {
             .push(json!("builtin_primitives"));
         write(&manifest);
         for version in 1..=18 {
+            verify_helpers(root.path(), true, version).unwrap();
+        }
+        assert!(verify_helpers(root.path(), false, 19)
+            .unwrap_err()
+            .contains("Scene19 static_assembly_hierarchy"));
+        manifest["profile"]["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!("static_assembly_hierarchy"));
+        write(&manifest);
+        for version in 1..=19 {
             verify_helpers(root.path(), true, version).unwrap();
         }
         manifest["profile"]["capabilities"]

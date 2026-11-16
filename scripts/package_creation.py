@@ -63,6 +63,8 @@ HUD_PANELS_PROFILE = {**HUD_CONTROLS_PROFILE,
                       "capabilities": [*HUD_CONTROLS_PROFILE["capabilities"], "runtime_hud_panels"]}
 PRIMITIVE_PROFILE = {**HUD_PANELS_PROFILE,
                      "capabilities": [*HUD_PANELS_PROFILE["capabilities"], "builtin_primitives"]}
+STATIC_ASSEMBLY_PROFILE = {**PRIMITIVE_PROFILE,
+                           "capabilities": [*PRIMITIVE_PROFILE["capabilities"], "static_assembly_hierarchy"]}
 LICENSE_FILES = ("LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt",
                  "SUPPLEMENTAL_NOTICES.txt", "LICENSE-SOURCES.json")
 HELPER_FILES = ("scripts/package_creation.py", "scripts/package_app.py",
@@ -176,7 +178,7 @@ def inventory(root: Path) -> set[str]:
 
 
 def check_profile(profile: object) -> None:
-    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE)
+    if (profile not in (PROFILE, CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE, STATIC_ASSEMBLY_PROFILE)
             or any(type(profile.get(key)) is not type(value) for key, value in PROFILE.items())):
         raise ValueError("unsupported runtime creation profile; expected a fixed Linux x86_64 protocol version 1 profile")
 
@@ -1049,15 +1051,15 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     version = document.get("format_version")
     scene = document.get("scene")
     if (document.get("format") != "ruster-scene" or type(version) is not int
-            or not 1 <= version <= 18 or not isinstance(scene, dict)):
-        raise ValueError("content requires a supported Scene1–18 document")
-    # This delivery profile does not support topology, even under an old version.
-    if "hierarchy" in scene or any(
+            or not 1 <= version <= 19 or not isinstance(scene, dict)):
+        raise ValueError("content requires a supported Scene1–19 document")
+    # Older profiles cannot carry topology or its reversible history.
+    if version < 19 and ("hierarchy" in scene or any(
             isinstance(change, dict) and (change.get("kind") == "hierarchy" or any(
                 isinstance(delta, dict) and delta.get("kind") == "hierarchy"
                 for delta in change.get("scene", []) if isinstance(change.get("scene"), list)))
-            for stack in ("undo", "redo") for change in document.get(stack, [])):
-        raise ValueError("assembly hierarchy requires an unsupported runtime/export capability")
+            for stack in ("undo", "redo") for change in document.get(stack, []))):
+        raise ValueError("assembly hierarchy requires Scene19 static_assembly_hierarchy")
     validate_hud_fields(document)
     validate_primitive_fields(document)
     validate_state_fields(document)
@@ -1120,9 +1122,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     cancelled(cancel_file)
     content = decode(read_bounded(root, "content.json", MAX_METADATA_BYTES), "content.json")
     schema = content.get("schema")
-    if type(schema) is not int or schema not in (1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14):
+    if type(schema) is not int or not 1 <= schema <= 15:
         raise ValueError("invalid content schema")
-    tick_field = "tick_nanos" if schema in (7, 8, 9, 10, 11, 12, 13, 14) else "tick_millis"
+    tick_field = "tick_nanos" if schema >= 7 else "tick_millis"
     fields = {"schema", "title", tick_field, "scene_sha256", "meshes"}
     if schema >= 2:
         fields.add("textures")
@@ -1130,7 +1132,7 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
     if "initial_camera" in content:
         content["initial_camera"] = initial_camera(content["initial_camera"])
     title = content["title"]
-    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema in (7, 8, 9, 10, 11, 12, 13, 14) else (1, 1000)
+    tick_minimum, tick_maximum = (1_000_000, 1_000_000_000) if schema >= 7 else (1, 1000)
     if (not isinstance(title, str) or not title or title != title.strip()
             or len(title.encode()) > 128 or any(ord(c) < 32 or 127 <= ord(c) <= 159 for c in title)
             or type(content[tick_field]) is not int or not tick_minimum <= content[tick_field] <= tick_maximum):
@@ -1154,8 +1156,9 @@ def source_content(root: Path, cancel_file: Path | None) -> tuple[dict, bytes, d
             or schema == 11 and document["format_version"] != 15
             or schema == 12 and document["format_version"] != 16
             or schema == 13 and document["format_version"] != 17
-            or schema == 14 and document["format_version"] != 18):
-        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13; schema10 requires Scene14; schema11 requires Scene15; schema12 requires Scene16; schema13 requires Scene17; schema14 requires Scene18")
+            or schema == 14 and document["format_version"] != 18
+            or schema == 15 and document["format_version"] != 19):
+        raise ValueError("content schema1 requires Scene1–5; schema2 requires Scene6; schema3 requires Scene7; schema4 requires Scene8; schema5 requires Scene9; schema6 requires Scene10; schema7 requires Scene11; schema8 requires Scene12; schema9 requires Scene13; schema10 requires Scene14; schema11 requires Scene15; schema12 requires Scene16; schema13 requires Scene17; schema14 requires Scene18; schema15 requires Scene19")
     meshes, textures = content["meshes"], content.get("textures", {})
     if (not isinstance(meshes, dict) or not isinstance(textures, dict)
             or len(meshes) + len(textures) > MAX_MESHES):
@@ -1198,6 +1201,16 @@ def typed_scene(document: dict) -> dict:
     validate_surface_fields(document)
     scene = json.loads(json.dumps(document["scene"]))
     try:
+        hierarchy = scene.get("hierarchy")
+        if hierarchy is not None:
+            groups, parents = hierarchy["groups"], hierarchy["parents"]
+            if not groups and not parents:
+                scene.pop("hierarchy")
+            for group in groups.values():
+                group.setdefault("name", None)
+                for field in ("translation", "rotation", "scale"):
+                    group["transform"][field] = [struct.unpack("f", struct.pack("f", value))[0]
+                                                 for value in group["transform"][field]]
         display = scene.get("display", {"type":"legacy_sdr"})
         if display["type"] == "legacy_sdr": scene.pop("display", None)
         else: display["exposure_stops"] = struct.unpack("f", struct.pack("f", display["exposure_stops"]))[0]
@@ -1269,46 +1282,51 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
     kit, payload, kit_hash = load_kit(runtime_kit, cancel_file)
     content, scene_data, document, source_specs = source_content(content_root, cancel_file)
     camera = content.get("initial_camera")
-    if content["schema"] == 14 and kit["profile"] != PRIMITIVE_PROFILE:
+    schema = content["schema"]
+    supplied_profile = kit["profile"]
+    if schema == 15 and supplied_profile != STATIC_ASSEMBLY_PROFILE:
+        raise ValueError("runtime kit does not support Scene19 static_assembly_hierarchy; prepare a current runtime kit")
+    profile = PRIMITIVE_PROFILE if supplied_profile == STATIC_ASSEMBLY_PROFILE else supplied_profile
+    if schema == 14 and profile != PRIMITIVE_PROFILE:
         raise ValueError("runtime kit does not support Scene18 builtin_primitives; prepare a current runtime kit")
-    if content["schema"] == 13 and kit["profile"] not in (HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 13 and profile not in (HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene17 runtime_hud_panels; prepare a current runtime kit")
-    if content["schema"] == 12 and kit["profile"] not in (HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 12 and profile not in (HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene16 runtime_hud_controls; prepare a current runtime kit")
-    if content["schema"] == 11 and kit["profile"] not in (HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 11 and profile not in (HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene15 runtime_hud; prepare a current runtime kit")
-    if content["schema"] == 10 and kit["profile"] not in (LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 10 and profile not in (LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene14 lifecycle_commands; prepare a current runtime kit")
-    if content["schema"] == 9 and kit["profile"] not in (STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 9 and profile not in (STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene13 runtime_state; prepare a current runtime kit")
-    if content["schema"] == 8 and kit["profile"] not in (SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 8 and profile not in (SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene12 spatial_queries; prepare a current runtime kit")
-    if content["schema"] == 7 and kit["profile"] not in (INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 7 and profile not in (INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene11 input_actions; prepare a current runtime kit")
-    if content["schema"] == 6 and kit["profile"] not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 6 and profile not in (ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene10 roughness_maps; prepare a current runtime kit")
-    if content["schema"] == 5 and kit["profile"] not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 5 and profile not in (SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene9 surface_materials; prepare a current runtime kit")
-    if content["schema"] == 4 and kit["profile"] not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 4 and profile not in (SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene8 sun_shadows; prepare a current runtime kit")
-    if content["schema"] == 3 and kit["profile"] not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 3 and profile not in (LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene7 authored_lighting; prepare a current runtime kit")
-    if content["schema"] == 2 and kit["profile"] not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if schema == 2 and profile not in (MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support Scene6 opaque_materials; prepare a current runtime kit")
-    if camera is not None and kit["profile"] not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+    if camera is not None and profile not in (CAMERA_PROFILE, MATERIAL_PROFILE, LIGHTING_PROFILE, SUN_SHADOW_PROFILE, SURFACE_PROFILE, ROUGHNESS_PROFILE, INPUT_PROFILE, SPATIAL_PROFILE, STATE_PROFILE, LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
         raise ValueError("runtime kit does not support initial_camera; prepare a current runtime kit")
-    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5, 10: 5, 11: 5, 12: 5, 13: 5, 14: 5}[content["schema"]]
-    tick_field = "tick_nanos" if content["schema"] in (7, 8, 9, 10, 11, 12, 13, 14) else "tick_millis"
-    fixed_dt = content[tick_field] / (1_000_000_000 if content["schema"] in (7, 8, 9, 10, 11, 12, 13, 14) else 1000)
+    descriptor_version = {1: 1, 2: 2, 3: 2, 4: 2, 5: 3, 6: 4, 7: 5, 8: 5, 9: 5, 10: 5, 11: 5, 12: 5, 13: 5, 14: 5, 15: 5}[schema]
+    tick_field = "tick_nanos" if schema >= 7 else "tick_millis"
+    fixed_dt = content[tick_field] / (1_000_000_000 if schema >= 7 else 1000)
     descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
                   "scene": "resources/scene.json", tick_field: content[tick_field],
                   "meshes": {identity: "resources/" + record["path"]
                              for identity, record in content["meshes"].items()}}
-    if content["schema"] >= 5:
+    if schema >= 5:
         descriptor["mesh_normal_policies"] = {identity: record["normal_policy"] for identity, record in content["meshes"].items()}
-    if content["schema"] >= 6:
+    if schema >= 6:
         descriptor["texture_roles"] = {identity: record["texture_role"] for identity, record in content["textures"].items()}
-    if content["schema"] >= 2:
+    if schema >= 2:
         descriptor["textures"] = {identity: "resources/" + record["path"]
                                   for identity, record in content["textures"].items()}
     if camera is not None:
@@ -1341,9 +1359,9 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             raise ValueError("runtime preflight did not retain creation identity, tick or authored scene")
         if camera is not None and result.get("initial_camera") != camera:
             raise ValueError("runtime preflight did not retain explicit initial camera")
-        if content["schema"] in (7, 8, 9, 10, 11, 12, 13, 14) and result.get("authored_actions") != authored_actions(document):
+        if schema >= 7 and result.get("authored_actions") != authored_actions(document):
             raise ValueError("runtime preflight did not retain authored input actions")
-        if content["schema"] in (9, 10, 11, 12, 13, 14):
+        if schema >= 9:
             bindings = document.get("authoring", {}).get("bindings", {})
             def typed_defaults(binding: dict) -> dict:
                 # StateValue is binary64, even when authored JSON used an integer
@@ -1359,7 +1377,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
             api5 = any(binding.get("enabled") and
                        sources.get(binding["source_id"], {}).get("host_api_version") == 5
                        for binding in bindings.values())
-            if api5 and kit["profile"] not in (LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
+            if api5 and profile not in (LIFECYCLE_PROFILE, HUD_PROFILE, HUD_CONTROLS_PROFILE, HUD_PANELS_PROFILE, PRIMITIVE_PROFILE):
                 raise ValueError("API5 requires lifecycle_commands runtime capability")
             observed = result.get("runtime_state")
             if not isinstance(observed, dict) or set(observed) != set(defaults):
@@ -1380,7 +1398,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                     raise ValueError("runtime preflight changed initialized state schema")
             elif observed != defaults:
                 raise ValueError("runtime preflight did not initialize authored state defaults")
-        if content["schema"] in (10, 11, 12, 13, 14) or (content["schema"] == 9 and api5):
+        if schema >= 10 or (schema == 9 and api5):
             metadata = {"initialized", "commit_revision", "last_step_commit_revision",
                         "command_receipt", "command_receipts", "captured_commands", "runtime_scene"}
             if (not metadata <= result.keys() or result.get("initialized") is not True or result.get("commit_revision") != "0"
@@ -1404,10 +1422,10 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                         or not isinstance(row.get("schema_hash"), str) or not HASH.fullmatch(row["schema_hash"])):
                     raise ValueError("runtime preflight did not retain captured command catalog")
                 seen.add(key)
-        if content["schema"] in (12, 13, 14) and result.get("hud_activation_receipts") != []:
+        if schema >= 12 and result.get("hud_activation_receipts") != []:
             raise ValueError("runtime preflight did not retain an empty HUD activation history")
-        if content["schema"] in (11, 12, 13, 14):
-            verify_hud_report(result, document, kit["profile"])
+        if schema >= 11:
+            verify_hud_report(result, document, profile)
         cancelled(cancel_file)
         manifest = {"schema": 1, "kind": "ruster-creation-package", "application": "application",
                     "target": package_app.TARGET, "title": content["title"],
