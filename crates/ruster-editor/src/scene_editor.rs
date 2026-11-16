@@ -9411,34 +9411,51 @@ mod tests {
 
     #[test]
     fn hierarchy_guarded_session_vertical_tracer() {
-        hierarchy_creator_journey(false, false, false, false);
+        hierarchy_creator_journey(false, false, CreatorFixture::Assembly);
     }
 
     #[test]
     #[ignore = "explicit RUSTER_TEST_MCP_BINARY; actual STDIO fixture approval, not human consent"]
     fn hierarchy_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true, false, false, false);
+        hierarchy_creator_journey(true, false, CreatorFixture::Assembly);
     }
 
     #[test]
     #[ignore = "explicit RUSTER_TEST_MCP_BINARY; registered-project STDIO fixture, not human consent"]
     fn project_registry_stdio_creator_save_fresh_open() {
-        hierarchy_creator_journey(true, true, false, false);
+        hierarchy_creator_journey(true, true, CreatorFixture::Assembly);
     }
 
     #[test]
     #[ignore = "explicit source-built adapter, matched RUSTER_RUNTIME_KIT and disposable RUSTER_MCP_EXPORT_DIR"]
     fn group_rotation_stdio_creator_save_and_export() {
-        hierarchy_creator_journey(true, false, true, false);
+        hierarchy_creator_journey(true, false, CreatorFixture::Rotation);
     }
 
     #[test]
     #[ignore = "explicit source-built adapter, legacy input fixture, matched kit and disposable export directory"]
     fn player_view_stdio_creator_save_and_export() {
-        hierarchy_creator_journey(true, false, false, true);
+        hierarchy_creator_journey(true, false, CreatorFixture::PlayerView);
     }
 
-    fn hierarchy_creator_journey(stdio: bool, registered: bool, moving: bool, player_view: bool) {
+    #[test]
+    #[ignore = "explicit source-built adapter, real Blender fixtures, matched kit and disposable export directory"]
+    fn static_glb_stdio_creator_save_and_export() {
+        hierarchy_creator_journey(true, false, CreatorFixture::StaticGlb);
+    }
+
+    #[derive(PartialEq)]
+    enum CreatorFixture {
+        Assembly,
+        Rotation,
+        PlayerView,
+        StaticGlb,
+    }
+
+    fn hierarchy_creator_journey(stdio: bool, registered: bool, fixture: CreatorFixture) {
+        let moving = fixture == CreatorFixture::Rotation;
+        let player_view = fixture == CreatorFixture::PlayerView;
+        let static_glb = fixture == CreatorFixture::StaticGlb;
         use std::io::{BufRead, Write};
         struct Adapter(std::process::Child);
         impl Drop for Adapter {
@@ -9485,6 +9502,8 @@ mod tests {
                 bridge.dispatch_request(|host, op, args, lease| {
                     if op == "scene_save" {
                         editor.dispatch_save_request(&ctx, host, &args, lease);
+                    } else if matches!(op, "asset_import" | "asset_refresh") {
+                        editor.dispatch_asset_request(&ctx, host, op, args, lease);
                     } else {
                         lease.run_immediate(|| editor.command(host, op, args));
                     }
@@ -9524,7 +9543,7 @@ mod tests {
             }
             editor.save_grant = Some(persistence_commands::SaveGrant::new(dir.path()).unwrap());
         }
-        if moving || player_view {
+        if moving || player_view || static_glb {
             editor.creation_export =
                 crate::creation_export::Controller::from_environment(true).unwrap();
             assert!(editor.creation_export.runtime_kit().is_some());
@@ -9677,6 +9696,8 @@ mod tests {
         };
         if player_view {
             player_view_journey(&mut editor, &mut call);
+        } else if static_glb {
+            static_glb_journey(&mut editor, &mut call, dir.path());
         } else {
             call(
                 &mut editor,
@@ -9874,7 +9895,7 @@ mod tests {
             let saved = call(&mut editor, "scene_persistence_inspect", json!({}));
             assert_eq!(saved["last_committed_save"]["committed"], true);
             let readback = call(&mut editor, "scene_inspect", json!({}));
-            if !player_view {
+            if !player_view && !static_glb {
                 assert_eq!(readback["hierarchy"]["parents"]["point"], "hinge");
             }
             assert_eq!(
@@ -9891,7 +9912,7 @@ mod tests {
         );
         assert_eq!(
             reopened.loaded_format_version(),
-            if player_view {
+            if player_view || static_glb {
                 ruster_scene::PLAYER_VIEW_FORMAT_VERSION
             } else if moving {
                 ruster_scene::GROUP_ROTATION_FORMAT_VERSION
@@ -9899,8 +9920,10 @@ mod tests {
                 ruster_scene::HIERARCHY_FORMAT_VERSION
             }
         );
-        if moving || player_view {
-            let (title, filename) = if player_view {
+        if moving || player_view || static_glb {
+            let (title, filename) = if static_glb {
+                ("Guarded static GLB", "guarded-static-glb.tar.gz")
+            } else if player_view {
                 ("Guarded Player View", "guarded-player-view.tar.gz")
             } else {
                 ("Guarded Group rotation", "guarded-group-rotation.tar.gz")
@@ -9983,6 +10006,96 @@ mod tests {
         if stdio {
             eprintln!("STDIO cleanup: adapter reaped, native locator absent");
         }
+    }
+
+    fn static_glb_journey(
+        editor: &mut SceneEditor,
+        call: &mut impl FnMut(&mut SceneEditor, &str, Value) -> Value,
+        project: &std::path::Path,
+    ) {
+        use base64::{engine::general_purpose::STANDARD, Engine as _};
+
+        let fixtures = PathBuf::from(std::env::var_os("RUSTER_TEST_GLB_FIXTURE").unwrap());
+        let source = project.join("beacon.glb");
+        std::fs::copy(fixtures.join("beacon-A.glb"), &source).unwrap();
+        let initial = call(editor, "asset_inspect", json!({}));
+        let imported = call(
+            editor,
+            "asset_import",
+            json!({
+                "expected_asset_revision":initial["asset_revision"], "asset_id":"beacon", "source":"beacon.glb"
+            }),
+        );
+        assert_eq!(imported["model"]["id"], "beacon");
+        let catalog = call(editor, "asset_inspect", json!({"model_offset":"0"}));
+        assert_eq!(catalog["models"][0]["id"], "beacon");
+        let placed = call(
+            editor,
+            "scene_model_place",
+            json!({
+                "expected_asset_revision":catalog["asset_revision"], "asset_id":"beacon", "name":"Beacon"
+            }),
+        );
+        let root = placed["root_id"].as_str().unwrap();
+        assert_eq!(editor.session.scene().objects.len(), 2);
+        let location = Transform {
+            translation: [2.0, 1.0, -1.0],
+            ..Transform::default()
+        };
+        call(
+            editor,
+            "scene_transform",
+            json!({"object_id":root,"transform":location}),
+        );
+        let text = "return {update=function(rotation, props, dt) if dt > 0 then rotation[2] = 0.5 end return rotation end}";
+        call(
+            editor,
+            "behavior_create",
+            json!({
+                "source_id":"spin","binding_id":"spin-model","language_id":"lua54","label":"Spin model",
+                "host_api_version":ruster_behavior::GROUP_ROTATION_HOST_API_VERSION,
+                "text_base64":STANDARD.encode(text),"target":{"type":"group","group_id":root}
+            }),
+        );
+        call(
+            editor,
+            "scene_player_view_set",
+            json!({
+                "player_view":{"anchor":{"type":"follow","target_id":root,"offset":[0,1,0]},
+                    "yaw":0,"pitch":0,"distance":6,"vertical_fov_degrees":60}
+            }),
+        );
+        let authored = editor.session.snapshot_bytes().unwrap();
+        std::fs::copy(fixtures.join("beacon-B-reordered.glb"), &source).unwrap();
+        let revised = call(
+            editor,
+            "asset_refresh",
+            json!({
+                "expected_asset_revision":catalog["asset_revision"],"asset_id":"beacon"
+            }),
+        );
+        assert_ne!(imported["model"]["hash"], revised["model"]["hash"]);
+        let accepted = call(editor, "asset_inspect", json!({}));
+        std::fs::copy(fixtures.join("beacon-malformed.glb"), &source).unwrap();
+        let revision = editor.session.scene().revision.to_string();
+        let refused = call(
+            editor,
+            "asset_refresh",
+            json!({
+                "expected_revision":revision,"expected_asset_revision":accepted["asset_revision"],"asset_id":"beacon"
+            }),
+        );
+        assert_eq!(refused["ok"], false, "{refused}");
+        assert_eq!(
+            call(editor, "asset_inspect", json!({}))["models"],
+            accepted["models"]
+        );
+        assert_eq!(editor.session.snapshot_bytes().unwrap(), authored);
+        let reopened = AssetStore::open(project).unwrap();
+        assert_eq!(
+            reopened.model("beacon").unwrap().hash,
+            revised["model"]["hash"].as_str().unwrap()
+        );
     }
 
     fn player_view_journey(
