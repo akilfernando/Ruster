@@ -53,11 +53,13 @@ must remain available on reload without mixed old and new resources.
   geometry, normals, UVs and embedded image changes. Node paths,
   hierarchy, local transforms, primitive counts, assignments and material
   settings must stay equivalent. A structural edit requires fresh import.
-- Keep the placement root creator-owned. Imported descendants and imported
-  material definitions have importer ownership. Place the hierarchy in one
+- Keep the placement root creator-owned. The source template and its resource
+  payloads are importer-owned. Placement creates ordinary editable scene
+  copies of the hierarchy and materials. Place them in one
   guarded, undoable scene command, with no partial placement. If insertion
   fails after catalog publication, show the unused imported resource and
-  allow retry with the existing identity.
+  allow retry with the existing identity. An explicit scene edit is local to
+  that copy. Reimport never rewrites local scene values.
 - Stage a complete immutable resource generation and atomically select it
   in the catalog. Export pins the selected generation. A failure before
   publication must leave the prior generation complete and recoverable.

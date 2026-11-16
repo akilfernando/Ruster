@@ -16,6 +16,19 @@ The asset owner is implementing the catalog portion in
 `feat/static-glb-20261116`. The fixture exists and no production import
 acceptance is claimed. The documentation lane verifies links and whitespace.
 
+Scene checkpoint `e2a7bcf` adds one guarded atomic placement command with
+ordinary scene hierarchy, material and object history, using the current
+scene wire. The named source template stays importer-owned. Placement makes
+an editable scene copy, and resource refresh preserves its IDs and local
+values. Existing Group scale rules apply. The focused
+`cargo test -p ruster-scene imported_placement_atomic_history_and_closure --locked`
+passed, as did strict scene Clippy. The case verifies failure atomicity,
+stale revisions, Undo/Redo and reopen. The independent Blender source oracle
+passed on both versions and reordered B, checking nested world poses,
+mesh extents, material settings and embedded PNG. The editor mapping and
+actual package tracer are being wired against the in-progress catalog API.
+The production import-to-relocated-runtime check remains open.
+
 ## Authored player view integrated locally — 2026-11-16
 
 Astra independently selected [authored player view](plans/AUTHORED-PLAYER-VIEW.md)
