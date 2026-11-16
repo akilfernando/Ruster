@@ -1,5 +1,14 @@
 # Current project status
 
+## Packaged one-shot audio goal active — 2026-11-16
+
+Astra selected [packaged audio feedback](plans/PACKAGED-AUDIO-FEEDBACK.md).
+Root coordinates the isolated `feat/packaged-audio-20261116` slice from
+`f731b6b`. A disposable CPAL/Hound probe reached a private PipeWire sink
+and its monitor captured the expected short waveform. The system default
+sink stayed unchanged. The production Lua commit tracer, creator
+authoring routes and relocated app still need verification.
+
 ## Kinematic move-and-slide integrated locally — 2026-11-16
 
 Lua API7 adds one keyboard-controlled sphere mover against stationary
