@@ -226,3 +226,12 @@ was published.
 ## Motion Lab notice supplement
 
 The first independent Motion Lab package attempt correctly refused missing readable `rhai_codegen3.3.0` license text. Its registry metadata declares MIT OR Apache-2.0 and records upstream commit `aaf90906bfa7eae090fc236b8572a67528cab3ed` with `dirty=true`. The exact upstream [MIT](https://raw.githubusercontent.com/rhaiscript/rhai/aaf90906bfa7eae090fc236b8572a67528cab3ed/LICENSE-MIT.txt) and [Apache](https://raw.githubusercontent.com/rhaiscript/rhai/aaf90906bfa7eae090fc236b8572a67528cab3ed/LICENSE-APACHE.txt) payloads were retained in packaging supplements on2026-11-04, with hashes and that provenance caveat. The cached Rhai1.27.0 at the same commit has matching text with CRLF endings; the initial raw-byte equality check failed on those line endings, then normalized-text comparison passed while the stored upstream payloads remained unchanged. No clean codegen publication tree is inferred. The actual missing-package notice check now passes; package relocation acceptance remains separately recorded.
+
+### Kinematic move-and-slide capability
+
+An export containing Lua API7 requires a kit advertising
+`kinematic_move_and_slide`. This includes API7 sources retained only in
+Undo/Redo. The exporter refuses an older kit before staging. Scenes
+without API7 retain their existing kit requirements, including the
+separate `repeatable_play_checks` capability when a saved case is present.
+The capability adds no resources and retains Descriptor5.

@@ -3,11 +3,11 @@ use serde_json::{json, Map, Value};
 const TOOLS: &[(&str,&str,&[&str])] = &[
     ("behavior_inspect","Page through source/binding summaries, full action definitions or missing-reference diagnostics, at most16 rows; no source/property bodies.",&["kind"]),
     ("behavior_source","Read one embedded source as base64 UTF-8 with SHA256; no filesystem access.",&["source_id"]),
-    ("behavior_source_set","Upsert embedded source data, including unfinished code. Shared Undo; no compilation or execution.",&["source_id","label","language_id","host_api_version","text_base64"]),
+    ("behavior_source_set","Upsert embedded source data, including unfinished code. host_api_version is a positive u32; Lua API7 opts into owned-sphere move-and-slide. Shared Undo; no compilation or execution; runtime validates supported versions and owner constraints.",&["source_id","label","language_id","host_api_version","text_base64"]),
     ("behavior_source_remove","Remove embedded source; dependent bindings remain repairable. Shared Undo.",&["source_id"]),
-    ("behavior_create","Atomically create a fresh source and enabled binding in one Undo entry. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians.",&["source_id","binding_id","label","language_id","host_api_version","text_base64"]),
+    ("behavior_create","Atomically create a fresh source and enabled binding in one Undo entry. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians. Lua API7 uses object_id for one flat enabled blocker sphere; runtime enforces constrained movement.",&["source_id","binding_id","label","language_id","host_api_version","text_base64"]),
     ("behavior_binding","Read owner/source metadata,16 property names/types and16 authored state defaults. The same offset selects each page; next_offset and next_state_offset are separate.",&["binding_id"]),
-    ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining properties and state defaults. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians. Shared Undo.",&["binding_id","source_id","enabled"]),
+    ("behavior_binding_set","Attach/change source, owner or enabled flag, retaining properties and state defaults. Use exactly one object_id or a tagged target: application, or group with group_id for Lua API6 local radians. Lua API7 uses object_id for one flat enabled blocker sphere; runtime enforces constrained movement. Shared Undo.",&["binding_id","source_id","enabled"]),
     ("behavior_binding_remove","Detach one behavior binding. Shared Undo; source stays available.",&["binding_id"]),
     ("behavior_property","Read one typed property or null for absent; no complete property-map response.",&["binding_id","name"]),
     ("behavior_property_set","Set one typed property or use null to remove. Shared Undo, no execution.",&["binding_id","name","value"]),
@@ -342,6 +342,31 @@ mod tests {
             response["result"]["structuredContent"]["error"]["code"],
             "drafts_pending"
         );
+        // Version selection is forwarded as authored data, including API7;
+        // runtime ownership semantics remain with the editor/VM, not the adapter.
+        let mut kinematic = args.clone();
+        kinematic["host_api_version"] = json!(7);
+        let mut create = kinematic.clone();
+        create["binding_id"] = json!("mover");
+        create["object_id"] = json!("sphere");
+        for (name, arguments) in [
+            ("behavior_source_set", kinematic),
+            ("behavior_create", create),
+        ] {
+            assert!(valid(name, &arguments));
+            let response = server.handle(
+                &serde_json::to_vec(&json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":name,"arguments":arguments}})).unwrap(),
+                |forwarded_name, forwarded| {
+                    assert_eq!(forwarded_name, name);
+                    assert_eq!(forwarded, &arguments);
+                    json!({"ok":false,"error":{"code":"stale_revision","message":"Inspect current revision"}})
+                },
+            ).unwrap();
+            assert_eq!(
+                response["result"]["structuredContent"]["error"]["code"],
+                "stale_revision"
+            );
+        }
         let action = json!({"expected_session_token":"session","expected_revision":"9007199254740993","action_id":"move"});
         let mut set = action.clone();
         set["definition"] = json!({"label":"Traverse","kind":{"type":"axis1d","negative":["a","arrow_left"],"positive":["d","arrow_right"]}});

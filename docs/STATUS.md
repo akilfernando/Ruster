@@ -1,5 +1,19 @@
 # Current project status
 
+## Kinematic move-and-slide qualification — 2026-11-16
+
+The [current goal](plans/KINEMATIC-MOVE-AND-SLIDE.md) adds bounded Lua API7
+motion for one keyboard-controlled sphere. Core wall, corner, reverse,
+sphere, precision and atomicity checks passed. Guarded real STDIO
+authoring, refusal/repair, save/readback and isolated play checks passed.
+Axis and rotated Linux exports passed after relocation, with legacy sweep
+compatibility and early old-kit rejection. The median wall Step reached
+32.380 µs compared with 27.551 µs for the current sweep fixture. See the
+[decision](decisions/2026-11-16-kinematic-move-and-slide.md) and
+[qualification evidence](evidence/KINEMATIC-MOVE-AND-SLIDE-2026-11-16.md).
+Native ordinary-editor qualification and final local integration are in
+progress.
+
 ## Repeatable play checks integrated locally — 2026-11-16
 
 The [goal plan](plans/REPEATABLE-PLAY-CHECKS.md) and

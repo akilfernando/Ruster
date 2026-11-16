@@ -758,13 +758,23 @@ fn checked_kit_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
     Ok(path)
 }
 
+const KINEMATIC_CAPABILITY: &str = "kinematic_move_and_slide";
+
+#[derive(Debug)]
+struct VerifiedKit {
+    kit_hash: String,
+    runtime_hash: String,
+    play_check_compatible: bool,
+    kinematic_compatible: bool,
+}
+
 // Verify fixed Python code before Python can import it. The configured kit is
 // explicitly trusted executable code, not a sandbox or a source upload service.
 fn verify_helpers(
     kit: &Path,
     initial_camera: bool,
     scene_version: u32,
-) -> Result<(String, String, bool), String> {
+) -> Result<VerifiedKit, String> {
     let raw = read_regular(&kit.join("runtime.json"), MAX_DOCUMENT)?;
     let manifest: Value = serde_json::from_slice(&raw).map_err(|e| e.to_string())?;
     if manifest["schema"] != 1
@@ -883,8 +893,14 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!("repeatable_play_checks"));
+    let mut kinematic_profile = play_check_profile.clone();
+    kinematic_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!(KINEMATIC_CAPABILITY));
     let supplied_profile = &manifest["profile"];
-    let play_check_compatible = supplied_profile == &play_check_profile;
+    let kinematic_compatible = supplied_profile == &kinematic_profile;
+    let play_check_compatible = supplied_profile == &play_check_profile || kinematic_compatible;
     let player_view_compatible = supplied_profile == &player_view_profile || play_check_compatible;
     let hierarchy_compatible = supplied_profile == &static_assembly_profile
         || supplied_profile == &animated_assembly_profile
@@ -1136,11 +1152,12 @@ fn verify_helpers(
     if script_count != fixed.len() {
         return Err("runtime kit is missing its fixed helpers".into());
     }
-    Ok((
-        digest(&raw),
-        runtime_hash.ok_or("runtime kit lacks executable inventory")?,
+    Ok(VerifiedKit {
+        kit_hash: digest(&raw),
+        runtime_hash: runtime_hash.ok_or("runtime kit lacks executable inventory")?,
         play_check_compatible,
-    ))
+        kinematic_compatible,
+    })
 }
 
 fn read_export_play_check(scene: &Path) -> Result<Option<(PlayCheck, Vec<u8>)>, String> {
@@ -1211,11 +1228,23 @@ fn prepare(
     if saved_check.is_some() && scene_version < 11 {
         return Err("Exporting a saved play check requires Scene11 or newer with the editor's exact fixed tick.".into());
     }
-    let (kit_hash, runtime_hash, play_check_compatible) = verify_helpers(
+    let VerifiedKit {
+        kit_hash,
+        runtime_hash,
+        play_check_compatible,
+        kinematic_compatible,
+    } = verify_helpers(
         &request.runtime_kit,
         request.initial_camera.is_some(),
         scene_version,
     )?;
+    let kinematic = captured.uses_behavior_source_api(
+        ruster_behavior::LANGUAGE_ID,
+        ruster_behavior::KINEMATIC_HOST_API_VERSION,
+    );
+    if kinematic && !kinematic_compatible {
+        return Err("Runtime kit does not support Lua API7 kinematic move-and-slide; prepare a current Linux runtime kit".into());
+    }
     if saved_check.is_some() && !play_check_compatible {
         return Err("Runtime kit does not support repeatable play checks; prepare a current Linux runtime kit".into());
     }
@@ -1333,6 +1362,9 @@ fn prepare(
     }
     if schema >= 2 {
         content_manifest["textures"] = json!(textures);
+    }
+    if kinematic {
+        content_manifest["required_runtime_capabilities"] = json!([KINEMATIC_CAPABILITY]);
     }
     let check_hash = if let Some((case, bytes)) = saved_check {
         let resources = ruster_assets::resource_identity(&check_resources);

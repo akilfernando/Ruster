@@ -523,3 +523,40 @@ automatically refreshed. A pass does not certify appearance or general game
 quality. This wire contract is separate from actual native/client/export
 qualification; see [project status](../../docs/STATUS.md) and the
 [bounded play-check plan](../../docs/plans/REPEATABLE-PLAY-CHECKS.md).
+
+
+### Owned kinematic movement (Lua API7) — 2026-11-16
+
+Use existing `behavior_create` or `behavior_source_set` with
+`language_id:"lua54"` and numeric `host_api_version:7`; source remains base64 UTF-8
+authored data. No new MCP movement tool or expression evaluator is introduced.
+Existing session/revision preconditions, pending-draft guards and shared Undo
+apply. Source editing does not execute it or change the captured live run; Reset
+validates and captures the new source through the existing runtime operations.
+
+API7 uses an Object owner (`object_id`) and the API4-style
+`{transform=..., state=...}` update result with typed state. Its bounded runtime
+contract permits one enabled kinematic mover in a flat scene: an enabled Blocker
+sphere with uniform positive scale, moving against stationary supported blockers.
+Other enabled Object behaviors attached to enabled Blocker colliders reject Reset.
+Application/Group owners, dynamic blockers and a general character/rigid-body
+solver are outside this contract.
+
+Within `update(object, properties, dt, host)`, call
+`host.move_and_slide({dx,dy,dz})` at most once per Reset or Step. The vector is
+requested displacement, not velocity; components must be finite within
+`[-100,100]`; accepted positions must also remain within the engine
+`[-10000,10000]` component bounds before conversion. The success result contains `outcome`, `suggested_translation` and at most
+four `contacts`, each with `target_id`, `point`, `normal` and `clearance`. Return
+the exact suggested translation while retaining the owner's rotation and scale;
+without a call, retain the original translation. Reset's zero-dt trial must keep
+the authored transform. A typical update therefore returns unchanged transform
+and state when `dt == 0`, and performs movement only during Step.
+
+Initial overlap, exhausted contact budget or insufficient precision cannot
+silently commit a guessed pose: the host reports a diagnostic and the tick
+transaction retains its prior committed result. Failed attempts do not publish
+success contact records. Existing bounded runtime/query inspection and
+saved play checks observe the same production behavior; they do not grant direct
+unconstrained runtime transforms. Native, actual-client and standalone acceptance
+remain separately recorded in [project status](../../docs/STATUS.md).
