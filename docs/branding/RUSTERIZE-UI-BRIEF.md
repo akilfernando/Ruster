@@ -1,5 +1,8 @@
 # Rusterize UI design brief
 
+Historical brief. The [Rot Engine identity](rot/README.md) supersedes the
+product name, logo and accent colors below.
+
 ## Objective
 
 Redesign Rusterize into a mature, visually appealing game engine editor. Preserve its existing workflows while improving visual hierarchy, consistency, interaction feedback, and the quality of everyday editing.

@@ -324,7 +324,7 @@ def prepare_runtime(root: Path, binary: Path, output: Path) -> dict:
             package_app.put(stage, name, data)
         for name in HELPER_FILES:
             package_app.put(stage, name, read_bounded(root, name, MAX_METADATA_BYTES))
-        package_app.put(stage, "README.txt", b"Ruster Linux x86_64 runtime kit\n\nUse Python3 scripts/package_creation.py package --runtime-kit . --content CONTENT --output NEW.tar.gz\nPrepare content with the Ruster editor or native MCP export controller. This kit contains trusted executable/tooling code; its hashes detect changes, not code safety. Native graphics require a Vulkan-capable driver, a desktop session and the recorded ELF prerequisites.\n")
+        package_app.put(stage, "README.txt", b"Rot Engine Linux x86_64 runtime kit\n\nUse Python3 scripts/package_creation.py package --runtime-kit . --content CONTENT --output NEW.tar.gz\nPrepare content with the Rot Engine editor or native MCP export controller. This kit contains trusted executable/tooling code; its hashes detect changes, not code safety. Native graphics require a Vulkan-capable driver, a desktop session and the recorded ELF prerequisites.\n")
         manifest = {"schema": 1, "kind": "ruster-runtime-kit", "target": package_app.TARGET,
                     "executable": "runtime", "helper": "scripts/package_creation.py", "profile": profile,
                     "elf": requirements, "dependencies": dependencies, "files": package_app.file_manifest(stage)}

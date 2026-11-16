@@ -57,7 +57,7 @@ def run():
                                 break
                             time.sleep(.01)
                         assert window is not None, f'{name}: no mapped window'
-                        assert window['workspace']['id'] == 2 and window['title'] == 'Ruster | Shared 3D', window
+                        assert window['workspace']['id'] == 2 and window['title'] in ('Rot Engine | Shared 3D', 'Ruster | Shared 3D'), window
                         assert window['size'] == [1100, 760] and window['floating'], window
                         assert hypr('activeworkspace')['id'] == before_workspace, 'Workspace changed during launch; stop to inspect'
                         deadline = time.monotonic() + 30

@@ -33,6 +33,7 @@ class DistributionTests(unittest.TestCase):
         for name in new_app.CRATES:
             put(f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion.workspace = true\n')
             put(f"crates/{name}/src/lib.rs", "pub fn run() {}\n")
+        put("crates/ruster-render/assets/rot-dark-128.png", "icon fixture\n")
         put("crates/ruster-scene/tests/fixtures/legacy-v1.scene.json", "{}\n")
         put("examples/yard-app/Cargo.toml", '[package]\nname = "ruster-yard"\nversion.workspace = true\n[dependencies]\nruster-app = {path = "../../crates/ruster-app"}\n')
         put("examples/yard-app/src/main.rs", "fn main() {}\n")
@@ -69,6 +70,7 @@ class DistributionTests(unittest.TestCase):
         sample = moved / "examples/yard-app"
         path = tomllib.loads((sample / "Cargo.toml").read_text())["dependencies"]["ruster-app"]["path"]
         self.assertTrue((sample / path / "src/lib.rs").is_file())
+        self.assertEqual((moved / "crates/ruster-render/assets/rot-dark-128.png").read_bytes(), b"icon fixture\n")
         self.assertTrue((moved / "crates/ruster-scene/tests/fixtures/legacy-v1.scene.json").is_file())
         for name in new_app.PACKAGING_FILES:
             self.assertTrue((moved / name).is_file())

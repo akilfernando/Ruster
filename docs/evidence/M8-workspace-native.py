@@ -148,7 +148,8 @@ def main():
     assert len(matching) == 1, matching
     window = matching[0]
     assert window['workspace']['id'] == 2 and window['class'] == 'org.ruster.editor', window
-    assert 'Ruster' in window['title'] and 'Editor' in window['title'], window
+    assert any(brand in window['title'] for brand in ('Rot Engine', 'Ruster')), window
+    assert 'Editor' in window['title'], window
     api = Inspection(args.port)
     records = []
 

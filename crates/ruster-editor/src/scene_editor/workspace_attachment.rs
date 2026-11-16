@@ -158,7 +158,7 @@ impl WorkspaceAttachment {
                 let child = Command::new("python3").args(["-I", "-u", "-c", include_str!("workspace_server.py")])
                     .stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::inherit()).spawn()?;
                 let mut child = ChildOwner(child);
-                let config = json!({"socket":path,"challenge":challenge,"native_pid":std::process::id(),"native_uid":rustix::process::getuid().as_raw(),"binding":worker_identity,"attachment":worker_attachment,"html":include_str!("workspace.html")});
+                let config = json!({"socket":path,"challenge":challenge,"native_pid":std::process::id(),"native_uid":rustix::process::getuid().as_raw(),"binding":worker_identity,"attachment":worker_attachment,"html":include_str!("workspace.html").replace("ROT_WORKSPACE_MARK", include_str!("../../assets/rot-mark-on-dark.svg"))});
                 child.0.stdin.take().ok_or_else(||io::Error::other("child stdin"))?.write_all(format!("{config}\n").as_bytes())?;
                 let deadline = Instant::now() + Duration::from_secs(3);
                 let mut stream = loop {

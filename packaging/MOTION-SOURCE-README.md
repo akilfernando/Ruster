@@ -24,7 +24,7 @@ cargo test --locked --offline --workspace
 
 Edit the example's owned scene/source or application presentation, then rebuild.
 The generic mode consumes Scene5/Lua through the shared kit. Sources/properties
-are authored in Ruster Editor, with runtime transforms kept separate. The legacy
+are authored in Rot Engine editor, with runtime transforms kept separate. The legacy
 Rhai application/project modes remain compatible and distinct. The app does not
 copy a new engine or grow another source/history editor.
 

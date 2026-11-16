@@ -1,4 +1,4 @@
-# Your Ruster application
+# Your Rot Engine application
 
 This is an editable standalone workspace with the small delivery challenge,
 shared application/scene/render/assets/core crates and the bounded vendored

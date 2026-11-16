@@ -39,6 +39,17 @@ const MAX_MESHES: usize = ruster_assets::MAX_ASSETS;
 const MAX_TARGET_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_SHADER_BYTES: usize = 64 * 1024;
 
+/// Bundled Rot Engine icon for native runtime windows.
+pub fn window_icon() -> Arc<egui::IconData> {
+    static ICON: std::sync::OnceLock<Arc<egui::IconData>> = std::sync::OnceLock::new();
+    Arc::clone(ICON.get_or_init(|| {
+        Arc::new(
+            eframe::icon_data::from_png_bytes(include_bytes!("../assets/rot-dark-128.png"))
+                .expect("bundled Rot Engine icon is PNG"),
+        )
+    }))
+}
+
 /// Built-in source is a starting point for project-local scene.wgsl edits.
 pub fn default_shader() -> &'static str {
     concat!(

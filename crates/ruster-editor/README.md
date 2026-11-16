@@ -1,4 +1,4 @@
-# Rusterize Editor
+# Rot Engine Editor
 
 The native editor opens a blank generic scene by default. Run `cargo run --locked -p ruster-editor` to start creating without a sample project. It has two modes: generic 3D scenes with M6 content iteration, and the legacy v1 logistics scenario. Start the current content example with:
 
@@ -65,21 +65,21 @@ Sphere has radius0.5; Capsule has radius0.5 and total height2 along local Y. The
 
 ## Branding and desktop launcher
 
-Start the editor without a scene argument to see the Rusterize start screen. **Help → About Rusterize** shows the version and source link. Compact menus place it under **File**. The editor also supplies the bundled dark app tile as its window icon.
+Start the editor without a scene argument to see the Rot Engine start screen. **Help → About Rot Engine** shows the version and source link. Compact menus place it under **File**. The editor also supplies the bundled dark app tile as its window icon.
 
 **View → Theme** and **File → Workspace and shortcuts…** select **System**, **Dark**, **Light** or **OLED black (dark)**. The choice applies immediately and is saved with workspace preferences; files without a theme keep Dark. System follows the platform's reported light/dark mode and falls back to Dark when none is reported. The 3D viewport and its overlays are not themed.
 
-The in-app mark and lockup switch between the dark and light [logo v2](../../docs/branding/logo-v2/README.md) variants. The bundled PNGs were rasterized from its SVGs with `rsvg-convert` (marks at 64 px, lockups at 96 px tall); the launcher icon is its `rusterize-dark-128.png`. The lockup wordmark is outlined DejaVu Sans Bold, so [`assets/DEJAVU-LICENSE.txt`](assets/DEJAVU-LICENSE.txt) travels with those assets.
+The in-app mark and lockup switch between the supplied Rot on-dark and on-light artwork. The native window and Linux launcher share the pack’s dark 128 px app tile. The workspace uses the on-dark vector mark and the same graphite, frost and oxide palette.
 
 On Linux, install the desktop entry and icon to make the same mark available to the application menu. The entry expects `ruster-editor` on the desktop session's PATH.
 
 ```sh
 cargo install --locked --path crates/ruster-editor
-rusterize_data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
+rot_data_dir="${XDG_DATA_HOME:-$HOME/.local/share}"
 install -Dm644 crates/ruster-editor/assets/org.ruster.editor.desktop \
-  "$rusterize_data_dir/applications/org.ruster.editor.desktop"
+  "$rot_data_dir/applications/org.ruster.editor.desktop"
 install -Dm644 crates/ruster-editor/assets/org.ruster.editor.png \
-  "$rusterize_data_dir/icons/hicolor/128x128/apps/org.ruster.editor.png"
+  "$rot_data_dir/icons/hicolor/128x128/apps/org.ruster.editor.png"
 ```
 
 ## Creator-authored screens — F3c

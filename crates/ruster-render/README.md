@@ -62,7 +62,7 @@ Memory figures are resource payload estimates, not allocated VRAM: cube vertices
 
 The 3-object and 256-object release commands establish declared initial workloads. Record hardware/driver, window size, validation state, warmup/repeats and compositor visibility when publishing samples. Hidden-workspace rendering is potentially throttled; compare matching conditions. The previous ash schematic cannot be a like-for-like 3D baseline. This implementation establishes a baseline rather than claiming an optimization win. A future cached unchanged-instance upload experiment should compare CPU preparation/upload bytes and end-to-end correctness at both workloads before introducing broader invalidation machinery.
 
-On the local desktop, the initial title `Ruster | Shared 3D` matches the existing workspace-2 rule. Verify routing before interaction; do not switch the user's workspace or use global input. Root integration owns GPU validation, resize/shutdown and visual evidence; compile/unit success alone does not prove Vulkan lifecycle correctness.
+The native viewport title is `Rot Engine | Shared 3D`. Verify routing before interaction; do not switch the user's workspace or use global input. Root integration owns GPU validation, resize/shutdown and visual evidence; compile/unit success alone does not prove Vulkan lifecycle correctness.
 
 ## Primary research and tradeoffs
 

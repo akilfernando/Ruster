@@ -20,7 +20,7 @@ use winit::{
 const TICK_INTERVAL: Duration = Duration::from_millis(250);
 const SMOKE_INTERVAL: Duration = Duration::from_millis(16);
 
-const HELP: &str = "Ruster Vulkan logistics viewer\n\
+const HELP: &str = "Rot Engine logistics viewer\n\
 Usage: ruster-viewer [--scenario PATH] [--validation] [--smoke FRAMES]\n\
 SPACE play/pause (4 ticks/sec); N step and pause; R reset and pause.\n\
 Arrows pan; mouse wheel zoom; Home resets camera; Escape quits.\n\
@@ -140,7 +140,7 @@ impl App {
     fn title(&self) -> String {
         let state = self.simulation.state();
         format!(
-            "Ruster | {} | tick {} | stock {} | delivered {} | Space play/pause · N step · R reset · Home camera",
+            "Rot Engine | {} | tick {} | stock {} | delivered {} | Space play/pause · N step · R reset · Home camera",
             if self.playing { "PLAY" } else { "PAUSED" },
             state.tick,
             state.stock,

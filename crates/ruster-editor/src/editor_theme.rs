@@ -1,4 +1,4 @@
-//! Shared Rusterize editor presentation, configured once with bundled fonts.
+//! Shared Rot Engine editor presentation, configured once with bundled fonts.
 //!
 //! One [`Palette`] per theme owns every chrome color. Call sites ask for the
 //! active palette through [`colors`]/[`palette`] so labels, warnings and axis
@@ -80,11 +80,11 @@ pub const DARK: Palette = Palette {
     control_border: rgb(0x64798b),
     text: rgb(0xe8eff4),
     secondary: rgb(0xa6b5c2),
-    accent: rgb(0x72e6c0),
-    accent_hover: rgb(0x95f0d3),
-    accent_pressed: rgb(0x50cba6),
-    on_accent: rgb(0x10231e),
-    selection: rgb(0x203f3a),
+    accent: rgb(0xef9aa2),
+    accent_hover: rgb(0xf9b2b7),
+    accent_pressed: rgb(0xdd838c),
+    on_accent: rgb(0x10151b),
+    selection: rgb(0x3b292e),
     warning: rgb(0xffc078),
     error: rgb(0xff8291),
     axis: [rgb(0xffa2a7), rgb(0x9bddab), rgb(0xa7caff)],
@@ -99,11 +99,11 @@ pub const OLED_BLACK: Palette = Palette {
     field: rgb(0x000000),
     divider: rgb(0x222b34),
     control_border: rgb(0x5f7384),
-    selection: rgb(0x16362f),
+    selection: rgb(0x362127),
     ..DARK
 };
 
-/// Light chrome uses graphite text and the logo's deep teal for accents.
+/// Light chrome uses graphite text and deep oxide accents.
 pub const LIGHT: Palette = Palette {
     background: rgb(0xe4eaef),
     surface: rgb(0xf2f5f8),
@@ -114,11 +114,11 @@ pub const LIGHT: Palette = Palette {
     control_border: rgb(0x6a7b8a),
     text: rgb(0x10151b),
     secondary: rgb(0x475563),
-    accent: rgb(0x176554),
-    accent_hover: rgb(0x1f7a66),
-    accent_pressed: rgb(0x0f4d40),
+    accent: rgb(0x96373e),
+    accent_hover: rgb(0xa34249),
+    accent_pressed: rgb(0x7d2d34),
     on_accent: rgb(0xffffff),
-    selection: rgb(0xcfeae1),
+    selection: rgb(0xf0d9dc),
     warning: rgb(0x8a5300),
     error: rgb(0xb3261e),
     axis: [rgb(0xb42318), rgb(0x2b7a0b), rgb(0x1f5fbf)],

@@ -210,7 +210,7 @@ impl External {
         if matches!(intent, Intent::Open { .. } | Intent::OpenExisting { .. })
             && self.children.len() >= 8
         {
-            return Err("Eight editor launcher processes are still active; retry after one exits. Ruster will not kill your editor.".into());
+            return Err("Eight editor launcher processes are still active; retry after one exits. Rot Engine leaves external editors running.".into());
         }
         let source = session
             .source(source_id)

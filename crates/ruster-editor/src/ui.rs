@@ -45,7 +45,7 @@ impl eframe::App for Editor {
         }
         let marker = if self.dirty() { "* " } else { "" };
         ctx.send_viewport_cmd(egui::ViewportCommand::Title(format!(
-            "{marker}{} — Rusterize Editor",
+            "{marker}{} — Rot Engine Editor",
             self.project.scenario().id()
         )));
     }
@@ -113,8 +113,8 @@ impl Editor {
             ui.horizontal(|ui| {
                 crate::branding::mark(ui, 24.0);
                 if ui
-                    .button("Rusterize")
-                    .on_hover_text("About Rusterize")
+                    .button("Rot Engine")
+                    .on_hover_text("About Rot Engine")
                     .clicked()
                 {
                     crate::branding::open_about(ui.ctx());

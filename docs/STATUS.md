@@ -3,14 +3,10 @@
 ## Resume here — 2026-11-16
 
 - Open `/home/akilf/Projects/rusterize-cumulative-editor-20261115` on
-  `feat/cumulative-editor-20261115`. Today's verified implementation
-  ends at `b8157b9`. The separate `/home/akilf/Projects/Rusterize`
-  checkout is on `claude/e1-editor-feedback` and contains local edits
-  and attachments.
-- The working branch is local. The live origin branch was checked at
-  `5e83590`. Both feature worktrees are clean and their commits are
-  in the cumulative branch. Keep the audit paths beside the retained
-  evidence.
+  `feat/cumulative-editor-20261115` or start from `origin/main`.
+  The separate `/home/akilf/Projects/Rusterize` checkout is on
+  `claude/e1-editor-feedback` and contains local edits and
+  attachments. Keep the audit paths beside the retained evidence.
 - Development stopped with the kinematic and WAV goals closed. Imported
   GLB transform animation is the next provisional candidate. Start by
   checking the existing GLB generation/reimport and runtime transform
@@ -20,6 +16,17 @@
   separate from the completed automated checks. The latest audio
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
+
+## Rot Engine rebrand — 2026-11-16
+
+The [Rot Engine identity](branding/rot/README.md) supplies the launcher
+tile, editor mark, About lockup and oxide controls. Dark and light
+welcome and About variants were verified in disposable native windows.
+The installed release launched as **Rot Engine Editor** on the isolated
+workspace. Runtime windows and packaging use the same product name.
+Run `ruster-editor` with the existing application ID, project formats
+and MCP identifiers. The new source export includes the shared runtime
+icon as a build input.
 
 ## Packaged one-shot audio integrated locally — 2026-11-16
 

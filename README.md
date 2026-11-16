@@ -1,19 +1,22 @@
-# Rusterize
+# Rot Engine
 
-![Rusterize mark](crates/ruster-editor/assets/org.ruster.editor.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/branding/rot/rot-on-dark.svg">
+  <img alt="Rot Engine" src="docs/branding/rot/rot-on-light.svg" width="280">
+</picture>
 
 An open-source Rust/Vulkan engine project for interactive simulation and visualization. Games are the first proving ground; the shared scene and tooling are designed to support other interactive applications too.
 
-Rusterize's purpose is to help people turn their own ideas into working creations. Its systems and tools should serve that creative process, with understandable workflows, room to extend behavior and ownership of the result. See the [project ethos](docs/DIRECTION.md#project-ethos-serve-the-creator) and the current scope below.
+Rot Engine's purpose is to help people turn their own ideas into working creations. Its systems and tools should serve that creative process, with understandable workflows, room to extend behavior and ownership of the result. See the [project ethos](docs/DIRECTION.md#project-ethos-serve-the-creator) and the current scope below.
 
 [![CI](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml/badge.svg)](https://github.com/akilfernando/Ruster/actions/workflows/ci.yml)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue)](#license)
 
 Familiarity for experienced Unity and Unreal creators, including everyday editor conveniences, is a core requirement. The [editor experience baseline](docs/EDITOR-EXPERIENCE.md) describes the target and the gaps still to close.
 
-**Early development:** milestones M0–M8 provide a small, working Linux foundation. Rusterize is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan/editor smoke covers NVIDIA RTX4060 Laptop and Intel Iris Xe on the recorded Linux workstation; Windows and other machines remain unverified. The Unity-experienced user confirms repaired viewport selection and live Transform feedback; broader creator-workflow acceptance remains open. The [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the interaction repairs and remaining adoption/platform limits.
+**Early development:** milestones M0–M8 provide a small, working Linux foundation. Rot Engine is not production-ready, and its APIs and file formats may evolve. There is no claim of feature or performance parity with mature engines. Native Vulkan/editor smoke covers NVIDIA RTX4060 Laptop and Intel Iris Xe on the recorded Linux workstation; Windows and other machines remain unverified. The Unity-experienced user confirms repaired viewport selection and live Transform feedback; broader creator-workflow acceptance remains open. The [candidate gate record](docs/ALPHA-CANDIDATE.md) tracks the interaction repairs and remaining adoption/platform limits.
 
-![Ruster scene editor with command menus, transform inspector and content browser](docs/evidence/m9-editor-overview.png)
+![Rot Engine editor with command menus, transform inspector and content browser](docs/branding/rot/editor-dark.png)
 
 ## What works today
 
@@ -23,12 +26,16 @@ Familiarity for experienced Unity and Unreal creators, including everyday editor
 - **Repeatable previews:** authored state stays separate from runtime snapshots. The scene lifecycle preview and provisional Lua behavior runtime support explicit Reset and fixed ticks; neither implies physics or gameplay simulation.
 - **Content iteration:** search objects/assets, use contextual actions and drag a registered mesh onto an object. Explicit OBJ/shader refresh retains last-good content; derived binary caches and shared snapshots avoid unchanged parsing/full payload copies. Catalog/originals are authored; cache is disposable.
 - **Recoverable workspace:** remappable shortcuts, remembered layout/scale/camera/recent files and bounded background checkpoints. Crash recovery retains unfinished behavior sources, typed-property drafts and invalid field/name drafts as an unsaved copy, preserving externally changed originals. Physical-focus and human-familiarity acceptance remain separate.
-- **Provisional scripting workflow:** language-neutral Scene5 sources, bindings and typed properties save with the scene and share bounded undo/redo and crash recovery. The generic editor includes a bounded provisional Lua 5.4 runtime, Zed/LuaLS working-copy support, and an owned debugger with breakpoints, locals, Next and Continue. Lua is not a permanent language choice; Rust remains the native application path.
-- **Independent application reuse:** the shared kit powers Yard and a non-game Motion Lab Scene5 consumer. Both can be exported, independently edited, rebuilt and packaged as Linux development artifacts. Motion Lab consumes scenes from the generic editor; it does not replace that editor's source/history workflow. The earlier Rhai Motion Lab project format remains a separate compatibility path.
-- **Native MCP workflows:** an optional local MCP adapter exposes 65 bounded scene, content, behavior, runtime and debugger tools against the displayed editor session, with revision checks and draft protection.
+- **Provisional scripting workflow:** language-neutral sources, bindings and typed properties save with the scene and share bounded undo/redo and crash recovery. The generic editor includes a bounded provisional Lua 5.4 runtime, Zed/LuaLS working-copy support, and an owned debugger with breakpoints, locals, Next and Continue. Lua is not a permanent language choice; Rust remains the native application path.
+- **Independent application reuse:** the shared kit powers Yard and a non-game Motion Lab scene consumer. Both can be exported, independently edited, rebuilt and packaged as Linux development artifacts. Motion Lab consumes scenes from the generic editor; it does not replace that editor's source/history workflow. The earlier Rhai Motion Lab project format remains a separate compatibility path.
+- **Native MCP workflows:** an optional local MCP adapter exposes bounded scene, content, behavior, runtime and debugger tools against the displayed editor session, with revision checks and draft protection.
 - **A logistics reference application:** integer throughput simulation, saved scenarios, a schematic viewer and the original authoring workflow remain available separately.
 
-The current scene limit is 256 objects and one viewport. Scene format v5 carries language-neutral behavior data; M6 adds bounded triangle-only OBJ mesh import, stable references, rebuildable caches and controlled asset/WGSL refresh. Textures/MTL, general mesh formats, physics/audio and a general ECS remain later work. M7 supplies the bounded application kit and M8 adds the shared editor/runtime/recovery workflow and independent Motion Lab consumer. See the [roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for exact scope and remaining acceptance gates.
+The current cumulative Linux workflow includes static GLB import and
+safe reimport, authored player view, fixed-input play checks, bounded
+kinematic movement and packaged one-shot WAV feedback. See the
+[roadmap](docs/ROADMAP.md) and [current status](docs/STATUS.md) for verified
+scope and remaining acceptance gates.
 
 ## Quickstart
 
@@ -119,7 +126,7 @@ RUSTER_MCP_ENABLE=1 cargo run --locked -p ruster-editor -- --scene examples/arra
 
 The editor prints a private socket path to stderr. Configure a stdio MCP client to launch the absolute path to `target/debug/ruster-mcp` with that path in `RUSTER_MCP_SOCKET`. Start with `scene_inspect`; changes require the exact inspected session token and revision. Unapplied human drafts block agent edits, and agent changes share the editor's undo history.
 
-The current adapter exposes 65 bounded tools across scene/content authoring, behavior data, runtime/debugging and explicitly granted scene persistence. The tested client is the official Python MCP SDK 2.3.0 with protocol revision 2025-06-18. The [MCP guide](crates/ruster-mcp/README.md) includes client configuration, the reproducible SDK demo and connection limits. There are no shell or arbitrary file-access tools. Creator export adds shared asynchronous inspect/start/cancel with explicit `RUSTER_MCP_EXPORT_DIR` authority; see the [creator workflow](docs/CREATOR-WORKFLOW.md). Scene Save/SaveAs additionally requires an explicit `RUSTER_MCP_SAVE_DIR` grant; its independent persistence token protects against a human changing the save association.
+The current adapter exposes bounded tools across scene/content authoring, behavior data, runtime/debugging and explicitly granted scene persistence. The tested client is the official Python MCP SDK 2.3.0 with protocol revision 2025-06-18. The [MCP guide](crates/ruster-mcp/README.md) includes client configuration, the reproducible SDK demo and connection limits. There are no shell or arbitrary file-access tools. Creator export adds shared asynchronous inspect/start/cancel with explicit `RUSTER_MCP_EXPORT_DIR` authority; see the [creator workflow](docs/CREATOR-WORKFLOW.md). Scene Save/SaveAs additionally requires an explicit `RUSTER_MCP_SAVE_DIR` grant; its independent persistence token protects against a human changing the save association.
 
 ### Logistics reference
 

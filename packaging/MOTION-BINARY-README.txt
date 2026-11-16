@@ -1,4 +1,4 @@
-Ruster Motion Lab — Linux x86_64 development package
+Rot Engine Motion Lab — Linux x86_64 development package
 
 Extract the complete archive into a fresh directory. The application consumes
 Scene5 behavior documents through the same kit as Yard. Its comparison demo has
@@ -11,7 +11,7 @@ Try:
   ./ruster-motion-lab --scene resources/generic.scene.json --headless --speed 2
   ./ruster-motion-lab --help
 
-Author sources/properties in Ruster Editor, save the scene, then run the app on
+Author sources/properties in Rot Engine editor, save the scene, then run the app on
 that file. Native generic mode starts paused; Reset validates the snapshot, then
 Run/Pause or Step advances it. Runtime transforms and speed overrides are never
 saved into the source document. Unsupported/unfinished code stays editable in

@@ -81,7 +81,7 @@ def hypr(instance, command):
 
 class Driver:
     expected_class = 'org.ruster.editor'
-    title_parts = ('Ruster', 'Editor')
+    title_parts = ('Editor',)
 
     def __init__(self, args, path, artifact):
         self.args, self.path, self.artifact = args, path, artifact
@@ -101,6 +101,7 @@ class Driver:
         assert len(clients) == 1, clients
         w = clients[0]
         assert w['workspace']['id'] == 2 and w['class'] == self.expected_class, w
+        assert any(brand in w['title'] for brand in ('Rot Engine', 'Ruster')), w
         assert all(part in w['title'] for part in self.title_parts), w
         # Tie the loopback listener to this PID, rather than trusting the port.
         inodes = set()

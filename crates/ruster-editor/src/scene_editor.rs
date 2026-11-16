@@ -5138,7 +5138,7 @@ impl SceneEditor {
                     self.workspace.settings_open = true;
                     ui.close();
                 }
-                if compact && ui.button("About Rusterize").clicked() {
+                if compact && ui.button("About Rot Engine").clicked() {
                     open_about = true;
                     ui.close();
                 }
@@ -5291,7 +5291,7 @@ impl SceneEditor {
             });
             if !compact {
                 ui.menu_button("Help", |ui| {
-                    if ui.button("About Rusterize").clicked() {
+                    if ui.button("About Rot Engine").clicked() {
                         open_about = true;
                         ui.close();
                     }
@@ -6186,7 +6186,7 @@ fn run_session(session: Session) -> Result<(), String> {
         ..Default::default()
     };
     eframe::run_native(
-        "Rusterize Editor",
+        "Rot Engine Editor",
         options,
         Box::new(move |cc| {
             crate::editor_theme::configure(&cc.egui_ctx);

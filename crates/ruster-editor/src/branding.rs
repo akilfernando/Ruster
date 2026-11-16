@@ -1,16 +1,15 @@
 //! Shared application mark and About dialog.
 use std::sync::{Arc, OnceLock};
 
-use eframe::egui::{self, ColorImage, IconData, TextureHandle, TextureOptions, Vec2};
+use eframe::egui::{self, ColorImage, IconData, TextureHandle, TextureOptions};
 
 use crate::editor_theme;
 
 const ICON: &[u8] = include_bytes!("../assets/org.ruster.editor.png");
-const MARK_DARK: &[u8] = include_bytes!("../assets/rusterize-mark-dark-64.png");
-const MARK_LIGHT: &[u8] = include_bytes!("../assets/rusterize-mark-light-64.png");
-// The lockup wordmark is outlined DejaVu Sans Bold; see assets/DEJAVU-LICENSE.txt.
-const LOCKUP_DARK: &[u8] = include_bytes!("../assets/rusterize-lockup-dark-96.png");
-const LOCKUP_LIGHT: &[u8] = include_bytes!("../assets/rusterize-lockup-light-96.png");
+const MARK_DARK: &[u8] = include_bytes!("../assets/rot-mark-on-dark.png");
+const MARK_LIGHT: &[u8] = include_bytes!("../assets/rot-mark-on-light.png");
+const LOCKUP_DARK: &[u8] = include_bytes!("../assets/rot-lockup-on-dark.png");
+const LOCKUP_LIGHT: &[u8] = include_bytes!("../assets/rot-lockup-on-light.png");
 const ABOUT: &str = "rusterize_about";
 
 /// The dark app tile, also installed as the Linux launcher icon.
@@ -19,7 +18,7 @@ pub fn window_icon() -> Arc<IconData> {
     DECODED
         .get_or_init(|| {
             Arc::new(
-                eframe::icon_data::from_png_bytes(ICON).expect("bundled Rusterize icon is PNG"),
+                eframe::icon_data::from_png_bytes(ICON).expect("bundled Rot Engine icon is PNG"),
             )
         })
         .clone()
@@ -33,7 +32,7 @@ fn texture(ctx: &egui::Context, name: &'static str, dark: &[u8], light: &[u8]) -
         return texture;
     }
     let icon = eframe::icon_data::from_png_bytes(if light_theme { light } else { dark })
-        .expect("bundled Rusterize logo is PNG");
+        .expect("bundled Rot Engine logo is PNG");
     let image =
         ColorImage::from_rgba_unmultiplied([icon.width as usize, icon.height as usize], &icon.rgba);
     let texture = ctx.load_texture(name, image, TextureOptions::LINEAR);
@@ -42,15 +41,17 @@ fn texture(ctx: &egui::Context, name: &'static str, dark: &[u8], light: &[u8]) -
 }
 
 pub fn mark(ui: &mut egui::Ui, size: f32) {
-    let texture = texture(ui.ctx(), "Rusterize mark", MARK_DARK, MARK_LIGHT);
-    ui.add(egui::Image::new((texture.id(), Vec2::splat(size))).alt_text("Rusterize logo"));
+    let texture = texture(ui.ctx(), "Rot Engine mark", MARK_DARK, MARK_LIGHT);
+    let source = texture.size_vec2();
+    let scale = size / source.x.max(source.y);
+    ui.add(egui::Image::new((texture.id(), source * scale)).alt_text("Rot Engine logo"));
 }
 
 pub fn lockup(ui: &mut egui::Ui) {
-    let texture = texture(ui.ctx(), "Rusterize lockup", LOCKUP_DARK, LOCKUP_LIGHT);
+    let texture = texture(ui.ctx(), "Rot Engine lockup", LOCKUP_DARK, LOCKUP_LIGHT);
     let source = texture.size_vec2();
     let size = source * (48.0 / source.y).min(ui.available_width().max(1.0) / source.x);
-    ui.add(egui::Image::new((texture.id(), size)).alt_text("Rusterize"));
+    ui.add(egui::Image::new((texture.id(), size)).alt_text("Rot Engine"));
 }
 
 pub fn is_about_open(ctx: &egui::Context) -> bool {

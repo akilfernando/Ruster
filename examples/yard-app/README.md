@@ -1,4 +1,4 @@
-# Ruster Yard: code-first delivery challenge
+# Rot Engine Yard: code-first delivery challenge
 
 This small standalone application is the M7 template. Produce crates at the blue source, move them with an orange truck and reach the green destination's target before time runs out. The default round produces 3 crates/tick, moves 2 crates/tick and asks for 24 crates in 10 ticks. It misses the target with 20 delivered. Increase truck capacity to 3, press **Reset**, then **Run**: it succeeds on tick 8.
 

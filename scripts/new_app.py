@@ -91,6 +91,9 @@ def export(root: Path, output: Path, normalize_lock: bool = True, app: str = "ya
             relative = "crates/" + name
             put(stage, relative + "/Cargo.toml", read_regular(root, relative + "/Cargo.toml"))
             copy_tree(root, relative + "/src", stage, {".rs", ".wgsl"})
+            if name == "ruster-render":
+                icon = relative + "/assets/rot-dark-128.png"
+                put(stage, icon, read_regular(root, icon))
             if (root / relative / "templates").is_dir():
                 copy_tree(root, relative + "/templates", stage, {".lua"})
             if (root / relative / "tests").is_dir():

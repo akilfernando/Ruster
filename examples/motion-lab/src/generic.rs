@@ -616,7 +616,7 @@ impl Application for GenericMotionLab {
             "Runtime preview"
         });
         ui.label("Compare authored positions with fixed-step motion.");
-        ui.small("Author sources, properties and history in the generic Ruster editor. This viewer reads a snapshot; reopen after saving changes.");
+        ui.small("Author sources, properties and history in the Rot Engine editor. This viewer reads a snapshot; reopen after saving changes.");
         ui.label(format!(
             "Fixed tick: {:.3} s · committed ticks: {}",
             self.fixed_dt.as_secs_f64(),

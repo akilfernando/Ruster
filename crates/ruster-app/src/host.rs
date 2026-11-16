@@ -75,7 +75,8 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 760.0])
             .with_min_inner_size([800.0, 540.0])
-            .with_app_id(&options.app_id),
+            .with_app_id(&options.app_id)
+            .with_icon(ruster_render::window_icon()),
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             wgpu_setup: WgpuSetup::CreateNew(setup),
@@ -83,7 +84,7 @@ pub fn run<A: Application>(app: A, options: HostOptions) -> Result<(), String> {
         },
         ..Default::default()
     };
-    let title = format!("Ruster | {}", options.title);
+    let title = format!("Rot Engine | {}", options.title);
     let exit_error = Arc::new(Mutex::new(None));
     let host_error = exit_error.clone();
     eframe::run_native(&title, native, Box::new(move |cc| {
@@ -136,7 +137,7 @@ impl<A: Application> Host<A> {
     fn report(&mut self, result: Result<(), String>) {
         if let Err(error) = result {
             if self.error.as_ref() != Some(&error) {
-                eprintln!("Ruster application: {error}");
+                eprintln!("Rot Engine application: {error}");
             }
             self.error = Some(error);
             self.runtime.set_running(false);

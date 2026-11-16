@@ -42,7 +42,7 @@ fn arguments() -> Result<Option<Options>, String> {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--help" {
-            println!("Ruster shared 3D runtime\nUsage: ruster-render [--scene PATH] [--shader PATH] [--frames N] [--ticks N] [--objects 3|256]\nRight-drag: orbit; wheel: zoom; left click: select. Ticks advance a static scene preview.");
+            println!("Rot Engine shared 3D runtime\nUsage: ruster-render [--scene PATH] [--shader PATH] [--frames N] [--ticks N] [--objects 3|256]\nRight-drag: orbit; wheel: zoom; left click: select. Ticks advance a static scene preview.");
             return Ok(None);
         }
         let value = args
@@ -145,7 +145,7 @@ impl eframe::App for Runtime {
                 ui.label(&self.asset_status);
             }
             ui.label(format!(
-                "Ruster standalone · Scene {} · revision {} · {} objects · tick {}",
+                "Rot Engine standalone · Scene {} · revision {} · {} objects · tick {}",
                 self.preview.scene.id,
                 self.preview.scene.revision,
                 self.preview.scene.objects.len(),
@@ -297,7 +297,8 @@ fn run() -> Result<(), String> {
     let native = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
             .with_inner_size([1100.0, 760.0])
-            .with_app_id("org.ruster.scene-runtime"),
+            .with_app_id("org.ruster.scene-runtime")
+            .with_icon(ruster_render::window_icon()),
         renderer: eframe::Renderer::Wgpu,
         wgpu_options: eframe::egui_wgpu::WgpuConfiguration {
             wgpu_setup: WgpuSetup::CreateNew(setup),
@@ -306,7 +307,7 @@ fn run() -> Result<(), String> {
         ..Default::default()
     };
     eframe::run_native(
-        "Ruster | Shared 3D",
+        "Rot Engine | Shared 3D",
         native,
         Box::new(move |cc| {
             let render = cc

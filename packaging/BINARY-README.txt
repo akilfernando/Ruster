@@ -1,4 +1,4 @@
-Ruster Yard — Linux x86_64 development package
+Rot Engine Yard — Linux x86_64 development package
 
 Extract the entire archive into a new directory. Run ./ruster-yard there, or
 launch the executable by absolute path from any working directory. The owned

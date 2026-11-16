@@ -12,7 +12,7 @@ use ruster_scene::input::{ActionFrame, ActionMap};
 #[path = "../../../crates/support/strict_json.rs"]
 mod strict_json;
 
-const HELP: &str = "Ruster Motion Lab — compare authored motion or open a legacy Rhai project
+const HELP: &str = "Rot Engine Motion Lab — compare authored motion or open a legacy Rhai project
 
 Usage: ruster-motion-lab [OPTIONS]
   --headless       Attach the behavior to left, Reset, run fixed ticks, print transforms
@@ -844,7 +844,7 @@ fn main() {
     };
     if let Err(error) = result {
         eprintln!(
-            "Ruster application: {error}\nFix the authored scene/script/options and retry. See --help."
+            "Rot Engine application: {error}\nFix the authored scene/script/options and retry. See --help."
         );
         std::process::exit(2);
     }

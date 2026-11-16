@@ -171,7 +171,7 @@ impl Renderer {
             extensions.push(ash::ext::debug_utils::NAME.as_ptr());
             extensions.push(ash::ext::validation_features::NAME.as_ptr());
         }
-        let name = CString::new("Ruster Vulkan schematic")?;
+        let name = CString::new("Rot Engine Vulkan schematic")?;
         let app = vk::ApplicationInfo::default()
             .application_name(&name)
             .api_version(vk::API_VERSION_1_0);

@@ -4,7 +4,7 @@ use std::time::Duration;
 use ruster_app::{HostOptions, ResourceRoot, Runtime};
 use ruster_yard::{Settings, Yard};
 
-const HELP: &str = "Ruster Yard — a tiny delivery challenge
+const HELP: &str = "Rot Engine Yard — a tiny delivery challenge
 
 Usage: ruster-yard [OPTIONS]
 
@@ -136,7 +136,7 @@ fn execute(options: Options) -> Result<(), String> {
         ruster_app::run(
             app,
             HostOptions {
-                title: "Ruster Yard — Delivery challenge".into(),
+                title: "Rot Engine Yard — Delivery challenge".into(),
                 app_id: "ruster-yard".into(),
                 tick_duration,
                 max_frames: options.frames,
@@ -157,7 +157,7 @@ fn main() {
         Err(error) => Err(error),
     };
     if let Err(error) = result {
-        eprintln!("Ruster Yard: {error}");
+        eprintln!("Rot Engine Yard: {error}");
         std::process::exit(2);
     }
 }
