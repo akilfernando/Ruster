@@ -55,6 +55,14 @@ prepared the saved check, and MCP ran it to a passing tick 3 while the live
 paused tick and authored bytes stayed intact. The exact adapter was reaped
 and the locator retired. See `STDIO-RESULT.json` and `stdio-journey-1.log`.
 
+The same guarded editor exporter qualified the prior and matched kits on
+the same saved revision and persistence token. It refused the prior kit
+with the API7 capability diagnostic and left the destination absent. The
+matched kit published and the archive's relocated application passed its
+saved check at tick 3. Packaged scene and case bytes exactly match their
+saved inputs. See `STDIO-EXPORT-RESULT.json` and
+`stdio-export-journey-1.log`.
+
 ## Fixed-step cost
 
 Release Engine cohorts used the same geometry/actions and nearly identical
@@ -77,3 +85,17 @@ instead of stopping at Z=0.82495. The clear cohort shows similar medians.
 These are small creator-course observations on this machine. Rendering,
 worst-case blocker scans, and full-physics comparisons are outside this
 measurement.
+
+## Change gate
+
+`RUST_TEST_THREADS=1 python3 scripts/check.py --base a726d34` selected the
+full gate for the packaging script changes. Markdown, 34 Python tests,
+formatting, strict workspace Clippy and 434 Rust tests passed. Twenty
+explicit manual probes were ignored by the standard suite. The run took
+125.53 seconds including compilation. Earlier parallel editor tests had
+a shared capture fixture return `capture_busy`. The full gate ran serially
+to avoid contention in that fixture. No capture code changed. The initial
+editor pass also exposed a tooling fixture that still expected API7 to
+be unknown. Its updated API7/API8 expectations passed serially.
+Independent source review found no blocking authority, solver or export
+compatibility issues.
