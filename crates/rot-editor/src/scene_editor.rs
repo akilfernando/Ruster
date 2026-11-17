@@ -461,6 +461,8 @@ pub struct SceneEditor {
     ai_listen: bool,
     ai_listen_retry: Option<std::time::Instant>,
     ai_listen_scene: Option<PathBuf>,
+    /// AI apps the creator denied in this session; they are not asked again.
+    ai_denied: Vec<String>,
     retired_connection_receipts: std::collections::VecDeque<Value>,
     save_grant: Option<persistence_commands::SaveGrant>,
     save_sequence: u64,
@@ -678,6 +680,7 @@ impl SceneEditor {
             ai_listen: false,
             ai_listen_retry: None,
             ai_listen_scene: None,
+            ai_denied: Vec::new(),
             retired_connection_receipts: Default::default(),
             save_grant: None,
             save_sequence: 0,
@@ -6446,6 +6449,8 @@ impl eframe::App for Host {
         self.editor.begin_ui(ui);
         #[cfg(unix)]
         self.native_connection_ui(ui);
+        #[cfg(unix)]
+        self.ai_prompt_ui(ui.ctx());
         self.editor.workspace_ui(ui);
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.

@@ -216,6 +216,7 @@ impl Host {
         if !state.notice.is_empty() {
             ui.label(&state.notice);
         }
+        self.trusted_apps_ui(ui);
         ui.add_space(8.0);
         ui.separator();
         ui.collapsing("Connection details", |ui| {

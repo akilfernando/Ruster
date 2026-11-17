@@ -38,6 +38,10 @@ One line each. Anyone may add; the user or a planning pass orders them.
   `rot-script`, `examples/yard-app`, editor `ui.rs` and `model.rs`, five
   legacy MCP tools) is unused by the scene editor. Proposal: delete it.
   Needs the user's yes.
+- The registry and enrollment connection modes (`ROT_MCP_PROJECT_REGISTRY`,
+  `ROT_CONNECTOR_ENROLLMENT`, `scripts/enroll_local_connector.py`,
+  `support/enrollment.rs`, `support/project_startup.rs`) are superseded by
+  A-01/A-02 and still pin binaries. Proposal: delete them (agent, 2026-11-17).
 - `docs/branding/rot/README.md` describes a monogram; the app uses the
   mushroom. Refresh the brand note once the user confirms the mark.
 - In the Rot dark palette the error color is close to the accent color.
@@ -451,7 +455,7 @@ variables; a headless test covers discovery with two editors and a dead
 entry.
 
 #### A-02 · Trust once — M — ready
-Status: in progress — Claude Opus 5.5 (AI lane helper), 2026-11-17
+Status: in review — Claude Opus 5.5 (AI lane helper), 2026-11-17; trust-boundary review pending
 **Outcome.** An AI app is approved once and never again, across restarts and
 rebuilds.
 **Facts.** Unenrolled adapters need approval after every restart

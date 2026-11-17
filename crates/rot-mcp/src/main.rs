@@ -30,6 +30,9 @@ mod project_tools;
 mod runtime_tools;
 #[path = "../../support/strict_json.rs"]
 mod strict_json;
+#[path = "../../support/trust.rs"]
+#[allow(dead_code)]
+mod trust;
 mod view_tools;
 use serde_json::{json, Map, Value};
 use std::io::{self, BufRead, Write};
@@ -49,6 +52,8 @@ enum Lifecycle {
 #[derive(Default)]
 struct Server {
     lifecycle: Lifecycle,
+    /// clientInfo.name from initialize; names the AI app to the editor.
+    client_name: Option<String>,
 }
 
 fn rpc_error(id: Value, code: i64, message: &str) -> Value {
@@ -702,6 +707,10 @@ impl Server {
                     ))
                 } else {
                     self.lifecycle = Lifecycle::Initializing;
+                    self.client_name = params["clientInfo"]["name"]
+                        .as_str()
+                        .filter(|name| trust::valid_name(name))
+                        .map(str::to_owned);
                     Ok(
                         json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},
                         "serverInfo":{"name":"rot-mcp","version":env!("CARGO_PKG_VERSION")},
@@ -855,6 +864,8 @@ struct Adapter {
     discovery: Option<std::path::PathBuf>,
     /// The editor chosen with project_connect, by process ID.
     pinned: Option<u32>,
+    /// The AI app's name, presented with its trust token.
+    client_name: Option<String>,
 }
 impl Adapter {
     fn startup_failure(&self, source: StartupResponseSource) -> Value {
@@ -1028,10 +1039,15 @@ impl Adapter {
     }
 }
 
-fn run(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
+fn run(
+    reader: &mut impl BufRead,
+    writer: &mut impl Write,
+    client: Option<String>,
+) -> io::Result<()> {
     let mut server = Server::default();
     let mut adapter = Adapter::configured();
     while let Some(frame) = read_frame(reader, MAX_FRAME)? {
+        adapter.client_name = client.clone().or_else(|| server.client_name.clone());
         if let Some(response) = server.handle(&frame, |op, args| adapter.call(op, args)) {
             let serialized = response.to_string();
             if serialized.len() + 1 > MAX_OUTPUT {
@@ -1047,8 +1063,19 @@ fn run(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
     Ok(())
 }
 
+/// `rot-mcp [--client NAME]`. NAME identifies the AI app to the editor;
+/// without it, the MCP client's own name is used.
 fn main() {
-    if let Err(error) = run(&mut io::stdin().lock(), &mut io::stdout().lock()) {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let client = match args.as_slice() {
+        [] => None,
+        [flag, name] if flag == "--client" && trust::valid_name(name) => Some(name.clone()),
+        _ => {
+            eprintln!("usage: rot-mcp [--client NAME]");
+            std::process::exit(2);
+        }
+    };
+    if let Err(error) = run(&mut io::stdin().lock(), &mut io::stdout().lock(), client) {
         eprintln!("rot-mcp: {error}");
         std::process::exit(1);
     }

@@ -10,8 +10,12 @@ project folder contains its working directory, else the only one open.
 With several open, `project_list` lists them and `project_connect` takes a
 project name, folder, scene file or ID; given a folder or scene that is not
 open, it starts Rot Engine on it. With none open, tools answer "Rot Engine
-is not running". The first call still waits for the creator to approve the
-app in File → Advanced → Rot connection…. Turning off
+is not running". The first time an app connects, the editor asks Allow
+Always, Allow Once or Deny; an app allowed always reconnects without asking,
+across restarts and rebuilds ([decision](../../docs/decisions/2026-11-17-trust-ai-apps-once.md)).
+The app is named by `rot-mcp --client NAME` or by its MCP `clientInfo.name`.
+Revoke it in File → Advanced → Rot connection…. An allowed app may save the
+open scene and build into `<project>/Builds`. Turning off
 `allow_ai_connections` in the editor preferences stops listening. The
 `ROT_MCP_PROJECT_REGISTRY` and `ROT_MCP_LOCATOR` modes below still work when
 set.

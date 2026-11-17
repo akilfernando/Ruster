@@ -32,6 +32,8 @@ struct AuthorityState {
     approved: bool,
     grant: Option<crate::enrollment::Grant>,
     owner: Option<(String, u32)>,
+    /// The AI app's name and trust token, as its adapter presented them.
+    client: Option<(String, String)>,
     commits: usize,
     requests: usize,
     listener_owned: bool,
@@ -66,6 +68,7 @@ impl Authority {
             approved: false,
             grant: None,
             owner: None,
+            client: None,
             commits: 0,
             requests: 0,
             listener_owned: false,
@@ -617,6 +620,7 @@ impl Bridge {
         grant: Option<crate::enrollment::Grant>,
         directory: &std::path::Path,
         scene: Option<&std::path::Path>,
+        trust: Option<std::path::PathBuf>,
     ) -> std::io::Result<Self> {
         crate::discovery::prepare(directory)?;
         let endpoint = EndpointDir {
@@ -637,27 +641,32 @@ impl Bridge {
             incarnation,
             generation,
             grant,
-            Some((project, scene)),
+            Some(Advertised {
+                project,
+                scene,
+                trust,
+            }),
         )
     }
-    #[allow(clippy::type_complexity)]
     fn start_at(
         ctx: egui::Context,
         directory: EndpointDir,
         incarnation: String,
         generation: String,
         grant: Option<crate::enrollment::Grant>,
-        discovery: Option<(Option<std::path::PathBuf>, Option<std::path::PathBuf>)>,
+        discovery: Option<Advertised>,
     ) -> std::io::Result<Self> {
         let path = directory.file("sock");
         let listener = connection::bind_socket(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
         let mut locator = Locator::capture(&path, incarnation, generation)?;
-        if let Some((project, scene)) = discovery {
-            locator.project = project;
-            locator.scene = scene;
+        let mut trust = None;
+        if let Some(advertised) = discovery {
+            locator.project = advertised.project;
+            locator.scene = advertised.scene;
             locator.started = crate::discovery::process_start(locator.pid);
+            trust = advertised.trust;
         }
         let locator_path = directory.file("json");
         use std::os::unix::fs::OpenOptionsExt;
@@ -708,11 +717,13 @@ impl Bridge {
                         if Instant::now() >= hello_deadline { return Ok(()); }
                     };
                     if hello["wire"] != connection::WIRE || hello["binding"] != worker_locator.binding()
-                        || hello.as_object().is_none_or(|m| m.len() != if hello.get("enrollment").is_some() {4} else {3})
-                        || hello["hello"].as_str().is_none_or(|s| s.len() != 64) {
+                        || hello.as_object().is_none_or(|m| m.len() != 3 + usize::from(hello.get("enrollment").is_some()) + usize::from(hello.get("client").is_some()))
+                        || hello["hello"].as_str().is_none_or(|s| s.len() != 64)
+                        || hello.get("client").is_some_and(|c| client_identity(c).is_none()) {
                         let _ = connection::send(&mut stream, &denied("wire_incompatible"));
                         continue;
                     }
+                    let client = hello.get("client").and_then(client_identity);
                     let trusted = match (&grant, hello.get("enrollment")) {
                         (Some(g), Some(proof)) if g.authenticate(proof, pid) => true,
                         (_, Some(_)) | (Some(_), None) => { connection::send(&mut stream, &denied("enrollment_required"))?; continue; },
@@ -723,7 +734,12 @@ impl Bridge {
                         let mut state = worker_authority.0.lock().map_err(|_| std::io::Error::other("authority poisoned"))?;
                         if !state.live || state.owner.is_some() { return Ok(()); }
                         state.owner = Some((owner.clone(), pid));
-                        state.approved = trusted;
+                        // An app the creator chose Allow Always for connects
+                        // without a prompt. Enrolled connectors keep their own path.
+                        let remembered = !trusted && grant.is_none() && client.as_ref().zip(trust.as_ref())
+                            .is_some_and(|((name, token), store)| crate::trust::Store::load(store).allowed(name, token));
+                        state.approved = trusted || remembered;
+                        state.client = client.clone();
                     }
                     ctx.request_repaint();
                     connection::send(&mut stream, &json!({"binding":worker_locator.binding(),"state":"approval_required"}))?;
@@ -829,6 +845,10 @@ impl Bridge {
     }
     pub fn pending_owner(&self) -> Option<(String, u32)> {
         self.authority.0.lock().ok()?.owner.clone()
+    }
+    /// The connected AI app's name and trust token, when its adapter named it.
+    pub fn client(&self) -> Option<(String, String)> {
+        self.authority.0.lock().ok()?.client.clone()
     }
     /// This API is human-owner-only, never reachable through MCP. CP2 supplies UI.
     pub fn approve_owner(&self, owner: &(String, u32)) -> bool {
@@ -1040,6 +1060,25 @@ impl Drop for Bridge {
             cleanup.run();
         }
     }
+}
+
+/// `{"name": printable, at most 64 bytes, "token": 64 hex digits}`.
+fn client_identity(value: &Value) -> Option<(String, String)> {
+    let map = value.as_object()?;
+    let name = map.get("name")?.as_str()?;
+    let token = map.get("token")?.as_str()?;
+    (map.len() == 2
+        && crate::trust::valid_name(name)
+        && token.len() == 64
+        && token.bytes().all(|b| b.is_ascii_hexdigit()))
+    .then(|| (name.to_owned(), token.to_owned()))
+}
+
+/// Where a discoverable endpoint advertises itself and checks trust.
+struct Advertised {
+    project: Option<std::path::PathBuf>,
+    scene: Option<std::path::PathBuf>,
+    trust: Option<std::path::PathBuf>,
 }
 
 fn denied(code: &str) -> Value {
@@ -1527,6 +1566,7 @@ pub(crate) mod tests {
             None,
             &directory,
             Some(&mine.join("scene.json")),
+            None,
         )
         .unwrap();
         let mut sleeper = std::process::Command::new("sleep")
@@ -1589,6 +1629,77 @@ pub(crate) mod tests {
         }
         assert!(crate::discovery::list(&directory).is_empty());
         assert!(directory.is_dir(), "the shared directory stays");
+    }
+
+    // Allow Always survives an editor restart; a revoked or unknown app, or a
+    // wrong token, waits for the creator again.
+    #[test]
+    fn allowed_app_reconnects_without_a_prompt_until_revoked() {
+        let root = tempfile::tempdir().unwrap();
+        let directory = root.path().join("rot");
+        let store = root.path().join("config/rot/ai-apps.json");
+        let token = crate::trust::Store::token_for(&store, "claude-code").unwrap();
+        let start = || {
+            Bridge::start_discoverable(
+                egui::Context::default(),
+                connection::unpredictable().unwrap(),
+                "g".into(),
+                None,
+                &directory,
+                None,
+                Some(store.clone()),
+            )
+            .unwrap()
+        };
+        let call = |bridge: &mut Bridge, token: &str| {
+            let mut client = connection::Client::open(bridge.locator_path()).unwrap();
+            client.identify(json!({"name":"claude-code","token":token}));
+            let worker = std::thread::spawn(move || client.call("scene_inspect", &json!({})));
+            let deadline = Instant::now() + Duration::from_secs(4);
+            while !worker.is_finished() {
+                bridge.dispatch_command(|_, _, _| json!({"ok":true,"result":{}}));
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            worker.join().unwrap()
+        };
+        let retire = |mut bridge: Bridge| {
+            bridge.disconnect();
+            let deadline = Instant::now() + Duration::from_secs(3);
+            while !bridge.poll_retired() {
+                assert!(Instant::now() < deadline);
+                std::thread::sleep(Duration::from_millis(1));
+            }
+        };
+
+        let mut bridge = start();
+        assert_eq!(
+            call(&mut bridge, &token)["error"]["code"],
+            "approval_required"
+        );
+        assert_eq!(bridge.client(), Some(("claude-code".into(), token.clone())));
+        retire(bridge);
+
+        crate::trust::Store::allow(&store, "claude-code", &token).unwrap();
+        for _restart in 0..2 {
+            let mut bridge = start();
+            assert_eq!(call(&mut bridge, &token)["ok"], true);
+            retire(bridge);
+        }
+        let mut bridge = start();
+        assert_eq!(
+            call(&mut bridge, &"0".repeat(64))["error"]["code"],
+            "approval_required"
+        );
+        retire(bridge);
+
+        crate::trust::Store::revoke(&store, "claude-code").unwrap();
+        let mut bridge = start();
+        assert_eq!(
+            call(&mut bridge, &token)["error"]["code"],
+            "approval_required"
+        );
+        retire(bridge);
     }
 
     #[test]

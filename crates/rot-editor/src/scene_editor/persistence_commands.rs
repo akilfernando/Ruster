@@ -34,7 +34,12 @@ impl SaveGrant {
         self.0.root()
     }
     fn validate(&self) -> Result<&Path> {
-        self.0.validate().map_err(|_| error("save_permission_required", "Save directory changed or became unavailable; restart with an explicit valid ROT_MCP_SAVE_DIR grant"))
+        self.0.validate().map_err(|_| {
+            error(
+                "save_permission_required",
+                "The project folder changed or became unavailable; reconnect the AI app",
+            )
+        })
     }
 }
 
@@ -83,7 +88,7 @@ impl SceneEditor {
         Ok(())
     }
     fn granted_save_root(&self) -> Result<&Path> {
-        self.save_grant.as_ref().ok_or_else(|| error("save_permission_required", "Restart with ROT_MCP_ENABLE=1 and an explicit ROT_MCP_SAVE_DIR; an opened scene does not grant write authority"))?.validate()
+        self.save_grant.as_ref().ok_or_else(|| error("save_permission_required", "Saving needs an AI app the creator allowed and a scene saved once in the editor"))?.validate()
     }
     fn associated_save_path(&self, root: &Path) -> Result<PathBuf> {
         let path = self.session.path().ok_or_else(|| {
@@ -162,7 +167,7 @@ impl SceneEditor {
             .ok_or_else(|| {
                 error(
                     "save_permission_required",
-                    "Restart with an explicit ROT_MCP_SAVE_DIR grant",
+                    "Saving needs an AI app the creator allowed and a scene saved once in the editor",
                 )
             })?
             .0

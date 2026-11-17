@@ -1,5 +1,6 @@
 # Architecture and project decisions
 
+- [Trust AI apps once](2026-11-17-trust-ai-apps-once.md) (2026-11-17) replaces 0050's per-adapter approval for named AI apps.
 - [0050 Session-bound MCP authority and owned retirement](0050-session-bound-mcp-authority.md) records the three approved E2a product bundles and CP1-only scope; implementation/security proof remains gated.
 
 Decisions record context, alternatives, rationale, consequences and status. Read [current status](../STATUS.md) and the individual decision's status before treating an old choice as current.

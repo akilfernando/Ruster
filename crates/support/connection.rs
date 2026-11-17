@@ -268,6 +268,7 @@ pub struct Client {
     stream: Option<UnixStream>,
     capability: Option<String>,
     proof: Option<Value>,
+    client: Option<Value>,
     failed: bool,
 }
 impl Client {
@@ -285,6 +286,10 @@ impl Client {
     }
     pub fn enroll(&mut self, proof: Value) {
         self.proof = Some(proof);
+    }
+    /// Name the AI app and present its trust token: `{"name","token"}`.
+    pub fn identify(&mut self, client: Value) {
+        self.client = Some(client);
     }
     pub fn native_pid(&self) -> u32 {
         self.locator.pid
@@ -314,6 +319,7 @@ impl Client {
             stream: None,
             capability: None,
             proof: None,
+            client: None,
             failed: false,
         })
     }
@@ -351,6 +357,9 @@ impl Client {
                 json!({"wire":WIRE,"hello":self.owner,"binding":self.locator.binding()});
             if let Some(proof) = &self.proof {
                 request["enrollment"] = proof.clone();
+            }
+            if let Some(client) = &self.client {
+                request["client"] = client.clone();
             }
             let hello = Self::exchange(&mut stream, request)?;
             if hello["binding"] != self.locator.binding() || hello["state"] != "approval_required" {
