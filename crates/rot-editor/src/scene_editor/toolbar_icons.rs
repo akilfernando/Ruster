@@ -6,7 +6,6 @@ pub(super) enum Icon {
     Move,
     Rotate,
     Scale,
-    Camera,
     Duplicate,
     Delete,
 }
@@ -17,7 +16,6 @@ impl Icon {
             Self::Move => "Move",
             Self::Rotate => "Rotate",
             Self::Scale => "Scale",
-            Self::Camera => "Game Camera…",
             Self::Duplicate => "Duplicate",
             Self::Delete => "Delete",
         }
@@ -108,13 +106,6 @@ impl Icon {
             Self::Scale => {
                 rect(point(-7., -3.), point(3., 7.));
                 painter.arrow(point(-2., 2.), egui::vec2(9., -9.), stroke);
-            }
-            Self::Camera => {
-                rect(point(-8., -5.), point(4., 5.));
-                painter.add(egui::Shape::closed_line(
-                    vec![point(4., -2.), point(8., -5.), point(8., 5.), point(4., 2.)],
-                    stroke,
-                ));
             }
             Self::Duplicate => {
                 rect(point(-4., -4.), point(6., 7.));

@@ -33,6 +33,7 @@ mod material_ui;
 mod material_visual_probe;
 mod model_placement;
 mod nonvisual;
+mod palette;
 #[path = "panels/mod.rs"]
 mod panels;
 mod persistence_commands;
@@ -249,18 +250,6 @@ pub(super) struct AssetDrag {
     generation: u64,
     scene_revision: u64,
     asset_id: String,
-}
-#[derive(Clone, Copy)]
-enum ContextAction {
-    Create(Action),
-    CreateEmpty,
-    DirectionalLight,
-    Rename,
-    Duplicate,
-    Delete,
-    Copy,
-    Paste,
-    Frame,
 }
 struct HierarchyRow {
     id: String,
@@ -518,6 +507,8 @@ pub struct SceneEditor {
     recovered_origin: Option<PathBuf>,
     /// Below about 1180 px, tool options and Layout move into the » menu.
     toolbar_compact: bool,
+    /// The open command palette (Ctrl+K, S-09).
+    palette: Option<palette::Palette>,
     /// Every message the editor shows, the Console panel and toasts (S-06).
     console: crate::console::Console,
     /// The docked panel layout (S-07a). Taken for the frame while it draws.
@@ -547,7 +538,7 @@ pub struct SceneEditor {
     /// A finished viewport box select: the objects inside, and whether it adds.
     queued_box_selection: Option<(Vec<String>, bool)>,
     queued_action: Option<Action>,
-    queued_context: Option<(Option<String>, ContextAction)>,
+    queued_context: Option<(Option<String>, Action)>,
     queued_drop: Option<(String, AssetDrag)>,
     queued_references: Option<String>,
     queued_refresh: Option<String>,
@@ -762,6 +753,7 @@ impl SceneEditor {
             captures: Default::default(),
             toolbar_compact: false,
             console: Default::default(),
+            palette: None,
             dock: None,
             dock_dragging: false,
             dock_dirty: false,
@@ -2846,20 +2838,20 @@ impl SceneEditor {
         );
     }
     fn layout_menu(&mut self, ui: &mut egui::Ui) {
-        self.layout_menu_items(ui);
-        ui.separator();
-        if ui.button("Reset Layout").clicked() {
-            self.reset_layout();
-            ui.close();
-        }
-    }
-    fn layout_menu_items(&mut self, ui: &mut egui::Ui) {
-        for kind in [panels::LayoutKind::Default, panels::LayoutKind::SideBySide] {
-            if ui.radio(self.active_layout == kind, kind.label()).clicked() {
-                self.switch_layout(kind);
+        for (kind, action) in [
+            (panels::LayoutKind::Default, Action::LayoutDefault),
+            (panels::LayoutKind::SideBySide, Action::LayoutSideBySide),
+        ] {
+            if ui
+                .radio(self.active_layout == kind, action.label())
+                .clicked()
+            {
+                self.queued_action = Some(action);
                 ui.close();
             }
         }
+        ui.separator();
+        self.command_item(ui, Action::ResetLayout);
     }
     fn runtime_toolbar(&mut self, ui: &mut egui::Ui, blocked: bool) {
         let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
@@ -3152,31 +3144,9 @@ impl SceneEditor {
                 self.error = error;
                 return;
             }
-            match action {
-                ContextAction::Create(action) => self.queued_action = Some(action),
-                ContextAction::CreateEmpty => {
-                    if self.guard().is_ok() && !self.manipulation.offset_pending() {
-                        self.create_empty();
-                    }
-                }
-                ContextAction::DirectionalLight => {
-                    self.create_light_ui(rot_scene::LightKind::Directional {
-                        shadow: Default::default(),
-                    });
-                }
-                ContextAction::Rename => {
-                    if self.manipulation.ids.len() == 1 {
-                        self.rename_pending = true;
-                    } else {
-                        self.error = "Select one object to rename.".into();
-                    }
-                }
-                ContextAction::Duplicate => self.object_action("duplicate"),
-                ContextAction::Delete => self.object_action("delete"),
-                ContextAction::Copy => self.clipboard_action(false),
-                ContextAction::Paste => self.clipboard_action(true),
-                ContextAction::Frame => self.navigation.frame_selected = true,
-            }
+            // Context menus run the same registered commands (S-09).
+            self.queued_action = Some(action);
+            self.process_queued_action();
         }
         if let Some((target, payload)) = self.queued_drop.take() {
             match self.accept_asset_drop(&target, &payload) {
@@ -4065,42 +4035,26 @@ impl SceneEditor {
             json!({"session_token":token,"revision":revision.to_string(),"changed":changed,"hierarchy":Self::hierarchy_page(self.session.scene(),0),"resolved_world_count":self.session.scene().target_count(),"resolved_world_next_offset":if self.session.scene().target_count()>16{Some("16")}else{None},"stored_coordinate_space":"local","resolved_world":self.session.scene().resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().take(16).collect::<BTreeMap<_,_>>(),"diff":diff,"diff_count":diff_count,"diff_truncated":diff_truncated,"light_diff":light_diff,"lighting_changed":lighting_changed,"lighting":self.session.scene().lighting,"changed_target_count":changed_targets.len(),"hierarchy_changed":hierarchy_changed,"changed_target_ids":changed_targets.iter().take(16).collect::<Vec<_>>(),"dirty":self.session.is_dirty()}),
         )
     }
-    fn create_entries(ui: &mut egui::Ui) -> Option<ContextAction> {
-        let mut selected = None;
-        if ui.button("Create Empty").clicked() {
-            selected = Some(ContextAction::CreateEmpty);
-            ui.close();
-        }
+    /// Create Empty, 3D Object ▸ and Light ▸, as commands.
+    fn create_entries(&mut self, ui: &mut egui::Ui) {
+        self.command_item(ui, Action::CreateEmpty);
         ui.menu_button("3D Object", |ui| {
             for action in [
                 Action::CreateCube,
                 Action::CreateSphere,
                 Action::CreateCapsule,
             ] {
-                if ui.button(action.label()).clicked() {
-                    selected = Some(ContextAction::Create(action));
-                    ui.close();
-                }
+                self.command_item(ui, action);
             }
         });
         ui.menu_button("Light", |ui| {
-            if ui.button("Directional Light").clicked() {
-                selected = Some(ContextAction::DirectionalLight);
-                ui.close();
-            }
-            if ui.button("Point Light").clicked() {
-                selected = Some(ContextAction::Create(Action::CreateLight));
-                ui.close();
+            for action in [Action::CreateDirectionalLight, Action::CreateLight] {
+                self.command_item(ui, action);
             }
         });
-        selected
     }
     fn create_menu(&mut self, ui: &mut egui::Ui) {
-        crate::editor_theme::text_menu(ui, "Create", |ui| {
-            if let Some(action) = Self::create_entries(ui) {
-                self.queued_context = Some((None, action));
-            }
-        });
+        crate::editor_theme::text_menu(ui, "Create", |ui| self.create_entries(ui));
     }
     fn new_group_button(&mut self, ui: &mut egui::Ui) {
         let enabled = self.guard().is_ok() && !self.manipulation.offset_pending();
@@ -4221,28 +4175,20 @@ impl SceneEditor {
         ui.horizontal_wrapped(|ui| {
             self.create_menu(ui);
             self.new_group_button(ui);
-            for (icon, action, context) in [
-                (
-                    toolbar_icons::Icon::Duplicate,
-                    Action::Duplicate,
-                    ContextAction::Duplicate,
-                ),
-                (
-                    toolbar_icons::Icon::Delete,
-                    Action::Delete,
-                    ContextAction::Delete,
-                ),
+            for (icon, action) in [
+                (toolbar_icons::Icon::Duplicate, Action::Duplicate),
+                (toolbar_icons::Icon::Delete, Action::Delete),
             ] {
                 if icon
                     .button(
                         ui,
-                        !self.manipulation.ids.is_empty(),
+                        self.command_enabled(action),
                         None,
                         &self.workspace.shortcut_text(action),
                     )
                     .clicked()
                 {
-                    self.queued_context = Some((None, context));
+                    self.queued_context = Some((None, action));
                 }
             }
         });
@@ -4338,19 +4284,35 @@ impl SceneEditor {
                     }
                     response.context_menu(|ui| {
                         ui.menu_button("Create", |ui| {
-                            if let Some(action) = Self::create_entries(ui) {
-                                context = Some((None, action));
+                            for action in [
+                                Action::CreateEmpty,
+                                Action::CreateCube,
+                                Action::CreateSphere,
+                                Action::CreateCapsule,
+                                Action::CreateDirectionalLight,
+                                Action::CreateLight,
+                            ] {
+                                if ui.button(action.label()).clicked() {
+                                    context = Some((None, action));
+                                    ui.close();
+                                }
                             }
                         });
-                        for (label, action) in [
-                            ("Rename object", ContextAction::Rename),
-                            ("Duplicate", ContextAction::Duplicate),
-                            ("Delete", ContextAction::Delete),
-                            ("Copy", ContextAction::Copy),
-                            ("Paste", ContextAction::Paste),
-                            ("Frame selected", ContextAction::Frame),
+                        for action in [
+                            Action::Rename,
+                            Action::Duplicate,
+                            Action::Delete,
+                            Action::Copy,
+                            Action::Paste,
+                            Action::Frame,
                         ] {
-                            if ui.button(label).clicked() {
+                            if ui
+                                .add(
+                                    egui::Button::new(action.label())
+                                        .shortcut_text(self.workspace.shortcut_hint(action)),
+                                )
+                                .clicked()
+                            {
                                 context = Some((Some(row.id.clone()), action));
                                 ui.close();
                             }
@@ -5205,6 +5167,108 @@ impl SceneEditor {
             Action::Open => self.dialog = Some(true),
             Action::Save => self.save(),
             Action::Export => self.open_export_dialog(),
+            Action::NewProject => {
+                if self.session.is_dirty() || self.guard().is_err() || self.asset_busy() {
+                    self.error = "Save the current project and finish or cancel pending edits before creating a project.".into();
+                } else {
+                    self.release_runtime_input();
+                    self.new_project_form = Some(project_picker::ProjectForm::new_project());
+                }
+            }
+            Action::OpenProject => {
+                if self.needs_recovery() || self.guard().is_err() || self.asset_busy() {
+                    self.error = "Save the current scene and finish or cancel pending edits before switching projects.".into();
+                } else {
+                    self.release_runtime_input();
+                    self.runtime.cancel_native_hud_activation();
+                    self.captures.invalidate();
+                    self.project_picker = Some(project_picker::ProjectPicker::switch_project());
+                }
+            }
+            Action::InputActions => {
+                if self.recovered_input.is_some() {
+                    self.recovered_input_open = true;
+                    self.recovered_input_focused = false;
+                } else {
+                    self.input_actions_open = true;
+                }
+                self.release_runtime_input();
+            }
+            Action::Preferences | Action::KeyboardShortcuts => self.workspace.settings_open = true,
+            Action::ImportAsset => self.open_asset_import(),
+            Action::CreateShaderSource => self.create_shader_source(),
+            Action::RefreshShader => self.refresh_shader_command(),
+            Action::CreateEmpty => {
+                if !self.manipulation.offset_pending() {
+                    self.create_empty();
+                }
+            }
+            Action::CreateDirectionalLight => {
+                self.create_light_ui(rot_scene::LightKind::Directional {
+                    shadow: Default::default(),
+                });
+            }
+            Action::GameCamera => {
+                if let Some(ctx) = self.export_context.clone() {
+                    self.open_player_view_editor(&ctx);
+                }
+            }
+            Action::GameUi => {
+                if self.command_enabled(Action::GameUi) {
+                    self.hud_open = true;
+                    self.release_runtime_input();
+                }
+            }
+            Action::AssignCube => {
+                if let Err(error) = self.assign_mesh(None) {
+                    self.error = error;
+                }
+            }
+            Action::ToggleHierarchy
+            | Action::ToggleInspector
+            | Action::ToggleAssets
+            | Action::ToggleConsole => {
+                let pane = match action {
+                    Action::ToggleHierarchy => panels::Pane::Hierarchy,
+                    Action::ToggleInspector => panels::Pane::Inspector,
+                    Action::ToggleAssets => panels::Pane::Assets,
+                    _ => panels::Pane::Console,
+                };
+                if self.pane_visible(pane) {
+                    self.hide_pane(pane);
+                } else {
+                    self.show_pane(pane, true);
+                }
+            }
+            Action::AiConnection => self.ai_connection_requested = true,
+            Action::PlayChecks => self.open_play_checks(),
+            Action::ScriptDebugger => self.runtime.open_debugger(),
+            Action::RecoveryCheckpoints => {
+                self.recovery.show_picker();
+                self.manipulation.cancel();
+            }
+            Action::LayoutDefault => self.switch_layout(panels::LayoutKind::Default),
+            Action::LayoutSideBySide => self.switch_layout(panels::LayoutKind::SideBySide),
+            Action::ResetLayout => self.reset_layout(),
+            Action::Documentation => {
+                if let Some(ctx) = &self.export_context {
+                    ctx.open_url(egui::OpenUrl::new_tab(DOCUMENTATION_URL));
+                }
+            }
+            Action::GameControls => {
+                if let Some(ctx) = self.export_context.clone() {
+                    self.runtime.open_game_controls(&ctx);
+                }
+            }
+            Action::About => {
+                if let Some(ctx) = self.export_context.clone() {
+                    self.release_runtime_input();
+                    self.runtime.cancel_control_focus();
+                    self.runtime.cancel_native_hud_activation();
+                    crate::branding::open_about(&ctx);
+                }
+            }
+            Action::CommandPalette => self.palette = Some(Default::default()),
             Action::NextPanel | Action::PreviousPanel => {
                 self.cycle_panel(action == Action::NextPanel);
             }
@@ -5318,55 +5382,73 @@ impl SceneEditor {
             }
         }
     }
+    /// A menu item for a registered command: its label, shortcut and
+    /// enabled state come from the command (S-09).
     fn command_menu_item(&mut self, ui: &mut egui::Ui, label: &str, action: Action) {
         if ui
-            .add(egui::Button::new(label).shortcut_text(self.workspace.shortcut_text(action)))
+            .add_enabled(
+                self.command_enabled(action),
+                egui::Button::new(label).shortcut_text(self.workspace.shortcut_hint(action)),
+            )
             .clicked()
         {
             self.queued_action = Some(action);
             ui.close();
         }
     }
-    fn shader_tools_ui(&mut self, ui: &mut egui::Ui) {
-        if ui.button("Create shader source").clicked() {
-            use std::io::Write;
-            let result = self
-                .assets
-                .as_ref()
-                .ok_or_else(|| "Open a saved project first".to_string())
-                .and_then(|store| {
-                    std::fs::OpenOptions::new()
-                        .write(true)
-                        .create_new(true)
-                        .open(store.root().join("scene.wgsl"))
-                        .and_then(|mut file| {
-                            file.write_all(rot_render::default_shader().as_bytes())
-                        })
-                        .map_err(|error| error.to_string())
-                });
-            match result {
-                Ok(()) => {
-                    self.notice = "Created scene.wgsl; edit it, then Refresh scene shader.".into()
-                }
-                Err(error) => self.error = error,
-            }
-            ui.close();
+    fn command_item(&mut self, ui: &mut egui::Ui, action: Action) {
+        self.command_menu_item(ui, action.label(), action);
+    }
+    fn release_runtime_input(&mut self) {
+        if let Some(ctx) = self.export_context.clone() {
+            self.runtime.release_input(&ctx);
         }
-        if ui.button("Refresh scene shader").clicked() {
-            if self.drafts() || self.manipulation.active() {
-                self.error =
-                    "Apply/revert transform drafts and finish the gesture before shader refresh."
-                        .into();
-            } else if let Err(error) = self.refresh_shader() {
-                self.shader_notice = format!(
-                    "Shader rejected; last good pipeline retained: {}",
-                    error.chars().take(256).collect::<String>()
-                );
-                self.error = self.shader_notice.clone();
+    }
+    /// Whether a command can run now; menus and the palette grey it out.
+    fn command_enabled(&self, action: Action) -> bool {
+        match action {
+            Action::GameUi => self.hud_draft.is_some() || self.hud_editable(),
+            Action::AiConnection => cfg!(unix),
+            Action::Duplicate | Action::Delete | Action::Copy | Action::Frame => {
+                !self.manipulation.ids.is_empty()
             }
-            ui.close();
+            Action::Rename => self.manipulation.ids.len() == 1,
+            _ => true,
         }
-        ui.label(&self.shader_notice);
+    }
+    fn create_shader_source(&mut self) {
+        use std::io::Write;
+        let result = self
+            .assets
+            .as_ref()
+            .ok_or_else(|| "Open a saved project first".to_string())
+            .and_then(|store| {
+                std::fs::OpenOptions::new()
+                    .write(true)
+                    .create_new(true)
+                    .open(store.root().join("scene.wgsl"))
+                    .and_then(|mut file| file.write_all(rot_render::default_shader().as_bytes()))
+                    .map_err(|error| error.to_string())
+            });
+        match result {
+            Ok(()) => {
+                self.notice = "Created scene.wgsl; edit it, then Refresh scene shader.".into()
+            }
+            Err(error) => self.error = error,
+        }
+    }
+    fn refresh_shader_command(&mut self) {
+        if self.drafts() || self.manipulation.active() {
+            self.error =
+                "Apply/revert transform drafts and finish the gesture before shader refresh."
+                    .into();
+        } else if let Err(error) = self.refresh_shader() {
+            self.shader_notice = format!(
+                "Shader rejected; last good pipeline retained: {}",
+                error.chars().take(256).collect::<String>()
+            );
+            self.error = self.shader_notice.clone();
+        }
     }
     /// Log every message source once per change, and toast the results of
     /// the creator's own actions (S-06).
@@ -5590,7 +5672,6 @@ impl SceneEditor {
 
     fn scene_menu_contents(&mut self, ui: &mut egui::Ui, overflow: bool) {
         let compact = overflow || ui.available_width() < 460.0;
-        let mut open_about = false;
         let contents = |ui: &mut egui::Ui| {
             // Keep the additional top-level Create menu on the supported narrow
             // menu row instead of consuming the status/viewport height.
@@ -5600,38 +5681,20 @@ impl SceneEditor {
             }
             crate::editor_theme::text_menu(ui, "File", |ui| {
                 for action in [Action::New, Action::Open] {
-                    self.command_menu_item(ui, action.label(), action);
+                    self.command_item(ui, action);
                 }
                 self.recent_scenes_menu(ui, "Open Recent");
                 for action in [Action::Save, Action::SaveAs] {
-                    self.command_menu_item(ui, action.label(), action);
+                    self.command_item(ui, action);
                 }
                 ui.separator();
-                if ui.button("New Project…").clicked() {
-                    if self.session.is_dirty() || self.guard().is_err() || self.asset_busy() {
-                        self.error = "Save the current project and finish or cancel pending edits before creating a project.".into();
-                    } else {
-                        self.runtime.release_input(ui.ctx());
-                        self.new_project_form = Some(project_picker::ProjectForm::new_project());
-                    }
-                    ui.close();
-                }
-                if ui.button("Open Project…").clicked() {
-                    if self.needs_recovery() || self.guard().is_err() || self.asset_busy() {
-                        self.error = "Save the current scene and finish or cancel pending edits before switching projects.".into();
-                    } else {
-                        self.runtime.release_input(ui.ctx());
-                        self.runtime.cancel_native_hud_activation();
-                        self.captures.invalidate();
-                        self.project_picker = Some(project_picker::ProjectPicker::switch_project());
-                        ui.ctx().request_repaint();
-                    }
-                    ui.close();
+                for action in [Action::NewProject, Action::OpenProject] {
+                    self.command_item(ui, action);
                 }
                 ui.separator();
-                self.command_menu_item(ui, Action::Export.label(), Action::Export);
+                self.command_item(ui, Action::Export);
                 ui.separator();
-                self.command_menu_item(ui, Action::Quit.label(), Action::Quit);
+                self.command_item(ui, Action::Quit);
             });
             crate::editor_theme::text_menu(ui, "Edit", |ui| {
                 for action in [Action::Undo, Action::Redo] {
@@ -5646,62 +5709,39 @@ impl SceneEditor {
                     Action::Rename,
                     Action::Delete,
                 ] {
-                    self.command_menu_item(ui, action.label(), action);
+                    self.command_item(ui, action);
                 }
                 ui.separator();
                 for action in [Action::SelectAll, Action::Frame] {
-                    self.command_menu_item(ui, action.label(), action);
+                    self.command_item(ui, action);
                 }
                 ui.separator();
                 ui.menu_button("Project Settings", |ui| {
-                    if ui.button("Input Actions…").clicked() {
-                        if self.recovered_input.is_some() {
-                            self.recovered_input_open = true;
-                            self.recovered_input_focused = false;
-                        } else {
-                            self.input_actions_open = true;
-                        }
-                        self.runtime.release_input(ui.ctx());
-                        ui.close();
-                    }
+                    self.command_item(ui, Action::InputActions)
                 });
-                if ui.button("Preferences…").clicked() {
-                    self.workspace.settings_open = true;
-                    ui.close();
-                }
+                self.command_item(ui, Action::Preferences);
+                self.command_item(ui, Action::CommandPalette);
             });
             crate::editor_theme::text_menu(ui, "Assets", |ui| {
-                if ui.button("Import…").clicked() {
-                    self.open_asset_import();
-                    ui.close();
+                self.command_item(ui, Action::ImportAsset);
+                ui.menu_button("Create", |ui| {
+                    self.command_item(ui, Action::CreateShaderSource);
+                });
+                self.command_item(ui, Action::RefreshShader);
+                if !self.shader_notice.is_empty() {
+                    ui.label(&self.shader_notice);
                 }
-                ui.menu_button("Create", |ui| self.shader_tools_ui(ui));
             });
             crate::editor_theme::text_menu(ui, "Object", |ui| {
-                if let Some(action) = Self::create_entries(ui) {
-                    self.queued_context = Some((None, action));
-                }
+                self.create_entries(ui);
                 ui.separator();
-                self.player_view_controls(ui, true);
-                if ui
-                    .add_enabled(
-                        self.hud_draft.is_some() || self.hud_editable(),
-                        egui::Button::new("Game UI…"),
-                    )
-                    .clicked()
-                {
-                    self.hud_open = true;
-                    self.runtime.release_input(ui.ctx());
-                    ui.close();
+                for action in [Action::GameCamera, Action::GameUi] {
+                    self.command_item(ui, action);
                 }
                 ui.separator();
                 ui.menu_button("Mesh", |ui| {
-                    if ui.button("Procedural Cube").clicked() {
-                        if let Err(error) = self.assign_mesh(None) {
-                            self.error = error;
-                        }
-                        ui.close();
-                    }
+                    self.command_item(ui, Action::AssignCube);
+                    // One entry per imported mesh (parameterized, not a command).
                     for id in self
                         .assets
                         .as_ref()
@@ -5724,64 +5764,44 @@ impl SceneEditor {
                 });
             });
             crate::editor_theme::text_menu(ui, "Window", |ui| {
-                {
-                    // Checking a panel shows, selects and focuses its tab.
-                    for pane in [
-                        panels::Pane::Hierarchy,
-                        panels::Pane::Inspector,
-                        panels::Pane::Assets,
-                        panels::Pane::Console,
-                    ] {
-                        let mut visible = self.pane_visible(pane);
-                        if ui.checkbox(&mut visible, pane.title()).changed() {
-                            if visible {
-                                self.show_pane(pane, true);
-                            } else {
-                                self.hide_pane(pane);
-                            }
-                        }
+                // Checking a panel shows, selects and focuses its tab.
+                for (pane, action) in [
+                    (panels::Pane::Hierarchy, Action::ToggleHierarchy),
+                    (panels::Pane::Inspector, Action::ToggleInspector),
+                    (panels::Pane::Assets, Action::ToggleAssets),
+                    (panels::Pane::Console, Action::ToggleConsole),
+                ] {
+                    let mut visible = self.pane_visible(pane);
+                    if ui
+                        .checkbox(&mut visible, action.label())
+                        .on_hover_text(self.workspace.shortcut_hint(action))
+                        .changed()
+                    {
+                        self.queued_action = Some(action);
                     }
-                    ui.separator();
                 }
-                #[cfg(unix)]
-                if ui.button("AI Connection…").clicked() {
-                    self.ai_connection_requested = true;
-                    ui.close();
-                }
-                if ui.button("Play Checks…").clicked() {
-                    self.open_play_checks();
-                    ui.close();
-                }
-                if ui.button("Script Debugger…").clicked() {
-                    self.runtime.open_debugger();
-                    ui.close();
-                }
-                if ui.button("Recovery Checkpoints…").clicked() {
-                    self.recovery.show_picker();
-                    self.manipulation.cancel();
-                    ui.close();
+                ui.separator();
+                for action in [
+                    Action::AiConnection,
+                    Action::PlayChecks,
+                    Action::ScriptDebugger,
+                    Action::RecoveryCheckpoints,
+                ] {
+                    self.command_item(ui, action);
                 }
                 ui.separator();
                 ui.menu_button("Layouts", |ui| self.layout_menu(ui));
             });
             crate::editor_theme::text_menu(ui, "Help", |ui| {
-                if ui.button("Documentation").clicked() {
-                    ui.ctx().open_url(egui::OpenUrl::new_tab(DOCUMENTATION_URL));
-                    ui.close();
-                }
-                if ui.button("Keyboard Shortcuts…").clicked() {
-                    self.workspace.settings_open = true;
-                    ui.close();
-                }
-                if ui.button("Game Controls…").clicked() {
-                    self.runtime.open_game_controls(ui.ctx());
-                    ui.close();
+                for action in [
+                    Action::Documentation,
+                    Action::KeyboardShortcuts,
+                    Action::GameControls,
+                ] {
+                    self.command_item(ui, action);
                 }
                 ui.separator();
-                if ui.button("About Rot Engine").clicked() {
-                    open_about = true;
-                    ui.close();
-                }
+                self.command_item(ui, Action::About);
             });
             ui.separator();
             let dirty = self.session.is_dirty() || self.pending_recovery_drafts();
@@ -5835,12 +5855,6 @@ impl SceneEditor {
                 .show(ui, contents);
         } else {
             ui.horizontal_wrapped(contents);
-        }
-        if open_about {
-            self.runtime.release_input(ui.ctx());
-            self.runtime.cancel_control_focus();
-            self.runtime.cancel_native_hud_activation();
-            crate::branding::open_about(ui.ctx());
         }
     }
     /// Applies a changed theme preference; the next frame paints it everywhere.
@@ -5968,6 +5982,7 @@ impl SceneEditor {
         }
         self.show_hud_editor(&ctx);
         self.show_player_view_editor(&ctx);
+        self.palette_ui(&ctx);
         self.observe_messages(&ctx);
         self.rename_dialog(&ctx);
         if self.dialog.is_none() {
@@ -8895,7 +8910,7 @@ mod tests {
         e.draft.as_mut().unwrap().translation[0] = "-".into();
         frame(&mut e, Some(egui::Key::Enter));
         assert_eq!(e.selected.as_deref(), Some("left"));
-        e.queued_context = Some((Some("right".into()), ContextAction::Delete));
+        e.queued_context = Some((Some("right".into()), Action::Delete));
         e.process_content_intents();
         assert_eq!(e.session.scene().objects.len(), count);
         assert_eq!(e.draft.as_ref().unwrap().translation[0], "-");
@@ -8910,7 +8925,7 @@ mod tests {
         assert!(e.hierarchy_query.is_empty());
         assert_eq!(e.hierarchy_search.visible.len(), count);
         assert_eq!(e.selected.as_deref(), Some("right"));
-        e.queued_context = Some((Some("right".into()), ContextAction::Duplicate));
+        e.queued_context = Some((Some("right".into()), Action::Duplicate));
         e.process_content_intents();
         assert_eq!(e.session.scene().objects.len(), count + 1);
         assert_eq!(e.session.undo_len(), 1);

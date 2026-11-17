@@ -137,53 +137,6 @@ impl SceneEditor {
         }
     }
 
-    pub(super) fn player_view_controls(&mut self, ui: &mut egui::Ui, menu: bool) {
-        let available = self.player_preview_available();
-        let blocked = crate::branding::is_about_open(ui.ctx())
-            || self.guard().is_err()
-            || self.asset_busy()
-            || self.manipulation.offset_pending()
-            || self.hud_open
-            || self.input_actions_open;
-        let mut close = false;
-        // The menu offers only Camera…; Scene and Game are view tabs.
-        if !menu
-            && ui
-                .add_enabled(
-                    !blocked,
-                    egui::Button::selectable(!self.navigation.player_view, "Scene"),
-                )
-                .clicked()
-        {
-            self.set_player_preview(false);
-            close = true;
-        }
-        if !menu
-            && ui
-                .add_enabled(
-                    !blocked && available,
-                    egui::Button::selectable(self.navigation.player_view, "Game"),
-                )
-                .on_disabled_hover_text("Set up the game camera to see what the player sees.")
-                .clicked()
-        {
-            self.set_player_preview(true);
-            close = true;
-        }
-        let edit = if menu {
-            ui.add_enabled(!blocked, egui::Button::new("Camera…"))
-        } else {
-            super::toolbar_icons::Icon::Camera.button(ui, !blocked, None, "")
-        };
-        if edit.clicked() {
-            self.open_player_view_editor(ui.ctx());
-            close = true;
-        }
-        if close && menu {
-            ui.close();
-        }
-    }
-
     /// Object → Camera… and the Game tab's set-up button.
     pub(super) fn open_player_view_editor(&mut self, ctx: &egui::Context) {
         let selected = self.selected.as_deref().filter(|id| {

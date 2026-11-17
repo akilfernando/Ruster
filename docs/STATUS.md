@@ -63,6 +63,10 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   editor or picked with Import… (system dialog via `rfd`) are copied into
   `Assets/` and imported with no form. OS drop not exercised end to end.
 
+- 2026-11-17 · S-09: every menu, context-menu and toolbar action is a
+  registered command (label, remappable shortcut, enabled test, one
+  handler); Ctrl+K opens a palette that searches and runs any command;
+  Ctrl+, opens Preferences.
 - 2026-11-17 · S-07a: Hierarchy, Scene/Game, Inspector and Assets/Console
   are docked tabs (egui_tiles); tabs drag between docks; nothing is painted
   over the view. S-07b: Hierarchy, Inspector, Assets and Console close (×) and
@@ -76,12 +80,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   (Ctrl/Shift adds); double-click frames; orientation gizmo top-right (axis
   click = view, center = projection); Stats shows frame, FPS, GPU, draw
   calls, triangles, repainting 4×/s only while open.
-- 2026-11-17 · A-07: `python3 scripts/mcp_smoke.py` checks the AI route in
-  one command (passes: 94 tools, 36 KB). Real client: Claude Code 2.1.326,
-  private `--mcp-config`, empty throwaway scene, asked to "add three cubes in
-  a row and color them differently": in 16 s it made Red, Green and Blue
-  cubes at x = −2, 0, 2 and checked with a screenshot, without prompting.
-
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified

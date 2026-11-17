@@ -331,9 +331,15 @@ impl SceneEditor {
                 {
                     self.pick_imports();
                 }
-                ui.menu_button("Tools", |ui| self.shader_tools_ui(ui))
-                    .response
-                    .on_hover_text("Shader and content tools");
+                ui.menu_button("Tools", |ui| {
+                    self.command_item(ui, Action::CreateShaderSource);
+                    self.command_item(ui, Action::RefreshShader);
+                    if !self.shader_notice.is_empty() {
+                        ui.label(&self.shader_notice);
+                    }
+                })
+                .response
+                .on_hover_text("Shader and content tools");
                 ui.selectable_value(&mut self.assets_view.list, false, "Grid");
                 ui.selectable_value(&mut self.assets_view.list, true, "List");
                 if !self.assets_view.list {

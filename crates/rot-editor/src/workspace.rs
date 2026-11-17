@@ -51,9 +51,37 @@ pub(super) enum Action {
     Step,
     NextPanel,
     PreviousPanel,
+    NewProject,
+    OpenProject,
+    InputActions,
+    Preferences,
+    ImportAsset,
+    CreateShaderSource,
+    RefreshShader,
+    CreateEmpty,
+    CreateDirectionalLight,
+    GameCamera,
+    GameUi,
+    AssignCube,
+    ToggleHierarchy,
+    ToggleInspector,
+    ToggleAssets,
+    ToggleConsole,
+    AiConnection,
+    PlayChecks,
+    ScriptDebugger,
+    RecoveryCheckpoints,
+    LayoutDefault,
+    LayoutSideBySide,
+    ResetLayout,
+    Documentation,
+    KeyboardShortcuts,
+    GameControls,
+    About,
+    CommandPalette,
 }
 impl Action {
-    pub const ALL: [Self; 39] = [
+    pub const ALL: [Self; 67] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -93,6 +121,34 @@ impl Action {
         Self::Step,
         Self::NextPanel,
         Self::PreviousPanel,
+        Self::NewProject,
+        Self::OpenProject,
+        Self::InputActions,
+        Self::Preferences,
+        Self::ImportAsset,
+        Self::CreateShaderSource,
+        Self::RefreshShader,
+        Self::CreateEmpty,
+        Self::CreateDirectionalLight,
+        Self::GameCamera,
+        Self::GameUi,
+        Self::AssignCube,
+        Self::ToggleHierarchy,
+        Self::ToggleInspector,
+        Self::ToggleAssets,
+        Self::ToggleConsole,
+        Self::AiConnection,
+        Self::PlayChecks,
+        Self::ScriptDebugger,
+        Self::RecoveryCheckpoints,
+        Self::LayoutDefault,
+        Self::LayoutSideBySide,
+        Self::ResetLayout,
+        Self::Documentation,
+        Self::KeyboardShortcuts,
+        Self::GameControls,
+        Self::About,
+        Self::CommandPalette,
     ];
     /// Title Case menu label (UX-STANDARDS §8). `name` stays the stored id.
     pub fn label(self) -> &'static str {
@@ -136,6 +192,34 @@ impl Action {
             Self::Step => "Step",
             Self::NextPanel => "Next Panel",
             Self::PreviousPanel => "Previous Panel",
+            Self::NewProject => "New Project…",
+            Self::OpenProject => "Open Project…",
+            Self::InputActions => "Input Actions…",
+            Self::Preferences => "Preferences…",
+            Self::ImportAsset => "Import…",
+            Self::CreateShaderSource => "Shader Source",
+            Self::RefreshShader => "Refresh Scene Shader",
+            Self::CreateEmpty => "Create Empty",
+            Self::CreateDirectionalLight => "Directional Light",
+            Self::GameCamera => "Camera…",
+            Self::GameUi => "Game UI…",
+            Self::AssignCube => "Procedural Cube",
+            Self::ToggleHierarchy => "Hierarchy",
+            Self::ToggleInspector => "Inspector",
+            Self::ToggleAssets => "Assets",
+            Self::ToggleConsole => "Console",
+            Self::AiConnection => "AI Connection…",
+            Self::PlayChecks => "Play Checks…",
+            Self::ScriptDebugger => "Script Debugger…",
+            Self::RecoveryCheckpoints => "Recovery Checkpoints…",
+            Self::LayoutDefault => "Default",
+            Self::LayoutSideBySide => "Side by Side",
+            Self::ResetLayout => "Reset Layout",
+            Self::Documentation => "Documentation",
+            Self::KeyboardShortcuts => "Keyboard Shortcuts…",
+            Self::GameControls => "Game Controls…",
+            Self::About => "About Rot Engine",
+            Self::CommandPalette => "Command Palette…",
         }
     }
     pub fn name(self) -> &'static str {
@@ -179,6 +263,34 @@ impl Action {
             Self::Step => "Step",
             Self::NextPanel => "Next panel",
             Self::PreviousPanel => "Previous panel",
+            Self::NewProject => "New project",
+            Self::OpenProject => "Open project",
+            Self::InputActions => "Input actions",
+            Self::Preferences => "Preferences",
+            Self::ImportAsset => "Import asset",
+            Self::CreateShaderSource => "Create shader source",
+            Self::RefreshShader => "Refresh scene shader",
+            Self::CreateEmpty => "Create empty",
+            Self::CreateDirectionalLight => "Create directional light",
+            Self::GameCamera => "Game camera",
+            Self::GameUi => "Game UI",
+            Self::AssignCube => "Assign procedural cube",
+            Self::ToggleHierarchy => "Toggle Hierarchy",
+            Self::ToggleInspector => "Toggle Inspector",
+            Self::ToggleAssets => "Toggle Assets",
+            Self::ToggleConsole => "Toggle Console",
+            Self::AiConnection => "AI connection",
+            Self::PlayChecks => "Play checks",
+            Self::ScriptDebugger => "Script debugger",
+            Self::RecoveryCheckpoints => "Recovery checkpoints",
+            Self::LayoutDefault => "Default layout",
+            Self::LayoutSideBySide => "Side by side layout",
+            Self::ResetLayout => "Reset layout",
+            Self::Documentation => "Documentation",
+            Self::KeyboardShortcuts => "Keyboard shortcuts",
+            Self::GameControls => "Game controls",
+            Self::About => "About",
+            Self::CommandPalette => "Command palette",
         }
     }
 }
@@ -205,7 +317,7 @@ impl Binding {
             if self.ctrl { "Ctrl+" } else { "" },
             if self.alt { "Alt+" } else { "" },
             if self.shift { "Shift+" } else { "" },
-            key.name()
+            key.symbol_or_name()
         )
     }
     fn modifiers(self) -> egui::Modifiers {
@@ -286,6 +398,8 @@ impl Default for Preferences {
             (Action::Play, Key::P, true, false),
             (Action::Pause, Key::P, true, true),
             (Action::NextPanel, Key::F6, false, false),
+            (Action::CommandPalette, Key::K, true, false),
+            (Action::Preferences, Key::Comma, true, false),
             (Action::PreviousPanel, Key::F6, false, true),
         ];
         Self {
@@ -324,6 +438,32 @@ impl Default for Preferences {
                         Action::CreateSphere,
                         Action::CreateCapsule,
                         Action::CreateLight,
+                        Action::NewProject,
+                        Action::OpenProject,
+                        Action::InputActions,
+                        Action::ImportAsset,
+                        Action::CreateShaderSource,
+                        Action::RefreshShader,
+                        Action::CreateEmpty,
+                        Action::CreateDirectionalLight,
+                        Action::GameCamera,
+                        Action::GameUi,
+                        Action::AssignCube,
+                        Action::ToggleHierarchy,
+                        Action::ToggleInspector,
+                        Action::ToggleAssets,
+                        Action::ToggleConsole,
+                        Action::AiConnection,
+                        Action::PlayChecks,
+                        Action::ScriptDebugger,
+                        Action::RecoveryCheckpoints,
+                        Action::LayoutDefault,
+                        Action::LayoutSideBySide,
+                        Action::ResetLayout,
+                        Action::Documentation,
+                        Action::KeyboardShortcuts,
+                        Action::GameControls,
+                        Action::About,
                     ]
                     .into_iter()
                     .map(|action| Binding {
@@ -1087,6 +1227,15 @@ impl Workspace {
     }
     pub fn changed(&mut self) {
         self.dirty = true;
+    }
+    /// Shortcut text for menus, tooltips and the palette: empty when unbound.
+    pub fn shortcut_hint(&self, action: Action) -> String {
+        self.prefs
+            .bindings
+            .iter()
+            .find(|b| b.action == action && b.key.is_some())
+            .map(|b| b.text())
+            .unwrap_or_default()
     }
     pub fn shortcut_text(&self, action: Action) -> String {
         self.prefs
