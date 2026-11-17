@@ -1250,3 +1250,19 @@ dialog plus the shared file-browser result. Root integrated the dialog styling,
 asset import, scene and export forms, and native verification. The worker's
 focused camera keyboard and project lifecycle checks passed. Individual usage
 and cost are unavailable.
+
+## Rot rename and imported transform animation — 2026-11-17
+
+Claude Code root `claude-fable-5-2` selected the slice, performed the
+rename and implemented the asset, scene and engine core, integration,
+native qualification and documentation. One read-only Explore agent
+mapped the GLB, runtime, editor and export code before design (about
+224k tokens, 277 s); its map was accurate where checked. Two `opus`
+medium workers ran in isolated worktrees with disjoint write scopes:
+editor UI and MCP tool (about 142k tokens, 374 s) and export, packager,
+descriptor and standalone runtime (about 237k tokens, 670 s). Both were
+accepted on first delivery by cherry-pick with no repair. The export
+worker correctly reported one required line outside its scope, which the
+root added. Both worktrees started from `origin/main` instead of the
+briefed commit and each worker moved itself to the briefed commit before
+starting. Root usage and cost are unavailable; savings are unmeasured.

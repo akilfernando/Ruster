@@ -47,6 +47,30 @@ last accepted version available. Repair the source and Refresh, or import a
 structurally different model with a fresh identity. When copying an editable
 project, include its asset catalog and `.rot-models` directory.
 
+## Animate an imported model
+
+Animate objects in Blender with ordinary location, rotation or scale
+keys, name the action, and export a self-contained `.glb` with animation
+enabled. Import it as above. The model row reads **Animated model** with
+each clip's name and length. **Place** attaches the first clip to the new
+placement Group and plays it in a loop.
+
+**Reset** shows the clip's first pose. **Play**, **Pause** and **Step**
+advance it with every other runtime motion, and **Stop** returns to the
+authored rest pose, which the clip never changes. Select the placement
+Group to find **Animation** in the Inspector: choose another clip from
+the same model, clear **Loop** to hold the last pose, or **Remove
+animation**. Each change is one Undo step. A target the clip animates
+cannot also carry a transform-writing behavior, and it cannot be deleted
+while the animation exists.
+
+After changing keys in Blender, overwrite the source and use **Refresh**.
+The placement keeps its binding. Renaming a clip, or animating a
+different set of nodes or properties, needs a fresh import and Place.
+Exporting an animated scene needs a runtime template that advertises
+`imported_transform_animation`. Skinned characters, shape keys, clip
+blending and script-controlled playback are not supported yet.
+
 Save, then use the normal export dialog. The relocated app runs with
 generated mesh and texture resources from the accepted GLB generation. The
 original modelling file and Blender are unnecessary for app playback.

@@ -334,6 +334,16 @@ one scene Undo step. Repeated Place creates independent editable copies with new
 scene IDs and shared resource IDs. Import alone does not place a scene object.
 If placement fails, the accepted model remains in Content for repair and retry.
 
+A model with named transform animation reads **Animated model** with each
+clip's name and length. **Place** attaches the first clip, looping, to the
+placement Group. The clip plays under the normal Reset, Play, Pause and Step
+controls and never changes authored transforms. With the placement Group
+selected, the Inspector's **Animation** section changes the clip, toggles
+**Loop** or removes the binding, each as one Undo step. See the
+[creator guide](../../docs/CREATOR-WORKFLOW.md#animate-an-imported-model).
+Tab traversal does not currently reach the Objects and Inspector panels
+(recorded 2026-11-17), so these controls need the pointer.
+
 The model row's tooltip shows source and accepted source hash. **Refresh** runs
 through the existing cancellable content worker and updates the accepted resource
 generation. It preserves scene placement, local edits and authored references;

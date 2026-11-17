@@ -1,25 +1,57 @@
 # Current project status
 
-## Resume here — 2026-11-16
+## Resume here — 2026-11-17
 
-- Open `/home/akilf/Projects/rusterize-cumulative-editor-20261115` on
-  `feat/cumulative-editor-20261115` or start from `origin/main`.
-  The separate `/home/akilf/Projects/Rusterize` checkout is on
-  `claude/e1-editor-feedback` and contains local edits and
-  attachments. Keep the audit paths beside the retained evidence.
-- Feature work is on hold at the user's request while usage is limited.
-  Make small usability refinements to existing workflows. Imported GLB
-  transform animation stays on the roadmap for when feature work resumes.
-  Kinematic move-and-slide and packaged WAV feedback are closed goals.
-- The first usability pass improves reopening scenes. Recent entries lead
-  with the filename and containing folder, with the full path on hover.
-  The Open dialog names the discard action when changes would be lost.
-  `cargo test --locked -p ruster-editor` passed (206 passed, 13 ignored).
-  This pass is a source checkpoint pending a native walkthrough and install.
-- Keep the pending human editor walkthrough and audio device breadth
-  separate from the completed automated checks. The latest audio
-  evidence records a 28 ms first live submission and a float-PCM
-  PipeWire/PulseAudio qualification scope.
+- Current work is on `claude/rot-next-20261117` in
+  `/home/akilf/Projects/rot_engine`, branched from
+  `feat/cumulative-editor-20261115` at `09bce7e`. It is local, unpushed
+  and not merged back into the cumulative branch. That branch's worktree
+  at `/home/akilf/Projects/rusterize-cumulative-editor-20261115` holds an
+  uncommitted `docs/STATUS.md` workspace-cleanup note from another
+  session, which was left untouched.
+- The earlier edit on `claude/e1-editor-feedback` in this checkout is
+  preserved as a git stash, not discarded.
+- The user lifted the feature hold for one slice on 2026-11-17 by asking
+  for the next slice to be selected and completed. A wider resumption has
+  not been stated.
+- Open from this session: Tab traversal does not enter the Objects or
+  Inspector panels (pre-existing, undiagnosed); an actual MCP client run
+  of `scene_animation_set`; cost measurement; merge and promotion;
+  renaming the installed binaries, desktop entry, client registration and
+  existing creator projects to the Rot names.
+- Earlier open items stand: the pending human editor walkthrough, audio
+  device breadth, and the reopen-scenes pass awaiting a native
+  walkthrough and install.
+
+## Imported transform animation — 2026-11-17
+
+The [goal plan](plans/IMPORTED-TRANSFORM-ANIMATION.md) and
+[ownership decision](decisions/2026-11-17-imported-transform-animation.md)
+cover one named node-transform clip from a GLB through import, Place,
+preview, Refresh and standalone delivery. The root selected roadmap row 4
+and its limits; the user did not separately approve each rule.
+
+- **Source.** Catalog v7 records clips with stable IDs. Scene22 records
+  a binding on the placement root. The engine samples clips on the fixed
+  tick, so Reset, Play, Pause and Step need no new state. Content
+  schema 18, descriptor 7 and kit capability
+  `imported_transform_animation` deliver clip payloads. Scenes without
+  animation keep their prior versions and bytes. The editor adds a model
+  row summary, an Inspector Animation section and the guarded
+  `scene_animation_set` command and MCP tool (98 tools, 95 bridge
+  operations).
+- **Verified.** The full gate passed in 64.80 s. A real Blender 5.2.3
+  export imported and refreshed. The ordinary native editor journey on
+  hidden workspace 2 ran import, Place, Reset, Play, Pause, Save,
+  Refresh, export and normal close. The relocated archive ran headless
+  and its poses matched the shipped keys within 5e-8.
+- **Not verified.** Keyboard reach of the Inspector, any STDIO or actual
+  AI client run, play checks on animated scenes, validation-layer
+  activation, cost, physical human use and installation.
+
+See the [qualification evidence](evidence/IMPORTED-TRANSFORM-ANIMATION-2026-11-17.md).
+The next roadmap candidate is row 5, reusable composition and
+application continuity, to be selected against actual creator blockers.
 
 ## Identifier rename to Rot — 2026-11-17
 

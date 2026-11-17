@@ -2,9 +2,11 @@
 
 ## Current delivery roadmap — 2026-11-16
 
-**Latest engine milestone:** [packaged one-shot audio](plans/PACKAGED-AUDIO-FEEDBACK.md)
-is locally integrated after kinematic move-and-slide, repeatable play
+**Latest engine milestone:** [imported transform animation](plans/IMPORTED-TRANSFORM-ANIMATION.md)
+is implemented on `claude/rot-next-20261117` (2026-11-17) after packaged
+one-shot audio, kinematic move-and-slide, repeatable play
 checks, static GLB import, articulated assembly and authored player view.
+It is not yet merged into the cumulative branch.
 The [status](STATUS.md) records qualification of source and artifacts.
 The [post-GLB plan](#post-glb-priority-and-next-capabilities--2026-11-16)
 retains the recommended sequence. Follow-on slices are provisional.
@@ -158,12 +160,12 @@ capability remain primary, and checks do not certify a whole game.
 | 1 | Repeatable play checks | Locally verified through ordinary editor, guarded MCP and relocated runtime. [Acceptance](STATUS.md#repeatable-play-checks-integrated-locally--2026-11-16). |
 | 2 | Collision-aware movement | [Bounded kinematic slide](plans/KINEMATIC-MOVE-AND-SLIDE.md) covers one sphere against stationary primitive blockers. Existing overlap and typed state cover the selected occupancy workflow. Cross-binding event delivery remains a separate candidate when a creator workflow needs it. |
 | 3 | Packaged audio feedback | [One-shot WAV feedback](plans/PACKAGED-AUDIO-FEEDBACK.md) passed ordinary authoring, guarded MCP and relocated playback. The bounded output owner supports pause, resume, Stop and Reset. |
-| 4 | Imported transform animation | Build on accepted GLB generations with one named clip, play/pause/reset and reimport/export identity. Resolve source versus authored/runtime transform ownership first. Skeletal data/blending is separate; move it earlier only for a concrete required actor workflow. |
+| 4 | Imported transform animation | [Bounded node-transform clips](plans/IMPORTED-TRANSFORM-ANIMATION.md) passed real Blender import and Refresh, the ordinary native editor journey and relocated playback on 2026-11-17. [Evidence](evidence/IMPORTED-TRANSFORM-ANIMATION-2026-11-17.md). Keyboard reach of the Inspector, an actual MCP client run and cost measurement remain open. Skeletal data/blending is separate; move it earlier only for a concrete required actor workflow. |
 | 5 | Reusable composition and application continuity | Select prefab/override, scene transition, player save/settings, broader UI or gamepad slices from the actual missing workflow. Static placed GLB copies do not establish live prefabs, and editor Save is not player persistence. |
 | Alongside subsequent slices | Visual baseline and usability | Normal maps/tangents, metallic/environment lighting and transparency remain required candidate slices; evaluate the next asset's actual fidelity blocker. Preserve keyboard, focus, recovery, ordinary human and MCP parity in every slice. |
 | After representative content | Measured scale/LOD, then later ray tracing | Profile a named useful scene; choose culling/LOD/resource changes against equal-quality evidence. No unsupported Rust performance advantage. |
 
-Rows 4–5 remain provisional. After each slice,
+Row 5 remains provisional. After each slice,
 compare the next blocker with the remaining [foundation packages](plans/CREATOR-FOUNDATIONS.md)
 and record any reorder and rationale. A short acceptance fixture is not the
 substantial integrated test project: retain the user's foundation-first direction
