@@ -277,6 +277,8 @@ impl Host {
         self.poll_connection(ctx);
         #[cfg(unix)]
         self.keep_listening(ctx);
+        #[cfg(unix)]
+        self.grant_trusted_app();
         if self.input.bridge_serviced || self.input.human_pending || self.input.close_requested {
             return;
         }

@@ -1,7 +1,11 @@
 //! Exact-owner native binding UI; client registration remains separately fail-closed.
 #[cfg(unix)]
 mod native;
+#[cfg(unix)]
+mod prompt;
 use super::*;
+#[cfg(unix)]
+pub(super) use prompt::TrustUi;
 
 // Bounded CP2 consent seam; native wiring is a subsequent integration slice.
 #[allow(dead_code)]
@@ -157,6 +161,7 @@ impl Host {
                 grant,
                 &crate::discovery::directory(),
                 self.editor.session.path(),
+                Some(crate::trust::path()),
             )
         }
         .map_err(|e| e.to_string())?;

@@ -108,9 +108,17 @@ impl Adapter {
         let current =
             self.pinned == Some(editor.pid) && self.client.as_ref().is_some_and(|c| c.available());
         if !current {
-            self.client = Some(connection::Client::open(editor.record.clone()).map_err(|_| {
+            let mut client = connection::Client::open(editor.record.clone()).map_err(|_| {
                 domain_error("bridge_unavailable", "Rot Engine is still opening or another AI app is connected to it. Try again shortly.")
-            })?);
+            })?;
+            // Name the app and present its token, so an app the creator
+            // allowed always connects without asking again.
+            let name = self.client_name.clone().unwrap_or_else(|| "AI app".into());
+            match trust::Store::token_for(&trust::path(), &name) {
+                Ok(token) => client.identify(json!({"name":name,"token":token})),
+                Err(error) => eprintln!("rot-mcp: cannot read trusted AI apps: {error}"),
+            }
+            self.client = Some(client);
         }
         if self.pinned != Some(editor.pid) || self.binding.is_null() {
             self.binding = json!({"project_id":editor.pid.to_string(),"epoch":connection::unpredictable().expect("local randomness")});

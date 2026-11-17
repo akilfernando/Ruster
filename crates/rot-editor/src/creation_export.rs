@@ -380,6 +380,28 @@ impl Controller {
         self.output_directory.as_ref().map(DirectoryGrant::root)
     }
 
+    /// A trusted AI app builds into `<project>/Builds`, a real folder inside
+    /// the project. A `Builds` link, or one that resolves elsewhere, is refused.
+    pub(crate) fn grant_agent_destination(&mut self, project: &Path) -> Result<(), String> {
+        let project = project.canonicalize().map_err(|error| error.to_string())?;
+        let builds = project.join("Builds");
+        match std::fs::symlink_metadata(&builds) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err(format!("{} is not a folder", builds.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&builds).map_err(|error| error.to_string())?;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+        if builds.canonicalize().map_err(|error| error.to_string())? != builds {
+            return Err(format!("{} leads outside the project", builds.display()));
+        }
+        self.output_directory = Some(DirectoryGrant::new(&builds)?);
+        Ok(())
+    }
+    pub(crate) fn has_agent_destination(&self) -> bool {
+        self.output_directory.is_some()
+    }
     /// Only future agent writes lose their grant; an authorized publication
     /// retains its captured directory and cleanup owner until drained.
     pub(crate) fn revoke_agent_destination(&mut self) {
@@ -402,7 +424,7 @@ impl Controller {
         let directory = self
             .output_directory
             .as_ref()
-            .ok_or("MCP export needs explicit startup ROT_MCP_EXPORT_DIR authority")?;
+            .ok_or("Building needs an AI app the creator allowed and a saved project")?;
         // This is path construction only; authority is revalidated at start and
         // publication rather than introducing I/O into inspection/paint.
         Ok(directory.root().join(filename))

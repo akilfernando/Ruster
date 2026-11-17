@@ -38,6 +38,10 @@ mod recovery_worker;
 mod scene_editor;
 #[path = "../../support/strict_json.rs"]
 mod strict_json;
+#[cfg(unix)]
+#[path = "../../support/trust.rs"]
+#[allow(dead_code)]
+mod trust;
 mod ui;
 mod ui_kit;
 mod workspace;

@@ -7,6 +7,7 @@ mod color_tools;
 #[allow(dead_code)]
 #[path = "../../support/connection.rs"]
 mod connection;
+mod descriptions;
 mod discovered;
 #[path = "../../support/discovery.rs"]
 #[allow(dead_code)]
@@ -30,11 +31,16 @@ mod project_tools;
 mod runtime_tools;
 #[path = "../../support/strict_json.rs"]
 mod strict_json;
+#[path = "../../support/trust.rs"]
+#[allow(dead_code)]
+mod trust;
 mod view_tools;
 use serde_json::{json, Map, Value};
 use std::io::{self, BufRead, Write};
 
 const PROTOCOL: &str = "2025-06-18";
+/// The server instructions every client reads once. Keep them short.
+const INSTRUCTIONS: &str = "Rot Engine edits the scene open in the editor; the creator sees every change and shares Undo. Use scene_inspect to find object IDs, then the scene_* tools to change them; scene_* tools apply to the current scene unless you pass expected_session_token and expected_revision from an inspect. viewport_screenshot shows the result. Changes stay unsaved until scene_save. If several editors are open, call project_list and project_connect first.";
 const MAX_FRAME: usize = 64 * 1024;
 const MAX_OUTPUT: usize = 256 * 1024;
 
@@ -49,6 +55,8 @@ enum Lifecycle {
 #[derive(Default)]
 struct Server {
     lifecycle: Lifecycle,
+    /// clientInfo.name from initialize; names the AI app to the editor.
+    client_name: Option<String>,
 }
 
 fn rpc_error(id: Value, code: i64, message: &str) -> Value {
@@ -193,7 +201,7 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
             valid_arguments(name, &args)
         };
     }
-    if name == "project_list" {
+    if name == "project_list" || name == "project_disconnect" {
         return arguments.as_object().is_some_and(|o| o.is_empty());
     }
     if name == "project_connect" {
@@ -502,11 +510,6 @@ fn tools() -> Value {
         json!({"name":"project_connect","description":"Choose which open editor to work with, by project name, project folder, scene file or ID from project_list. A folder or scene file that is not open is opened in Rot Engine. Only needed when several editors are open or none is. With a registry configured, connect the exact registered project and include the returned connection in later calls.","inputSchema":object_schema(json!({"project":{"type":"string","minLength":1,"maxLength":1024}}),vec!["project"])}),
     ];
     for (name, description) in [
-        ("inspect", "Inspect the attached editor's session, authored configuration, revision and mutation guards. No history arrays, files or logs."),
-        ("edit", "Replace all three authored configuration fields. Requires the inspected identity/revision and clean human drafts. Unsaved; shares human undo; leaves preview unchanged."),
-        ("undo", "Undo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
-        ("redo", "Redo one authored operation in shared human/agent history, using the inspected identity/revision. Leaves preview unchanged."),
-        ("replay", "Replay the inspected authored snapshot in isolation for at most 10000 ticks; return one aggregate state. Does not alter editor playback."),
         ("asset_inspect", "Inspect bounded pages of project meshes/textures and static GLB model summaries with status and catalog revision. offset pages resources; model_offset independently pages models. Follow next_offset/model_next_offset; restart if catalog/session revisions change. No resource payloads."),
         ("asset_import", "Import one bounded project-relative OBJ mesh, bounded PCM16 WAV sound, supported PNG texture or self-contained static GLB model into the immediately persisted typed catalog. GLB rejects normal_policy/texture_role; supports a bounded named hierarchy and opaque nonmetallic materials with embedded PNGs. Unsupported semantics reject; place separately with scene_model_place. Optional normal_policy selects a distinct OBJ interpretation: flat or authored_when_complete; omitted preserves flat. PNG-only texture_role selects base_color_srgb or roughness_linear; omission preserves base color. The two options cannot be combined. Another interpretation needs a distinct asset ID; Refresh preserves the accepted interpretation. Requires scene/session/catalog revisions. Does not assign it or save the scene."),
         ("asset_refresh", "Reimport one registered mesh, texture or static GLB model, retaining last-good accepted content on failure. Model refresh accepts geometry/normal/UV/image changes only with the same named structure, transforms and material settings; it updates resources without rewriting placed scene copies. Catalog persists independently of scene history."),
@@ -623,21 +626,144 @@ fn tools() -> Value {
     tools.extend(hud_tools::list());
     tools.extend(player_view_tools::list());
     tools.extend(animation_tools::list());
-    tools.push(json!({"name":"project_disconnect","description":"Disconnect this exact epoch. Retains enrollment but invalidates queued work; reconnect only through a later explicit project_connect.","inputSchema":object_schema(json!({}),vec!["connection"])}));
-    for tool in &mut tools {
-        if !matches!(
-            tool["name"].as_str(),
-            Some("project_list" | "project_connect")
-        ) {
-            tool["inputSchema"]["properties"]["connection"] = object_schema(
-                json!({"project_id":{"type":"string","minLength":1,"maxLength":128},"epoch":{"type":"string","pattern":"^[0-9a-f]{64}$"}}),
-                vec!["project_id", "epoch"],
-            );
-            let description = tool["description"].as_str().unwrap_or("").to_string();
-            tool["description"] = json!(format!("{description} Registered-project calls MUST include the exact connection returned by project_connect, including reads. Never reuse a prior epoch or infer current binding."));
+    tools.push(json!({"name":"viewport_screenshot","description":"","inputSchema":object_schema(json!({}),vec![]),"annotations":{"readOnlyHint":true}}));
+    tools.push(json!({"name":"project_disconnect","description":"","inputSchema":object_schema(json!({}),vec![])}));
+    json!({"tools":tools})
+}
+
+/// Arguments the adapter fills in from the open scene when a call leaves them
+/// out, so a client need not read before every edit.
+const SCENE_GUARDS: [(&str, &str); 2] = [
+    ("expected_session_token", "session_token"),
+    ("expected_revision", "revision"),
+];
+
+/// What tools/list shows: the plain description, and only the schema a client
+/// needs to form a call. Bounds and exact shapes are still checked by
+/// valid_arguments and the editor.
+fn listed() -> Value {
+    fn compact(value: &mut Value) {
+        match value {
+            Value::Object(map) => {
+                for key in [
+                    "minLength",
+                    "maxLength",
+                    "pattern",
+                    "additionalProperties",
+                    "minItems",
+                    "maxItems",
+                    "uniqueItems",
+                    "minimum",
+                    "maximum",
+                    "exclusiveMinimum",
+                    "exclusiveMaximum",
+                    "description",
+                ] {
+                    map.remove(key);
+                }
+                map.values_mut().for_each(compact);
+            }
+            Value::Array(items) => items.iter_mut().for_each(compact),
+            _ => {}
         }
     }
-    json!({"tools":tools})
+    let mut listed = tools();
+    for tool in listed["tools"].as_array_mut().unwrap() {
+        let name = tool["name"].as_str().unwrap().to_owned();
+        let schema = &mut tool["inputSchema"];
+        if let Some(properties) = schema["properties"].as_object_mut() {
+            for (guard, _) in SCENE_GUARDS {
+                properties.remove(guard);
+            }
+        }
+        if let Some(required) = schema["required"].as_array_mut() {
+            required.retain(|r| !SCENE_GUARDS.iter().any(|(guard, _)| r == *guard));
+        }
+        compact(schema);
+        let read_only = tool["annotations"]["readOnlyHint"] == true;
+        let object = tool.as_object_mut().unwrap();
+        object.remove("annotations");
+        if read_only {
+            object.insert("annotations".into(), json!({"readOnlyHint":true}));
+        }
+        object.insert(
+            "description".into(),
+            json!(descriptions::DESCRIPTIONS
+                .iter()
+                .find(|(n, _)| *n == name)
+                .map_or("", |(_, d)| *d)),
+        );
+    }
+    listed
+}
+
+/// Fill in left-out scene guards from the open scene.
+fn fill_scene_guards(
+    name: &str,
+    arguments: &mut Value,
+    bridge: &mut impl FnMut(&str, &Value) -> Value,
+) {
+    static GUARDED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
+    let guarded = GUARDED.get_or_init(|| {
+        tools()["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|t| {
+                t["inputSchema"]["required"]
+                    .as_array()
+                    .is_some_and(|r| r.iter().any(|f| f == "expected_revision"))
+            })
+            .map(|t| t["name"].as_str().unwrap().to_owned())
+            .collect()
+    });
+    let Some(map) = arguments.as_object() else {
+        return;
+    };
+    if !guarded.iter().any(|g| g == name)
+        || SCENE_GUARDS
+            .iter()
+            .all(|(guard, _)| map.contains_key(*guard))
+    {
+        return;
+    }
+    let current = bridge("viewport_inspect", &json!({}));
+    if current["ok"] != true {
+        return;
+    }
+    for (guard, field) in SCENE_GUARDS {
+        if arguments.get(guard).is_none() {
+            arguments[guard] = current["result"][field].clone();
+        }
+    }
+}
+
+/// viewport_capture_start, then viewport_capture_inspect until the image is
+/// ready, in one call.
+fn screenshot(bridge: &mut impl FnMut(&str, &Value) -> Value) -> Value {
+    let view = bridge("viewport_inspect", &json!({}));
+    if view["ok"] != true {
+        return view;
+    }
+    let started = bridge(
+        "viewport_capture_start",
+        &json!({"expected_session_token":view["result"]["session_token"],"expected_revision":view["result"]["revision"],"expected_view_revision":view["result"]["view_revision"]}),
+    );
+    if started["ok"] != true {
+        return started;
+    }
+    let capture = json!({"capture_id":started["result"]["capture_id"]});
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    loop {
+        let result = bridge("viewport_capture_inspect", &capture);
+        if result["ok"] != true
+            || result["result"]["status"] != "pending"
+            || std::time::Instant::now() >= deadline
+        {
+            return result;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
 }
 
 impl Server {
@@ -702,10 +828,14 @@ impl Server {
                     ))
                 } else {
                     self.lifecycle = Lifecycle::Initializing;
+                    self.client_name = params["clientInfo"]["name"]
+                        .as_str()
+                        .filter(|name| trust::valid_name(name))
+                        .map(str::to_owned);
                     Ok(
                         json!({"protocolVersion":PROTOCOL,"capabilities":{"tools":{}},
                         "serverInfo":{"name":"rot-mcp","version":env!("CARGO_PKG_VERSION")},
-                        "instructions":"Project access uses deliberate persistent local connector/project enrollment or separate legacy manual owner approval. Use project_connect with the exact registered project; copy its returned connection project/epoch into every following call, including reads. Never infer a current target for an old conversation. Explicit project_disconnect invalidates that epoch; a later explicit project_connect needs no server restart. A native-only connection is complete without a browser. With an explicitly installed project registry, project_list contains only registered records and selection is not consent. initialize/tools/list alone grant no authority; keep the fixed selected locator. New/Open/Restore, disconnect, owner loss/restart or a project-root rebase revoke access and require fresh consent. One outstanding request at a time. Inspect before mutations; use exact returned session token/revision as concurrency guards, not credentials. No automatic retries. Cancellation cannot roll back already authorized publication; after unknown outcomes inspect current state/receipts only through an approved connection. Edits remain unsaved until explicit persistence. Generic scene_save requires a separate editor-granted directory and session/revision/persistence tokens; legacy configuration Save remains human-only. Creator export requires a human-selected executable runtime kit and separate output grant; inspect its operation ID rather than restarting. Asset catalog changes persist immediately."}),
+                        "instructions":INSTRUCTIONS}),
                     )
                 }
             }
@@ -718,7 +848,7 @@ impl Server {
                     .as_object()
                     .is_some_and(|params| exact_keys(params, &[], &["_meta"]))
                 {
-                    Ok(tools())
+                    Ok(listed())
                 } else {
                     Err((-32602, "No cursor or other parameters are supported"))
                 }
@@ -728,7 +858,7 @@ impl Server {
                     unreachable!()
                 };
                 let name = params.get("name").and_then(Value::as_str).unwrap_or("");
-                let arguments = params
+                let mut arguments = params
                     .get("arguments")
                     .cloned()
                     .unwrap_or_else(|| json!({}));
@@ -737,11 +867,7 @@ impl Server {
                         "project_list",
                         "project_connect",
                         "project_disconnect",
-                        "inspect",
-                        "edit",
-                        "undo",
-                        "redo",
-                        "replay",
+                        "viewport_screenshot",
                         "scene_inspect",
                         "scene_transform",
                         "scene_transform_many",
@@ -781,7 +907,19 @@ impl Server {
                         && !animation_tools::supported(name)
                 {
                     Err((-32602, "Unknown tool or tools/call parameters"))
-                } else if !valid_arguments(name, &arguments) {
+                } else if name == "viewport_screenshot" {
+                    if arguments.as_object().is_some_and(|m| m.is_empty()) {
+                        Ok(tool_result(screenshot(&mut bridge)))
+                    } else {
+                        Ok(tool_result(domain_error(
+                            "invalid_arguments",
+                            "viewport_screenshot takes no arguments",
+                        )))
+                    }
+                } else if !{
+                    fill_scene_guards(name, &mut arguments, &mut bridge);
+                    valid_arguments(name, &arguments)
+                } {
                     Ok(tool_result(domain_error("invalid_arguments", "Arguments must match the tool schema; u64 values are canonical decimal strings and transform vectors contain exactly three JSON numbers")))
                 } else {
                     Ok(tool_result(bridge(name, &arguments)))
@@ -855,6 +993,8 @@ struct Adapter {
     discovery: Option<std::path::PathBuf>,
     /// The editor chosen with project_connect, by process ID.
     pinned: Option<u32>,
+    /// The AI app's name, presented with its trust token.
+    client_name: Option<String>,
 }
 impl Adapter {
     fn startup_failure(&self, source: StartupResponseSource) -> Value {
@@ -950,9 +1090,9 @@ impl Adapter {
                 if name != "project_disconnect" && self.startup_error.is_some() {
                     return self.startup_failure(StartupResponseSource::CachedFailure);
                 }
-                let Some(binding) = arguments.get("connection") else {
-                    return domain_error("connection_required", "Supply the explicit project/epoch returned by project_connect; never infer the current conversation target.");
-                };
+                // The connection is optional: left out, the call goes to the
+                // project chosen with project_connect.
+                let binding = arguments.get("connection").unwrap_or(&self.binding);
                 if binding != &self.binding {
                     return domain_error("connection_changed", "Old project/epoch refused before dispatch. Explicit connect does not retarget queued calls.");
                 }
@@ -1028,10 +1168,15 @@ impl Adapter {
     }
 }
 
-fn run(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
+fn run(
+    reader: &mut impl BufRead,
+    writer: &mut impl Write,
+    client: Option<String>,
+) -> io::Result<()> {
     let mut server = Server::default();
     let mut adapter = Adapter::configured();
     while let Some(frame) = read_frame(reader, MAX_FRAME)? {
+        adapter.client_name = client.clone().or_else(|| server.client_name.clone());
         if let Some(response) = server.handle(&frame, |op, args| adapter.call(op, args)) {
             let serialized = response.to_string();
             if serialized.len() + 1 > MAX_OUTPUT {
@@ -1047,8 +1192,19 @@ fn run(reader: &mut impl BufRead, writer: &mut impl Write) -> io::Result<()> {
     Ok(())
 }
 
+/// `rot-mcp [--client NAME]`. NAME identifies the AI app to the editor;
+/// without it, the MCP client's own name is used.
 fn main() {
-    if let Err(error) = run(&mut io::stdin().lock(), &mut io::stdout().lock()) {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    let client = match args.as_slice() {
+        [] => None,
+        [flag, name] if flag == "--client" && trust::valid_name(name) => Some(name.clone()),
+        _ => {
+            eprintln!("usage: rot-mcp [--client NAME]");
+            std::process::exit(2);
+        }
+    };
+    if let Err(error) = run(&mut io::stdin().lock(), &mut io::stdout().lock(), client) {
         eprintln!("rot-mcp: {error}");
         std::process::exit(1);
     }
@@ -1072,7 +1228,8 @@ mod tests {
         );
         assert_eq!(
             adapter.call("scene_inspect", &json!({}))["error"]["code"],
-            "connection_required"
+            "bridge_unavailable",
+            "a left-out connection goes to the chosen project"
         );
         let binding = adapter.binding.clone();
         assert_eq!(
@@ -1345,11 +1502,55 @@ mod tests {
     }
 
     #[test]
+    fn tool_list_is_small_and_every_tool_is_described() {
+        let mut server = ready();
+        let listed = request(&mut server, "tools/list", json!({}));
+        let bytes = listed.to_string().len();
+        assert!(bytes < 40 * 1024, "tools/list is {bytes} bytes");
+        for tool in listed["result"]["tools"].as_array().unwrap() {
+            let description = tool["description"].as_str().unwrap();
+            assert!(
+                !description.is_empty() && description.len() <= 200,
+                "{}",
+                tool["name"]
+            );
+        }
+    }
+
+    // Left-out scene guards come from the open scene; supplied ones are kept.
+    #[test]
+    fn edits_without_guards_apply_to_the_current_scene() {
+        let mut server = ready();
+        let mut seen = Vec::new();
+        let edit = json!({"object_id":"cube","transform":{"translation":[1,2,3],"rotation":[0,0,0],"scale":[1,1,1]}});
+        server.handle(json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"scene_transform","arguments":edit}}).to_string().as_bytes(), |name, args| {
+            seen.push((name.to_owned(), args.clone()));
+            if name == "viewport_inspect" {
+                json!({"ok":true,"result":{"session_token":"s:1","revision":"7","view_revision":"2"}})
+            } else {
+                json!({"ok":true,"result":{}})
+            }
+        });
+        assert_eq!(seen[0].0, "viewport_inspect");
+        assert_eq!(seen[1].1["expected_session_token"], "s:1");
+        assert_eq!(seen[1].1["expected_revision"], "7");
+        let mut guarded = edit.clone();
+        guarded["expected_session_token"] = json!("old");
+        guarded["expected_revision"] = json!("3");
+        let mut calls = Vec::new();
+        server.handle(json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"scene_transform","arguments":guarded}}).to_string().as_bytes(), |name, args| {
+            calls.push((name.to_owned(), args.clone()));
+            json!({"ok":true,"result":{}})
+        });
+        assert_eq!(calls, vec![("scene_transform".to_owned(), guarded)]);
+    }
+
+    #[test]
     fn schemas_and_validation_prevent_unknown_or_rounded_arguments() {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 98);
+        assert_eq!(tools.len(), 94);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1361,11 +1562,6 @@ mod tests {
             [
                 "project_list",
                 "project_connect",
-                "inspect",
-                "edit",
-                "undo",
-                "redo",
-                "replay",
                 "asset_inspect",
                 "asset_import",
                 "asset_refresh",
@@ -1456,10 +1652,11 @@ mod tests {
                 "player_view_inspect",
                 "scene_player_view_set",
                 "scene_animation_set",
+                "viewport_screenshot",
                 "project_disconnect"
             ]
         );
-        for tool in tools {
+        for tool in super::tools()["tools"].as_array().unwrap() {
             assert_eq!(tool["inputSchema"]["additionalProperties"], false);
         }
         assert_eq!(
@@ -1507,7 +1704,7 @@ mod tests {
             let response = request(
                 &mut server,
                 "tools/call",
-                json!({"name":"undo","arguments":args}),
+                json!({"name":"scene_undo","arguments":args}),
             );
             assert_eq!(response["result"]["isError"], true);
             assert_eq!(
@@ -2069,8 +2266,8 @@ mod tests {
         let mut server = ready();
         let arguments = json!({"expected_session_token":"old","expected_revision":"9"});
         let domain = json!({"ok":false,"error":{"code":"stale_session","message":"Inspect again","session_token":"current","revision":"10"}});
-        let response = server.handle(json!({"jsonrpc":"2.0","id":"request","method":"tools/call","params":{"name":"undo","arguments":arguments}}).to_string().as_bytes(), |name, args| {
-            assert_eq!(name, "undo"); assert_eq!(args, &arguments); domain.clone()
+        let response = server.handle(json!({"jsonrpc":"2.0","id":"request","method":"tools/call","params":{"name":"scene_undo","arguments":arguments}}).to_string().as_bytes(), |name, args| {
+            assert_eq!(name, "scene_undo"); assert_eq!(args, &arguments); domain.clone()
         }).unwrap();
         assert_eq!(response["id"], "request");
         assert_eq!(response["result"]["structuredContent"], domain);
@@ -2081,9 +2278,9 @@ mod tests {
         assert_eq!(text, domain);
         let response = server
             .handle(
-                br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"inspect"}}"#,
+                br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"scene_inspect"}}"#,
                 |name, args| {
-                    assert_eq!(name, "inspect");
+                    assert_eq!(name, "scene_inspect");
                     assert_eq!(args, &json!({}));
                     json!({"ok":true,"result":{"revision":"10"}})
                 },
@@ -2097,7 +2294,7 @@ mod tests {
         let coordinate = 4.0543599477693704e-7_f64;
         let response = server
             .handle(
-                br#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"inspect"}}"#,
+                br#"{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{"name":"scene_inspect"}}"#,
                 |_, _| {
                     serde_json::from_slice(
                         br#"{"ok":true,"result":{"point":[4.0543599477693704e-7]}}"#,

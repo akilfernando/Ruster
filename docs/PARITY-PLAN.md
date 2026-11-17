@@ -212,7 +212,7 @@ throttled and do not count). Renderer numbers come from `rot-render
 | Enter Play mode, small scene | 300 ms | 1 | 70 ms for Reset then Play (Reset 35 ms) |
 | AI edit of one object, round trip | 30 ms at the 95th percentile | 1 | `scene_transform` 3.8 ms p50, 6.6 ms p95 over 200 calls (adapter stdio to editor and back) |
 | AI screenshot | 250 ms | 1 | 58 ms median, 70 ms worst of 10 (`viewport_capture_start` until `viewport_capture_inspect` is ready) |
-| MCP tool list | 40 KB in Phase 1, 15 KB after Phase 2 | 1 | **Over:** 145 KB, 98 tools |
+| MCP tool list | 40 KB in Phase 1, 15 KB after Phase 2 | 1 | 39 KB, 94 tools (A-06, 2026-11-17; was 145 KB) |
 | Editor memory, empty project | 300 MB | 1 | Hub 284 MB RSS (207 MB PSS); 3-object scene 293 MB RSS (214 MB PSS) |
 | Editor UI frame, 5,000 objects, excluding 3D | 4 ms at the 95th percentile | 2 | |
 | Scene view, 5,000 objects, about 1 M triangles, 1080p | 60 fps | 2 | 256 cubes today (scene cap): CPU prepare 0.13 ms p95, GPU scene pass 0.10 ms p95 |

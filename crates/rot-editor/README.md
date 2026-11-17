@@ -289,19 +289,7 @@ static-arrangement tick toolbar. Standalone `rot-scene run` and isolated
 `scene_replay` still provide their original static lifecycle replay; they do not
 execute behavior sources.
 
-For native MCP, start scene mode with `ROT_MCP_ENABLE=1`, then attach the
-adapter using the printed private socket as described above. Scene mode uses
-`scene_inspect`, `scene_transform`, `scene_undo`, `scene_redo`, `scene_replay`, plus the object-lifecycle commands described below.
-Inspection pages at most16 objects; all edits require the exact live session
-identity/revision and resolved human drafts/dialogs. From the repository root:
-
-```sh
-ROT_MCP_SOCKET=/absolute/private-directory/editor.sock \
-  uv run --with mcp==2.3.0 scripts/mcp_scene_demo.py
-```
-
-Use a disposable scene. This official-SDK demo checks inspection/replay,
-transform diff, stale/invalid rejection and shared undo. It does not save. See
+AI apps connect through `rot-mcp` with no setup; see the [MCP guide](../rot-mcp/README.md). See
 the [scene API](../rot-scene/README.md), [renderer guide](../rot-render/README.md)
 and [M5 evidence](../../docs/evidence/M5.md) for exact scope and tested conditions.
 
@@ -393,9 +381,7 @@ Native MCP adds `asset_inspect`, `asset_import`, `asset_refresh`, `asset_rename`
 `scene_mesh`, `scene_model_place` and `shader_refresh`. Use the exact session/scene revision and the
 separate catalog/shader revision returned by inspection. Paths stay inside the
 explicit project root; responses contain metadata/status rather than mesh arrays
-or shader source. A reproducible official-SDK smoke is
-`uv run --with mcp==2.3.0 scripts/mcp_content_demo.py` with `ROT_MCP_SOCKET`
-set, against a disposable scene whose first object is still a procedural cube.
+or shader source.
 
 
 ### Generic scene construction
@@ -649,7 +635,7 @@ The footer shows one concise first-line summary, with active progress taking pri
 
 Native MCP is opt-in. `ROT_MCP_ENABLE=1` permits attachment; it does not grant scene-save authority. Set `ROT_MCP_SAVE_DIR` to one existing project directory at startup to additionally permit guarded Save/fresh SaveAs directly there. Both paths use the editor's Session persistence, full baseline/conflict checks and recovery/working-copy coordination. Agent saves reject pending human fields/gestures/dialogs instead of applying them. Human saves advance the inspected persistence token, preventing a stale agent from following a changed SaveAs association. The explicit directory grant survives human-owned New/Open/Restore, with fresh tokens and an empty receipt for each scene incarnation; it never expands to a different project directory. Restart to choose a different directory grant.
 
-See the [adapter's save workflow](../rot-mcp/README.md#explicit-scene-save-authority) for tools, fresh filename policy, committed receipts, timeout uncertainty and current scope. This first parity slice does not add arbitrary file access, automatic project replacement or packaging tools.
+See the [adapter's save workflow](../rot-mcp/README.md#working-with-the-scene) for tools, fresh filename policy, committed receipts, timeout uncertainty and current scope. This first parity slice does not add arbitrary file access, automatic project replacement or packaging tools.
 
 ## Export your creation
 
@@ -659,7 +645,7 @@ See the [adapter's save workflow](../rot-mcp/README.md#explicit-scene-save-autho
 
 The Inspector's **Color** fields edit the active object's tint through shared scene history. Enter applies, Escape cancels and Tab traverses fields/actions. Invalid Enter preserves both text and focus for repair. Alpha is retained in the document; the current viewport uses opaque surfaces. Color drafts participate in guarded saving and recovery, so another agent cannot overwrite unfinished human color text.
 
-Native MCP now supports actual viewport thumbnails, guarded camera/selection changes and the same authored color operation. See the [native MCP guide](../rot-mcp/README.md#viewport-observation-navigation-and-color). Saved headings follow the document filename without changing stable scene identity. **Use current view** in Export explicitly freezes initial application framing; it does not turn every working camera movement into scene data. See the [creator export guide](../../docs/CREATOR-WORKFLOW.md).
+Native MCP now supports actual viewport thumbnails, guarded camera/selection changes and the same authored color operation. See the [native MCP guide](../rot-mcp/README.md#working-with-the-scene). Saved headings follow the document filename without changing stable scene identity. **Use current view** in Export explicitly freezes initial application framing; it does not turn every working camera movement into scene data. See the [creator export guide](../../docs/CREATOR-WORKFLOW.md).
 
 ### Author a player view
 

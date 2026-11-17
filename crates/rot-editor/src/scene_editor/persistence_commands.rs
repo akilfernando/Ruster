@@ -34,7 +34,12 @@ impl SaveGrant {
         self.0.root()
     }
     fn validate(&self) -> Result<&Path> {
-        self.0.validate().map_err(|_| error("save_permission_required", "Save directory changed or became unavailable; restart with an explicit valid ROT_MCP_SAVE_DIR grant"))
+        self.0.validate().map_err(|_| {
+            error(
+                "save_permission_required",
+                "The project folder changed or became unavailable; reconnect the AI app",
+            )
+        })
     }
 }
 
@@ -56,6 +61,11 @@ fn filename(value: &Value) -> Result<&str> {
         return Err(error("invalid_filename", "Use a visible fresh .json leaf name of at most 128 UTF-8 bytes, without '/', '\\', control characters or leading/trailing whitespace"));
     }
     Ok(name)
+}
+/// The real folder holding a file, so a scene opened by another path to the
+/// same folder still matches the save grant.
+fn canonical_parent(path: &Path) -> Option<PathBuf> {
+    path.parent()?.canonicalize().ok()
 }
 fn reject_symlink(path: &Path) -> Result<()> {
     match path.symlink_metadata() {
@@ -83,7 +93,7 @@ impl SceneEditor {
         Ok(())
     }
     fn granted_save_root(&self) -> Result<&Path> {
-        self.save_grant.as_ref().ok_or_else(|| error("save_permission_required", "Restart with ROT_MCP_ENABLE=1 and an explicit ROT_MCP_SAVE_DIR; an opened scene does not grant write authority"))?.validate()
+        self.save_grant.as_ref().ok_or_else(|| error("save_permission_required", "Saving needs an AI app the creator allowed and a scene saved once in the editor"))?.validate()
     }
     fn associated_save_path(&self, root: &Path) -> Result<PathBuf> {
         let path = self.session.path().ok_or_else(|| {
@@ -92,7 +102,7 @@ impl SceneEditor {
                 "This scene has no saved association; provide a fresh filename",
             )
         })?;
-        if path.parent() != Some(root) {
+        if canonical_parent(path).as_deref() != Some(root) {
             return Err(error("save_permission_required", "The associated scene is outside the granted save directory; provide a fresh filename within the grant"));
         }
         reject_symlink(path)?;
@@ -162,7 +172,7 @@ impl SceneEditor {
             .ok_or_else(|| {
                 error(
                     "save_permission_required",
-                    "Restart with an explicit ROT_MCP_SAVE_DIR grant",
+                    "Saving needs an AI app the creator allowed and a scene saved once in the editor",
                 )
             })?
             .0
@@ -178,7 +188,7 @@ impl SceneEditor {
                     "This scene has no saved association; provide a fresh filename",
                 )
             })?;
-            if associated.parent() != Some(root) {
+            if canonical_parent(associated).as_deref() != Some(root) {
                 return Err(error("save_permission_required", "Associated scene is outside the granted save directory; provide a fresh filename within the grant"));
             }
             associated.to_path_buf()
