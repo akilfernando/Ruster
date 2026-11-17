@@ -28,6 +28,12 @@ package in your lane under **Now**. How to work is in the
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
+- MCP tool list is 145 KB for 98 tools against a 40 KB Phase 1 budget
+  (P-01, 2026-11-17). Shorten descriptions and merge tools.
+- Inspector number fields have no drag-to-scrub; Unity and Unreal scrub by
+  dragging the field label (P-01, 2026-11-17).
+- An open scene repaints about 3 frames per 10 s while idle; the hub draws
+  none (P-01, 2026-11-17).
 - The legacy logistics prototype (`rot-core`, `rot-cli`, `rot-viewer`,
   `rot-script`, `examples/yard-app`, editor `ui.rs` and `model.rs`, five
   legacy MCP tools) is unused by the scene editor. Proposal: delete it.
@@ -561,7 +567,7 @@ verification table.
 ### Tools lane
 
 #### P-01 · Baseline performance numbers — S — ready
-Status: in progress — Claude Opus 5.5 (Tools lane helper), 2026-11-17
+Status: done — 2026-11-17, f8d6de6
 **Outcome.** Known starting numbers for the
 [budgets](PARITY-PLAN.md#5-performance-budgets).
 **Facts.** `rot-render` has a benchmark binary (`--objects 3|256 --frames
@@ -574,7 +580,7 @@ benchmark scenes after C-02.
 could not be measured.
 
 #### P-02 · One-command local install — S — ready
-Status: open
+Status: done — 2026-11-17, e6a1ee8
 **Outcome.** The user can try each finished package.
 **Do.** `scripts/install_local.py`: build release `rot-editor` and
 `rot-mcp`, install them with the desktop entry and icon under `~/.local`,

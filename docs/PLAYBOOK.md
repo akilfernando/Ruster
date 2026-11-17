@@ -142,7 +142,7 @@ Rules that keep the second workflow good:
 | One test while iterating | `cargo test -p <crate> <name>` | Constantly |
 | See and drive the editor UI | `cargo build -p rot-editor --features inspection` then `python3 scripts/ui_drive.py --help` | Every UI change |
 | Keyboard reach | `python3 scripts/ui_drive.py … tabwalk:60` and read the order; add `shot:` steps to see the focus ring | Every new panel or dialog |
-| Speed | Release build on the reference scenes (see the performance section of the plan) | When touching rendering, scene updates, import or the per-frame UI |
+| Speed | `python3 scripts/measure_budgets.py --foreground` on a release build, user away (see the performance section of the plan) | When touching rendering, scene updates, import or the per-frame UI |
 | Real AI client | Connect Claude Code or Codex to the running editor and ask it to perform the task | When adding or changing MCP tools |
 
 Tests: write the few that protect behavior a creator depends on. Prefer one

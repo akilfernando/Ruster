@@ -58,6 +58,11 @@ cd Rot Engine
 cargo run --locked -p rot-editor -- --scene examples/arrangement.scene.json
 ```
 
+To install the editor for your user, with a **Rot Engine** entry in the app
+launcher, run `python3 scripts/install_local.py`. It builds a release
+`rot-editor` and `rot-mcp` into `~/.local/bin` and keeps the version it
+replaced; `python3 scripts/install_local.py --rollback` restores that.
+
 Run `cargo run --locked -p rot-editor` for a blank creation workspace. Scene sources, workspace preferences and local recovery records have separate lifetimes; see the [editor guide](crates/rot-editor/README.md).
 
 Select an object in the hierarchy or click a cube. Edit a Position, Rotation or Scale component, then press Enter or choose **Apply transform components**. Escape reverts a pending component edit; invalid text stays available for correction. Right-drag to orbit, scroll to zoom, and use **Fit** to frame the scene. **Edit → Undo** reverses an authored change. Use **File → Save as…** to keep experiments separate from the checked-in example.

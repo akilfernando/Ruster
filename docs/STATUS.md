@@ -33,8 +33,10 @@ assets, opaque materials only). The honest inventory is in the
 
 ## Installed on this machine
 
-The installed editor and MCP adapter are the 2026-11-16 build under their old
-names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
+`rot-editor` and `rot-mcp` from 2026-11-17 (P-01 tip) are in `~/.local/bin`,
+with the **Rot Engine** launcher entry `org.rot.editor.desktop`. Reinstall
+with `python3 scripts/install_local.py`. The pre-rename `ruster-*` build is
+kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Known problems
 
@@ -44,8 +46,7 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
   variables the code no longer reads (A-06).
 - Play checks refuse scenes that use groups, so they cannot cover an animated
   model.
-- Outside the repository, still using old names: the installed binaries,
-  two MCP entries in `~/.codex/config.toml`,
+- Outside the repository, still using old names: two MCP entries in `~/.codex/config.toml`,
   and the projects in `~/Projects/Ruster-Creations`, which will not load in a
   build from this branch until their files are renamed.
 
@@ -54,6 +55,16 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
 - 2026-11-17 · S-01: Tab and Shift+Tab walk menu → Assets → toolbar →
   Hierarchy → Inspector and back to File; the focused control scrolls into
   view. The viewport, panel backdrops and resize handles are no longer stops.
+- 2026-11-17 · One-command local install (P-02): `scripts/install_local.py`
+  builds and installs the editor, adapter, launcher entry and icon under
+  `~/.local`, keeping the replaced version for `--rollback`. Checked here:
+  install, launch from the entry's Exec on workspace 2, rollback (old files
+  byte-identical), reinstall. The launcher menu itself was not clicked.
+- 2026-11-17 · Phase 1 performance baseline (P-01): numbers are beside the
+  [budgets](PARITY-PLAN.md#5-performance-budgets); re-run with
+  `scripts/measure_budgets.py --foreground`. Inside budget: start, open,
+  idle CPU, Play, AI edit (6.6 ms p95), AI screenshot, memory (just). Over:
+  MCP tool list, 145 KB against 40 KB. Gizmo latency not measured.
 - 2026-11-17 · Working framework: [PLAYBOOK](PLAYBOOK.md),
   [parity plan](PARITY-PLAN.md), [BACKLOG](BACKLOG.md),
   [UX standards](UX-STANDARDS.md), and `scripts/ui_drive.py` for driving and
@@ -70,4 +81,4 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
 - No person has walked through this branch's editor. All UI checks used
   injected events on a hidden workspace.
 - No real AI client has been run against this branch.
-- The performance budgets in the plan are targets; none is measured yet.
+- Gizmo drag latency is not measured (injected drags do not engage the gizmo).
