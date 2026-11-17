@@ -162,7 +162,7 @@ This is a CP1 test setup, not a complete released-user onboarding flow. CLI disc
 
 ## Viewport observation, navigation and color
 
-Generic-scene sessions also expose `viewport_inspect`, `viewport_camera`, `scene_select`, `viewport_capture_start`, `viewport_capture_inspect`, `viewport_capture_pick` and `scene_color`. Use `tools/list` for the exact schemas. Current source lists 93 tools, including `scene_primitive` and the HUD panel tools below.
+Generic-scene sessions also expose `viewport_inspect`, `viewport_camera`, `scene_select`, `viewport_capture_start`, `viewport_capture_inspect`, `viewport_capture_pick` and `scene_color`. Use `tools/list` for the exact schemas. Current source lists 98 tools, including `scene_primitive` and the HUD panel tools below.
 
 `viewport_inspect` returns the viewport mode, Scene View camera, selection and independent `view_revision`. The camera field is null in Player View; query its committed framing with `player_view_inspect`. Camera/selection changes require its exact session token, authored revision and view revision. A human's newer navigation rejects an old request. Finish drafts/dialogs/gestures first. These transient controls preserve scene Undo and runtime transforms. `scene_color` is a shared authored RGBA operation with scene revision/Undo; channels are finite0–1. The direct Inspector has matching Apply/Enter and Cancel/Escape behavior. Alpha is stored; the renderer remains opaque.
 
@@ -196,6 +196,22 @@ presentation. Use the existing runtime Reset, Play, Pause and Step calls to
 preview the captured scene, including guarded action frames when stepping.
 Export the saved Scene21 view with a kit advertising `authored_player_view`.
 Omit `initial_camera` when the scene has a view.
+
+## Imported transform animation
+
+`asset_inspect` model summaries list each clip's `name`, `id`, `duration` in
+seconds and up to 16 animated node properties (`target_count` and
+`targets_truncated` report the rest). `scene_inspect` pages `animations` with
+`owner_id`, `clip_id`, `looping` and `target_count`.
+
+`scene_animation_set` requires `expected_session_token`, `expected_revision`
+and `owner_id` plus exactly one of `clip_id` (optional boolean `looping`) or
+`remove: true`. Only a placement root created by `scene_model_place` has a
+binding; other owners refuse with `animation_unbound`. A clip from another
+model, or one animating a node the placement does not map, refuses with
+`invalid_clip`. An unresolved current clip refuses `clip_unavailable`, and
+removal still works. Each change is one shared Undo step; runtime motion uses
+it after preview Reset.
 
 ## Explicit scene-save authority
 

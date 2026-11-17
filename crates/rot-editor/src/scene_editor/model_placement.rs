@@ -216,7 +216,20 @@ impl super::SceneEditor {
                     || model.id.to_lowercase().contains(&query)
                     || model.source.to_lowercase().contains(&query)
             })
-            .map(|model| (model.id.clone(), model.source.clone(), model.hash.clone()))
+            .map(|model| {
+                // At most MAX_MODEL_CLIPS short rows; key data stays in the store.
+                let clips: Vec<_> = model
+                    .clips
+                    .iter()
+                    .map(|(name, clip)| format!("{name} ({:.2} s)", clip.duration))
+                    .collect();
+                (
+                    model.id.clone(),
+                    model.source.clone(),
+                    model.hash.clone(),
+                    clips,
+                )
+            })
             .collect();
         if rows.is_empty() {
             return;
@@ -229,11 +242,26 @@ impl super::SceneEditor {
             .id_salt("content_models_scroll")
             .max_height(150.0)
             .show(ui, |ui| {
-                for (id, source, hash) in rows {
+                for (id, source, hash, clips) in rows {
                     ui.push_id(&id, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            ui.label(format!("{id} · Model")).on_hover_text(format!(
-                                "Source: {source}\nAccepted revision: {hash}"
+                            let (kind, animation) = match clips.len() {
+                                0 => ("Model".to_owned(), String::new()),
+                                1 => (
+                                    format!("Animated model · {}", clips[0]),
+                                    format!("\nClip: {}\nPlace attaches this clip.", clips[0]),
+                                ),
+                                count => (
+                                    format!("Animated model · {count} clips"),
+                                    format!(
+                                        "\nClips: {}\nPlace attaches {}; change it in the Inspector.",
+                                        clips.join(", "),
+                                        clips[0]
+                                    ),
+                                ),
+                            };
+                            ui.label(format!("{id} · {kind}")).on_hover_text(format!(
+                                "Source: {source}\nAccepted revision: {hash}{animation}"
                             ));
                             if ui
                                 .add_enabled(enabled, eframe::egui::Button::new("Place"))

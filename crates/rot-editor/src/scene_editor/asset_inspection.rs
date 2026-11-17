@@ -46,10 +46,22 @@ pub(super) fn page(store: &AssetStore, offset: usize) -> Result<Value, &'static 
 }
 
 /// Model source metadata only: never serialize node/material graphs into a page.
+/// Clip summaries are catalog-bounded structure, never key times or values.
 pub(super) fn model_summary(model: &rot_assets::ModelInfo) -> Value {
     let source: String = model.source.chars().take(DIAGNOSTIC_CHARS).collect();
+    let clips: Vec<_> = model
+        .clips
+        .iter()
+        .map(|(name, clip)| {
+            // Tracks are bounded per clip, but a full page of models must stay small.
+            let targets: Vec<_> = clip.targets.iter().take(PAGE_SIZE).collect();
+            json!({"name":name,"id":clip.id,"duration":clip.duration,"targets":targets,
+                "target_count":clip.targets.len(),"targets_truncated":clip.targets.len()>PAGE_SIZE})
+        })
+        .collect();
     json!({"id":model.id,"source":source,"source_truncated":source.len()!=model.source.len(),
-        "hash":model.hash,"status":"accepted","node_count":model.nodes.len(),"material_count":model.materials.len()})
+        "hash":model.hash,"status":"accepted","node_count":model.nodes.len(),"material_count":model.materials.len(),
+        "clips":clips})
 }
 
 pub(super) fn page_with_models(

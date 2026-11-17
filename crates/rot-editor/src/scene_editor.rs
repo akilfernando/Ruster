@@ -2,6 +2,7 @@
 mod ai_workspace;
 #[cfg(all(test, unix))]
 mod ai_workspace_tracer;
+mod animation;
 mod asset_commands;
 mod asset_inspection;
 #[cfg(feature = "inspection")]
@@ -87,6 +88,7 @@ pub(crate) const SCENE_CAPABILITIES: &[&str] = &[
     "viewport_player_view",
     "player_view_inspect",
     "scene_player_view_set",
+    "scene_animation_set",
     "scene_select",
     "viewport_capture_start",
     "viewport_capture_inspect",
@@ -3115,6 +3117,9 @@ impl SceneEditor {
         if player_view::supported(op) {
             return self.player_view_command(token, op, args);
         }
+        if animation::supported(op) {
+            return self.animation_command(token, args);
+        }
         if matches!(
             op,
             "hud_inspect"
@@ -3273,7 +3278,7 @@ impl SceneEditor {
             }
             let objects: Vec<_> = scene.objects.iter().skip(start).take(16).collect();
             return Ok(
-                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"hierarchy":Self::hierarchy_page(scene,start),"resolved_world_count":scene.target_count(),"resolved_world_next_offset":if start+16<scene.target_count(){Some((start+16).to_string())}else{None},"stored_coordinate_space":"local","resolved_world":scene.resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"object_count":scene.objects.len(),"light_count":scene.lighting.light_count(),"target_count":scene.target_count(),"lighting_mode":if scene.lighting.is_legacy(){"legacy"}else{"authored"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":SCENE_CAPABILITIES}),
+                json!({"session_token":token,"scene_id":scene.id,"document_label":self.document_label(),"revision":scene.revision.to_string(),"objects":objects,"hierarchy":Self::hierarchy_page(scene,start),"animations":scene.animations.iter().skip(start).take(16).map(|(owner,binding)|json!({"owner_id":owner,"clip_id":binding.clip,"looping":binding.looping,"target_count":binding.targets.len()})).collect::<Vec<_>>(),"animation_count":scene.animations.len(),"resolved_world_count":scene.target_count(),"resolved_world_next_offset":if start+16<scene.target_count(){Some((start+16).to_string())}else{None},"stored_coordinate_space":"local","resolved_world":scene.resolve_poses().map_err(|e| ("invalid_scene".into(),e.to_string()))?.transforms.into_iter().skip(start).take(16).collect::<BTreeMap<_,_>>(),"object_count":scene.objects.len(),"light_count":scene.lighting.light_count(),"target_count":scene.target_count(),"lighting_mode":if scene.lighting.is_legacy(){"legacy"}else{"authored"},"asset_operation":self.asset_observation(),"unresolved_assets":scene.objects.iter().filter(|_|!self.asset_loading()).filter_map(|o|o.mesh.as_ref().filter(|id|!self.resolved.contains_key(*id)).map(|id|json!({"object_id":o.id,"asset_id":id,"action":"Import registered source or repair the project catalog; placeholder cube shown"}))).take(16).collect::<Vec<_>>(),"next_offset":if start+16<scene.objects.len(){Some((start+16).to_string())}else{None},"dirty":self.session.is_dirty(),"drafts_pending":self.drafts()||self.manipulation.active()||self.manipulation.offset_pending(),"recovery_pending":self.export_dialog||self.dialog.is_some()||self.close_pending||self.close_approved||self.asset_dialog||self.new_scene_pending||self.rename_pending||self.workspace.settings_open||self.recovery.open||self.recovery_transition.is_some(),"preview_tick":self.preview.tick.to_string(),"preview_fingerprint":self.preview.scene.fingerprint(),"asset_revision":self.assets.as_ref().map(|s|s.revision().to_string()),"loaded_format_version":self.session.loaded_format_version(),"shader_revision":self.shader_revision.to_string(),"preview_stale":self.asset_loading() || self.preview.scene!=*scene || !same_asset_snapshots(&self.preview_assets,&self.resolved) || !same_asset_snapshots(&self.preview_textures,&self.resolved_textures),"capabilities":SCENE_CAPABILITIES}),
             );
         }
         if args["expected_session_token"].as_str() != Some(token) {
@@ -4131,6 +4136,7 @@ impl SceneEditor {
             self.material_inspector_ui(ui);
             self.color_inspector_ui(ui);
         }
+        self.animation_inspector_ui(ui);
         self.behavior_inspector_ui(ui);
         self.ambient_inspector_ui(ui);
         self.display_inspector_ui(ui);

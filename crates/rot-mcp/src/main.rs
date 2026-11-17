@@ -1,4 +1,5 @@
 //! Narrow MCP 2025-06-18 stdio profile. See the crate README for limits.
+mod animation_tools;
 mod behavior_tools;
 mod capture_tools;
 mod collider_tools;
@@ -201,6 +202,9 @@ fn valid_arguments(name: &str, arguments: &Value) -> bool {
     }
     if player_view_tools::supported(name) {
         return player_view_tools::valid(name, arguments);
+    }
+    if animation_tools::supported(name) {
+        return animation_tools::valid(name, arguments);
     }
     if hud_tools::supported(name) {
         return hud_tools::valid(name, arguments);
@@ -614,6 +618,7 @@ fn tools() -> Value {
     tools.extend(runtime_tools::list());
     tools.extend(hud_tools::list());
     tools.extend(player_view_tools::list());
+    tools.extend(animation_tools::list());
     tools.push(json!({"name":"project_disconnect","description":"Disconnect this exact epoch. Retains enrollment but invalidates queued work; reconnect only through a later explicit project_connect.","inputSchema":object_schema(json!({}),vec!["connection"])}));
     for tool in &mut tools {
         if !matches!(
@@ -769,6 +774,7 @@ impl Server {
                         && !runtime_tools::supported(name)
                         && !hud_tools::supported(name)
                         && !player_view_tools::supported(name)
+                        && !animation_tools::supported(name)
                 {
                     Err((-32602, "Unknown tool or tools/call parameters"))
                 } else if !valid_arguments(name, &arguments) {
@@ -1329,7 +1335,7 @@ mod tests {
         let mut server = ready();
         let listed = request(&mut server, "tools/list", json!({}));
         let tools = listed["result"]["tools"].as_array().unwrap();
-        assert_eq!(tools.len(), 97);
+        assert_eq!(tools.len(), 98);
         let shape = json!({"expected_session_token":"s","expected_revision":"0","object_id":"a","primitive":"capsule"});
         assert!(valid_arguments("scene_primitive", &shape));
         let names: Vec<_> = tools
@@ -1435,6 +1441,7 @@ mod tests {
                 "hud_panel_move",
                 "player_view_inspect",
                 "scene_player_view_set",
+                "scene_animation_set",
                 "project_disconnect"
             ]
         );
