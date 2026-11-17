@@ -51,6 +51,11 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · S-13: the project hub lists every project (name, path,
+  Modified time, missing ones marked) with Search, Open Project… and New
+  Project…; right-click shows in file manager or removes from list. New
+  Project offers Empty or Basic 3D (Ground, Cube, Sun, Game view camera).
+  First launch: style chooser, then an optional Connect an AI App… row.
 - 2026-11-17 · S-07a: Hierarchy, Scene/Game, Inspector and Assets/Console
   are docked tabs (egui_tiles); tabs drag between docks; nothing is painted
   over the view. S-07b: Hierarchy, Inspector, Assets and Console close (×) and

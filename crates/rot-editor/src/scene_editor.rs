@@ -6508,6 +6508,7 @@ impl eframe::App for Host {
                 self.editor.apply_theme(ui.ctx());
                 let (session, back) = picker.show(ui, &self.editor.workspace);
                 self.editor.workspace.style_chooser_ui(ui.ctx());
+                self.editor.hub_requests(&mut picker, ui.ctx());
                 if let Some(session) = session {
                     if !picker.switching
                         || (!self.editor.needs_recovery()
