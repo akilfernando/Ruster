@@ -1,14 +1,31 @@
-//! Project selection uses the saved scene's directory as its project root.
+//! The project hub. A project is a folder; its scene is `scene.json` inside.
 use super::*;
 use std::{fs, path::Path};
 
+mod templates;
+use templates::Template;
+
+/// The project hub, shown at launch and by File → Open Project…. Laid out like
+/// Unity Hub's Projects page: New Project and Open Project at the top right,
+/// a search field, then every known project with its path and when its scene
+/// last changed.
 #[derive(Default)]
 pub(super) struct ProjectPicker {
-    all: bool,
     pub(super) switching: bool,
     form: Option<ProjectForm>,
     error: String,
+    search: String,
+    /// The first-launch AI step was answered (Connect or Not Now).
+    ai_step_done: bool,
+    /// Set when the creator chose Connect an AI App…; the host opens the dialog.
+    pub(super) connect_ai: bool,
+    /// Set when the creator chose Remove from List on a project.
+    pub(super) remove: Option<PathBuf>,
 }
+
+const HUB_WIDTH: f32 = 880.0;
+const PROJECT_ROW: f32 = 44.0;
+const MODIFIED_COLUMN: f32 = 140.0;
 
 impl ProjectPicker {
     pub(super) fn switch_project() -> Self {
@@ -23,103 +40,179 @@ impl ProjectPicker {
         ui: &mut egui::Ui,
         workspace: &Workspace,
     ) -> (Option<Session>, bool) {
+        use crate::ui_kit::{self as kit, tokens::*};
         let mut chosen = None;
         let mut back = self.switching
             && self.form.is_none()
+            && ui.memory(|memory| memory.focused().is_none())
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
-        egui::CentralPanel::default().show(ui, |ui| {
-            let width = (ui.available_width() - 24.0).clamp(1.0, 820.0);
-            ui.vertical_centered(|ui| {
-                ui.allocate_ui_with_layout(
-                    egui::vec2(width, 0.0),
-                    egui::Layout::top_down(egui::Align::Min),
-                    |ui| {
-                        ui.set_width(width);
-                        ui.add_space(20.0);
-                        ui.horizontal(|ui| {
-                            crate::branding::mark(ui, 34.0);
-                            ui.heading("Rot Engine");
-                            if self.switching && ui.button("Back to Editor").clicked() {
-                                back = true;
+        let palette = kit::colors(ui);
+        let themed = crate::editor_theme::style(ui.ctx()) == crate::editor_theme::Style::Rot
+            && workspace.prefs.themed_wording;
+        let ai_step =
+            workspace.first_launch && workspace.prefs.style.is_some() && !self.ai_step_done;
+        egui::CentralPanel::default()
+            .frame(
+                egui::Frame::new()
+                    .fill(palette.background)
+                    .inner_margin(SPACE_XL),
+            )
+            .show(ui, |ui| {
+                let width = ui.available_width().clamp(1.0, HUB_WIDTH);
+                ui.vertical_centered(|ui| {
+                    ui.allocate_ui_with_layout(
+                        egui::vec2(width, ui.available_height()),
+                        egui::Layout::top_down(egui::Align::Min),
+                        |ui| {
+                            ui.set_width(width);
+                            ui.horizontal(|ui| {
+                                ui.set_min_height(CONTROL_HEIGHT);
+                                crate::branding::mark(ui, 28.0);
+                                ui.label(
+                                    egui::RichText::new("Rot Engine")
+                                        .font(kit::semibold(TEXT_DIALOG_TITLE)),
+                                );
+                                if self.switching {
+                                    ui.with_layout(
+                                        egui::Layout::right_to_left(egui::Align::Center),
+                                        |ui| {
+                                            if kit::button(ui, "Back to Editor")
+                                                .on_hover_text("Back to Editor (Escape)")
+                                                .clicked()
+                                            {
+                                                back = true;
+                                            }
+                                        },
+                                    );
+                                }
+                            });
+                            ui.add_space(SPACE_L);
+                            if ai_step {
+                                self.ai_step_ui(ui);
+                                ui.add_space(SPACE_L);
                             }
-                        });
-                        ui.add_space(18.0);
-                        ui.horizontal_wrapped(|ui| {
-                            ui.heading("Projects");
-                            ui.with_layout(
-                                egui::Layout::right_to_left(egui::Align::Center),
-                                |ui| {
-                                    if crate::editor_theme::primary_button(ui, "New Project…")
-                                        .clicked()
-                                    {
-                                        self.form = Some(ProjectForm::new_project());
-                                    }
-                                    if ui.button("Open Project…").clicked() {
-                                        self.form = Some(ProjectForm::open_project());
-                                    }
-                                },
-                            );
-                        });
-                        ui.add_space(8.0);
-                        ui.horizontal(|ui| {
-                            ui.selectable_value(&mut self.all, false, "Recent");
-                            ui.selectable_value(&mut self.all, true, "All Projects");
-                        });
-                        ui.separator();
-                        let projects = &workspace.prefs.projects;
-                        let visible = if self.all {
-                            projects.len()
-                        } else {
-                            projects.len().min(10)
-                        };
-                        if visible == 0 {
-                            ui.weak("Open an existing project or create one to get started.");
-                        }
-                        if !workspace.error.is_empty() {
-                            ui.colored_label(
-                                crate::editor_theme::colors(ui).warning,
-                                &workspace.error,
-                            );
-                        }
-                        if !self.error.is_empty() {
-                            ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
-                        }
-                        egui::ScrollArea::vertical().show_rows(ui, 48.0, visible, |ui, range| {
-                            for path in &projects[range] {
-                                let folder = path.parent().unwrap_or(path);
-                                let name = folder
-                                    .file_name()
-                                    .unwrap_or(folder.as_os_str())
-                                    .to_string_lossy();
-                                let width = ui.available_width();
-                                if ui
-                                    .add_sized(
-                                        [width, 48.0],
-                                        egui::Button::new(format!(
-                                            "{name}  ·  {}",
-                                            folder.display()
-                                        ))
-                                        .truncate(),
-                                    )
-                                    .on_hover_text(path.display().to_string())
+                            ui.horizontal(|ui| {
+                                ui.set_min_height(CONTROL_HEIGHT);
+                                ui.label(
+                                    egui::RichText::new("Projects")
+                                        .font(kit::semibold(TEXT_DIALOG_TITLE)),
+                                );
+                                push_right(ui, &["Open Project…", "New Project…"]);
+                                if kit::button(ui, "Open Project…")
+                                    .on_hover_text("Open Project")
                                     .clicked()
                                 {
-                                    match Session::open(path) {
-                                        Ok(session) => chosen = Some(session),
-                                        Err(error) => {
-                                            self.error = format!(
-                                                "Could not open {}. {error}",
-                                                path.display()
-                                            )
-                                        }
-                                    }
+                                    self.form = Some(ProjectForm::open_project());
+                                }
+                                if kit::primary_button(ui, "New Project…")
+                                    .on_hover_text("New Project")
+                                    .clicked()
+                                {
+                                    self.form = Some(ProjectForm::new_project());
+                                }
+                            });
+                            ui.add_space(SPACE_M);
+                            let projects = &workspace.prefs.projects;
+                            if !projects.is_empty() {
+                                let search = kit::search_field(ui, &mut self.search, "Search");
+                                if ui.input_mut(|i| {
+                                    i.consume_key(egui::Modifiers::COMMAND, egui::Key::F)
+                                }) {
+                                    search.request_focus();
+                                }
+                                ui.add_space(SPACE_S);
+                            }
+                            for (message, color) in [
+                                (&workspace.error, palette.warning),
+                                (&self.error, palette.error),
+                            ] {
+                                if !message.is_empty() {
+                                    ui.add(
+                                        egui::Label::new(
+                                            egui::RichText::new(format!("⚠ {message}"))
+                                                .color(color),
+                                        )
+                                        .wrap(),
+                                    );
                                 }
                             }
-                        });
-                    },
-                );
+                            if projects.is_empty() {
+                                kit::empty_state(
+                                    ui,
+                                    if themed {
+                                        "Nothing planted yet."
+                                    } else {
+                                        "No recent projects"
+                                    },
+                                    None,
+                                );
+                                return;
+                            }
+                            let needle = self.search.trim().to_lowercase();
+                            let visible: Vec<&PathBuf> = projects
+                                .iter()
+                                .filter(|path| {
+                                    needle.is_empty()
+                                        || path.to_string_lossy().to_lowercase().contains(&needle)
+                                })
+                                .collect();
+                            column_header(ui);
+                            if visible.is_empty() {
+                                kit::empty_state(
+                                    ui,
+                                    if themed {
+                                        "Nothing under this log."
+                                    } else {
+                                        "No results"
+                                    },
+                                    None,
+                                );
+                                return;
+                            }
+                            let now = std::time::SystemTime::now();
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false, false])
+                                .show_rows(ui, PROJECT_ROW, visible.len(), |ui, range| {
+                                    ui.spacing_mut().item_spacing.y = 0.0;
+                                    for path in &visible[range] {
+                                        let response = project_row(ui, path, now);
+                                        response.context_menu(|ui| {
+                                            #[cfg(target_os = "linux")]
+                                            if ui.button("Show in File Manager").clicked() {
+                                                let folder = path.parent().unwrap_or(path);
+                                                if let Err(error) =
+                                                    std::process::Command::new("xdg-open")
+                                                        .arg(folder)
+                                                        .spawn()
+                                                {
+                                                    self.error = format!(
+                                                        "Couldn't open the file manager. {error}."
+                                                    );
+                                                }
+                                                ui.close();
+                                            }
+                                            if ui.button("Remove from List").clicked() {
+                                                self.remove = Some((*path).clone());
+                                                ui.close();
+                                            }
+                                        });
+                                        if response.clicked() {
+                                            match Session::open(path) {
+                                                Ok(session) => chosen = Some(session),
+                                                Err(error) => {
+                                                    self.error = format!(
+                                                        "Couldn't open {}. {error}",
+                                                        path.display()
+                                                    )
+                                                }
+                                            }
+                                        }
+                                    }
+                                });
+                        },
+                    );
+                });
             });
-        });
         if let Some(form) = &mut self.form {
             let (session, close) = form.show(ui.ctx());
             if close {
@@ -133,10 +226,212 @@ impl ProjectPicker {
             (chosen, false)
         }
     }
+
+    /// The optional first-launch step after the style chooser.
+    fn ai_step_ui(&mut self, ui: &mut egui::Ui) {
+        use crate::ui_kit::{self as kit, tokens::*};
+        let palette = kit::colors(ui);
+        egui::Frame::new()
+            .fill(palette.surface)
+            .stroke(egui::Stroke::new(1.0, palette.divider))
+            .corner_radius(RADIUS_MENU)
+            .inner_margin(SPACE_M)
+            .show(ui, |ui| {
+                ui.set_width(ui.available_width());
+                ui.horizontal(|ui| {
+                    ui.set_min_height(CONTROL_HEIGHT);
+                    ui.label(egui::RichText::new("AI Connection").font(kit::semibold(TEXT_TITLE)));
+                    push_right(ui, &["Not Now", "Connect an AI App…"]);
+                    if kit::button(ui, "Not Now")
+                        .on_hover_text("Connect later from the AI button in the toolbar")
+                        .clicked()
+                    {
+                        self.ai_step_done = true;
+                    }
+                    if kit::button(ui, "Connect an AI App…")
+                        .on_hover_text(
+                            "Let an AI app such as Claude Code or Codex edit your projects",
+                        )
+                        .clicked()
+                    {
+                        self.connect_ai = true;
+                        self.ai_step_done = true;
+                    }
+                });
+            });
+    }
+}
+
+impl SceneEditor {
+    /// Act on what the hub asked for this frame: the Connect an AI App dialog
+    /// and Remove from List.
+    pub(super) fn hub_requests(&mut self, picker: &mut ProjectPicker, ctx: &egui::Context) {
+        #[cfg(unix)]
+        {
+            if std::mem::take(&mut picker.connect_ai) {
+                self.ai_apps.show();
+            }
+            self.ai_apps_ui(ctx);
+        }
+        #[cfg(not(unix))]
+        let _ = ctx;
+        if let Some(path) = picker.remove.take() {
+            self.workspace.prefs.projects.retain(|p| p != &path);
+            self.workspace.prefs.recent.retain(|p| p != &path);
+            self.workspace.changed();
+            self.workspace.flush();
+        }
+    }
+}
+
+/// In a horizontal row, skip to where these buttons end flush right, so they
+/// can be added left to right and Tab visits them in reading order.
+fn push_right(ui: &mut egui::Ui, labels: &[&str]) {
+    let padding = 2.0 * ui.spacing().button_padding.x;
+    let gap = ui.spacing().item_spacing.x;
+    let width: f32 = labels
+        .iter()
+        .map(|label| {
+            let text = egui::WidgetText::from(*label)
+                .into_galley(
+                    ui,
+                    Some(egui::TextWrapMode::Extend),
+                    f32::INFINITY,
+                    egui::TextStyle::Button,
+                )
+                .size()
+                .x;
+            (text + padding).max(crate::ui_kit::tokens::MIN_HIT) + gap
+        })
+        .sum::<f32>()
+        - gap;
+    ui.add_space((ui.available_width() - width).max(0.0));
+}
+
+/// `Name` and `Modified` above the project list, like Unity Hub's columns.
+fn column_header(ui: &mut egui::Ui) {
+    use crate::ui_kit::{self as kit, tokens::*};
+    let palette = kit::colors(ui);
+    let (rect, _) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), ROW_HEIGHT),
+        egui::Sense::hover(),
+    );
+    let font = egui::FontId::proportional(TEXT_SMALL);
+    let painter = ui.painter();
+    painter.text(
+        egui::pos2(rect.left() + SPACE_M, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "Name",
+        font.clone(),
+        palette.secondary,
+    );
+    painter.text(
+        egui::pos2(rect.right() - MODIFIED_COLUMN, rect.center().y),
+        egui::Align2::LEFT_CENTER,
+        "Modified",
+        font,
+        palette.secondary,
+    );
+    painter.hline(
+        rect.x_range(),
+        rect.bottom() - 0.5,
+        egui::Stroke::new(1.0, palette.divider),
+    );
+}
+
+/// One project: its folder name over its path, and when its scene last
+/// changed. The whole row opens the project; Enter does too when focused.
+fn project_row(ui: &mut egui::Ui, scene: &Path, now: std::time::SystemTime) -> egui::Response {
+    use crate::ui_kit::{self as kit, tokens::*};
+    let palette = kit::colors(ui);
+    let folder = scene.parent().unwrap_or(scene);
+    let name = folder
+        .file_name()
+        .unwrap_or(folder.as_os_str())
+        .to_string_lossy()
+        .into_owned();
+    let modified = fs::metadata(scene).and_then(|meta| meta.modified()).ok();
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(ui.available_width(), PROJECT_ROW),
+        egui::Sense::click(),
+    );
+    response.widget_info(|| egui::WidgetInfo::labeled(egui::Role::Button, true, &name));
+    if ui.is_rect_visible(rect) {
+        let painter = ui.painter();
+        if response.hovered() || response.has_focus() {
+            painter.rect_filled(rect, RADIUS_CONTROL, palette.hover);
+        }
+        if response.has_focus() {
+            painter.rect_stroke(
+                rect.shrink(1.0),
+                RADIUS_CONTROL,
+                egui::Stroke::new(FOCUS_RING, palette.accent),
+                egui::StrokeKind::Inside,
+            );
+        }
+        let text_width = (rect.width() - MODIFIED_COLUMN - 2.0 * SPACE_M).max(1.0);
+        let line = |text: String, size: f32| {
+            egui::WidgetText::from(egui::RichText::new(text).size(size)).into_galley(
+                ui,
+                Some(egui::TextWrapMode::Truncate),
+                text_width,
+                egui::TextStyle::Body,
+            )
+        };
+        let left = rect.left() + SPACE_M;
+        painter.galley(
+            egui::pos2(left, rect.top() + SPACE_XS + 2.0),
+            line(name, TEXT_BODY),
+            palette.text,
+        );
+        painter.galley(
+            egui::pos2(
+                left,
+                rect.top() + SPACE_XS + 2.0 + TEXT_BODY + SPACE_XS + 2.0,
+            ),
+            line(folder.display().to_string(), TEXT_SMALL),
+            palette.secondary,
+        );
+        let (when, color) = match modified {
+            Some(time) => (time_ago(now, time), palette.secondary),
+            None => ("⚠ Missing".to_owned(), palette.warning),
+        };
+        painter.text(
+            egui::pos2(rect.right() - MODIFIED_COLUMN, rect.center().y),
+            egui::Align2::LEFT_CENTER,
+            when,
+            egui::FontId::proportional(TEXT_SMALL),
+            color,
+        );
+    }
+    response.on_hover_text(scene.display().to_string())
+}
+
+/// "Just now", "5 minutes ago", "Yesterday", "3 months ago": Unity Hub's style.
+fn time_ago(now: std::time::SystemTime, then: std::time::SystemTime) -> String {
+    let seconds = now.duration_since(then).map_or(0, |age| age.as_secs());
+    let unit = |count: u64, name: &str| {
+        if count == 1 {
+            format!("1 {name} ago")
+        } else {
+            format!("{count} {name}s ago")
+        }
+    };
+    match seconds {
+        0..60 => "Just now".into(),
+        60..3_600 => unit(seconds / 60, "minute"),
+        3_600..86_400 => unit(seconds / 3_600, "hour"),
+        86_400..172_800 => "Yesterday".into(),
+        172_800..2_592_000 => unit(seconds / 86_400, "day"),
+        2_592_000..31_536_000 => unit(seconds / 2_592_000, "month"),
+        _ => unit(seconds / 31_536_000, "year"),
+    }
 }
 
 pub(super) struct ProjectForm {
+    /// Some for New Project, None for Open Project.
     name: Option<String>,
+    template: Template,
     path: String,
     error: String,
     focus: bool,
@@ -161,6 +456,7 @@ impl ProjectForm {
     fn new(name: Option<String>, path: String) -> Self {
         Self {
             name,
+            template: Template::default(),
             path,
             error: String::new(),
             focus: true,
@@ -170,6 +466,7 @@ impl ProjectForm {
     }
 
     pub(super) fn show(&mut self, ctx: &egui::Context) -> (Option<Session>, bool) {
+        use crate::ui_kit::{self as kit, tokens::*};
         let creating = self.name.is_some();
         let mut session = None;
         let mut close = false;
@@ -177,133 +474,117 @@ impl ProjectForm {
             .frame(crate::editor_theme::dialog_frame(ctx))
             .show(ctx, |ui| {
                 let screen = ctx.content_rect();
-                let width = (screen.width() - 44.0).clamp(115.0, 450.0);
+                let width = (screen.width() - 44.0).clamp(115.0, 480.0);
                 ui.set_width(width);
-                let top = ui.cursor().min.y;
-                let (title, description) = if creating {
-                    (
-                        "New Project",
-                        "Create a project folder with its first scene.",
-                    )
-                } else {
-                    (
-                        "Open Project",
-                        "Choose a Rot scene file or its project folder.",
-                    )
-                };
-                crate::editor_theme::dialog_header(ui, title, description);
-                let header_height = ui.cursor().min.y - top;
-                let footer_height = if width < 220.0 { 88.0 } else { 52.0 };
+                ui.label(
+                    egui::RichText::new(if creating {
+                        "New Project"
+                    } else {
+                        "Open Project"
+                    })
+                    .font(kit::semibold(TEXT_DIALOG_TITLE)),
+                );
+                ui.add_space(SPACE_M);
+                let footer_height = CONTROL_HEIGHT + 2.0 * SPACE_M;
                 let editing = egui::ScrollArea::vertical()
                     .id_salt("project_form_body")
-                    .max_height((screen.height() - header_height - footer_height - 40.0).max(48.0))
+                    .max_height((screen.height() - footer_height - 120.0).max(48.0))
                     .show(ui, |ui| {
-                        crate::editor_theme::dialog_section(
-                            ui,
-                            if creating {
-                                "Project details"
-                            } else {
-                                "Project location"
-                            },
-                        );
                         let mut editing = false;
+                        if creating {
+                            self.templates_ui(ui);
+                            ui.add_space(SPACE_M);
+                        }
                         if let Some(name) = &mut self.name {
-                            let label = ui.label("Project name");
-                            let field = ui
-                                .add(
+                            let field = kit::property_row(ui, "Project Name", |ui| {
+                                ui.add(
                                     egui::TextEdit::singleline(name)
                                         .desired_width(ui.available_width())
                                         .char_limit(128),
                                 )
-                                .labelled_by(label.id);
+                            });
                             editing = field.has_focus() || field.lost_focus();
                             if std::mem::take(&mut self.focus) {
                                 field.request_focus();
                             }
-                            if field.gained_focus() {
-                                field.scroll_to_me(None);
-                            }
-                            ui.add_space(4.0);
                         }
-                        let label = ui.label(if creating {
-                            "Parent folder"
-                        } else {
-                            "Scene or folder path"
+                        let destination = self
+                            .name
+                            .as_deref()
+                            .filter(|name| !name.trim().is_empty())
+                            .map(|name| Path::new(self.path.trim()).join(name.trim()));
+                        let field = kit::property_row(ui, "Location", |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = SPACE_XS;
+                                let browse_width = 72.0;
+                                let field = ui.add(
+                                    egui::TextEdit::singleline(&mut self.path)
+                                        .desired_width(
+                                            (ui.available_width() - browse_width - SPACE_XS)
+                                                .max(MIN_HIT),
+                                        )
+                                        .char_limit(4096),
+                                );
+                                // S-12 replaces this with the native dialog.
+                                #[cfg(target_os = "linux")]
+                                self.browse.show(
+                                    ui,
+                                    &mut self.path,
+                                    &mut self.error,
+                                    if creating {
+                                        BrowseKind::Directory
+                                    } else {
+                                        BrowseKind::OpenScene
+                                    },
+                                );
+                                field
+                            })
+                            .inner
                         });
-                        let field = ui
-                            .add(
-                                egui::TextEdit::singleline(&mut self.path)
-                                    .desired_width(ui.available_width())
-                                    .char_limit(4096),
-                            )
-                            .labelled_by(label.id);
+                        let field = match &destination {
+                            Some(folder) => {
+                                field.on_hover_text(format!("Creates {}", folder.display()))
+                            }
+                            None if creating => {
+                                field.on_hover_text("The folder the project goes in")
+                            }
+                            None => field.on_hover_text("A project folder or its scene file"),
+                        };
                         editing |= field.has_focus() || field.lost_focus();
                         if std::mem::take(&mut self.focus) {
                             field.request_focus();
                         }
-                        if field.gained_focus() {
-                            field.scroll_to_me(None);
-                        }
-                        #[cfg(target_os = "linux")]
-                        self.browse.show(
-                            ui,
-                            &mut self.path,
-                            &mut self.error,
-                            if creating {
-                                BrowseKind::Directory
-                            } else {
-                                BrowseKind::OpenScene
-                            },
-                        );
-                        if let Some(name) = self.name.as_deref().filter(|n| !n.trim().is_empty()) {
-                            let destination = Path::new(&self.path)
-                                .join(name.trim())
-                                .join("scene.json")
-                                .display()
-                                .to_string();
-                            let surface = crate::editor_theme::colors(ui).surface;
-                            egui::Frame::new()
-                                .fill(surface)
-                                .corner_radius(6.0)
-                                .inner_margin(8.0)
-                                .show(ui, |ui| {
-                                    ui.set_width(ui.available_width());
-                                    ui.weak("First scene");
-                                    ui.add(egui::Label::new(&destination).truncate())
-                                        .on_hover_text(destination);
-                                });
-                        }
                         if !self.error.is_empty() {
-                            ui.colored_label(crate::editor_theme::colors(ui).error, &self.error);
+                            ui.add_space(SPACE_XS);
+                            ui.add(
+                                egui::Label::new(
+                                    egui::RichText::new(format!("⚠ {}", self.error))
+                                        .color(kit::colors(ui).error),
+                                )
+                                .wrap(),
+                            );
                         }
                         editing
                     })
                     .inner;
-                ui.add_space(4.0);
-                ui.separator();
-                ui.horizontal_wrapped(|ui| {
-                    let cancel = ui.button("Cancel").clicked()
+                ui.add_space(SPACE_M);
+                ui.horizontal(|ui| {
+                    // Bottom right, Cancel then the primary action, in Tab order too.
+                    let primary = if creating { "Create Project" } else { "Open" };
+                    push_right(ui, &["Cancel", primary]);
+                    let cancel = kit::button(ui, "Cancel").clicked()
                         || ui
                             .input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                    let submit = kit::primary_button(ui, primary).clicked();
                     let enter = editing
                         && ui.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Enter));
-                    let submit = crate::editor_theme::primary_button(
-                        ui,
-                        if creating {
-                            "Create Project"
-                        } else {
-                            "Open Project"
-                        },
-                    )
-                    .clicked();
                     if cancel {
                         close = true;
                     } else if submit || enter {
                         let location = Path::new(self.path.trim());
-                        let result = if let Some(name) = &self.name {
-                            create_project(location, name.trim())
-                        } else {
-                            open_project(location)
+                        let result = match &self.name {
+                            Some(name) => create_project(location, name.trim(), self.template),
+                            None => open_project(location),
                         };
                         match result {
                             Ok(opened) => {
@@ -317,6 +598,125 @@ impl ProjectForm {
             });
         (session, close)
     }
+
+    /// Template tiles, like the template grid in Unity Hub and Unreal's
+    /// Project Browser. Tab reaches each; Enter or Space selects.
+    fn templates_ui(&mut self, ui: &mut egui::Ui) {
+        use crate::ui_kit::{self as kit, tokens::*};
+        kit::section_title(ui, "Template");
+        ui.add_space(SPACE_XS);
+        let palette = kit::colors(ui);
+        ui.columns(Template::ALL.len(), |columns| {
+            for (ui, template) in columns.iter_mut().zip(Template::ALL) {
+                let selected = self.template == template;
+                let (rect, response) = ui.allocate_exact_size(
+                    egui::vec2(ui.available_width(), 92.0),
+                    egui::Sense::click(),
+                );
+                response.widget_info(|| {
+                    egui::WidgetInfo::selected(
+                        egui::Role::RadioButton,
+                        true,
+                        selected,
+                        template.label(),
+                    )
+                });
+                let painter = ui.painter();
+                painter.rect_filled(
+                    rect,
+                    RADIUS_MENU,
+                    if selected {
+                        palette.selection
+                    } else if response.hovered() {
+                        palette.hover
+                    } else {
+                        palette.surface
+                    },
+                );
+                let (width, color) = if response.has_focus() {
+                    (FOCUS_RING, palette.accent)
+                } else if selected {
+                    (1.0, palette.accent)
+                } else {
+                    (1.0, palette.divider)
+                };
+                painter.rect_stroke(
+                    rect,
+                    RADIUS_MENU,
+                    egui::Stroke::new(width, color),
+                    egui::StrokeKind::Inside,
+                );
+                let art = egui::Rect::from_center_size(
+                    egui::pos2(rect.center().x, rect.top() + 34.0),
+                    egui::vec2(72.0, 44.0),
+                );
+                template_art(painter, art, template, palette);
+                painter.text(
+                    egui::pos2(rect.center().x, rect.bottom() - SPACE_M),
+                    egui::Align2::CENTER_BOTTOM,
+                    template.label(),
+                    kit::semibold(TEXT_BODY),
+                    palette.text,
+                );
+                if response.on_hover_text(template.tooltip()).clicked() {
+                    self.template = template;
+                }
+            }
+        });
+    }
+}
+
+/// A small line drawing of what the template contains.
+fn template_art(
+    painter: &egui::Painter,
+    art: egui::Rect,
+    template: Template,
+    palette: &crate::ui_kit::palette::Palette,
+) {
+    let stroke = egui::Stroke::new(1.5, palette.secondary);
+    // Horizon and sun, in both templates.
+    let sun = art.right_top() + egui::vec2(-8.0, 8.0);
+    painter.circle_stroke(sun, 5.0, stroke);
+    if template == Template::Empty {
+        painter.hline(art.x_range(), art.bottom() - 6.0, stroke);
+        return;
+    }
+    // Ground plane in perspective, and a cube standing on it.
+    let ground = [
+        egui::pos2(art.left() + 14.0, art.bottom() - 16.0),
+        egui::pos2(art.right() - 14.0, art.bottom() - 16.0),
+        egui::pos2(art.right(), art.bottom()),
+        egui::pos2(art.left(), art.bottom()),
+    ];
+    painter.add(egui::Shape::closed_line(ground.to_vec(), stroke));
+    let c = egui::pos2(art.center().x - 4.0, art.bottom() - 8.0);
+    let s = 9.0;
+    let front =
+        egui::Rect::from_min_max(egui::pos2(c.x - s, c.y - 2.0 * s), egui::pos2(c.x + s, c.y));
+    painter.rect_stroke(
+        front,
+        0,
+        egui::Stroke::new(1.5, palette.accent),
+        egui::StrokeKind::Middle,
+    );
+    let depth = egui::vec2(6.0, -6.0);
+    painter.add(egui::Shape::line(
+        vec![
+            front.left_top(),
+            front.left_top() + depth,
+            front.right_top() + depth,
+            front.right_top(),
+        ],
+        egui::Stroke::new(1.5, palette.accent),
+    ));
+    painter.add(egui::Shape::line(
+        vec![
+            front.right_top() + depth,
+            front.right_bottom() + depth,
+            front.right_bottom(),
+        ],
+        egui::Stroke::new(1.5, palette.accent),
+    ));
 }
 
 fn open_project(path: &Path) -> Result<Session, String> {
@@ -328,10 +728,10 @@ fn open_project(path: &Path) -> Result<Session, String> {
     } else {
         path.to_path_buf()
     };
-    Session::open(&scene).map_err(|error| format!("Could not open {}. {error}", scene.display()))
+    Session::open(&scene).map_err(|error| format!("Couldn't open {}. {error}", scene.display()))
 }
 
-fn create_project(location: &Path, name: &str) -> Result<Session, String> {
+fn create_project(location: &Path, name: &str, template: Template) -> Result<Session, String> {
     if name.is_empty()
         || name == "."
         || name == ".."
@@ -346,7 +746,7 @@ fn create_project(location: &Path, name: &str) -> Result<Session, String> {
         return Err("Choose an existing folder for the new project.".into());
     }
     let root = location.join(name);
-    let mut session = Session::new(Scene::authored_empty("main")).map_err(|e| e.to_string())?;
+    let mut session = template.session().map_err(|e| e.to_string())?;
     fs::create_dir(&root).map_err(|error| {
         if error.kind() == std::io::ErrorKind::AlreadyExists {
             format!(
@@ -354,18 +754,19 @@ fn create_project(location: &Path, name: &str) -> Result<Session, String> {
                 root.display()
             )
         } else {
-            format!("Could not create {}. {error}", root.display())
+            format!("Couldn't create {}. {error}", root.display())
         }
     })?;
     if let Err(error) = session.save(root.join("scene.json")) {
         // An empty reservation can be discarded. Preserve any files in the new folder.
         let _ = fs::remove_dir(&root);
         return Err(format!(
-            "Could not save the first scene in {}. {error}",
+            "Couldn't save the first scene in {}. {error}",
             root.display()
         ));
     }
-    Ok(session)
+    // Hand over the saved document, exactly as Open Project would.
+    Session::open(root.join("scene.json")).map_err(|error| error.to_string())
 }
 
 #[cfg(target_os = "linux")]
@@ -466,14 +867,40 @@ mod tests {
     #[test]
     fn creates_reopenable_project_without_reusing_existing_folder() {
         let parent = tempfile::tempdir().unwrap();
-        let created = create_project(parent.path(), "My Project").unwrap();
+        let created = create_project(parent.path(), "My Project", Template::Empty).unwrap();
         let root = parent.path().join("My Project");
         assert_eq!(created.path(), Some(root.join("scene.json").as_path()));
         let bytes = fs::read(created.path().unwrap()).unwrap();
-        assert!(create_project(parent.path(), "My Project").is_err());
-        assert!(create_project(parent.path(), "../escape").is_err());
+        assert!(create_project(parent.path(), "My Project", Template::Empty).is_err());
+        assert!(create_project(parent.path(), "../escape", Template::Empty).is_err());
         let reopened = open_project(&root).unwrap();
         assert_eq!(reopened.scene().id, "main");
         assert_eq!(fs::read(reopened.path().unwrap()).unwrap(), bytes);
+    }
+
+    #[test]
+    fn basic_3d_project_opens_with_ground_sun_cube_and_game_camera() {
+        let parent = tempfile::tempdir().unwrap();
+        let created = create_project(parent.path(), "Game", Template::Basic3d).unwrap();
+        // The template's edits are the saved starting point, not Undo steps.
+        assert_eq!(created.undo_len(), 0);
+        assert!(!created.is_dirty());
+        let scene = open_project(&parent.path().join("Game"))
+            .unwrap()
+            .scene()
+            .clone();
+        let names: Vec<_> = scene.objects.iter().map(|o| o.display_name()).collect();
+        assert_eq!(names, ["Ground", "Cube"]);
+        let lights: Vec<_> = scene.lighting.lights().map(|(_, l)| l.clone()).collect();
+        assert_eq!(lights.len(), 1);
+        assert!(matches!(
+            lights[0].kind,
+            rot_scene::LightKind::Directional { .. }
+        ));
+        let view = scene.resolve_player_view().unwrap().expect("game camera");
+        assert_eq!(view.anchor, [0.0, 0.5, 0.0]);
+        let empty = create_project(parent.path(), "Blank", Template::Empty).unwrap();
+        assert!(empty.scene().objects.is_empty());
+        assert!(empty.scene().player_view.is_none());
     }
 }

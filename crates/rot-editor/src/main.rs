@@ -78,7 +78,7 @@ impl log::Log for Diagnostics {
 
 static DIAGNOSTICS: Diagnostics = Diagnostics;
 
-const HELP: &str = "Rot Engine Editor — scene authoring\n\nUsage: rot-editor\n       rot-editor --scene PATH\n       rot-editor --scenario PATH\n       rot-editor --help\n\nDefault: project picker with Recent, All Projects, Open Project and New Project.\nLegacy logistics mode: --scenario PATH.\nRequires a desktop session and Vulkan adapter. File → Workspace and shortcuts…\nlists and remaps scene shortcuts. Legacy scenario mode uses Space to run/pause outside text fields.\n";
+const HELP: &str = "Rot Engine Editor — scene authoring\n\nUsage: rot-editor\n       rot-editor --scene PATH\n       rot-editor --scenario PATH\n       rot-editor --help\n\nDefault: project hub with recent projects, Open Project and New Project.\nLegacy logistics mode: --scenario PATH.\nRequires a desktop session and Vulkan adapter. File → Workspace and shortcuts…\nlists and remaps scene shortcuts. Legacy scenario mode uses Space to run/pause outside text fields.\n";
 
 fn arguments(arguments: impl Iterator<Item = String>) -> Result<Option<PathBuf>, String> {
     let mut arguments = arguments;
