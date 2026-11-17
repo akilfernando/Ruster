@@ -5,9 +5,7 @@ Updated 2026-11-17. This file stays under 100 lines. Older entries are in
 
 ## Where to work
 
-- **Branch:** `claude/rot-next-20261117` in `/home/akilf/Projects/rot_engine`.
-  It is local and unpushed, and it is ahead of both `main` and
-  `feat/cumulative-editor-20261115`. Branch from it until the user merges it.
+- **Trunk:** `main`, on `origin`. Branch from it and merge back to it.
 - **Other checkouts:** `/home/akilf/Projects/rusterize-cumulative-editor-20261115`
   holds an uncommitted status note from another session; leave it alone. Old
   worktrees are under `~/Projects/Archive/Rot Engine/`. An edit from the stale
