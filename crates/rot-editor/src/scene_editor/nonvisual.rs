@@ -342,10 +342,7 @@ impl Host {
     fn dispatch_ai_requests(&mut self, ctx: &egui::Context) {
         let budget = std::time::Instant::now() + std::time::Duration::from_millis(4);
         let mut served = 0;
-        loop {
-            let Some(bridge) = &mut self.bridge else {
-                break;
-            };
+        while let Some(bridge) = &mut self.bridge {
             let op = if served == 0 {
                 bridge.waiting()
             } else {
