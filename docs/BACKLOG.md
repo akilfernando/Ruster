@@ -192,24 +192,117 @@ hard-coded colors in the files you touch.
 **Done when.** Switching is instant; screenshots of all four palettes pass
 the checklist; layout is pixel-identical between styles.
 
-#### S-07 · Docked, tabbed panels — L — brief needed
+#### S-07a · Dock shell: every panel in a tab — M — ready
 Status: open
-**Outcome.** Hierarchy, Inspector, Assets, Console, Scene and Game are real
-panels that dock, tab, close and reopen, with saved layouts.
-**Facts.** Hierarchy and Inspector are rectangles painted over the viewport
-(`scene_editor/sidebars.rs:96-158`). Assets is `Panel::bottom`
-(`scene_editor.rs:5711`). No docking crate is used. The AI workspace has its
-own drawers (`scene_editor/ai_workspace.rs:128`).
-**Split.** (a) Pick a docking crate that works with the egui version in
-`Cargo.toml` in under an hour; if none does, use fixed side panels with tab
-strips. (b) Move each panel into `crates/rot-editor/src/panels/<name>.rs`
-and into the dock. (c) Layouts: Default and Side by Side (for a 960 px wide
-window next to an AI app), saved per user, with F6 to cycle panels; retire
-the separate AI workspace drawers.
-**Done when.** A tab can be dragged to another dock; panels close and reopen
-from Window; the layout survives a restart; nothing is painted over the
-viewport; the editor works at 960×1080.
-**Not now.** Floating OS windows and multiple viewports.
+**Outcome.** Hierarchy, Inspector, Scene, Game, Assets and Console are tabs
+in one dock. Tabs drag between docks; nothing is painted over the viewport.
+**Facts.** Agent decision 2026-11-17: `egui_tiles = "0.18.0"` (needs `egui
+^0.37.0`, as the repo has; `egui_dock` 0.21.1 stops at 0.36). Sidebars
+overlay the viewport (`scene_editor/sidebars.rs`); Assets is `Panel::bottom`
+and the viewport is the `CentralPanel` closure, both in `workspace_ui`.
+`rot_render::allocate_viewport` fills the `Ui` it is given and
+`render_viewport_with_materials` adds an `egui_wgpu` paint callback for that
+rect, so the Vulkan view works in a tile unchanged. There is one render
+surface. egui_tiles calls `pane_ui` only for a container's active tab.
+**Do.** Add the crate; rerun `scripts/dependency_notices.py`. Create
+`crates/rot-editor/src/panels/mod.rs`, declared in `scene_editor.rs` with
+`#[path = "panels/mod.rs"]` so it reaches `SceneEditor`'s private fields:
+`enum Pane` (six variants, serde); `default_tree()` = Vertical[ Horizontal[
+Hierarchy 0.14, Tabs[Scene, Game] 0.59, Inspector 0.27 ] 0.75, Tabs[Assets,
+Console] 0.25 ]; a `Behavior<Pane>` over `&mut SceneEditor` (hold the tree
+in an `Option` and `take()` it per frame), `all_panes_must_have_tabs: true`,
+tab colors from the theme. Move the `CentralPanel` closure body to
+`viewport_pane_ui`, used by Scene and Game: their active tab drives
+`set_player_preview` (replacing S-04's strip) and neither is draggable
+(`is_tile_draggable`), so one surface is enough. Delete `SceneSidebars`,
+`sidebar_budget`, the `content_browser` panels and the `sidebar_pointer`
+terms. Block viewport input while `tree.dragged_id` is some. In
+`ai_workspace` mode show `viewport_pane_ui` without the tree until S-07c.
+**Done when.** Screenshots at 1280×800 and 1920×1080 match the
+[window anatomy](UX-STANDARDS.md#3-window-anatomy); clicks near each edge of
+the Scene tab pick correctly; the camera survives a divider drag; in-process
+tests show the wheel over Hierarchy does not zoom and a pointer drag moves
+Console into the Inspector dock (`ui_drive.py` cannot drag; say so);
+`tabwalk` reaches every panel.
+**Not now.** Close buttons, saving and layouts (S-07b, S-07c).
+
+#### S-07b · Close, reopen, saved layout and F6 — M — ready
+Status: open
+**Outcome.** Panels close and reopen from Window, the layout survives a
+restart, and F6 moves the keyboard between panels.
+**Facts.** egui_tiles: `Tree::set_visible` hides a tile in place,
+`on_tab_close` returning false keeps it, `make_active` selects a tab,
+`on_edit` fires on each user change, `Tree<Pane>` is serde. Preferences are
+`~/.config/rot/editor.json` (`Workspace::load`, `workspace.rs`;
+`ROT_EDITOR_STATE` overrides). `Preferences::parse` rejects unknown keys and
+P-02 keeps the old build for rollback, so the layout cannot go in that file.
+**Do.**
+- Save `layout.json` beside `editor.json` (`state_path().parent()`):
+  `{"format":"rot-editor-layout","version":1,"layouts":{"default":<Tree>}}`.
+  Mark dirty in `on_edit`; write by temp file and rename where
+  `workspace.flush()` is called and on exit. A missing or bad file, or a
+  tree without each `Pane` exactly once, loads `default_tree()` with one
+  Console warning.
+- Hierarchy, Inspector, Assets and Console get a close button
+  (`set_visible(false)`). Scene and Game do not close.
+- Window's panel items show `tree.is_visible`; checking one shows, activates
+  and focuses the tab. `Action::FindObjects` and `FindContent` do the same.
+  Add Window ▸ Layouts ▸ Reset Layout.
+- Keep the seven sidebar keys in `editor.json` read and written but unused;
+  remove their settings controls.
+- Add `Action::NextPanel` (F6) and `PreviousPanel` (Shift+F6): the next
+  visible dock in reading order (`tiles.rect`), focusing the first control
+  of its active tab (pattern: `hierarchy_focus`).
+**Done when.** Closing Hierarchy unchecks it in Window and checking it
+restores it to the same dock; a test saves a changed tree through a
+temporary state path and a new editor loads it; a corrupt file opens the
+default; F6 visits each dock once and wraps, and is remappable.
+
+#### S-07c · Default and Side by Side layouts; no AI workspace — M — ready
+Status: open
+**Outcome.** Two layouts, picked from the toolbar or by window width. The
+editor beside an AI app is the same editor.
+**Facts.** The AI workspace is the `ai_workspace` flag with `ai_header`,
+`ai_tools` and `ai_drawer_ui` (`scene_editor/ai_workspace.rs`), entered from
+File ▸ Advanced or `ROT_WORKSPACE=ai` (host setup in `scene_editor.rs`,
+which also skips the project picker). About a dozen `self.ai_workspace`
+branches hide menus, toolbar and status bar. It has a test in
+`ai_workspace_tracer.rs` and a section in `crates/rot-editor/README.md`.
+**Do.**
+- `layout.json` gains `"active"` and a `side_by_side` tree: Horizontal[
+  Vertical[ Tabs[Scene, Game] 0.62, Tabs[Assets, Console] 0.38 ] 0.64,
+  Tabs[Inspector, Hierarchy] 0.36 ]. Each layout keeps its own arrangement.
+- S-04's Layout picker and Window ▸ Layouts list Default and Side by Side
+  as radio items, then Reset Layout for the active one.
+- Agent decision: crossing 1100 px of window width switches to Side by Side
+  below and Default above. A manual choice holds until the next crossing.
+- Delete `Drawer`, `ai_drawer_ui`, `ai_header`, `ai_tools`,
+  `set_ai_workspace`, their fields, the menu item and every branch.
+  `ROT_WORKSPACE=ai` only starts in Side by Side and skips the picker.
+  Update the tracer test and the README.
+**Done when.** Screenshots at 960×1080, 960×600, 1280×800 and 1920×1080 clip
+nothing; at 960×1080 the viewport is at least 560×560 px; `resize:` from
+1280 to 960 and back switches layouts and restores each arrangement; both
+survive a restart; no `ai_workspace` identifier remains in the editor crate.
+**Not now.** User-named layouts, floating OS windows, multiple viewports.
+
+#### S-07d · Panel code in `panels/<name>.rs` — M — ready
+Status: open
+**Outcome.** Each panel's code is one file and `scene_editor.rs` is about
+1,500 lines shorter. No behavior changes.
+**Facts.** Panel bodies are `SceneEditor` methods in `scene_editor.rs`:
+`hierarchy_contents`, `inspector_scroll_ui` and `inspector_contents`,
+`browser_contents`, and `viewport_pane_ui` from S-07a. Several open packages
+edit the same file.
+**Do.** Move them, with their private helpers and tests, as `impl
+SceneEditor` blocks into `panels/hierarchy.rs`, `inspector.rs`, `assets.rs`,
+`console.rs` and `scene_view.rs` (Scene and Game). Delete `sidebars.rs` and
+`ai_workspace.rs` if S-07a and S-07c left anything in them. Code motion only:
+no renames, no logic edits. Start from a fresh trunk, finish in one sitting
+and merge at once. Suits a cheaper model.
+**Done when.** `git diff --color-moved` shows moves only; `scene_editor.rs`
+holds no panel body; one `ui_drive.py` screenshot is unchanged; the gate
+passes.
 
 #### S-08 · String table and wording pass — M — ready
 Status: open
