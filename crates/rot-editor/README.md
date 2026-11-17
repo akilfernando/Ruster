@@ -25,35 +25,15 @@ Static assemblies can Reset, Play and export through a matched Linux template ad
 
 To animate a hinge, select the Group in Objects, then choose **Behavior → Add behavior… → Lua Group rotation**. Edit the opened source and use **Ctrl+Enter** to apply it. Lua host API6 passes a local Euler rotation in radians in X/Y/Z order. Return exactly three components and use the same Play, Pause, Step and Reset controls as other behavior runs. Group topology, position and uniform scale stay fixed within the run. Reset restores the authored pose. The runtime Inspector identifies the Group-local read-only rotation. Save or use Undo/Redo through the existing shared controls. For standalone delivery of Scene20, use a matched Linux kit advertising `group_local_rotation` (content16, Descriptor5).
 
-## Native AI workspace — headless implementation candidate
+## Layouts and working beside an AI app
 
-The full editor is the default after project selection and when a trusted
-connector starts a registered project. **File → Advanced → AI workspace**
-switches the existing window. **Full editor** returns without recreating the
-session, history, selection or camera. Connecting to a running editor keeps its
-current layout.
-
-At reduced widths, one essential header retains project/unsaved state, Undo,
-AI status and Full editor; **…** holds secondary tools/actions. Wider windows expose
-the existing transform/navigation actions directly. Objects, Selection and Content
-reuse existing controls in a collapsed, bounded overlay drawer, not permanent
-sidebars. The viewport takes its natural available aspect ratio; there is no forced
-portrait camera, crop or letterbox. Full-editor visibility and divider preferences
-are not overwritten. Resolve pending drafts, gestures or modals before changing mode;
-AI drafts keep Selection visible and cannot be silently hidden by closing its drawer.
-
-Remappable shortcuts, native picking/gizmos/navigation, Save/history, recovery, close
-safety, diagnostics and active-runtime Stop use their existing owners in both modes.
-Connect to an enrolled project from the AI client by choosing its registered name.
-That path asks for no recurring native approval. **File → Advanced → Rot connection…**
-contains Disconnect and persistent revoke for a project or the registry. Save/export/execution grants
-are unchanged. Browser preview and model image reception are not prerequisites for
-local native interaction.
-
-Headless geometry covers 600×850, 650×900, 640×600, 800×650, wider windows and larger
-UI scale, plus drawer hit-testing/capture occlusion and state/draft preservation.
-This is not native-human usability or actual ChatGPT/image acceptance.
-[Evidence and precise remaining gates](../../docs/evidence/NATIVE-AI-WORKSPACE-2026-11-15.md).
+Panels are docked tabs. **Window ▸ Layouts** (and the toolbar's Layout menu)
+offers **Default** and **Side by Side**; each keeps its own arrangement, and
+both are saved to `layout.json` beside the editor preferences. Narrowing the
+window below about 1100 px switches to Side by Side, widening switches back;
+a manual choice holds until the next crossing. `ROT_WORKSPACE=ai` starts in
+Side by Side and skips the project picker. Close a panel with its ×; bring
+it back from Window. F6 and Shift+F6 move between panels.
 
 ## Legacy local AI binding — CP2 candidate
 

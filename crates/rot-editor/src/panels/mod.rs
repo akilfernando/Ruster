@@ -69,6 +69,75 @@ pub fn default_tree() -> Tree<Pane> {
     Tree::new(egui::Id::unique("rot_dock"), root, tiles)
 }
 
+/// The two layouts (S-07c). Each keeps its own arrangement.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum LayoutKind {
+    /// Unity's default: Hierarchy | Scene, Game | Inspector over Assets.
+    Default,
+    /// For a half-width window beside an AI app.
+    SideBySide,
+}
+
+impl LayoutKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Default => "Default",
+            Self::SideBySide => "Side by Side",
+        }
+    }
+    fn key(self) -> &'static str {
+        match self {
+            Self::Default => "default",
+            Self::SideBySide => "side_by_side",
+        }
+    }
+    fn tree(self) -> Tree<Pane> {
+        match self {
+            Self::Default => default_tree(),
+            Self::SideBySide => side_by_side_tree(),
+        }
+    }
+    fn other(self) -> Self {
+        match self {
+            Self::Default => Self::SideBySide,
+            Self::SideBySide => Self::Default,
+        }
+    }
+}
+
+/// Below about 1100 px: the view over Assets on the left, Inspector and
+/// Hierarchy sharing one dock on the right (UX-STANDARDS §3).
+pub fn side_by_side_tree() -> Tree<Pane> {
+    let mut tiles = Tiles::default();
+    let scene = tiles.insert_pane(Pane::Scene);
+    let game = tiles.insert_pane(Pane::Game);
+    let assets = tiles.insert_pane(Pane::Assets);
+    let console = tiles.insert_pane(Pane::Console);
+    let inspector = tiles.insert_pane(Pane::Inspector);
+    let hierarchy = tiles.insert_pane(Pane::Hierarchy);
+    let views = tiles.insert_tab_tile(vec![scene, game]);
+    let bottom = tiles.insert_tab_tile(vec![assets, console]);
+    let right = tiles.insert_tab_tile(vec![inspector, hierarchy]);
+    let mut left = Linear::new(LinearDir::Vertical, vec![views, bottom]);
+    left.shares.set_share(views, 0.62);
+    left.shares.set_share(bottom, 0.38);
+    let left = tiles.insert_new(Tile::Container(Container::Linear(left)));
+    let mut root = Linear::new(LinearDir::Horizontal, vec![left, right]);
+    root.shares.set_share(left, 0.64);
+    root.shares.set_share(right, 0.36);
+    let root = tiles.insert_new(Tile::Container(Container::Linear(root)));
+    Tree::new(egui::Id::unique("rot_dock_side_by_side"), root, tiles)
+}
+
+/// What layout.json holds.
+pub struct SavedLayouts {
+    pub active: LayoutKind,
+    pub default: Tree<Pane>,
+    pub side_by_side: Tree<Pane>,
+    /// The file existed and was read.
+    pub loaded: bool,
+}
+
 /// `layout.json` sits beside the preferences file (S-07b).
 pub fn layout_path(state: Option<&Path>) -> Option<PathBuf> {
     Some(state?.parent()?.join("layout.json"))
@@ -85,46 +154,73 @@ fn complete(tree: &Tree<Pane>) -> bool {
     })
 }
 
-/// The saved layout, or the default with a warning when the file is
-/// missing parts, unreadable or corrupt. A missing file is not a problem.
-pub fn load_tree(path: Option<&Path>) -> (Tree<Pane>, Option<String>) {
+/// The saved layouts, or the defaults with a warning when the file is
+/// unreadable or damaged. A missing file is not a problem.
+pub fn load_layouts(path: Option<&Path>) -> (SavedLayouts, Option<String>) {
+    let fresh = |loaded| SavedLayouts {
+        active: LayoutKind::Default,
+        default: default_tree(),
+        side_by_side: side_by_side_tree(),
+        loaded,
+    };
     let Some(path) = path else {
-        return (default_tree(), None);
+        return (fresh(false), None);
     };
     let bytes = match rot_assets::read_regular_file(path, 1024 * 1024) {
         Ok(bytes) => bytes,
-        Err(_) if path.symlink_metadata().is_err() => return (default_tree(), None),
+        Err(_) if path.symlink_metadata().is_err() => return (fresh(false), None),
         Err(error) => {
             return (
-                default_tree(),
+                fresh(false),
                 Some(format!(
                     "Couldn't read the panel layout; using the default. {error}"
                 )),
             )
         }
     };
-    let tree = serde_json::from_slice::<serde_json::Value>(&bytes)
+    let value = serde_json::from_slice::<serde_json::Value>(&bytes)
         .ok()
-        .filter(|value| value["format"] == "rot-editor-layout" && value["version"] == 1)
-        .and_then(|value| {
-            serde_json::from_value::<Tree<Pane>>(value["layouts"]["default"].clone()).ok()
+        .filter(|value| value["format"] == "rot-editor-layout" && value["version"] == 1);
+    let tree = |kind: LayoutKind| {
+        value.as_ref().and_then(|value| {
+            serde_json::from_value::<Tree<Pane>>(value["layouts"][kind.key()].clone())
+                .ok()
+                .filter(complete)
         })
-        .filter(complete);
-    match tree {
-        Some(tree) => (tree, None),
-        None => (
-            default_tree(),
+    };
+    let Some(default) = tree(LayoutKind::Default) else {
+        return (
+            fresh(false),
             Some("The saved panel layout is damaged; using the default layout.".into()),
-        ),
-    }
+        );
+    };
+    let active = match value.as_ref().map(|value| value["active"].clone()) {
+        Some(serde_json::Value::String(name)) if name == "side_by_side" => LayoutKind::SideBySide,
+        _ => LayoutKind::Default,
+    };
+    (
+        SavedLayouts {
+            active,
+            default,
+            side_by_side: tree(LayoutKind::SideBySide).unwrap_or_else(side_by_side_tree),
+            loaded: true,
+        },
+        None,
+    )
 }
 
-/// Write the layout by temporary file and rename.
-pub fn save_tree(path: &Path, tree: &Tree<Pane>) -> std::io::Result<()> {
+/// Write both layouts by temporary file and rename.
+pub fn save_layouts(
+    path: &Path,
+    active: LayoutKind,
+    default: &Tree<Pane>,
+    side_by_side: &Tree<Pane>,
+) -> std::io::Result<()> {
     let value = serde_json::json!({
         "format": "rot-editor-layout",
         "version": 1,
-        "layouts": { "default": tree },
+        "active": active.key(),
+        "layouts": { "default": default, "side_by_side": side_by_side },
     });
     let bytes = serde_json::to_vec_pretty(&value)?;
     if let Some(parent) = path.parent() {
@@ -336,6 +432,7 @@ impl SceneEditor {
     /// The dock below the toolbar: every panel in a tab (S-07a).
     pub(super) fn dock_ui(&mut self, ui: &mut egui::Ui, about_open: bool) {
         self.ensure_dock();
+        self.follow_window_width(ui.ctx().content_rect().width());
         // The status bar's counts ask to show the Console.
         if std::mem::take(&mut self.console.open) {
             self.show_pane(Pane::Console, false);
@@ -352,16 +449,60 @@ impl SceneEditor {
         self.dock = Some(tree);
     }
 
-    /// Load the saved layout once.
+    /// Load the saved layouts once.
     fn ensure_dock(&mut self) {
+        if self.dock.is_some() {
+            return;
+        }
+        let path = layout_path(self.workspace.state_path());
+        let (saved, warning) = load_layouts(path.as_deref());
+        if let Some(warning) = warning {
+            self.console
+                .push(crate::console::Level::Warning, "Layout", warning);
+        }
+        self.layout_loaded = saved.loaded;
+        self.active_layout = saved.active;
+        let (active, other) = match saved.active {
+            LayoutKind::Default => (saved.default, saved.side_by_side),
+            LayoutKind::SideBySide => (saved.side_by_side, saved.default),
+        };
+        self.dock = Some(active);
+        self.other_dock = Some(other);
+        if let Some(kind) = self.layout_override.take() {
+            self.switch_layout(kind);
+            self.layout_loaded = true;
+        }
+    }
+
+    /// Show the other layout; each keeps its own arrangement.
+    pub(super) fn switch_layout(&mut self, kind: LayoutKind) {
+        self.ensure_dock();
+        if kind == self.active_layout {
+            return;
+        }
+        std::mem::swap(&mut self.dock, &mut self.other_dock);
         if self.dock.is_none() {
-            let path = layout_path(self.workspace.state_path());
-            let (tree, warning) = load_tree(path.as_deref());
-            if let Some(warning) = warning {
-                self.console
-                    .push(crate::console::Level::Warning, "Layout", warning);
+            self.dock = Some(kind.tree());
+        }
+        self.active_layout = kind;
+        self.dock_dirty = true;
+    }
+
+    /// Crossing 1100 px of window width picks Side by Side below and
+    /// Default above. A manual choice holds until the next crossing.
+    fn follow_window_width(&mut self, width: f32) {
+        let wide = width >= 1100.0;
+        let first = self.layout_band.is_none();
+        if self.layout_band != Some(wide) {
+            self.layout_band = Some(wide);
+            // At startup a saved or requested layout keeps its own choice.
+            if !(first && self.layout_loaded) {
+                self.switch_layout(if wide {
+                    LayoutKind::Default
+                } else {
+                    LayoutKind::SideBySide
+                });
             }
-            self.dock = Some(tree);
         }
     }
 
@@ -399,7 +540,7 @@ impl SceneEditor {
     }
 
     pub(super) fn reset_layout(&mut self) {
-        self.dock = Some(default_tree());
+        self.dock = Some(self.active_layout.tree());
         self.dock_dirty = true;
     }
 
@@ -408,11 +549,19 @@ impl SceneEditor {
         if !std::mem::take(&mut self.dock_dirty) {
             return;
         }
-        let (Some(tree), Some(path)) = (&self.dock, layout_path(self.workspace.state_path()))
+        let (Some(active), Some(path)) = (&self.dock, layout_path(self.workspace.state_path()))
         else {
             return;
         };
-        if let Err(error) = save_tree(&path, tree) {
+        let other = self
+            .other_dock
+            .clone()
+            .unwrap_or_else(|| self.active_layout.other().tree());
+        let (default, side_by_side) = match self.active_layout {
+            LayoutKind::Default => (active, &other),
+            LayoutKind::SideBySide => (&other, active),
+        };
+        if let Err(error) = save_layouts(&path, self.active_layout, default, side_by_side) {
             self.console.push(
                 crate::console::Level::Warning,
                 "Layout",
@@ -489,6 +638,78 @@ mod tests {
             |ui| editor.ui(ui),
         );
         output.textures_delta.clear();
+    }
+
+    fn run_at(editor: &mut SceneEditor, ctx: &egui::Context, size: egui::Vec2) {
+        let mut output = ctx.run_ui(
+            egui::RawInput {
+                focused: true,
+                screen_rect: Some(egui::Rect::from_min_size(egui::Pos2::ZERO, size)),
+                ..Default::default()
+            },
+            |ui| editor.ui(ui),
+        );
+        output.textures_delta.clear();
+    }
+
+    /// S-07c: crossing 1100 px switches layouts, each keeps its own
+    /// arrangement, both survive a restart, and the narrow view is roomy.
+    #[test]
+    fn layouts_follow_window_width_and_keep_their_arrangement() {
+        let dir = tempfile::tempdir().unwrap();
+        let state = dir.path().join("editor.json");
+        let session = || rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let wide = egui::vec2(1280.0, 800.0);
+        let narrow = egui::vec2(960.0, 1080.0);
+        let mut editor = SceneEditor::with_workspace(
+            session(),
+            crate::workspace::Workspace::at_for_test(state.clone()),
+        );
+        run_at(&mut editor, &ctx, wide);
+        assert_eq!(editor.active_layout, LayoutKind::Default);
+        editor.hide_pane(Pane::Hierarchy);
+        run_at(&mut editor, &ctx, narrow);
+        run_at(&mut editor, &ctx, narrow);
+        assert_eq!(editor.active_layout, LayoutKind::SideBySide);
+        assert!(editor.pane_visible(Pane::Hierarchy), "its own arrangement");
+        let view = editor.captures.rect.unwrap();
+        assert!(
+            view.width() >= 560.0 && view.height() >= 560.0,
+            "view {view:?}"
+        );
+        editor.hide_pane(Pane::Console);
+        run_at(&mut editor, &ctx, wide);
+        assert_eq!(editor.active_layout, LayoutKind::Default);
+        assert!(
+            !editor.pane_visible(Pane::Hierarchy),
+            "Default kept its change"
+        );
+        // A manual choice holds until the next crossing.
+        editor.switch_layout(LayoutKind::SideBySide);
+        run_at(&mut editor, &ctx, wide);
+        assert_eq!(editor.active_layout, LayoutKind::SideBySide);
+        assert!(editor.pane_visible(Pane::Hierarchy));
+        editor.flush_layout();
+
+        let mut reopened =
+            SceneEditor::with_workspace(session(), crate::workspace::Workspace::at_for_test(state));
+        run_at(&mut reopened, &ctx, wide);
+        assert_eq!(
+            reopened.active_layout,
+            LayoutKind::SideBySide,
+            "saved choice"
+        );
+        reopened.switch_layout(LayoutKind::Default);
+        run_at(&mut reopened, &ctx, wide);
+        assert!(!reopened.pane_visible(Pane::Hierarchy), "Default restored");
+        reopened.switch_layout(LayoutKind::SideBySide);
+        run_at(&mut reopened, &ctx, wide);
+        assert!(
+            !reopened.pane_visible(Pane::Console),
+            "Side by Side restored"
+        );
     }
 
     /// S-07b: a closed panel reopens in the same dock, the layout survives a

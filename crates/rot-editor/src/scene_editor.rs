@@ -1,7 +1,6 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
 mod ai_indicator;
 mod ai_steps;
-mod ai_workspace;
 #[cfg(all(test, unix))]
 mod ai_workspace_tracer;
 mod animation;
@@ -515,7 +514,6 @@ pub struct SceneEditor {
     draft_generation: u64,
     asset_origin: Option<PathBuf>,
     recovered_origin: Option<PathBuf>,
-    ai_workspace: bool,
     /// Below about 1180 px, tool options and Layout move into the » menu.
     toolbar_compact: bool,
     /// Every message the editor shows, the Console panel and toasts (S-06).
@@ -526,13 +524,19 @@ pub struct SceneEditor {
     dock_dragging: bool,
     /// The layout changed since it was last written to layout.json.
     dock_dirty: bool,
+    /// The inactive layout's tree, kept so each layout keeps its arrangement.
+    other_dock: Option<egui_tiles::Tree<panels::Pane>>,
+    active_layout: panels::LayoutKind,
+    /// Which side of 1100 px the window was last frame (true: wide).
+    layout_band: Option<bool>,
+    /// Start in this layout regardless of the saved one (ROT_WORKSPACE=ai).
+    layout_override: Option<panels::LayoutKind>,
+    /// layout.json existed: keep its active layout at startup.
+    layout_loaded: bool,
     /// Move keyboard focus into this pane's first control; the frame it was
     /// armed in once the anchor holds focus.
     pane_focus: Option<(panels::Pane, Option<u64>)>,
-    ai_drawer: Option<ai_workspace::Drawer>,
     ai_connection_requested: bool,
-    ai_release_navigation: bool,
-    ai_drawer_rect: Option<egui::Rect>,
     navigation: rot_render::NavigationOptions,
     player_view_draft: Option<player_view::Draft>,
     view_state: view_commands::ViewState,
@@ -753,18 +757,19 @@ impl SceneEditor {
             recovered_origin: None,
             view_state: Default::default(),
             captures: Default::default(),
-            ai_workspace: false,
             toolbar_compact: false,
             console: Default::default(),
             dock: None,
             dock_dragging: false,
             dock_dirty: false,
+            other_dock: None,
+            active_layout: panels::LayoutKind::Default,
+            layout_band: None,
+            layout_override: None,
+            layout_loaded: false,
             pane_focus: None,
-            ai_drawer: None,
             ai_connection_requested: false,
-            ai_release_navigation: false,
             player_view_draft: None,
-            ai_drawer_rect: None,
             navigation: rot_render::NavigationOptions {
                 camera,
                 reset: camera.is_none(),
@@ -2500,9 +2505,6 @@ impl SceneEditor {
             self.runtime.cancel_control_focus();
         }
         let blocked = document_blocked || self.asset_busy();
-        if self.ai_workspace && self.runtime.has_worker() {
-            self.runtime_toolbar(ui, blocked);
-        }
         self.runtime.observe(
             self.generation,
             self.session.scene().revision,
@@ -2523,18 +2525,14 @@ impl SceneEditor {
         };
         // At a compact height, the View menu retains projection and
         // presets while the recovered Inspector draft needs the extra row.
-        self.navigation.show_controls = !self.ai_workspace
-            && !(self.recovered_input.is_some() && ui.available_height() < 215.0);
+        self.navigation.show_controls =
+            !(self.recovered_input.is_some() && ui.available_height() < 215.0);
         self.navigation.selection_feedback = true;
         self.navigation.show_editor_grid = !player_view;
         self.navigation.focusable =
             self.runtime.input_owned() || (self.runtime.visible && self.runtime.is_playing());
         self.navigation.enabled = !player_view
             && !self.dock_dragging
-            && !self.ai_release_navigation
-            && !self
-                .ai_drawer_rect
-                .is_some_and(|rect| ctx.pointer_hover_pos().is_some_and(|p| rect.contains(p)))
             && !about_open
             && !self.runtime.input_owned()
             && !self.export_dialog
@@ -2674,7 +2672,6 @@ impl SceneEditor {
         );
         self.runtime
             .input_finish(&ctx, &viewport.response, blocked || hud_owns);
-        self.ai_release_navigation = false;
         self.captures.rect = Some(viewport.rect);
         self.captures.visible_crop = Some(hud_rect);
         self.captures.view = Some(viewport.view);
@@ -2836,11 +2833,7 @@ impl SceneEditor {
                     } else {
                         egui::ComboBox::from_id_salt("toolbar_layout")
                             .width(96.0)
-                            .selected_text(if self.ai_workspace {
-                                "AI Workspace"
-                            } else {
-                                "Default"
-                            })
+                            .selected_text(self.active_layout.label())
                             .show_ui(ui, |ui| self.layout_menu(ui))
                             .response
                             .on_hover_text("Layout");
@@ -2858,19 +2851,11 @@ impl SceneEditor {
         }
     }
     fn layout_menu_items(&mut self, ui: &mut egui::Ui) {
-        if ui
-            .add(egui::Button::selectable(!self.ai_workspace, "Default"))
-            .clicked()
-        {
-            self.set_ai_workspace(false, &ui.ctx().clone());
-            ui.close();
-        }
-        if ui
-            .add(egui::Button::selectable(self.ai_workspace, "AI Workspace"))
-            .clicked()
-        {
-            self.set_ai_workspace(true, &ui.ctx().clone());
-            ui.close();
+        for kind in [panels::LayoutKind::Default, panels::LayoutKind::SideBySide] {
+            if ui.radio(self.active_layout == kind, kind.label()).clicked() {
+                self.switch_layout(kind);
+                ui.close();
+            }
         }
     }
     fn runtime_toolbar(&mut self, ui: &mut egui::Ui, blocked: bool) {
@@ -5519,19 +5504,11 @@ impl SceneEditor {
                 }
             }
             Action::FindObjects => {
-                if self.ai_workspace {
-                    self.ai_drawer = Some(ai_workspace::Drawer::Objects);
-                } else {
-                    self.show_pane(panels::Pane::Hierarchy, false);
-                }
+                self.show_pane(panels::Pane::Hierarchy, false);
                 self.hierarchy_focus = true;
             }
             Action::FindContent => {
-                if self.ai_workspace {
-                    self.ai_drawer = Some(ai_workspace::Drawer::Content);
-                } else {
-                    self.show_pane(panels::Pane::Assets, false);
-                }
+                self.show_pane(panels::Pane::Assets, false);
                 self.content_focus = true;
             }
             Action::FocusRuntime => {
@@ -6009,7 +5986,7 @@ impl SceneEditor {
                 });
             });
             crate::editor_theme::text_menu(ui, "Window", |ui| {
-                if !self.ai_workspace {
+                {
                     // Checking a panel shows, selects and focuses its tab.
                     for pane in [
                         panels::Pane::Hierarchy,
@@ -6214,11 +6191,7 @@ impl SceneEditor {
         }
         self.runtime.input_begin(&ctx, input_blocked);
         egui::Panel::top("scene_top").show(ui, |ui| {
-            if self.ai_workspace {
-                self.ai_header(ui);
-            } else {
-                self.scene_menus(ui);
-            }
+            self.scene_menus(ui);
         });
     }
 
@@ -6227,16 +6200,7 @@ impl SceneEditor {
         self.route_shortcuts(&ctx);
         let about_open = crate::branding::is_about_open(&ctx);
         crate::branding::show_about(&ctx);
-        if !self.ai_workspace
-            || self.status_diagnostics()
-            || !self.notice.is_empty()
-            || self.asset_busy()
-        {
-            egui::Panel::bottom("scene_status").show(ui, |ui| self.asset_status_ui(ui));
-        }
-        if self.ai_workspace {
-            self.ai_drawer_ui(&ctx);
-        }
+        egui::Panel::bottom("scene_status").show(ui, |ui| self.asset_status_ui(ui));
         self.process_queued_action();
         self.process_queued_selection();
         self.process_content_intents();
@@ -6247,7 +6211,7 @@ impl SceneEditor {
             self.shader_revision,
         );
         egui::CentralPanel::default().show(ui, |ui| {
-            if self.ai_workspace || self.asset_loading() {
+            if self.asset_loading() {
                 self.viewport_pane_ui(ui, about_open);
             } else {
                 let document_blocked =
@@ -6678,9 +6642,13 @@ fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
                     editor.navigation.metrics = metrics.clone();
                     #[cfg(feature = "inspection")]
                     editor.asset_ops.probe.attach_metrics(metrics);
-                    editor.ai_workspace = std::env::var_os("ROT_PROJECT_STARTUP").is_none()
+                    // ROT_WORKSPACE=ai: start beside an AI app, in Side by Side.
+                    let beside_ai = std::env::var_os("ROT_PROJECT_STARTUP").is_none()
                         && std::env::var("ROT_WORKSPACE").as_deref() == Ok("ai");
-                    if startup_projects && !mcp_enabled && !editor.ai_workspace {
+                    if beside_ai {
+                        editor.layout_override = Some(panels::LayoutKind::SideBySide);
+                    }
+                    if startup_projects && !mcp_enabled && !beside_ai {
                         editor.project_picker = Some(project_picker::ProjectPicker::default());
                         cc.egui_ctx.set_zoom_factor(editor.workspace.prefs.scale);
                     }

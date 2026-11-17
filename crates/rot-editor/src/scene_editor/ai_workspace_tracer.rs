@@ -23,10 +23,12 @@ fn headless_native_fixture_owner() {
         workspace: None,
         workspace_enabled: false,
     };
-    host.editor.ai_workspace = std::env::var("ROT_WORKSPACE").as_deref() == Ok("ai");
+    // S-07c: beside an AI app the editor starts in the Side by Side layout.
+    assert_eq!(std::env::var("ROT_WORKSPACE").as_deref(), Ok("ai"));
+    host.editor.layout_override = Some(super::panels::LayoutKind::SideBySide);
     host.editor.save_grant =
         Some(persistence_commands::SaveGrant::new(startup.scene_path.parent().unwrap()).unwrap());
-    assert!(host.editor.ai_workspace);
+    assert!(host.editor.layout_override.is_some());
     host.connect_adapter(&ctx).unwrap();
     let deadline = Instant::now() + Duration::from_secs(60);
     while Instant::now() < deadline && !startup.state_directory.join("stop-fixture").exists() {
