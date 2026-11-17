@@ -41,6 +41,7 @@ mod recovery_worker;
 mod scene_editor;
 #[path = "../../support/strict_json.rs"]
 mod strict_json;
+mod strings;
 #[cfg(unix)]
 #[path = "../../support/trust.rs"]
 #[allow(dead_code)]

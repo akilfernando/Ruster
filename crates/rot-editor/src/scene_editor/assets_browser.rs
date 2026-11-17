@@ -369,7 +369,10 @@ impl SceneEditor {
             .update(self.assets.as_ref(), &self.content_query);
         self.content_diagnostics_ui(ui);
         if self.asset_loading() {
-            ui.label("Loading project content…");
+            ui.label(crate::strings::tr(
+                ui.ctx(),
+                crate::strings::Text::LoadingContent,
+            ));
             return;
         }
         if self.assets.is_none() {
@@ -391,9 +394,9 @@ impl SceneEditor {
         let items = self.items();
         if items.is_empty() {
             let line = if self.content_query.is_empty() {
-                "Drop .glb, .obj, .png or .wav files here to import them."
+                crate::strings::tr(ui.ctx(), crate::strings::Text::EmptyAssets)
             } else {
-                "No assets match this search."
+                crate::strings::tr(ui.ctx(), crate::strings::Text::NoResults)
             };
             crate::ui_kit::empty_state(ui, line, None);
             return;

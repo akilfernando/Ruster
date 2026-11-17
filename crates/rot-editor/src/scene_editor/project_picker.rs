@@ -47,8 +47,6 @@ impl ProjectPicker {
             && ui.memory(|memory| memory.focused().is_none())
             && ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
         let palette = kit::colors(ui);
-        let themed = crate::editor_theme::style(ui.ctx()) == crate::editor_theme::Style::Rot
-            && workspace.prefs.themed_wording;
         let ai_step =
             workspace.first_launch && workspace.prefs.style.is_some() && !self.ai_step_done;
         egui::CentralPanel::default()
@@ -139,11 +137,10 @@ impl ProjectPicker {
                             if projects.is_empty() {
                                 kit::empty_state(
                                     ui,
-                                    if themed {
-                                        "Nothing planted yet."
-                                    } else {
-                                        "No recent projects"
-                                    },
+                                    crate::strings::tr(
+                                        ui.ctx(),
+                                        crate::strings::Text::NoRecentProjects,
+                                    ),
                                     None,
                                 );
                                 return;
@@ -160,11 +157,7 @@ impl ProjectPicker {
                             if visible.is_empty() {
                                 kit::empty_state(
                                     ui,
-                                    if themed {
-                                        "Nothing under this log."
-                                    } else {
-                                        "No results"
-                                    },
+                                    crate::strings::tr(ui.ctx(), crate::strings::Text::NoResults),
                                     None,
                                 );
                                 return;

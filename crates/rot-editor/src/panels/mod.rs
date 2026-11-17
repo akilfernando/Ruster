@@ -288,7 +288,7 @@ impl egui_tiles::Behavior<Pane> for Dock<'_> {
                     egui::Frame::new().inner_margin(margin).show(ui, |ui| {
                         let set_up = crate::ui_kit::empty_state(
                             ui,
-                            "Set up the game camera to see what the player sees.",
+                            crate::strings::tr(ui.ctx(), crate::strings::Text::GameCameraNeeded),
                             Some("Game Camera…"),
                         );
                         if set_up.is_some_and(|response| response.clicked()) {

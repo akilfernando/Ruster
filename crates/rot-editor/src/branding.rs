@@ -112,6 +112,10 @@ pub fn show_about(ctx: &egui::Context) {
             ui.vertical(|ui| {
                 ui.heading("Rot Engine");
                 ui.weak(concat!("Version ", env!("CARGO_PKG_VERSION")));
+                let tagline = crate::strings::tr(ctx, crate::strings::Text::AboutTagline);
+                if !tagline.is_empty() {
+                    ui.label(tagline);
+                }
                 ui.hyperlink_to("Source and documentation", env!("CARGO_PKG_REPOSITORY"));
                 ui.separator();
                 let close = editor_theme::primary_button(ui, "Close");

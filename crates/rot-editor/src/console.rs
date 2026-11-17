@@ -299,7 +299,11 @@ impl Console {
             .map(|(index, _)| index)
             .collect();
         if visible.is_empty() {
-            crate::ui_kit::empty_state(ui, "No messages", None);
+            crate::ui_kit::empty_state(
+                ui,
+                crate::strings::tr(ui.ctx(), crate::strings::Text::EmptyConsole),
+                None,
+            );
             return None;
         }
         let detail_height = if self.selected.is_some() { 72.0 } else { 0.0 };

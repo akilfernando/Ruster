@@ -551,7 +551,11 @@ pub struct SceneEditor {
     content_scroll_to: bool,
     content_search: ContentSearch,
     scale_applied: f32,
-    theme_applied: Option<(crate::editor_theme::ThemeChoice, crate::editor_theme::Style)>,
+    theme_applied: Option<(
+        crate::editor_theme::ThemeChoice,
+        crate::editor_theme::Style,
+        bool,
+    )>,
     preview: Preview,
     generation: u64,
     error: String,
@@ -630,7 +634,10 @@ impl SceneEditor {
                 self.recovery.poll(&ctx);
                 self.process_recovery_ack();
                 if self.asset_loading() {
-                    ui.label("Loading project content…");
+                    ui.label(crate::strings::tr(
+                        ui.ctx(),
+                        crate::strings::Text::LoadingContent,
+                    ));
                 }
                 self.asset_frame(&ctx, true);
             })
@@ -2476,7 +2483,10 @@ impl SceneEditor {
             self.captures.rect = None;
             self.captures.visible_crop = None;
             self.captures.receipt = None;
-            ui.heading("Loading project content…");
+            ui.heading(crate::strings::tr(
+                ui.ctx(),
+                crate::strings::Text::LoadingContent,
+            ));
             ui.label("The scene and your saved edits are retained while content loads.");
             // Stop remains available for an older retained runtime while
             // Reset and playback edits wait for content authority.
@@ -4465,7 +4475,10 @@ impl SceneEditor {
             );
             if self.runtime.visible {
                 ui.strong("Authored components");
-                ui.small("Edits apply to the scene and restart Play.");
+                ui.small(crate::strings::tr(
+                    ui.ctx(),
+                    crate::strings::Text::EditsRestartPlay,
+                ));
             }
             self.ambient_inspector_ui(ui);
             self.display_inspector_ui(ui);
@@ -5643,8 +5656,9 @@ impl SceneEditor {
 
     fn scene_welcome(&mut self, ui: &mut egui::Ui) {
         let show_recent = ui.available_width() >= 340.0;
+        ui.heading(crate::strings::tr(ui.ctx(), crate::strings::Text::Welcome));
         ui.horizontal_wrapped(|ui| {
-            if crate::editor_theme::primary_button(ui, "Open a scene…").clicked() {
+            if crate::editor_theme::primary_button(ui, Action::Open.label()).clicked() {
                 self.queued_action = Some(Action::Open);
             }
             self.create_menu(ui);
@@ -5859,15 +5873,19 @@ impl SceneEditor {
     }
     /// Applies a changed theme preference; the next frame paints it everywhere.
     fn apply_theme(&mut self, ctx: &egui::Context) {
+        let style = self
+            .workspace
+            .previewed_style()
+            .or(self.workspace.prefs.style)
+            .unwrap_or_default();
         let theme = (
             self.workspace.prefs.theme,
-            self.workspace
-                .previewed_style()
-                .or(self.workspace.prefs.style)
-                .unwrap_or_default(),
+            style,
+            style == crate::editor_theme::Style::Rot && self.workspace.prefs.themed_wording,
         );
         if self.theme_applied != Some(theme) {
             crate::editor_theme::apply(ctx, theme.0, theme.1);
+            crate::strings::set_themed(ctx, theme.2);
             if self.theme_applied.is_some() {
                 ctx.request_repaint();
             }

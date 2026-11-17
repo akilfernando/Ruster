@@ -129,7 +129,10 @@ impl SceneEditor {
                                         }
                                     }
                                     if found.is_empty() {
-                                        ui.weak("No matching commands");
+                                        ui.weak(crate::strings::tr(
+                                            ui.ctx(),
+                                            crate::strings::Text::NoMatchingCommands,
+                                        ));
                                     }
                                 },
                             );
