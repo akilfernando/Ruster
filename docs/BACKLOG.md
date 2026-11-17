@@ -247,7 +247,7 @@ Console into the Inspector dock (`ui_drive.py` cannot drag; say so);
 **Not now.** Close buttons, saving and layouts (S-07b, S-07c).
 
 #### S-07b · Close, reopen, saved layout and F6 — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** Panels close and reopen from Window, the layout survives a
 restart, and F6 moves the keyboard between panels.
 **Facts.** egui_tiles: `Tree::set_visible` hides a tile in place,
