@@ -823,7 +823,7 @@ fn model(object: &Object) -> Mat4 {
 }
 
 /// Paint a procedural-only scene. Imported references use the diagnostic cube fallback.
-/// Right-drag orbits, wheel zooms, and Fit restores bounds. Scene changes require valid data.
+/// Unity-style navigation (see `render_viewport_with_materials`); Fit restores bounds. Scene changes require valid data.
 pub fn viewport(ui: &mut egui::Ui, scene: &Scene, selected: Option<&str>) -> Option<String> {
     viewport_with_assets(ui, scene, selected, &BTreeMap::new())
 }
@@ -1127,47 +1127,53 @@ pub fn allocate_viewport(
             }
             stats_anchor = Some(egui::pos2(origin.x, ui.min_rect().bottom() + 6.0));
         }
-        // The orientation gizmo sits in the visible top-right corner.
-        if navigation_enabled && visible.width() >= 240.0 && visible.height() >= 160.0 {
-            let center = egui::pos2(
-                visible.right() - 8.0 - GIZMO_RADIUS - 10.0,
-                visible.top() + 8.0 + GIZMO_RADIUS + 10.0,
-            );
-            let hit = egui::Rect::from_center_size(
-                center + egui::vec2(0.0, 8.0),
-                egui::vec2(2.0 * GIZMO_RADIUS + 20.0, 2.0 * GIZMO_RADIUS + 36.0),
-            );
-            // Mouse-only, like the surface: not a Tab stop. View Presets is
-            // the keyboard route to the same views.
-            let response = overlay
-                .interact(
-                    hit,
-                    overlay.scope_id().with("orientation-gizmo"),
-                    egui::Sense::CLICK,
-                )
-                .on_hover_text(
-                    "Click an axis to view along it. Click the center or the label to \
+    }
+    // The orientation gizmo sits in the top-right corner. It lives on the
+    // surface's own layer, so panels drawn over the surface also cover it.
+    if navigation.show_controls
+        && !navigation.player_view
+        && navigation_enabled
+        && visible.width() >= 240.0
+        && visible.height() >= 160.0
+    {
+        let center = egui::pos2(
+            visible.right() - 8.0 - GIZMO_RADIUS - 10.0,
+            visible.top() + 8.0 + GIZMO_RADIUS + 10.0,
+        );
+        let hit = egui::Rect::from_center_size(
+            center + egui::vec2(0.0, 8.0),
+            egui::vec2(2.0 * GIZMO_RADIUS + 20.0, 2.0 * GIZMO_RADIUS + 36.0),
+        );
+        // Mouse-only, like the surface: not a Tab stop. View Presets is
+        // the keyboard route to the same views.
+        let response = ui
+            .interact(
+                hit,
+                ui.scope_id().with("orientation-gizmo"),
+                egui::Sense::CLICK,
+            )
+            .on_hover_text(
+                "Click an axis to view along it. Click the center or the label to \
                      switch Perspective and Orthographic; Shift-click the center for \
                      the default view.",
-                );
-            let target = response
-                .hover_pos()
-                .and_then(|pointer| gizmo_target(camera, center, pointer));
-            if response.clicked() {
-                match target {
-                    Some(GizmoTarget::Axis(preset)) => camera.set_preset(preset),
-                    Some(GizmoTarget::Center) if overlay.input(|i| i.modifiers.shift) => {
-                        camera.set_preset(ViewPreset::Free);
-                    }
-                    Some(GizmoTarget::Center) => camera.orthographic = !camera.orthographic,
-                    None => {}
+            );
+        let target = response
+            .hover_pos()
+            .and_then(|pointer| gizmo_target(camera, center, pointer));
+        if response.clicked() {
+            match target {
+                Some(GizmoTarget::Axis(preset)) => camera.set_preset(preset),
+                Some(GizmoTarget::Center) if ui.input(|i| i.modifiers.shift) => {
+                    camera.set_preset(ViewPreset::Free);
                 }
+                Some(GizmoTarget::Center) => camera.orthographic = !camera.orthographic,
+                None => {}
             }
-            gizmo = Some(Gizmo {
-                center,
-                hovered: target,
-            });
         }
+        gizmo = Some(Gizmo {
+            center,
+            hovered: target,
+        });
     }
     ViewportSurface {
         rect,
@@ -1707,7 +1713,7 @@ pub fn render_viewport_with_materials(
         let (current, held) = ui.input(|i| (i.pointer.latest_pos(), i.pointer.primary_down()));
         let selection = egui::Rect::from_two_pos(origin, current.unwrap_or(origin));
         if held {
-            let painter = ui.ctx().layer_painter(overlay_layer).with_clip_rect(rect);
+            let painter = ui.painter().with_clip_rect(rect);
             let accent = ui.visuals().selection.bg_fill;
             painter.rect(
                 selection,
@@ -1904,10 +1910,15 @@ pub fn render_viewport_with_materials(
         painter.galley(position, galley, ui.visuals().warn_fg_color);
     }
     if !navigation.player_view {
-        let painter = ui.ctx().layer_painter(overlay_layer).with_clip_rect(rect);
         if let Some(gizmo) = gizmo {
-            paint_gizmo(&painter, ui.visuals(), camera, gizmo);
+            paint_gizmo(
+                &ui.painter().with_clip_rect(rect),
+                ui.visuals(),
+                camera,
+                gizmo,
+            );
         }
+        let painter = ui.ctx().layer_painter(overlay_layer).with_clip_rect(rect);
         if let (true, Some(anchor)) = (navigation.show_stats, stats_anchor) {
             paint_stats(&painter, ui.visuals(), anchor, navigation, triangles);
             // Live numbers at a few updates per second; nothing while closed.
