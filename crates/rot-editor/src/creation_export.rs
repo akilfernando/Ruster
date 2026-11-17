@@ -760,6 +760,7 @@ fn checked_kit_path(root: &Path, relative: &str) -> Result<PathBuf, String> {
 
 const KINEMATIC_CAPABILITY: &str = "kinematic_move_and_slide";
 const AUDIO_CAPABILITY: &str = "one_shot_audio";
+const ANIMATION_CAPABILITY: &str = "imported_transform_animation";
 
 #[derive(Debug)]
 struct VerifiedKit {
@@ -768,6 +769,7 @@ struct VerifiedKit {
     play_check_compatible: bool,
     kinematic_compatible: bool,
     audio_compatible: bool,
+    animation_compatible: bool,
 }
 
 // Verify fixed Python code before Python can import it. The configured kit is
@@ -906,14 +908,24 @@ fn verify_helpers(
         .as_array_mut()
         .expect("capability array")
         .push(json!(AUDIO_CAPABILITY));
+    let mut animation_profile = audio_profile.clone();
+    animation_profile["descriptor_version"] = json!(7);
+    animation_profile["capabilities"]
+        .as_array_mut()
+        .expect("capability array")
+        .push(json!(ANIMATION_CAPABILITY));
     let supplied_profile = &manifest["profile"];
-    let audio_compatible = supplied_profile == &audio_profile;
+    let animation_compatible = supplied_profile == &animation_profile;
+    let audio_compatible = supplied_profile == &audio_profile || animation_compatible;
     let kinematic_compatible = supplied_profile == &kinematic_profile || audio_compatible;
     let play_check_compatible = supplied_profile == &play_check_profile || kinematic_compatible;
     let player_view_compatible = supplied_profile == &player_view_profile || play_check_compatible;
     let hierarchy_compatible = supplied_profile == &static_assembly_profile
         || supplied_profile == &animated_assembly_profile
         || player_view_compatible;
+    if scene_version == rot_scene::ANIMATION_FORMAT_VERSION && !animation_compatible {
+        return Err("runtime kit does not support Scene22 imported_transform_animation; prepare a current Linux runtime kit".into());
+    }
     if scene_version == rot_scene::PLAYER_VIEW_FORMAT_VERSION && !player_view_compatible {
         return Err("runtime kit does not support Scene21 authored_player_view; prepare a current Linux runtime kit".into());
     }
@@ -1167,6 +1179,7 @@ fn verify_helpers(
         play_check_compatible,
         kinematic_compatible,
         audio_compatible,
+        animation_compatible,
     })
 }
 
@@ -1210,6 +1223,30 @@ fn prepare(
     let sound_ids = &sound.assets;
     if !sound_ids.is_disjoint(&mesh_ids) || !sound_ids.is_disjoint(&texture_ids) {
         return Err("WAV assets require distinct IDs from meshes and textures.".into());
+    }
+    // Only current bindings drive the delivered runtime; retained history needs
+    // no clip payload because a standalone application cannot undo.
+    let clip_ids: BTreeSet<String> = captured
+        .scene()
+        .animations
+        .values()
+        .map(|binding| binding.clip.clone())
+        .collect();
+    if !clip_ids.is_disjoint(&mesh_ids)
+        || !clip_ids.is_disjoint(&texture_ids)
+        || !clip_ids.is_disjoint(sound_ids)
+    {
+        return Err("Animation clips require distinct IDs from meshes, textures and WAVs.".into());
+    }
+    let accepted_clips = request
+        .assets
+        .as_ref()
+        .map(|assets| assets.clips().keys().cloned().collect::<BTreeSet<_>>())
+        .unwrap_or_default();
+    if accepted_clips != clip_ids {
+        return Err(
+            "Accepted animation clips differ from the captured scene dependency closure.".into(),
+        );
     }
     for id in sound_ids {
         if request.assets.as_ref().and_then(|assets| assets.kind(id))
@@ -1263,6 +1300,7 @@ fn prepare(
         play_check_compatible,
         kinematic_compatible,
         audio_compatible,
+        animation_compatible,
     } = verify_helpers(
         &request.runtime_kit,
         request.initial_camera.is_some(),
@@ -1280,6 +1318,9 @@ fn prepare(
             "Runtime kit does not support one-shot WAV audio; prepare a current Linux runtime kit"
                 .into(),
         );
+    }
+    if !clip_ids.is_empty() && !animation_compatible {
+        return Err("Runtime kit does not support imported transform animation; prepare a current Linux runtime kit".into());
     }
     if saved_check.is_some() && !play_check_compatible {
         return Err("Runtime kit does not support repeatable play checks; prepare a current Linux runtime kit".into());
@@ -1368,6 +1409,24 @@ fn prepare(
             })
             .map_err(|error| error.to_string())?;
     }
+    let mut animations = BTreeMap::new();
+    if !clip_ids.is_empty() {
+        fs::create_dir(content.join("animations")).map_err(|e| e.to_string())?;
+    }
+    for (index, id) in clip_ids.iter().enumerate() {
+        cancelled(cancel)?;
+        let bytes = request
+            .assets
+            .as_ref()
+            .and_then(|assets| assets.clips().get(id))
+            .ok_or_else(|| format!("Accepted animation clip {id} is unavailable"))?;
+        let path = format!("animations/{index:04}.json");
+        fs::write(content.join(&path), bytes.as_slice()).map_err(|e| e.to_string())?;
+        if saved_check.is_some() {
+            check_resources.insert(id.clone(), rot_assets::ResourcePin::clip(bytes));
+        }
+        animations.insert(id.clone(), json!({"path":path,"sha256":digest(bytes)}));
+    }
     let scene_hash = digest(scene_bytes);
     let schema = match scene_version {
         1..=5 => 1,
@@ -1387,7 +1446,8 @@ fn prepare(
         rot_scene::HIERARCHY_FORMAT_VERSION => 15,
         rot_scene::GROUP_ROTATION_FORMAT_VERSION => 16,
         rot_scene::PLAYER_VIEW_FORMAT_VERSION => 17,
-        _ => return Err("export requires a supported Scene1–21 document".into()),
+        rot_scene::ANIMATION_FORMAT_VERSION => 18,
+        _ => return Err("export requires a supported Scene1–22 document".into()),
     };
     let tick_nanos = u64::try_from(rot_behavior::DEFAULT_FIXED_TICK.as_nanos())
         .map_err(|_| "Default fixed tick exceeds the descriptor nanosecond range")?;
@@ -1408,6 +1468,10 @@ fn prepare(
     if sound.uses_sound {
         content_manifest["sounds"] = json!(sounds);
         capabilities.push(AUDIO_CAPABILITY);
+    }
+    if schema >= 18 {
+        content_manifest["animations"] = json!(animations);
+        capabilities.push(ANIMATION_CAPABILITY);
     }
     if !capabilities.is_empty() {
         content_manifest["required_runtime_capabilities"] = json!(capabilities);
@@ -2547,6 +2611,185 @@ print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha25
         .err()
         .unwrap();
         assert!(error.contains("dependency closure"), "{error}");
+    }
+
+    // Unique risk: animated content ships without its exact accepted clip
+    // payloads, reaches a kit lacking the capability, or perturbs the
+    // byte-for-byte contract of a scene without animation.
+    #[test]
+    fn worker_stages_accepted_clips_and_gates_animation_kits() {
+        use rot_assets::fixtures::{animated_glb, AnimatedFixture};
+        let root = tempfile::tempdir().unwrap();
+        let kit = root.path().join("kit");
+        fs::create_dir_all(kit.join("scripts")).unwrap();
+        // A trusted fake helper: it returns the staged content manifest as
+        // the archive so the test observes exactly what the worker staged.
+        let helper = br#"
+import hashlib,json,pathlib,sys
+args=dict(zip(sys.argv[2::2],sys.argv[3::2]))
+content=pathlib.Path(args['--content'])
+kit=pathlib.Path(args['--runtime-kit'])
+archive=pathlib.Path(args['--output'])
+data=(content/'content.json').read_bytes()
+archive.write_bytes(data)
+hash=lambda data:hashlib.sha256(data).hexdigest()
+print(json.dumps(dict(archive=str(archive),archive_bytes=len(data),archive_sha256=hash(data),
+    manifest_sha256='a'*64,scene_sha256=hash((content/'scene.json').read_bytes()),
+    runtime_kit_sha256=hash((kit/'runtime.json').read_bytes()),runtime_binary_sha256=hash((kit/'runtime').read_bytes()),
+    file_count=4,title=json.loads(data)['title'])))
+"#;
+        let mut records = Vec::new();
+        for (name, data) in [
+            ("runtime", b"fixture".as_slice()),
+            ("scripts/package_creation.py", helper.as_slice()),
+            ("scripts/package_app.py", b"# fixture".as_slice()),
+            ("scripts/dependency_notices.py", b"# fixture".as_slice()),
+        ] {
+            fs::write(kit.join(name), data).unwrap();
+            records.push(json!({"path":name,"bytes":data.len(),"sha256":digest(data)}));
+        }
+        let audio_capabilities = json!([
+            "initial_camera",
+            "opaque_materials",
+            "authored_lighting",
+            "sun_shadows",
+            "surface_materials",
+            "roughness_maps",
+            "input_actions",
+            "spatial_queries",
+            "runtime_state",
+            "lifecycle_commands",
+            "runtime_hud",
+            "runtime_hud_controls",
+            "runtime_hud_panels",
+            "builtin_primitives",
+            "static_assembly_hierarchy",
+            "group_local_rotation",
+            "authored_player_view",
+            "repeatable_play_checks",
+            "kinematic_move_and_slide",
+            "one_shot_audio"
+        ]);
+        let mut manifest = json!({
+            "schema":1,"kind":"rot-runtime-kit","executable":"runtime",
+            "helper":"scripts/package_creation.py","files":records,
+            "profile":{"format":"rot-runtime","version":1,"descriptor_format":"rot-application",
+                "descriptor_version":6,"os":"linux","arch":"x86_64",
+                "capabilities":audio_capabilities}});
+        let write_kit = |manifest: &Value| {
+            fs::write(
+                kit.join("runtime.json"),
+                serde_json::to_vec(manifest).unwrap(),
+            )
+            .unwrap()
+        };
+        write_kit(&manifest);
+
+        fs::write(
+            root.path().join("rig.glb"),
+            animated_glb(AnimatedFixture::default()),
+        )
+        .unwrap();
+        let mut store = rot_assets::AssetStore::open(root.path()).unwrap();
+        let model = store.import_glb_at(0, "rig", "rig.glb").unwrap();
+        let clip_id = model.clips["Swing"].id.clone();
+        let clip_bytes = store.clip_snapshots()[&clip_id].clone();
+
+        let mut scene = rot_scene::Scene::empty("animated");
+        scene.objects.push(rot_scene::Object::cube("arm", None));
+        scene.hierarchy.groups.insert(
+            "owner".into(),
+            rot_scene::Group {
+                name: None,
+                transform: rot_scene::Transform::default(),
+            },
+        );
+        scene.hierarchy.parents.insert("arm".into(), "owner".into());
+        let mut animated = rot_scene::Session::new(scene).unwrap();
+        animated
+            .set_animation(
+                0,
+                "owner",
+                Some(rot_scene::AnimationBinding {
+                    clip: clip_id.clone(),
+                    looping: true,
+                    targets: BTreeMap::from([("Rig/Arm".to_owned(), "arm".to_owned())]),
+                }),
+            )
+            .unwrap();
+        let flat = rot_scene::Session::new(rot_scene::Scene::demo()).unwrap();
+        let cancel = AtomicBool::new(false);
+        let stage = |name: &str, session: &rot_scene::Session, assets| {
+            let scene_path = root.path().join(format!("{name}.json"));
+            session.clone().save(&scene_path).unwrap();
+            prepare(
+                Request {
+                    identity: identity(),
+                    title: "Animated transport".into(),
+                    scene_path,
+                    scene_bytes: session.snapshot_bytes().unwrap(),
+                    assets,
+                    destination: root.path().join(format!("{name}.tar.gz")),
+                    runtime_kit: kit.clone(),
+                    mcp_scope: false,
+                    initial_camera: None,
+                },
+                DirectoryGrant::new(root.path()).unwrap(),
+                &cancel,
+            )
+        };
+        let clip_snapshot = || {
+            Some(
+                store
+                    .export_snapshot(&BTreeSet::from([clip_id.clone()]))
+                    .unwrap(),
+            )
+        };
+
+        // The audio kit still exports a scene without animation unchanged.
+        let legacy = stage("flat-audio-kit", &flat, None).unwrap();
+        let legacy_content = fs::read(&legacy.archive).unwrap();
+        let error = stage("animated-audio-kit", &animated, clip_snapshot())
+            .err()
+            .unwrap();
+        assert!(
+            error.contains("Scene22 imported_transform_animation"),
+            "{error}"
+        );
+        assert!(!root.path().join("animated-audio-kit.tar.gz").exists());
+
+        manifest["profile"]["descriptor_version"] = json!(7);
+        manifest["profile"]["capabilities"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!(ANIMATION_CAPABILITY));
+        write_kit(&manifest);
+        let current = stage("flat-current-kit", &flat, None).unwrap();
+        assert_eq!(fs::read(&current.archive).unwrap(), legacy_content);
+        let flat_staged: Value = serde_json::from_slice(&legacy_content).unwrap();
+        assert!(flat_staged.get("animations").is_none());
+        assert!(flat_staged.get("required_runtime_capabilities").is_none());
+
+        let error = stage("animated-no-clip", &animated, None).err().unwrap();
+        assert!(error.contains("animation clips differ"), "{error}");
+        let prepared = stage("animated", &animated, clip_snapshot()).unwrap();
+        let staged: Value = serde_json::from_slice(&fs::read(&prepared.archive).unwrap()).unwrap();
+        assert_eq!(staged["schema"], 18);
+        assert_eq!(
+            staged["required_runtime_capabilities"],
+            json!([ANIMATION_CAPABILITY])
+        );
+        assert_eq!(
+            staged["animations"],
+            json!({clip_id.as_str(): {"path":"animations/0000.json","sha256":digest(&clip_bytes)}})
+        );
+        let staged_clip = prepared
+            .archive
+            .parent()
+            .unwrap()
+            .join("content/animations/0000.json");
+        assert_eq!(fs::read(staged_clip).unwrap(), clip_bytes.as_slice());
+        assert!(!root.path().join("animated.tar.gz").exists());
     }
 
     fn identity() -> Identity {

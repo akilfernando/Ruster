@@ -564,6 +564,9 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         tick_duration,
     )?;
     app.set_sounds(manifest.load_sounds(&root)?);
+    app.set_clips(rot_behavior::decode_clips(
+        &manifest.load_animations(&root)?,
+    )?);
     app.set_creation_presentation(manifest.title.clone());
     if options.headless {
         let HeadlessRun {
@@ -799,6 +802,12 @@ fn execute_play_check(options: &Options) -> Result<bool, String> {
             pins.insert(id.clone(), ResourcePin::sound(&bytes));
         }
     }
+    // Pin the exact accepted clip bytes, as the editor's export snapshot does.
+    let clip_payloads = manifest.load_animations(&root)?;
+    for (id, bytes) in &clip_payloads {
+        pins.insert(id.clone(), ResourcePin::clip(bytes));
+    }
+    let clips = rot_behavior::decode_clips(&clip_payloads)?;
     let tick_nanos =
         u64::try_from(manifest.tick_duration().as_nanos()).map_err(|error| error.to_string())?;
     let report = play_check::run(
@@ -806,7 +815,7 @@ fn execute_play_check(options: &Options) -> Result<bool, String> {
         &case,
         &resource_identity(&pins),
         tick_nanos,
-        &Default::default(),
+        &clips,
         Arc::new(AtomicBool::new(false)),
     );
     println!(
@@ -825,7 +834,7 @@ fn main() {
                 "descriptor_format":rot_app::creation::FORMAT,
                 "descriptor_version":rot_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
-                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation", "authored_player_view", "repeatable_play_checks", "kinematic_move_and_slide", "one_shot_audio"],
+                "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation", "authored_player_view", "repeatable_play_checks", "kinematic_move_and_slide", "one_shot_audio", "imported_transform_animation"],
             })
         );
         return;

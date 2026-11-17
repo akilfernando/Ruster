@@ -1110,3 +1110,111 @@ fn creator_screen_commands_drive_panels_and_retry_without_host_rules() {
         authored
     );
 }
+
+// Unique risk: a relocated descriptor7 creation runs without its clips, or the
+// packaged play check pins a resource closure that omits them.
+#[test]
+fn relocated_creation_plays_imported_clip_and_pins_it_for_play_checks() {
+    use rot_behavior::play_check::{
+        CheckIdentity, Comparison, Expectation, PlayCheck, Selection, FORMAT, VERSION,
+    };
+    use rot_scene::{AnimationBinding, Group, Object, Scene, StateValue, Transform};
+    use std::collections::BTreeMap;
+
+    let directory = tempfile::tempdir().unwrap();
+    let resources = directory.path().join("resources");
+    fs::create_dir_all(resources.join("animations")).unwrap();
+    let mut scene = Scene::empty("animated");
+    scene.objects.push(Object::cube("arm", None));
+    scene.hierarchy.groups.insert(
+        "owner".into(),
+        Group {
+            name: None,
+            transform: Transform::default(),
+        },
+    );
+    scene.hierarchy.parents.insert("arm".into(), "owner".into());
+    let mut session = Session::new(scene).unwrap();
+    let binding = AnimationBinding {
+        clip: "glb-clip-swing".into(),
+        looping: false,
+        targets: BTreeMap::from([("Rig/Arm".to_owned(), "arm".to_owned())]),
+    };
+    session.set_animation(0, "owner", Some(binding)).unwrap();
+    let authored = session.snapshot_bytes().unwrap();
+    fs::write(resources.join("scene.json"), &authored).unwrap();
+    let clip = br#"{"format":"rot-clip","version":1,"duration":2.0,"tracks":[{"node":"Rig/Arm","property":"translation","interpolation":"linear","times":[0.0,2.0],"values":[[0.0,0.0,0.0],[2.0,0.0,0.0]]}]}"#;
+    fs::write(resources.join("animations/0000.json"), clip).unwrap();
+    let tick_nanos = 16_666_667;
+    fs::write(
+        directory.path().join("app.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "format": "rot-application", "version": 7, "title": "Animated",
+            "scene": "resources/scene.json", "tick_nanos": tick_nanos,
+            "meshes": {}, "texture_roles": {},
+            "animations": {"glb-clip-swing": "resources/animations/0000.json"}
+        }))
+        .unwrap(),
+    )
+    .unwrap();
+    let cli = |args: &[&str]| {
+        Command::new(env!("CARGO_BIN_EXE_rot-motion-lab"))
+            .args(args)
+            .current_dir(directory.path())
+            .output()
+            .unwrap()
+    };
+    let run = cli(&["--creation", "app.json", "--headless", "--ticks", "60"]);
+    assert!(
+        run.status.success(),
+        "{}",
+        String::from_utf8_lossy(&run.stderr)
+    );
+    let output: serde_json::Value = serde_json::from_slice(&run.stdout).unwrap();
+    assert_eq!(output["tick"], "60");
+    let x = output["runtime_scene"]["objects"][0]["transform"]["translation"][0]
+        .as_f64()
+        .unwrap();
+    assert!((x - 1.0).abs() < 1e-4, "animated pose after 60 ticks: {x}");
+    assert_eq!(
+        output["authored_scene"]["objects"][0]["transform"]["translation"][0],
+        0.0
+    );
+    assert_eq!(fs::read(resources.join("scene.json")).unwrap(), authored);
+
+    let pins = BTreeMap::from([(
+        "glb-clip-swing".to_owned(),
+        rot_assets::ResourcePin::clip(clip),
+    )]);
+    let case = PlayCheck {
+        format: FORMAT.into(),
+        version: VERSION,
+        name: "Clip midpoint".into(),
+        identity: CheckIdentity::capture(
+            &session,
+            rot_assets::resource_identity(&pins),
+            tick_nanos,
+        )
+        .unwrap(),
+        frames: vec![Default::default(); 60],
+        expectations: vec![Expectation {
+            select: Selection::Translation {
+                object_id: "arm".into(),
+            },
+            comparison: Comparison::Equals {
+                expected: StateValue::Vec3([1., 0., 0.]),
+                tolerance: Some(1e-4),
+            },
+        }],
+    };
+    fs::write(resources.join("play-check.json"), case.encode().unwrap()).unwrap();
+    let check = cli(&["--creation", "app.json", "--play-check"]);
+    let report: serde_json::Value = serde_json::from_slice(&check.stdout).unwrap();
+    // Identity is compared before the current flat-scene limit, so reaching
+    // that limit (not `stale`) proves the runtime pinned the exact clip bytes.
+    assert_eq!(report["status"], "invalid_case", "{report}");
+    assert!(report["diagnostic"]
+        .as_str()
+        .unwrap()
+        .contains("require a flat scene"));
+}

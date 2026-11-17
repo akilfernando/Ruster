@@ -7,7 +7,9 @@ use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 pub const DESCRIPTOR_NAME: &str = "app.json";
 pub const FORMAT: &str = "rot-application";
 pub const NO_AUDIO_VERSION: u32 = 5;
-pub const VERSION: u32 = 6;
+/// The audio-capable descriptor without imported transform animation.
+pub const NO_ANIMATION_VERSION: u32 = 6;
+pub const VERSION: u32 = 7;
 pub const MAX_DESCRIPTOR_BYTES: usize = 64 * 1024;
 
 /// Explicit launch framing. Navigation remains interactive after initialization.
@@ -74,6 +76,14 @@ pub struct CreationManifest {
         deserialize_with = "unique_optional_mapping"
     )]
     pub sounds: Option<BTreeMap<String, String>>,
+    /// Descriptor7 carries the accepted `rot-clip` payload for every clip a
+    /// current Scene22 animation binding uses, including an empty map.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "unique_optional_mapping"
+    )]
+    pub animations: Option<BTreeMap<String, String>>,
     /// Descriptors1–4 keep their original integer-millisecond contract.
     #[serde(
         default,
@@ -174,7 +184,7 @@ impl CreationManifest {
     pub fn validate(&self) -> Result<(), String> {
         if self.format != FORMAT || !(1..=VERSION).contains(&self.version) {
             return Err(
-                "Unsupported application descriptor; expected rot-application version 1 through 6"
+                "Unsupported application descriptor; expected rot-application version 1 through 7"
                     .into(),
             );
         }
@@ -199,9 +209,17 @@ impl CreationManifest {
                 return Err("Descriptor4 and later require exactly one role per texture".into());
             }
         }
-        if (self.version == VERSION) != self.sounds.is_some() {
+        if (self.version == NO_ANIMATION_VERSION && self.sounds.is_none())
+            || (self.version < NO_ANIMATION_VERSION && self.sounds.is_some())
+        {
             return Err(
                 "Descriptor6 requires sounds, including an empty map; descriptors1–5 omit it"
+                    .into(),
+            );
+        }
+        if (self.version == VERSION) != self.animations.is_some() {
+            return Err(
+                "Descriptor7 requires animations, including an empty map; descriptors1–6 omit it"
                     .into(),
             );
         }
@@ -215,14 +233,17 @@ impl CreationManifest {
         match (self.version, self.tick_millis, self.tick_nanos) {
             (1..=4, Some(millis), None) if (1..=1000).contains(&millis) => {},
             (5..=VERSION, None, Some(nanos)) if (1_000_000..=1_000_000_000).contains(&nanos) => {},
-            _ => return Err("Descriptors1–4 require only tick_millis (1–1000); Descriptors5–6 require only tick_nanos (1000000–1000000000).".into()),
+            _ => return Err("Descriptors1–4 require only tick_millis (1–1000); Descriptors5–7 require only tick_nanos (1000000–1000000000).".into()),
         }
         if let Some(camera) = self.initial_camera {
             camera.camera_state()?;
         }
         resource_path(&self.scene)?;
         let sound_count = self.sounds.as_ref().map_or(0, BTreeMap::len);
-        if self.meshes.len() + self.textures.len() + sound_count > rot_assets::MAX_ASSETS {
+        let animation_count = self.animations.as_ref().map_or(0, BTreeMap::len);
+        if self.meshes.len() + self.textures.len() + sound_count + animation_count
+            > rot_assets::MAX_ASSETS
+        {
             return Err("Application resource mappings exceed 64".into());
         }
         for (id, path) in self
@@ -230,6 +251,7 @@ impl CreationManifest {
             .iter()
             .chain(&self.textures)
             .chain(self.sounds.iter().flatten())
+            .chain(self.animations.iter().flatten())
         {
             // Use the scene owner's identity grammar rather than a new dialect.
             rot_scene::validate_id(id).map_err(|error| error.to_string())?;
@@ -243,6 +265,27 @@ impl CreationManifest {
                 }
                 if !path.ends_with(".wav") || !paths.insert(path) {
                     return Err("Application sounds require unique WAV resource paths".into());
+                }
+            }
+        }
+        if let Some(animations) = &self.animations {
+            let mut paths = std::collections::BTreeSet::new();
+            for (id, path) in animations {
+                if self.meshes.contains_key(id)
+                    || self.textures.contains_key(id)
+                    || self
+                        .sounds
+                        .as_ref()
+                        .is_some_and(|sounds| sounds.contains_key(id))
+                {
+                    return Err(
+                        "Animation clip IDs cannot overlap mesh, texture or sound mappings".into(),
+                    );
+                }
+                if !path.ends_with(".json") || !paths.insert(path) {
+                    return Err(
+                        "Application animations require unique JSON clip resource paths".into(),
+                    );
                 }
             }
         }
@@ -271,7 +314,7 @@ impl CreationManifest {
         if raw["version"].as_u64().is_some_and(|version| version >= 5)
             && raw.get("tick_millis").is_some()
         {
-            return Err("Descriptors5–6 use tick_nanos; tick_millis must be absent".into());
+            return Err("Descriptors5–7 use tick_nanos; tick_millis must be absent".into());
         }
         let manifest: Self = serde_json::from_slice(&bytes)
             .map_err(|error| format!("Invalid {DESCRIPTOR_NAME}: {error}"))?;
@@ -294,6 +337,23 @@ impl CreationManifest {
         let bytes = root.read(&self.scene, rot_scene::MAX_FILE_BYTES as usize)?;
         let session =
             rot_scene::Session::from_snapshot_bytes(&bytes).map_err(|error| error.to_string())?;
+        let animated = session.loaded_format_version() >= rot_scene::ANIMATION_FORMAT_VERSION;
+        if animated != (self.version >= VERSION) {
+            return Err("Scene22 imported_transform_animation requires descriptor version 7, and descriptor7 requires Scene22".into());
+        }
+        if let Some(animations) = &self.animations {
+            let clips: std::collections::BTreeSet<&str> = session
+                .scene()
+                .animations
+                .values()
+                .map(|binding| binding.clip.as_str())
+                .collect();
+            if !animations.keys().map(String::as_str).eq(clips) {
+                return Err(
+                    "Application animation clips differ from the scene's animation bindings".into(),
+                );
+            }
+        }
         let referenced = session.sound_asset_references();
         match &self.sounds {
             Some(sounds) if referenced.uses_sound && sounds.keys().eq(referenced.assets.iter()) => {
@@ -356,6 +416,23 @@ impl CreationManifest {
             sounds.insert(id.clone(), Arc::new(clip));
         }
         Ok(sounds)
+    }
+
+    /// Read and strictly validate each accepted `rot-clip` payload. The exact
+    /// bytes are returned so callers can both decode and pin them.
+    pub fn load_animations(
+        &self,
+        root: &ResourceRoot,
+    ) -> Result<BTreeMap<String, Arc<Vec<u8>>>, String> {
+        self.validate()?;
+        let mut clips = BTreeMap::new();
+        for (id, path) in self.animations.iter().flatten() {
+            let bytes = root.read(path, rot_scene::MAX_CLIP_BYTES)?;
+            rot_scene::Clip::decode(&bytes)
+                .map_err(|error| format!("animation clip {id}: {error}"))?;
+            clips.insert(id.clone(), Arc::new(bytes));
+        }
+        Ok(clips)
     }
 
     pub fn load_textures(&self, root: &ResourceRoot) -> Result<TextureMap, String> {
@@ -434,7 +511,7 @@ mod tests {
         raw["sounds"] = serde_json::json!({});
         write(&raw);
         assert!(CreationManifest::load(&root).is_err());
-        raw["version"] = VERSION.into();
+        raw["version"] = NO_ANIMATION_VERSION.into();
         write(&raw);
         assert!(CreationManifest::load(&root)
             .unwrap()
@@ -499,6 +576,94 @@ mod tests {
         assert!(CreationManifest::load(&root).is_err());
     }
 
+    // Unique risk: a descriptor hides clips under an older version, delivers a
+    // closure that differs from the bindings or an invalid clip payload.
+    #[test]
+    fn descriptor7_delivers_exact_valid_animation_closure() {
+        use rot_scene::{AnimationBinding, Group, Object, Scene, Session, Transform};
+        let project = tempfile::tempdir().unwrap();
+        let root = ResourceRoot::new(project.path()).unwrap();
+        let mut scene = Scene::empty("animated");
+        scene.objects.push(Object::cube("arm", None));
+        scene.hierarchy.groups.insert(
+            "owner".into(),
+            Group {
+                name: None,
+                transform: Transform::default(),
+            },
+        );
+        scene.hierarchy.parents.insert("arm".into(), "owner".into());
+        let mut session = Session::new(scene).unwrap();
+        let binding = AnimationBinding {
+            clip: "glb-clip-swing".into(),
+            looping: true,
+            targets: BTreeMap::from([("Rig/Arm".to_owned(), "arm".to_owned())]),
+        };
+        session.set_animation(0, "owner", Some(binding)).unwrap();
+        session.save(project.path().join("scene.json")).unwrap();
+        let clip = br#"{"format":"rot-clip","version":1,"duration":2.0,"tracks":[{"node":"Rig/Arm","property":"translation","interpolation":"linear","times":[0.0,2.0],"values":[[0.0,0.0,0.0],[2.0,0.0,0.0]]}]}"#;
+        std::fs::create_dir(project.path().join("animations")).unwrap();
+        std::fs::write(project.path().join("animations/0000.json"), clip).unwrap();
+        let mut raw = serde_json::json!({
+            "format": FORMAT, "version": VERSION, "title": "Animated",
+            "scene": "scene.json", "tick_nanos": 16_666_667,
+            "meshes": {}, "texture_roles": {},
+            "animations": {"glb-clip-swing": "animations/0000.json"}
+        });
+        let write = |value: &serde_json::Value| {
+            std::fs::write(
+                project.path().join(DESCRIPTOR_NAME),
+                serde_json::to_vec(value).unwrap(),
+            )
+            .unwrap();
+        };
+        write(&raw);
+        let manifest = CreationManifest::load(&root).unwrap();
+        let reloaded: CreationManifest =
+            serde_json::from_slice(&serde_json::to_vec(&manifest).unwrap()).unwrap();
+        assert_eq!(reloaded.animations, manifest.animations);
+        manifest.load_session(&root).unwrap();
+        assert_eq!(
+            manifest.load_animations(&root).unwrap()["glb-clip-swing"].as_slice(),
+            clip
+        );
+
+        raw["version"] = NO_ANIMATION_VERSION.into();
+        raw["sounds"] = serde_json::json!({});
+        write(&raw);
+        assert!(CreationManifest::load(&root)
+            .unwrap_err()
+            .contains("Descriptor7 requires animations"));
+        raw.as_object_mut().unwrap().remove("animations");
+        write(&raw);
+        assert!(CreationManifest::load(&root)
+            .unwrap()
+            .load_session(&root)
+            .unwrap_err()
+            .contains("Scene22"));
+
+        raw["version"] = VERSION.into();
+        raw["animations"] = serde_json::json!({});
+        write(&raw);
+        assert!(CreationManifest::load(&root)
+            .unwrap()
+            .load_session(&root)
+            .unwrap_err()
+            .contains("animation clips differ"));
+        raw["animations"] = serde_json::json!({"glb-clip-swing": "animations/0000.json"});
+        write(&raw);
+        std::fs::write(
+            project.path().join("animations/0000.json"),
+            br#"{"format":"rot-clip","version":1,"duration":2.0,"tracks":[]}"#,
+        )
+        .unwrap();
+        let error = CreationManifest::load(&root)
+            .unwrap()
+            .load_animations(&root)
+            .unwrap_err();
+        assert!(error.contains("animation clip glb-clip-swing"), "{error}");
+    }
+
     // Protect descriptor interpretation/resource confinement, not the existing
     // scene, OBJ parser or Lua evaluation matrices.
     #[test]
@@ -526,6 +691,7 @@ mod tests {
             textures: BTreeMap::new(),
             texture_roles: Some(BTreeMap::new()),
             sounds: None,
+            animations: None,
             tick_millis: None,
             tick_nanos: Some(16_666_667),
             initial_camera: None,

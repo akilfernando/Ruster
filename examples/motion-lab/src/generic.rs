@@ -59,6 +59,7 @@ pub struct GenericMotionLab {
     hud_controls: HudControls,
     sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
     audio: AudioOutput,
+    clips: rot_behavior::Clips,
 }
 
 impl GenericMotionLab {
@@ -103,6 +104,7 @@ impl GenericMotionLab {
             hud_controls: HudControls::default(),
             sounds: BTreeMap::new(),
             audio: AudioOutput::default(),
+            clips: rot_behavior::Clips::new(),
         })
     }
 
@@ -328,6 +330,12 @@ impl GenericMotionLab {
         self.audio.stop();
     }
 
+    /// Accepted imported clip payloads; supplied to the engine before every Reset.
+    pub fn set_clips(&mut self, clips: rot_behavior::Clips) {
+        self.clips = clips;
+        self.needs_reset = true;
+    }
+
     pub fn audio_batch(&self) -> Option<&rot_behavior::AudioBatch> {
         self.runtime.as_ref()?.audio_batch()
     }
@@ -429,11 +437,9 @@ impl Application for GenericMotionLab {
             });
             self.engine = Some(self.report(result)?);
         }
-        let result = self
-            .engine
-            .as_mut()
-            .expect("initialized engine")
-            .reset(self.session.scene(), &authoring);
+        let engine = self.engine.as_mut().expect("initialized engine");
+        engine.set_clips(self.clips.clone());
+        let result = engine.reset(self.session.scene(), &authoring);
         let candidate = self.report(result)?;
         // Engine validated transforms; meshes remain the same immutable Content resources.
         *self.content.scene_mut() = candidate.scene().clone();

@@ -161,6 +161,93 @@ class CreationDistributionTests(unittest.TestCase):
                 run_stub(current, "bad-wav.tar.gz")
             self.assertFalse((root / "bad-wav.tar.gz").exists())
 
+    def test_animation_closure_gates_old_kits_and_delivers_exact_clips(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            transform = {"translation": [0.0, 0.0, 0.0], "rotation": [0.0, 0.0, 0.0], "scale": [1.0, 1.0, 1.0]}
+            document = {"format": "rot-scene", "format_version": 21, "undo": [], "redo": [],
+                        "scene": {"objects": [], "hierarchy": {
+                            "groups": {"owner": {"transform": transform}, "arm": {"transform": transform}},
+                            "parents": {"arm": "owner"}},
+                            "animations": {"owner": {"clip": "glb-clip-swing", "looping": True,
+                                                     "targets": {"Rig/Arm": "arm"}}}}}
+            with self.assertRaisesRegex(ValueError, "require Scene22 imported_transform_animation"):
+                package_creation.scene_dependencies(document)
+            document["format_version"] = 22
+            clip = b'{"format":"rot-clip","version":1,"duration":2.0,"tracks":[]}'
+            package_app.put(root, "animations/0000.json", clip)
+            features = [package_creation.ANIMATION_CAPABILITY]
+            content = {"schema": 18, "title": "Animated", "tick_nanos": 16666667,
+                       "meshes": {}, "textures": {}, "required_runtime_capabilities": features}
+
+            def stage():
+                scene_bytes = package_creation.encoded(document)
+                (root / "scene.json").write_bytes(scene_bytes)
+                content["scene_sha256"] = package_creation.sha256(scene_bytes)
+                (root / "content.json").write_bytes(package_creation.encoded(content))
+
+            def run_stub(profile, filename, runtime_scene=None):
+                load = {"profile": profile, "elf": {}, "dependencies": []}
+                payload = dict.fromkeys(("runtime", *package_creation.LICENSE_FILES), b"fixture")
+                scene = package_creation.typed_scene(document)
+                response = {"mode": "creation", "title": "Animated", "tick": "0",
+                            "fixed_dt": 0.016666667, "runtime_scene": runtime_scene or scene,
+                            "authored_scene": scene, "authored_actions": {}, "runtime_state": {},
+                            "initialized": True, "commit_revision": "0", "last_step_commit_revision": None,
+                            "command_receipt": None, "command_receipts": [], "captured_commands": [],
+                            "hud_presentation": "committed", "hud_activation_receipts": [], "hud": {"panels": []}}
+                output = root / filename
+                with patch.object(package_creation, "load_kit", return_value=(load, payload, "kit")), \
+                        patch.object(package_creation, "run_runtime", return_value=response):
+                    package_creation.package(root, root, output)
+                return output
+
+            previous, current = package_creation.AUDIO_PROFILE, package_creation.ANIMATION_PROFILE
+            package_creation.check_profile(current)
+            self.assertEqual(current["descriptor_version"], 7)
+            self.assertEqual(current["capabilities"][-2:],
+                             [package_creation.AUDIO_CAPABILITY, package_creation.ANIMATION_CAPABILITY])
+            stage()
+            with self.assertRaisesRegex(ValueError, "content animations must be present"):
+                package_creation.source_content(root, None)
+            content["animations"] = {}
+            stage()
+            with self.assertRaisesRegex(ValueError, "animation clip closure"):
+                package_creation.source_content(root, None)
+            record = {"path": "animations/0000.json", "sha256": package_creation.sha256(clip)}
+            content["animations"] = {"glb-clip-swing": {**record, "path": "clips/0000.json"}}
+            stage()
+            with self.assertRaisesRegex(ValueError, "unique generated animation paths"):
+                package_creation.source_content(root, None)
+            content["animations"]["glb-clip-swing"] = record
+            features.clear()
+            stage()
+            with self.assertRaisesRegex(ValueError, "runtime requirements"):
+                package_creation.source_content(root, None)
+            features.append(package_creation.ANIMATION_CAPABILITY)
+            stage()
+            with self.assertRaisesRegex(ValueError, "Scene22 imported_transform_animation"):
+                run_stub(previous, "refused.tar.gz")
+            self.assertFalse((root / "refused.tar.gz").exists())
+
+            # Tick0 may already pose an animation target, but nothing else.
+            posed = package_creation.typed_scene(document)
+            posed["hierarchy"]["groups"]["arm"]["transform"]["translation"] = [1.0, 0.0, 0.0]
+            with tarfile.open(run_stub(current, "animated.tar.gz", posed)) as archive:
+                manifest = json.load(archive.extractfile("application/app.json"))
+                self.assertEqual(manifest["version"], 7)
+                self.assertNotIn("sounds", manifest)
+                self.assertEqual(manifest["animations"],
+                                 {"glb-clip-swing": "resources/animations/0000.json"})
+                self.assertEqual(archive.extractfile("application/resources/animations/0000.json").read(), clip)
+            posed["hierarchy"]["groups"]["owner"]["transform"]["translation"] = [1.0, 0.0, 0.0]
+            with self.assertRaisesRegex(ValueError, "runtime preflight did not complete initialization"):
+                run_stub(current, "moved-owner.tar.gz", posed)
+            (root / "animations/0000.json").write_bytes(b"{}")
+            with self.assertRaisesRegex(ValueError, "animation checksum mismatch"):
+                run_stub(current, "bad-clip.tar.gz")
+            self.assertFalse((root / "bad-clip.tar.gz").exists())
+
     def test_hierarchy_content_or_history_requires_scene19(self):
         for version in (18, 19):
             for history in (False, True):
