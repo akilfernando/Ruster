@@ -39,11 +39,19 @@ pub fn sprout(ui: &mut egui::Ui) {
     painter.line_segment([p(-2.5, -4.0), p(-3.0, 8.0)], stroke);
     painter.line_segment([p(2.5, -4.0), p(3.0, 8.0)], stroke);
     // Threads.
-    for (dx, dy, len) in [(-1.0, 1.0, 26.0), (1.0, 1.0, 24.0), (-1.0, 0.4, 16.0), (1.0, 0.5, 18.0)] {
+    for (dx, dy, len) in [
+        (-1.0, 1.0, 26.0),
+        (1.0, 1.0, 24.0),
+        (-1.0, 0.4, 16.0),
+        (1.0, 0.5, 18.0),
+    ] {
         let points: Vec<Pos2> = (0..=8)
             .map(|i| {
                 let t = i as f32 / 8.0;
-                p(dx * (3.0 + len * t), 8.0 + dy * 6.0 * t + (t * 9.0).sin() * 1.5)
+                p(
+                    dx * (3.0 + len * t),
+                    8.0 + dy * 6.0 * t + (t * 9.0).sin() * 1.5,
+                )
             })
             .collect();
         painter.add(egui::Shape::line(points, Stroke::new(0.8, color)));
@@ -56,7 +64,8 @@ pub fn spinner(ui: &mut egui::Ui, size: f32) -> egui::Response {
     if !rot(ui) {
         return ui.add(egui::Spinner::new().size(size));
     }
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(size * 1.5, size), egui::Sense::hover());
+    let (rect, response) =
+        ui.allocate_exact_size(egui::vec2(size * 1.5, size), egui::Sense::hover());
     let time = ui.input(|input| input.time);
     let accent = crate::editor_theme::colors(ui).accent;
     let radius = size * 0.12;

@@ -6,6 +6,7 @@
 //! section is the first user.
 // Panels adopt the remaining controls as they are rebuilt (S-04 onward).
 #![allow(dead_code)]
+pub mod motif;
 pub mod palette;
 pub mod tokens;
 
@@ -296,6 +297,7 @@ pub fn search_field(ui: &mut egui::Ui, text: &mut String, hint: &str) -> egui::R
 pub fn empty_state(ui: &mut egui::Ui, line: &str, action: Option<&str>) -> Option<egui::Response> {
     ui.vertical_centered(|ui| {
         ui.add_space(SPACE_XL);
+        motif::sprout(ui);
         ui.label(RichText::new(line).color(colors(ui).secondary));
         action.map(|label| {
             ui.add_space(SPACE_S);
