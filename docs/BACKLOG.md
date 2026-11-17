@@ -30,10 +30,10 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 - MCP tool list is 145 KB for 98 tools against a 40 KB Phase 1 budget
   (P-01, 2026-11-17). Shorten descriptions and merge tools.
-- Inspector number fields have no drag-to-scrub; Unity and Unreal scrub by
-  dragging the field label (P-01, 2026-11-17).
 - An open scene repaints about 3 frames per 10 s while idle; the hub draws
   none (P-01, 2026-11-17).
+- Scrubbing an Inspector axis letter commits on release; the viewport does not follow live during the drag (S-02).
+- `human_and_deferred_assets_share_admission_authority_and_terminal_adoption` failed 2 of ~40 runs, only while other builds loaded the machine; cause not found.
 - The legacy logistics prototype (`rot-core`, `rot-cli`, `rot-viewer`,
   `rot-script`, `examples/yard-app`, editor `ui.rs` and `model.rs`, five
   legacy MCP tools) is unused by the scene editor. Proposal: delete it.
@@ -83,7 +83,7 @@ control and on an Inspector field; the order is pasted in the commit
 message.
 
 #### S-02 · UI kit, tokens and fonts — M — ready
-Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
+Status: done — 2026-11-17, see git log
 **Outcome.** One module supplies every control, size and color, and the
 editor becomes denser and consistent.
 **Facts.** `crates/rot-editor/src/editor_theme.rs` has a 17-role `Palette`

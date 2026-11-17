@@ -52,6 +52,10 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · S-02: UI kit (`crates/rot-editor/src/ui_kit/`) with tokens,
+  palette roles and shared controls; Inter 13 px and JetBrains Mono bundled;
+  24 px controls; Transform is three rows and dragging an axis letter scrubs
+  (Shift fast, Alt slow), committing as one Undo. Fields accept `2*3`, `+=1`.
 - 2026-11-17 · S-01: Tab and Shift+Tab walk menu → Assets → toolbar →
   Hierarchy → Inspector and back to File; the focused control scrolls into
   view. The viewport, panel backdrops and resize handles are no longer stops.

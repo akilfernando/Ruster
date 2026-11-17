@@ -2772,7 +2772,9 @@ mod tests {
     }
     #[track_caller]
     fn until(editor: &mut SceneEditor, ctx: &egui::Context, done: impl Fn(&SceneEditor) -> bool) {
-        let deadline = Instant::now() + Duration::from_secs(3);
+        // A liveness wait, not a speed check: parallel tests can starve the
+        // asset worker for seconds on a loaded machine.
+        let deadline = Instant::now() + Duration::from_secs(10);
         while !done(editor) && Instant::now() < deadline {
             if editor.asset_ops.root_frame.is_some() {
                 ctx.run_ui(egui::RawInput::default(), |_ui| {
