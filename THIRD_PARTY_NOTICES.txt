@@ -443,6 +443,7 @@ Associated package source files:
   blocking 1.7.0: LICENSE-MIT
   concurrent-queue 2.5.0: LICENSE-MIT
   endi 1.1.1: LICENSE-MIT
+  enumn 0.1.14: LICENSE-MIT
   event-listener 5.4.2: LICENSE-MIT
   event-listener-strategy 0.5.4: LICENSE-MIT
   fastrand 2.5.0: LICENSE-MIT
@@ -2586,6 +2587,7 @@ DEALINGS IN THE SOFTWARE.
 ==============================================================================
 Associated package source files:
   async-trait 0.1.92: LICENSE-APACHE
+  enumn 0.1.14: LICENSE-APACHE
   glifo 0.3.0: LICENSE-APACHE
   itoa 1.0.18: LICENSE-APACHE
   libc 0.2.191: LICENSE-APACHE
@@ -3362,6 +3364,7 @@ Associated package source files:
   bit-vec 0.9.1: LICENSE-APACHE
   downcast-rs 1.2.1: LICENSE-APACHE
   downcast-rs 2.0.2: LICENSE-APACHE
+  egui_tiles 0.18.0: LICENSE-APACHE
   presser 0.3.1: LICENSE-APACHE
 ==============================================================================
 
@@ -6012,6 +6015,37 @@ Copyright © 2017-2018 Arm Limited
 and labelled as such in comments in the individual source files. All
 have been licensed under extremely permissive terms.
 ------------------------------------------------------------------------------
+
+==============================================================================
+Associated package source files:
+  egui_tiles 0.18.0: LICENSE-MIT
+==============================================================================
+
+Copyright (c) 2024 Rerun Technologies AB <opensource@rerun.io>
+
+Permission is hereby granted, free of charge, to any
+person obtaining a copy of this software and associated
+documentation files (the "Software"), to deal in the
+Software without restriction, including without
+limitation the rights to use, copy, modify, merge,
+publish, distribute, sublicense, and/or sell copies of
+the Software, and to permit persons to whom the Software
+is furnished to do so, subject to the following
+conditions:
+
+The above copyright notice and this permission notice
+shall be included in all copies or substantial portions
+of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF
+ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED
+TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT
+SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION
+OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR
+IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER
+DEALINGS IN THE SOFTWARE.
 
 ==============================================================================
 Associated package source files:
@@ -13664,7 +13698,7 @@ SOFTWARE.
 
 ==============================================================================
 Associated package source files:
-  toml_datetime 1.1.2+spec-1.1.0: LICENSE-APACHE
+  toml_datetime 1.1.3+spec-1.1.0: LICENSE-APACHE
   toml_edit 0.25.18+spec-1.1.0: LICENSE-APACHE
   toml_parser 1.1.5+spec-1.1.0: LICENSE-APACHE
 ==============================================================================
@@ -13874,7 +13908,7 @@ Associated package source files:
 
 ==============================================================================
 Associated package source files:
-  toml_datetime 1.1.2+spec-1.1.0: LICENSE-MIT
+  toml_datetime 1.1.3+spec-1.1.0: LICENSE-MIT
   toml_edit 0.25.18+spec-1.1.0: LICENSE-MIT
   toml_parser 1.1.5+spec-1.1.0: LICENSE-MIT
 ==============================================================================

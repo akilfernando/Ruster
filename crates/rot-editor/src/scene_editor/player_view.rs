@@ -176,13 +176,7 @@ impl SceneEditor {
             super::toolbar_icons::Icon::Camera.button(ui, !blocked, None, "")
         };
         if edit.clicked() {
-            let selected = self.selected.as_deref().filter(|id| {
-                let scene = self.session.scene();
-                scene.objects.iter().any(|object| object.id == *id)
-                    || scene.hierarchy.groups.contains_key(*id)
-            });
-            self.player_view_draft = Some(Draft::new(self.session.scene(), selected));
-            self.runtime.release_input(ui.ctx());
+            self.open_player_view_editor(ui.ctx());
             close = true;
         }
         if close && menu {
@@ -190,6 +184,16 @@ impl SceneEditor {
         }
     }
 
+    /// Object → Camera… and the Game tab's set-up button.
+    pub(super) fn open_player_view_editor(&mut self, ctx: &egui::Context) {
+        let selected = self.selected.as_deref().filter(|id| {
+            let scene = self.session.scene();
+            scene.objects.iter().any(|object| object.id == *id)
+                || scene.hierarchy.groups.contains_key(*id)
+        });
+        self.player_view_draft = Some(Draft::new(self.session.scene(), selected));
+        self.runtime.release_input(ctx);
+    }
     pub(super) fn player_preview_available(&self) -> bool {
         self.runtime
             .displayed_frame()

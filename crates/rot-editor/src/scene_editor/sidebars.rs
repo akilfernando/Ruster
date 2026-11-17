@@ -1,167 +1,7 @@
 //! Objects and Inspector share the scene surface while owning their visible input.
-use super::{sidebar_budget, SceneEditor, Side};
+#[cfg(test)]
+use super::SceneEditor;
 use eframe::egui;
-
-#[derive(Clone, Copy)]
-struct Panel {
-    rect: egui::Rect,
-    side: Side,
-    inspector: bool,
-}
-
-pub(super) struct SceneSidebars {
-    panels: [Option<Panel>; 2],
-    visible_scene: egui::Rect,
-    constrained: bool,
-}
-
-impl SceneSidebars {
-    pub(super) fn new(editor: &SceneEditor, viewport: egui::Rect) -> Self {
-        let prefs = &editor.workspace.prefs;
-        let (constrained, hierarchy_width, inspector_width) = sidebar_budget(
-            viewport.width(),
-            (!editor.ai_workspace && prefs.hierarchy_visible).then_some(prefs.hierarchy_width),
-            (!editor.ai_workspace && prefs.inspector_visible).then_some(prefs.inspector_width),
-        );
-        let mut visible_scene = viewport;
-        let mut panel = |width: f32, side: Side, inspector| {
-            if width <= 0.0 || viewport.height() <= 0.0 {
-                return None;
-            }
-            // Keep at least one unoccluded column even on forcibly tiny windows.
-            let width = width.min((visible_scene.width() - 1.0).max(0.0));
-            if width == 0.0 {
-                return None;
-            }
-            let (left, right) = match side {
-                Side::Left => {
-                    let left = visible_scene.left();
-                    visible_scene.min.x += width;
-                    (left, visible_scene.left())
-                }
-                Side::Right => {
-                    let right = visible_scene.right();
-                    visible_scene.max.x -= width;
-                    (visible_scene.right(), right)
-                }
-            };
-            let rect = egui::Rect::from_min_max(
-                egui::pos2(left, viewport.top()),
-                egui::pos2(right, viewport.bottom()),
-            );
-            Some(Panel {
-                rect,
-                side,
-                inspector,
-            })
-        };
-        let panels = [
-            panel(hierarchy_width, prefs.hierarchy_side, false),
-            panel(inspector_width, prefs.inspector_side, true),
-        ];
-        Self {
-            panels,
-            visible_scene,
-            constrained,
-        }
-    }
-
-    fn owns_point(&self, point: egui::Pos2) -> bool {
-        self.panels
-            .iter()
-            .flatten()
-            .any(|panel| panel.rect.contains(point))
-    }
-
-    pub(super) fn own_pointer(&self, ctx: &egui::Context) -> bool {
-        ctx.pointer_interact_pos()
-            .is_some_and(|pointer| self.owns_point(pointer))
-    }
-
-    pub(super) fn owns_pointer_press(&self, ctx: &egui::Context) -> bool {
-        ctx.input(|input| {
-            input.events.iter().any(|event| {
-                matches!(event, egui::Event::PointerButton {pos, pressed: true, ..}
-                    if self.owns_point(*pos))
-            })
-        })
-    }
-
-    /// This crop excludes the opaque side panels and their controls.
-    /// Picking and Fit continue to use the full scene rectangle and projection.
-    pub(super) fn visible_scene(&self) -> egui::Rect {
-        self.visible_scene
-    }
-
-    pub(super) fn show(&self, editor: &mut SceneEditor, ui: &mut egui::Ui) {
-        for panel in self.panels.iter().flatten() {
-            let name = if panel.inspector {
-                "overlay_inspector"
-            } else {
-                "overlay_objects"
-            };
-            let id = ui.scope_id().with(name);
-            // Panel backdrop and resize handle are surfaces, not Tab stops.
-            ui.interact(
-                panel.rect,
-                id.with("panel"),
-                egui::Sense::CLICK | egui::Sense::DRAG,
-            );
-
-            let content = panel.rect.shrink(8.0);
-            let palette = crate::editor_theme::colors(ui);
-            ui.painter().rect_filled(panel.rect, 0.0, palette.surface);
-
-            if content.is_positive() {
-                let mut child = ui.new_child(
-                    egui::UiBuilder::new()
-                        .id_salt(name)
-                        .max_rect(content)
-                        .layout(egui::Layout::top_down(egui::Align::Min)),
-                );
-                child.set_clip_rect(content.intersect(ui.clip_rect()));
-                child.set_width(content.width());
-                child.set_max_height(content.height());
-                if panel.inspector {
-                    editor.inspector_scroll_ui(&mut child);
-                } else {
-                    egui::ScrollArea::vertical()
-                        .id_salt("hierarchy_panel_scroll")
-                        .max_height(content.height())
-                        .show(&mut child, |ui| editor.hierarchy_contents(ui));
-                }
-            }
-
-            if !self.constrained {
-                let mut handle = panel.rect;
-                match panel.side {
-                    Side::Left => handle.min.x = handle.max.x - 5.0,
-                    Side::Right => handle.max.x = handle.min.x + 5.0,
-                }
-                let resize = ui
-                    .interact(handle, id.with("resize"), egui::Sense::DRAG)
-                    .on_hover_cursor(egui::CursorIcon::ResizeHorizontal)
-                    .on_hover_text("Drag to resize panel");
-                let sign = if panel.side == Side::Left { 1.0 } else { -1.0 };
-                let delta = sign * resize.drag_delta().x;
-                if delta != 0.0 {
-                    let (width, min, max) = if panel.inspector {
-                        (&mut editor.workspace.prefs.inspector_width, 240.0, 1000.0)
-                    } else {
-                        (&mut editor.workspace.prefs.hierarchy_width, 120.0, 800.0)
-                    };
-                    // Never drag the sides past this window's central viewport budget.
-                    let available = (self.visible_scene.width() - 304.0).max(0.0);
-                    let next = (*width + delta.min(available)).clamp(min, max);
-                    if next != *width {
-                        *width = next;
-                        editor.workspace.changed();
-                    }
-                }
-            }
-        }
-    }
-}
 
 /// Cover the outside of each small corner arc with the surrounding chrome.
 /// The renderer, picking and capture still agree on the rectangular viewport.
@@ -400,7 +240,11 @@ mod tests {
         };
         frame(&mut editor, vec![]);
         frame(&mut editor, vec![]);
-        let panels = SceneSidebars::new(&editor, editor.captures.rect.unwrap());
+        let dock = editor.dock.as_ref().unwrap();
+        let panels = [
+            super::super::panels::pane_rect(dock, super::super::panels::Pane::Hierarchy).unwrap(),
+            super::super::panels::pane_rect(dock, super::super::panels::Pane::Inspector).unwrap(),
+        ];
         let mut inside = [false, false];
         let mut seen = Vec::new();
         for _ in 0..90 {
@@ -413,8 +257,8 @@ mod tests {
             }
             seen.push(focused);
             let center = ctx.read_response(focused).unwrap().rect.center();
-            for (index, panel) in panels.panels.iter().flatten().enumerate() {
-                inside[index] |= panel.rect.contains(center);
+            for (index, panel) in panels.iter().enumerate() {
+                inside[index] |= panel.contains(center);
             }
         }
         assert_eq!(inside, [true, true], "Tab reached both side panels");
@@ -446,17 +290,17 @@ mod tests {
         };
         frame(&mut editor, vec![]);
         frame(&mut editor, vec![]);
+        // S-07a: docked panels sit beside the view; nothing covers it.
         let viewport = editor.captures.rect.unwrap();
-        let panels = SceneSidebars::new(&editor, viewport);
-        let hierarchy = panels.panels[0].unwrap().rect;
-        let inspector = panels.panels[1].unwrap().rect;
+        let dock = editor.dock.as_ref().unwrap();
+        let hierarchy =
+            super::super::panels::pane_rect(dock, super::super::panels::Pane::Hierarchy).unwrap();
+        let inspector =
+            super::super::panels::pane_rect(dock, super::super::panels::Pane::Inspector).unwrap();
         let crop = editor.captures.visible_crop.unwrap();
-        assert_eq!(hierarchy.left(), viewport.left());
-        assert_eq!(inspector.right(), viewport.right());
-        assert_eq!(crop.left(), hierarchy.right());
-        assert_eq!(crop.right(), inspector.left());
-        assert_eq!(viewport.bottom(), hierarchy.bottom());
-        assert_eq!(hierarchy.bottom(), inspector.bottom());
+        assert_eq!(crop, viewport, "the whole view is visible");
+        assert!(hierarchy.right() <= viewport.left());
+        assert!(inspector.left() >= viewport.right());
 
         let wheel = |pos| {
             vec![
@@ -494,7 +338,11 @@ mod tests {
             .session
             .set_player_view(editor.session.scene().revision, Some(player_view))
             .unwrap();
-        editor.set_player_preview(true);
+        // The Game tab shows the player view in the same place.
+        let dock = editor.dock.as_mut().unwrap();
+        let game = super::super::panels::tile_of(dock, super::super::panels::Pane::Game).unwrap();
+        dock.make_active(|id, _| id == game);
+        frame(&mut editor, vec![]);
         frame(&mut editor, vec![]);
         let player = editor.captures.rect.unwrap();
         assert!(editor.navigation.player_view);

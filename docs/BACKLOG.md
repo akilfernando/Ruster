@@ -28,6 +28,7 @@ package in your lane under **Now**. How to work is in the
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
+- `third_party/egui_tiles` is egui_tiles 0.18.0 with three Sense lines patched so dock dividers and tab-bar backgrounds are not Tab stops; drop it when upstream allows that (S-07a).
 - MCP tool list is 145 KB for 98 tools against a 40 KB Phase 1 budget
   (P-01, 2026-11-17). Shorten descriptions and merge tools.
 - An open scene repaints about 3 frames per 10 s while idle; the hub draws
@@ -212,7 +213,7 @@ hard-coded colors in the files you touch.
 the checklist; layout is pixel-identical between styles.
 
 #### S-07a · Dock shell: every panel in a tab — M — ready
-Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
+Status: done — 2026-11-17, see git log
 **Outcome.** Hierarchy, Inspector, Scene, Game, Assets and Console are tabs
 in one dock. Tabs drag between docks; nothing is painted over the viewport.
 **Facts.** Agent decision 2026-11-17: `egui_tiles = "0.18.0"` (needs `egui

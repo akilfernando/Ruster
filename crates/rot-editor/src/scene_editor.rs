@@ -33,6 +33,8 @@ mod material_ui;
 mod material_visual_probe;
 mod model_placement;
 mod nonvisual;
+#[path = "panels/mod.rs"]
+mod panels;
 mod persistence_commands;
 mod play_checks;
 mod player_view;
@@ -49,7 +51,7 @@ mod toolbar_icons;
 mod view_commands;
 #[cfg(unix)]
 mod workspace_attachment;
-use crate::workspace::{Action, Side, Workspace};
+use crate::workspace::{Action, Workspace};
 use eframe::{
     egui,
     egui_wgpu::{WgpuSetup, WgpuSetupCreateNew},
@@ -240,26 +242,6 @@ impl Fields {
     }
 }
 // A temporary layout constraint never becomes the user's preferred panel size.
-fn sidebar_budget(width: f32, hierarchy: Option<f32>, inspector: Option<f32>) -> (bool, f32, f32) {
-    let h = hierarchy.unwrap_or(0.0);
-    let i = inspector.unwrap_or(0.0);
-    let hmin = if hierarchy.is_some() { 120.0 } else { 0.0 };
-    let imin = if inspector.is_some() { 240.0 } else { 0.0 };
-    let available = (width - 304.0).max(hmin + imin);
-    if h + i <= available {
-        return (false, h, i);
-    }
-    let surplus = (available - hmin - imin).max(0.0);
-    let requested = (h - hmin).max(0.0) + (i - imin).max(0.0);
-    if requested == 0.0 {
-        return (true, hmin, imin);
-    }
-    (
-        true,
-        hmin + surplus * (h - hmin).max(0.0) / requested,
-        imin + surplus * (i - imin).max(0.0) / requested,
-    )
-}
 #[derive(Clone)]
 pub(super) struct AssetDrag {
     catalog_root: PathBuf,
@@ -538,6 +520,10 @@ pub struct SceneEditor {
     toolbar_compact: bool,
     /// Every message the editor shows, the Console panel and toasts (S-06).
     console: crate::console::Console,
+    /// The docked panel layout (S-07a). Taken for the frame while it draws.
+    dock: Option<egui_tiles::Tree<panels::Pane>>,
+    /// A dock tab is being dragged: the viewport ignores the pointer.
+    dock_dragging: bool,
     ai_drawer: Option<ai_workspace::Drawer>,
     ai_connection_requested: bool,
     ai_release_navigation: bool,
@@ -765,6 +751,8 @@ impl SceneEditor {
             ai_workspace: false,
             toolbar_compact: false,
             console: Default::default(),
+            dock: None,
+            dock_dragging: false,
             ai_drawer: None,
             ai_connection_requested: false,
             ai_release_navigation: false,
@@ -2463,6 +2451,342 @@ impl SceneEditor {
             }
         });
     }
+    /// The Scene or Game view: everything inside its dock tab (S-07a).
+    fn viewport_pane_ui(&mut self, ui: &mut egui::Ui, about_open: bool) {
+        let ctx = ui.ctx().clone();
+        if self.workspace.welcome
+            && self.session.path().is_none()
+            && self.session.scene().revision == 0
+            && self.session.scene().objects.is_empty()
+            && !self.runtime.visible
+            && !self.asset_loading()
+        {
+            self.scene_welcome(ui);
+        }
+        if self.asset_loading() {
+            self.runtime.cancel_control_focus();
+            self.captures.rect = None;
+            self.captures.visible_crop = None;
+            self.captures.receipt = None;
+            ui.heading("Loading project content…");
+            ui.label("The scene and your saved edits are retained while content loads.");
+            // Stop remains available for an older retained runtime while
+            // Reset and playback edits wait for content authority.
+            let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
+            let _ = self.runtime.controls_with_sounds(
+                ui,
+                &self.session,
+                self.generation,
+                true,
+                &shortcut,
+                self.assets.as_ref(),
+            );
+            return;
+        }
+        if !self.player_preview_available() {
+            self.set_player_preview(false);
+        }
+        let document_blocked =
+            about_open || self.guard().is_err() || self.manipulation.offset_pending();
+        if document_blocked || self.input_actions_open {
+            self.runtime.cancel_control_focus();
+        }
+        let blocked = document_blocked || self.asset_busy();
+        if self.ai_workspace && self.runtime.has_worker() {
+            self.runtime_toolbar(ui, blocked);
+        }
+        self.runtime.observe(
+            self.generation,
+            self.session.scene().revision,
+            self.assets.as_ref().map(|store| store.revision()),
+            self.shader_revision,
+        );
+        self.asset_mark_callback_owners();
+        let transient = if !self.runtime.visible && !self.navigation.player_view {
+            self.manipulation.transient_scene(self.session.scene())
+        } else {
+            None
+        };
+        let player_view = self.navigation.player_view;
+        let selected: Vec<_> = if player_view {
+            Vec::new()
+        } else {
+            self.manipulation.ids.iter().map(String::as_str).collect()
+        };
+        // At a compact height, the View menu retains projection and
+        // presets while the recovered Inspector draft needs the extra row.
+        self.navigation.show_controls = !self.ai_workspace
+            && !(self.recovered_input.is_some() && ui.available_height() < 215.0);
+        self.navigation.selection_feedback = true;
+        self.navigation.show_editor_grid = !player_view;
+        self.navigation.focusable =
+            self.runtime.input_owned() || (self.runtime.visible && self.runtime.is_playing());
+        self.navigation.enabled = !player_view
+            && !self.dock_dragging
+            && !self.ai_release_navigation
+            && !self
+                .ai_drawer_rect
+                .is_some_and(|rect| ctx.pointer_hover_pos().is_some_and(|p| rect.contains(p)))
+            && !about_open
+            && !self.runtime.input_owned()
+            && !self.export_dialog
+            && !self.close_approved
+            && !self.manipulation.active()
+            && !self.workspace.settings_open
+            && !self.recovery.open
+            && self.recovery_transition.is_none()
+            && !self.asset_dialog
+            && self.dialog.is_none()
+            && !self.rename_pending
+            && !self.new_scene_pending
+            && !self.close_pending;
+        self.navigation.keyboard_enabled =
+            self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
+        self.navigation.movement_speed = self.workspace.prefs.movement_speed;
+        let authored_view = transient.as_ref().unwrap_or(self.session.scene());
+        let shown_frame = self.runtime.displayed_frame().cloned();
+        let mut mixed_fit_error = None;
+        let mut mixed_fit_succeeded = false;
+        if !player_view
+            && self.navigation.frame_selected
+            && self
+                .manipulation
+                .ids
+                .iter()
+                .any(|id| authored_view.lighting.light(id).is_some())
+        {
+            // The shared runtime renderer frames geometry. Editor light
+            // anchors participate only in the authored view, never its runtime.
+            self.navigation.frame_selected = false;
+            if !self.runtime.visible && self.navigation.enabled {
+                if let Some(camera) = self.navigation.camera.and_then(|camera| {
+                    lighting_viewport::frame_selection(
+                        authored_view,
+                        &self.manipulation.ids,
+                        &self.resolved,
+                        camera,
+                        ui.available_width() / ui.available_height().max(1.0),
+                    )
+                }) {
+                    self.navigation.camera = Some(camera);
+                    self.navigation.clear_fit_error = true;
+                    mixed_fit_succeeded = true;
+                } else {
+                    mixed_fit_error = Some(rot_render::FIT_ERROR);
+                }
+            } else if self.runtime.visible {
+                self.notice = "Switch to the authored view to frame selected lights.".into();
+            }
+        }
+        if let Some(error) = mixed_fit_error {
+            self.error = error.into();
+            ui.colored_label(ui.visuals().warn_fg_color, error);
+        }
+        let shown_scene = shown_frame
+            .as_ref()
+            .map_or(authored_view, |frame| frame.scene.as_ref());
+        // The view fills its dock tab; no panel covers it (S-07a).
+        self.navigation.overlay_origin = None;
+        let mut surface =
+            rot_render::allocate_viewport(ui, shown_scene, &selected, &mut self.navigation);
+        let hud_rect = surface.rect;
+        let authoring = shown_frame
+            .as_ref()
+            .map_or(self.session.authoring(), |frame| frame.authoring.as_ref());
+        let scope = shown_frame.as_ref().map_or_else(
+            || {
+                egui::Id::unique((
+                    "hud-preview",
+                    self.generation,
+                    self.session.scene().revision,
+                ))
+            },
+            |frame| {
+                egui::Id::unique((
+                    "hud-runtime",
+                    frame.key.generation,
+                    frame.key.reset_epoch,
+                    frame.key.authored_revision,
+                ))
+            },
+        );
+        let (hud_owns, hud_error) = hud_interaction::interact(
+            ui,
+            hud_interaction::HudViewport {
+                rect: hud_rect,
+                frame: shown_frame.as_ref(),
+                authoring,
+                scope,
+            },
+            &mut self.hud_cache,
+            &mut self.hud_controls,
+            &mut self.runtime,
+            blocked,
+        );
+        if let Some(error) = hud_error {
+            self.error = error;
+        }
+        surface.input_owned = hud_owns;
+        let viewport = rot_render::render_viewport_with_materials(
+            ui,
+            shown_scene,
+            &selected,
+            if self.runtime.visible {
+                &self.preview_assets
+            } else {
+                &self.resolved
+            },
+            if self.runtime.visible {
+                &self.preview_textures
+            } else {
+                &self.resolved_textures
+            },
+            &mut self.navigation,
+            surface,
+        );
+        // The wheel changes fly speed while the right button is held.
+        self.workspace
+            .set_movement_speed(self.navigation.movement_speed);
+        if let Some(error) = viewport.fit_error.filter(|_| viewport.fit_attempted) {
+            self.error = error.into();
+        } else if (mixed_fit_succeeded || viewport.fit_attempted)
+            && mixed_fit_error.is_none()
+            && self.error == rot_render::FIT_ERROR
+        {
+            self.error.clear();
+        }
+        // Clicking the running Game view gives it the keyboard.
+        let has_actions = !self.session.authoring().actions.is_empty();
+        let playing_view = self.runtime.visible && self.runtime.is_playing();
+        self.runtime.input_control_click(
+            &ctx,
+            blocked || hud_owns,
+            has_actions,
+            playing_view && viewport.response.clicked(),
+        );
+        self.runtime
+            .input_finish(&ctx, &viewport.response, blocked || hud_owns);
+        self.ai_release_navigation = false;
+        self.captures.rect = Some(viewport.rect);
+        self.captures.visible_crop = Some(hud_rect);
+        self.captures.view = Some(viewport.view);
+        self.captures.projection = Some(viewport.projection);
+        self.captures.receipt = Some(viewport.receipt.clone());
+        self.view_state.input_active = ui.input(|input| input.pointer.any_down());
+        let may_draw = !player_view
+            && !about_open
+            && !self.asset_publishing()
+            && !self.asset_loading()
+            && !self.runtime.visible
+            && !self.drafts()
+            && self.dialog.is_none()
+            && !self.asset_dialog
+            && !self.close_pending
+            && !self.close_approved
+            && !self.new_scene_pending
+            && !self.rename_pending
+            && !self.workspace.settings_open
+            && !self.recovery.open
+            && self.recovery_transition.is_none();
+        let can_pick = self.navigation.enabled && !self.manipulation.active() && !hud_owns;
+        if !player_view && !self.runtime.visible {
+            let active = self.selected.as_slice();
+            collider_viewport::paint(ui, &viewport, authored_view, active);
+        } else if !player_view && !self.runtime.stale {
+            if let Some(frame) = self
+                .runtime
+                .displayed_frame()
+                .filter(|frame| Some(frame.key) == self.runtime.current_run())
+            {
+                if let Some(observations) = &frame.query_observations {
+                    collider_viewport::paint_contacts(
+                        ui,
+                        &viewport,
+                        frame.scene.as_ref(),
+                        frame.tick,
+                        observations,
+                    );
+                }
+            }
+        }
+        // Passive xray icons precede transform handles in paint order;
+        // handles retain first refusal on a click, then icons, then surfaces.
+        let light_pick = if !player_view && !self.runtime.visible {
+            lighting_viewport::paint_and_pick(
+                ui,
+                &viewport,
+                authored_view,
+                &self.manipulation.ids,
+                can_pick,
+            )
+        } else {
+            None
+        };
+        let overlay_owns = if may_draw {
+            let before = self.session.scene().revision;
+            let result = self.manipulation.draw_with_pointer_block(
+                ui,
+                &viewport,
+                &mut self.session,
+                hud_owns,
+            );
+            if before != self.session.scene().revision {
+                self.sync_draft();
+                self.notice = "Transform committed; Undo restores the whole selection.".into();
+            }
+            match result {
+                Ok(owns) => owns,
+                Err(error) => {
+                    self.error = error;
+                    true
+                }
+            }
+        } else {
+            false
+        };
+        if viewport.response.clicked() && !overlay_owns && can_pick {
+            let id = light_pick.clone().or(viewport.picked.clone()).filter(|id| {
+                lighting_viewport::selectable_target(
+                    self.session.scene(),
+                    id,
+                    !self.runtime.visible,
+                )
+            });
+            let additive =
+                ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
+            self.queued_selection = Some((id, additive));
+        }
+        // Double-clicking an object selects and frames it, like F. The
+        // first click already shows the transform handles under the
+        // pointer, so the second click may land on them.
+        if viewport.response.double_clicked() && !hud_owns && !self.runtime.visible && !player_view
+        {
+            if let Some(id) = light_pick
+                .or(viewport.picked)
+                .filter(|id| lighting_viewport::selectable_target(self.session.scene(), id, true))
+            {
+                self.queued_selection = Some((Some(id), false));
+                self.navigation.frame_selected = true;
+                ui.ctx().request_repaint();
+            }
+        }
+        if let Some(ids) = viewport.box_selection.filter(|_| !overlay_owns && can_pick) {
+            let additive =
+                ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
+            self.queued_box_selection = Some((ids, additive));
+        }
+        self.paint_hud_overlay(ui, hud_rect, shown_frame.as_ref());
+        sidebars::round_viewport(ui, hud_rect);
+        if self.runtime.in_play_mode() {
+            // A thin live-red frame marks Play mode (UX-STANDARDS §6).
+            ui.painter().rect_stroke(
+                hud_rect,
+                0.0,
+                egui::Stroke::new(2.0, crate::editor_theme::ROT_RED),
+                egui::StrokeKind::Inside,
+            );
+        }
+    }
     /// The one toolbar row: tools left, Play controls centered, Layout and the
     /// AI indicator right (UX-STANDARDS §3).
     fn toolbar_ui(&mut self, ui: &mut egui::Ui, blocked: bool) {
@@ -2532,14 +2856,6 @@ impl SceneEditor {
             self.set_ai_workspace(true, &ui.ctx().clone());
             ui.close();
         }
-    }
-    /// Scene and Game view tabs above the viewport.
-    fn view_tabs_ui(&mut self, ui: &mut egui::Ui) {
-        ui.horizontal(|ui| {
-            ui.set_min_height(crate::ui_kit::tokens::PANEL_TAB);
-            ui.spacing_mut().item_spacing.x = crate::ui_kit::tokens::SPACE_XXS;
-            self.player_view_controls(ui, false);
-        });
     }
     fn runtime_toolbar(&mut self, ui: &mut egui::Ui, blocked: bool) {
         let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
@@ -3870,7 +4186,6 @@ impl SceneEditor {
         }
     }
     fn hierarchy_contents(&mut self, ui: &mut egui::Ui) {
-        ui.heading("Hierarchy");
         let enter = ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.is_none());
         let escape = ui.input(|i| i.key_pressed(egui::Key::Escape) && i.modifiers.is_none());
         let search = ui.add(
@@ -5900,86 +6215,6 @@ impl SceneEditor {
         {
             egui::Panel::bottom("scene_status").show(ui, |ui| self.asset_status_ui(ui));
         }
-        if !self.ai_workspace && self.workspace.prefs.content_visible {
-            let remaining = ui.available_height();
-            // Reserve 160 points for compact tools/runtime/view chrome and
-            // about 180 for the viewport, after global status/menu bars.
-            let max_height = (remaining - 340.0).clamp(32.0, 280.0);
-            let min_height = (ctx.content_rect().height() * 0.15)
-                .clamp(96.0, 160.0)
-                .min(max_height);
-            let default_height = (ctx.content_rect().height() * 0.16).clamp(108.0, 250.0);
-            let preferred_height = egui::containers::panel::PanelState::load(
-                &ctx,
-                ui.scope_id().with("content_browser"),
-            )
-            .map(|state| state.size().y)
-            .unwrap_or(default_height);
-            // Never let a temporary cap overwrite the normal panel's remembered
-            // divider height. The constrained instance has one stable identity.
-            let panel = if preferred_height > max_height {
-                egui::Panel::bottom("content_browser_constrained")
-                    .resizable(false)
-                    .exact_size(max_height)
-            } else {
-                egui::Panel::bottom("content_browser")
-                    .default_size(preferred_height)
-                    .resizable(true)
-                    .size_range(min_height..=max_height)
-            };
-            panel.show(ui, |ui| {
-                ui.set_min_height(ui.available_height());
-                // Assets and Console share the bottom dock as tabs.
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = crate::ui_kit::tokens::SPACE_XXS;
-                    let title = |text: &str| {
-                        egui::RichText::new(text)
-                            .font(crate::ui_kit::semibold(crate::ui_kit::tokens::TEXT_TITLE))
-                    };
-                    if ui
-                        .add(egui::Button::selectable(
-                            !self.console.open,
-                            title("Assets"),
-                        ))
-                        .clicked()
-                    {
-                        self.console.open = false;
-                    }
-                    let errors = self.console.count(crate::console::Level::Error);
-                    let console = if errors > 0 {
-                        format!("Console ({errors})")
-                    } else {
-                        "Console".to_owned()
-                    };
-                    if ui
-                        .add(egui::Button::selectable(self.console.open, title(&console)))
-                        .clicked()
-                    {
-                        self.console.open = true;
-                    }
-                });
-                if self.console.open {
-                    if let Some(crate::console::Request::OpenSource(source, line)) =
-                        self.console.ui(ui)
-                    {
-                        self.external_action(
-                            &ctx,
-                            &source,
-                            crate::behavior_external::Intent::Open { line },
-                        );
-                    }
-                    return;
-                }
-                egui::ScrollArea::vertical()
-                    .id_salt("content_panel_scroll")
-                    .min_scrolled_height(0.0)
-                    .max_height(ui.available_height())
-                    .show(ui, |ui| {
-                        crate::focus::scroll_focus_into_view(ui);
-                        self.browser_contents(ui)
-                    });
-            });
-        }
         if self.ai_workspace {
             self.ai_drawer_ui(&ctx);
         }
@@ -5993,375 +6228,13 @@ impl SceneEditor {
             self.shader_revision,
         );
         egui::CentralPanel::default().show(ui, |ui| {
-            if self.workspace.welcome
-                && self.session.path().is_none()
-                && self.session.scene().revision == 0
-                && self.session.scene().objects.is_empty()
-                && !self.runtime.visible
-                && !self.asset_loading()
-            {
-                self.scene_welcome(ui);
-            }
-            if self.asset_loading() {
-                self.runtime.cancel_control_focus();
-                self.captures.rect = None;
-                self.captures.visible_crop = None;
-                self.captures.receipt = None;
-                ui.heading("Loading project content…");
-                ui.label("The scene and your saved edits are retained while content loads.");
-                // Stop remains available for an older retained runtime while
-                // Reset and playback edits wait for content authority.
-                let shortcut = self.workspace.shortcut_text(Action::FocusRuntime);
-                let _ = self.runtime.controls_with_sounds(
-                    ui,
-                    &self.session,
-                    self.generation,
-                    true,
-                    &shortcut,
-                    self.assets.as_ref(),
-                );
-                return;
-            }
-            if !self.player_preview_available() {
-                self.set_player_preview(false);
-            }
-            let document_blocked =
-                about_open || self.guard().is_err() || self.manipulation.offset_pending();
-            if document_blocked || self.input_actions_open {
-                self.runtime.cancel_control_focus();
-            }
-            let blocked = document_blocked || self.asset_busy();
-            if !self.ai_workspace {
-                self.toolbar_ui(ui, blocked);
-                self.view_tabs_ui(ui);
-            } else if self.runtime.has_worker() {
-                self.runtime_toolbar(ui, blocked);
-            }
-            self.runtime.observe(
-                self.generation,
-                self.session.scene().revision,
-                self.assets.as_ref().map(|store| store.revision()),
-                self.shader_revision,
-            );
-            self.asset_mark_callback_owners();
-            let transient = if !self.runtime.visible && !self.navigation.player_view {
-                self.manipulation.transient_scene(self.session.scene())
+            if self.ai_workspace || self.asset_loading() {
+                self.viewport_pane_ui(ui, about_open);
             } else {
-                None
-            };
-            let player_view = self.navigation.player_view;
-            let selected: Vec<_> = if player_view {
-                Vec::new()
-            } else {
-                self.manipulation.ids.iter().map(String::as_str).collect()
-            };
-            // At a compact height, the View menu retains projection and
-            // presets while the recovered Inspector draft needs the extra row.
-            self.navigation.show_controls = !self.ai_workspace
-                && !(self.recovered_input.is_some() && ui.available_height() < 215.0);
-            self.navigation.selection_feedback = true;
-            self.navigation.show_editor_grid = !player_view;
-            self.navigation.focusable =
-                self.runtime.input_owned() || (self.runtime.visible && self.runtime.is_playing());
-            self.navigation.enabled = !player_view
-                && !self.ai_release_navigation
-                && !self
-                    .ai_drawer_rect
-                    .is_some_and(|rect| ctx.pointer_hover_pos().is_some_and(|p| rect.contains(p)))
-                && !about_open
-                && !self.runtime.input_owned()
-                && !self.export_dialog
-                && !self.close_approved
-                && !self.manipulation.active()
-                && !self.workspace.settings_open
-                && !self.recovery.open
-                && self.recovery_transition.is_none()
-                && !self.asset_dialog
-                && self.dialog.is_none()
-                && !self.rename_pending
-                && !self.new_scene_pending
-                && !self.close_pending;
-            self.navigation.keyboard_enabled =
-                self.navigation.enabled && !ctx.egui_wants_keyboard_input() && !self.drafts();
-            self.navigation.movement_speed = self.workspace.prefs.movement_speed;
-            let authored_view = transient.as_ref().unwrap_or(self.session.scene());
-            let shown_frame = self.runtime.displayed_frame().cloned();
-            let mut mixed_fit_error = None;
-            let mut mixed_fit_succeeded = false;
-            if !player_view
-                && self.navigation.frame_selected
-                && self
-                    .manipulation
-                    .ids
-                    .iter()
-                    .any(|id| authored_view.lighting.light(id).is_some())
-            {
-                // The shared runtime renderer frames geometry. Editor light
-                // anchors participate only in the authored view, never its runtime.
-                self.navigation.frame_selected = false;
-                if !self.runtime.visible && self.navigation.enabled {
-                    if let Some(camera) = self.navigation.camera.and_then(|camera| {
-                        lighting_viewport::frame_selection(
-                            authored_view,
-                            &self.manipulation.ids,
-                            &self.resolved,
-                            camera,
-                            ui.available_width() / ui.available_height().max(1.0),
-                        )
-                    }) {
-                        self.navigation.camera = Some(camera);
-                        self.navigation.clear_fit_error = true;
-                        mixed_fit_succeeded = true;
-                    } else {
-                        mixed_fit_error = Some(rot_render::FIT_ERROR);
-                    }
-                } else if self.runtime.visible {
-                    self.notice = "Switch to the authored view to frame selected lights.".into();
-                }
-            }
-            if let Some(error) = mixed_fit_error {
-                self.error = error.into();
-                ui.colored_label(ui.visuals().warn_fg_color, error);
-            }
-            let shown_scene = shown_frame
-                .as_ref()
-                .map_or(authored_view, |frame| frame.scene.as_ref());
-            let player_sidebars = player_view
-                .then(|| sidebars::SceneSidebars::new(self, ui.available_rect_before_wrap()));
-            // View options sit in the visible corner, beside the Hierarchy panel.
-            self.navigation.overlay_origin = Some(
-                sidebars::SceneSidebars::new(self, ui.available_rect_before_wrap())
-                    .visible_scene()
-                    .min,
-            );
-            let mut surface = if let Some(sidebars) = &player_sidebars {
-                // The Player View retains the original unoccluded aspect and HUD
-                // bounds. Only the editor Scene view paints behind its panels.
-                ui.scope_builder(
-                    egui::UiBuilder::new().max_rect(sidebars.visible_scene()),
-                    |ui| {
-                        rot_render::allocate_viewport(
-                            ui,
-                            shown_scene,
-                            &selected,
-                            &mut self.navigation,
-                        )
-                    },
-                )
-                .inner
-            } else {
-                rot_render::allocate_viewport(ui, shown_scene, &selected, &mut self.navigation)
-            };
-            let sidebars =
-                player_sidebars.unwrap_or_else(|| sidebars::SceneSidebars::new(self, surface.rect));
-            let sidebar_pressed = sidebars.owns_pointer_press(&ctx);
-            let sidebar_pointer = sidebar_pressed || sidebars.own_pointer(&ctx);
-            let hud_rect = sidebars.visible_scene();
-            let authoring = shown_frame
-                .as_ref()
-                .map_or(self.session.authoring(), |frame| frame.authoring.as_ref());
-            let scope = shown_frame.as_ref().map_or_else(
-                || {
-                    egui::Id::unique((
-                        "hud-preview",
-                        self.generation,
-                        self.session.scene().revision,
-                    ))
-                },
-                |frame| {
-                    egui::Id::unique((
-                        "hud-runtime",
-                        frame.key.generation,
-                        frame.key.reset_epoch,
-                        frame.key.authored_revision,
-                    ))
-                },
-            );
-            let (hud_owns, hud_error) = hud_interaction::interact(
-                ui,
-                hud_interaction::HudViewport {
-                    rect: hud_rect,
-                    frame: shown_frame.as_ref(),
-                    authoring,
-                    scope,
-                },
-                &mut self.hud_cache,
-                &mut self.hud_controls,
-                &mut self.runtime,
-                blocked,
-            );
-            if let Some(error) = hud_error {
-                self.error = error;
-            }
-            surface.input_owned = hud_owns || sidebar_pointer;
-            let viewport = rot_render::render_viewport_with_materials(
-                ui,
-                shown_scene,
-                &selected,
-                if self.runtime.visible {
-                    &self.preview_assets
-                } else {
-                    &self.resolved
-                },
-                if self.runtime.visible {
-                    &self.preview_textures
-                } else {
-                    &self.resolved_textures
-                },
-                &mut self.navigation,
-                surface,
-            );
-            // The wheel changes fly speed while the right button is held.
-            self.workspace
-                .set_movement_speed(self.navigation.movement_speed);
-            if let Some(error) = viewport.fit_error.filter(|_| viewport.fit_attempted) {
-                self.error = error.into();
-            } else if (mixed_fit_succeeded || viewport.fit_attempted)
-                && mixed_fit_error.is_none()
-                && self.error == rot_render::FIT_ERROR
-            {
-                self.error.clear();
-            }
-            // Clicking the running Game view gives it the keyboard.
-            let has_actions = !self.session.authoring().actions.is_empty();
-            let playing_view = self.runtime.visible && self.runtime.is_playing();
-            self.runtime.input_control_click(
-                &ctx,
-                blocked || hud_owns || sidebar_pressed,
-                has_actions,
-                playing_view && viewport.response.clicked(),
-            );
-            self.runtime.input_finish(
-                &ctx,
-                &viewport.response,
-                blocked || hud_owns || sidebar_pressed,
-            );
-            self.ai_release_navigation = false;
-            self.captures.rect = Some(viewport.rect);
-            self.captures.visible_crop = Some(hud_rect);
-            self.captures.view = Some(viewport.view);
-            self.captures.projection = Some(viewport.projection);
-            self.captures.receipt = Some(viewport.receipt.clone());
-            self.view_state.input_active = ui.input(|input| input.pointer.any_down());
-            let may_draw = !player_view
-                && !about_open
-                && !self.asset_publishing()
-                && !self.asset_loading()
-                && !self.runtime.visible
-                && !self.drafts()
-                && self.dialog.is_none()
-                && !self.asset_dialog
-                && !self.close_pending
-                && !self.close_approved
-                && !self.new_scene_pending
-                && !self.rename_pending
-                && !self.workspace.settings_open
-                && !self.recovery.open
-                && self.recovery_transition.is_none();
-            let can_pick = self.navigation.enabled
-                && !self.manipulation.active()
-                && !hud_owns
-                && !sidebar_pointer;
-            if !player_view && !self.runtime.visible {
-                let active = self.selected.as_slice();
-                collider_viewport::paint(ui, &viewport, authored_view, active);
-            } else if !player_view && !self.runtime.stale {
-                if let Some(frame) = self
-                    .runtime
-                    .displayed_frame()
-                    .filter(|frame| Some(frame.key) == self.runtime.current_run())
-                {
-                    if let Some(observations) = &frame.query_observations {
-                        collider_viewport::paint_contacts(
-                            ui,
-                            &viewport,
-                            frame.scene.as_ref(),
-                            frame.tick,
-                            observations,
-                        );
-                    }
-                }
-            }
-            // Passive xray icons precede transform handles in paint order;
-            // handles retain first refusal on a click, then icons, then surfaces.
-            let light_pick = if !player_view && !self.runtime.visible {
-                lighting_viewport::paint_and_pick(
-                    ui,
-                    &viewport,
-                    authored_view,
-                    &self.manipulation.ids,
-                    can_pick,
-                )
-            } else {
-                None
-            };
-            let overlay_owns = if may_draw {
-                let before = self.session.scene().revision;
-                let result = self.manipulation.draw_with_pointer_block(
-                    ui,
-                    &viewport,
-                    &mut self.session,
-                    sidebar_pointer || hud_owns,
-                );
-                if before != self.session.scene().revision {
-                    self.sync_draft();
-                    self.notice = "Transform committed; Undo restores the whole selection.".into();
-                }
-                match result {
-                    Ok(owns) => owns,
-                    Err(error) => {
-                        self.error = error;
-                        true
-                    }
-                }
-            } else {
-                false
-            };
-            if viewport.response.clicked() && !overlay_owns && can_pick {
-                let id = light_pick.clone().or(viewport.picked.clone()).filter(|id| {
-                    lighting_viewport::selectable_target(
-                        self.session.scene(),
-                        id,
-                        !self.runtime.visible,
-                    )
-                });
-                let additive =
-                    ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
-                self.queued_selection = Some((id, additive));
-            }
-            // Double-clicking an object selects and frames it, like F. The
-            // first click already shows the transform handles under the
-            // pointer, so the second click may land on them.
-            if viewport.response.double_clicked()
-                && !hud_owns
-                && !sidebar_pointer
-                && !self.runtime.visible
-                && !player_view
-            {
-                if let Some(id) = light_pick.or(viewport.picked).filter(|id| {
-                    lighting_viewport::selectable_target(self.session.scene(), id, true)
-                }) {
-                    self.queued_selection = Some((Some(id), false));
-                    self.navigation.frame_selected = true;
-                    ui.ctx().request_repaint();
-                }
-            }
-            if let Some(ids) = viewport.box_selection.filter(|_| !overlay_owns && can_pick) {
-                let additive =
-                    ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
-                self.queued_box_selection = Some((ids, additive));
-            }
-            self.paint_hud_overlay(ui, hud_rect, shown_frame.as_ref());
-            sidebars.show(self, ui);
-            sidebars::round_viewport(ui, hud_rect);
-            if self.runtime.in_play_mode() {
-                // A thin live-red frame marks Play mode (UX-STANDARDS §6).
-                ui.painter().rect_stroke(
-                    hud_rect,
-                    0.0,
-                    egui::Stroke::new(2.0, crate::editor_theme::ROT_RED),
-                    egui::StrokeKind::Inside,
-                );
+                let document_blocked =
+                    about_open || self.guard().is_err() || self.manipulation.offset_pending();
+                self.toolbar_ui(ui, document_blocked || self.asset_busy());
+                self.dock_ui(ui, about_open);
             }
         });
         self.process_queued_selection();
@@ -7016,8 +6889,16 @@ mod tests {
             editor.asset_snapshot();
             editor.workspace.prefs.hierarchy_width = 320.0;
             editor.workspace.prefs.inspector_width = 400.0;
-            editor.workspace.prefs.hierarchy_side = if swapped { Side::Right } else { Side::Left };
-            editor.workspace.prefs.inspector_side = if swapped { Side::Left } else { Side::Right };
+            editor.workspace.prefs.hierarchy_side = if swapped {
+                crate::workspace::Side::Right
+            } else {
+                crate::workspace::Side::Left
+            };
+            editor.workspace.prefs.inspector_side = if swapped {
+                crate::workspace::Side::Left
+            } else {
+                crate::workspace::Side::Right
+            };
             let preferred = (320.0, 400.0);
             let events = std::cell::RefCell::new(Vec::new());
             let details_center = std::cell::Cell::new(None);
@@ -7055,13 +6936,11 @@ mod tests {
                                     )
                                 }),
                         );
-                        content_rect.set(
-                            egui::containers::panel::PanelState::load(
-                                ui.ctx(),
-                                ui.scope_id().with("content_browser"),
-                            )
-                            .map(|state| state.outer_rect),
-                        );
+                        // S-07a: the bottom dock (Assets, Console) and its divider.
+                        content_rect.set(editor.dock.as_ref().and_then(|dock| {
+                            let assets = panels::tile_of(dock, panels::Pane::Assets)?;
+                            dock.tiles.rect(dock.tiles.parent_of(assets)?)
+                        }));
                     },
                 );
                 output.textures_delta.clear();
@@ -7328,7 +7207,7 @@ mod tests {
             frame(&mut editor, normal_size);
             frame(&mut editor, normal_size);
             let before = content_rect.get().expect("normal Content panel state");
-            let divider = egui::pos2(before.center().x, before.top());
+            let divider = egui::pos2(before.center().x, before.top() - 1.0);
             let pointer = |pos, pressed| egui::Event::PointerButton {
                 pos,
                 button: egui::PointerButton::Primary,

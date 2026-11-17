@@ -5,7 +5,7 @@ This inventory covers every external package in the locked workspace resolution,
 Cargo's declared SPDX license expression is metadata supplied by each package. Its presence is not an independent license review or certification.
 Project source licensing does not change the licenses of dependencies.
 
-External locked package versions: **479**. Packages with no discovered readable license text: **71**.
+External locked package versions: **481**. Packages with no discovered readable license text: **71**.
 
 | Package | Version | Cargo source | Declared license expression | Upstream repository |
 | --- | --- | --- | --- | --- |
@@ -116,6 +116,7 @@ External locked package versions: **479**. Packages with no discovered readable 
 | egui-wgpu | 0.37.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/emilk/egui/tree/main/crates/egui-wgpu](https://github.com/emilk/egui/tree/main/crates/egui-wgpu) |
 | egui-winit | 0.37.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/emilk/egui/tree/main/crates/egui-winit](https://github.com/emilk/egui/tree/main/crates/egui-winit) |
 | egui_glow | 0.37.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/emilk/egui/tree/main/crates/egui_glow](https://github.com/emilk/egui/tree/main/crates/egui_glow) |
+| egui_tiles | 0.18.0 | `vendored:third_party/egui_tiles` | `MIT OR Apache-2.0` | [https://github.com/rerun-io/egui_crates](https://github.com/rerun-io/egui_crates) |
 | either | 1.19.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rayon-rs/either](https://github.com/rayon-rs/either) |
 | emath | 0.37.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/emilk/egui/tree/main/crates/emath](https://github.com/emilk/egui/tree/main/crates/emath) |
 | ena | 0.14.4 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/rust-lang/ena](https://github.com/rust-lang/ena) |
@@ -124,6 +125,7 @@ External locked package versions: **479**. Packages with no discovered readable 
 | enum_dispatch | 0.3.13 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://gitlab.com/antonok/enum_dispatch](https://gitlab.com/antonok/enum_dispatch) |
 | enumflags2 | 0.7.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/meithecatte/enumflags2](https://github.com/meithecatte/enumflags2) |
 | enumflags2_derive | 0.7.12 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/meithecatte/enumflags2](https://github.com/meithecatte/enumflags2) |
+| enumn | 0.1.14 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/dtolnay/enumn](https://github.com/dtolnay/enumn) |
 | enumset | 1.1.15 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/Lymia/enumset](https://github.com/Lymia/enumset) |
 | enumset_derive | 0.15.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT/Apache-2.0` | [https://github.com/Lymia/enumset](https://github.com/Lymia/enumset) |
 | epaint | 0.37.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/emilk/egui/tree/main/crates/epaint](https://github.com/emilk/egui/tree/main/crates/epaint) |
@@ -381,7 +383,7 @@ External locked package versions: **479**. Packages with no discovered readable 
 | tiny-skia | 0.11.4 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-3-Clause` | [https://github.com/RazrFalcon/tiny-skia](https://github.com/RazrFalcon/tiny-skia) |
 | tiny-skia-path | 0.11.4 | `registry+https://github.com/rust-lang/crates.io-index` | `BSD-3-Clause` | [https://github.com/RazrFalcon/tiny-skia/tree/master/path](https://github.com/RazrFalcon/tiny-skia/tree/master/path) |
 | tokio | 1.54.1 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/tokio-rs/tokio](https://github.com/tokio-rs/tokio) |
-| toml_datetime | 1.1.2+spec-1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
+| toml_datetime | 1.1.3+spec-1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | toml_edit | 0.25.18+spec-1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | toml_parser | 1.1.5+spec-1.1.0 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT OR Apache-2.0` | [https://github.com/toml-rs/toml](https://github.com/toml-rs/toml) |
 | tracing | 0.1.44 | `registry+https://github.com/rust-lang/crates.io-index` | `MIT` | [https://github.com/tokio-rs/tracing](https://github.com/tokio-rs/tracing) |
