@@ -452,32 +452,19 @@ impl SceneEditor {
         let kind = self.item_kind(item);
         let has_target = self.selected.is_some();
         response.context_menu(|ui| {
-            match kind {
-                "Model" | "Animated model" => {
-                    if ui.button("Place in Scene").clicked() {
-                        action = Some(AssetAction::Place(id.clone()));
-                    }
-                }
-                "Mesh" => {
-                    if ui
-                        .add_enabled(has_target, egui::Button::new("Assign to Selected Object"))
-                        .clicked()
-                    {
-                        action = Some(AssetAction::Assign(id.clone()));
-                    }
-                }
-                "Texture" => {
-                    if ui
-                        .add_enabled(
-                            has_target,
-                            egui::Button::new("Use on Selected Object's Material"),
-                        )
-                        .clicked()
-                    {
-                        action = Some(AssetAction::Texture(id.clone()));
-                    }
-                }
-                _ => {}
+            // The one action that fits this kind of asset.
+            let (label, enabled, make): (&str, bool, fn(String) -> AssetAction) = match kind {
+                "Mesh" => ("Assign to Selected Object", has_target, AssetAction::Assign),
+                "Texture" => (
+                    "Use on Selected Object's Material",
+                    has_target,
+                    AssetAction::Texture,
+                ),
+                "Sound" => ("", false, AssetAction::Place),
+                _ => ("Place in Scene", true, AssetAction::Place),
+            };
+            if !label.is_empty() && ui.add_enabled(enabled, egui::Button::new(label)).clicked() {
+                action = Some(make(id.clone()));
             }
             if ui.button("Reimport").clicked() {
                 action = Some(AssetAction::Refresh(id.clone()));
