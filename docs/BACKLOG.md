@@ -156,7 +156,7 @@ viewport at 1280×800 is at least 520 px tall; `tabwalk` still reaches
 everything.
 
 #### S-05 · Play, Pause, Step, Stop — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** Pressing Play runs the current scene. There is no Reset.
 **Facts.** The runtime toolbar is in
 `crates/rot-editor/src/behavior_ui.rs:2386-2511`. Play is enabled only after
