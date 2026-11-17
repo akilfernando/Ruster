@@ -28,6 +28,7 @@ package in your lane under **Now**. How to work is in the
 
 One line each. Anyone may add; the user or a planning pass orders them.
 
+- `ui_drive.py` screenshots do not change after key-only input (Tab): the hub and the editor gave byte-identical PNGs across Tab presses while the accessibility focus moved, so focus rings cannot be checked from screenshots on the hidden workspace (S-13, 2026-11-17).
 - `third_party/egui_tiles` is egui_tiles 0.18.0 with three Sense lines patched so dock dividers and tab-bar backgrounds are not Tab stops; drop it when upstream allows that (S-07a).
 - MCP tool list is 145 KB for 98 tools against a 40 KB Phase 1 budget
   (P-01, 2026-11-17). Shorten descriptions and merge tools.
@@ -405,7 +406,7 @@ it into the scene, with no form.
 **Not now.** Folder tree, automatic reimport and sidecar files (C-04).
 
 #### S-13 · Project hub and templates — S — ready
-Status: in progress — Claude Opus 5.5 (UX helper), 2026-11-17
+Status: done — 2026-11-17, Claude Opus 5.5 (UX helper). The list shows Unity Hub's "Modified" (scene file time), not a stored last-opened time (agent choice).
 **Outcome.** A first launch that looks finished.
 **Facts.** `scene_editor/project_picker.rs:30-135`; New Project creates one
 empty scene; no templates.
