@@ -580,7 +580,7 @@ benchmark scenes after C-02.
 could not be measured.
 
 #### P-02 · One-command local install — S — ready
-Status: open
+Status: done — 2026-11-17, e6a1ee8
 **Outcome.** The user can try each finished package.
 **Do.** `scripts/install_local.py`: build release `rot-editor` and
 `rot-mcp`, install them with the desktop entry and icon under `~/.local`,
