@@ -22,9 +22,9 @@ package in your lane under **Now**. How to work is in the
 - **For the user (2026-11-17).** A-04's real-config test left
   `~/.claude.json.rot-backup` and `~/.codex/config.toml.rot-backup` (safe to
   delete) and an empty `"mcpServers": {}` in `~/.claude.json`; no `rot`
-  entry remains in either config. The installed `~/.local/bin` build is
-  P-01's; reinstall with `scripts/install_local.py`, then use Window ▸ AI
-  Connection… ▸ Connect an AI App… from the installed editor.
+  entry remains in either config. The current build is installed
+  (607b908); to connect an AI app, use Window ▸ AI Connection… ▸ Connect an
+  AI App… from the installed editor.
 - **Answered 2026-11-17 (user).** A-04 may add the `rot` entry to the user's
   real Claude Code and Codex configs (backup, that entry only, Undo). P-02 may
   replace the installed pre-rename build (old one kept for `--rollback`).
