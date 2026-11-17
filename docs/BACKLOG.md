@@ -19,6 +19,10 @@ package in your lane under **Now**. How to work is in the
 - **Outside the repository.** The installed editor is still the pre-rename
   build. Two MCP entries in `~/.codex/config.toml` point at old names. Projects in
   `~/Projects/Ruster-Creations` use pre-rename file names.
+- **Answered 2026-11-17 (user).** A-04 may add the `rot` entry to the user's
+  real Claude Code and Codex configs (backup, that entry only, Undo). P-02 may
+  replace the installed pre-rename build (old one kept for `--rollback`).
+  Phase 1 runs as three parallel lanes.
 
 ## Inbox
 
@@ -47,7 +51,7 @@ packages edit: keep changes there small and merge to the trunk often.
 ### UX lane
 
 #### S-01 · Tab reaches every panel — S — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** Tab and Shift+Tab move through every control in the Hierarchy
 and Inspector panels.
 **Facts.** Today focus goes menu → Assets controls → toolbar → "Fit", then
@@ -318,7 +322,7 @@ whenever both are running, with no prompts, tokens or environment
 variables. See [A10](PARITY-PLAN.md#4-architecture-decisions).
 
 #### A-01 · The editor is always reachable — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (AI lane helper), 2026-11-17
 **Outcome.** `rot-mcp` started with no configuration finds the running
 editor.
 **Facts.** The editor listens only after Connect AI or with
@@ -464,7 +468,7 @@ verification table.
 ### Tools lane
 
 #### P-01 · Baseline performance numbers — S — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (Tools lane helper), 2026-11-17
 **Outcome.** Known starting numbers for the
 [budgets](PARITY-PLAN.md#5-performance-budgets).
 **Facts.** `rot-render` has a benchmark binary (`--objects 3|256 --frames
