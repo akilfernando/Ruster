@@ -89,8 +89,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 - 2026-11-17 · Imported GLB transform animation: import, Place, Play, Refresh
   and Build, checked with a real Blender export, a scripted editor run and a
   relocated build. [Details](evidence/IMPORTED-TRANSFORM-ANIMATION-2026-11-17.md).
-- 2026-11-17 · Remaining Ruster identifiers renamed to Rot, with no
-  backward compatibility, as the user chose.
 
 ## Not verified
 
