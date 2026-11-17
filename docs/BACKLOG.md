@@ -179,7 +179,7 @@ messages still mention Reset; S-08 rewrites them. Focus Game Controls moved
 from Ctrl+Shift+P to Ctrl+Shift+G so Pause can use Unity's key.
 
 #### S-06 · Console, status bar and toasts — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** Messages have a home. The status bar is one quiet line.
 **Facts.** There is no Console; logs go to stderr
 (`crates/rot-editor/src/main.rs:47-62`). The status bar is `asset_status_ui`
