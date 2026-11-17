@@ -77,7 +77,7 @@ control and on an Inspector field; the order is pasted in the commit
 message.
 
 #### S-02 · UI kit, tokens and fonts — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** One module supplies every control, size and color, and the
 editor becomes denser and consistent.
 **Facts.** `crates/rot-editor/src/editor_theme.rs` has a 17-role `Palette`
