@@ -135,6 +135,30 @@ generation. Refresh requires matching named paths, placements, assignments
 and interpreted material properties. Geometry, normals, UVs and embedded
 PNG pixels can change.
 
+### Transform animation clips
+
+A GLB may carry up to eight named animations. Each channel targets the
+translation, rotation or scale of a reachable named node, with a float
+LINEAR or STEP sampler. `ModelInfo::clips` records each clip's stable
+resource ID (`glb-clip-…`, derived from model ID and clip name), duration
+and sorted animated node properties. Catalog v7 marks any model with
+clips; v5 and v6 catalogs are unchanged. Key times and values stay in the
+accepted generation. `AssetStore::clip` and `clip_snapshots` return the
+bounded `rot-clip` version 1 JSON payload that the editor preview and
+exported runtime sample, and `export_snapshot` captures the payloads of
+requested clip IDs and pins them in the resource identity.
+
+A clip may hold 96 tracks, 1,024 keys per track, 8,192 keys in total,
+600 seconds and a 1 MiB payload. Key times are strictly increasing
+seconds. Every key must respect placement bounds, and scale keys on nodes
+placed as Groups must be uniform. The importer checks the whole hierarchy
+at every key time. It refuses cubic-spline samplers, morph weights,
+unnamed or duplicate clips and repeated channels with a specific message.
+Refresh accepts changed key times and values. A changed clip set or
+animated node property set is structural and needs a fresh import.
+Blender's default export samples every frame as LINEAR keys and is
+accepted; skinned armatures and shape keys are separate future work.
+
 The subset accepts one embedded GLB 2.0 scene and BIN buffer, positive
 bounded TRS, named paths with unique siblings, one triangle primitive on
 each mesh node, and named opaque single-sided nonmetallic materials with
@@ -144,8 +168,8 @@ Group levels including the placement root and groups that wrap a mesh with
 children. The resolved placement must stay within scene transform bounds.
 Base color uses an embedded compatible PNG with TEXCOORD_0, optional repeat
 or clamp on both axes, and supported matching min/mag/mipmap filters. The
-decoder rejects external URIs, extensions, skins, animations, morphs,
-unsupported vertex/material channels and matrices. Derived OBJ preserves
+decoder rejects external URIs, extensions, skins, morphs, unsupported
+vertex/material channels and matrices. Derived OBJ preserves
 triangle order and the existing renderer's normal and UV convention;
 the export snapshot passes only the verified generated OBJ/PNG closure to
 the existing standalone resource loader.

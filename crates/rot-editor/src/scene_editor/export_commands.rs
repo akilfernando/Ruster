@@ -85,10 +85,18 @@ impl SceneEditor {
         let (mesh_ids, texture_ids) =
             crate::creation_export::scene_dependencies(self.session.scene())?;
         let sound_ids = self.session.sound_asset_references().assets;
+        let clip_ids: std::collections::BTreeSet<String> = self
+            .session
+            .scene()
+            .animations
+            .values()
+            .map(|binding| binding.clip.clone())
+            .collect();
         let ids = mesh_ids
             .iter()
             .chain(&texture_ids)
             .chain(&sound_ids)
+            .chain(&clip_ids)
             .cloned()
             .collect();
         if !sound_ids.is_disjoint(&mesh_ids) || !sound_ids.is_disjoint(&texture_ids) {
@@ -113,7 +121,13 @@ impl SceneEditor {
                 }
                 Some(store.export_snapshot(&ids).map_err(|e| e.to_string())?)
             }
-            None if mesh_ids.is_empty() && texture_ids.is_empty() && sound_ids.is_empty() => None,
+            None if mesh_ids.is_empty()
+                && texture_ids.is_empty()
+                && sound_ids.is_empty()
+                && clip_ids.is_empty() =>
+            {
+                None
+            }
             None => {
                 return Err("Repair the content catalog before exporting imported assets.".into())
             }

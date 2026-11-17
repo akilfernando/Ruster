@@ -1,8 +1,31 @@
 # Model routing
 
-Checked 2026-11-16 UTC for the local ChatGPT Codex session. This snapshot describes the session's tools. The policy lives in [the development skill](../../skills/rot-development/SKILL.md).
+Checked 2026-11-17 for a Claude Code root session; the Codex snapshot was checked 2026-11-16 UTC. This snapshot describes the session's tools. The policy lives in [the development skill](../../skills/rot-development/SKILL.md).
 
-## Current routing — Codex host, 2026-11-16
+## Current routing — Claude Code host, 2026-11-17
+
+The user starts this root session in Claude Code with `claude-fable-5-2`
+saved as the default model. The Codex table below describes the previous
+host and is not available through this session's delegation tool.
+
+| Role | Available model (Agent tool alias) | Use in this session |
+| --- | --- | --- |
+| Main developer and deep reasoning | Root `claude-fable-5-2` (`fable`) | Scope, core implementation, integration, verification and documentation |
+| Balanced developer | `opus` | Medium effort for bounded multi-file implementation with explicit write scopes |
+| Economical worker | `sonnet`, `haiku` | Not used this session |
+| Read-only search | `Explore` agent type | Code mapping before design |
+| Visual and computer use | None separate; the root reads images directly | Native UI checks stay with the root |
+
+Evidence is the active Agent tool schema: model aliases `sonnet`, `opus`,
+`haiku` and `fable`, efforts low through max, agent types including
+general-purpose, Explore and Plan, and optional worktree isolation.
+Children start with only their brief unless forked. The host names the
+family as Fable 5.2, Opus 5.5, Sonnet 5.5 and Haiku 5.5. No external model
+documentation was fetched. Concurrency limits, relative cost and quality
+per role on this project are unmeasured. The root fills the
+deep-reasoning role, so slice selection was done by the root directly.
+
+## Previous routing — Codex host, 2026-11-16
 
 The active collaboration tool exposes these role choices. Starting efforts are project policy or working defaults, separate from tool defaults.
 

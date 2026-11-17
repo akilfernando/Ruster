@@ -122,3 +122,50 @@ fn unsupported_animation_sources_refuse_before_publication() {
         assert!(!root.path().join(".rot-models").exists());
     }
 }
+
+// Real exporter boundary: Blender samples every frame and starts keys at frame
+// one, which the hand-built fixture does not exercise.
+#[test]
+#[ignore = "requires Blender beacon-anim-A/B.glb in ROT_TEST_ANIMATED_GLB_FIXTURES"]
+fn blender_sampled_clip_imports_and_refreshes() {
+    let fixtures = std::path::PathBuf::from(
+        std::env::var_os("ROT_TEST_ANIMATED_GLB_FIXTURES").expect("fixture directory"),
+    );
+    let root = tempfile::tempdir().unwrap();
+    let source = root.path().join("beacon.glb");
+    fs::copy(fixtures.join("beacon-anim-A.glb"), &source).unwrap();
+    let mut store = AssetStore::open(root.path()).unwrap();
+    let first = store.import_glb_at(0, "beacon", "beacon.glb").unwrap();
+    let clip = &first.clips["CapSpin"];
+    assert_eq!(
+        clip.targets
+            .iter()
+            .map(|target| (target.node.as_str(), target.property))
+            .collect::<Vec<_>>(),
+        [
+            ("BeaconAssembly/BeaconCap", ClipProperty::Translation),
+            ("BeaconAssembly/BeaconCap", ClipProperty::Rotation),
+        ]
+    );
+    assert!(
+        (clip.duration - 49.0 / 24.0).abs() < 1e-5,
+        "{}",
+        clip.duration
+    );
+    let payload: serde_json::Value = serde_json::from_slice(store.clip(&clip.id).unwrap()).unwrap();
+    for track in payload["tracks"].as_array().unwrap() {
+        assert_eq!(track["times"].as_array().unwrap().len(), 49);
+        assert_eq!(track["interpolation"], "linear");
+    }
+    let first_bytes = store.clip(&clip.id).unwrap().clone();
+    fs::copy(fixtures.join("beacon-anim-B.glb"), &source).unwrap();
+    let revised = store.refresh_glb_at(1, "beacon").unwrap();
+    assert_eq!(revised.clips["CapSpin"].id, clip.id);
+    assert_ne!(store.clip(&clip.id).unwrap(), &first_bytes);
+    println!(
+        "blender clip {} duration {} payload {} bytes",
+        clip.id,
+        clip.duration,
+        first_bytes.len()
+    );
+}
