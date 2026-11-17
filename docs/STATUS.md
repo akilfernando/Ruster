@@ -52,6 +52,11 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
 
 ## Recently finished
 
+- 2026-11-17 · Phase 1 performance baseline (P-01): numbers are beside the
+  [budgets](PARITY-PLAN.md#5-performance-budgets); re-run with
+  `scripts/measure_budgets.py --foreground`. Inside budget: start, open,
+  idle CPU, Play, AI edit (6.6 ms p95), AI screenshot, memory (just). Over:
+  MCP tool list, 145 KB against 40 KB. Gizmo latency not measured.
 - 2026-11-17 · Working framework: [PLAYBOOK](PLAYBOOK.md),
   [parity plan](PARITY-PLAN.md), [BACKLOG](BACKLOG.md),
   [UX standards](UX-STANDARDS.md), and `scripts/ui_drive.py` for driving and
@@ -68,4 +73,4 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
 - No person has walked through this branch's editor. All UI checks used
   injected events on a hidden workspace.
 - No real AI client has been run against this branch.
-- The performance budgets in the plan are targets; none is measured yet.
+- Gizmo drag latency is not measured (injected drags do not engage the gizmo).
