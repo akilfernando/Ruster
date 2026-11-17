@@ -85,13 +85,14 @@ impl egui_tiles::Behavior<Pane> for Dock<'_> {
                 let game = *pane == Pane::Game;
                 if game && !editor.player_preview_available() {
                     egui::Frame::new().inner_margin(margin).show(ui, |ui| {
-                        crate::ui_kit::empty_state(
+                        let set_up = crate::ui_kit::empty_state(
                             ui,
                             "Set up the game camera to see what the player sees.",
                             Some("Game Camera…"),
-                        )
-                        .filter(|response| response.clicked())
-                        .map(|_| editor.open_player_view_editor(ui.ctx()));
+                        );
+                        if set_up.is_some_and(|response| response.clicked()) {
+                            editor.open_player_view_editor(ui.ctx());
+                        }
                     });
                 } else {
                     if editor.navigation.player_view != game {

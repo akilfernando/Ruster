@@ -87,11 +87,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   (notices, errors, script errors with file and line, engine warnings); Clear,
   Collapse and level filters; double-click a script error to open it. The
   status bar is one line with warning/error counts; toasts confirm actions.
-- 2026-11-17 · A-03: AI edits apply to the current scene, so a creator's edit
-  between the AI's read and write no longer fails it; a pending field edit is
-  committed first, a drag is waited on up to a second; JSON numbers accepted;
-  a restarted adapter reconnects; Edit shows "Undo AI: Move …". Fifty edits:
-  0.80 s release, 3.65 s debug (hidden workspace, scripted run).
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified
