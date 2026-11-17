@@ -106,7 +106,7 @@ the gate passes.
 rebuilt in later packages.
 
 #### S-03 · Menu bar and names — S — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** Menus are where a Unity or Unreal user looks, with standard
 names.
 **Facts.** Menus are built in `scene_menu_contents`
