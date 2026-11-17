@@ -195,7 +195,7 @@ impl Startup {
         {
             return Err(io::Error::other("native publication locator mismatch"));
         }
-        locator.validate_socket(&p.locator.with_file_name("editor.sock"))?;
+        locator.validate_socket(&connection::socket_path(&p.locator))?;
         Ok(p)
     }
     pub fn publish(&self, id: &str, scene_id: &str, locator: PathBuf) -> io::Result<()> {

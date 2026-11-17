@@ -90,7 +90,48 @@ impl Host {
         .map(Some)
         .map_err(|e| e.to_string())
     }
+    /// Keep the editor findable by `rot-mcp` while a scene is open and AI apps
+    /// are allowed. Adapters still need the approval below to get access.
+    pub(super) fn keep_listening(&mut self, ctx: &egui::Context) {
+        use std::time::{Duration, Instant};
+        let editor = &self.editor;
+        if !editor.ai_listen || std::env::var_os("ROT_PROJECT_STARTUP").is_some() {
+            return;
+        }
+        let allowed =
+            editor.workspace.prefs.allow_ai_connections && editor.project_picker.is_none();
+        if let Some(bridge) = &mut self.bridge {
+            // Refresh the record after Save As or when AI apps are turned off,
+            // but never while an adapter holds the connection.
+            let stale = editor.ai_listen_scene.as_deref() != editor.session.path();
+            if (stale || !allowed)
+                && bridge.pending_owner().is_none()
+                && bridge.authority().live()
+                && editor.save_grant.is_none()
+            {
+                bridge.disconnect();
+            }
+            return;
+        }
+        if !allowed
+            || editor.ai_listen_retry.is_some_and(|at| Instant::now() < at)
+            || editor.asset_ops.busy()
+            || editor.creation_export.busy()
+            || editor.recovery_transition.is_some()
+            || editor.close_in_progress()
+        {
+            return;
+        }
+        if let Err(error) = self.open_endpoint(ctx, false) {
+            log::warn!("AI apps cannot find this editor yet: {error}");
+            self.editor.ai_listen_retry = Some(Instant::now() + Duration::from_secs(2));
+            ctx.request_repaint_after(Duration::from_secs(2));
+        }
+    }
     pub(super) fn connect_adapter(&mut self, ctx: &egui::Context) -> Result<PathBuf, String> {
+        self.open_endpoint(ctx, self.workspace_enabled)
+    }
+    fn open_endpoint(&mut self, ctx: &egui::Context, workspace: bool) -> Result<PathBuf, String> {
         self.poll_connection(ctx);
         if self.bridge.is_some()
             || self.editor.asset_ops.busy()
@@ -101,16 +142,29 @@ impl Host {
             return Err("Wait for the old connection/publication owner to retire.".into());
         }
         let grant = self.enrolled_grant()?;
-        let bridge = crate::bridge::Bridge::start_enrolled(
-            ctx.clone(),
+        let (incarnation, generation) = (
             self.editor.connection_incarnation.clone(),
             self.editor.connection_generation.clone(),
-            grant,
-        )
+        );
+        // Tests share one process ID, so they keep private endpoints.
+        let bridge = if cfg!(test) {
+            crate::bridge::Bridge::start_enrolled(ctx.clone(), incarnation, generation, grant)
+        } else {
+            crate::bridge::Bridge::start_discoverable(
+                ctx.clone(),
+                incarnation,
+                generation,
+                grant,
+                &crate::discovery::directory(),
+                self.editor.session.path(),
+            )
+        }
         .map_err(|e| e.to_string())?;
+        self.editor.ai_listen_retry = None;
+        self.editor.ai_listen_scene = self.editor.session.path().map(Into::into);
         let path = bridge.locator_path();
         self.editor.connection_authority = Some(bridge.authority());
-        self.workspace = if self.workspace_enabled {
+        self.workspace = if workspace {
             match workspace_attachment::WorkspaceAttachment::start(&self.editor, &bridge, ctx) {
                 Ok(workspace) => workspace,
                 Err(error) => {

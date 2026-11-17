@@ -98,6 +98,19 @@ pub struct Locator {
     pub directory_ino: u64,
     pub socket_dev: u64,
     pub socket_ino: u64,
+    /// Discovery fields: the editor's project folder, scene file and process
+    /// start time. Absent for private test endpoints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub project: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub scene: Option<PathBuf>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub started: Option<String>,
+}
+
+/// The socket that belongs to a locator file: `<stem>.json` → `<stem>.sock`.
+pub fn socket_path(locator: &Path) -> PathBuf {
+    locator.with_extension("sock")
 }
 impl Locator {
     pub fn validate_file(&self, path: &Path, dev: u64, ino: u64) -> io::Result<()> {
@@ -113,7 +126,7 @@ impl Locator {
         {
             return Err(io::Error::other("locator replaced"));
         }
-        self.validate_socket(&path.with_file_name("editor.sock"))
+        self.validate_socket(&socket_path(path))
     }
     pub fn capture(path: &Path, incarnation: String, generation: String) -> io::Result<Self> {
         let dir =
@@ -130,6 +143,9 @@ impl Locator {
             directory_ino: dir.ino(),
             socket_dev: socket.dev(),
             socket_ino: socket.ino(),
+            project: None,
+            scene: None,
+            started: None,
         };
         locator.validate_socket(path)?;
         Ok(locator)
@@ -288,7 +304,7 @@ impl Client {
             return Err(io::Error::other("invalid private locator"));
         }
         let locator: Locator = serde_json::from_slice(&fs::read(&path)?)?;
-        locator.validate_socket(&path.with_file_name("editor.sock"))?;
+        locator.validate_socket(&socket_path(&path))?;
         Ok(Self {
             locator_path: path,
             locator_dev: meta.dev(),
@@ -326,7 +342,7 @@ impl Client {
         }
         self.validate()?;
         if self.stream.is_none() {
-            let mut stream = connect_socket(&self.locator_path.with_file_name("editor.sock"))?;
+            let mut stream = connect_socket(&socket_path(&self.locator_path))?;
             self.validate()?;
             if peer(&stream)? != (self.locator.uid, self.locator.pid) {
                 return Err(io::Error::other("wrong connected editor peer"));

@@ -396,7 +396,7 @@ mod seamless_tests {
             let listener = connection::bind_socket(&socket).unwrap();
             std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600)).unwrap();
             let locator = Locator::capture(&socket, "i".into(), "g".into()).unwrap();
-            let path = root.path().join("connection.json");
+            let path = root.path().join("editor.json");
             std::fs::write(&path, serde_json::to_vec(&locator).unwrap()).unwrap();
             std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
             let server = std::thread::spawn(move || {
@@ -448,9 +448,7 @@ mod seamless_tests {
         let (entered, admission) = mpsc::sync_channel(1);
         let (resume, resumed) = mpsc::sync_channel(1);
         bridge.authority.0.lock().unwrap().bind_gate = Some((entered, resumed));
-        let mut stream =
-            connection::connect_socket(&bridge.locator_path().with_file_name("editor.sock"))
-                .unwrap();
+        let mut stream = connection::connect_socket(&bridge.socket_path()).unwrap();
         let owner = connection::unpredictable().unwrap();
         connection::send(&mut stream, &json!({"wire":connection::WIRE,"hello":owner,"binding":bridge.locator.as_ref().unwrap().binding(),"enrollment":grant.proof().unwrap()})).unwrap();
         let _ = tests::receive(&mut stream);
@@ -541,10 +539,35 @@ mod seamless_tests {
     }
 }
 
+/// Where an endpoint's `<stem>.sock` and `<stem>.json` live. A private test
+/// directory is removed with the endpoint; the shared discovery directory is not.
+struct EndpointDir {
+    path: std::path::PathBuf,
+    stem: String,
+    remove: bool,
+}
+impl EndpointDir {
+    fn path(&self) -> &std::path::Path {
+        &self.path
+    }
+    fn file(&self, extension: &str) -> std::path::PathBuf {
+        self.path.join(format!("{}.{extension}", self.stem))
+    }
+}
+impl From<tempfile::TempDir> for EndpointDir {
+    fn from(directory: tempfile::TempDir) -> Self {
+        Self {
+            path: directory.keep(),
+            stem: "editor".into(),
+            remove: true,
+        }
+    }
+}
+
 pub struct Bridge {
     browser: Option<browser::BrowserPairing>,
     receiver: mpsc::Receiver<Pending>,
-    directory: tempfile::TempDir,
+    directory: EndpointDir,
     nonce: String,
     authority: Authority,
     stop: Arc<AtomicBool>,
@@ -576,20 +599,67 @@ impl Bridge {
         generation: String,
         grant: Option<crate::enrollment::Grant>,
     ) -> std::io::Result<Self> {
-        let mut directory = tempfile::Builder::new()
+        let directory = tempfile::Builder::new()
             .prefix("rot-mcp-")
             .rand_bytes(24)
             .tempdir()?;
         // Cleanup is identity-scoped below, never recursive deletion of a path
         // another cooperating process may have replaced.
-
         std::fs::set_permissions(directory.path(), std::fs::Permissions::from_mode(0o700))?;
-        let path = directory.path().join("editor.sock");
+        Self::start_at(ctx, directory.into(), incarnation, generation, grant, None)
+    }
+    /// Listen where `rot-mcp` finds running editors: `<directory>/<pid>.sock`
+    /// with a `<pid>.json` record naming the project folder and scene.
+    pub fn start_discoverable(
+        ctx: egui::Context,
+        incarnation: String,
+        generation: String,
+        grant: Option<crate::enrollment::Grant>,
+        directory: &std::path::Path,
+        scene: Option<&std::path::Path>,
+    ) -> std::io::Result<Self> {
+        crate::discovery::prepare(directory)?;
+        let endpoint = EndpointDir {
+            path: directory.to_path_buf(),
+            stem: std::process::id().to_string(),
+            remove: false,
+        };
+        // Files under this process ID belong to an exited editor that reused it
+        // or to this editor's own retired endpoint.
+        for extension in ["sock", "json"] {
+            let _ = std::fs::remove_file(endpoint.file(extension));
+        }
+        let scene = scene.and_then(|s| s.canonicalize().ok());
+        let project = scene.as_ref().and_then(|s| s.parent()).map(Into::into);
+        Self::start_at(
+            ctx,
+            endpoint,
+            incarnation,
+            generation,
+            grant,
+            Some((project, scene)),
+        )
+    }
+    #[allow(clippy::type_complexity)]
+    fn start_at(
+        ctx: egui::Context,
+        directory: EndpointDir,
+        incarnation: String,
+        generation: String,
+        grant: Option<crate::enrollment::Grant>,
+        discovery: Option<(Option<std::path::PathBuf>, Option<std::path::PathBuf>)>,
+    ) -> std::io::Result<Self> {
+        let path = directory.file("sock");
         let listener = connection::bind_socket(&path)?;
         std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600))?;
         listener.set_nonblocking(true)?;
-        let locator = Locator::capture(&path, incarnation, generation)?;
-        let locator_path = directory.path().join("connection.json");
+        let mut locator = Locator::capture(&path, incarnation, generation)?;
+        if let Some((project, scene)) = discovery {
+            locator.project = project;
+            locator.scene = scene;
+            locator.started = crate::discovery::process_start(locator.pid);
+        }
+        let locator_path = directory.file("json");
         use std::os::unix::fs::OpenOptionsExt;
         let mut file = std::fs::OpenOptions::new()
             .write(true)
@@ -723,7 +793,6 @@ impl Bridge {
             if worker_locator.validate_socket(&path).is_ok() { let _ = std::fs::remove_file(&path); }
             ctx.request_repaint();
         })?;
-        directory.disable_cleanup(true);
         Ok(Self {
             browser: None,
             receiver,
@@ -752,7 +821,11 @@ impl Bridge {
             .unwrap_or_default()
     }
     pub fn locator_path(&self) -> std::path::PathBuf {
-        self.directory.path().join("connection.json")
+        self.directory.file("json")
+    }
+    #[cfg(test)]
+    pub fn socket_path(&self) -> std::path::PathBuf {
+        self.directory.file("sock")
     }
     pub fn pending_owner(&self) -> Option<(String, u32)> {
         self.authority.0.lock().ok()?.owner.clone()
@@ -834,6 +907,8 @@ impl Bridge {
     fn cleanup_job(&self) -> EndpointCleanup {
         EndpointCleanup {
             directory: self.directory.path().to_path_buf(),
+            socket: self.directory.file("sock"),
+            remove_directory: self.directory.remove,
             locator: self.locator.clone(),
             authority: self.authority.clone(),
         }
@@ -900,6 +975,8 @@ impl Bridge {
 
 struct EndpointCleanup {
     directory: std::path::PathBuf,
+    socket: std::path::PathBuf,
+    remove_directory: bool,
     locator: Option<Locator>,
     authority: Authority,
 }
@@ -916,9 +993,8 @@ impl EndpointCleanup {
         {
             return;
         }
-        let socket = self.directory.join("editor.sock");
-        if locator.validate_socket(&socket).is_ok() {
-            let _ = std::fs::remove_file(socket);
+        if locator.validate_socket(&self.socket).is_ok() {
+            let _ = std::fs::remove_file(&self.socket);
         }
         if let Ok(state) = self.authority.0.lock() {
             if let Some((_, path, dev, ino)) = &state.endpoint {
@@ -929,7 +1005,9 @@ impl EndpointCleanup {
                 }
             }
         }
-        let _ = std::fs::remove_dir(&self.directory); // Empty original only.
+        if self.remove_directory {
+            let _ = std::fs::remove_dir(&self.directory); // Empty original only.
+        }
     }
     fn joined(&self) {
         if let Ok(mut state) = self.authority.0.lock() {
@@ -980,7 +1058,7 @@ pub(crate) fn queued_test_bridge(
         Bridge {
             browser: None,
             receiver,
-            directory: tempfile::tempdir().unwrap(),
+            directory: tempfile::tempdir().unwrap().into(),
             nonce: "test".into(),
             authority: Authority::new(),
             stop: Arc::new(AtomicBool::new(false)),
@@ -1093,7 +1171,7 @@ pub(crate) mod tests {
         let bridge = Bridge {
             browser: None,
             receiver: mpsc::sync_channel(1).1,
-            directory: tempfile::tempdir().unwrap(),
+            directory: tempfile::tempdir().unwrap().into(),
             nonce: "drop-test".into(),
             authority: authority.clone(),
             stop: Arc::new(AtomicBool::new(false)),
@@ -1316,7 +1394,7 @@ pub(crate) mod tests {
             }
             if replacement == "locator" {
                 assert!(
-                    fixture_directory.join("connection.json").is_file(),
+                    fixture_directory.join("editor.json").is_file(),
                     "retirement deleted a replacement locator"
                 );
             }
@@ -1431,6 +1509,88 @@ pub(crate) mod tests {
         );
     }
 
+    // Two editors and a dead record: the adapter picks the editor whose
+    // project holds its working directory and still needs approval.
+    #[test]
+    fn discovered_editor_is_chosen_by_project_and_still_needs_approval() {
+        let temporary = tempfile::tempdir().unwrap();
+        let root = temporary.path().canonicalize().unwrap();
+        let directory = root.join("rot");
+        let (mine, other) = (root.join("Mine"), root.join("Other"));
+        std::fs::create_dir_all(mine.join("Assets")).unwrap();
+        std::fs::create_dir_all(&other).unwrap();
+        std::fs::write(mine.join("scene.json"), "{}").unwrap();
+        let mut bridge = Bridge::start_discoverable(
+            egui::Context::default(),
+            "i".into(),
+            "g".into(),
+            None,
+            &directory,
+            Some(&mine.join("scene.json")),
+        )
+        .unwrap();
+        let mut sleeper = std::process::Command::new("sleep")
+            .arg("30")
+            .spawn()
+            .unwrap();
+        let mut dead = std::process::Command::new("true").spawn().unwrap();
+        dead.wait().unwrap();
+        let record = std::fs::read(bridge.locator_path()).unwrap();
+        for (pid, started, project) in [
+            (
+                sleeper.id(),
+                crate::discovery::process_start(sleeper.id()),
+                &other,
+            ),
+            (dead.id(), Some("1".into()), &other),
+        ] {
+            let mut locator: Locator = serde_json::from_slice(&record).unwrap();
+            (locator.pid, locator.started, locator.project) = (pid, started, Some(project.clone()));
+            std::fs::write(
+                directory.join(format!("{pid}.json")),
+                serde_json::to_vec(&locator).unwrap(),
+            )
+            .unwrap();
+        }
+        let running = crate::discovery::list(&directory);
+        assert_eq!(running.len(), 2);
+        assert!(!directory.join(format!("{}.json", dead.id())).exists());
+        let crate::discovery::Choice::One(chosen) =
+            crate::discovery::choose(running, Some(&mine.join("Assets")))
+        else {
+            panic!("expected the editor holding the working directory");
+        };
+        assert_eq!(chosen.pid, std::process::id());
+        assert_eq!(chosen.scene, Some(mine.join("scene.json")));
+
+        let mut client = connection::Client::open(chosen.record).unwrap();
+        assert_eq!(
+            client.call("scene_inspect", &json!({}))["error"]["code"],
+            "approval_required"
+        );
+        assert!(bridge.approve_owner(&bridge.pending_owner().unwrap()));
+        let worker = std::thread::spawn(move || client.call("scene_inspect", &json!({})));
+        let deadline = Instant::now() + Duration::from_secs(4);
+        while !worker.is_finished() {
+            bridge.dispatch_command(|_, op, _| json!({"ok":true,"result":{"operation":op}}));
+            assert!(Instant::now() < deadline);
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert_eq!(
+            worker.join().unwrap()["result"]["operation"],
+            "scene_inspect"
+        );
+        sleeper.kill().unwrap();
+        sleeper.wait().unwrap();
+        bridge.disconnect();
+        while !bridge.poll_retired() {
+            assert!(Instant::now() < deadline + Duration::from_secs(3));
+            std::thread::sleep(Duration::from_millis(1));
+        }
+        assert!(crate::discovery::list(&directory).is_empty());
+        assert!(directory.is_dir(), "the shared directory stays");
+    }
+
     #[test]
     fn unapproved_transport_never_discloses_project_or_mutates() {
         use std::io::BufRead;
@@ -1516,7 +1676,7 @@ pub(crate) mod tests {
         let mut bridge = Bridge {
             browser: None,
             receiver,
-            directory,
+            directory: directory.into(),
             nonce: "test".into(),
             authority: Authority::new(),
             stop: Arc::new(AtomicBool::new(false)),

@@ -183,6 +183,8 @@ pub(super) struct Preferences {
     pub bindings: Vec<Binding>,
     pub external_editor: crate::behavior_files::LaunchSpec,
     pub theme: crate::editor_theme::ThemeChoice,
+    /// Let AI apps find this editor and ask to connect. Approval still applies.
+    pub allow_ai_connections: bool,
 }
 impl Default for Preferences {
     fn default() -> Self {
@@ -228,6 +230,7 @@ impl Default for Preferences {
             inspector_visible: true,
             content_visible: true,
             theme: Default::default(),
+            allow_ai_connections: true,
             scale: 1.0,
             movement_speed: 4.0,
             recent: Vec::new(),
@@ -268,7 +271,7 @@ impl Default for Preferences {
 }
 impl Preferences {
     fn json(&self) -> Value {
-        json!({"format":"rot-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"theme":self.theme.name(),"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"projects":self.projects,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
+        json!({"format":"rot-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"theme":self.theme.name(),"allow_ai_connections":self.allow_ai_connections,"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"projects":self.projects,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
     }
     fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() > MAX_WORKSPACE_BYTES {
@@ -308,10 +311,12 @@ impl Preferences {
             "bindings",
             "external_editor",
             "theme",
+            "allow_ai_connections",
         ];
         let map = v.as_object().ok_or("Preferences must be an object.")?;
-        // content_visible, external_editor and theme are optional later fields.
-        if !(keys.len() - 3..=keys.len()).contains(&map.len())
+        // content_visible, external_editor, theme and allow_ai_connections are
+        // optional later fields.
+        if !(keys.len() - 4..=keys.len()).contains(&map.len())
             || map.keys().any(|k| !keys.contains(&k.as_str()))
             || v["format"] != "rot-editor-preferences"
             || v["version"] != 1
@@ -523,6 +528,10 @@ impl Preferences {
                     .as_str()
                     .and_then(crate::editor_theme::ThemeChoice::from_name)
                     .ok_or("Invalid theme preference.")?,
+            },
+            allow_ai_connections: match v.get("allow_ai_connections") {
+                None => true,
+                Some(value) => value.as_bool().ok_or("Invalid AI connection preference.")?,
             },
             scale: number("ui_scale", 0.75, 2.0)?,
             movement_speed: number("movement_speed", 0.05, 1000.0)?,

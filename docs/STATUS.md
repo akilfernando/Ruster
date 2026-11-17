@@ -40,8 +40,8 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Known problems
 
-- Connecting an AI app needs scripts and environment variables, and any
-  rebuild breaks the registration (A-01, A-02).
+- Every new AI adapter process still needs approval in File → Advanced →
+  Rot connection…, and an editor serves one adapter at a time (A-02, A-03).
 - The MCP demo scripts and parts of `crates/rot-mcp/README.md` describe
   variables the code no longer reads (A-06).
 - Play checks refuse scenes that use groups, so they cannot cover an animated
@@ -65,6 +65,12 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   `scripts/measure_budgets.py --foreground`. Inside budget: start, open,
   idle CPU, Play, AI edit (6.6 ms p95), AI screenshot, memory (just). Over:
   MCP tool list, 145 KB against 40 KB. Gizmo latency not measured.
+- 2026-11-17 · A-01: `rot-mcp` with no configuration finds the open editor
+  (`$XDG_RUNTIME_DIR/rot/<pid>.sock` + `.json`), by working directory or as
+  the only one; `project_list`/`project_connect` choose among several or start
+  the editor on a folder. Checked with a hidden-workspace editor and a
+  terminal `rot-mcp` (initialize, tools/list, approve, `scene_inspect`) and a
+  headless two-editors-plus-dead-record test. Approval is unchanged.
 - 2026-11-17 · Working framework: [PLAYBOOK](PLAYBOOK.md),
   [parity plan](PARITY-PLAN.md), [BACKLOG](BACKLOG.md),
   [UX standards](UX-STANDARDS.md), and `scripts/ui_drive.py` for driving and
