@@ -6,8 +6,12 @@ focus), sends app-scoped events over eframe's inspection socket, saves
 screenshots and accessibility labels, then closes it. No global input is used.
 
     cargo build -p rot-editor --features inspection
-    python3 scripts/ui_drive.py --scene path/to/scene.json \
+    python3 scripts/ui_drive.py --scene examples/arrangement.scene.json \
         shot:start "click:Import Asset…" waitfor:Browse… shot:import key:Escape
+
+The scene is opened from a disposable copy (the scene file, its asset catalog
+and the files the catalog names), so a test can never change your project.
+Pass --in-place to open the original instead.
 
 Steps (run in order):
     click:LABEL        click the control with this exact accessible label
@@ -28,6 +32,7 @@ import argparse
 import json
 import os
 import shlex
+import shutil
 import socket
 import struct
 import subprocess
@@ -153,16 +158,41 @@ def desktop():
     return {"workspace": hypr("activeworkspace")["id"], "window": hypr("activewindow").get("address")}
 
 
+def stage_copy(scene, dest):
+    """Copy a scene with its asset catalog and catalog-listed sources into dest."""
+    scene, root = Path(scene).resolve(strict=True), Path(scene).resolve().parent
+    dest.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(scene, dest / scene.name)
+    wanted = [path.name for path in root.glob("*.wgsl")]
+    catalog = root / ".rot-assets.json"
+    if catalog.is_file():
+        wanted.append(catalog.name)
+        data = json.loads(catalog.read_text())
+        for group in ("assets", "models"):
+            wanted += [entry["source"] for entry in data.get(group, {}).values() if "source" in entry]
+    for relative in wanted:
+        source = root / relative
+        if source.is_file():
+            (dest / relative).parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(source, dest / relative)
+    if (root / ".rot-models").is_dir():
+        shutil.copytree(root / ".rot-models", dest / ".rot-models", dirs_exist_ok=True)
+    return dest / scene.name
+
+
 # --- the launched editor ------------------------------------------------------
 class Editor:
     """One owned editor process. Use as a context manager; it always cleans up."""
 
-    def __init__(self, binary, out, scene=None, lease=120, env=None, foreground=False, prefs=None):
+    def __init__(self, binary, out, scene=None, lease=120, env=None, foreground=False, prefs=None,
+                 in_place=False):
         self.binary = Path(binary).resolve(strict=True)
         self.out = Path(out).absolute()  # the compositor starts the editor from its own cwd
         self.out.mkdir(parents=True, exist_ok=True)
         self.run = self.out / "run"
         self.scene = Path(scene).resolve(strict=True) if scene else None
+        if self.scene and not in_place:
+            self.scene = stage_copy(self.scene, self.run / "project")
         self.lease, self.extra_env, self.foreground, self.prefs = lease, env or {}, foreground, prefs
         self.pid = self.sock = self.before = None
         self.actions = []
@@ -188,10 +218,14 @@ class Editor:
         (self.run / "launch.json").write_text(json.dumps(launch, indent=1))
         argv = ["/usr/bin/timeout", "--kill-after=2s", f"{self.lease}s", sys.executable,
                 str(Path(__file__).resolve()), "--exec", str(self.run)]
+        compositor = shutil.which("hyprctl") is not None
+        if compositor:
+            self.before = desktop()
         if self.foreground:
             subprocess.Popen(argv, start_new_session=True)
         else:
-            self.before = desktop()
+            if not compositor:
+                raise SystemExit("Hidden-workspace launch needs Hyprland. Use --foreground when the user is away.")
             if self.before["workspace"] == 2:
                 raise SystemExit("Workspace 2 is in use as the hidden test workspace; switch away first.")
             hypr_eval("hl.exec_cmd(" + json.dumps(shlex.join(argv)) +
@@ -408,12 +442,15 @@ def main():
     parser.add_argument("--prefs", help="editor.json preferences file to start from")
     parser.add_argument("--env", action="append", default=[], metavar="KEY=VALUE")
     parser.add_argument("--foreground", action="store_true",
-                        help="open a normal window instead of hidden workspace 2 (only when the user is away)")
+                        help="open a normal, focused window instead of hidden workspace 2 (only when the user is away)")
+    parser.add_argument("--in-place", action="store_true",
+                        help="open the scene file itself instead of a disposable copy")
     args = parser.parse_args()
     out = Path(args.out or f"target/ui/{time.strftime('%Y%m%d-%H%M%S')}")
     env = dict(item.split("=", 1) for item in args.env)
-    with Editor(args.binary, out, args.scene, args.lease, env, args.foreground, args.prefs) as editor:
-        if not args.foreground:
+    with Editor(args.binary, out, args.scene, args.lease, env, args.foreground, args.prefs,
+                args.in_place) as editor:
+        if editor.before is not None:
             width, height = args.size.lower().split("x")
             editor.resize(int(width), int(height))
         time.sleep(1.0)

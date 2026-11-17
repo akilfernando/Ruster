@@ -1,5 +1,7 @@
 # Testing policy
 
+> **2026-11-17.** The [PLAYBOOK](PLAYBOOK.md) decides how much to verify and what to write down. This file is the detail of the gate and the risk-specific checks; where they differ on process, the playbook wins.
+
 Adopted 2026-11-04 under the user's request for diligent verification with minimal overhead. This is the single policy; [the testing skill](../skills/rot-testing/SKILL.md) applies it during development.
 
 ## Principles
@@ -16,7 +18,7 @@ Protect behavior, not test counts. Select checks by changed behavior and depende
 | Risk-specific | Change touches a sensitive boundary | Additional checks from the matrix below, required for that change before acceptance. |
 | Broad validation | Release candidate, toolchain/dependency changes, structural changes; periodic CI once introduced | Full workspace plus supported platform/feature/hardware coverage relevant to release. Avoid exhaustive feature cross-products. |
 
-The Linux GitHub Actions workflow in `.github/workflows/ci.yml` calls the same runner against the actual PR base SHA or previous push SHA, with full scope for initial publication/manual dispatch. Hosted execution results belong in STATUS.md; configuration alone is not a pass. There is no merge queue, GPU suite, scheduled job or supported release matrix. CI does not duplicate overlapping checks by default. Full validation is not automatically a GPU/performance/platform audit.
+The Linux GitHub Actions workflow in `.github/workflows/ci.yml` calls the same runner against the actual PR base SHA or previous push SHA, with full scope for initial publication/manual dispatch. Report hosted results in the commit or handoff; configuration alone is not a pass. There is no merge queue, GPU suite, scheduled job or supported release matrix. CI does not duplicate overlapping checks by default. Full validation is not automatically a GPU/performance/platform audit.
 
 ## Commands
 
@@ -70,7 +72,7 @@ Use focused tests during iteration, then the selected final gate once. Root and 
 
 ## Failures and maintenance
 
-Fix relevant failures. Classify environmental failures separately and report them. Flaky tests are defects; do not hide them with retries. A quarantined check needs a tracked record containing owner, failure evidence, review date and affected protection. Critical coverage needs a reliable replacement before removing its blocking role.
+Fix relevant failures. Classify environmental failures separately and report them. Flaky tests are defects; do not hide them with retries. A quarantined check needs a one-line **Inbox** item in [BACKLOG](BACKLOG.md) naming the failure and what it protected. Critical coverage needs a reliable replacement before removing its blocking role.
 
 Review slow or redundant cases when they impair feedback, when replacing an implementation, and before release. Preserve regression value when consolidating. Keep timing evidence in handoffs; avoid a permanent append-only log of every green command.
 

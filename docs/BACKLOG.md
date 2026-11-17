@@ -40,8 +40,11 @@ One line each. Anyone may add; the user or a planning pass orders them.
 
 ## Now — Phase 1: Shell
 
-Three lanes that touch different files and can run at the same time:
-**UX** (S and T packages), **AI** (A packages), **Tools** (P packages).
+Three lanes that can run at the same time: **UX** (S and T packages), **AI**
+(A packages), **Tools** (P packages). With no lane given, take the UX lane;
+it is the user's stated weak point. The lanes mostly touch different files.
+The exception is `crates/rot-editor/src/scene_editor.rs`, which several
+packages edit: keep changes there small and merge to the trunk often.
 
 ---
 
@@ -60,13 +63,18 @@ viewport surface (`crates/rot-render/src/lib.rs:1031`,
 (`sidebars.rs:136`), and the gizmo's 1×1 widget
 (`third_party/transform-gizmo-egui/src/lib.rs:87`). Why focus never reaches
 the panel contents was not found.
-**Do.** Reproduce with `python3 scripts/ui_drive.py --scene <scene> tabwalk:60`.
-If the cause is not obvious, log `ctx.memory(|m| m.focused())` per frame.
-Make surfaces that are not controls non-focusable. Fix whatever blocks the
-panels.
-**Done when.** `tabwalk` lists the Hierarchy search field, rows and Inspector
-fields in order and returns to File; Shift+Tab reverses; the focus ring is
-visible on each stop; paste the order in the commit message.
+**Do.** Reproduce with
+`python3 scripts/ui_drive.py --scene examples/arrangement.scene.json "click:left" tabwalk:60`
+(clicking an object row fills the Inspector). If the cause is not obvious,
+log `ctx.memory(|m| m.focused())` per frame. Make surfaces that are not
+controls non-focusable. Fix whatever blocks the panels. This package is
+only the focus fix; do not restyle anything.
+**Done when.** `tabwalk` visits the Hierarchy search field, the object rows
+and the Inspector fields, each panel's controls together and top to bottom,
+then returns to File; no stop is an unlabeled surface; Shift+Tab reverses;
+a `shot:` after a few Tab presses shows the focus ring on a Hierarchy
+control and on an Inspector field; the order is pasted in the commit
+message.
 
 #### S-02 · UI kit, tokens and fonts — M — ready
 Status: open
@@ -318,7 +326,7 @@ Status: open
 **Outcome.** `rot-mcp` started with no configuration finds the running
 editor.
 **Facts.** The editor listens only after Connect AI or with
-`ROT_MCP_ENABLE=1` (`scene_editor.rs:6491`, `:6566-6575`). Each Connect
+`ROT_MCP_ENABLE=1` (`scene_editor.rs:6486`, `:6566-6575`). Each Connect
 creates a new random directory under `$TMPDIR`
 (`crates/rot-editor/src/bridge.rs:579-598`). The adapter needs
 `ROT_MCP_PROJECT_REGISTRY` or `ROT_MCP_LOCATOR`
@@ -329,11 +337,15 @@ file (`crates/rot-mcp/src/project_tools.rs:177-264`).
 `$XDG_RUNTIME_DIR/rot/<pid>.sock` and writes `<pid>.json` beside it (pid,
 project folder, scene, start time), removing it on exit. `rot-mcp` lists
 those files, drops dead ones, and picks the editor whose project folder
-contains its working directory, else the only one running, else asks the
-client to choose with a `project_select` tool. With no editor running,
-tools answer "Rot Engine is not running" and an `editor_open` tool starts
-it. Put socket and process code in a small per-OS module. A preference
-"Allow AI apps to connect" defaults to on.
+contains its working directory, else the only one running. With several to
+choose from, the existing `project_list` and `project_connect` tools list
+and select running editors; with none running, tools answer "Rot Engine is
+not running" and `project_connect` with a project path starts it. Do not
+add new tool names. Put socket and process code in a small per-OS module.
+Store an "allow AI apps to connect" setting in the preferences file,
+default on; its checkbox arrives with S-10. **Keep the existing approval
+step exactly as it is.** This package changes how the editor is found, not
+who is trusted; trust changes in A-02.
 **Done when.** Start the editor normally, run `rot-mcp` in a terminal, and
 `initialize`, `tools/list` and a read tool work with no environment
 variables; a headless test covers discovery with two editors and a dead
@@ -346,8 +358,8 @@ rebuilds.
 **Facts.** Unenrolled adapters need approval after every restart
 (`crates/support/connection.rs:354`). Enrollment pins the inode and
 modification time of both binaries, so any rebuild breaks it
-(`crates/rot-mcp/src/project_startup.rs:11-37`,
-`crates/rot-mcp/src/enrollment.rs:140-152`), and is created only by two
+(`crates/support/project_startup.rs:11-37`,
+`crates/support/enrollment.rs:140-152`), and is created only by two
 scripts. `scene_save` needs `ROT_MCP_SAVE_DIR`
 (`scene_editor/persistence_commands.rs:22-29`).
 **Do.** Keep a per-user store of trusted AI apps (name, random token,
@@ -356,8 +368,10 @@ allowed flag) in the config directory with owner-only permissions.
 silently. An unknown client produces one non-blocking prompt: Allow Always,
 Allow Once, Deny. Remove binary pinning. A trusted app may save the open
 scene and write inside the project folder; builds go to `<project>/Builds`.
-Revoke lives in Preferences → AI. Write a short decision note: this replaces
-the session-bound approvals of decision 0050.
+Revoke lives in Preferences → AI (until S-10, in the existing connection
+panel). Write a short decision note: this replaces the session-bound
+approvals of decision 0050. Because this changes the AI trust boundary, have
+the strongest available model review the diff before merging.
 **Done when.** Approve once; restart the editor, rebuild both binaries,
 reconnect: no prompt. Revoke blocks the next call. Save works for a trusted
 app with no environment variable.
@@ -396,9 +410,11 @@ for anything else. Writing a config file means: read it, add or replace only
 the `rot` entry, write atomically, keep a backup. Offer Undo. Also offer
 "Add AI configuration to this project" for apps that read project-level
 files.
-**Done when.** On this machine Claude Code and Codex connect through the
-button and run a tool with no manual editing; other entries in their config
-files are unchanged; Undo removes the entry.
+Develop and test against copies of the config files. Ask the user before
+the first write to their real configuration.
+**Done when.** On this machine, with the user's go-ahead, Claude Code and
+Codex connect through the button and run a tool with no manual editing;
+other entries in their config files are unchanged; Undo removes the entry.
 **Not now.** Provenance checks, custom transactions or hardening beyond an
 atomic merge. An earlier attempt at this spent days there and shipped
 nothing.
@@ -441,9 +457,9 @@ Status: open
 **Do.** `scripts/mcp_smoke.py`, standard library only: start the editor with
 `ui_drive.Editor`, start `rot-mcp` over stdio, then initialize, list tools
 (print the size), read the scene, create and move an object, take a
-screenshot, undo. Then connect Claude Code or Codex by hand, ask it to "add
-three cubes in a row and color them differently", and note the result in
-STATUS.
+screenshot, undo. Then, in a throwaway project with a project-level MCP
+config, ask Claude Code or Codex to "add three cubes in a row and color them
+differently", and note the result in STATUS.
 **Done when.** The script passes and is listed in the PLAYBOOK's
 verification table.
 

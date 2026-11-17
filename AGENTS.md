@@ -10,8 +10,8 @@ an AI app that edits the open project through MCP.
 1. [docs/PLAYBOOK.md](docs/PLAYBOOK.md): how to work. Short. Read it every
    session.
 2. [docs/STATUS.md](docs/STATUS.md): where things stand. One page.
-3. [docs/BACKLOG.md](docs/BACKLOG.md): what to do next. Take the first open
-   package.
+3. [docs/BACKLOG.md](docs/BACKLOG.md): what to do next. Find the first open
+   package in your lane and read only that package.
 4. [docs/UX-STANDARDS.md](docs/UX-STANDARDS.md): read before any editor UI
    work.
 5. [docs/PARITY-PLAN.md](docs/PARITY-PLAN.md): the phases, the architecture
@@ -63,8 +63,9 @@ instead of launching the editor yourself.
 - Rendering on a hidden workspace can be throttled. Do not report frame
   rates from it as performance evidence.
 - When the user says they are away, a focused test window is allowed
-  (`--foreground`). Restore the original workspace and window afterwards, and
-  stop if the user becomes active.
+  (`--foreground`). The tool closes its window when it finishes; confirm the
+  user's original workspace and window are active again, and stop if the
+  user becomes active.
 - Injected events are not a human walkthrough. Do not call them one.
 
 ## Commands

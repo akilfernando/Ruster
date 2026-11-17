@@ -10,16 +10,17 @@ change the product, not on supporting process.**
 
 ## 1. Start of a session (5 minutes, no more)
 
-1. `git status`, `git log --oneline -5`. Work from the branch named in
-   [STATUS](STATUS.md). Run `git worktree list` if anything looks odd; this
-   repository has had stale checkouts.
+1. `git status`, `git log --oneline -5`. The **trunk** is the branch named
+   under "Where to work" in [STATUS](STATUS.md). Run `git worktree list` if
+   anything looks odd; this repository has had stale checkouts.
 2. Read [STATUS](STATUS.md) (one page).
-3. Open [BACKLOG](BACKLOG.md). Take the first package under **Now** that is not
-   claimed, unless the user asked for something specific. Read only that
-   package.
+3. Open [BACKLOG](BACKLOG.md). Take the first open package in your lane
+   under **Now**, unless the user asked for something specific. With no lane
+   given, use the UX lane. Read only that package, and do only that package.
 4. If the package touches the editor UI, read [UX-STANDARDS](UX-STANDARDS.md).
 5. Claim the package: change its status line to
-   `in progress — <agent/model>, <date>` and commit that one-line change.
+   `in progress — <agent/model>, <date>` and commit that one-line change
+   directly on the trunk, before you branch, so other agents see it.
 
 Do not read `docs/archive/`, `docs/evidence/`, `docs/HISTORY.md`, old plans or
 the old roadmap unless your package links to a specific section. They are
@@ -27,11 +28,12 @@ history and cost tens of thousands of tokens.
 
 ## 2. The loop for one package
 
-1. **Look at the reference.** Open the Unity and Unreal documentation for the
-   feature (the package names the pages). Write down, for yourself, how each
-   engine does it: where the control lives, what it is called, its default,
-   its shortcut. That is the specification. Match it unless the package says
-   otherwise.
+1. **Look at the reference.** Find the official Unity and Unreal
+   documentation page for the feature (search for it;
+   [the editor comparison](research/EDITOR-WORKFLOW-COMPARISON.md) links the
+   main editor pages). Write down, for yourself, how each engine does it:
+   where the control lives, what it is called, its default, its shortcut.
+   That is the specification. Match it unless the package says otherwise.
 2. **Look at what exists.** Run the editor with
    [`scripts/ui_drive.py`](../scripts/ui_drive.py) and view the screenshots.
    Read the code the package lists under *Touch*.
@@ -53,8 +55,10 @@ user-visible steps and do the first one completely.
 
 ## 3. Definition of done
 
-A package is done when all of these are true. If one cannot be met, say so in
-the handoff instead of quietly skipping it.
+A package is done when all of these that apply to it are true. Skip the
+items that cannot apply (a transport change has no screenshots; a visual
+change has no MCP tool) and name what you skipped in the handoff. If an item
+applies and cannot be met, say so instead of quietly skipping it.
 
 - A creator can do the thing in the editor, in the place and with the name a
   Unity or Unreal user would expect.
@@ -63,14 +67,15 @@ the handoff instead of quietly skipping it.
   runtime feature.
 - An AI client can do the same thing through MCP (see §6), unless the package
   is purely visual.
-- It works on real content: an asset from Blender or a public asset pack, a
-  scene with thousands of objects. It warns and continues where it can
-  instead of refusing.
-- It meets the [performance budgets](PARITY-PLAN.md#5-performance-budgets),
-  and you measured in a release build if you touched a hot path.
+- It works on real content: an asset from Blender or a public asset pack, and
+  the largest scene today's limits allow (thousands of objects once Phase 2
+  removes the caps). It warns and continues where it can instead of refusing.
+- It stays inside the [performance budgets](PARITY-PLAN.md#5-performance-budgets)
+  for its phase. If you touched a hot path, measure in a release build
+  before and after and put both numbers in the commit message.
 - You looked at the screenshots and it passes the
   [UI review checklist](UX-STANDARDS.md#10-ui-review-checklist).
-- `python3 scripts/check.py` passes.
+- `python3 scripts/check.py --base <trunk>` passes.
 - BACKLOG and STATUS are updated.
 
 ## 4. Quality bars, with the mistakes this project has already made
@@ -100,6 +105,8 @@ If you catch yourself doing one of these, stop and do the thing on the right.
 | Ask another agent to review routine work | Review your own screenshots and diff. Ask for review only for data-loss risk, the AI trust boundary or a format change. |
 | Build a framework, a generic abstraction or a harness "for later" | Write the direct code for today's feature. Extract on the third use. |
 | Keep a long-lived branch or a new worktree | Merge when the package is done. Delete the branch. |
+| Start the next package's work inside this one | Finish and merge yours. Then claim the next. |
+| Change how AI apps are trusted, or weaken an approval step, as a side effect | Only in a package that says so, with a decision note and a review by the strongest model. |
 | Write a long STATUS entry | Eight lines. What works now, what is still missing. |
 | Ask the user to choose an implementation detail | Choose what Unity does, note it in the package, continue. |
 
@@ -123,16 +130,18 @@ Rules that keep the second workflow good:
 - Project data lives in readable files (scenes, prefabs, materials, scripts)
   that an AI coding tool can also edit directly; the editor reloads them.
 - Test the AI route with a real client at least once per package that adds
-  authoring surface, not only through unit tests.
+  authoring surface, not only through unit tests. Use a throwaway project
+  with a project-level MCP config for this. Do not edit the user's own AI
+  app configuration without asking.
 
 ## 7. What to verify, and with what
 
 | Check | Command | When |
 | --- | --- | --- |
-| Gate: format, Clippy, affected tests, Markdown links | `python3 scripts/check.py` | Before every merge |
+| Gate: format, Clippy, affected tests, Markdown links | `python3 scripts/check.py --base <trunk>` | Before every merge. Without `--base` it only checks uncommitted changes, so after committing it checks nothing. |
 | One test while iterating | `cargo test -p <crate> <name>` | Constantly |
 | See and drive the editor UI | `cargo build -p rot-editor --features inspection` then `python3 scripts/ui_drive.py --help` | Every UI change |
-| Keyboard reach | `python3 scripts/ui_drive.py … tabwalk:60` and read the order | Every new panel or dialog |
+| Keyboard reach | `python3 scripts/ui_drive.py … tabwalk:60` and read the order; add `shot:` steps to see the focus ring | Every new panel or dialog |
 | Speed | Release build on the reference scenes (see the performance section of the plan) | When touching rendering, scene updates, import or the per-frame UI |
 | Real AI client | Connect Claude Code or Codex to the running editor and ask it to perform the task | When adding or changing MCP tools |
 
@@ -141,8 +150,10 @@ test through the real command path over many unit tests of internals. Do not
 add tests to demonstrate diligence. [TESTING](TESTING.md) has the detail.
 
 The editor test window opens on Hyprland workspace 2 without taking focus;
-`ui_drive.py` does this for you. Never send global keyboard or mouse input and
-never touch the user's clipboard or their open windows.
+`ui_drive.py` does this for you, and it opens a disposable copy of the scene
+you give it (for example `--scene examples/arrangement.scene.json`). Never
+send global keyboard or mouse input and never touch the user's clipboard or
+their open windows.
 
 ## 8. Documentation you maintain
 
@@ -165,9 +176,9 @@ they did not.
   defaults and limits. Follow the reference engines. Note anything a later
   agent would otherwise have to rediscover.
 - **Ask the user** before: anything destructive to their files or projects,
-  installing system software, publishing or pushing to a public remote if
-  your host requires approval, changing brand assets, or reordering the
-  phases of the plan.
+  installing system software, editing their own AI app configuration,
+  pushing to a remote unless STATUS says pushing is allowed, changing brand
+  assets, or reordering the phases of the plan.
 - **Changing the plan.** Add a line under **Inbox** in BACKLOG with your
   reason. Do not reorder **Now** yourself unless a package is blocked.
 
@@ -193,8 +204,10 @@ its done-when list. Otherwise work in the main session.
 
 ## 11. Git
 
-- One trunk. Branch `work/<package-id>-<short-name>` from it, merge back when
-  the package is done, delete the branch.
+- One trunk, named in STATUS. Branch `work/<package-id>-<short-name>` from
+  it, merge back into it locally when the package is done, delete the
+  branch. Merging into the trunk needs no permission; pushing follows the
+  policy in STATUS.
 - Commit as you go. One package may be several commits.
 - Do not rewrite history on the trunk. Do not leave work only in a stash or a
   worktree.
