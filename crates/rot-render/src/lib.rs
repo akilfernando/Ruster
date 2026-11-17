@@ -145,6 +145,8 @@ pub struct Metrics {
     pub frames: u64,
     pub cpu_prepare_us: Vec<f64>,
     pub gpu_scene_us: Vec<f64>,
+    /// GPU scene time of the most recent timed frame, for the Stats overlay.
+    pub last_gpu_scene_us: Option<f64>,
     /// Separate shadow/color intervals; None means no shadow pass encoded.
     pub gpu_shadow_us: Vec<Option<f64>>,
     pub gpu_color_us: Vec<f64>,
@@ -547,7 +549,14 @@ pub struct NavigationOptions {
     pub clear_fit_error: bool,
     /// Top-left corner of the visible viewport for the overlaid view controls,
     /// when side panels cover part of the surface. Defaults to the surface corner.
+    /// The orientation gizmo uses the surface's top-right corner.
     pub overlay_origin: Option<egui::Pos2>,
+    /// The Stats overlay is open. Toggled by the Stats button in the view options.
+    pub show_stats: bool,
+    /// Renderer counters for the Stats overlay (from `install`).
+    pub metrics: Option<MetricsHandle>,
+    /// CPU time of the previous editor frame, for the Stats overlay.
+    pub frame_cpu_seconds: Option<f32>,
     /// The surface may hold keyboard focus (a running game owns the keys).
     /// Off by default so Tab skips the viewport like any other surface.
     pub focusable: bool,
@@ -569,6 +578,9 @@ impl Default for NavigationOptions {
             view_preset: None,
             clear_fit_error: false,
             overlay_origin: None,
+            show_stats: false,
+            metrics: None,
+            frame_cpu_seconds: None,
             focusable: false,
         }
     }
@@ -743,6 +755,29 @@ impl Camera {
             self.pitch = (self.pitch + delta.y * 0.008).clamp(-1.45, 1.45);
         }
     }
+    /// Orbit around the pivot (Unity's Alt+left-drag).
+    fn orbit(&mut self, delta: egui::Vec2) {
+        self.leave_axis_view();
+        self.navigate(delta, false, 4.0, 1.0);
+    }
+    /// Turn the camera in place, keeping the eye fixed (Unity's right-drag).
+    fn look(&mut self, delta: egui::Vec2) {
+        self.leave_axis_view();
+        let eye = self.target + self.direction() * self.distance;
+        self.navigate(delta, false, 4.0, 1.0);
+        self.target = eye - self.direction() * self.distance;
+    }
+    /// Zoom by a factor of the pivot distance; positive `amount` moves closer.
+    fn zoom(&mut self, amount: f32) {
+        self.distance = (self.distance * (-amount).exp()).clamp(0.01, 1.0e7);
+    }
+    /// An axis view snapped from the orientation gizmo is orthographic; turning
+    /// away from it returns to perspective, as in Unity.
+    fn leave_axis_view(&mut self) {
+        if self.orthographic && self.direction().abs().max_element() > 0.999 {
+            self.orthographic = false;
+        }
+    }
     /// Separate view and projections keep toolkit clip-depth conventions explicit.
     fn matrices(self, aspect: f32) -> (Mat4, Mat4, Mat4) {
         self.matrices_with_lens(aspect, 45.0_f32.to_radians(), self.up())
@@ -860,6 +895,9 @@ pub struct ViewportInteraction {
     pub response: egui::Response,
     /// Newly clicked surface; the host decides whether an overlay consumes the click.
     pub picked: Option<String>,
+    /// A box select finished this frame: the objects inside the box, possibly
+    /// none. The host decides how it combines with the current selection.
+    pub box_selection: Option<Vec<String>>,
     /// This frame evaluated a shared Fit/Reset candidate, including initial Fit.
     pub fit_attempted: bool,
     /// A rejected Fit leaves the last valid view installed. Frontends may retain
@@ -922,6 +960,9 @@ pub struct ViewportSurface {
     selected_fit: bool,
     fit_error: Option<&'static str>,
     navigation_enabled: bool,
+    overlay_layer: egui::LayerId,
+    gizmo: Option<Gizmo>,
+    stats_anchor: Option<egui::Pos2>,
 }
 
 pub fn viewport_with_materials(
@@ -997,17 +1038,24 @@ pub fn allocate_viewport(
             egui::Sense::CLICK | egui::Sense::DRAG
         },
     );
+    // A layer above the scene image (painted later in this pass) but below
+    // menus and tooltips.
+    let overlay_layer = egui::LayerId::new(
+        egui::Order::Middle,
+        ui.scope_id().with("rot-viewport-overlay"),
+    );
+    // Controls start at the visible top-left; the gizmo sits at the surface's
+    // top-right corner.
+    let visible = egui::Rect::from_min_max(navigation.overlay_origin.unwrap_or(rect.min), rect.max)
+        .intersect(rect);
+    let mut gizmo = None;
+    let mut stats_anchor = None;
     // View options float in the viewport's top-left corner (UX-STANDARDS §3).
     // Drawn after the surface so they sit on top for input.
     if navigation.show_controls && !navigation.player_view {
-        let origin = navigation.overlay_origin.unwrap_or(rect.min) + egui::vec2(8.0, 8.0);
+        let origin = visible.min + egui::vec2(8.0, 8.0);
         let area = egui::Rect::from_min_max(origin, rect.max).intersect(rect);
-        // A layer above the scene image (painted later in this pass) but below
-        // menus and tooltips.
-        let layer = egui::LayerId::new(
-            egui::Order::Middle,
-            ui.scope_id().with("rot-viewport-overlay"),
-        );
+        let layer = overlay_layer;
         let mut overlay = ui.new_child(
             egui::UiBuilder::new()
                 .id_salt("rot-viewport-overlay")
@@ -1070,6 +1118,55 @@ pub fn allocate_viewport(
                 selected_fit = false;
                 fitted = true;
             }
+            if ui
+                .add(egui::Button::selectable(navigation.show_stats, "Stats"))
+                .on_hover_text("Show frame time, FPS, draw calls and triangles")
+                .clicked()
+            {
+                navigation.show_stats = !navigation.show_stats;
+            }
+            stats_anchor = Some(egui::pos2(origin.x, ui.min_rect().bottom() + 6.0));
+        }
+        // The orientation gizmo sits in the visible top-right corner.
+        if navigation_enabled && visible.width() >= 240.0 && visible.height() >= 160.0 {
+            let center = egui::pos2(
+                visible.right() - 8.0 - GIZMO_RADIUS - 10.0,
+                visible.top() + 8.0 + GIZMO_RADIUS + 10.0,
+            );
+            let hit = egui::Rect::from_center_size(
+                center + egui::vec2(0.0, 8.0),
+                egui::vec2(2.0 * GIZMO_RADIUS + 20.0, 2.0 * GIZMO_RADIUS + 36.0),
+            );
+            // Mouse-only, like the surface: not a Tab stop. View Presets is
+            // the keyboard route to the same views.
+            let response = overlay
+                .interact(
+                    hit,
+                    overlay.scope_id().with("orientation-gizmo"),
+                    egui::Sense::CLICK,
+                )
+                .on_hover_text(
+                    "Click an axis to view along it. Click the center or the label to \
+                     switch Perspective and Orthographic; Shift-click the center for \
+                     the default view.",
+                );
+            let target = response
+                .hover_pos()
+                .and_then(|pointer| gizmo_target(camera, center, pointer));
+            if response.clicked() {
+                match target {
+                    Some(GizmoTarget::Axis(preset)) => camera.set_preset(preset),
+                    Some(GizmoTarget::Center) if overlay.input(|i| i.modifiers.shift) => {
+                        camera.set_preset(ViewPreset::Free);
+                    }
+                    Some(GizmoTarget::Center) => camera.orthographic = !camera.orthographic,
+                    None => {}
+                }
+            }
+            gizmo = Some(Gizmo {
+                center,
+                hovered: target,
+            });
         }
     }
     ViewportSurface {
@@ -1084,7 +1181,255 @@ pub fn allocate_viewport(
         selected_fit,
         fit_error,
         navigation_enabled,
+        overlay_layer,
+        gizmo,
+        stats_anchor,
     }
+}
+
+const GIZMO_RADIUS: f32 = 30.0;
+
+/// The orientation gizmo for one frame: where it is and what the pointer is over.
+#[derive(Clone, Copy, Debug)]
+struct Gizmo {
+    center: egui::Pos2,
+    hovered: Option<GizmoTarget>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum GizmoTarget {
+    Axis(ViewPreset),
+    Center,
+}
+
+/// The six axis ends of the orientation gizmo, back to front: preset, label,
+/// screen position, depth toward the viewer, and whether it is a positive axis.
+fn gizmo_axes(
+    camera: Camera,
+    center: egui::Pos2,
+) -> [(ViewPreset, &'static str, egui::Pos2, f32, bool); 6] {
+    let view = Mat4::look_to_rh(Vec3::ZERO, -camera.direction(), camera.up());
+    let mut axes = [
+        (ViewPreset::Right, "X", Vec3::X, true),
+        (ViewPreset::Left, "", Vec3::NEG_X, false),
+        (ViewPreset::Top, "Y", Vec3::Y, true),
+        (ViewPreset::Bottom, "", Vec3::NEG_Y, false),
+        (ViewPreset::Front, "Z", Vec3::Z, true),
+        (ViewPreset::Back, "", Vec3::NEG_Z, false),
+    ]
+    .map(|(preset, label, axis, positive)| {
+        let v = view.transform_vector3(axis);
+        (
+            preset,
+            label,
+            center + egui::vec2(v.x, -v.y) * GIZMO_RADIUS,
+            v.z,
+            positive,
+        )
+    });
+    axes.sort_by(|a, b| a.3.total_cmp(&b.3));
+    axes
+}
+
+fn gizmo_target(camera: Camera, center: egui::Pos2, pointer: egui::Pos2) -> Option<GizmoTarget> {
+    // Front-most first; an axis pointing at the viewer sits on the center and
+    // yields it to the projection toggle.
+    let axis = gizmo_axes(camera, center)
+        .into_iter()
+        .rev()
+        .filter(|(_, _, end, _, _)| end.distance(center) > GIZMO_RADIUS * 0.3)
+        .find(|(_, _, end, _, _)| end.distance(pointer) <= 10.0)
+        .map(|(preset, ..)| GizmoTarget::Axis(preset));
+    axis.or_else(|| {
+        let label = egui::Rect::from_center_size(
+            center + egui::vec2(0.0, GIZMO_RADIUS + 16.0),
+            egui::vec2(56.0, 16.0),
+        );
+        (pointer.distance(center) <= 9.0 || label.contains(pointer)).then_some(GizmoTarget::Center)
+    })
+}
+
+fn axis_color(preset: ViewPreset) -> egui::Color32 {
+    match preset {
+        ViewPreset::Right | ViewPreset::Left => egui::Color32::from_rgb(222, 72, 60),
+        ViewPreset::Top | ViewPreset::Bottom => egui::Color32::from_rgb(130, 200, 60),
+        _ => egui::Color32::from_rgb(60, 130, 235),
+    }
+}
+
+fn paint_gizmo(painter: &egui::Painter, visuals: &egui::Visuals, camera: Camera, gizmo: Gizmo) {
+    let center = gizmo.center;
+    if gizmo.hovered.is_some() {
+        painter.circle_filled(
+            center,
+            GIZMO_RADIUS + 12.0,
+            visuals.extreme_bg_color.gamma_multiply(0.6),
+        );
+    }
+    for (preset, label, end, _, positive) in gizmo_axes(camera, center) {
+        let color = axis_color(preset);
+        let hovered = gizmo.hovered == Some(GizmoTarget::Axis(preset));
+        if positive {
+            painter.line_segment([center, end], egui::Stroke::new(2.0, color));
+            painter.circle_filled(end, 8.0, color);
+            painter.text(
+                end,
+                egui::Align2::CENTER_CENTER,
+                label,
+                egui::FontId::proportional(11.0),
+                egui::Color32::from_gray(20),
+            );
+        } else {
+            painter.circle(
+                end,
+                6.0,
+                color.gamma_multiply(0.35),
+                egui::Stroke::new(1.0, color),
+            );
+        }
+        if hovered {
+            painter.circle_stroke(
+                end,
+                if positive { 9.5 } else { 7.5 },
+                egui::Stroke::new(1.5, egui::Color32::WHITE),
+            );
+        }
+    }
+    let center_hovered = gizmo.hovered == Some(GizmoTarget::Center);
+    painter.circle_filled(
+        center,
+        if center_hovered { 6.0 } else { 4.5 },
+        if center_hovered {
+            egui::Color32::WHITE
+        } else {
+            egui::Color32::from_gray(190)
+        },
+    );
+    painter.text(
+        center + egui::vec2(0.0, GIZMO_RADIUS + 16.0),
+        egui::Align2::CENTER_CENTER,
+        if camera.orthographic { "Iso" } else { "Persp" },
+        egui::FontId::proportional(12.0),
+        if center_hovered {
+            visuals.strong_text_color()
+        } else {
+            visuals.text_color()
+        },
+    );
+}
+
+/// Unity-style Stats: frame time and the FPS it allows, GPU scene time when
+/// timestamps are available, draw calls and triangles.
+fn paint_stats(
+    painter: &egui::Painter,
+    visuals: &egui::Visuals,
+    anchor: egui::Pos2,
+    navigation: &NavigationOptions,
+    triangles: u64,
+) {
+    let (draw_calls, gpu_us) = navigation.metrics.as_ref().map_or((None, None), |metrics| {
+        let metrics = metrics.lock().expect("metrics lock");
+        (
+            Some(metrics.draw_calls + metrics.shadow_draw_calls),
+            metrics.last_gpu_scene_us,
+        )
+    });
+    let dash = || "—".to_string();
+    let frame_ms = navigation
+        .frame_cpu_seconds
+        .filter(|seconds| *seconds > 0.0)
+        .map(|seconds| seconds * 1000.0);
+    let rows = [
+        (
+            "Frame",
+            frame_ms.map_or_else(dash, |ms| format!("{ms:.1} ms")),
+        ),
+        (
+            "FPS",
+            frame_ms.map_or_else(dash, |ms| format!("{:.0}", 1000.0 / ms)),
+        ),
+        (
+            "GPU",
+            gpu_us.map_or_else(dash, |us| format!("{:.2} ms", us / 1000.0)),
+        ),
+        (
+            "Draw calls",
+            draw_calls.map_or_else(dash, |calls| calls.to_string()),
+        ),
+        ("Triangles", format_count(triangles)),
+    ];
+    let font = egui::FontId::monospace(12.0);
+    let text: String = rows
+        .iter()
+        .map(|(label, value)| format!("{label:<11}{value:>9}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let galley = painter.layout_no_wrap(text, font, visuals.text_color());
+    let frame = egui::Rect::from_min_size(anchor, galley.size() + egui::vec2(16.0, 12.0));
+    painter.rect_filled(frame, 4.0, visuals.extreme_bg_color.gamma_multiply(0.85));
+    painter.galley(anchor + egui::vec2(8.0, 6.0), galley, visuals.text_color());
+}
+
+fn format_count(count: u64) -> String {
+    match count {
+        0..1_000 => count.to_string(),
+        1_000..1_000_000 => format!("{:.1}k", count as f64 / 1.0e3),
+        _ => format!("{:.2}M", count as f64 / 1.0e6),
+    }
+}
+
+/// Stable IDs of objects with any vertex (or their center) inside `selection`,
+/// projected through the same matrices the frame was drawn with.
+fn objects_in_rect(
+    scene: &Scene,
+    meshes: &BTreeMap<String, Arc<rot_assets::Mesh>>,
+    view_projection: Mat4,
+    rect: egui::Rect,
+    selection: egui::Rect,
+) -> Vec<String> {
+    let inside = |matrix: Mat4, point: Vec3| {
+        let clip = view_projection * matrix * point.extend(1.0);
+        if clip.w <= 1.0e-6 {
+            return false;
+        }
+        let ndc = clip.truncate() / clip.w;
+        if !(0.0..=1.0).contains(&ndc.z) {
+            return false;
+        }
+        selection.contains(egui::pos2(
+            rect.left() + (ndc.x + 1.0) * 0.5 * rect.width(),
+            rect.top() + (1.0 - ndc.y) * 0.5 * rect.height(),
+        ))
+    };
+    const CUBE: [Vec3; 9] = [
+        Vec3::ZERO,
+        Vec3::new(-0.5, -0.5, -0.5),
+        Vec3::new(0.5, -0.5, -0.5),
+        Vec3::new(-0.5, 0.5, -0.5),
+        Vec3::new(0.5, 0.5, -0.5),
+        Vec3::new(-0.5, -0.5, 0.5),
+        Vec3::new(0.5, -0.5, 0.5),
+        Vec3::new(-0.5, 0.5, 0.5),
+        Vec3::new(0.5, 0.5, 0.5),
+    ];
+    scene
+        .objects
+        .iter()
+        .filter(|object| {
+            let matrix = model(object);
+            match object_mesh(object, meshes) {
+                Some(mesh) => {
+                    inside(matrix, Vec3::ZERO)
+                        || mesh
+                            .vertices
+                            .iter()
+                            .any(|vertex| inside(matrix, Vec3::from(vertex.position)))
+                }
+                None => CUBE.iter().any(|point| inside(matrix, *point)),
+            }
+        })
+        .map(|object| object.id.clone())
+        .collect()
 }
 
 /// Finish an allocated viewport after the host has registered overlay ownership.
@@ -1115,6 +1460,7 @@ pub fn render_viewport_with_materials(
                     view: Mat4::IDENTITY.to_cols_array_2d(),
                     projection: Mat4::IDENTITY.to_cols_array_2d(),
                     gizmo_projection: Mat4::IDENTITY.to_cols_array_2d(),
+                    box_selection: None,
                 };
             }
         }
@@ -1149,6 +1495,7 @@ pub fn render_viewport_with_materials(
                     view: view.to_cols_array_2d(),
                     projection: projection.to_cols_array_2d(),
                     gizmo_projection: gizmo_projection.to_cols_array_2d(),
+                    box_selection: None,
                 };
             }
         };
@@ -1199,6 +1546,9 @@ pub fn render_viewport_with_materials(
         selected_fit,
         mut fit_error,
         navigation_enabled,
+        overlay_layer,
+        gizmo,
+        stats_anchor,
     } = surface;
     if fitted {
         let fit = if selected_fit {
@@ -1230,27 +1580,61 @@ pub fn render_viewport_with_materials(
     }
     let accepted_camera = camera;
     let speed = navigation.movement_speed.clamp(0.05, 1000.0);
-    let pan = response.dragged_by(egui::PointerButton::Middle)
-        || (response.dragged_by(egui::PointerButton::Secondary) && ui.input(|i| i.modifiers.shift));
-    if navigation_enabled
-        && !input_owned
-        && (pan || response.dragged_by(egui::PointerButton::Secondary))
-    {
-        camera.navigate(
-            ui.input(|input| input.pointer.delta()),
-            pan,
-            speed,
-            rect.height(),
-        );
-    }
-    if navigation_enabled && !input_owned && response.hovered() {
-        let scroll = ui.input(|input| input.smooth_scroll_delta.y);
-        if scroll != 0.0 {
-            camera.distance = (camera.distance * (-scroll * 0.002).exp()).clamp(0.01, 1.0e7);
+    // Unity's Scene view scheme: Alt+left-drag orbits, middle-drag pans,
+    // right-drag looks around (orbits in an orthographic view), Alt+right-drag
+    // and the wheel zoom, and the wheel changes fly speed while the right
+    // button is held. Shift speeds up zoom and flight.
+    let navigating = navigation_enabled && !input_owned;
+    let (alt, shift, delta, flying) = ui.input(|i| {
+        (
+            i.modifiers.alt,
+            i.modifiers.shift,
+            i.pointer.delta(),
+            i.pointer.button_down(egui::PointerButton::Secondary),
+        )
+    });
+    let boost = if shift { 4.0 } else { 1.0 };
+    if navigating {
+        if response.dragged_by(egui::PointerButton::Middle) {
+            camera.navigate(delta, true, 4.0, rect.height());
+        } else if alt && response.dragged_by(egui::PointerButton::Primary) {
+            camera.orbit(delta);
+        } else if alt && response.dragged_by(egui::PointerButton::Secondary) {
+            camera.zoom((delta.x + delta.y) * 0.005 * boost);
+        } else if response.dragged_by(egui::PointerButton::Secondary) {
+            if camera.orthographic {
+                camera.orbit(delta);
+            } else {
+                camera.look(delta);
+            }
         }
-        if navigation.keyboard_enabled
-            && ui.input(|i| i.focused && i.pointer.button_down(egui::PointerButton::Secondary))
-        {
+    }
+    if navigating && (response.hovered() || response.dragged()) {
+        // Unsmoothed, so a wheel turn that changed fly speed never spills
+        // into a zoom after the right button is released.
+        let scroll: f32 = ui.input(|input| {
+            input
+                .events
+                .iter()
+                .map(|event| match event {
+                    egui::Event::MouseWheel { unit, delta, .. } => {
+                        delta.y
+                            * match unit {
+                                egui::MouseWheelUnit::Point => 1.0,
+                                egui::MouseWheelUnit::Line => 50.0,
+                                egui::MouseWheelUnit::Page => rect.height(),
+                            }
+                    }
+                    _ => 0.0,
+                })
+                .sum()
+        });
+        if scroll != 0.0 && flying {
+            navigation.movement_speed = (speed * (scroll * 0.003).exp()).clamp(0.05, 1000.0);
+        } else if scroll != 0.0 {
+            camera.zoom(scroll * 0.002 * boost);
+        }
+        if navigation.keyboard_enabled && flying && ui.input(|i| i.focused) {
             let movement = ui.input(|i| {
                 Vec3::new(
                     f32::from(u8::from(i.key_down(egui::Key::D)))
@@ -1269,6 +1653,7 @@ pub fn render_viewport_with_materials(
                     (right * movement.x + Vec3::Y * movement.y + direction * movement.z)
                         .normalize_or_zero()
                         * speed
+                        * boost
                         * dt;
                 ui.ctx().request_repaint();
             }
@@ -1307,6 +1692,47 @@ pub fn render_viewport_with_materials(
     } else {
         None
     };
+    // Box select: a plain left-drag that starts on the surface. It is dropped
+    // as soon as a gizmo, panel or other overlay takes the pointer.
+    let box_id = camera_id.with("box-select");
+    let mut box_origin = ui.ctx().data(|data| data.get_temp::<egui::Pos2>(box_id));
+    if response.drag_started_by(egui::PointerButton::Primary) && !alt {
+        box_origin = ui.input(|i| i.pointer.press_origin());
+    }
+    if !navigating || navigation.player_view {
+        box_origin = None;
+    }
+    let mut box_selection = None;
+    if let Some(origin) = box_origin {
+        let (current, held) = ui.input(|i| (i.pointer.latest_pos(), i.pointer.primary_down()));
+        let selection = egui::Rect::from_two_pos(origin, current.unwrap_or(origin));
+        if held {
+            let painter = ui.ctx().layer_painter(overlay_layer).with_clip_rect(rect);
+            let accent = ui.visuals().selection.bg_fill;
+            painter.rect(
+                selection,
+                0.0,
+                accent.gamma_multiply(0.2),
+                egui::Stroke::new(1.0, accent),
+                egui::StrokeKind::Inside,
+            );
+        } else {
+            box_selection = Some(objects_in_rect(
+                scene,
+                meshes,
+                view_projection,
+                rect,
+                selection,
+            ));
+            box_origin = None;
+        }
+    }
+    ui.ctx().data_mut(|data| match box_origin {
+        Some(origin) => {
+            data.insert_temp(box_id, origin);
+        }
+        None => data.remove::<egui::Pos2>(box_id),
+    });
     let start = Instant::now();
     let (lighting, invalid_lighting) = match LightingPacket::try_pack(&scene.lighting) {
         Ok(packet) => (packet, false),
@@ -1314,8 +1740,10 @@ pub fn render_viewport_with_materials(
     };
     let mut grouped =
         BTreeMap::<(Option<String>, Option<rot_scene::Primitive>, BindingKey), DrawGroup>::new();
+    let mut triangles = 0u64;
     for object in &scene.objects {
         let mesh = object_mesh(object, meshes);
+        triangles += mesh.map_or(12, |mesh| mesh.indices.len() as u64 / 3);
         let key = mesh.and_then(|_| object.mesh.clone());
         let primitive = object.mesh.is_none().then_some(object.primitive).flatten();
         let material = object
@@ -1475,11 +1903,24 @@ pub fn render_viewport_with_materials(
         );
         painter.galley(position, galley, ui.visuals().warn_fg_color);
     }
+    if !navigation.player_view {
+        let painter = ui.ctx().layer_painter(overlay_layer).with_clip_rect(rect);
+        if let Some(gizmo) = gizmo {
+            paint_gizmo(&painter, ui.visuals(), camera, gizmo);
+        }
+        if let (true, Some(anchor)) = (navigation.show_stats, stats_anchor) {
+            paint_stats(&painter, ui.visuals(), anchor, navigation, triangles);
+            // Live numbers at a few updates per second; nothing while closed.
+            ui.ctx()
+                .request_repaint_after(std::time::Duration::from_millis(250));
+        }
+    }
     ViewportInteraction {
         receipt,
         rect,
         response,
         picked,
+        box_selection,
         fit_attempted: fitted,
         fit_error,
         view: view.to_cols_array_2d(),
@@ -2805,16 +3246,13 @@ impl egui_wgpu::CallbackTrait for SceneCallback {
                         .get_mapped_range()
                         .expect("completed timestamp mapping");
                     let values: &[u64] = bytemuck::cast_slice(&bytes);
-                    if record {
-                        if let Some((total, color, depth)) =
-                            gpu_durations(values, has_shadow, period)
-                        {
-                            let mut m = metrics.lock().expect("metrics lock");
-                            if m.gpu_scene_us.len() < MAX_SAMPLES {
-                                m.gpu_scene_us.push(total);
-                                m.gpu_color_us.push(color);
-                                m.gpu_shadow_us.push(depth);
-                            }
+                    if let Some((total, color, depth)) = gpu_durations(values, has_shadow, period) {
+                        let mut m = metrics.lock().expect("metrics lock");
+                        m.last_gpu_scene_us = Some(total);
+                        if record && m.gpu_scene_us.len() < MAX_SAMPLES {
+                            m.gpu_scene_us.push(total);
+                            m.gpu_color_us.push(color);
+                            m.gpu_shadow_us.push(depth);
                         }
                     }
                     drop(bytes);
@@ -3267,6 +3705,295 @@ mod tests {
             assert_eq!(camera.pitch, old.pitch);
             assert_eq!(camera.orthographic, old.orthographic);
         }
+    }
+
+    // S-11: Unity's Scene view mouse scheme, box select, the orientation gizmo
+    // and the Stats overlay, driven by in-process egui events.
+    #[test]
+    fn unity_navigation_box_select_gizmo_and_stats() {
+        let scene = Scene::demo();
+        let meshes = BTreeMap::new();
+        let front = CameraState {
+            target: [0.0; 3],
+            yaw: 0.0,
+            pitch: 0.0,
+            distance: 8.0,
+            orthographic: false,
+        };
+        let ctx = egui::Context::default();
+        let mut navigation = NavigationOptions {
+            camera: Some(front),
+            ..Default::default()
+        };
+        let frame = |navigation: &mut NavigationOptions,
+                     modifiers: egui::Modifiers,
+                     events: Vec<egui::Event>| {
+            let mut result = None;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(800.0, 600.0),
+                    )),
+                    events: (ctx.input(|i| i.modifiers) != modifiers)
+                        .then_some(egui::Event::ModifiersChanged(modifiers))
+                        .into_iter()
+                        .chain(events)
+                        .collect(),
+                    ..Default::default()
+                },
+                |ui| {
+                    result = Some(
+                        viewport_with_navigation(ui, &scene, &[], &meshes, navigation)
+                            .box_selection,
+                    );
+                },
+            );
+            output.textures_delta.clear();
+            (output, result.unwrap())
+        };
+        let button = |pos, button, pressed, modifiers| egui::Event::PointerButton {
+            pos,
+            button,
+            pressed,
+            modifiers,
+        };
+        // Press, move in two steps (past the drag threshold), release.
+        let drag = |navigation: &mut NavigationOptions,
+                    which,
+                    modifiers,
+                    from: egui::Pos2,
+                    to: egui::Pos2| {
+            frame(
+                navigation,
+                modifiers,
+                vec![
+                    egui::Event::PointerMoved(from),
+                    button(from, which, true, modifiers),
+                ],
+            );
+            frame(
+                navigation,
+                modifiers,
+                vec![egui::Event::PointerMoved(from.lerp(to, 0.5))],
+            );
+            frame(navigation, modifiers, vec![egui::Event::PointerMoved(to)]);
+            frame(
+                navigation,
+                modifiers,
+                vec![button(to, which, false, modifiers)],
+            )
+            .1
+        };
+        let eye = |state: CameraState| {
+            let camera = Camera::from_state(state);
+            camera.target + camera.direction() * camera.distance
+        };
+        let (from, to) = (egui::pos2(300.0, 300.0), egui::pos2(360.0, 330.0));
+
+        // Right-drag looks around: the eye stays put and the view turns.
+        frame(&mut navigation, egui::Modifiers::NONE, vec![]);
+        drag(
+            &mut navigation,
+            egui::PointerButton::Secondary,
+            egui::Modifiers::NONE,
+            from,
+            to,
+        );
+        let look = navigation.camera.unwrap();
+        assert!(eye(look).abs_diff_eq(eye(front), 1e-4));
+        assert_ne!(look.yaw, front.yaw);
+        assert_ne!(look.target, front.target);
+
+        // Alt+left-drag orbits around the pivot and selects nothing.
+        navigation.camera = Some(front);
+        let orbit_box = drag(
+            &mut navigation,
+            egui::PointerButton::Primary,
+            egui::Modifiers::ALT,
+            from,
+            to,
+        );
+        let orbit = navigation.camera.unwrap();
+        assert_eq!(orbit.target, front.target);
+        assert_ne!(orbit.yaw, front.yaw);
+        assert_eq!(orbit_box, None);
+
+        // Middle-drag pans without turning.
+        navigation.camera = Some(front);
+        drag(
+            &mut navigation,
+            egui::PointerButton::Middle,
+            egui::Modifiers::NONE,
+            from,
+            to,
+        );
+        let pan = navigation.camera.unwrap();
+        assert_eq!((pan.yaw, pan.pitch), (front.yaw, front.pitch));
+        assert_ne!(pan.target, front.target);
+
+        // The wheel zooms; with the right button held it changes fly speed.
+        let wheel = egui::Event::MouseWheel {
+            unit: egui::MouseWheelUnit::Point,
+            phase: egui::TouchPhase::Move,
+            source: egui::MouseWheelSource::Unknown,
+            delta: egui::vec2(0.0, 100.0),
+            modifiers: egui::Modifiers::NONE,
+        };
+        navigation.camera = Some(front);
+        for _ in 0..4 {
+            frame(
+                &mut navigation,
+                egui::Modifiers::NONE,
+                vec![egui::Event::PointerMoved(from), wheel.clone()],
+            );
+        }
+        assert!(navigation.camera.unwrap().distance < front.distance);
+        assert_eq!(navigation.movement_speed, 4.0);
+        navigation.camera = Some(front);
+        frame(
+            &mut navigation,
+            egui::Modifiers::NONE,
+            vec![button(
+                from,
+                egui::PointerButton::Secondary,
+                true,
+                egui::Modifiers::NONE,
+            )],
+        );
+        for _ in 0..4 {
+            frame(&mut navigation, egui::Modifiers::NONE, vec![wheel.clone()]);
+        }
+        frame(
+            &mut navigation,
+            egui::Modifiers::NONE,
+            vec![button(
+                from,
+                egui::PointerButton::Secondary,
+                false,
+                egui::Modifiers::NONE,
+            )],
+        );
+        assert_eq!(navigation.camera.unwrap().distance, front.distance);
+        assert!(navigation.movement_speed > 4.0);
+
+        // A left-drag box selects exactly what it covers; an empty box clears.
+        navigation.camera = Some(front);
+        let center_only = drag(
+            &mut navigation,
+            egui::PointerButton::Primary,
+            egui::Modifiers::NONE,
+            egui::pos2(330.0, 230.0),
+            egui::pos2(470.0, 370.0),
+        );
+        assert_eq!(center_only, Some(vec!["center".to_string()]));
+        let all = drag(
+            &mut navigation,
+            egui::PointerButton::Primary,
+            egui::Modifiers::NONE,
+            egui::pos2(100.0, 200.0),
+            egui::pos2(700.0, 400.0),
+        );
+        assert_eq!(all.map(|ids| ids.len()), Some(3));
+        let empty = drag(
+            &mut navigation,
+            egui::PointerButton::Primary,
+            egui::Modifiers::NONE,
+            egui::pos2(100.0, 450.0),
+            egui::pos2(300.0, 550.0),
+        );
+        assert_eq!(empty, Some(Vec::new()));
+        assert_eq!(
+            navigation.camera.unwrap(),
+            front,
+            "box select must not move the camera"
+        );
+        // While another owner holds the pointer, a drag does not box select.
+        navigation.enabled = false;
+        let owned = drag(
+            &mut navigation,
+            egui::PointerButton::Primary,
+            egui::Modifiers::NONE,
+            egui::pos2(100.0, 200.0),
+            egui::pos2(700.0, 400.0),
+        );
+        assert_eq!(owned, None);
+        navigation.enabled = true;
+
+        // Clicking the gizmo's Y axis gives the orthographic Top view; the
+        // center toggles projection; turning away returns to perspective.
+        let center = egui::pos2(800.0 - 8.0 - GIZMO_RADIUS - 10.0, 8.0 + GIZMO_RADIUS + 10.0);
+        let click = |navigation: &mut NavigationOptions, pos, modifiers| {
+            frame(navigation, modifiers, vec![egui::Event::PointerMoved(pos)]);
+            frame(
+                navigation,
+                modifiers,
+                vec![button(pos, egui::PointerButton::Primary, true, modifiers)],
+            );
+            frame(
+                navigation,
+                modifiers,
+                vec![button(pos, egui::PointerButton::Primary, false, modifiers)],
+            )
+            .1
+        };
+        let y_end = gizmo_axes(Camera::from_state(front), center)
+            .into_iter()
+            .find(|(preset, ..)| *preset == ViewPreset::Top)
+            .unwrap()
+            .2;
+        assert_eq!(click(&mut navigation, y_end, egui::Modifiers::NONE), None);
+        let top = navigation.camera.unwrap();
+        assert!((top.pitch - std::f32::consts::FRAC_PI_2).abs() < 1e-5);
+        assert!(top.orthographic);
+        click(&mut navigation, center, egui::Modifiers::NONE);
+        assert!(!navigation.camera.unwrap().orthographic);
+        click(&mut navigation, center, egui::Modifiers::NONE);
+        assert!(navigation.camera.unwrap().orthographic);
+        drag(
+            &mut navigation,
+            egui::PointerButton::Secondary,
+            egui::Modifiers::NONE,
+            from,
+            to,
+        );
+        assert!(!navigation.camera.unwrap().orthographic);
+
+        // Stats: live numbers while open at a few repaints a second, and no
+        // repaint loop while closed.
+        let idle = |navigation: &mut NavigationOptions| {
+            let (output, _) = frame(navigation, egui::Modifiers::NONE, vec![]);
+            let text = output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+                .join("\n");
+            let delay = output.viewport_output[&egui::ViewportId::ROOT].repaint_delay;
+            (text, delay)
+        };
+        frame(
+            &mut navigation,
+            egui::Modifiers::NONE,
+            vec![egui::Event::PointerGone],
+        );
+        for _ in 0..3 {
+            frame(&mut navigation, egui::Modifiers::NONE, vec![]);
+        }
+        let (text, delay) = idle(&mut navigation);
+        assert!(!text.contains("Triangles"));
+        assert!(delay > std::time::Duration::from_secs(60), "{delay:?}");
+        navigation.show_stats = true;
+        navigation.frame_cpu_seconds = Some(0.004);
+        idle(&mut navigation);
+        let (text, delay) = idle(&mut navigation);
+        assert!(text.contains("Triangles") && text.contains("36"), "{text}");
+        assert!(text.contains("4.0 ms") && text.contains("250"), "{text}");
+        assert!(delay <= std::time::Duration::from_millis(250), "{delay:?}");
     }
 
     // Unique UI contract: navigation options frame exact selected content,

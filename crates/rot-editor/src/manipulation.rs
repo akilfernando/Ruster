@@ -2325,6 +2325,7 @@ mod tests {
                                 rect,
                                 response,
                                 picked: None,
+                                box_selection: None,
                                 fit_attempted: false,
                                 fit_error: None,
                                 view: view.to_cols_array_2d().map(|row| row.map(|v| v as f32)),
