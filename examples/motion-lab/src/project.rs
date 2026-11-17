@@ -1,7 +1,7 @@
 //! Versioned application documents; deliberately separate from scene Session files.
 use crate::{MotionLab, MAX_SOURCE_BYTES};
-use ruster_scene::Scene;
-use ruster_script::Properties;
+use rot_scene::Scene;
+use rot_script::Properties;
 use serde::{Deserialize, Serialize};
 use std::{
     collections::BTreeMap,
@@ -31,18 +31,18 @@ struct Document {
 impl Document {
     fn new(authored: Authored) -> Self {
         Self {
-            format: "ruster-motion-project".into(),
+            format: "rot-motion-project".into(),
             format_version: 1,
             authored,
         }
     }
     fn load(path: &Path) -> Result<Self, String> {
         let bytes =
-            ruster_assets::read_regular_file(path, MAX_PROJECT_BYTES).map_err(|e| e.to_string())?;
+            rot_assets::read_regular_file(path, MAX_PROJECT_BYTES).map_err(|e| e.to_string())?;
         let doc: Self = serde_json::from_slice(&bytes)
             .map_err(|e| format!("Invalid Motion Lab project: {e}"))?;
-        if doc.format != "ruster-motion-project" || doc.format_version != 1 {
-            return Err("Expected ruster-motion-project version 1.".into());
+        if doc.format != "rot-motion-project" || doc.format_version != 1 {
+            return Err("Expected rot-motion-project version 1.".into());
         }
         validate(&doc.authored)?;
         Ok(doc)
@@ -110,7 +110,7 @@ impl Lock {
         }
         let mut lock_name = std::ffi::OsString::from(".");
         lock_name.push(name);
-        lock_name.push(".ruster-lock");
+        lock_name.push(".rot-lock");
         let lock_path = parent.join(lock_name);
         if lock_path.symlink_metadata().is_ok_and(|m| !m.is_file()) {
             return Err("Project lock must be a regular file.".into());
@@ -252,8 +252,8 @@ impl MotionLab {
 }
 
 impl MotionLab {
-    pub(crate) fn project_ui(&mut self, ui: &mut ruster_app::egui::Ui) {
-        use ruster_app::egui;
+    pub(crate) fn project_ui(&mut self, ui: &mut rot_app::egui::Ui) {
+        use rot_app::egui;
         ui.strong(if self.is_dirty() {
             "Project · unsaved changes"
         } else {

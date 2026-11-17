@@ -22,7 +22,7 @@ import dependency_notices
 
 ROOT = Path(__file__).resolve().parent.parent
 TARGET = "x86_64-unknown-linux-gnu"
-APP = "ruster-yard"
+APP = "rot-yard"
 # Resource additions require deliberate review, never a recursive project copy.
 RESOURCES = ("truck.obj",)
 
@@ -37,12 +37,12 @@ class AppSpec:
     binary_readme: str
 
 
-KIT_CRATES = ("ruster-app", "ruster-assets", "ruster-scene", "ruster-render", "ruster-core")
+KIT_CRATES = ("rot-app", "rot-assets", "rot-scene", "rot-render", "rot-core")
 APPS = {
     "yard": AppSpec(APP, "examples/yard-app", KIT_CRATES, RESOURCES,
                     "packaging/SOURCE-README.md", "packaging/BINARY-README.txt"),
-    "motion-lab": AppSpec("ruster-motion-lab", "examples/motion-lab",
-                          KIT_CRATES + ("ruster-script", "ruster-behavior"),
+    "motion-lab": AppSpec("rot-motion-lab", "examples/motion-lab",
+                          KIT_CRATES + ("rot-script", "rot-behavior"),
                           ("motion.rhai", "generic.scene.json"),
                           "packaging/MOTION-SOURCE-README.md", "packaging/MOTION-BINARY-README.txt"),
 }
@@ -131,7 +131,7 @@ def notices(root: Path, packages: list[dict]) -> tuple[bytes, list[dict]]:
         parts += [json.dumps(item, sort_keys=True) + "\n\n", data.decode("utf-8"), "\n\n"]
     inventory = []
     missing = []
-    workspace = set(KIT_CRATES) | {"ruster-script", "ruster-behavior"} | {spec.package for spec in APPS.values()}
+    workspace = set(KIT_CRATES) | {"rot-script", "rot-behavior"} | {spec.package for spec in APPS.values()}
     for package in packages:
         if package["name"] in workspace and not package.get("source"):
             continue
@@ -174,7 +174,7 @@ def publish_archive(stage: Path, output: Path, application: str = APP) -> None:
     output = output.absolute()
     if output.exists() or output.is_symlink():
         raise ValueError(f"refusing to overwrite {output}")
-    with tempfile.NamedTemporaryFile(prefix=".ruster-package-", dir=output.parent) as temp:
+    with tempfile.NamedTemporaryFile(prefix=".rot-package-", dir=output.parent) as temp:
         with tarfile.open(fileobj=temp, mode="w:gz", format=tarfile.PAX_FORMAT) as archive:
             for path in sorted(stage.rglob("*")):
                 if not path.is_file() or path.is_symlink():
@@ -201,7 +201,7 @@ def package(root: Path, binary: Path, output: Path, app: str = "yard") -> dict:
     requirements = elf_requirements(binary)
     active = active_packages(metadata(root, spec.package), spec.package)
     license_text, dependencies = notices(root, active)
-    with tempfile.TemporaryDirectory(prefix="ruster-payload-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rot-payload-") as temporary:
         stage = Path(temporary)
         put(stage, spec.package, binary_data, executable=True)
         for name in spec.resources:

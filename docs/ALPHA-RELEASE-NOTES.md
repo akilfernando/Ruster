@@ -6,7 +6,7 @@ Updated2026-11-05. **Candidate preparation, not accepted or published.** The fir
 
 Create a bounded3D scene, import triangle OBJ content, assign meshes, manipulate multiple objects and edit precise transforms. Save/reopen preserves supported authored history and embedded behavior; unfinished source remains saveable. Attach provisional Lua behavior, expose typed properties/references, edit through optional Zed/LuaLS working copies and navigate errors or inspect execution in the editor debugger. Authored and runtime data remain distinct.
 
-Build your application in Rust using the shared kit. Yard and the non-game Motion Lab consumer demonstrate independent app edits, source export and relocated Linux development packages. The optional44-tool local MCP adapter edits the same guarded editor session; manual use requires no AI account or MCP service. The [quickstart](../README.md#quickstart), [editor guide](../crates/ruster-editor/README.md), [behavior guide](BEHAVIOR-AUTHORING.md) and [distribution workflow](DISTRIBUTION.md) provide the entry points.
+Build your application in Rust using the shared kit. Yard and the non-game Motion Lab consumer demonstrate independent app edits, source export and relocated Linux development packages. The optional44-tool local MCP adapter edits the same guarded editor session; manual use requires no AI account or MCP service. The [quickstart](../README.md#quickstart), [editor guide](../crates/rot-editor/README.md), [behavior guide](BEHAVIOR-AUTHORING.md) and [distribution workflow](DISTRIBUTION.md) provide the entry points.
 
 ## M9 corrections
 

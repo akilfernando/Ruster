@@ -16,7 +16,7 @@ The user explicitly requires lighting, shaders and textures as core product capa
 
 ## Capability inventory
 
-Inspected owning sources: `crates/ruster-scene/src/lib.rs` and `authoring.rs`, `crates/ruster-assets/src/lib.rs`, `crates/ruster-render/src/lib.rs` and `scene.wgsl`, `crates/ruster-app/src/lib.rs` and the current status/evidence guides. Existing lower-level primitives do not prove a complete creator workflow.
+Inspected owning sources: `crates/rot-scene/src/lib.rs` and `authoring.rs`, `crates/rot-assets/src/lib.rs`, `crates/rot-render/src/lib.rs` and `scene.wgsl`, `crates/rot-app/src/lib.rs` and the current status/evidence guides. Existing lower-level primitives do not prove a complete creator workflow.
 
 | Area | Current boundary | Missing product workflow to plan |
 | --- | --- | --- |
@@ -47,7 +47,7 @@ LOD reduces geometry detail when it contributes less to the image. Plan mesh LOD
 
 Ray tracing is a later quality/rendering path, potentially starting with a bounded effect such as reflections or shadows. It requires explicit hardware/API capability checks, acceleration-structure resource/update ownership, compatible materials, sampling/denoising and measured quality/cost. Keep an effective raster path; adding a ray-tracing checkbox would not deliver the workflow. This is a proposed adoption approach, not an accepted API/backend migration or a guarantee that the current abstraction already supports it.
 
-Primary sources accessed2026-11-05: [Godot mesh LOD](https://docs.godotengine.org/en/stable/tutorials/3d/mesh_lod.html) documents import-time simplification, quality pitfalls and measuring effectiveness; [Epic hardware ray tracing](https://dev.epicgames.com/documentation/en-us/unreal-engine/hardware-ray-tracing-in-unreal-engine) documents hybrid raster/ray approaches, denoising, hardware conditions and scene-update costs. These inform tradeoffs, not Ruster capability or comparative-performance claims.
+Primary sources accessed2026-11-05: [Godot mesh LOD](https://docs.godotengine.org/en/stable/tutorials/3d/mesh_lod.html) documents import-time simplification, quality pitfalls and measuring effectiveness; [Epic hardware ray tracing](https://dev.epicgames.com/documentation/en-us/unreal-engine/hardware-ray-tracing-in-unreal-engine) documents hybrid raster/ray approaches, denoising, hardware conditions and scene-update costs. These inform tradeoffs, not Rot Engine capability or comparative-performance claims.
 
 ## Current allocation and acceptance
 
@@ -58,7 +58,7 @@ The working sequence is root/Astra-selected under the user’s realignment autho
 
 ## Post-V2b planning baseline — 2026-11-06
 
-Actual code d163569 retains relative diffuse output clamped into an Rgba8UnormSrgb scene target (`crates/ruster-render/src/scene.wgsl`, `lib.rs`); there is no specular/material roughness/metalness or environment/exposure contract. The camera uniform contains only view-projection. `crates/ruster-assets/src/lib.rs::parse_obj` validates supplied normal indexes but emits geometric flat normals; it does not preserve authored normals or supply tangents. These are relevant dependencies to investigate for the next material slice, not delivered support or automatic approval of an HDR/PBR/import rewrite. V2b's accepted shared shadow map and bounds can be reused under unchanged inputs, with material/camera/color/lifetime changes requalified where they actually affect behavior.
+Actual code d163569 retains relative diffuse output clamped into an Rgba8UnormSrgb scene target (`crates/rot-render/src/scene.wgsl`, `lib.rs`); there is no specular/material roughness/metalness or environment/exposure contract. The camera uniform contains only view-projection. `crates/rot-assets/src/lib.rs::parse_obj` validates supplied normal indexes but emits geometric flat normals; it does not preserve authored normals or supply tangents. These are relevant dependencies to investigate for the next material slice, not delivered support or automatic approval of an HDR/PBR/import rewrite. V2b's accepted shared shadow map and bounds can be reused under unchanged inputs, with material/camera/color/lifetime changes requalified where they actually affect behavior.
 
 
 ## Post-V3b next-goal planning — 2026-11-07
@@ -80,7 +80,7 @@ I1a is complete within its accepted input/action/authoring/runtime limits. Actua
 
 This assessment is a recommendation based on inspected current owners and retained creator/runtime evidence. The user explicitly confirms creator-owned scoring/menu/application rules, supported by reusable engine facilities. It activates no new implementation or Goal-tool goal. Historical M0–M8 labels measure their original prototype contracts. They do not measure a percentage of the expanded engine product. Current public-alpha qualification remains incomplete.
 
-The strongest delivered path is a small Linux interactive visual application with supported OBJ/PNG assets, opaque materials/lighting, authored transform behaviors, keyboard actions and bounded spatial interaction. Ordinary editor and native MCP routes can save/recover/reopen and deliver a standalone application. Rust application authors can additionally implement their own state, UI and completion through `ruster_app::Application`. Finishing a particular supported application is possible today, as the retained examples demonstrate. An independently adopted customer product built entirely through editor/Lua still needs broader game/application workflows.
+The strongest delivered path is a small Linux interactive visual application with supported OBJ/PNG assets, opaque materials/lighting, authored transform behaviors, keyboard actions and bounded spatial interaction. Ordinary editor and native MCP routes can save/recover/reopen and deliver a standalone application. Rust application authors can additionally implement their own state, UI and completion through `rot_app::Application`. Finishing a particular supported application is possible today, as the retained examples demonstrate. An independently adopted customer product built entirely through editor/Lua still needs broader game/application workflows.
 
 | Project type | Current readiness judgment | Principal remaining obstacle |
 | --- | --- | --- |
@@ -91,7 +91,7 @@ The strongest delivered path is a small Linux interactive visual application wit
 
 The user subsequently directs addressing the significant remaining gaps before a test project. The [foundation sequence](plans/CREATOR-FOUNDATIONS.md) now owns that working order. [F1 runtime state](plans/F1-RUNTIME-STATE.md) is accepted with a nonvisual application owner and exact creator/runtime parity. Later lifecycle/runtime UI and composition/content/physics/audio/scale packages have separate bounded contracts. Small subsystem/native fixtures verify every slice, and the substantial integrated project follows the selected foundation work. Creators define their own scores, objectives, menus and rules through reusable state/scripting/UI/lifecycle facilities.
 
-The runtime-state recommendation addresses an inspected host API bottleneck. `ruster-behavior::Engine::evaluate_with_input` recreates the Lua module/environment and returns `Transform`; `ruster_app::Application` separately permits Rust-owned `ui`, `input`, `reset` and `completed`. Prefabs/hierarchy remain important for repeated construction but do not supply scores, objectives or player feedback. Audio, pointer/gamepad, reusable composition, richer import and animation/physics should follow from the chosen game's actual requirements. LOD/culling and later ray tracing retain their existing measured-scale/quality order.
+The runtime-state recommendation addresses an inspected host API bottleneck. `rot-behavior::Engine::evaluate_with_input` recreates the Lua module/environment and returns `Transform`; `rot_app::Application` separately permits Rust-owned `ui`, `input`, `reset` and `completed`. Prefabs/hierarchy remain important for repeated construction but do not supply scores, objectives or player feedback. Audio, pointer/gamepad, reusable composition, richer import and animation/physics should follow from the chosen game's actual requirements. LOD/culling and later ray tracing retain their existing measured-scale/quality order.
 
 Before calling that scope customer-ready, require an independent creator to build and finish a project from the guide, without engine-source patches or continuing author assistance. The exact application must package/reopen/recover and run on its advertised deployment environment, with meaningful quality/cost and UI/MCP evidence. NVIDIA native results are retained; Intel presentation and broader Linux binary compatibility remain unresolved qualifications. No numerical completion percentage or calendar delivery estimate is established by this assessment.
 

@@ -2824,7 +2824,7 @@ impl super::Adapter {
                 capabilities.extend(&[spv::Capability::Int8]);
             }
             spv::Options {
-                // Ruster: Naga 30.0.1 emits Offset decorations on Function/Private
+                // Rot Engine: Naga 30.0.1 emits Offset decorations on Function/Private
                 // structs (wgpu#7696), which are legal only through SPIR-V 1.4.
                 // Emit SPIR-V 1.3 for our basic graphics/timestamp feature set.
                 // This is a generator target, not a post-generation header rewrite.

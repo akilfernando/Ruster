@@ -1,4 +1,4 @@
-# Original Ruster demonstration mesh; MIT OR Apache-2.0.
+# Original Rot Engine demonstration mesh; MIT OR Apache-2.0.
 # Triangle-only Wavefront OBJ, Y-up, five positions and six outward faces.
 v -0.8 -0.5 -0.8
 v 0.8 -0.5 -0.8

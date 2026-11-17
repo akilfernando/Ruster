@@ -1,0 +1,6 @@
+interface:
+  display_name: "Rot Engine Testing"
+  short_description: "Risk-based checks without redundant test growth"
+  default_prompt: "Use $rot-testing to select, run, and document proportionate checks for this Rot Engine change."
+policy:
+  allow_implicit_invocation: true

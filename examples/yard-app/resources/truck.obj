@@ -1,4 +1,4 @@
-# Original low-poly yard truck, authored for Ruster. MIT OR Apache-2.0.
+# Original low-poly yard truck, authored for Rot Engine. MIT OR Apache-2.0.
 # +X front, Y up. All faces explicitly triangulated; no textures/MTL.
 # body
 v -0.9 0.0 -0.5

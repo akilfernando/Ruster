@@ -24,7 +24,7 @@ post-install checks; this is not a public release or real-project enrollment.
 The frozen open human trial/configuration is preserved. Broader engine/runtime
 work retains the existing plan.
 
-**Latest user-approved priority:** native-first, viewport-focused Rusterize UI
+**Latest user-approved priority:** native-first, viewport-focused Rot Engine UI
 alongside ChatGPT. Astra defines interface/implementation, then regular Sol builds.
 Browser viewing remains a deferred nice-to-have, not deleted or a native-first gate.
 
@@ -108,7 +108,7 @@ capabilities, but clearly clunky controls must not be labeled accepted.
 The [feature parity study](research/MATURE-ENGINE-PARITY.md) proposes a mature
 3D baseline, project-dependent workflows and advanced capabilities. The
 [editor study](research/EDITOR-WORKFLOW-COMPARISON.md) proposes a baseline
-walkthrough for current Rusterize. These are planning inputs for the bounded
+walkthrough for current Rot Engine. These are planning inputs for the bounded
 assembly contract below.
 
 ### Accepted assembly runtime and delivery contract
@@ -381,7 +381,7 @@ M6 delivered scope: bounded triangle-only OBJ import, stable-ID catalog with its
 
 **Decision gate:** source licensing is now MIT OR Apache-2.0 under decision0007; retain notices and review binary distribution obligations before packaging. Test Windows runtime feasibility before packaging assumptions harden, or explicitly narrow the support target. Add audio/physics/UI capabilities only where the chosen small application requires them.
 
-M7 delivered scope: ruster-app shared host with application-owned behavior, read-only resources and focus-aware bounded lifecycle; editable Yard challenge, portable source workspace and Linux x86_64 development archive. Independent source modification/rebuild, native controls/resize/shutdown, final release Vulkan validation and readonly relocation/recovery passed; see [M7 evidence](evidence/M7.md) and [distribution](DISTRIBUTION.md). Exact binary requires GLIBC2.44. Focus routing has real egui widget coverage; focused native keyboard and experienced-human familiarity remain unverified. No public binary release or editor readiness claim.
+M7 delivered scope: rot-app shared host with application-owned behavior, read-only resources and focus-aware bounded lifecycle; editable Yard challenge, portable source workspace and Linux x86_64 development archive. Independent source modification/rebuild, native controls/resize/shutdown, final release Vulkan validation and readonly relocation/recovery passed; see [M7 evidence](evidence/M7.md) and [distribution](DISTRIBUTION.md). Exact binary requires GLIBC2.44. Focus routing has real egui widget coverage; focused native keyboard and experienced-human familiarity remain unverified. No public binary release or editor readiness claim.
 
 ## M8 Independent reuse proof
 

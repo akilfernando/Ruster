@@ -2,7 +2,7 @@
 
 Updated2026-11-05. Creator-owned saved scenes use the [shared editor/MCP creator workflow](CREATOR-WORKFLOW.md), with a once-prepared runtime template and no per-creation Cargo. Its integration verification is tracked separately.
 
- This is the bounded Linux x86_64 development workflow for M7 Yard and the M8 Motion Lab consumer, not a public binary release or supported OS/GPU matrix. The shared kit is `crates/ruster-app`. Yard remains the default `--app yard`; `--app motion-lab` selects the non-game Scene5/Lua consumer and its legacy Rhai compatibility mode. [M8 independent source/build/package evidence](evidence/M8-independent-reuse.md) passed on the recorded local configuration; native presentation remains a separate check.
+ This is the bounded Linux x86_64 development workflow for M7 Yard and the M8 Motion Lab consumer, not a public binary release or supported OS/GPU matrix. The shared kit is `crates/rot-app`. Yard remains the default `--app yard`; `--app motion-lab` selects the non-game Scene5/Lua consumer and its legacy Rhai compatibility mode. [M8 independent source/build/package evidence](evidence/M8-independent-reuse.md) passed on the recorded local configuration; native presentation remains a separate check.
 The app owns its logistics rules, challenge settings, scene and UI. The kit
 supplies bounded ticking, lifecycle, read-only resource access and the shared
 Vulkan host. Editor and MCP are independent authoring tools, not runtime
@@ -13,10 +13,10 @@ prerequisites.
 From a checkout with the pinned Rust toolchain and cached registry dependencies:
 
 ```sh
-python3 scripts/new_app.py /tmp/my-ruster-app
-cd /tmp/my-ruster-app
-cargo run --locked --offline -p ruster-yard -- --headless --resources examples/yard-app/resources
-cargo run --locked --offline -p ruster-yard -- --resources examples/yard-app/resources
+python3 scripts/new_app.py /tmp/my-rot-app
+cd /tmp/my-rot-app
+cargo run --locked --offline -p rot-yard -- --headless --resources examples/yard-app/resources
+cargo run --locked --offline -p rot-yard -- --resources examples/yard-app/resources
 ```
 
 Choose a new directory outside the checkout; an existing destination is never
@@ -51,11 +51,11 @@ export visibly. Native desktop/GPU requirements still apply.
 ```sh
 python3 scripts/new_app.py --app motion-lab /tmp/my-motion-lab
 cd /tmp/my-motion-lab
-cargo run --locked --offline -p ruster-motion-lab -- --generic-demo --headless --ticks 10
-cargo run --locked --offline -p ruster-motion-lab -- --generic-demo
+cargo run --locked --offline -p rot-motion-lab -- --generic-demo --headless --ticks 10
+cargo run --locked --offline -p rot-motion-lab -- --generic-demo
 ```
 
-The selected source export includes only Motion Lab, the common kit and its optional `ruster-script`/`ruster-behavior` backends, the reviewed mlua source/patch and required templates. Owned resources are exactly `motion.rhai` and `generic.scene.json`; arbitrary project files remain excluded. Lua is bundled at build time; a C compiler/linker is needed, but system Lua is not. The kit itself gains no mandatory interpreter. The new consumer reads Scene5 snapshots, leaving source/history authoring to the generic editor; it adds no competing source editor. Existing Rhai project1 files stay distinct and are not silently converted.
+The selected source export includes only Motion Lab, the common kit and its optional `rot-script`/`rot-behavior` backends, the reviewed mlua source/patch and required templates. Owned resources are exactly `motion.rhai` and `generic.scene.json`; arbitrary project files remain excluded. Lua is bundled at build time; a C compiler/linker is needed, but system Lua is not. The kit itself gains no mandatory interpreter. The new consumer reads Scene5 snapshots, leaving source/history authoring to the generic editor; it adds no competing source editor. Existing Rhai project1 files stay distinct and are not silently converted.
 
 The source export requires only versioned vendor inputs. In particular, mlua’s ignored development `Cargo.lock` is not exported or required; the exported workspace’s root lock controls selected dependency versions. This avoids relying on a file present only in a developer checkout.
 
@@ -66,20 +66,20 @@ Both selectors preserve previous locked registry versions. Use a fresh destinati
 Build with local compiler paths remapped before creating an archive:
 
 ```sh
-RUSTFLAGS="--remap-path-prefix=$PWD=/ruster-source --remap-path-prefix=$HOME=/ruster-build -C debuginfo=0" cargo build --locked --offline --release -p ruster-yard
-python3 scripts/package_app.py --output /tmp/ruster-yard-linux-x86_64.tar.gz
+RUSTFLAGS="--remap-path-prefix=$PWD=/rot-source --remap-path-prefix=$HOME=/rot-build -C debuginfo=0" cargo build --locked --offline --release -p rot-yard
+python3 scripts/package_app.py --output /tmp/rot-yard-linux-x86_64.tar.gz
 mkdir /tmp/relocated-yard
-tar -xzf /tmp/ruster-yard-linux-x86_64.tar.gz -C /tmp/relocated-yard
+tar -xzf /tmp/rot-yard-linux-x86_64.tar.gz -C /tmp/relocated-yard
 cd /tmp
-/tmp/relocated-yard/ruster-yard/ruster-yard --headless
-/tmp/relocated-yard/ruster-yard/ruster-yard --headless --capacity 3
+/tmp/relocated-yard/rot-yard/rot-yard --headless
+/tmp/relocated-yard/rot-yard/rot-yard --headless --capacity 3
 ```
 
 For Motion Lab, remap both Rust and bundled-C compiler paths and select it explicitly:
 
 ```sh
-CFLAGS="-ffile-prefix-map=$PWD=/ruster-source -ffile-prefix-map=$HOME=/ruster-build" RUSTFLAGS="--remap-path-prefix=$PWD=/ruster-source --remap-path-prefix=$HOME=/ruster-build -C debuginfo=0" cargo build --locked --offline --release -p ruster-motion-lab
-python3 scripts/package_app.py --app motion-lab --binary /absolute/path/to/ruster-motion-lab --output /tmp/my-motion-lab.tar.gz
+CFLAGS="-ffile-prefix-map=$PWD=/rot-source -ffile-prefix-map=$HOME=/rot-build" RUSTFLAGS="--remap-path-prefix=$PWD=/rot-source --remap-path-prefix=$HOME=/rot-build -C debuginfo=0" cargo build --locked --offline --release -p rot-motion-lab
+python3 scripts/package_app.py --app motion-lab --binary /absolute/path/to/rot-motion-lab --output /tmp/my-motion-lab.tar.gz
 ```
 
 Its payload contains the two owned resources, application-specific README and active backend notices. Use `--generic-demo` or `--scene resources/generic.scene.json`; no checkout/editor is a runtime prerequisite. The original no-argument/`--script`/`--project` modes remain the separate legacy experiment.
@@ -93,7 +93,7 @@ source label, not a filesystem runtime dependency. Release builds retain Rust
 panic/error behavior while omitting compiler debuginfo.
 
 The archive contains only the executable, the owned `resources/truck.obj`, a
-runtime README, original Ruster licenses, readable dependency notices and
+runtime README, original Rot Engine licenses, readable dependency notices and
 supplemental provenance, and a JSON manifest. Resource lookup defaults to the
 `resources` directory beside the executable and does not depend on the working
 directory. The resource is read-only; no project cache, editor or MCP is
@@ -108,7 +108,7 @@ target, selected normal/build dependency inventory, ELF `DT_NEEDED` libraries,
 interpreter and required GLIBC symbol versions. Build dependencies and
 procedural macros are conservatively retained in the notice inventory; it is
 not a claim that every listed package is linked into the executable. Selection
-uses `cargo tree -p ruster-yard --target x86_64-unknown-linux-gnu --edges
+uses `cargo tree -p rot-yard --target x86_64-unknown-linux-gnu --edges
 normal,build` joined to locked metadata, avoiding feature unification with
 unrelated workspace members. Metadata/cache paths are never serialized.
 
@@ -174,40 +174,40 @@ exclusion with relative engine/patch paths; overwrite/symlink/failure atomicity;
 missing/corrupt readable notices; and dev-only dependency exclusion. The real
 ELF fixture uses the host's `true`, so it proves packaging mechanics, not Yard
 behavior or GPU rendering. Actual source export to
-`/tmp/ruster-m7-template-ready` succeeded with136files and offline Cargo metadata
+`/tmp/rot-m7-template-ready` succeeded with136files and offline Cargo metadata
 (four unused GLES source shaders were appended after the initial132-file export
 to preserve complete HAL source; Vulkan build inputs were unchanged);
 the reduced lockfile contains no editor/MCP/viewer/CLI workspace packages.
 
 The initial remapped release package was created in3.08s at
-`/tmp/ruster-m7-evidence/ruster-yard-linux-x86_64.tar.gz` (about8.1MiB compressed,
+`/tmp/rot-m7-evidence/rot-yard-linux-x86_64.tar.gz` (about8.1MiB compressed,
 25MiB executable); SHA-256
 `e7a1c239d4e03dc975fd45d06769991bcc69f904ef8499695d1230705c04609f`.
 It includes8payload files plus the manifest and248external normal/build
 dependency versions. All selected readable notices and supplemental checksums
 passed; no checkout/home prefix was found by the packager's binary check.
 
-After extraction under `/tmp/ruster-m7-relocated`, eight real release checks
+After extraction under `/tmp/rot-m7-relocated`, eight real release checks
 passed from unrelated cwd `/tmp`, with display/runtime environment variables
 removed: default headless20delivered at tick10; capacity3 gives24at tick8;
 zero ticks; invalid capacity; unknown option; missing-resource error; resource
 restoration; and subsequent default-resource recovery. Resources were0444 in
 a0555directory; all package file hashes/paths stayed unchanged, with no cache
 created. `readelf`/`ldd` prerequisites above came from this exact executable.
-Raw captures are local `/tmp/ruster-m7-evidence/{packaging-headless.json,ldd.txt,elf-*.txt}`.
+Raw captures are local `/tmp/rot-m7-evidence/{packaging-headless.json,ldd.txt,elf-*.txt}`.
 
 The final keyboard-focus verification and production `Host::route_keyboard`
 extraction changed kit source after that artifact. A fresh136-file source export
-at `/tmp/ruster-m7-source-final` and final remapped executable package were
+at `/tmp/rot-m7-source-final` and final remapped executable package were
 created together in3.01s. The current artifact is
-`/tmp/ruster-m7-evidence/ruster-yard-linux-x86_64-final.tar.gz`,8,456,509bytes
+`/tmp/rot-m7-evidence/rot-yard-linux-x86_64-final.tar.gz`,8,456,509bytes
 compressed with a26,037,888-byte executable; SHA-256
 `0438291f9f591d2506bfa865f87d67201efa254183e2b311f91bcaac9ea3c708`.
 It supersedes the initial package for final-state acceptance and preserves the
 same8payload files plus manifest and248external normal/build notice versions.
 
 All eight relocation/headless/error/recovery checks above were rerun against
-`/tmp/ruster-m7-relocated-final/ruster-yard/ruster-yard` from `/tmp`, again with
+`/tmp/rot-m7-relocated-final/rot-yard/rot-yard` from `/tmp`, again with
 desktop/runtime environment variables removed and resources0444 in a0555
 directory. They passed, including20at tick10,24at tick8 with capacity3,
 missing-resource failure and subsequent restoration; package hashes/paths
@@ -215,7 +215,7 @@ remained unchanged. All nine archive members were regular safe relative files,
 with no current checkout/home prefix in any payload. Fresh `readelf`/`ldd`
 results confirmed the same GLIBC2.44/interpreter/library requirements.
 Final raw captures are
-`/tmp/ruster-m7-evidence/{packaging-headless-final.json,ldd-final.txt,elf-*-final.txt}`.
+`/tmp/rot-m7-evidence/{packaging-headless-final.json,ldd-final.txt,elf-*-final.txt}`.
 Unchanged distribution-script fixture evidence above was reused.
 
 Independent creator edit/rebuild and native release validation belong in the
@@ -249,5 +249,5 @@ The Linux audio-enabled editor and Motion Lab build use ALSA development
 headers, as listed in the Linux CI prerequisites. The compiled runtime
 links `libasound.so.2`. Playback was qualified on PipeWire through
 PulseAudio using float PCM; isolated headless replay and saved checks
-leave the device closed. `RUSTER_AUDIO_DEVICE` optionally selects an
+leave the device closed. `ROT_AUDIO_DEVICE` optionally selects an
 exact PulseAudio output description for the launched process.

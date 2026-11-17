@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=Rot Engine
-Comment=Create and simulate interactive 3D scenes
-Exec=ruster-editor
-Icon=rot-engine-launcher
-Terminal=false
-Categories=Graphics;3DGraphics;
-StartupWMClass=org.ruster.editor

@@ -1,6 +1,6 @@
-# Contributing to Ruster
+# Contributing to Rot Engine
 
-Ruster is an early Rust/Vulkan engine project. Issues, reproducible bug reports, documentation fixes and focused code contributions are welcome at [akilfernando/Ruster](https://github.com/akilfernando/Ruster).
+Rot Engine is an early Rust/Vulkan engine project. Issues, reproducible bug reports, documentation fixes and focused code contributions are welcome at [akilfernando/Ruster](https://github.com/akilfernando/Ruster).
 
 Before starting a large change, discuss it in an issue and read the [roadmap](docs/ROADMAP.md), [current status](docs/STATUS.md) and relevant [architecture decisions](docs/decisions/README.md). Keep proposals distinct from accepted decisions. Do not expand several later milestones at once.
 
@@ -20,6 +20,6 @@ Treat other contributors respectfully, keep technical criticism specific, and av
 
 ## Licensing and dependencies
 
-Unless explicitly stated otherwise, contributions intentionally submitted for inclusion are offered under Ruster's `MIT OR Apache-2.0` dual license, without additional terms. Only contribute code/assets you have the right to license this way. Third-party dependencies retain their own terms.
+Unless explicitly stated otherwise, contributions intentionally submitted for inclusion are offered under Rot Engine's `MIT OR Apache-2.0` dual license, without additional terms. Only contribute code/assets you have the right to license this way. Third-party dependencies retain their own terms.
 
 For dependency changes, regenerate the [inventory](docs/DEPENDENCIES.md) and `THIRD_PARTY_NOTICES.txt` with `python3 scripts/dependency_notices.py`, review new license expressions and notices, and commit the updated lockfile. Preserve font/Unicode and other required third-party notices when distributing compiled artifacts. Do not add secrets, proprietary assets or developer-local paths.

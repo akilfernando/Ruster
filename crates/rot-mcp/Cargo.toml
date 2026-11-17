@@ -1,0 +1,22 @@
+[package]
+name = "rot-mcp"
+description = "Bounded local stdio MCP adapter for an explicitly attached Rot Engine editor"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+base64 = "0.22.1"
+png = "0.18.1"
+rot-scene = { path = "../rot-scene" }
+serde = "1"
+serde_json = { version = "1", features = ["float_roundtrip"] }
+rustix = { version = "0.38.44", features = ["net", "process"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[lints]
+workspace = true

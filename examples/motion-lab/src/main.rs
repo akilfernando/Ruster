@@ -3,18 +3,18 @@ use std::{
     time::Duration,
 };
 
-use ruster_app::creation::{CreationManifest, DESCRIPTOR_NAME};
-use ruster_app::{Application, HostOptions, MeshMap, ResourceRoot, Runtime};
-use ruster_motion_lab::generic::{self, GenericMotionLab};
-use ruster_motion_lab::{read_source, MotionLab, DEFAULT_SOURCE};
-use ruster_scene::input::{ActionFrame, ActionMap};
+use rot_app::creation::{CreationManifest, DESCRIPTOR_NAME};
+use rot_app::{Application, HostOptions, MeshMap, ResourceRoot, Runtime};
+use rot_motion_lab::generic::{self, GenericMotionLab};
+use rot_motion_lab::{read_source, MotionLab, DEFAULT_SOURCE};
+use rot_scene::input::{ActionFrame, ActionMap};
 
 #[path = "../../../crates/support/strict_json.rs"]
 mod strict_json;
 
 const HELP: &str = "Rot Engine Motion Lab — compare authored motion or open a legacy Rhai project
 
-Usage: ruster-motion-lab [OPTIONS]
+Usage: rot-motion-lab [OPTIONS]
   --headless       Attach the behavior to left, Reset, run fixed ticks, print transforms
   --ticks N        Headless ticks, 0–10000 (default 10)
   --input-frames PATH Headless generic/creation JSON array, at most 1 MiB and N frames
@@ -42,7 +42,7 @@ The default script is embedded, so the command works from any directory.
 
 Generic mode consumes Scene5/Lua through the shared behavior backend. Native mode
 loads authored data without compiling it; Reset validates at dt0, Run/Step uses
-fixed dt0.1. Author/edit/save in ruster-editor, then reopen this read-only viewer.
+fixed dt0.1. Author/edit/save in rot-editor, then reopen this read-only viewer.
 Headless generic mode Resets and prints JSON with separate authored/runtime scenes.
 --input-frames supplies one programmatic action frame per initial tick; the whole
 file validates before Reset. Remaining ticks are neutral; no native input is claimed.
@@ -297,11 +297,11 @@ fn execute(options: Options) -> Result<(), String> {
         }
         Ok(())
     } else {
-        ruster_app::run(
+        rot_app::run(
             app,
             HostOptions {
                 title: "Motion Lab — Behavior authoring".into(),
-                app_id: "ruster-motion-lab".into(),
+                app_id: "rot-motion-lab".into(),
                 tick_duration,
                 max_frames: options.frames,
                 start_running: false,
@@ -349,7 +349,7 @@ fn read_input_frames(
     let Some(path) = path else {
         return Ok(Vec::new());
     };
-    let bytes = ruster_assets::read_regular_file(path, 1024 * 1024)
+    let bytes = rot_assets::read_regular_file(path, 1024 * 1024)
         .map_err(|error| format!("Input frames {}: {error}", path.display()))?;
     let frames: Vec<ActionFrame> = serde_json::from_slice(&bytes)
         .map_err(|error| format!("Input frames require a JSON array of action frames: {error}"))?;
@@ -376,7 +376,7 @@ fn read_commands(path: Option<&Path>) -> Result<Vec<generic::CommandRequest>, St
     let Some(path) = path else {
         return Ok(Vec::new());
     };
-    let bytes = ruster_assets::read_regular_file(path, 1024 * 1024)
+    let bytes = rot_assets::read_regular_file(path, 1024 * 1024)
         .map_err(|error| format!("Command sequence {}: {error}", path.display()))?;
     let value = strict_json::parse(&bytes).map_err(|e| format!("Command sequence: {e}"))?;
     let commands: Vec<generic::CommandRequest> = serde_json::from_value(value)
@@ -403,7 +403,7 @@ fn read_hud_activations(path: Option<&Path>, ticks: u64) -> Result<Vec<(u64, Str
     let Some(path) = path else {
         return Ok(Vec::new());
     };
-    let bytes = ruster_assets::read_regular_file(path, 1024 * 1024)
+    let bytes = rot_assets::read_regular_file(path, 1024 * 1024)
         .map_err(|error| format!("HUD activations {}: {error}", path.display()))?;
     let value = strict_json::parse(&bytes).map_err(|error| format!("HUD activations: {error}"))?;
     let requests: Vec<HudActivationRequest> = serde_json::from_value(value).map_err(|error| {
@@ -422,7 +422,7 @@ fn read_hud_activations(path: Option<&Path>, ticks: u64) -> Result<Vec<(u64, Str
         if tick.to_string() != request.after_tick || tick > ticks || tick < previous_tick {
             return Err("HUD activations require sorted canonical after_tick strings within requested ticks".into());
         }
-        ruster_scene::validate_id(&request.button_id).map_err(|error| error.to_string())?;
+        rot_scene::validate_id(&request.button_id).map_err(|error| error.to_string())?;
         schedule.push((tick, request.button_id));
         previous_tick = tick;
     }
@@ -432,7 +432,7 @@ fn read_hud_activations(path: Option<&Path>, ticks: u64) -> Result<Vec<(u64, Str
 fn activate_scheduled_hud(
     runtime: &mut Runtime<GenericMotionLab>,
     schedule: &mut std::iter::Peekable<std::vec::IntoIter<(u64, String)>>,
-    receipts: &mut Vec<ruster_behavior::HudActivationReceipt>,
+    receipts: &mut Vec<rot_behavior::HudActivationReceipt>,
 ) -> Result<(), String> {
     while schedule
         .peek()
@@ -448,7 +448,7 @@ struct HeadlessRun {
     runtime: Runtime<GenericMotionLab>,
     input: serde_json::Value,
     command_receipts: Vec<serde_json::Value>,
-    hud_activation_receipts: Vec<ruster_behavior::HudActivationReceipt>,
+    hud_activation_receipts: Vec<rot_behavior::HudActivationReceipt>,
 }
 
 fn headless_runtime(
@@ -620,7 +620,7 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
             let mut matrices = Vec::new();
             let mut eye = None;
             for aspect in [4.0 / 3.0, 16.0 / 9.0] {
-                let camera = ruster_app::player_view_projection(view, aspect)
+                let camera = rot_app::player_view_projection(view, aspect)
                     .ok_or("Resolved player view could not be projected")?;
                 eye = Some(camera.eye);
                 matrices.push(serde_json::json!({
@@ -644,11 +644,11 @@ fn execute_creation(options: Options, descriptor: &Path) -> Result<(), String> {
         // The host preserves callers' reset policy. Validate authored behavior at dt0 before
         // opening a running creation; its new host Runtime and behavior both begin at tick0.
         app.reset()?;
-        ruster_app::run(
+        rot_app::run(
             app,
             HostOptions {
                 title: manifest.title,
-                app_id: "ruster-creation".into(),
+                app_id: "rot-creation".into(),
                 tick_duration,
                 max_frames: options.frames,
                 start_running: true,
@@ -665,7 +665,7 @@ fn execute_generic(options: Options) -> Result<(), String> {
     let session = match &options.scene {
         Some(path) => generic::read_session(path)?,
         None => {
-            ruster_scene::Session::from_snapshot_bytes(generic::DEMO).map_err(|e| e.to_string())?
+            rot_scene::Session::from_snapshot_bytes(generic::DEMO).map_err(|e| e.to_string())?
         }
     };
     let tick_duration = generic::session_tick_duration(&session);
@@ -726,11 +726,11 @@ fn execute_generic(options: Options) -> Result<(), String> {
         );
         Ok(())
     } else {
-        ruster_app::run(
+        rot_app::run(
             app,
             HostOptions {
                 title: "Motion Lab — Shared behavior comparison".into(),
-                app_id: "ruster-motion-lab".into(),
+                app_id: "rot-motion-lab".into(),
                 tick_duration,
                 max_frames: options.frames,
                 start_running: false,
@@ -741,8 +741,8 @@ fn execute_generic(options: Options) -> Result<(), String> {
 }
 
 fn execute_play_check(options: &Options) -> Result<bool, String> {
-    use ruster_assets::{resource_identity, MeshNormalPolicy, ResourcePin, TextureRole};
-    use ruster_behavior::play_check::{self, PlayCheck, Status};
+    use rot_assets::{resource_identity, MeshNormalPolicy, ResourcePin, TextureRole};
+    use rot_behavior::play_check::{self, PlayCheck, Status};
     use std::{
         collections::BTreeMap,
         sync::{atomic::AtomicBool, Arc},
@@ -775,7 +775,7 @@ fn execute_play_check(options: &Options) -> Result<bool, String> {
     // read-only runner verifies exact bytes and interpretation without retaining
     // renderer resources or building a second preview.
     for (id, path) in &manifest.meshes {
-        let bytes = root.read(path, ruster_assets::MAX_SOURCE_BYTES)?;
+        let bytes = root.read(path, rot_assets::MAX_SOURCE_BYTES)?;
         let policy = manifest
             .mesh_normal_policies
             .get(id)
@@ -784,7 +784,7 @@ fn execute_play_check(options: &Options) -> Result<bool, String> {
         pins.insert(id.clone(), ResourcePin::mesh(&bytes, policy));
     }
     for (id, path) in &manifest.textures {
-        let bytes = root.read(path, ruster_assets::MAX_TEXTURE_SOURCE_BYTES)?;
+        let bytes = root.read(path, rot_assets::MAX_TEXTURE_SOURCE_BYTES)?;
         let role = manifest
             .texture_roles
             .as_ref()
@@ -795,7 +795,7 @@ fn execute_play_check(options: &Options) -> Result<bool, String> {
     }
     if let Some(sounds) = &manifest.sounds {
         for (id, path) in sounds {
-            let bytes = root.read(path, ruster_assets::MAX_SOUND_SOURCE_BYTES)?;
+            let bytes = root.read(path, rot_assets::MAX_SOUND_SOURCE_BYTES)?;
             pins.insert(id.clone(), ResourcePin::sound(&bytes));
         }
     }
@@ -820,9 +820,9 @@ fn main() {
         println!(
             "{}",
             serde_json::json!({
-                "format":"ruster-runtime", "version":1,
-                "descriptor_format":ruster_app::creation::FORMAT,
-                "descriptor_version":ruster_app::creation::VERSION,
+                "format":"rot-runtime", "version":1,
+                "descriptor_format":rot_app::creation::FORMAT,
+                "descriptor_version":rot_app::creation::VERSION,
                 "os":std::env::consts::OS, "arch":std::env::consts::ARCH,
                 "capabilities":["initial_camera", "opaque_materials", "authored_lighting", "sun_shadows", "surface_materials", "roughness_maps", "input_actions", "spatial_queries", "runtime_state", "lifecycle_commands", "runtime_hud", "runtime_hud_controls", "runtime_hud_panels", "builtin_primitives", "static_assembly_hierarchy", "group_local_rotation", "authored_player_view", "repeatable_play_checks", "kinematic_move_and_slide", "one_shot_audio"],
             })

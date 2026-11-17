@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Official MCP SDK behavior-data smoke on a disposable enabled scene editor.
 Run: uv run --with mcp==2.3.0 scripts/mcp_behavior_demo.py
-Requires RUSTER_MCP_SOCKET, clean human drafts and one unattached object. Does not
+Requires ROT_MCP_SOCKET, clean human drafts and one unattached object. Does not
 save or run scripts. Three shared Undo operations restore authored data on success.
 A failed/timeout assertion leaves reviewable unsaved work: inspect before retrying.
 """
@@ -18,7 +18,7 @@ from mcp.client.stdio import stdio_client
 
 
 async def main():
-    binary = Path(__file__).resolve().parents[1] / "target/debug/ruster-mcp"
+    binary = Path(__file__).resolve().parents[1] / "target/debug/rot-mcp"
     params = StdioServerParameters(command=str(binary), env={**os.environ})
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client:

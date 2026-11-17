@@ -3,9 +3,9 @@ __pycache__/
 *.pyc
 
 # Persistent sibling files for cooperating scenario writers; do not delete while in use.
-.*.ruster-lock
+.*.rot-lock
 
-# Rebuildable imported content; preserve authored .ruster-assets.json catalog.
-.ruster-cache/
+# Rebuildable imported content; preserve authored .rot-assets.json catalog.
+.rot-cache/
 # Stable cooperating asset-catalog lock inode, not authored content.
-.ruster-assets.lock
+.rot-assets.lock

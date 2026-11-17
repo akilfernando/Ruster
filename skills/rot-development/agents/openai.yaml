@@ -1,0 +1,6 @@
+interface:
+  display_name: "Rot Engine Development"
+  short_description: "Adaptive model delegation for Rot Engine development"
+  default_prompt: "Use $rot-development to continue Rot Engine work with current model routing and documented verification."
+policy:
+  allow_implicit_invocation: true

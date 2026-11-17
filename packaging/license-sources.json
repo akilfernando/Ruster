@@ -266,15 +266,15 @@
       "source": "https://raw.githubusercontent.com/KhronosGroup/ToneMapping/180b1a7bddec33f73fe41712a2963cc3ad8e5547/LICENSES/Apache-2.0.txt",
       "accessed": "2026-11-06",
       "packages": [],
-      "component": "Non-Cargo Khronos PBR Neutral GLSL-to-WGSL translation in ruster-render; included in all distributed supplemental notices"
+      "component": "Non-Cargo Khronos PBR Neutral GLSL-to-WGSL translation in rot-render; included in all distributed supplemental notices"
     },
     {
       "path": "licenses/khronos-tone-mapping-NOTICE.txt",
-      "sha256": "36c63e37e08a4260ef4d50d5f0b3406f0b1ece9977b7b7ed8e3fb8a7347b2dce",
+      "sha256": "a2ecc4f5e55536346e712d07f14ee8a0a0dd38c63fa146979105aef191f2d81f",
       "source": "https://raw.githubusercontent.com/KhronosGroup/ToneMapping/180b1a7bddec33f73fe41712a2963cc3ad8e5547/.reuse/dep5",
       "accessed": "2026-11-06",
       "packages": [],
-      "component": "Non-Cargo Khronos PBR Neutral GLSL-to-WGSL translation in ruster-render; included in all distributed supplemental notices"
+      "component": "Non-Cargo Khronos PBR Neutral GLSL-to-WGSL translation in rot-render; included in all distributed supplemental notices"
     },
     {
       "path": "licenses/parry3d-f64-LICENSE-APACHE.txt",

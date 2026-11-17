@@ -84,7 +84,7 @@ cargo run --locked -p ruster-motion-lab -- --script examples/motion-lab/resource
 cargo run --locked -p ruster-motion-lab -- --headless --ticks 10 --speed 2
 ```
 
-Choose a new export destination. Modify `examples/yard-app/src/lib.rs` in that tree, then build/package it using its README. [Application guide](../examples/yard-app/README.md), [kit API](../crates/ruster-app/README.md) and [distribution guide](DISTRIBUTION.md) contain the full loop. Python3.11+ is now required by packaging/tooling tests.
+Choose a new export destination. Modify `examples/yard-app/src/lib.rs` in that tree, then build/package it using its README. [Application guide](../examples/yard-app/README.md), [kit API](../crates/rot-app/README.md) and [distribution guide](DISTRIBUTION.md) contain the full loop. Python3.11+ is now required by packaging/tooling tests.
 
 For [Motion Lab](../examples/motion-lab/README.md), select an object, Attach behavior, edit properties, then Reset and Run/Step. Edit the shared script in-app or externally and Reload. Revert restores applied values as drafts; Reset validates and applies them, clearing recoverable host errors. Script files are never overwritten by the app. Save project stores a validated runnable candidate; Open restores embedded source without rereading its external reference. Undo history remains session-only. This is not an IDE workflow.
 

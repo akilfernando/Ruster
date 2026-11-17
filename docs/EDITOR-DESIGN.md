@@ -1,10 +1,10 @@
-# Rusterize editor design direction
+# Rot Engine editor design direction
 
 Updated2026-11-05. This is a working design specification and source record; implementation/acceptance is reported separately in STATUS. The creator workflow and data-safety contracts remain authoritative.
 
-## Rusterize identity update — 2026-11-10
+## Rot Engine identity update — 2026-11-10
 
-The user confirms the product name **Rusterize**, supplies a graphite/mint [design brief](branding/RUSTERIZE-UI-BRIEF.md) and [logo concept](branding/rusterize-logo-concept.png), then explicitly resumes a bounded branding/UI slice. The new brief owns the current visual direction. Earlier implementation records below retain their historical palette and evidence. The supplied raster is a concept reference with rough edges. The initial slice left production logo refinement and launcher/About integration open. The later overhaul entry records the delivered assets.
+The user confirms the product name **Rot Engine**, supplies a graphite/mint [design brief](branding/RUSTERIZE-UI-BRIEF.md) and [logo concept](branding/rusterize-logo-concept.png), then explicitly resumes a bounded branding/UI slice. The new brief owns the current visual direction. Earlier implementation records below retain their historical palette and evidence. The supplied raster is a concept reference with rough edges. The initial slice left production logo refinement and launcher/About integration open. The later overhaul entry records the delivered assets.
 
 The current slice updates the editor name and shared egui theme, primary Save action and main-editor warning/error colors while preserving existing keyboard/workflow contracts. Review actual normal/compact/scaled layouts before accepting the slice. F4a remains a separate unapproved proposal.
 
@@ -32,7 +32,7 @@ Move/Rotate/Scale and their Space/Pivot/Snap settings belong with the viewport t
 - Essential labels and values must be readable at supported scale/width. No essential instruction depends on tiny helper text or a tooltip. Supplementary explanations use hover/focus help; empty states and errors provide relevant next actions.
 - Use typography and alignment to establish hierarchy. Reserve prominent headings for the selected object and main areas; keep section labels compact. Align related vector fields; show units once in their proper context. Preserve exact edited data even when presentation is compact.
 - Use quiet neutral surfaces, clear text contrast, restrained separators and one limited accent. Avoid oversized buttons, repeated boxed panels and a wall of equally emphasized actions. Preserve visible keyboard focus and distinguish hover, selected, edited, disabled and error states through more than color alone.
-- A warm-neutral dark starting palette and restrained sand accent are proposed Ruster defaults, not a copied Obsidian/Godot skin or a user-approved palette. Typography, spacing and component consistency matter as much as color. A later light variant must meet the same reading/interaction contracts.
+- A warm-neutral dark starting palette and restrained sand accent are proposed Rot Engine defaults, not a copied Obsidian/Godot skin or a user-approved palette. Typography, spacing and component consistency matter as much as color. A later light variant must meet the same reading/interaction contracts.
 - Keep the native egui implementation lean: central style values and existing controls/Session commands. No web layer, theme/plugin framework, new render pipeline or speculative UI dependency is selected.
 
 ## First implementation review
@@ -47,17 +47,17 @@ That follow-up is now implemented and passes its bounded source/native review: [
 
 ## Primary references and observations
 
-Accessed2026-11-05; source lessons are guidance, while the Ruster mapping is our inference.
+Accessed2026-11-05; source lessons are guidance, while the Rot Engine mapping is our inference.
 
-- [Unity Inspector/components](https://docs.unity.com/en-us/engine/6000.7/manual/working-with-gameobjects/unity-components/inspector-manage-components): selected components and their values form the editing surface. The opened manual is6000.7 Beta; do not treat its version as a Ruster dependency.
+- [Unity Inspector/components](https://docs.unity.com/en-us/engine/6000.7/manual/working-with-gameobjects/unity-components/inspector-manage-components): selected components and their values form the editing surface. The opened manual is6000.7 Beta; do not treat its version as a Rot Engine dependency.
 - [Unity UI writing](https://www.foundations.unity.com/fundamentals/ui-copy-style): concise, consistent, action-oriented labels and plain user-facing terms. Apply the writing principles without copying Unity's proprietary visual assets.
 - [Unity UX essentials](https://www.foundations.unity.com/fundamentals/ux-essentials): distinguish relevant disabled controls from irrelevant hidden controls, with contextual feedback.
 - [Unity contextual tooling](https://www.foundations.unity.com/patterns/contextual-tooling): present tools for the current selection/context. Its framework is not a proposal to introduce an equivalent framework here.
 - [Unity typography](https://www.foundations.unity.com/fundamentals/typography): alignment, hierarchy and sparing heading scale; its font pixel sizes are not adopted verbatim.
-- [Godot Inspector](https://docs.godotengine.org/en/stable/tutorials/editor/inspector_dock.html): grouped property sections, contextual descriptions and direct property/reference editing. A disposable installed-Godot editor probe selected a mesh and captured its actual interface, exit0, isolated workspace2/no global input. It shows compact class/group headings, property/value alignment and viewport tool placement. Transform is lower in the full MeshInstance3D class hierarchy, so this is not evidence that Godot always puts transforms first. Ruster's simpler object model and the user's task justify our transform-first proposal. This is a UI reference, not a performance comparison or physical human study.
-- [Obsidian settings](https://obsidian.md/help/settings) and [Notion sidebar](https://www.notion.com/help/navigate-with-the-sidebar)/[page appearance](https://www.notion.com/help/customize-and-style-your-content): organized navigation, typography/appearance choices and context-dependent actions. The requested calm aesthetic comes from the user's reference, not a claim that either help page prescribes Ruster's colors.
+- [Godot Inspector](https://docs.godotengine.org/en/stable/tutorials/editor/inspector_dock.html): grouped property sections, contextual descriptions and direct property/reference editing. A disposable installed-Godot editor probe selected a mesh and captured its actual interface, exit0, isolated workspace2/no global input. It shows compact class/group headings, property/value alignment and viewport tool placement. Transform is lower in the full MeshInstance3D class hierarchy, so this is not evidence that Godot always puts transforms first. Rot Engine's simpler object model and the user's task justify our transform-first proposal. This is a UI reference, not a performance comparison or physical human study.
+- [Obsidian settings](https://obsidian.md/help/settings) and [Notion sidebar](https://www.notion.com/help/navigate-with-the-sidebar)/[page appearance](https://www.notion.com/help/customize-and-style-your-content): organized navigation, typography/appearance choices and context-dependent actions. The requested calm aesthetic comes from the user's reference, not a claim that either help page prescribes Rot Engine's colors.
 
-The [Godot reference report](evidence/M9-godot-reference.md) retains the selected screenshot, probe source, logs and cleanup evidence; its disposable project remains at `/tmp/ruster-m9-godot-reference`. The Godot UI is third-party reference material, not Ruster artwork or a shipped component. No Godot/Unity/Obsidian/Notion logos, fonts or icon libraries are being copied into the product.
+The [Godot reference report](evidence/M9-godot-reference.md) retains the selected screenshot, probe source, logs and cleanup evidence; its disposable project remains at `/tmp/rot-m9-godot-reference`. The Godot UI is third-party reference material, not Rot Engine artwork or a shipped component. No Godot/Unity/Obsidian/Notion logos, fonts or icon libraries are being copied into the product.
 
 ## Verification before acceptance
 
@@ -68,7 +68,7 @@ First reproduce and repair picking/live-value failure; then capture the actual r
 
 The generic-editor-only style candidate uses existing bundled fonts and egui controls. Agent-selected sizes are14pt body/button,18pt heading,12pt supplementary text and13pt monospace. Calculated sRGB contrast for its explicit color pairs: body/panel12.84:1, secondary/panel7.37:1, body/input13.62:1, body/selection8.39:1 and focus/panel8.37:1. These are static color calculations, not a full accessibility audit or a rendered-layout pass. Disabled/blended states, clipping, focus and scale still require native inspection. Legacy logistics styling is unchanged.
 
-## Rusterize first theme slice — 2026-11-10
+## Rot Engine first theme slice — 2026-11-10
 
 Productd955dc2implements the first shared graphite/mint theme and visible editor naming. Generic and legacy editor setup use one theme owner with bundled fonts. Normal controls use30logical pixels and8pixel gaps. Below600logical pixels of available editor height, the prior28pixel/7pixel compact density preserves the existing viewport minimum and preferred-panel restoration. Selected rows and current tools use the tinted selection/mint foreground, primary Save uses mint/dark text with scoped interaction states, and focused text fields use the actual egui selection-stroke path. Primary text remains14point. Control border #64798B is an agent adjustment from the brief’s #536575to meet the3to1boundary aim on raised controls.
 
@@ -76,7 +76,7 @@ Actual default native [normal capture](/home/akilf/Projects/Ruster-Audits/ruster
 
 The supplied raster remains a concept reference. At that checkpoint, a transparent production icon and launcher/About placement still required asset work. Continue the brief’s representative-workflow/component rollout before claiming a complete redesign. Specialized dialogs/panels, consistent axes/icons/copy, remaining semantic status roles and disabled/accessibility/motion behavior retain their own review. Existing submitted invalid transform drafts remain pending after Enter and Escape; explicit Revert repairs them. A future interaction change should preserve raw recovery while defining keyboard cancellation deliberately.
 
-## Rusterize logo and editor rollout — 2026-11-11
+## Rot Engine logo and editor rollout — 2026-11-11
 
 After user approval of the first visual pass, product eb1d9c6 integrates the clean cube and scanline mark with the existing bundled typeface. The branded start screen and About use the full in-app lockup. The window, normal toolbar and Linux desktop entry use the mark. The icon asset is a 128×128 transparent raster used at smaller sizes as needed. The original concept remains the design reference.
 

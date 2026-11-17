@@ -1,0 +1,151 @@
+# Owned mesh, texture and sound sources
+
+`rot-assets` provides bounded project-local Wavefront OBJ meshes, role-aware PNG textures and short PCM WAV sounds. Sources remain ordinary creator-owned files. A stable asset ID identifies a typed entry in `.rot-assets.json` independently of its filename. Genuine catalog1–3 remain readable without an implicit rewrite; their texture interpretation remains BaseColor. V3b adds an explicit immutable Roughness role inside the same texture owner/worker path. These source APIs do not by themselves establish the complete editor/MCP/render/runtime workflow.
+
+```sh
+cargo run --locked -p rot-assets -- import /path/to/project roof meshes/roof.obj
+cargo run --locked -p rot-assets -- import /path/to/project paint textures/paint.png
+cargo run --locked -p rot-assets -- import /path/to/project cue sounds/cue.wav
+cargo run --locked -p rot-assets -- inspect /path/to/project
+cargo run --locked -p rot-assets -- refresh /path/to/project paint
+cargo run --locked -p rot-assets -- rename /path/to/project paint textures/paint-renamed.png
+```
+
+Create source directories yourself. Import infers Mesh, Texture or Sound from the case-sensitive `.obj`, `.png` or `.wav` extension. `rename` physically moves a source, preserves its ID/kind/accepted hash, and refuses an existing destination or a kind-changing extension. A mesh source may be imported under distinct IDs with different immutable normal policies; a PNG source may have distinct IDs for BaseColor and Roughness. The same source and interpretation cannot be registered twice. Shared-source Rename is rejected rather than orphaning another identity. A no-op Rename remains valid. Import/rename persist the catalog immediately; scene save/Undo is a separate transaction. There is no file watcher or automatic acceptance of changed source bytes.
+
+## OBJ and UV policy
+
+Accepted records: `v x y z`; optional `vt` with1–3 coordinates and `vn` with3; triangle `f` records using positive or relative negative indices, including `v/vt`, `v//vn` and `v/vt/vn`; comments and `o`, `g`, `s` metadata. Indices must refer to already declared data. The default `parse_obj` / `AssetStore::import` route generates flat face normals, preserving old import semantics. Explicit `parse_obj_with_normal_policy` / `import_mesh` may choose `AuthoredWhenComplete`: complete valid per-corner authored normals are safely normalized and retained; an entirely absent normal stream falls back to flat; partial/mixed/zero/nonfinite normals reject atomically. `Flat` explicitly retains flat shading. Smoothing metadata and names do not generate normals. Triangulate and disable material export in the source tool: `mtllib`, `usemtl`, quads, curves, unsupported directives, zero/out-of-range indices, non-finite coordinates and degenerate triangles produce line-numbered errors. Coordinates are bounded to±1,000,000.
+
+Complete UVs are retained by expanded face corner, including seams and negative indices, as `Mesh.texcoords: Option<Vec<[f32;2]>>`. The stream has exactly one entry per vertex when present. `vt u` defaults its second component to0; a third component is validated and ignored for this2D route. Raw repeat coordinates are retained and no V flip occurs in the importer. The renderer must flip V exactly once for the top-row-first image convention. Meshes missing any corner UV remain valid geometry with no complete stream; `has_complete_uvs()` and `uv_diagnostic()` expose that limitation. Textured dependency validation belongs to the consuming scene/runtime workflow.
+
+OBJ source size is at most1MiB; source positions/UVs/normals each at most98,304; triangles at most32,768. Derived geometry emits an independent vertex per corner, at most98,304 vertices and indices. `Mesh::payload_bytes()` counts actual position/normal/index/UV logical bytes. The project mesh payload cap is48MiB, increased from32MiB so recovering UV attributes does not reject previously supported geometry sets merely for those attributes. Container overhead and caller-retained snapshots are excluded; this is a compatibility bound, not a measured performance budget.
+
+The normal policy is immutable per asset identity and visible in `AssetInfo.mesh_normal_policy`. Existing catalog1/2 meshes migrate as Flat. Authored-normal cache4 has a distinct policy-aware identity; existing Flat cache3 semantics are unchanged, and an authored cache miss never falls back to an old flat cache. Refresh retains the accepted policy; changing policy requires a new import ID and explicit mesh assignment. Texture entries must omit mesh normal policy, including null.
+
+## PNG roles, pixels and mips
+
+`decode_png(bytes)` and the existing `AssetStore::import`/CLI PNG route retain the opaque sRGB BaseColor interpretation. Explicit `decode_png_with_role(bytes, TextureRole::Roughness)` and `import_texture`/`import_texture_at` choose raw roughness data. `TextureRole::BaseColor` serializes as `base_color_srgb`; `TextureRole::Roughness` as `roughness_linear`. Role is immutable per asset identity and appears in `AssetInfo.texture_role`; it is not inferred from a filename, gamma tag or material slot. Import another ID and use the consuming scene's undoable assignment to change interpretation. Catalog import remains separately persistent.
+
+Both roles accept nonanimated, noninterlaced8-bit PNG with standard compression/filtering, at most8MiB encoded and2048 pixels on either edge. BaseColor accepts RGB/RGBA, retains RGB even at alpha0 and writes tightly packed RGBA8/alpha255, without premultiplication. Roughness accepts grayscale/RGB/RGBA and retains gray/red bytes exactly in tightly packed R8. Other channels and alpha, including transparency metadata, do not affect either opaque route. No importer V flip occurs: raw top-row-first order is retained and the renderer must flip OBJ V exactly once.
+
+A complete chunk preflight checks CRCs, bounded lengths, required header/end, consecutive IDAT chunks and absence of trailing bytes, including metadata after image data. The pinned PNG decoder additionally validates image structure/decompression. Neither role implements general color management.
+
+| PNG metadata/input | BaseColor | Roughness |
+| --- | --- | --- |
+| Untagged, valid sRGB intent0–3 | Fixed sRGB interpretation | Raw bytes; tag ignored |
+| gAMA | Exactly conventional45455 | Any nonzero four-byte value; ignored |
+| cHRM | Exactly canonical sRGB coordinates | Exactly32bytes; coordinates ignored, no colorimetry interpretation |
+| ICC/cICP/mDCV/cLLI profiles, APNG | Reject | Reject |
+| Text metadata | Ignore | Ignore |
+| Grayscale | Reject | Raw byte |
+| Grayscale+alpha, palette,16-bit, interlaced | Reject | Reject |
+
+`Texture { role, width, height, mips }` contains the complete chain through1×1. `TextureMip { width, height, bytes }` contains exactly `width * height * role.bytes_per_pixel()` bytes:4for BaseColor,1for Roughness. The previous `rgba` field is renamed `bytes`; application-provided BaseColor fixtures must also set their explicit role. `validate_texture` checks dimensions, complete mip shapes, exact role-specific byte counts and BaseColor opacity.
+
+BaseColor mip arithmetic and version1 cache bytes are unchanged: average RGB in linear light and encode back to sRGB, using area coverage to retain odd final rows/columns. An equal black/white average encodes188. Roughness uses the same complete area-weighted footprints but averages raw perceptual roughness bytes arithmetically and rounds once; black/white produces128 and `[0,0,255]` along either axis produces85. This is a declared filtering approximation, not exact BRDF integration or specular antialiasing.
+
+`Texture::payload_bytes()` sums actual retained mip bytes. A full2048² R8 chain uses5,592,405bytes; RGBA8 uses four times that. Limits remain24MiB per chain and64MiB across **all accepted latest catalog texture identities, across both roles**; at most64combined asset records are supported. Distinct roles of the same source count separately. Shared material users do not create another asset owner. The replacement check excludes only the replaced ID before adding its candidate payload.
+
+The64MiB figure is not a lifetime/peak bound: staged candidates, decoder buffers, older immutable Arc snapshots, painted/runtime preview owners, retired stores, containers and GPU resources can coexist. The existing single texture map and bounded worker/publication/fenced-retirement ownership remain; no second roughness store or worker is added. A roughness RGB/RGBA decode can temporarily need four output bytes per pixel even though its accepted pixels use R8. That checked raw output is separate from the chain; PNG internal allocations retain the existing32MiB best-effort decoder limit. Root resource verification must account for these owners separately.
+
+## Short WAV sound sources
+
+`decode_wav` accepts RIFF WAV with signed 16-bit PCM, mono or stereo,
+sample rates from 8,000 to 48,000 Hz, and a nonempty duration of at most
+10 seconds. Encoded bytes are limited to 2 MiB. Decode returns immutable
+stereo `f32` frames at the original rate. Mono duplicates its channel.
+Accepted sound identities share a 64 MiB decoded-frame budget in each
+catalog. Transient decode storage and expired snapshots held by other
+owners have separate lifetimes.
+
+`AssetStore::import` selects Sound for `.wav`. The catalog writes
+version 6 only when it contains a WAV record. Sound records omit both
+render interpretation fields. A verified exact-byte copy in
+`.rot-cache/sounds/v1-HASH.bin` preserves last-good playback across
+reopen. Changed source bytes require Refresh to become the accepted
+source. Export pins the accepted WAV bytes and sound interpretation
+and fails if the source changed. `sound()` borrows the accepted decoded
+clip and `sound_snapshots()` returns shared immutable clips.
+
+## Catalog, caches and recovery
+
+Asset IDs contain1–128 ASCII letters, digits, `_`, `-`, `.`. Source paths are relative, at most256 bytes, without traversal, reserved `.rot-` components or symlinks. The catalog is bounded to64KiB. Kind must match source extension. Catalog4 mesh records require `mesh_normal_policy` and must omit `texture_role`; texture records require `texture_role` and must omit `mesh_normal_policy`. Opposite-kind keys reject even when null; missing/null/unknown required interpretations reject. Catalog1/2/3 decode using their exact old shapes, preserving normal-policy migration and defaulting old texture identities to BaseColor. Actual `texture_role` presence under any old label rejects before migration, including null. Open is read only for catalog bytes. A successful catalog-changing mutation writes version 4 for mesh/texture, version 5 for static models, or version 6 when WAV assets are present; same-content Refresh repairs status/cache without advancing revision or migrating catalog bytes. Unsupported versions reject.
+
+A successful import/refresh hashes exact source bytes with SHA-256 and publishes the derived cache before committing catalog bytes. Flat mesh cache writes use `.rot-cache/meshes/v3-HASH.bin`; AuthoredWhenComplete uses version4. Flat caches2/1 remain readable, without automatic deletion. The116-byte header retains `RUSTMESH`, little-endian version/counts,64 ASCII source-hash bytes and32 binary checksum bytes. In version3, the vertex-count high bit marks a complete UV stream. The payload has six little-endian `f32` values per vertex, then optional two-float UVs per vertex, then `u32` indices. The checksum covers all header fields except itself plus payload. Counts, exact length, geometry and UV validity are checked before use. Serialized mesh cache size remains bounded to16MiB.
+
+Opening a Flat mesh prefers cache3, then2, then1; AuthoredWhenComplete reads only cache4. Old caches lack UV information: when exact accepted source remains available, it is reparsed to recover UVs and publish3 without accepting source edits or rewriting the catalog. Missing sources can retain old geometry without UVs. Cache1 uses strict historical mesh serialization for its checksum, so adding UV support does not invalidate old checksums or permit UV fields under an old label. Absent UVs remain omitted from ordinary Mesh serialization.
+
+BaseColor texture cache `.rot-cache/textures/v1-HASH.bin` preserves its exact prior format/bytes. Roughness uses `v2-HASH.bin` with the same120-byte header and per-level dimensions/byte count, followed by tight R8 bytes. Version is the immutable role identity. Both include source hash and a checksum covering semantic header/payload; expected role, counts, exact lengths and mip shapes are checked before allocation/use, plus BaseColor opacity. A cache never falls back to or reinterprets the other role, even when source hashes match. It preserves last-good texture content across reopen when sources change or disappear. Removing caches rebuilds unchanged valid sources. Cache keys contain importer version/source hash, never an asset ID or absolute local path. Do not commit derived data.
+
+Opening reads/hashes each source once. Matching accepted bytes plus a validated current cache skip parsing/decoding; valid legacy mesh caches trigger the UV recovery described above. Changed, missing or malformed sources retain usable accepted caches and report Invalid/Missing diagnostics. Refresh is the explicit acceptance boundary. Failed import/refresh/cache publication/catalog publication preserves previous accepted payload/hash/revision/catalog bytes; an orphan derived cache is disposable. A later valid Refresh recovers. Refresh accepts only the requested immutable identity. If the same PNG is registered under two roles, accepting changed bytes for one does not accept the other: its prior Arc/hash remain. A selected export involving the stale role rejects by source hash until it too is explicitly refreshed, even if its in-memory status has not yet been rechecked by open. Missing both accepted source bytes and a usable cache is irrecoverable; this crate never replaces failed content with a cube/placeholder.
+
+Rename rolls its file move back if catalog publication fails and reports both paths if rollback also fails. Catalog writes use same-directory temporary files, file sync and atomic replacement; this is not universal power-loss durability or a transaction across scene and catalog files.
+
+## APIs and concurrency
+
+`mesh()`/`texture()` borrow accepted content; `mesh_snapshots()`/`texture_snapshots()` return cheap maps of immutable `Arc` snapshots. `meshes()` preserves the legacy owned-copy API. Identical decoded content preserves Arc identity through source-only edits, unchanged Refresh, unrelated changes, rename and failures. Changed accepted content replaces only that asset's Arc. Consumers should release obsolete snapshots; retained snapshots are outside catalog payload accounting. `inspect()` exposes kind, mesh normal policy/texture role, stable ID, relative source path, accepted hash, Ready/Missing/Invalid status and diagnostics. All roles remain in the existing `texture()`/`texture_snapshots()` map; consumers must validate slot-role compatibility before upload/assignment.
+
+Mutations compare expected revision and the complete on-disk catalog baseline under a project advisory lock. `import_at`, `import_mesh_at`, `import_texture_at`, `refresh_at` and `rename_at` reject stale revisions; convenience methods use the current revision. Session/draft permission guards belong to hosts. The nonblocking lock reports Busy for explicit retry and explicitly unlocks on drop even with inherited/duplicated descriptors. Reopen after a disk conflict. Regular-file preflight avoids blocking on FIFOs; special-file write destinations reject rather than being replaced. Confinement/symlink checks support trusted project use, not a hostile same-user filesystem race sandbox.
+
+`export_snapshot(&BTreeSet<String>)` captures metadata for selected resource IDs without filesystem I/O. `ExportSnapshot::read_sources()` returns only exact accepted source bytes, using kind-specific bounds/confinement and checking catalog baseline before/after reading. Changed bytes require Refresh. It does not acquire locks, open another store, write caches or include sources outside the selected IDs. `ExportSnapshot::texture_role(id)` and `mesh_normal_policy(id)` expose the frozen accepted interpretation without filesystem access. The caller must compute the complete current object/material dependency closure, including inactive authored map slots, and preserve exact roles in delivery descriptors. It must not infer role later from the PNG or omit a roughness reference. This method is not itself an exporter.
+
+## Verification
+
+The owning command is `cargo test --locked -p rot-assets`. Existing cases cover supported mesh cache1/2 recovery and cache3/4 publication, UV seams/negative indices/partial legacy behavior, catalog1 no-write recovery/strict old labels, typed texture last-good refresh/reopen/mixed export, source-only Arc identity, PNG role/color/raw-data/mip/cache boundaries, same-source role separation/frozen export metadata, mixed-role64MiB accepted payload bounds, failed publication, rename rollback, path/symlink/conflict guards and CLI wiring. Unix CLI child checks exercise FIFOs and actual lock contention without risking a hung runner. Other platforms require their own filesystem evidence. Actual commands/results belong in session evidence; this API summary does not claim that unrun V3b checks passed. Source checks do not establish GPU, native editor, exported application or resource-performance acceptance. The package inherits the workspace MIT OR Apache-2.0 license and uses the pinned png crate for image decoding.
+
+Unchanged accepted PNG Refresh still checks confined source bytes/hash and repairs the disposable cache, but reuses immutable decoded pixels/mips instead of decoding again. A missing accepted snapshot takes the normal validation path. Cache write failures retain the accepted payload/catalog revision and report a diagnostic; repair and Refresh can clear it. Mesh Refresh continues parsing so old caches can recover UVs. This avoids redundant work; it does not make import/cache operations asynchronous.
+
+Opening a changed PNG marks it Invalid with “Source changed; Refresh to validate and accept” and retains last-good cached content where available. Open does not decode or validate the changed image. Explicit Refresh gives format diagnostics and accepts valid changes. Missing, oversized and unreadable files still report their specific read failures. Mesh-open diagnostics are unchanged.
+
+`ExportSnapshot::source_ids` reads captured metadata only. `read_verified_sources` verifies bounded source buffers one at a time and passes ownership to a consumer; callback failure or final catalog mismatch rejects the entire traversal. Consumers must write disposable staging and publish only after success. `read_sources` remains a collecting compatibility API and can retain the complete encoded closure; the editor uses the visitor.
+
+## Staged mutations for responsive hosts
+
+`request_at(expected_revision, AssetMutation::{Import,ImportMesh,ImportTexture,Refresh,Rename})` captures bounded metadata and immutable Arc handles without filesystem or pixel work. Move the request to an owning worker, call `prepare`, retain its opaque candidate there, then call `publish` only after the host authorizes publication. Preparation has no source/catalog/cache writes. Publication reacquires the exact catalog guard and rechecks the source witness; it writes cache before catalog. Rename preserves its source-only semantics and does not decode or accept changed/corrupt/oversized content.
+
+The host compares the opaque `AssetStateIdentity` as well as its document/root/revision/draft authority before publishing and reserves that state until acknowledgement. `adopt` checks the captured in-memory identity and moves the completion into place without pixel comparison or filesystem work; it returns `AssetAdoption { result, retired }`. Return the retired store and rejected completions to a worker for destruction after updating render maps. Identity covers diagnostics/payload changes even when catalog revision is unchanged. Failure results remain owned completion envelopes, so diagnostics cannot be adopted from stale preparation.
+
+Existing synchronous import/refresh/rename call this same pipeline and destroy retired state on their caller's thread. `open` remains synchronous for worker callers. The library does not supply editor scheduling, cancellation/deadline authority or lifecycle reservation. Every completion requires acknowledgement: `catalog_published()==false` does not mean no filesystem effects, since cache writes or failed rename rollback can occur. [Decision0030](../../docs/decisions/0030-bounded-asset-preparation-and-publication.md) owns the host contract; later role-aware editor/runtime integration must preserve that contract.
+
+Worker-only `with_current_catalog` checks the exact accepted baseline and retains the catalog advisory lock through a caller's publication callback. The callback must not reenter asset operations for that root. This supports coordinated destination-catalog validation and the existing scene-save operation; it does not implement an editor save controller or isolate hostile filesystem races.
+
+V3a source checks additionally cover policy-aware authored normals, strict catalog3/old-label migration, cache4 identity and frozen `ExportSnapshot::mesh_normal_policy(id)` metadata. Exact acceptance commands/results are recorded in [V3a evidence](../../docs/evidence/V3A-feasibility.md); this API summary does not infer native workflow or hardware support.
+
+V3b's asset foundation keeps BaseColor import/cache behavior while adding explicit immutable raw roughness data, catalog4 and frozen export roles. Its renderer/Scene/history/recovery/editor/MCP/application closure is owned by the approved [Finish Patterns plan](../../docs/plans/V3B-FINISH-PATTERNS.md), not established by this crate patch.
+
+## Static GLB source generations
+
+`AssetMutation::ImportGlb` and `RefreshGlb` use the same revision, staged
+preparation, publication lock and live adoption as individual OBJ and PNG
+assets. Their typed success returns a `ModelInfo`, including the accepted
+SHA-256, stable named node paths, local transforms and material/subresource
+identities. Derived mesh and texture IDs resolve through the existing
+renderer-facing snapshots. Synchronous callers use `import_glb_at` and
+`refresh_glb_at`.
+
+Catalog v5 adds the model records. Legacy-only catalogs still publish v4.
+Each accepted generation is an immutable content-addressed GLB under
+`.rot-models`. It is project source data and belongs with the catalog when
+copying a project. Disposable caches can be emptied separately. Opening or
+exporting a model uses the verified accepted generation. Changes to the
+editable source file require Refresh, which checks complete structure before
+publication. Broken or missing editable bytes preserve the last accepted
+generation. Refresh requires matching named paths, placements, assignments
+and interpreted material properties. Geometry, normals, UVs and embedded
+PNG pixels can change.
+
+The subset accepts one embedded GLB 2.0 scene and BIN buffer, positive
+bounded TRS, named paths with unique siblings, one triangle primitive on
+each mesh node, and named opaque single-sided nonmetallic materials with
+roughness in 0.08..=1. Nodes that become Groups require uniform scale;
+mesh leaves can use nonuniform scale. The hierarchy may have at most eight
+Group levels including the placement root and groups that wrap a mesh with
+children. The resolved placement must stay within scene transform bounds.
+Base color uses an embedded compatible PNG with TEXCOORD_0, optional repeat
+or clamp on both axes, and supported matching min/mag/mipmap filters. The
+decoder rejects external URIs, extensions, skins, animations, morphs,
+unsupported vertex/material channels and matrices. Derived OBJ preserves
+triangle order and the existing renderer's normal and UV convention;
+the export snapshot passes only the verified generated OBJ/PNG closure to
+the existing standalone resource loader.

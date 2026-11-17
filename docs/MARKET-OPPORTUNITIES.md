@@ -1,6 +1,6 @@
 # Market opportunity hypotheses
 
-Researched 2026-11-04 through a delegated Astra research pass using primary sources. These rankings express fit for Ruster, not proven demand, market size, or a confirmed product direction. No interviews, source audits, or comparative benchmarks have been conducted.
+Researched 2026-11-04 through a delegated Astra research pass using primary sources. These rankings express fit for Rot Engine, not proven demand, market size, or a confirmed product direction. No interviews, source audits, or comparative benchmarks have been conducted.
 
 ## Ranked opportunities
 

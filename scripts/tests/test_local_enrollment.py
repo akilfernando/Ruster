@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class EnrollmentProvisioning(unittest.TestCase):
     def test_malformed_registry_refused_before_output(self):
-        valid = {"id": "one", "name": "One", "scene_id": "scene", "locator": "/fixture/connection.json", "binding": {"wire": "ruster-owner-1", "incarnation": "i", "generation": "g", "connection": "c"}}
+        valid = {"id": "one", "name": "One", "scene_id": "scene", "locator": "/fixture/connection.json", "binding": {"wire": "rot-owner-1", "incarnation": "i", "generation": "g", "connection": "c"}}
         cases = [({"projects": [{"id": "one", "name": "One", "scene_id": "s"}]}, "fixture"),
                  ({"projects": [valid]}, "é" * 128)]
         for field, value in [("id", "bad/id"), ("name", "é" * 128), ("scene_id", "é" * 128), ("unknown", True), ("binding", {**valid["binding"], "unknown": 1})]:
@@ -51,7 +51,7 @@ class EnrollmentProvisioning(unittest.TestCase):
             adapter.write_text("#!/bin/sh\nexit 0\n")
             adapter.chmod(0o700)
             registry = root / "legacy.json"
-            records = [{"id": p, "name": p, "scene_id": "same", "locator": "/fixture/connection.json", "binding": {"wire": "ruster-owner-1", "incarnation": "i", "generation": "g", "connection": "c"}} for p in ("one", "two")]
+            records = [{"id": p, "name": p, "scene_id": "same", "locator": "/fixture/connection.json", "binding": {"wire": "rot-owner-1", "incarnation": "i", "generation": "g", "connection": "c"}} for p in ("one", "two")]
             registry.write_text(json.dumps({"projects": records}))
             registry.chmod(0o600)
             original = registry.read_bytes()

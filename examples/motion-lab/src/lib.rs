@@ -1,13 +1,13 @@
-//! Shared Scene5 motion comparison and legacy Rhai project1 compatibility over ruster-app.
+//! Shared Scene5 motion comparison and legacy Rhai project1 compatibility over rot-app.
 
 use std::{
     collections::BTreeMap,
     path::{Path, PathBuf},
 };
 
-use ruster_app::{egui, Application, Content, MeshMap, Step};
-use ruster_scene::Scene;
-use ruster_script::{Behavior, Properties};
+use rot_app::{egui, Application, Content, MeshMap, Step};
+use rot_scene::Scene;
+use rot_script::{Behavior, Properties};
 
 pub mod generic;
 mod project;
@@ -17,7 +17,7 @@ pub const MAX_SOURCE_BYTES: u64 = 16 * 1024;
 
 /// Read a bounded regular UTF-8 file. This is a trusted local authoring workflow.
 pub fn read_source(path: &Path) -> Result<String, String> {
-    let bytes = ruster_assets::read_regular_file(path, MAX_SOURCE_BYTES as usize)
+    let bytes = rot_assets::read_regular_file(path, MAX_SOURCE_BYTES as usize)
         .map_err(|e| format!("Cannot read {}: {e}", path.display()))?;
     String::from_utf8(bytes).map_err(|e| format!("Script must be UTF-8: {e}"))
 }

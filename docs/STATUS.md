@@ -21,6 +21,36 @@
   evidence records a 28 ms first live submission and a float-PCM
   PipeWire/PulseAudio qualification scope.
 
+## Identifier rename to Rot — 2026-11-17
+
+The user directed renaming the remaining Ruster/Rusterize identifiers and
+chose the short `rot-*` form with **no read-old fallback** for on-disk
+names ([product identity](DIRECTION.md#product-identity--2026-11-17)).
+Crates and binaries are `rot-editor`, `rot-mcp`, `rot-scene` and so on,
+libraries `rot_*`, environment variables `ROT_*`, the application ID
+`org.rot.editor`, skills `rot-development`/`rot-testing`, vendored patch
+records `ROT-PATCH.md`, project files `.rot-assets.json`, `.rot-cache/`
+and `.rot-lock`, formats `rot-scene`, `rot-application` and
+`rot-runtime-kit`, Lua host types `Rot*`, the owner wire `rot-owner-1`
+and the default MCP entry name `rot_engine`.
+
+- **Not renamed:** dated evidence, decisions, plans, verification,
+  research, spikes, history, the delegation log and earlier entries in this
+  file keep the names true when written; only their links to moved files
+  were updated. The GitHub URL, `Ruster-Audits`, `Ruster-Creations`, the
+  user-supplied logo v2 set and absolute local paths are unchanged.
+- **Outside the repository, still old:** the installed `ruster-editor` and
+  `ruster-mcp` binaries, the `org.ruster.editor` desktop entry, the frozen
+  ChatGPT trial registration and the `~/.codex/skills/ruster-*` links.
+  Existing projects under `Ruster-Creations` use the old file and format
+  names and will not load in a build from this source until renamed.
+- **Verification:** `python3 scripts/check.py --full` passed in 51.47 s
+  (formatting, strict Clippy, workspace and script tests, Markdown).
+  Inspection-feature editor Clippy passed. Two pins changed for cause: the
+  Khronos modification notice checksum, and the v4 scene migration fixture
+  whose format string is three bytes shorter. No native window, install or
+  actual-client run was performed for the rename.
+
 ## Linux launcher icon — 2026-11-16
 
 The Rot Engine desktop entry uses the current red mushroom with transparent
@@ -127,7 +157,7 @@ scene identity, Save and the connection-backed Rot badge. The full editor
 uses one Scene projection behind the scrollable, outlined Objects and Inspector
 overlays. The world guide uses the Scene camera and depth, and Player View
 retains the authored rendering. Existing menus and the Content list retain
-their established actions. The [editor guide](../crates/ruster-editor/README.md#full-editor-workspace)
+their established actions. The [editor guide](../crates/rot-editor/README.md#full-editor-workspace)
 describes the layout.
 
 The final artwork adds spacing around the mushroom in native and browser surfaces.

@@ -1,0 +1,32 @@
+[package]
+name = "rot-app"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[features]
+inspection = ["eframe/inspection"]
+audio-output = ["dep:cpal", "dep:kira"]
+
+[dependencies]
+rot-scene = { path = "../rot-scene" }
+rot-assets = { path = "../rot-assets" }
+rot-render = { path = "../rot-render" }
+eframe = { version = "0.37.0", default-features = false, features = ["default_fonts", "wgpu_no_default_features", "wayland", "x11", "accesskit", "clipboard"] }
+wgpu = { version = "30.0", default-features = false, features = ["std", "vulkan", "wgsl"] }
+log = "0.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[target.'cfg(target_os = "linux")'.dependencies]
+cpal = { version = "=0.18.2", features = ["pulseaudio"], optional = true }
+kira = { version = "=0.12.6", default-features = false, optional = true }
+
+[dev-dependencies]
+png = "0.18"
+tempfile = "3"
+
+[lints]
+workspace = true

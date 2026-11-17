@@ -18,5 +18,5 @@ Warning, error and information colors represent their own states.
 
 The existing application ID, executable names, configuration paths,
 project formats and MCP identifiers carry forward for compatibility.
-The previous [Rusterize visual brief](../RUSTERIZE-UI-BRIEF.md) records
+The previous [Rot Engine visual brief](../RUSTERIZE-UI-BRIEF.md) records
 the earlier identity and design work.

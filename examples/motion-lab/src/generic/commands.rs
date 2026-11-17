@@ -1,6 +1,6 @@
 //! Paused, run-owned Application commands. Invocation input is never authored.
 use super::*;
-use ruster_scene::{BindingTarget, StateFields, StateValue};
+use rot_scene::{BindingTarget, StateFields, StateValue};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Debug, serde::Deserialize)]
@@ -13,8 +13,8 @@ pub struct CommandRequest {
 }
 impl CommandRequest {
     pub fn validate(&self) -> Result<u64, String> {
-        ruster_scene::validate_id(&self.binding_id).map_err(|e| e.to_string())?;
-        ruster_scene::validate_id(&self.command_id).map_err(|e| e.to_string())?;
+        rot_scene::validate_id(&self.binding_id).map_err(|e| e.to_string())?;
+        rot_scene::validate_id(&self.command_id).map_err(|e| e.to_string())?;
         let revision: u64 = self
             .expected_commit_revision
             .parse()
@@ -22,12 +22,12 @@ impl CommandRequest {
         if revision.to_string() != self.expected_commit_revision {
             return Err("Use a canonical commit revision string".into());
         }
-        ruster_scene::command_argument_payload_bytes(&self.args).map_err(|e| e.to_string())?;
+        rot_scene::command_argument_payload_bytes(&self.args).map_err(|e| e.to_string())?;
         Ok(revision)
     }
 }
 
-pub(super) fn receipt_wire(receipt: &ruster_behavior::CommandReceipt) -> serde_json::Value {
+pub(super) fn receipt_wire(receipt: &rot_behavior::CommandReceipt) -> serde_json::Value {
     serde_json::json!({"binding_id":receipt.binding_id,"command_id":receipt.command_id,
         "schema_hash":receipt.schema_hash,"input_sha256":receipt.input_sha256,
         "previous_commit_revision":receipt.previous_commit_revision.to_string(),
@@ -36,9 +36,9 @@ pub(super) fn receipt_wire(receipt: &ruster_behavior::CommandReceipt) -> serde_j
 
 /// Callers supply the existing host Runtime, which owns actual playback authority.
 pub fn dispatch_command(
-    runtime: &mut ruster_app::Runtime<GenericMotionLab>,
+    runtime: &mut rot_app::Runtime<GenericMotionLab>,
     request: &CommandRequest,
-) -> Result<ruster_behavior::CommandReceipt, String> {
+) -> Result<rot_behavior::CommandReceipt, String> {
     if runtime.is_running() || runtime.app().runtime_tick() != Some(runtime.tick()) {
         return Err(
             "Application commands require paused execution at the committed host tick".into(),
@@ -51,7 +51,7 @@ impl GenericMotionLab {
     fn apply_command(
         &mut self,
         request: &CommandRequest,
-    ) -> Result<ruster_behavior::CommandReceipt, String> {
+    ) -> Result<rot_behavior::CommandReceipt, String> {
         let revision = request.validate()?;
         if self.needs_reset || self.physical_input_owned || self.pending_input.is_some() {
             return Err("Reset this snapshot and release input before invoking commands".into());
@@ -218,7 +218,7 @@ impl CommandUi {
         &mut self,
         ui: &mut egui::Ui,
         binding_id: &str,
-        binding: &ruster_scene::BehaviorBinding,
+        binding: &rot_scene::BehaviorBinding,
         run: u64,
         tick: u64,
         revision: u64,
@@ -467,15 +467,15 @@ mod tests {
     fn command_form_keyboard_ownership_preserves_raw_input_and_one_commit() {
         let mut session = Session::from_snapshot_bytes(DEMO).unwrap();
         let revision = session.scene().revision;
-        session.create_behavior(revision, "app-source", ruster_scene::BehaviorSource {
+        session.create_behavior(revision, "app-source", rot_scene::BehaviorSource {
             label: None, language_id: "lua54".into(), host_api_version: 5,
             text: "return {update=function() return {} end, command=function(n,a,p,h) if n=='noop' then return {} end; return {state={count=h.state('count')+a.amount}} end}".into(),
-        }, "application", ruster_scene::BehaviorBinding {
+        }, "application", rot_scene::BehaviorBinding {
             target: BindingTarget::Application, source_id: "app-source".into(), enabled: true,
             properties: BTreeMap::new(), state_defaults: StateFields::from([("count".into(), StateValue::Number(0.0))]),
-            commands: BTreeMap::from([("add".into(), ruster_scene::CommandDefinition {
+            commands: BTreeMap::from([("add".into(), rot_scene::CommandDefinition {
                 arguments: StateFields::from([("amount".into(), StateValue::Number(2.0))]),
-            }), ("noop".into(), ruster_scene::CommandDefinition { arguments: StateFields::new() })]),
+            }), ("noop".into(), rot_scene::CommandDefinition { arguments: StateFields::new() })]),
         }).unwrap();
         let mut app = GenericMotionLab::new(session, MeshMap::new(), FIXED_DT).unwrap();
         app.reset().unwrap();

@@ -1,11 +1,11 @@
 //! Captured button intents and one prepared post-advance presentation.
 use super::*;
-use ruster_app::hud::{
+use rot_app::hud::{
     interact_prepared_hud, paint_prepared_hud, prepare_hud, HudInteractionState, PreparedHud,
 };
-use ruster_app::ViewportInputOwnership;
-use ruster_behavior::{HudActivation, HudActivationReceipt};
-use ruster_scene::hud::{hud_button_identity, HudSource};
+use rot_app::ViewportInputOwnership;
+use rot_behavior::{HudActivation, HudActivationReceipt};
+use rot_scene::hud::{hud_button_identity, HudSource};
 use serde_json::{json, Value};
 
 #[derive(Default)]
@@ -62,7 +62,7 @@ impl GenericMotionLab {
             .source
             .command_binding()
             .ok_or("HUD row is not a button")?;
-        ruster_scene::hud::validate_hud_button_command(authoring, command)
+        rot_scene::hud::validate_hud_button_command(authoring, command)
             .map_err(|error| error.to_string())?;
         let id = self
             .hud_controls

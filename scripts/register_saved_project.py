@@ -58,8 +58,8 @@ def main():
     with launcher.open("x") as f:
         os.chmod(launcher, 0o700)
         f.write("#!/usr/bin/python3\nimport os\n")
-        f.write("os.environ.pop('RUSTER_MCP_LOCATOR', None)\n")
-        f.write(f"os.environ['RUSTER_MCP_PROJECT_REGISTRY'] = {str(registry)!r}\n")
+        f.write("os.environ.pop('ROT_MCP_LOCATOR', None)\n")
+        f.write(f"os.environ['ROT_MCP_PROJECT_REGISTRY'] = {str(registry)!r}\n")
         f.write(f"os.execv({str(adapter)!r}, [{str(adapter)!r}])\n")
     print(json.dumps({"registry": str(registry), "stable_mcp_command": str(launcher),
                       "project": args.name, "selection_is_consent": False}, indent=2))

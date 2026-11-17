@@ -1,12 +1,12 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use ruster_app::{HostOptions, ResourceRoot, Runtime};
-use ruster_yard::{Settings, Yard};
+use rot_app::{HostOptions, ResourceRoot, Runtime};
+use rot_yard::{Settings, Yard};
 
 const HELP: &str = "Rot Engine Yard — a tiny delivery challenge
 
-Usage: ruster-yard [OPTIONS]
+Usage: rot-yard [OPTIONS]
 
   --headless          Run deterministic ticks and print the outcome (no window/GPU)
   --ticks N           Maximum headless ticks (0–10000; default: time budget)
@@ -23,8 +23,8 @@ Change the round settings, then press Reset to apply them.
 Try --capacity 3 to deliver the default target before the deadline.
 
 From a source checkout:
-  cargo run --locked -p ruster-yard -- --resources examples/yard-app/resources
-  cargo run --locked -p ruster-yard -- --headless --resources examples/yard-app/resources --capacity 3
+  cargo run --locked -p rot-yard -- --resources examples/yard-app/resources
+  cargo run --locked -p rot-yard -- --headless --resources examples/yard-app/resources --capacity 3
 
 A missed delivery is a completed challenge, so headless mode exits successfully.
 Invalid options or unreadable resources exit with an error and a recovery hint.";
@@ -133,11 +133,11 @@ fn execute(options: Options) -> Result<(), String> {
         );
         Ok(())
     } else {
-        ruster_app::run(
+        rot_app::run(
             app,
             HostOptions {
                 title: "Rot Engine Yard — Delivery challenge".into(),
-                app_id: "ruster-yard".into(),
+                app_id: "rot-yard".into(),
                 tick_duration,
                 max_frames: options.frames,
                 start_running: false,

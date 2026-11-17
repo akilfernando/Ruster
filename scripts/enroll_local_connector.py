@@ -82,7 +82,7 @@ def registry_records(raw):
             raise ValueError("invalid locator")
         if startup is None:
             fields(binding, ("wire", "incarnation", "generation", "connection"))
-            if not absolute(locator) or binding["wire"] != "ruster-owner-1" or not all(bounded_text(binding[k], 256) for k in ("incarnation", "generation", "connection")):
+            if not absolute(locator) or binding["wire"] != "rot-owner-1" or not all(bounded_text(binding[k], 256) for k in ("incarnation", "generation", "connection")):
                 raise ValueError("invalid registered routing")
         else:
             fields(startup, ("scene_path", "native_binary", "state_directory", "binary_identity", "routing_identity"))
@@ -142,8 +142,8 @@ def main():
     private_write(enrollment, grant_text)
     private_write(new_registry, registry_text)
     launcher = root / "connect.py"
-    private_write(launcher, "#!/usr/bin/python3\nimport os\nos.environ.pop('RUSTER_MCP_LOCATOR', None)\n"
-                  f"os.environ['RUSTER_MCP_PROJECT_REGISTRY'] = {str(new_registry)!r}\n"
+    private_write(launcher, "#!/usr/bin/python3\nimport os\nos.environ.pop('ROT_MCP_LOCATOR', None)\n"
+                  f"os.environ['ROT_MCP_PROJECT_REGISTRY'] = {str(new_registry)!r}\n"
                   f"os.execv({str(adapter)!r}, [{str(adapter)!r}])\n", 0o700)
     print(json.dumps({"registry": str(new_registry), "stable_mcp_command": str(launcher),
                       "enrolled_projects": args.project, "live_client_configuration_changed": False}))

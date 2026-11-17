@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Official MCP SDK content smoke against an enabled disposable scene project.
 Run: uv run --with mcp==2.3.0 scripts/mcp_content_demo.py
-Set RUSTER_MCP_SOCKET. The project must contain meshes/pyramid.obj (override
-RUSTER_MCP_CONTENT_SOURCE / RUSTER_MCP_CONTENT_ASSET_ID for another fixture).
-RUSTER_MCP_DEMO_KEEP=1 retains the assignment for a subsequent native Undo.
+Set ROT_MCP_SOCKET. The project must contain meshes/pyramid.obj (override
+ROT_MCP_CONTENT_SOURCE / ROT_MCP_CONTENT_ASSET_ID for another fixture).
+ROT_MCP_DEMO_KEEP=1 retains the assignment for a subsequent native Undo.
 Catalog imports persist immediately; the demo never saves the authored scene,
 changes source/shader files or controls the editor's live preview.
 """
@@ -17,9 +17,9 @@ from mcp.client.stdio import stdio_client
 
 
 async def main():
-    binary = Path(__file__).resolve().parents[1] / "target/debug/ruster-mcp"
-    source = os.environ.get("RUSTER_MCP_CONTENT_SOURCE", "meshes/pyramid.obj")
-    asset_id = os.environ.get("RUSTER_MCP_CONTENT_ASSET_ID", "pyramid")
+    binary = Path(__file__).resolve().parents[1] / "target/debug/rot-mcp"
+    source = os.environ.get("ROT_MCP_CONTENT_SOURCE", "meshes/pyramid.obj")
+    asset_id = os.environ.get("ROT_MCP_CONTENT_ASSET_ID", "pyramid")
     params = StdioServerParameters(command=str(binary), env={**os.environ})
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client:
@@ -120,7 +120,7 @@ async def main():
                 "shader_revision": metadata["shader_revision"],
                 "stale_asset_revision_rejected": True,
             }, indent=2))
-            if os.environ.get("RUSTER_MCP_DEMO_KEEP") != "1":
+            if os.environ.get("ROT_MCP_DEMO_KEEP") != "1":
                 undone = await call("scene_undo", expected)
                 restored = await call("scene_inspect")
                 assert restored["revision"] == undone["revision"], undone

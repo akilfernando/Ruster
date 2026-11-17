@@ -1,0 +1,14 @@
+[package]
+name = "rot-viewer"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+rot-core = { path = "../rot-core" }
+ash = "0.38"
+ash-window = "0.13"
+raw-window-handle = "0.6"
+winit = "0.30"

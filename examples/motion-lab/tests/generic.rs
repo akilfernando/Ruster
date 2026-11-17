@@ -1,9 +1,9 @@
 use std::{fs, process::Command, time::Duration};
 
-use ruster_app::{Application, MeshMap, Runtime, Step};
-use ruster_behavior::DiagnosticCode;
-use ruster_motion_lab::generic::{read_session, GenericMotionLab, DEMO, FIXED_DT};
-use ruster_scene::{PropertyValue, Session};
+use rot_app::{Application, MeshMap, Runtime, Step};
+use rot_behavior::DiagnosticCode;
+use rot_motion_lab::generic::{read_session, GenericMotionLab, DEMO, FIXED_DT};
+use rot_scene::{PropertyValue, Session};
 
 fn demo() -> Session {
     Session::from_snapshot_bytes(DEMO).unwrap()
@@ -17,10 +17,10 @@ fn runtime(session: Session) -> Runtime<GenericMotionLab> {
 }
 
 fn lifecycle_session() -> Session {
-    use ruster_scene::{
+    use rot_scene::{
         BehaviorBinding, BehaviorSource, BindingTarget, CommandDefinition, StateFields, StateValue,
     };
-    let mut session = Session::new(ruster_scene::Scene::empty("lifecycle-consumer")).unwrap();
+    let mut session = Session::new(rot_scene::Scene::empty("lifecycle-consumer")).unwrap();
     session.create_behavior(0, "controller", BehaviorSource {
         label: None, language_id: "lua54".into(), host_api_version: 5,
         text: "return {initialize=function(p,h) return {state={count=3}} end, update=function() return {} end, command=function(n,a,p,h) return {state={count=h.state('count')+a.amount}} end}".into(),
@@ -36,8 +36,8 @@ fn lifecycle_session() -> Session {
 }
 
 fn hud_session() -> Session {
-    use ruster_scene::hud::{Hud, HudCommandBinding, HudLabel, HudPanel, HudSource, HudValueType};
-    use ruster_scene::{StateFields, StateValue};
+    use rot_scene::hud::{Hud, HudCommandBinding, HudLabel, HudPanel, HudSource, HudValueType};
+    use rot_scene::{StateFields, StateValue};
     let mut session = lifecycle_session();
     let mut source = session.source("controller").unwrap().clone();
     source.text = r#"return {
@@ -233,7 +233,7 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
     // authored defaults/source and rejecting Reset, just like visible motion.
     let mut stateful = demo();
     let mut source = stateful.source("follower").unwrap().clone();
-    source.host_api_version = ruster_behavior::STATE_HOST_API_VERSION;
+    source.host_api_version = rot_behavior::STATE_HOST_API_VERSION;
     source.text = "return {update=function(o,p,dt,h) return {transform=o,state={count=h.state('count')+1}} end}".into();
     stateful
         .set_source(stateful.scene().revision, "follower", Some(source))
@@ -245,7 +245,7 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
                 stateful.scene().revision,
                 owner,
                 "count",
-                Some(ruster_scene::StateValue::Number(0.0)),
+                Some(rot_scene::StateValue::Number(0.0)),
             )
             .unwrap();
     }
@@ -261,7 +261,7 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
             replacement.scene().revision,
             &owners[0],
             "count",
-            Some(ruster_scene::StateValue::Number(99.0)),
+            Some(rot_scene::StateValue::Number(99.0)),
         )
         .unwrap();
     let mut broken = replacement.source("follower").unwrap().clone();
@@ -286,7 +286,7 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
 
     // Consumer-specific boundary: actual host Pause authority and Core commit
     // identity must agree while command transactions leave its tick untouched.
-    use ruster_motion_lab::generic::{dispatch_command, CommandRequest};
+    use rot_motion_lab::generic::{dispatch_command, CommandRequest};
     let mut lifecycle = crate::runtime(lifecycle_session());
     let mut request = CommandRequest {
         binding_id: "application".into(),
@@ -298,7 +298,7 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
     lifecycle.reset().unwrap();
     assert_eq!(
         lifecycle.app().runtime_state_report()["application"]["count"],
-        ruster_scene::StateValue::Number(3.0)
+        rot_scene::StateValue::Number(3.0)
     );
     let authored = lifecycle.app().session().snapshot_bytes().unwrap();
     let scene = lifecycle.app().content().scene().clone();
@@ -311,14 +311,14 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
     assert_eq!(lifecycle.app().last_step_commit_revision(), None);
     assert_eq!(
         lifecycle.app().runtime_state_report()["application"]["count"],
-        ruster_scene::StateValue::Number(5.0)
+        rot_scene::StateValue::Number(5.0)
     );
     assert_eq!(*lifecycle.app().content().scene(), scene);
     assert!(dispatch_command(&mut lifecycle, &request).is_err());
     request.expected_commit_revision = "1".into();
     request
         .args
-        .insert("amount".into(), ruster_scene::StateValue::Number(0.0));
+        .insert("amount".into(), rot_scene::StateValue::Number(0.0));
     dispatch_command(&mut lifecycle, &request).unwrap();
     lifecycle.step().unwrap();
     assert_eq!(lifecycle.tick(), 1);
@@ -342,9 +342,9 @@ fn failed_step_and_reset_keep_committed_motion_and_context() {
 // presentation. Its failures and reload boundaries must retain that same commit.
 #[test]
 fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
-    use ruster_app::hud::HudPresentationMode;
-    use ruster_motion_lab::generic::{dispatch_command, CommandRequest};
-    use ruster_scene::{CommandDefinition, StateFields, StateValue};
+    use rot_app::hud::HudPresentationMode;
+    use rot_motion_lab::generic::{dispatch_command, CommandRequest};
+    use rot_scene::{CommandDefinition, StateFields, StateValue};
     let mut lifecycle = runtime(hud_session());
     assert_eq!(
         lifecycle.app().hud_presentation_mode(),
@@ -440,9 +440,7 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
     );
     let mut replacement = hud_session();
     let mut hud = replacement.hud().clone();
-    if let ruster_scene::hud::HudSource::State { prefix, .. } =
-        &mut hud.panels[0].elements[0].source
-    {
+    if let rot_scene::hud::HudSource::State { prefix, .. } = &mut hud.panels[0].elements[0].source {
         *prefix = "New count ".into();
     }
     replacement
@@ -506,7 +504,7 @@ fn hud_commands_cross_play_pause_atomic_failure_and_stale_presentation() {
 // commits on the next frame, and raw focus loss or Reset discards pending work.
 #[test]
 fn native_hud_hooks_buffer_one_action_and_cancel_focus_loss_or_reset() {
-    use ruster_app::{egui, ViewportInputOwnership};
+    use rot_app::{egui, ViewportInputOwnership};
     fn frame(
         app: &mut GenericMotionLab,
         context: &egui::Context,
@@ -645,7 +643,7 @@ fn generic_cli_replays_read_only_scene_and_explicit_mesh_resources() {
     )
     .unwrap();
     let cli = |args: &[&str]| {
-        Command::new(env!("CARGO_BIN_EXE_ruster-motion-lab"))
+        Command::new(env!("CARGO_BIN_EXE_rot-motion-lab"))
             .args(args)
             .current_dir(directory.path())
             .output()
@@ -688,7 +686,7 @@ fn generic_cli_replays_read_only_scene_and_explicit_mesh_resources() {
     assert_eq!(output["tick"], "10");
     assert_eq!(
         output["fixed_dt"],
-        ruster_behavior::DEFAULT_FIXED_TICK.as_secs_f64()
+        rot_behavior::DEFAULT_FIXED_TICK.as_secs_f64()
     );
     assert_eq!(output["runtime_speed_override"], 3.0);
     assert_eq!(
@@ -699,7 +697,7 @@ fn generic_cli_replays_read_only_scene_and_explicit_mesh_resources() {
         (output["runtime_scene"]["objects"][0]["transform"]["translation"][0]
             .as_f64()
             .unwrap()
-            - (-2.0 + 30.0 * ruster_behavior::DEFAULT_FIXED_TICK.as_secs_f64()))
+            - (-2.0 + 30.0 * rot_behavior::DEFAULT_FIXED_TICK.as_secs_f64()))
         .abs()
             < 1e-5
     );
@@ -781,12 +779,12 @@ fn generic_cli_replays_read_only_scene_and_explicit_mesh_resources() {
 // and a saved remap changes controls without serializing runtime motion.
 #[test]
 fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
-    use ruster_behavior::INPUT_HOST_API_VERSION;
-    use ruster_scene::input::{
+    use rot_behavior::INPUT_HOST_API_VERSION;
+    use rot_scene::input::{
         ActionDefinition, ActionFrame, ActionKind, ActionValue, ButtonState, InputKey,
     };
-    use ruster_scene::BehaviorSource;
-    use ruster_scene::{BehaviorBinding, Object, Scene};
+    use rot_scene::BehaviorSource;
+    use rot_scene::{BehaviorBinding, Object, Scene};
     use std::collections::BTreeMap;
     let mut scene = Scene::empty("action-consumer");
     scene.objects.push(Object::cube("head", None));
@@ -825,7 +823,7 @@ fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
             3,
             "control",
             Some(BehaviorBinding {
-                target: ruster_scene::BindingTarget::Object("head".into()),
+                target: rot_scene::BindingTarget::Object("head".into()),
                 state_defaults: Default::default(),
                 commands: Default::default(),
                 source_id: "controller".into(),
@@ -872,13 +870,13 @@ fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
         "travel".into(),
         ActionValue::Axis1d { value: -1 },
     )]));
-    assert!(ruster_motion_lab::generic::step_with_input(
+    assert!(rot_motion_lab::generic::step_with_input(
         &mut runtime,
         expected_tick - 1,
         supplied.clone()
     )
     .is_err());
-    ruster_motion_lab::generic::step_with_input(&mut runtime, expected_tick, supplied).unwrap();
+    rot_motion_lab::generic::step_with_input(&mut runtime, expected_tick, supplied).unwrap();
     assert_eq!(runtime.app().input_observation().unwrap().2, "programmatic");
     assert_eq!(
         runtime.app().content().scene().objects[0]
@@ -921,7 +919,7 @@ fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
     );
     let before = runtime.app().content().scene().clone();
     let expected_tick = runtime.tick();
-    assert!(ruster_motion_lab::generic::step_with_input(
+    assert!(rot_motion_lab::generic::step_with_input(
         &mut runtime,
         expected_tick,
         ActionFrame::default()
@@ -961,11 +959,11 @@ fn authored_actions_cross_catchup_pause_supplied_step_and_remapped_reset() {
 // panels from Lua commits, preserves host playback and round-trips the document.
 #[test]
 fn creator_screen_commands_drive_panels_and_retry_without_host_rules() {
-    use ruster_scene::hud::{
+    use rot_scene::hud::{
         BoolCondition, Hud, HudAnchor, HudCommandBinding, HudLabel, HudPanel, HudSource,
         HudValueType,
     };
-    use ruster_scene::{CommandDefinition, StateFields, StateValue};
+    use rot_scene::{CommandDefinition, StateFields, StateValue};
     let mut session = lifecycle_session();
     let mut source = session.source("controller").unwrap().clone();
     source.text = r#"return {

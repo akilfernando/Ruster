@@ -81,9 +81,9 @@ Retained preparation failures, none product defects:
 
 ## Assets, notices and installed/current-candidate distinction
 
-Earlier `origins.py` rerasterizes all four supplied SVGs with installed `rsvg-convert` at64pixel mark/96pixel lockup height: all four generated PNGs byte-match bundled assets. `asset-origins.json` records commands/tool versions/hashes; bundled app icon matches supplied dark128tile. [Branding](../../crates/ruster-editor/src/branding.rs) intentionally keeps the fixed dark OS icon separate from adaptive in-app assets.
+Earlier `origins.py` rerasterizes all four supplied SVGs with installed `rsvg-convert` at64pixel mark/96pixel lockup height: all four generated PNGs byte-match bundled assets. `asset-origins.json` records commands/tool versions/hashes; bundled app icon matches supplied dark128tile. [Branding](../../crates/rot-editor/src/branding.rs) intentionally keeps the fixed dark OS icon separate from adaptive in-app assets.
 
-Full [supplied DejaVu notice](../branding/logo-v2/DEJAVU-LICENSE.txt) and [editor notice](../../crates/ruster-editor/assets/DEJAVU-LICENSE.txt) byte-match SHA256 `63d3ba759d12804c5b31a9d5940d855c1820d1f5999e6b0872eb1c7ff045fbc9`; copyright/trademark, permission, warranty, name-use and separately labelled Debian packaging clauses remain complete. `cargo package --list --allow-dirty --offline -p ruster-editor` includes full notice/assets (`cargo-package-list.log`, existing missing-description warning). No distribution/install is performed; any later authorized asset-bearing binary delivery must carry its notice.
+Full [supplied DejaVu notice](../branding/logo-v2/DEJAVU-LICENSE.txt) and [editor notice](../../crates/rot-editor/assets/DEJAVU-LICENSE.txt) byte-match SHA256 `63d3ba759d12804c5b31a9d5940d855c1820d1f5999e6b0872eb1c7ff045fbc9`; copyright/trademark, permission, warranty, name-use and separately labelled Debian packaging clauses remain complete. `cargo package --list --allow-dirty --offline -p ruster-editor` includes full notice/assets (`cargo-package-list.log`, existing missing-description warning). No distribution/install is performed; any later authorized asset-bearing binary delivery must carry its notice.
 
 Read-only installation hashes are unchanged from the previous report, rechecked by `native_seal.py`:
 

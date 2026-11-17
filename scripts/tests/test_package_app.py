@@ -33,9 +33,9 @@ class DistributionTests(unittest.TestCase):
         for name in new_app.CRATES:
             put(f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion.workspace = true\n')
             put(f"crates/{name}/src/lib.rs", "pub fn run() {}\n")
-        put("crates/ruster-render/assets/rot-dark-128.png", "icon fixture\n")
-        put("crates/ruster-scene/tests/fixtures/legacy-v1.scene.json", "{}\n")
-        put("examples/yard-app/Cargo.toml", '[package]\nname = "ruster-yard"\nversion.workspace = true\n[dependencies]\nruster-app = {path = "../../crates/ruster-app"}\n')
+        put("crates/rot-render/assets/rot-dark-128.png", "icon fixture\n")
+        put("crates/rot-scene/tests/fixtures/legacy-v1.scene.json", "{}\n")
+        put("examples/yard-app/Cargo.toml", '[package]\nname = "rot-yard"\nversion.workspace = true\n[dependencies]\nrot-app = {path = "../../crates/rot-app"}\n')
         put("examples/yard-app/src/main.rs", "fn main() {}\n")
         put("crates/support/strict_json.rs", "pub fn parse() {}\n")
         put("examples/content/scene.wgsl", "// compatibility shader\n")
@@ -55,8 +55,8 @@ class DistributionTests(unittest.TestCase):
 
     def test_source_allowlist_relocation_and_no_overwrite(self):
         """A new creator tree carries relative engine paths, never local private/cache files."""
-        for relative in (".env", "crates/ruster-app/src/credentials.env", "crates/ruster-app/src/target/leaked.rs",
-                         "examples/yard-app/resources/private.obj", "crates/ruster-editor/src/lib.rs",
+        for relative in (".env", "crates/rot-app/src/credentials.env", "crates/rot-app/src/target/leaked.rs",
+                         "examples/yard-app/resources/private.obj", "crates/rot-editor/src/lib.rs",
                          "crates/support/private.rs", "examples/content/private.wgsl"):
             package_app.put(self.root, relative, b"SECRET")
         destination = self.base / "my-app"
@@ -68,10 +68,10 @@ class DistributionTests(unittest.TestCase):
         self.assertTrue((moved / cargo["patch"]["crates-io"]["wgpu-hal"]["path"] / "src/lib.rs").is_file())
         self.assertTrue((moved / "third_party/wgpu-hal/src/gles/shaders/clear.frag").is_file())
         sample = moved / "examples/yard-app"
-        path = tomllib.loads((sample / "Cargo.toml").read_text())["dependencies"]["ruster-app"]["path"]
+        path = tomllib.loads((sample / "Cargo.toml").read_text())["dependencies"]["rot-app"]["path"]
         self.assertTrue((sample / path / "src/lib.rs").is_file())
-        self.assertEqual((moved / "crates/ruster-render/assets/rot-dark-128.png").read_bytes(), b"icon fixture\n")
-        self.assertTrue((moved / "crates/ruster-scene/tests/fixtures/legacy-v1.scene.json").is_file())
+        self.assertEqual((moved / "crates/rot-render/assets/rot-dark-128.png").read_bytes(), b"icon fixture\n")
+        self.assertTrue((moved / "crates/rot-scene/tests/fixtures/legacy-v1.scene.json").is_file())
         for name in new_app.PACKAGING_FILES:
             self.assertTrue((moved / name).is_file())
         for file in manifest["files"]:
@@ -90,8 +90,8 @@ class DistributionTests(unittest.TestCase):
         root = Path(__file__).resolve().parents[2]
         required = ("crates/support/strict_json.rs", "examples/content/scene.wgsl",
                     "examples/logistics.scenario.json",
-                    "crates/ruster-scene/tests/fixtures/legacy-v1.scene.json",
-                    "crates/ruster-scene/src/assembly_prototype.rs")
+                    "crates/rot-scene/tests/fixtures/legacy-v1.scene.json",
+                    "crates/rot-scene/src/assembly_prototype.rs")
         for app in ("yard", "motion-lab"):
             with self.subTest(app=app):
                 destination = self.base / app
@@ -117,7 +117,7 @@ class DistributionTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "symlink"):
             new_app.export(self.root, destination, normalize_lock=False)
         self.assertFalse(destination.exists())
-        self.assertFalse(list(self.base.glob(".ruster-source-*")))
+        self.assertFalse(list(self.base.glob(".rot-source-*")))
 
     @unittest.skipUnless(sys.platform == "linux" and shutil.which("readelf"), "Linux ELF tooling required")
     def test_real_elf_archive_relocation_safe_members_and_no_overwrite(self):
@@ -133,10 +133,10 @@ class DistributionTests(unittest.TestCase):
                 self.assertFalse(Path(member.name).is_absolute())
                 self.assertNotIn("..", Path(member.name).parts)
             archive.extractall(self.base / "relocated", filter="data")
-        payload = self.base / "relocated/ruster-yard"
+        payload = self.base / "relocated/rot-yard"
         for file in manifest["files"]:
             self.assertEqual(hashlib.sha256((payload / file["path"]).read_bytes()).hexdigest(), file["sha256"])
-        subprocess.run([str(payload / "ruster-yard")], cwd=self.base, check=True)
+        subprocess.run([str(payload / "rot-yard")], cwd=self.base, check=True)
         with patch.object(package_app, "metadata", return_value=self.meta):
             with self.assertRaisesRegex(ValueError, "overwrite"):
                 package_app.package(self.root, binary, output)
@@ -146,11 +146,11 @@ class DistributionTests(unittest.TestCase):
     def test_motion_selection_carries_optional_backend_and_owned_resources(self):
         """The second app exports its own closure/templates/vendor and packages its own payload."""
         put = lambda name, text: package_app.put(self.root, name, text.encode())
-        for name in ("ruster-script", "ruster-behavior"):
+        for name in ("rot-script", "rot-behavior"):
             put(f"crates/{name}/Cargo.toml", f'[package]\nname = "{name}"\nversion.workspace = true\n')
             put(f"crates/{name}/src/lib.rs", "pub fn run() {}\n")
-        put("crates/ruster-behavior/templates/follower.lua", "return {}\n")
-        put("examples/motion-lab/Cargo.toml", '[package]\nname = "ruster-motion-lab"\nversion.workspace = true\n')
+        put("crates/rot-behavior/templates/follower.lua", "return {}\n")
+        put("examples/motion-lab/Cargo.toml", '[package]\nname = "rot-motion-lab"\nversion.workspace = true\n')
         put("examples/motion-lab/src/main.rs", "fn main() {}\n")
         put("examples/motion-lab/resources/motion.rhai", "fn update() {}\n")
         put("examples/motion-lab/resources/generic.scene.json", "{}\n")
@@ -166,29 +166,29 @@ class DistributionTests(unittest.TestCase):
             put(f"third_party/mlua/{directory}/fixture.rs", "// pinned fixture\n")
         source = self.base / "motion-source"
         manifest = new_app.export(self.root, source, normalize_lock=False, app="motion-lab")
-        self.assertEqual(manifest["application"], "ruster-motion-lab")
+        self.assertEqual(manifest["application"], "rot-motion-lab")
         cargo = tomllib.loads((source / "Cargo.toml").read_text())
-        self.assertIn("crates/ruster-behavior", cargo["workspace"]["members"])
+        self.assertIn("crates/rot-behavior", cargo["workspace"]["members"])
         self.assertIn("third_party/mlua", cargo["workspace"]["exclude"])
-        self.assertTrue((source / "third_party/mlua/RUSTER-PATCH.md").is_file())
+        self.assertTrue((source / "third_party/mlua/ROT-PATCH.md").is_file())
         self.assertTrue((source / "Cargo.lock").is_file())
         self.assertFalse((source / "third_party/mlua/Cargo.lock").exists())
         self.assertTrue((source / new_app.CREATION_PACKAGING_FILE).is_file())
-        self.assertTrue((source / "crates/ruster-behavior/templates/follower.lua").is_file())
+        self.assertTrue((source / "crates/rot-behavior/templates/follower.lua").is_file())
         self.assertFalse((source / "examples/yard-app").exists())
         self.assertFalse((source / "examples/motion-lab/resources/private.json").exists())
-        meta = {"packages": [{"id":"motion", "name":"ruster-motion-lab", "version":"0.1.0", "source":None}],
+        meta = {"packages": [{"id":"motion", "name":"rot-motion-lab", "version":"0.1.0", "source":None}],
                 "resolve":{"nodes":[{"id":"motion", "deps":[]}]}}
         output = self.base / "motion.tar.gz"
         with patch.object(package_app, "metadata", return_value=meta):
             binary = package_app.package(self.root, Path(shutil.which("true")).resolve(), output, app="motion-lab")
-        self.assertEqual(binary["application"], "ruster-motion-lab")
+        self.assertEqual(binary["application"], "rot-motion-lab")
         with tarfile.open(output) as archive:
             names = set(archive.getnames())
-            self.assertIn("ruster-motion-lab/resources/generic.scene.json", names)
-            self.assertIn("ruster-motion-lab/ruster-motion-lab", names)
-            self.assertNotIn("ruster-motion-lab/resources/truck.obj", names)
-            self.assertEqual(archive.extractfile("ruster-motion-lab/README.txt").read(), b"Motion binary\n")
+            self.assertIn("rot-motion-lab/resources/generic.scene.json", names)
+            self.assertIn("rot-motion-lab/rot-motion-lab", names)
+            self.assertNotIn("rot-motion-lab/resources/truck.obj", names)
+            self.assertEqual(archive.extractfile("rot-motion-lab/README.txt").read(), b"Motion binary\n")
 
     def test_missing_notices_or_corrupted_supplements_are_blocking(self):
         """Declared SPDX metadata cannot silently replace readable redistribution notices."""
@@ -211,7 +211,7 @@ class DistributionTests(unittest.TestCase):
         meta = {"packages": [self.app] + [{"id": n, "name": n, "version": "1"} for n in ("normal", "build", "dev")],
                 "resolve": {"nodes": [{"id": "yard", "deps": [dependency("normal", None), dependency("build", "build"), dependency("dev", "dev")]}] +
                             [{"id": n, "deps": []} for n in ("normal", "build", "dev")]}}
-        self.assertEqual([p["name"] for p in package_app.active_packages(meta)], ["build", "normal", "ruster-yard"])
+        self.assertEqual([p["name"] for p in package_app.active_packages(meta)], ["build", "normal", "rot-yard"])
 
 
 if __name__ == "__main__":

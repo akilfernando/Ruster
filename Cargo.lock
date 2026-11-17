@@ -3299,6 +3299,175 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4e27ee8bb91ca0adcf0ecb116293afa12d393f9c2b9b9cd54d33e8078fe19839"
 
 [[package]]
+name = "rot-app"
+version = "0.1.0"
+dependencies = [
+ "cpal",
+ "eframe",
+ "kira",
+ "log",
+ "png",
+ "rot-assets",
+ "rot-render",
+ "rot-scene",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "wgpu",
+]
+
+[[package]]
+name = "rot-assets"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "glam 0.30.10",
+ "hound",
+ "png",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "rot-behavior"
+version = "0.1.0"
+dependencies = [
+ "glam 0.30.10",
+ "mlua",
+ "parry3d-f64",
+ "rot-scene",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "rot-cli"
+version = "0.1.0"
+dependencies = [
+ "rot-core",
+ "tempfile",
+]
+
+[[package]]
+name = "rot-core"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rot-editor"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "eframe",
+ "log",
+ "png",
+ "rot-app",
+ "rot-assets",
+ "rot-behavior",
+ "rot-core",
+ "rot-render",
+ "rot-scene",
+ "rustix 0.38.44",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "transform-gizmo-egui",
+ "wgpu",
+]
+
+[[package]]
+name = "rot-mcp"
+version = "0.1.0"
+dependencies = [
+ "base64",
+ "png",
+ "rot-scene",
+ "rustix 0.38.44",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rot-motion-lab"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "rot-app",
+ "rot-assets",
+ "rot-behavior",
+ "rot-scene",
+ "rot-script",
+ "serde",
+ "serde_json",
+ "tempfile",
+]
+
+[[package]]
+name = "rot-render"
+version = "0.1.0"
+dependencies = [
+ "bytemuck",
+ "eframe",
+ "glam 0.30.10",
+ "log",
+ "pollster 0.4.0",
+ "rot-assets",
+ "rot-scene",
+ "wgpu",
+]
+
+[[package]]
+name = "rot-scene"
+version = "0.1.0"
+dependencies = [
+ "fs2",
+ "glam 0.30.10",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+]
+
+[[package]]
+name = "rot-script"
+version = "0.1.0"
+dependencies = [
+ "rhai",
+ "rot-scene",
+]
+
+[[package]]
+name = "rot-viewer"
+version = "0.1.0"
+dependencies = [
+ "ash",
+ "ash-window",
+ "raw-window-handle",
+ "rot-core",
+ "winit",
+]
+
+[[package]]
+name = "rot-yard"
+version = "0.1.0"
+dependencies = [
+ "rot-app",
+ "rot-core",
+ "rot-scene",
+]
+
+[[package]]
 name = "rstar"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3334,175 +3503,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cfcb3a22ef46e85b45de6ee7e79d063319ebb6594faafcf1c225ea92ab6e9b92"
 dependencies = [
  "semver",
-]
-
-[[package]]
-name = "ruster-app"
-version = "0.1.0"
-dependencies = [
- "cpal",
- "eframe",
- "kira",
- "log",
- "png",
- "ruster-assets",
- "ruster-render",
- "ruster-scene",
- "serde",
- "serde_json",
- "tempfile",
- "wgpu",
-]
-
-[[package]]
-name = "ruster-assets"
-version = "0.1.0"
-dependencies = [
- "fs2",
- "glam 0.30.10",
- "hound",
- "png",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
-]
-
-[[package]]
-name = "ruster-behavior"
-version = "0.1.0"
-dependencies = [
- "glam 0.30.10",
- "mlua",
- "parry3d-f64",
- "ruster-scene",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
-]
-
-[[package]]
-name = "ruster-cli"
-version = "0.1.0"
-dependencies = [
- "ruster-core",
- "tempfile",
-]
-
-[[package]]
-name = "ruster-core"
-version = "0.1.0"
-dependencies = [
- "fs2",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "ruster-editor"
-version = "0.1.0"
-dependencies = [
- "base64",
- "eframe",
- "log",
- "png",
- "ruster-app",
- "ruster-assets",
- "ruster-behavior",
- "ruster-core",
- "ruster-render",
- "ruster-scene",
- "rustix 0.38.44",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
- "transform-gizmo-egui",
- "wgpu",
-]
-
-[[package]]
-name = "ruster-mcp"
-version = "0.1.0"
-dependencies = [
- "base64",
- "png",
- "ruster-scene",
- "rustix 0.38.44",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "ruster-motion-lab"
-version = "0.1.0"
-dependencies = [
- "fs2",
- "ruster-app",
- "ruster-assets",
- "ruster-behavior",
- "ruster-scene",
- "ruster-script",
- "serde",
- "serde_json",
- "tempfile",
-]
-
-[[package]]
-name = "ruster-render"
-version = "0.1.0"
-dependencies = [
- "bytemuck",
- "eframe",
- "glam 0.30.10",
- "log",
- "pollster 0.4.0",
- "ruster-assets",
- "ruster-scene",
- "wgpu",
-]
-
-[[package]]
-name = "ruster-scene"
-version = "0.1.0"
-dependencies = [
- "fs2",
- "glam 0.30.10",
- "serde",
- "serde_json",
- "sha2",
- "tempfile",
-]
-
-[[package]]
-name = "ruster-script"
-version = "0.1.0"
-dependencies = [
- "rhai",
- "ruster-scene",
-]
-
-[[package]]
-name = "ruster-viewer"
-version = "0.1.0"
-dependencies = [
- "ash",
- "ash-window",
- "raw-window-handle",
- "ruster-core",
- "winit",
-]
-
-[[package]]
-name = "ruster-yard"
-version = "0.1.0"
-dependencies = [
- "ruster-app",
- "ruster-core",
- "ruster-scene",
 ]
 
 [[package]]

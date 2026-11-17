@@ -1,6 +1,6 @@
 # 0005 Live editor MCP proof
 
-Date: 2026-11-04. Status: agent-selected M4 implementation decision under accepted roadmap; verification tracked in status/evidence. Supersedes no prior decision. M5/M6 extend the domain surface; see the [current adapter guide](../../crates/ruster-mcp/README.md). Cross-platform/headless hosting remains unverified.
+Date: 2026-11-04. Status: agent-selected M4 implementation decision under accepted roadmap; verification tracked in status/evidence. Supersedes no prior decision. M5/M6 extend the domain surface; see the [current adapter guide](../../crates/rot-mcp/README.md). Cross-platform/headless hosting remains unverified.
 
 ## Context and decision
 

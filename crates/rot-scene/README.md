@@ -1,0 +1,274 @@
+# Generic authored scenes
+
+## Static imported placement (2026-11-16)
+
+`Session::place_imported(expected_revision, ImportedPlacement)` inserts a complete
+static model as ordinary scene values in one revision and Undo entry. The request
+contains `root_id`, `root: Group`, descendant `hierarchy`, mesh `objects`, and new
+scene `materials`. The hierarchy excludes the placement root from its group map;
+every descendant has a parent leading to that root. IDs must be fresh across
+current and reversible history. Mesh objects cannot carry procedural primitives
+or colliders in this placement request. The caller validates resource existence;
+the scene validates the closed hierarchy, materials, numeric bounds, combined
+capacity and staged history admission. Failures leave the document unchanged.
+
+The importer owns its canonical source template and resource payloads. Placement
+is an explicit scene copy, not an ongoing prefab link: the root and copied local
+values remain ordinarily editable. Resource-only reimport preserves stable mesh
+and texture IDs and never rewrites copied transforms or material settings. Source
+structure/settings compatibility belongs to the asset importer. This API adds no
+wire variant or format version; existing hierarchy, object and material history
+encode placement and survive save/reopen with Undo/Redo.
+
+Focused verification: `cargo test -p rot-scene
+imported_placement_atomic_history_and_closure --locked` passed on 2026-11-16,
+covering closed-tree and stale-revision rejection, overflow, unchanged snapshots
+on failure, one-step Undo/Redo across reopen, historical ID reservation and explicit
+child editing with stable resource references. Strict package Clippy passed.
+
+## Bounded hierarchy capability (format 19, WIP)
+
+`Scene.hierarchy` owns `groups: BTreeMap<String, Group>` and target→group `parents`. `Group` stores an optional display name and local Transform. Only groups parent; geometry leaves support existing nonuniform scale, groups require positive exactly uniform scale, and the Sun remains root. Point lights inherit spatial placement but retain authored range/intensity and unit scale. `Scene::resolve_poses` returns an invocation-local world observation; roots are copied exactly. No retained cache is introduced.
+
+`Session::create_group`, `reparent`, `edit_transforms` (local) and `edit_world_transforms` use existing staged Change/history admission, shared revision and reversible identity reservations. Reparent preserves the entire world closure within the disclosed matrix tolerance or refuses. `save_format_version()` reports Scene19 whenever current groups or retained structural history require it; otherwise output remains byte-compatible Scene18 with no hierarchy field. Scene1–18 reject hierarchy at actual scene/history owners. `HIERARCHY_FORMAT_VERSION=19` is separate from the preserved flat `FORMAT_VERSION=18`. Recovery snapshot bytes use the same decoder; raw-draft format remains unchanged.
+
+The current qualification envelope is eight group levels /256 combined targets, not a permanent engine limit. Unsupported legacy authoring/runtime and delivery reject before mutation/execution/publication. [Implementation, owning-callsite inventory and unfinished qualification](../../docs/evidence/ASSEMBLY-HIERARCHY-2026-11-15.md); this candidate is not milestone acceptance.
+
+## Built-in geometry (format 18)
+
+`Object.primitive: Option<Primitive>` stores `"sphere"` or `"capsule"`. Absent/null remains the unit cube when no mesh is assigned; `None` is omitted from output. A non-null primitive and mesh asset cannot coexist. `Object::procedural` constructs a shape. `Session::set_primitive(revision, object_id, Option<Primitive>)` clears a mesh; `set_mesh` clears the primitive, even when setting `None`. Coupled deltas use one Undo entry. Stale, invalid and equal edits preserve the established transaction/no-op rules.
+
+Scene1–17 reject the new key (including null) and primitive deltas at actual current/history object owners. Opaque behavior property/source text is unaffected. Scene17 cubes migrate without gaining a primitive field. Current saves emit Scene18; raw recovery stays15 because it carries snapshot bytes. Delivery uses content14/exact cumulative `builtin_primitives`, Descriptor5. Built-ins do not consume asset identities, catalog capacity or admitted asset bytes. They do not imply a collider component. [E1 evidence](../../docs/evidence/E1-PRIMITIVES-2026-11-13.md).
+
+## Creator-authored HUD (format 17)
+
+Updated2026-11-10. `Authoring.hud` contains the canonical `Hud { enabled, panels }`. Up to4 ordered flat `HudPanel` definitions share32 globally identified rows. Every panel owns `id`, `name`, optional `visible_when`, anchor/style and `elements`. Every row owns `id`, `source` and optional `enabled_when`. Panel IDs are explicit in new JSON and unique within the HUD. Row IDs are unique across all panels. Panel names accept up to128 UTF-8 bytes. `Hud::default()` is disabled with no panels and remains omitted from empty authoring.
+
+`Session::set_hud(expected_revision, Hud)` replaces the group atomically through shared revision and Undo/Redo history. Equal replacement preserves revision and Redo. Panel and row IDs retained by current or reversible HUD history remain reserved. `contains_hud_panel_id` and `allocate_hud_panel_ids` expose the panel namespace, alongside the existing globally scoped label-ID helpers. `Hud::elements()` iterates rows in authored panel order. `panel_for_label(id)` finds their owning panel.
+
+Panels support `top_left`, `top_right`, `bottom_left`, `bottom_right` and `center`. Finite bounds remain width64–1024, margin0–256, spacing0–64, font size8–48 and RGBA channels0–1. Default panel style remains width320, margin12, spacing6, font14, white text and a dark translucent background. `HudPanel::default()` constructs the ordinary `hud-default`/`HUD` panel for Rust callers. New wire input must still provide its ID explicitly.
+
+Sources retain their Static, typed State and Button shapes. A State source stores `binding_id`, `field`, `value_type`, optional prefix/suffix and precision0–6 with default2. Number/Vec3 use fixed locale-independent precision including signed zero, Bool uses lowercase text and Text remains literal. A Button source stores a caption and `HudCommandBinding { binding_id, command_id, arguments }`. Complete arguments use typed Number/Bool/Text/Vec3 constants. New/changed command bindings require an enabled Application binding with an existing API5 source and exact argument names/types. Runtime owners also check backend availability.
+
+The existing source-payload budget is32KiB across every panel. Static text and combined State prefix/suffix remain limited to1024 UTF-8 bytes per row. Button captions have the same1024-byte limit, and their binding/command IDs plus canonical typed argument JSON also count in the aggregate. Each argument map retains its16-argument/16KiB bound. A separate agent-selected16KiB metadata budget counts canonical HUD JSON after removing only every row’s `source`. It therefore includes enabled, all panel IDs/names/conditions/styles, global row IDs and row conditions, including JSON escaping and container overhead. Resolved text retains2KiB per row/64KiB aggregate. The1MiB authored document/history bound also applies.
+
+### Typed conditions and presentation
+
+`BoolCondition { binding_id, field, expected }` compares one typed Bool state field. `visible_when` controls a panel. `enabled_when` is valid only on Buttons. Absence permits. A Bool mismatch denies without a diagnostic. Missing/disabled bindings, missing sources/fields, unavailable live state and type changes deny with a shared `HudDiagnostic`. Conditions read only a caller-supplied immutable state frame and execute no expressions or VM code.
+
+`validate_bool_condition(&Authoring, &BoolCondition)` admits new targets against enabled authored Bool defaults. Existing exact panel/row conditions remain saveable when their owner breaks, allowing name, caption, style and layout repair. Changing a target or its expected polarity requires fresh validation. Conditions reserve referenced binding IDs through current/history HUDs. Existing current/reversible binding records reserve their known source IDs. Explicit source-ID repair retains its existing authoring behavior.
+
+`resolve_bool_condition` returns `ResolvedCondition { permitted, diagnostic }`. `resolve_hud` and `HudCache::prepare` retain their lookup signatures and now return `ResolvedHud { panels }`. Each `ResolvedHudPanel` has ID, effective visibility, diagnostic and ordered labels. Hidden panels retain resolved labels for coherent inspection. Each `ResolvedHudLabel` retains ID/text/diagnostic and adds effective `available`, incorporating parent visibility, source/command validity and row condition. Button captions remain readable when unavailable. Presentation owners omit hidden geometry and own actual input admission.
+
+`HudCache::formatted_labels()` counts text formatting only. Visibility/availability can change while it remains zero. Consumers caching complete resolved JSON must use `resolved_changed()` to detect those metadata-only changes. `hud_button_identity(&HudPanel, &HudLabel)` hashes the owning panel ID/visibility condition plus the complete row, including command constants and enabled condition. Panel name/style edits preserve that identity. Runtime owners combine it with document/run/catalog identity and re-evaluate conditions on their current committed frame.
+
+### Scene15/16 migration
+
+New saves and snapshots emit Scene18. Supported older documents keep their original `loaded_format_version()` until Save/encode. Legacy current HUD and both sides of HUD history normalize at the versioned document boundary. Every nondefault old group becomes one ordinary `hud-default`/`HUD` panel with the same row IDs, ordering and style. The exact old disabled/default/empty HUD collapses to canonical empty HUD. This exception preserves omission and makes an omitted current HUD agree with explicit default history sides after Undo/Redo.
+
+`migrate_legacy_hud(Value)` exposes that strict wire normalization and structural validation for version-aware callers. `migrate_legacy_hud_draft(Value)` shares its decoder, preserves unfinished raw references and always materializes the editing panel, including the exact old default. Recovery owns the old-version provenance, raw storage and original-fingerprint checks before accepting its result. Canonical `Hud` serde accepts only the new shape. Both helpers reject mixed panel/legacy fields, Center and row-condition fields in legacy data.
+
+Scene1–14 retain their existing HUD-field rejection. Scene15 retains its label-only schema. Scene16 adds Buttons. Scene1–16 reject panels, Center and conditions at their actual current/history owners, including empty/null new fields. Source strings and arbitrary property/state keys remain opaque. Existing typed row JSON with absent conditions keeps its prior byte shape.
+
+## Application command definitions (format 14)
+
+Added 2026-11-09 under [decision0045](../../docs/decisions/0045-initialization-and-paused-application-commands.md). The Scene layer stores a language-neutral command catalog. Execution, paused dispatch and milestone qualification have separate owners.
+
+`BehaviorBinding.commands` is a `BTreeMap<String, CommandDefinition>`, defaulting to empty and omitted on serialization when empty. A nonempty catalog requires an Application binding, including when disabled. Object bindings retain their existing wire shape when the catalog is empty. Each definition requires an `arguments` map of typed Number/Bool/Text/Vec3 defaults, including an explicit empty map for a parameterless command.
+
+```json
+{
+  "commands": {
+    "restart": {"arguments": {}},
+    "set_mode": {
+      "arguments": {
+        "mode": {"type": "text", "value": "ready"}
+      }
+    }
+  }
+}
+```
+
+`MAX_COMMANDS` is 16, `MAX_COMMAND_ARGUMENTS` is 16 and `MAX_COMMAND_ARGUMENT_BYTES` is 16 KiB. `command_argument_payload_bytes(&arguments)` validates the complete map using existing identifier, finite-number/vector and 1024-byte UTF-8 Text rules. It counts canonical typed JSON, including escaping. The byte limit covers the argument map. The definition wrapper and catalog IDs add their own bytes. Commands remain subject to the independent 1 MiB authored document/reachable-history limit. Argument defaults are authored metadata and do not contribute to the committed runtime-state aggregate.
+
+`Session::set_command_definition(revision, binding_id, command_id, Option<CommandDefinition>)` shares the binding transaction and Undo/Redo owner. It preserves all other binding fields. Equal replacement or absent removal preserves revision/history/Redo. Missing bindings, stale revisions and invalid/capacity-rejected edits preserve the complete document. Geometry lifecycle operations leave the Application catalog intact.
+
+`inspect_commands(binding_id, offset, limit)` returns bounded `CommandSummary` values containing only ID and `argument_count`. `command_definition(binding_id, command_id)` borrows one complete definition. Binding summaries add only `command_count`. A full 16-definition catalog can exceed a 64 KiB transport frame, so consumers should retain the summary/single-definition split. Validated public Serialize types and sorted maps provide canonical hash input for backend/editor SHA256 owners. HUD button definitions use SHA256 identity, while command catalog owners retain their existing hashes and the geometry fingerprint keeps its existing purpose.
+
+Scene1–13 rejects any `commands` field in current bindings or either side of Undo/Redo binding deltas, including null/empty maps. Property names, source text and positive opaque source API metadata retain their existing meaning. Scene14 introduced strict catalog fields, rejecting null catalogs and malformed/unknown definition fields. Existing supported documents without command fields remain readable. Current Save and snapshot output writes Scene18. F2a acceptance is recorded in [current status](../../docs/STATUS.md).
+
+## Application bindings and authored state defaults (format 13)
+
+The data contract added on 2026-11-09 is defined by [decision 0044](../../docs/decisions/0044-owned-creator-runtime-state.md). Backend execution and creator qualification have separate owners.
+
+`BehaviorBinding.target` is `BindingTarget::Object(String)` or `BindingTarget::Application`. `object_id()` returns an optional borrowed object ID. Object bindings retain their existing JSON shape with `object_id`. Application bindings use only `"target": {"type": "application"}`. Decoding requires exactly one form and rejects explicit null, unknown target kinds and unknown fields. There is at most one binding per object and one application binding, including disabled entries. The application binding counts toward the 256-binding cap and has no geometry identity. Geometry duplication/deletion leaves it intact. Object bindings copy their authored defaults during duplication, with the existing fresh binding ID and property-reference remapping.
+
+`state_defaults` is an optional map keyed by stable field names. Empty maps are omitted. `StateValue` uses the existing tagged `type`/`value` convention for finite `number`, `bool`, `text` up to 1024 UTF-8 bytes and finite three-component `vec3`. Reference variants are excluded. An application binding can therefore be stored as the following data-only definition.
+
+```json
+{
+  "target": {"type": "application"},
+  "source_id": "game-flow",
+  "enabled": true,
+  "properties": {},
+  "state_defaults": {
+    "score": {"type": "number", "value": 0.0},
+    "phase": {"type": "text", "value": "ready"}
+  }
+}
+```
+
+The public bounds are `MAX_STATE_FIELDS` at 64 fields, `MAX_BINDING_STATE_BYTES` at 16 KiB and `MAX_RUNTIME_STATE_BYTES` at 1 MiB. `state_payload_bytes(&fields)` validates field names/values and counts canonical typed JSON with a capped writer, including escaped text. It returns two bytes for an empty map. Aggregate default accounting skips empty maps and includes all nonempty maps across enabled and disabled bindings. The existing 1 MiB document/current-reachable-history limit also applies and can reject a document before the aggregate default limit is reached.
+
+`Session::set_state_default(revision, binding_id, name, Option<StateValue>)` uses the same binding transaction and shared Undo/Redo history as `set_binding`. It preserves target, source, enabled status, properties and other defaults. A missing value removes one default. No-op updates preserve revision/history/Redo. Stale, invalid and capacity-rejected updates preserve the complete document.
+
+Scene 1–12 labels reject `target` and `state_defaults` wherever a binding definition occurs, including null/empty values and both sides of Undo/Redo binding deltas. Property names and opaque source text retain their meaning. A source's positive host API metadata remains saveable independently of runtime availability. These fields were introduced in Scene13. Current Save and snapshot output uses Scene15.
+
+Binding summaries retain `object_id` for object targets, expose the explicit application `target` for application bindings and add `state_field_count` beside `property_count`. Full authored defaults remain available through the binding accessor. Live per-run values belong to the runtime and stay separate from this authored data/history contract.
+
+## Scene model and CLI
+
+This application-neutral scene foundation is independent of logistics, rendering, editor, assets and MCP. Each object has an immutable stable ID, an optional display name (falling back to its ID), and an optional stable mesh asset ID (`None` selects the procedural unit cube), translation, Euler rotation (radians, fixed-axis X then Y then Z, world qz*qy*qx), positive scale and linear RGBA color. The initial storage is a bounded vector, chosen for small whole-scene inspection and direct object lookup; this is not a general ECS or a scalability claim.
+
+From the repository root:
+
+```sh
+cargo run --locked -p rot-scene -- new /tmp/my-scene.json my-scene
+cargo run --locked -p rot-scene -- create /tmp/my-scene.json 0 object-1 "My object"
+cargo run --locked -p rot-scene -- duplicate /tmp/my-scene.json 1 object-1 object-2
+cargo run --locked -p rot-scene -- rename /tmp/my-scene.json 2 object-2 "Second object"
+cargo run --locked -p rot-scene -- delete /tmp/my-scene.json 3 object-1
+cargo run --locked -p rot-scene -- undo /tmp/my-scene.json 4
+cargo run --locked -p rot-scene -- demo /tmp/rot-scene.json
+cargo run --locked -p rot-scene -- inspect /tmp/rot-scene.json
+cargo run --locked -p rot-scene -- transform /tmp/rot-scene.json 0 left -3 1 0
+cargo run --locked -p rot-scene -- undo /tmp/rot-scene.json 1
+cargo run --locked -p rot-scene -- redo /tmp/rot-scene.json 2
+cargo run --locked -p rot-scene -- mesh /tmp/rot-scene.json 3 left owned-mesh
+cargo run --locked -p rot-scene -- mesh /tmp/rot-scene.json 4 left none
+cargo run --locked -p rot-scene -- run /tmp/rot-scene.json 10
+```
+
+Use a new filename for `new` (`empty` is an alias) or `demo`; existing destinations are protected. `transform FILE REV OBJECT X Y Z [RX RY RZ SX SY SZ]` edits translation alone or the complete transform; omitted rotation/scale are preserved. `mesh FILE REV OBJECT ASSET_ID|none` assigns a mesh or restores the procedural cube. The scene CLI and library validate ID syntax only; registry existence, import and missing-asset diagnostics belong to asset-aware callers. The CLI reserves `none` for restoring the cube; the library can represent the syntactically valid asset ID `none` as `Some("none".into())`. `inspect` reports the loaded format version and the next-save upgrade when opening v1/v2. `run` observes a static configurator snapshot for 0..10000 ticks and emits its scene identity, revision, tick, object count and fingerprint. It does not invent physics or application rules. `Preview::new` snapshots authored data; edits do not enter that snapshot until explicit `reset`. Headless and rendered previews can share this lifecycle.
+
+`Scene::empty(id)` starts a scene with no objects, and `Object::cube(id, optional_name)` constructs a default procedural cube. `Object::display_name()` returns its name or ID. `Session::create(expected_revision, object)`, `rename(expected_revision, id, optional_name)`, `duplicate(expected_revision, source_id, new_id, optional_name)` and `delete(expected_revision, id)` share the same chronological history as transform and mesh edits. Create appends; Duplicate inserts immediately after its source, copying transform, color, mesh and name unless a replacement name is supplied. Duplicate names are allowed; references always use immutable IDs. Removing the name (`None`, or omit the CLI rename name argument) restores the ID label. Names accept 1..128 UTF-8 bytes, without control characters or surrounding whitespace. New IDs cannot collide with current objects or IDs retained by undo/redo; `contains_object_id(id)` exposes this reservation for ID generators. IDs whose history has expired are no longer reserved. Undo restores deleted objects at their original index, including name and asset ID. Lifecycle history stores one object payload and index, not a whole-scene snapshot. Mesh references retained in creation/deletion history count for `has_asset_references()`.
+
+`Scene::validate/load/save` support code-first values. `Session::new/open`, `scene`, `edit(expected_revision, object_id, &transform)`, `set_mesh(expected_revision, object_id, Option<String>)`, `undo(expected_revision)`, `redo(expected_revision)` and `save(path)` provide the authoring boundary. A no-op transform or mesh assignment keeps the revision/history and redo entries. Transform and mesh edits share one chronological undo/redo history. Every successful change, undo or redo increases the revision; stale, invalid and overflowed commands preserve state. `Scene::fingerprint` is a deterministic 16-character noncryptographic FNV-1a checksum of canonical JSON bytes (including revision), for preview comparisons rather than security. Read-only `path`, `is_dirty`, `loaded_format_version`, `undo_len` and `redo_len` expose authoring state. New sessions are unsaved. Save to an opened canonical path checks the full saved document; other paths must not exist. A failed save preserves the file association, history and dirty baseline.
+
+The JSON envelope is `{ "format": "rot-scene", "format_version": 17, "scene": { "id": "...", "revision": 0, "objects": [...] }, "undo": [], "redo": [] }`. New saves emit format17 with the data contract below. Existing Scene1–16 documents remain readable with explicit new-field version guards. A nonempty optional `authoring` section holds language-neutral sources, bindings, actions and HUD definitions beside the rendering scene. It is omitted when empty. Optional `mesh` and `name` fields are omitted when `None`, preserving canonical scene bytes/fingerprints of old unnamed cube-only scenes. V3 scalar history supports tagged `transform`, `mesh`, `name`, `create` and `delete` entries. Name entries carry `id`, `before` and `after`; lifecycle entries carry the complete `object` and original `index`.
+
+Scene v1 through v5 retain strict old schemas; v3 accepts only its scalar history variants, preserving both undo and redo. V1 rejects mesh fields (even null) and tagged history; v2 accepts only transform/mesh history and rejects name fields (even null). Opening does not rewrite a file or mark it dirty. Explicit Save upgrades even an unchanged old file to v17 without increasing its authored revision. Failed saves retain the loaded-version indicator. Every reconstructed historical authored state is validated, including object count, identities and lifecycle payload/order consistency. Logistics v1 scenarios remain separate and are not migrated. Unknown fields, duplicate JSON object keys at any depth, unsupported versions, inconsistent history and corrupt/truncated inputs fail. Duplicate keys are rejected while decoding the original bytes, before JSON normalization. Pre-v5 envelopes reject authoring fields even when null; old history cannot acquire v5 fields by relabeling its version.
+
+V4 introduced nonrecursive grouped scene deltas: `transforms` carries unique-target transform deltas, while `objects` carries one bounded creation or deletion set with original indices. `edit_transforms(expected_revision, &[(id, transform)])` applies a whole gesture as one revision/undo step; `create_many(expected_revision, Vec<Object>)`, `delete_many(expected_revision, &[id])` and `duplicate_many(expected_revision, &[(source_id, new_id)])` do the same for a selection. Bulk creation/duplication appends in caller order, and bulk deletion restores original scene order on Undo. Duplicate targets, missing IDs, stale revisions, invalid members or capacity overflow reject the whole group. Empty/all-no-op groups preserve redo. Groups have at most256 members and cannot nest; documents relabeling grouped history as v3 are rejected.
+
+Every edit preflights a disposable authored state and normalized output size before committing. Admission and Open reserve the maximum reachable scene plus sources/bindings across all retained Undo/Redo states, including maximum revision width. Undo/Redo apply and validate a disposable state, then reuse that admitted byte invariant while moving the same delta between stacks. A capped counting writer measures the projected current-version document over borrowed history references, without allocating encoded output or retaining whole-document history snapshots. Retained history is counted once; the maximum reachable authored payload is counted separately. New valid edits retain up to32 recent Undo steps. If needed to fit1MiB, admission selects a suffix by trimming the oldest Undo entries, always retaining the newest complete change. Only a successful new edit can perform this byte-pressure eviction; Open, Save, Undo, Redo, stale/invalid/no-op commands and rejected edits do not trim history. `history_evictions()` reports the cumulative number of entries trimmed by byte pressure in this session (ordinary32-step age eviction is excluded); it resets on new Session/Open. If even the newest change plus current/reachable authored payload cannot fit, `SceneError::Capacity` rejects the command atomically with an actionable limit message. Other validation errors never trigger trimming. Both counting and writing use compact JSON plus a final newline, avoiding v5 wrapper indentation growth when migrating previously admitted near-cap v4 histories. Input/Open validates compact normalized saveability without rewriting or discarding any history. This bounded transient validation runs on gesture commit, not every drag frame.
+
+Limits remain 256 objects, up to32 recent total undo/redo changes (also constrained by bytes) and 1 MiB serialized input/output across geometry, sources, bindings and history. IDs use 1..128 ASCII letters/digits/`-_.`; object IDs are unique. Translation and rotation magnitudes are at most 10000 (radians), scale is 0.001..1000, and colors are finite 0..1. Empty scenes are valid. All valid edits, undo and redo advance the revision; no-ops preserve revision and redo, and stale/invalid/overflowed commands preserve state.
+
+Persistence flushes and syncs a sibling temporary file before atomic replacement. `Session` uses nonblocking sibling `.FILE.rot-lock` advisory locks for cooperating writers, resolves parent aliases, rejects nonregular source/destination/lock entries (including symlinks and FIFOs) before opening and checks full saved baselines (including same-revision changes). Lock files remain in place. Direct `Scene::save` replaces the file with empty history and requires caller-managed concurrency. Advisory locking does not exclude hostile/noncooperating writers; atomic replacement is not a universal power-loss durability guarantee. The bounded scene format stores mesh IDs rather than mesh source paths or derived mesh payloads. It has no hierarchy or implicit logistics conversion. Motion Lab application format1 remains separate and is not automatically converted into generic authoring or another language. Asset resolution is deliberately outside this crate.
+
+
+The CLI also accepts bounded regular-file JSON batches: `transforms FILE REV BATCH.json` takes `[{"object_id":"id","transform":{"translation":[0,0,0],"rotation":[0,0,0],"scale":[1,1,1]}}]`; `duplicates FILE REV BATCH.json` takes `[{"object_id":"source","new_object_id":"copy"}]`; `deletes FILE REV BATCH.json` takes `["id"]`. Input is at most1MiB; core group limits and stale/atomic validation apply before the same guarded file Save. One group consumes one revision and one Undo entry.
+
+
+## Language-neutral behavior authoring
+
+Format5 adds `authoring: { "sources": { "source-id": { "label": null, "language_id": "opaque-backend-id", "host_api_version": 1, "text": "unfinished source" } }, "bindings": { "binding-id": { "object_id": "object-id", "source_id": "source-id", "enabled": true, "properties": {} } } }`. Source and binding map keys are immutable identities for references, separate from source display labels and binding owner IDs. The current working bound is256 sources and256 bindings, with one binding per object; binding identity permits later multiple-binding support without treating object identity as the binding key. Embedded UTF-8 source text is authoritative and accepts at most16KiB per source. Labels follow object display-name rules; language IDs follow stable-ID syntax and host API versions must be positive. These are storage bounds/defaults, not a permanent backend or host API selection.
+
+Property values use tagged objects: `{"type":"number","value":2.0}`, `{"type":"bool","value":true}`, `{"type":"text","value":"label"}`, `{"type":"vec3","value":[1,2,3]}`, `{"type":"object_ref","value":"other-object"}` and `{"type":"asset_ref","value":"asset-id"}`. References also accept null. Each binding has at most64 stable-ID-named properties, each text value at most1024 UTF-8 bytes; numbers and vector components must be finite `f64`. Runtime transform/output validation remains a separate host obligation. No source-declared schema is stored or required, and undeclared/orphan values remain intact for repair.
+
+`Session::authoring()`, `source(id)` and `binding(id)` provide read-only data. `set_source(expected_revision, id, Option<BehaviorSource>)` and `set_binding(expected_revision, id, Option<BehaviorBinding>)` explicitly upsert/remove an identity, share chronological scene history and use the same stale/no-op/failure guards. Missing sources, unresolved object/asset property references, unknown backend IDs and syntactically invalid code are structurally saveable; a binding's owner must exist in every reachable authored state. This crate has no interpreter, source compiler, filesystem working-copy synchronization or runtime capability. A subsequent editor/backend layer must diagnose language/API/schema/asset availability and reconcile external working copies explicitly.
+
+Object deletion removes owned bindings in the same undo change. Single/group duplication clones bindings under newly allocated binding IDs, shares their sources and remaps ObjectRef values within the copied selection (including self references); external and unresolved references remain intact. Undo restores exact original bindings/properties together with object order. `contains_source_id`, `contains_binding_id`, `allocate_source_ids` and `allocate_binding_ids` expose identity reservations; object allocation also reserves dangling ObjectRef IDs. Current data and retained history reserve referenced IDs, preventing accidental retargeting. Explicit source/binding upsert can repair an intentionally named missing identity. AssetRef properties in current/history values count for `has_asset_references()`.
+
+A named audio cue uses
+`{"type":"sound_ref","value":{"asset_id":"confirmation","gain":0.5}}`.
+Both fields are required. The asset ID can be null while unassigned, and
+gain must be finite in the inclusive range 0 to 1. `Session::sound_asset_references()`
+collects all assigned IDs through current bindings and both sides of retained
+Undo and Redo. A separate presence flag also detects unassigned definitions.
+Disabled bindings remain part of the export asset and capability closure.
+Current or historical sound properties require Scene21. Other scenes retain
+the format required by their own data.
+
+
+V5 history is a flat nonrecursive record with optional nonempty `scene`, `sources` and `bindings` delta arrays. Scene entries retain the previous compact scalar/group representations. Source/binding entries hold `id`, `before` and `after` values (null means absent); text is initially retained in full within the aggregate1MiB budget. Frontends should coalesce transient text editing before committing; no blob store or compression was introduced. Undo admission retains the largest restorable authored payload as well as retained delta text; old history may expire sooner for large source/property edits. If trimming all older Undo entries still cannot fit the newest complete change, failure preserves current state/history and the eviction counter. Source editing must coalesce frontend drafts before commit and surface byte-pressure history reduction; the core exposes that reduction but does not invent a UI notice.
+
+The CLI reports byte-pressure removal on stderr after a successful save, retaining its existing revision line on stdout. The editor shows a nonmodal notice; its successful command responses expose the cumulative session count as `history_evictions`.
+
+`Session::snapshot_bytes()` exports the complete admitted current-format document without changing the live save baseline/path/history. `Session::from_snapshot_bytes(&bytes)` uses the same strict decoder/migrations/capacity checks, retaining authoring/history but restoring with no path/saved baseline. This supports recovery as an unsaved copy: it grants no authority to replace the origin or another existing destination. Asset origin and bounded frontend drafts remain separate editor recovery context, not scene geometry fields.
+
+## Headless source and binding edits
+
+`rot-scene --help` lists the data-only authoring commands:
+
+```sh
+rot-scene sources /tmp/my-scene.json
+rot-scene source-set /tmp/my-scene.json 2 movement /tmp/source.json
+rot-scene binding-set /tmp/my-scene.json 3 mover /tmp/binding.json
+rot-scene diagnostics /tmp/my-scene.json
+rot-scene source /tmp/my-scene.json movement
+```
+
+`Session::create_behavior(revision, source_id, source, binding_id, binding)` creates a fresh source and its attachment atomically in one revision/Undo. Its binding must reference that source; both identities must be fresh across live/history/dangling reservations. Owner conflicts, stale state, mismatched references and capacity rejection leave neither half behind. `behavior-create FILE REV SOURCE_ID BINDING_ID JSON_FILE` exposes the same operation with a `{"source": BehaviorSource, "binding": BehaviorBinding}` input object. Use `set_binding`/`binding-set` to attach an existing source, and explicit source upserts for repair.
+
+Use the actual current revision. The input files describe one `BehaviorSource` or `BehaviorBinding` using the schema above; inputs must be regular JSON files no larger than1MiB, with the stricter typed source/property limits still enforced. `source-remove FILE REV ID` and `binding-remove FILE REV ID` are reversible edits, not filesystem deletion. Removing a referenced source deliberately leaves repairable bindings. `sources`, `bindings` and `diagnostics` accept an optional numeric offset and return16-item summary pages. Singular `source`/`binding` returns the complete requested value; `inspect` also reports authoring counts. All mutations share guarded Save/Undo and report byte-pressure history removal after successful persistence. This CLI stores unfinished/unknown-language source; it does not execute an interpreter or turn invalid code into a save error. The geometry-only `run` command rejects authoring-bearing documents rather than stripping them.
+
+`inspect_sources(offset, limit)`, `inspect_bindings(offset, limit)` and `authoring_diagnostics(offset, limit)` return total/continuation metadata with at most16 entries per page (requested limits are clamped to1..16); source summaries exclude source text and binding summaries exclude property/state-default bodies and report their field counts. Structural diagnostics currently identify missing sources and unresolved ObjectRef values. Retrieve source bodies/full bindings explicitly through their accessors; transport consumers must separately bound encoded property replies. Unknown languages, unavailable host APIs/assets and runtime/source diagnostics belong to the relevant host, rather than a hardcoded backend list here.
+
+`Scene::load` rejects documents with live or reversible behavior authoring and directs callers to `Session::open`; geometry-only readers cannot silently drop authored behavior. An authoring-aware caller can explicitly export geometry by saving `session.scene()` to a separate destination. Empty-authoring files continue to load through existing geometry readers. Untextured `Scene`/`Object` serialization and fingerprints remain unchanged; generic authoring shares the scene's monotonically increasing revision but is not part of its geometry fingerprint.
+
+
+`validate_id` exposes the same stable ID grammar used by object/source/mesh references (1–128 ASCII letters, digits, `-`, `_` or `.`). Display names remain separate and may contain Unicode/spaces. Resource consumers can validate mapping keys without constructing placeholder scenes.
+
+
+## Scene-owned opaque materials (format6)
+
+Scene6 adds `Scene.materials: BTreeMap<String, OpaqueMaterial>` (at most64 entries) and optional `Object.material` references. Each material has an optional display `name`, finite linear RGB `tint` in0..1, optional syntactically validated `base_color_texture` asset ID, `filter` (`linear`/`nearest`) and `address` (`repeat`/`clamp`). `OpaqueMaterial::default()` is unnamed white tint without a texture, with linear/repeat sampling. Asset availability, UV compatibility, decoding and rendering belong to asset-aware consumers; unavailable texture IDs remain saveable for explicit repair. Object material references must resolve inside every current and reversible Scene. No image bytes or GPU resources enter scene state. Assignment preserves the existing object RGBA tint. Duplicate objects retain their shared material reference.
+
+`Session::set_material(revision, id, value)` creates a fresh material identity or edits a live shared material. `copy_material(revision, source_id, new_id, optional_name)` copies under a fresh identity; an absent override preserves the source label. `remove_material(revision, id)` rejects assigned live materials and treats an absent ID as a no-op. `assign_material(revision, object_id, Option<String>)` assigns or clears a reference. `create_and_assign_material(revision, object_id, id, value)` creates and assigns in one transaction, revision and Undo entry. All use the ordinary stale-revision, no-op, failure-atomicity, byte-admission and chronological Undo/Redo contracts. Shared material edits affect all referring objects; they never modify behavior Authoring or catalog/source state.
+
+`contains_material_id` and `allocate_material_ids` reserve current and Undo/Redo identities, including references retained by object lifecycle deltas, in a separate namespace from object/source IDs. Absent historical material identities cannot be recycled through `set_material`; Undo restores the original definition. Delete rejects current users, while prior historical users remain valid through their original chronological history. Material history is a bounded optional `materials` array on each Change, holding `id`, `before` and `after` material values. Assignment is a `scene` delta with `kind: "material"`, object `id`, and before/after optional material IDs.
+
+The empty material map and absent object references are omitted, preserving canonical legacy untextured scene bytes/fingerprints. Old version1–5 labels reject new material fields even when null/empty, material changes and nested lifecycle references in either history stack. Opening preserves old input and revisions; explicit Save writes the current format. Material payloads participate in current and maximum Undo/Redo-reachable byte accounting. Texture IDs in current maps and historical material definitions participate in `has_asset_references()`, including unused materials and Redo-only definitions, so root-changing SaveAs cannot lose their asset context. `Preview` and runtime Scene clones preserve materials as part of their immutable authored snapshot until Reset; immutable external texture snapshots remain the host's responsibility.
+
+
+`Session::create_many_with_materials(revision, objects, materials)` appends a copied group and fresh scene-owned definitions in one atomic revision/Undo entry. Existing `create_many` uses this path with an empty material map. New material IDs must be fresh across current and reversible state, independently of object IDs; every supplied material/value and final object reference is validated before admission. Object/material count and reachable byte limits apply to the combined transaction. Invalid references, collisions, stale revisions and capacity failures preserve both halves; Undo removes imported objects and definitions together. Empty inputs preserve revision/history/Redo.
+
+The editor's window-owned clipboard2 captures exact referenced definitions and the source document incarnation beside objects and catalog root, with a256KiB aggregate bound. Same-incarnation paste shares a still-live material (including its latest edits); removed definitions and all cross-incarnation definitions receive fresh reserved-safe destination IDs. Sharing within the copied selection is preserved. Even matching catalog roots do not establish scene material identity. Mesh and effective texture references require known matching catalog roots; no files or system clipboard are copied. Unavailable external references remain authored data for host diagnostics and explicit repair.
+
+
+## Scene7 authored diffuse lighting
+
+Scene7 adds a separate `Scene.lighting`: omitted/`Legacy` preserves fixed legacy illumination; `Authored` owns ambient linear RGB/relative intensity and a stable-ID map of at most one directional/four point lights, including disabled entries. Geometry and lights share the existing256-target capacity and current/reversible ID namespace. Light transforms have unit scale. Geometry mesh/material/tint remain geometry-owned. Scene 13 separately permits application behavior targets under the contract below. The bounded V2a creator workflow is accepted under its recorded evidence; broader rendering capabilities remain separate.
+
+`Scene::empty` remains legacy for existing code-first clients; `Scene::authored_empty` seeds an explicit editable Sun with legacy-equivalent ambient/directional values. `Session::create_light`, `set_light`, `remove_light` and `set_ambient` perform expected-revision guarded, reversible edits. `LightingEdit.created_ids` includes an explicit Sun when a first point/ambient edit promotes Legacy. Undo restores the exact previous mode; deleting the last authored light does not restore fixed illumination. `set_light` preserves kind/identity. Invalid requests, target capacity and stale revisions preserve the document.
+
+Generic rename/transform/delete/duplicate group operations accept geometry/light targets atomically. Light-containing scale edits reject; point rotation and directional translation retain editor-anchor values without affecting their illumination. `create_many_with_materials_and_lights` admits a mixed clipboard group with fresh IDs and optional fresh materials, preserves global ambient and promotes Legacy in the same Undo step. Incoming directional lights avoid an additional seeded Sun. `target_transform`, `target_display_name` and `target_count` provide borrowed/bounded authoring lookups without changing geometry draw/pick semantics.
+
+Supported Scene1–6 files remain readable. Pre7documents reject lighting fields/deltas even when values are null or nested in reversible history. Lighting snapshots participate in current/reachable validation, fingerprint and serialized byte limits. No renderer/GPU resources or editor light-marker meshes are stored here. See [0031](../../docs/decisions/0031-authored-diffuse-lighting.md) and [V2a evidence](../../docs/evidence/V2A-foundation.md) for selected math, delivery compatibility and outstanding verification.
+
+
+## Scene8 Sun-shadow data — feasibility in progress
+
+Updated2026-11-06. Scene8 adds shadow settings only to `LightKind::Directional { shadow: SunShadow }`. A default directional kind still serializes as `{"type":"directional"}`. Its optional `shadow` field defaults only when entirely absent; a present object requires all four fields: `{"enabled":false,"quality":"standard","depth_bias_texels":0.15,"normal_bias_texels":0.0}`. Unknown fields, null, missing members and unknown quality values reject. Point lights reject shadow fields, and Legacy remains a strict empty variant. `Light::directional` constructs the disabled default; authored/Legacy lighting is never silently shadow-enabled.
+
+`ShadowQuality::Standard.map_size()` is1024 and `High` is2048. Both biases must be finite in0..=4 world shadow texels. These agent-selected defaults and units are provisional until actual Daylight Study quality/cost evaluation. The whole shadow field is omitted only when all four values equal `SunShadow::default()`. Disabling preserves nondefault quality and bias values in saved data, rather than discarding the creator's settings.
+
+Existing `Session::set_light` and whole-`Lighting` history snapshots carry settings without new transaction kinds. Undo/Redo, mixed object/light clipboard admission, current/reachable byte accounting, immutable light kind and one-Sun capacity continue to apply. Duplicating a Sun into a scene already containing it still rejects the entire mixed group atomically. Preview/runtime Scene clones retain the authored settings as data; renderer support and actual native output are separate acceptance checks.
+
+Scene1–7 and their supported history shapes remain readable with shadows disabled by default. Pre8documents reject any shadow field at actual current light definitions and either endpoint of lighting history, including null, explicit defaults and disabled settings. This guard follows exact schema positions and accepts unrelated behavior properties named `shadow` in current and reversible state. Opening preserves input/revision and explicit Save upgrades to8. See [0033](../../docs/decisions/0033-bounded-sun-shadow-feasibility.md) and [V2b](../../docs/plans/V2B-SUN-SHADOWS.md); this data change does not establish editor/MCP controls, standalone compatibility or visual/native acceptance.
+
+
+Sun-shadow bias deserialization checks the originalf64 value is finite0..4before f32 conversion, including live lighting and reversible history endpoints. Tiny negatives and values just above4reject instead of normalizing into range. Code-first f32 constructors still validate through the shared light/scene boundary.
+
+
+## I1a action authoring foundation
+
+`Authoring.actions` is a default-empty/omit-empty stable-ID map, validated with behavior authoring rather than render Scene. `rot_scene::input` defines logical `InputKey`, Button/Axis1d definitions, typed supplied frames and a pure bounded `KeyEventAccumulator`. Limits are32actions/four key entries per action; Escape/Tab are reserved, opposite axis keys cancel and cross-action sharing is valid. Logical identifiers are explicit (`a`, `0`, `arrow_left`, `space`, etc.); no physical-key fallback or chord interpretation is implied.
+
+`Session::action`, `set_action`, `contains_action_id` and `allocate_action_ids` supply the shared undoable Rust authoring boundary. Deleted reversible identities cannot be silently reused; normal allocation includes the next revision to avoid routine reuse after history aging. Current/actions-only and historical action definitions participate in the existing saveable reachable-payload envelope. Geometry-only loading rejects actions-bearing documents. Working Scene11 accepts definitions/history; older owning versions reject new field presence even when null/empty. Raw text inside source/labels is not reinterpreted as schema.
+
+Supplied `ActionFrame` decoding rejects duplicate IDs and more than32entries before insertion; validation against the actual runtime map rejects unknown IDs/kinds/axis values and fills omissions with neutral values. `ValidatedActionFrame` is one immutable set of values, not proof of a different map/run identity. The pure accumulator takes pending edges at tick admission; it does not clear new arrivals on an acknowledgement. Host adapters still own focus, repeat filtering and run/reset/map/ownership authority. These APIs do not yet establish native keyboard/editor/MCP/export support; track [I1a evidence](../../docs/evidence/I1A-foundation.md).
+
+`ActionFrame::validate_only_against` checks the complete map and every supplied value. `validate_against` uses that same validation and then constructs the complete neutral-filled frame. Hosts can use the validation-only method for admission checks and construct the immutable frame when execution admits the tick. Execution still requires its current run, map and ownership checks. The accumulator traverses Button definitions and edge entries in their shared immutable ID order, checking their correspondence as it advances.

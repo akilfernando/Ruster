@@ -1,14 +1,14 @@
 Rot Engine Yard — Linux x86_64 development package
 
-Extract the entire archive into a new directory. Run ./ruster-yard there, or
+Extract the entire archive into a new directory. Run ./rot-yard there, or
 launch the executable by absolute path from any working directory. The owned
 truck.obj resource is loaded from resources beside the executable, read-only.
-No Ruster checkout, editor, MCP server, Cargo, network or account is required.
+No Rot Engine checkout, editor, MCP server, Cargo, network or account is required.
 
 Try:
-  ./ruster-yard --headless
-  ./ruster-yard --headless --capacity 3
-  ./ruster-yard --help
+  ./rot-yard --headless
+  ./rot-yard --headless --capacity 3
+  ./rot-yard --help
 
 The native application starts paused. Run/Pause, Step and Reset are in the
 toolbar; changing settings takes effect on Reset. The default capacity misses
@@ -25,7 +25,7 @@ and GLIBC symbols from this executable; it is not a tested distribution matrix.
 This is a local development artifact, not a supported public binary release.
 Other Linux distributions, GPUs, Windows and macOS remain unverified.
 
-Original Ruster code and owned example resources: MIT OR Apache-2.0, at your
+Original Rot Engine code and owned example resources: MIT OR Apache-2.0, at your
 option. Dependencies retain their own terms. LICENSE-MIT, LICENSE-APACHE,
 THIRD_PARTY_NOTICES.txt and SUPPLEMENTAL_NOTICES.txt preserve readable texts;
 LICENSE-SOURCES.json records supplemental upstream provenance. The full locked

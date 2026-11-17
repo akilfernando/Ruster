@@ -10,10 +10,10 @@ Do this once for an engine version, with the pinned toolchain and native develop
 
 ```sh
 python3 scripts/package_creation.py prepare-runtime \
-  --binary target/release/ruster-motion-lab --output /tmp/ruster-runtime.tar.gz
-mkdir /tmp/ruster-template
-tar -xzf /tmp/ruster-runtime.tar.gz -C /tmp/ruster-template
-RUSTER_RUNTIME_KIT=/tmp/ruster-template/ruster-runtime target/debug/ruster-editor
+  --binary target/release/rot-motion-lab --output /tmp/rot-runtime.tar.gz
+mkdir /tmp/rot-template
+tar -xzf /tmp/rot-runtime.tar.gz -C /tmp/rot-template
+ROT_RUNTIME_KIT=/tmp/rot-template/rot-runtime target/debug/rot-editor
 ```
 
 Choose a fresh archive path. Preparation verifies the Linux executable/profile and includes dependency/license notices, requirements, fixed helpers and hashed inventory. The template contains trusted executable code; use a template you prepared or trust. It is specific to its recorded Linux requirements, not a universal Linux binary. Each later scene export uses this template without Cargo or recompiling. Changing the runtime/helpers requires a new template. Editor export requires Python3 and the current Linux process-cleanup utility `/usr/bin/kill`; standalone application execution does not require Python or Rust.
@@ -45,13 +45,13 @@ paths, transforms and material settings equivalent. **Reset** refreshes an
 active preview. A malformed or structurally incompatible source keeps the
 last accepted version available. Repair the source and Refresh, or import a
 structurally different model with a fresh identity. When copying an editable
-project, include its asset catalog and `.ruster-models` directory.
+project, include its asset catalog and `.rot-models` directory.
 
 Save, then use the normal export dialog. The relocated app runs with
 generated mesh and texture resources from the accepted GLB generation. The
 original modelling file and Blender are unnecessary for app playback.
-See the [asset guide](../crates/ruster-assets/README.md#static-glb-source-generations)
-for the bounded format and the [MCP guide](../crates/ruster-mcp/README.md)
+See the [asset guide](../crates/rot-assets/README.md#static-glb-source-generations)
+for the bounded format and the [MCP guide](../crates/rot-mcp/README.md)
 for the guarded equivalent.
 
 ## Save and rerun a play check
@@ -72,7 +72,7 @@ you repair the behavior.
 Export using a matched kit advertising `repeatable_play_checks`. After
 relocation run `application/application --play-check`. The app prints a
 structured report and exits 0 on pass or 2 on a failed check. You can still
-launch the app normally. The [MCP guide](../crates/ruster-mcp/README.md)
+launch the app normally. The [MCP guide](../crates/rot-mcp/README.md)
 covers guarded start, inspect and cancel.
 
 ## Perform the same export through MCP
@@ -80,14 +80,14 @@ covers guarded start, inspect and cancel.
 Launch the editor with explicit existing directory grants:
 
 ```sh
-RUSTER_MCP_ENABLE=1 \
-RUSTER_MCP_SAVE_DIR=/absolute/project \
-RUSTER_MCP_EXPORT_DIR=/absolute/exports \
-RUSTER_RUNTIME_KIT=/absolute/template/ruster-runtime \
-  target/debug/ruster-editor --scene /absolute/project/scene.json
+ROT_MCP_ENABLE=1 \
+ROT_MCP_SAVE_DIR=/absolute/project \
+ROT_MCP_EXPORT_DIR=/absolute/exports \
+ROT_RUNTIME_KIT=/absolute/template/rot-runtime \
+  target/debug/rot-editor --scene /absolute/project/scene.json
 ```
 
-Attach the adapter using the private socket printed by the editor; see the [MCP guide](../crates/ruster-mcp/README.md). Scene/content/behavior tools perform the same validated authoring operations as the editor. Save via `scene_persistence_inspect` then `scene_save`, using the returned tokens. Save may preserve unfinished Lua; export's actual runtime preflight must succeed.
+Attach the adapter using the private socket printed by the editor; see the [MCP guide](../crates/rot-mcp/README.md). Scene/content/behavior tools perform the same validated authoring operations as the editor. Save via `scene_persistence_inspect` then `scene_save`, using the returned tokens. Save may preserve unfinished Lua; export's actual runtime preflight must succeed.
 
 Call `creation_export_inspect`, then `creation_export_start` with title, a fresh `.tar.gz` leaf filename and its exact returned session, scene revision, persistence, asset, shader and export-configuration preconditions. Revisions/operation IDs are decimal strings; a missing asset catalog is JSON null. No executable, shell arguments or arbitrary output path is accepted. `shader_refresh` with `builtin:true` explicitly selects the same built-in appearance as the editor.
 
@@ -120,7 +120,7 @@ mover's terminal translation and any declared contact-count state you use in
 the behavior. For Linux export use a current runtime kit advertising
 `kinematic_move_and_slide`, then run the relocated application's
 `--play-check`. Older kits can still package compatible scenes without API7.
-See the [Lua contract](../crates/ruster-behavior/README.md#opt-in-api7-kinematic-move-and-slide).
+See the [Lua contract](../crates/rot-behavior/README.md#opt-in-api7-kinematic-move-and-slide).
 
 ## One-shot sound feedback
 

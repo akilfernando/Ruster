@@ -28,7 +28,7 @@ class CreationDistributionTests(unittest.TestCase):
         for stack, side in ((None, None), ("undo", "before"), ("redo", "after")):
             with self.subTest(stack=stack), tempfile.TemporaryDirectory() as temporary:
                 root = Path(temporary)
-                document = {"format": "ruster-scene", "format_version": 21,
+                document = {"format": "rot-scene", "format_version": 21,
                             "scene": {"objects": []}, "undo": [], "redo": [],
                             "authoring": {"sources": {"unused": plain}, "bindings": {}}}
                 content = {"schema": 17, "title": "Motion", "tick_nanos": 16666667,
@@ -60,7 +60,7 @@ class CreationDistributionTests(unittest.TestCase):
     def test_sound_closure_gates_old_kits_and_preserves_no_audio_descriptor(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            document = {"format": "ruster-scene", "format_version": 21,
+            document = {"format": "rot-scene", "format_version": 21,
                         "scene": {"objects": []}, "undo": [], "redo": [],
                         "authoring": {"sources": {"plain": {
                             "language_id": "lua54", "host_api_version": 7,
@@ -164,7 +164,7 @@ class CreationDistributionTests(unittest.TestCase):
     def test_hierarchy_content_or_history_requires_scene19(self):
         for version in (18, 19):
             for history in (False, True):
-                document = {"format": "ruster-scene", "format_version": version,
+                document = {"format": "rot-scene", "format_version": version,
                             "scene": {"objects": []}, "undo": [], "redo": []}
                 hierarchy = {"groups": {}, "parents": {}}
                 if history:
@@ -179,7 +179,7 @@ class CreationDistributionTests(unittest.TestCase):
 
     def test_primitive_owners_and_history_are_versioned_not_assets(self):
         obj = {"id": "shape", "primitive": "sphere"}
-        document = {"format": "ruster-scene", "format_version": 18,
+        document = {"format": "rot-scene", "format_version": 18,
                     "scene": {"objects": [obj]}, "undo": [], "redo": []}
         self.assertEqual(package_creation.scene_dependencies(document), (set(), set()))
         for bad in ("cube", "torus", {}, 1):
@@ -223,18 +223,18 @@ class CreationDistributionTests(unittest.TestCase):
                 package_app.put(root, name, (package_creation.ROOT / name).read_bytes())
             package_app.put(root, ".env", b"PRIVATE CHECKOUT SECRET")
             binary = Path(shutil.which("true")).resolve()
-            app = {"id": "motion", "name": "ruster-motion-lab", "version": "0.1.0", "source": None}
+            app = {"id": "motion", "name": "rot-motion-lab", "version": "0.1.0", "source": None}
             metadata = {"packages": [app], "resolve": {"nodes": [{"id": "motion", "deps": []}]}}
             kit_archive = base / "runtime.tar.gz"
             with patch.object(package_app, "metadata", return_value=metadata) as cargo_metadata, \
                     patch.object(package_app, "notices", return_value=(large_notice, [])), \
                     patch.object(package_creation, "run_runtime", return_value=package_creation.PROFILE) as profile:
                 prepared = package_creation.prepare_runtime(root, binary, kit_archive)
-            cargo_metadata.assert_called_once_with(root, "ruster-motion-lab")
+            cargo_metadata.assert_called_once_with(root, "rot-motion-lab")
             profile.assert_called_once_with(binary, ["--creation-info"])
             with tarfile.open(kit_archive) as archive:
                 archive.extractall(base / "relocated", filter="data")
-            kit = base / "relocated/ruster-runtime"
+            kit = base / "relocated/rot-runtime"
             runtime_json = (kit / "runtime.json").read_bytes()
             self.assertEqual(prepared["runtime_kit_sha256"], hashlib.sha256(runtime_json).hexdigest())
             self.assertEqual(package_creation.inventory(kit), package_creation.KIT_FILES | {"runtime.json"})
@@ -245,7 +245,7 @@ class CreationDistributionTests(unittest.TestCase):
             self.assertFalse((kit / "scripts/__pycache__").exists())
             content_root = base / "content"
             content_root.mkdir()
-            scene = {"format": "ruster-scene", "format_version": 5,
+            scene = {"format": "rot-scene", "format_version": 5,
                      "scene": {"id": "owned-scene", "revision": 4, "objects": [
                          {"id": "marker", "transform": {"translation": [0.1, 0, 0],
                           "rotation": [0, 0, 0], "scale": [1, 1, 1]},
@@ -1217,7 +1217,7 @@ class CreationDistributionTests(unittest.TestCase):
                         (kit / "runtime.json").write_bytes(runtime_json)
                         (kit / "private.txt").unlink(missing_ok=True)
                         with tarfile.open(kit_archive) as archive:
-                            readme = archive.extractfile("ruster-runtime/README.txt").read()
+                            readme = archive.extractfile("rot-runtime/README.txt").read()
                         (kit / "README.txt").write_bytes(readme)
                 # Changed/missing/symlinked references never cause recursive fallback or publication.
                 (content_root / "scene.json").write_bytes(scene_bytes + b" ")
@@ -1251,7 +1251,7 @@ class CreationDistributionTests(unittest.TestCase):
                "kind": {"type": "directional", "shadow": shadow}}
         lighting = {"mode": "authored", "ambient": {"color": [1, 1, 1], "intensity": 0.28},
                     "lights": {"sun": sun}}
-        document = {"format": "ruster-scene", "format_version": 8,
+        document = {"format": "rot-scene", "format_version": 8,
                     "scene": {"id": "shadow-admission", "revision": 0, "objects": [], "lighting": lighting},
                     "authoring": {"bindings": {"behavior": {"properties": {"shadow": {"type": "bool", "value": True}}}}},
                     "undo": [], "redo": []}
@@ -1304,7 +1304,7 @@ class CreationDistributionTests(unittest.TestCase):
             package_creation.scene_dependencies(top_level)
 
     def test_surface_admission_keeps_original_bounds_and_owning_history(self):
-        doc={"format":"ruster-scene","format_version":9,"scene":{"id":"surface","revision":0,"objects":[],
+        doc={"format":"rot-scene","format_version":9,"scene":{"id":"surface","revision":0,"objects":[],
             "display":{"type":"surface_hdr","exposure_stops":0},
             "materials":{"finish":{"tint":[1,1,1],"filter":"linear","address":"repeat",
                 "response":{"type":"dielectric","roughness":.08}}}},"undo":[],"redo":[]}

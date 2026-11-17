@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Official MCP SDK scene smoke; requires an enabled disposable scene editor.
 Run: uv run --with mcp==2.3.0 scripts/mcp_scene_demo.py
-Set RUSTER_MCP_SOCKET; RUSTER_MCP_DEMO_KEEP=1 retains the edit for native Undo.
+Set ROT_MCP_SOCKET; ROT_MCP_DEMO_KEEP=1 retains the edit for native Undo.
 The demo does not save or change the editor preview.
 """
 import asyncio
@@ -15,7 +15,7 @@ from mcp.client.stdio import stdio_client
 
 
 async def main():
-    binary = Path(__file__).resolve().parents[1] / "target/debug/ruster-mcp"
+    binary = Path(__file__).resolve().parents[1] / "target/debug/rot-mcp"
     params = StdioServerParameters(command=str(binary), env={**os.environ})
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client:
@@ -81,7 +81,7 @@ async def main():
                 "baseline": baseline, "replayed": replayed, "edit": edited,
                 "preview_tick_unchanged": current["preview_tick"],
             }, indent=2))
-            if os.environ.get("RUSTER_MCP_DEMO_KEEP") != "1":
+            if os.environ.get("ROT_MCP_DEMO_KEEP") != "1":
                 undone = await call("scene_undo", expected)
                 assert undone["diff"] == [{
                     "object_id": first["id"], "before": proposed, "after": first["transform"], "before_mesh":first.get("mesh"), "after_mesh":first.get("mesh"),

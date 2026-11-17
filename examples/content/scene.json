@@ -1,5 +1,5 @@
 {
-  "format": "ruster-scene",
+  "format": "rot-scene",
   "format_version": 2,
   "scene": {
     "id": "procedural-demo",

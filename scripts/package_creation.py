@@ -36,8 +36,8 @@ MAX_OBJECTS = 256
 MAX_MATERIALS = 64
 MAX_TEXTURE_BYTES = 8 * MIB
 MAX_SOUND_BYTES = 2 * MIB
-PROFILE = {"format": "ruster-runtime", "version": 1,
-           "descriptor_format": "ruster-application", "descriptor_version": 1,
+PROFILE = {"format": "rot-runtime", "version": 1,
+           "descriptor_format": "rot-application", "descriptor_version": 1,
            "os": "linux", "arch": "x86_64"}
 CAMERA_PROFILE = {**PROFILE, "capabilities": ["initial_camera"]}
 MATERIAL_PROFILE = {**PROFILE, "descriptor_version": 2,
@@ -241,7 +241,7 @@ def run_runtime(binary: Path, arguments: list[str], cancel_file: Path | None = N
                 allowed_exit: tuple[int, ...] = (0,)) -> dict:
     """Only fixed implementation-owned invocations; always reap our runtime child."""
     cancelled(cancel_file)
-    with tempfile.TemporaryDirectory(prefix="ruster-preflight-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rot-preflight-") as temporary:
         environment = {"PATH": "/usr/bin:/bin", "HOME": temporary, "TMPDIR": temporary,
                        "LANG": "C.UTF-8"}
         with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
@@ -281,7 +281,7 @@ def publish(stage: Path, output: Path, archive_root: str, cancel_file: Path | No
         raise ValueError(f"refusing to overwrite {output}")
     cancelled(cancel_file)
     # Compression may finish its current file. Recheck cancellation before final publication.
-    with tempfile.TemporaryDirectory(prefix=".ruster-creation-", dir=output.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix=".rot-creation-", dir=output.parent) as temporary:
         prepared = Path(temporary) / "payload.tar.gz"
         package_app.publish_archive(stage, prepared, archive_root)
         digest = hashlib.sha256()
@@ -312,7 +312,7 @@ def prepare_runtime(root: Path, binary: Path, output: Path) -> dict:
     spec = package_app.app_spec("motion-lab")
     active = package_app.active_packages(package_app.metadata(root, spec.package), spec.package)
     license_text, dependencies = package_app.notices(root, active)
-    with tempfile.TemporaryDirectory(prefix="ruster-runtime-kit-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rot-runtime-kit-") as temporary:
         stage = Path(temporary)
         package_app.put(stage, "runtime", binary_data, executable=True)
         for name in LICENSE_FILES:
@@ -325,13 +325,13 @@ def prepare_runtime(root: Path, binary: Path, output: Path) -> dict:
         for name in HELPER_FILES:
             package_app.put(stage, name, read_bounded(root, name, MAX_METADATA_BYTES))
         package_app.put(stage, "README.txt", b"Rot Engine Linux x86_64 runtime kit\n\nUse Python3 scripts/package_creation.py package --runtime-kit . --content CONTENT --output NEW.tar.gz\nPrepare content with the Rot Engine editor or native MCP export controller. This kit contains trusted executable/tooling code; its hashes detect changes, not code safety. Native graphics require a Vulkan-capable driver, a desktop session and the recorded ELF prerequisites.\n")
-        manifest = {"schema": 1, "kind": "ruster-runtime-kit", "target": package_app.TARGET,
+        manifest = {"schema": 1, "kind": "rot-runtime-kit", "target": package_app.TARGET,
                     "executable": "runtime", "helper": "scripts/package_creation.py", "profile": profile,
                     "elf": requirements, "dependencies": dependencies, "files": package_app.file_manifest(stage)}
         package_app.put(stage, "runtime.json", encoded(manifest))
         # Apply the consumer's same size/inventory rules before publishing a kit.
         load_kit(stage)
-        receipt = publish(stage, output, "ruster-runtime")
+        receipt = publish(stage, output, "rot-runtime")
         receipt.update(runtime_kit_sha256=sha256(encoded(manifest)),
                        runtime_binary_sha256=sha256(binary_data), file_count=len(KIT_FILES) + 1)
         return receipt
@@ -345,7 +345,7 @@ def load_kit(root: Path, cancel_file: Path | None = None) -> tuple[dict, dict[st
     manifest = decode(raw, "runtime.json")
     exact_fields(manifest, {"schema", "kind", "target", "executable", "helper", "profile", "elf", "dependencies", "files"}, "runtime kit")
     if (type(manifest["schema"]) is not int or manifest["schema"] != 1
-            or manifest["kind"] != "ruster-runtime-kit" or manifest["target"] != package_app.TARGET
+            or manifest["kind"] != "rot-runtime-kit" or manifest["target"] != package_app.TARGET
             or manifest["executable"] != "runtime" or manifest["helper"] != "scripts/package_creation.py"):
         raise ValueError("unsupported runtime kit")
     check_profile(manifest["profile"])
@@ -1087,7 +1087,7 @@ def scene_dependencies(document: dict) -> tuple[set[str], set[str]]:
     """
     version = document.get("format_version")
     scene = document.get("scene")
-    if (document.get("format") != "ruster-scene" or type(version) is not int
+    if (document.get("format") != "rot-scene" or type(version) is not int
             or not 1 <= version <= 21 or not isinstance(scene, dict)):
         raise ValueError("content requires a supported Scene1–21 document")
     if version < 21 and ("player_view" in scene or any(
@@ -1474,7 +1474,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
         descriptor_version = 6
     tick_field = "tick_nanos" if schema >= 7 else "tick_millis"
     fixed_dt = content[tick_field] / (1_000_000_000 if schema >= 7 else 1000)
-    descriptor = {"format": "ruster-application", "version": descriptor_version, "title": content["title"],
+    descriptor = {"format": "rot-application", "version": descriptor_version, "title": content["title"],
                   "scene": "resources/scene.json", tick_field: content[tick_field],
                   "meshes": {identity: "resources/" + record["path"]
                              for identity, record in content["meshes"].items()}}
@@ -1490,7 +1490,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                                 for identity, record in content["sounds"].items()}
     if camera is not None:
         descriptor["initial_camera"] = camera
-    with tempfile.TemporaryDirectory(prefix="ruster-creation-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="rot-creation-") as temporary:
         stage = Path(temporary)
         package_app.put(stage, "application", payload["runtime"], executable=True)
         for name in LICENSE_FILES:
@@ -1603,7 +1603,7 @@ def package(runtime_kit: Path, content_root: Path, output: Path,
                 message = check.get("diagnostic") or check.get("status") or "missing saved-case result"
                 raise ValueError(f"play check preflight refused: {str(message)[:512]}")
         cancelled(cancel_file)
-        manifest = {"schema": 1, "kind": "ruster-creation-package", "application": "application",
+        manifest = {"schema": 1, "kind": "rot-creation-package", "application": "application",
                     "target": package_app.TARGET, "title": content["title"],
                     "runtime_kit_sha256": kit_hash, "runtime_binary_sha256": sha256(payload["runtime"]),
                     "scene_sha256": sha256(scene_data), "profile": kit["profile"],

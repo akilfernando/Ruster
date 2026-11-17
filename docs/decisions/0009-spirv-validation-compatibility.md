@@ -14,7 +14,7 @@ Vendor the published wgpu-hal30.0.1 source with its MIT/Apache licenses, exact o
 
 A full Naga layout-free-type/OpCopyLogical repair is larger compiler work and inappropriate to guess inside M6. Rewriting only our WGSL constructors leaves egui and arbitrary supported project shader paths affected. Public wgpu configuration exposes no suitable output-language cap. Suppressing the message or merely enabling debug would conceal a real defect and was rejected. The vendored patch is an explicit maintenance cost, not a permanent architecture preference.
 
-The source is at [third_party/wgpu-hal](../../third_party/wgpu-hal/RUSTER-PATCH.md), excluded from workspace-owned formatting/lint scope but built normally as a dependency. Its original source/licenses are retained; three generated rustdoc README links are normalized to versioned docs.rs links. Dependency inventory now includes non-workspace path dependencies, so vendoring cannot silently drop original notices. No external global toolchain/library installation or replacement was made.
+The source is at [third_party/wgpu-hal](../../third_party/wgpu-hal/ROT-PATCH.md), excluded from workspace-owned formatting/lint scope but built normally as a dependency. Its original source/licenses are retained; three generated rustdoc README links are normalized to versioned docs.rs links. Dependency inventory now includes non-workspace path dependencies, so vendoring cannot silently drop original notices. No external global toolchain/library installation or replacement was made.
 
 ## Verification
 

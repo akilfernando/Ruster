@@ -11,7 +11,7 @@ spec.loader.exec_module(notices)
 class NoticeTests(unittest.TestCase):
     def test_nonworkspace_vendored_dependency_is_in_inventory_without_local_paths(self):
         packages = [
-            {"id": "own", "name": "ruster", "version": "0.1.0", "source": None},
+            {"id": "own", "name": "rot", "version": "0.1.0", "source": None},
             {"id": "registry", "name": "serde", "version": "1.0", "source": "registry+example"},
             {"id": "patch", "name": "wgpu-hal", "version": "30.0.1", "source": None,
              "manifest_path": str(notices.ROOT / "third_party/wgpu-hal/Cargo.toml")},

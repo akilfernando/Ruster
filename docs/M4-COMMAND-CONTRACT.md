@@ -2,7 +2,7 @@
 
 Date: 2026-11-04. Status: implemented Linux M4 working contract under the accepted roadmap. Scope defaults and transport were selected by the agent; see decision 0005. See [status](STATUS.md) for delivered evidence.
 
-This is the delivered M4/legacy logistics baseline. The [current adapter guide](../crates/ruster-mcp/README.md) documents M5 scene and M6 content extensions. In particular, scene edits stay unsaved while asset catalog import/refresh/rename persist immediately under [decision0008](decisions/0008-content-import-and-refresh.md); the original five-tool surface below is not the complete current API.
+This is the delivered M4/legacy logistics baseline. The [current adapter guide](../crates/rot-mcp/README.md) documents M5 scene and M6 content extensions. In particular, scene edits stay unsaved while asset catalog import/refresh/rename persist immediately under [decision0008](decisions/0008-content-import-and-refresh.md); the original five-tool surface below is not the complete current API.
 
 ## Authority and identity
 

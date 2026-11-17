@@ -1,0 +1,17 @@
+[package]
+name = "rot-script"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+rot-scene = { path = "../rot-scene" }
+rhai = { version = "=1.27.0", features = ["no_module", "no_time"] }
+
+[lints]
+workspace = true

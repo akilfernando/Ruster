@@ -295,7 +295,7 @@ native success followed by real-client attach/edit/Undo/revoke does not qualify
 managed startup. No FD-limit, driver or sandbox cause is established.
 
 The small additive response object is documented in the
-[MCP contract](../../crates/ruster-mcp/README.md#one-registered-saved-project-stable-startupattachment).
+[MCP contract](../../crates/rot-mcp/README.md#one-registered-saved-project-stable-startupattachment).
 `project_list.result.startup_diagnostics` snapshots only adapter-local state;
 every startup failure carries the same object under `error`, marking its response
 `fresh_failure` or `cached_failure`. PID/start/attempt/child stay identical on

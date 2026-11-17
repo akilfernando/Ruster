@@ -1,6 +1,6 @@
 # Model routing
 
-Checked 2026-11-16 UTC for the local ChatGPT Codex session. This snapshot describes the session's tools. The policy lives in [the development skill](../../skills/ruster-development/SKILL.md).
+Checked 2026-11-16 UTC for the local ChatGPT Codex session. This snapshot describes the session's tools. The policy lives in [the development skill](../../skills/rot-development/SKILL.md).
 
 ## Current routing — Codex host, 2026-11-16
 

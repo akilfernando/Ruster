@@ -11,7 +11,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-SPEC = importlib.util.spec_from_file_location("ruster_check", Path(__file__).resolve().parents[1] / "check.py")
+SPEC = importlib.util.spec_from_file_location("rot_check", Path(__file__).resolve().parents[1] / "check.py")
 check = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = check
 SPEC.loader.exec_module(check)
@@ -26,15 +26,15 @@ class RunnerTests(unittest.TestCase):
         self.git("config", "user.email", "runner@example.invalid")
         self.git("config", "user.name", "Runner Test")
         self.write("README.md", "# Fixture\n")
-        self.write("crates/ruster-core/src/lib.rs", "// Core\n")
-        self.write("crates/ruster-cli/src/main.rs", "// CLI\n")
+        self.write("crates/rot-core/src/lib.rs", "// Core\n")
+        self.write("crates/rot-cli/src/main.rs", "// CLI\n")
         self.commit()
         self.workspace = {
             "workspace_members": ["core", "cli"],
             "packages": [
-                {"id": "core", "name": "ruster-core", "manifest_path": str(self.root / "crates/ruster-core/Cargo.toml"), "dependencies": []},
-                {"id": "cli", "name": "ruster-cli", "manifest_path": str(self.root / "crates/ruster-cli/Cargo.toml"), "dependencies": [
-                    {"name": "renamed-core", "path": str(self.root / "crates/ruster-core")},
+                {"id": "core", "name": "rot-core", "manifest_path": str(self.root / "crates/rot-core/Cargo.toml"), "dependencies": []},
+                {"id": "cli", "name": "rot-cli", "manifest_path": str(self.root / "crates/rot-cli/Cargo.toml"), "dependencies": [
+                    {"name": "renamed-core", "path": str(self.root / "crates/rot-core")},
                 ]},
             ],
         }
@@ -64,15 +64,15 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(check.commands(plan), [])
 
     def test_cli_only_selects_cli(self):
-        self.write("crates/ruster-cli/src/main.rs", "// Updated\n")
-        self.assertEqual(self.plan().packages, ("ruster-cli",))
+        self.write("crates/rot-cli/src/main.rs", "// Updated\n")
+        self.assertEqual(self.plan().packages, ("rot-cli",))
 
     def test_core_selects_dependents_with_alias(self):
-        self.write("crates/ruster-core/src/lib.rs", "// Updated\n")
-        self.assertEqual(self.plan().packages, ("ruster-cli", "ruster-core"))
+        self.write("crates/rot-core/src/lib.rs", "// Updated\n")
+        self.assertEqual(self.plan().packages, ("rot-cli", "rot-core"))
 
     def test_unknown_build_and_runner_inputs_are_full(self):
-        for path in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates/ruster-cli/build.rs", "scripts/check.py", "assets/example.bin"):
+        for path in ("Cargo.toml", "Cargo.lock", "rust-toolchain.toml", "crates/rot-cli/build.rs", "scripts/check.py", "assets/example.bin"):
             with self.subTest(path=path):
                 self.assertEqual(check.choose_plan(self.root, {path}, workspace=self.workspace).scope, "full")
 
@@ -153,10 +153,10 @@ class RunnerTests(unittest.TestCase):
         self.assertEqual(paths, {"docs/committed.md", "docs/staged.md", "README.md", "docs/untracked.md"})
 
     def test_staged_change_canceled_by_worktree_is_still_checked(self):
-        self.write("crates/ruster-cli/src/main.rs", "// Staged\n")
-        self.git("add", "crates/ruster-cli/src/main.rs")
-        self.write("crates/ruster-cli/src/main.rs", "// CLI\n")
-        self.assertEqual(self.plan().packages, ("ruster-cli",))
+        self.write("crates/rot-cli/src/main.rs", "// Staged\n")
+        self.git("add", "crates/rot-cli/src/main.rs")
+        self.write("crates/rot-cli/src/main.rs", "// CLI\n")
+        self.assertEqual(self.plan().packages, ("rot-cli",))
 
     def test_markdown_inventory_ignores_build_output_and_catches_deleted_target(self):
         self.write(".gitignore", "target/\n")
@@ -173,11 +173,11 @@ class RunnerTests(unittest.TestCase):
             check.validate_markdown(self.root, paths)
 
     def test_deleted_rust_and_cross_package_rename_keep_both_owners(self):
-        self.git("mv", "crates/ruster-core/src/lib.rs", "crates/ruster-cli/src/moved.rs")
+        self.git("mv", "crates/rot-core/src/lib.rs", "crates/rot-cli/src/moved.rs")
         paths, _ = check.changed_files(self.root)
-        self.assertIn("crates/ruster-core/src/lib.rs", paths)
-        self.assertIn("crates/ruster-cli/src/moved.rs", paths)
-        self.assertEqual(self.plan().packages, ("ruster-cli", "ruster-core"))
+        self.assertIn("crates/rot-core/src/lib.rs", paths)
+        self.assertIn("crates/rot-cli/src/moved.rs", paths)
+        self.assertEqual(self.plan().packages, ("rot-cli", "rot-core"))
 
     def test_clean_tree_is_noop(self):
         self.assertEqual(self.plan().scope, "none")
@@ -192,10 +192,10 @@ class RunnerTests(unittest.TestCase):
                     check.validate_markdown(self.root, {"docs/broken.md"})
 
     def test_commands_include_doc_tests_and_fail_fast(self):
-        plan = check.Plan("packages", "fixture", ("ruster-cli",))
+        plan = check.Plan("packages", "fixture", ("rot-cli",))
         commands = check.commands(plan)
         self.assertEqual([command[1] for command in commands], ["fmt", "clippy", "test"])
-        self.assertEqual(commands[0], ["cargo", "fmt", "-p", "ruster-cli", "--", "--check"])
+        self.assertEqual(commands[0], ["cargo", "fmt", "-p", "rot-cli", "--", "--check"])
         self.assertIn("--locked", commands[-1])
         self.assertNotIn("--all-targets", commands[-1])
         self.assertNotIn("--no-default-features", commands[-1])

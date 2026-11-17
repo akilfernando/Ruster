@@ -2,9 +2,11 @@
 
 Updated 2026-11-09. Working direction adopted under authorization to define the product and start development; see [decision 0001](decisions/0001-product-foundation.md). Specific scope defaults were selected by the agent and remain revisable.
 
-## Product identity — 2026-11-10
+## Product identity — 2026-11-17
 
-The user renames the product **Rusterize**, referring to rasterization, and supplies a mint block/scanline/pixel logo concept plus a [graphite-and-mint editor brief](branding/RUSTERIZE-UI-BRIEF.md). The identity and design work resume under explicit user authorization. Existing repository/package/schema/IPC identities retain their compatibility meaning during the visible-brand transition. [Editor design direction](EDITOR-DESIGN.md) tracks implementation and visual qualification.
+The product is **Rot Engine** (short form **Rot**). On 2026-11-10 the user first named the visible product Rusterize over the original Ruster working name and supplied a [graphite-and-mint editor brief](branding/RUSTERIZE-UI-BRIEF.md); on 2026-11-16 the visible brand became Rot Engine with the [Rot identity](branding/rot/README.md). On 2026-11-17 the user directed renaming the remaining Ruster/Rusterize identifiers and explicitly chose the short `rot-*` crate/binary form (`rot-editor`, `rot-mcp`, libraries `rot_scene`, environment `ROT_*`, application ID `org.rot.editor`) and renamed on-disk identifiers (`.rot-assets.json`, `.rot-cache/`, `.rot-lock`, `rot-application`, `rot-runtime-kit`, Lua `Rot*` types, wire `rot-owner-1`) **without a read-old fallback**. Projects written before this change must be renamed by hand to load.
+
+Dated evidence, decisions, plans, research, spikes, history and earlier status entries keep the names that were true when written. The GitHub repository URL, `Ruster-Audits`/`Ruster-Creations` directories and installed local artifacts keep their existing names until separately renamed. [Editor design direction](EDITOR-DESIGN.md) tracks implementation and visual qualification.
 
 ## Promise
 
@@ -14,7 +16,7 @@ User experience is the primary product pillar. Performance, reliability and open
 
 ## Creator-owned application logic clarification — 2026-11-09
 
-The user explicitly confirms that Ruster is the foundation through which creators implement their own scoring systems, menus and other application rules. Reusable state, scripting, UI and lifecycle facilities must support creator-defined designs through code, direct editing and native MCP. Example challenges supply acceptance exercises for those capabilities. Their particular scoring/objective/menu rules are application content. The next-work recommendation remains a proposal. Engine architecture and the acceptance exercise require their own bounded selection.
+The user explicitly confirms that Rot Engine is the foundation through which creators implement their own scoring systems, menus and other application rules. Reusable state, scripting, UI and lifecycle facilities must support creator-defined designs through code, direct editing and native MCP. Example challenges supply acceptance exercises for those capabilities. Their particular scoring/objective/menu rules are application content. The next-work recommendation remains a proposal. Engine architecture and the acceptance exercise require their own bounded selection.
 
 ## Foundation-first execution clarification — 2026-11-09
 
@@ -24,7 +26,7 @@ The user directs addressing remaining significant gaps before a test project. De
 
 Confirmed by the user on 2026-11-04: having systems in place is useful only insofar as those systems serve end users and help them create what they want to create. Creative intent should guide the engine; the reference examples should not define the limits of what people can imagine building with it.
 
-For Ruster, this means helping creators turn their own ideas into working applications: understand the tools, bring their own content, express behavior, iterate with confidence, and share the result. The experience of people using those finished applications also matters. Technical foundations, performance, visual tools and optional agent assistance should support that complete journey.
+For Rot Engine, this means helping creators turn their own ideas into working applications: understand the tools, bring their own content, express behavior, iterate with confidence, and share the result. The experience of people using those finished applications also matters. Technical foundations, performance, visual tools and optional agent assistance should support that complete journey.
 
 This is a long-term design principle, not a claim that the current prototype can build every kind of application or a request to add every subsystem now. Keep staged scope explicit. When choosing or reviewing work, identify the creator's intended result, the obstacle it removes, and the evidence that the workflow is usable. Internal infrastructure can be necessary; connect it to that result rather than treating its existence as the product outcome. Prefer understandable defaults and documented ways to extend behavior over assumptions that constrain every application to the sample's needs.
 
@@ -32,7 +34,7 @@ The original ethos clarification did not itself revise the milestone sequence. T
 
 ## Familiarity is a product requirement
 
-Confirmed by the user on 2026-11-04: creators who have spent their working lives in Unity or Unreal should feel at home immediately in Ruster. Everyday quality-of-life behavior is non-negotiable, including the small interactions people ordinarily take for granted. Treat it as part of delivering a workflow, not discretionary finishing work. The [editor experience baseline](EDITOR-EXPERIENCE.md) records the working breakdown, current gaps and required human acceptance evidence. Current prototype completion does not establish that this requirement is met.
+Confirmed by the user on 2026-11-04: creators who have spent their working lives in Unity or Unreal should feel at home immediately in Rot Engine. Everyday quality-of-life behavior is non-negotiable, including the small interactions people ordinarily take for granted. Treat it as part of delivering a workflow, not discretionary finishing work. The [editor experience baseline](EDITOR-EXPERIENCE.md) records the working breakdown, current gaps and required human acceptance evidence. Current prototype completion does not establish that this requirement is met.
 
 ## Visual authoring is core product scope
 

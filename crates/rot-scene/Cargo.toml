@@ -1,0 +1,19 @@
+[package]
+name = "rot-scene"
+description = "Bounded application-neutral authored scenes and headless editing"
+version.workspace = true
+edition.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+fs2 = "0.4"
+glam = "0.30"
+serde = { version = "1", features = ["derive"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }
+sha2 = "0.10.9"
+tempfile = "3"
+
+[lints]
+workspace = true

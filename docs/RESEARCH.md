@@ -2,7 +2,7 @@
 
 Research date: 2026-11-04. Sources below were consulted during the initial conversation. This is a documentation-level survey, not a source audit or performance comparison. Product and version claims must be rechecked before implementation decisions.
 
-| Engine | Documented model | Design lesson and tradeoff inferred for Ruster |
+| Engine | Documented model | Design lesson and tradeoff inferred for Rot Engine |
 | --- | --- | --- |
 | Unity | Component-bearing GameObjects, reusable prefabs, multiple rendering paths and DOTS graphics integration | Adopt approachable composition and reusable content; avoid multiplying programming and rendering paths prematurely. |
 | Unreal | Actor/component gameplay framework with C++/Blueprint integration; sophisticated rendering; experimental editor MCP | Learn integrated workflows and automation; breadth and closely integrated features create large maintenance obligations. MCP alone is not a unique proposition. |

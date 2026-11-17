@@ -4,15 +4,15 @@ Updated2026-11-05. The user explicitly wants ongoing learning from established e
 
 ## Working method
 
-Before a consequential subsystem design, consult relevant primary engine documentation and, where appropriate, openly licensed implementations. Record the technique, workload it helps, costs/constraints, fit for Ruster, and the experiment that would justify adoption. Studying a design does not grant permission to copy proprietary code.
+Before a consequential subsystem design, consult relevant primary engine documentation and, where appropriate, openly licensed implementations. Record the technique, workload it helps, costs/constraints, fit for Rot Engine, and the experiment that would justify adoption. Studying a design does not grant permission to copy proprietary code.
 
 For an optimization: state a hypothesis, capture a reproducible baseline, make the smallest useful change, verify behavior, measure again, and retain or reject it based on evidence. Record negative results too. Revisit architecture if measured bottlenecks cross its boundaries; do not preserve an early abstraction merely because it already exists. Avoid recurring research bureaucracy for trivial changes.
 
 ## Initial lessons from established engines
 
-Primary pages consulted 2026-11-04. The Ruster mappings below distinguish implemented initial work from future adoption triggers.
+Primary pages consulted 2026-11-04. The Rot Engine mappings below distinguish implemented initial work from future adoption triggers.
 
-| Source technique | Documented lesson and cost | Ruster application and adoption trigger |
+| Source technique | Documented lesson and cost | Rot Engine application and adoption trigger |
 | --- | --- | --- |
 | Unreal Slate/UMG invalidation | Cache stable widget geometry and recalculate affected data. Frequently changing widgets can spend cache memory without benefiting from reuse. | M3 implements event-driven viewer redraw and a retained geometry cache. The bounded results are linked below. General UI invalidation and static/dynamic scene separation still require workload-specific evidence. |
 | Unity GPU Resident Drawer | GPU instancing reduces draw calls/CPU work, with compatibility restrictions and additional shader build cost. | M5 delivered shared instanced 3D; M6 retains mesh buffers and groups draws by mesh. Further batching or instance-upload caching needs a measured workload. Measure command count, CPU preparation, uploads and GPU work rather than assuming fewer calls always means faster execution. |
@@ -45,7 +45,7 @@ Keep performance verification proportionate under [TESTING.md](TESTING.md): rele
 
 The shared wgpu/Vulkan path replaces the temporary rendering split for new3D work; the ash schematic remains legacy/reference support. [M5 evidence](evidence/M5.md) declares3/256-object workloads, provisional scene sub-budgets and matched release repeats. Bounded asynchronous GPU timestamps distinguish scene-pass GPU work from CPU instance/upload preparation. Offscreen color/depth memory is explicitly estimated rather than called totalVRAM. Both provisional targets passed on this workstation; hidden rendering was throttled and full-frame/presentation/other-hardware performance remains unverified. This is the initial3D baseline, not an optimization win over schematics.
 
-Primary Bevy instancing and egui/wgpu ownership sources, costs and adoption limits are recorded in the [renderer guide](../crates/ruster-render/README.md). A future unchanged-instance upload/cache experiment should compare measured preparation/upload cost before and after at matching quality/hardware/workloads; no general render graph or speculative concurrency is justified by these small results.
+Primary Bevy instancing and egui/wgpu ownership sources, costs and adoption limits are recorded in the [renderer guide](../crates/rot-render/README.md). A future unchanged-instance upload/cache experiment should compare measured preparation/upload cost before and after at matching quality/hardware/workloads; no general render graph or speculative concurrency is justified by these small results.
 
 ## M6 content baseline and M5 validation correction
 
@@ -130,7 +130,7 @@ The fixed immediate-retirement bundle adds one bounded CPU ownership role to the
 
 ## Opt-in native light observation — 2026-11-06
 
-Inspection builds extend the existing `RUSTER_ASSET_TIMING=1` observer; `RUSTER_ASSET_TIMING_OPS=scene_light_create,scene_light_set,scene_ambient_set,scene_save,asset_refresh` selects the cohort before launch. Light/ambient commands and ordinary-editor Apply/Create report `foreground_commit_elapsed`, origin `mcp` or `human` (UI path, not proof of physical input), and changed/no_op/rejected outcomes. Nested Save→Apply remains one outer Save observation. These spans measure foreground elapsed, excluding transport/queue wait; they are not scheduled CPU or input-to-photon latency. Default builds retain no observer clocks/counter handle. Disabled/excluded/overlapping admission short-circuits before added metric reads.
+Inspection builds extend the existing `ROT_ASSET_TIMING=1` observer; `ROT_ASSET_TIMING_OPS=scene_light_create,scene_light_set,scene_ambient_set,scene_save,asset_refresh` selects the cohort before launch. Light/ambient commands and ordinary-editor Apply/Create report `foreground_commit_elapsed`, origin `mcp` or `human` (UI path, not proof of physical input), and changed/no_op/rejected outcomes. Nested Save→Apply remains one outer Save observation. These spans measure foreground elapsed, excluding transport/queue wait; they are not scheduled CPU or input-to-photon latency. Default builds retain no observer clocks/counter handle. Disabled/excluded/overlapping admission short-circuits before added metric reads.
 
 The observer retains only the existing scalar MetricsHandle and copies selected counters, never resource payloads. For an operation to qualify both frame and resource conclusions, require summary `complete` and `resources.complete`. A later genuine UI frame must build the changed viewport, then the next real Host entry samples after that callback; the current frame may have built its callback before an MCP commit. Missing renderer/render, hidden/nonvisual, overlap or overflow stays unqualified. Counter deltas cover logical mesh/texture/lighting payload and encoded uploads, target size/MSAA and instance capacity; they do not establish GPU completion, CPU ownership or whole-driver peaks. Actual native evidence is still required. No new profiler, worker, timer, unbounded queue or forced hidden paint is added.
 

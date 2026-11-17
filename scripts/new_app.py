@@ -20,10 +20,10 @@ CRATES = KIT_CRATES
 ROOT_FILES = ("Cargo.lock", "rust-toolchain.toml", "LICENSE-MIT", "LICENSE-APACHE", "THIRD_PARTY_NOTICES.txt")
 # Compiler inputs and compatibility fixtures outside the selected crate trees.
 SHARED_INPUTS = ("crates/support/strict_json.rs", "examples/content/scene.wgsl", "examples/logistics.scenario.json")
-VENDOR_FILES = ("Cargo.toml", "Cargo.toml.orig", "build.rs", "README.md", "LICENSE.MIT", "LICENSE.APACHE", "RUSTER-PATCH.md")
+VENDOR_FILES = ("Cargo.toml", "Cargo.toml.orig", "build.rs", "README.md", "LICENSE.MIT", "LICENSE.APACHE", "ROT-PATCH.md")
 PACKAGING_FILES = ("scripts/package_app.py", "scripts/dependency_notices.py")
 CREATION_PACKAGING_FILE = "scripts/package_creation.py"
-MLUA_FILES = ("Cargo.toml", "Cargo.toml.orig", "README.md", "README.upstream", "FAQ.upstream", "CHANGELOG.upstream", "LICENSE", "RUSTER-PATCH.md", "RUSTER-local.patch", ".cargo_vcs_info.json", "rustfmt.toml", "tarpaulin.toml", "typos.toml", "codecov.yml", ".gitignore")
+MLUA_FILES = ("Cargo.toml", "Cargo.toml.orig", "README.md", "README.upstream", "FAQ.upstream", "CHANGELOG.upstream", "LICENSE", "ROT-PATCH.md", "ROT-local.patch", ".cargo_vcs_info.json", "rustfmt.toml", "tarpaulin.toml", "typos.toml", "codecov.yml", ".gitignore")
 
 
 def copy_tree(root: Path, relative: str, stage: Path, extensions: set[str]) -> None:
@@ -66,7 +66,7 @@ def export(root: Path, output: Path, normalize_lock: bool = True, app: str = "ya
     if output.is_relative_to(root.resolve()):
         raise ValueError("export destination must be outside the checkout")
     notices(root, [])  # Validate supplemental source text hashes before publishing.
-    with tempfile.TemporaryDirectory(prefix=".ruster-source-", dir=output.parent) as temporary:
+    with tempfile.TemporaryDirectory(prefix=".rot-source-", dir=output.parent) as temporary:
         stage = Path(temporary) / "payload"
         stage.mkdir()
         workspace = tomllib.loads(read_regular(root, "Cargo.toml").decode())
@@ -91,7 +91,7 @@ def export(root: Path, output: Path, normalize_lock: bool = True, app: str = "ya
             relative = "crates/" + name
             put(stage, relative + "/Cargo.toml", read_regular(root, relative + "/Cargo.toml"))
             copy_tree(root, relative + "/src", stage, {".rs", ".wgsl"})
-            if name == "ruster-render":
+            if name == "rot-render":
                 icon = relative + "/assets/rot-dark-128.png"
                 put(stage, icon, read_regular(root, icon))
             if (root / relative / "templates").is_dir():

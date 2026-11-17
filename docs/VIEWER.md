@@ -7,8 +7,8 @@ The renderer uses ash and winit. A Vulkan-capable driver and a desktop session a
 ## Run
 
 ```sh
-cargo run -p ruster-viewer -- --scenario examples/logistics.scenario.json
-cargo run -p ruster-viewer -- --scenario examples/logistics.scenario.json --validation --smoke 90
+cargo run -p rot-viewer -- --scenario examples/logistics.scenario.json
+cargo run -p rot-viewer -- --scenario examples/logistics.scenario.json --validation --smoke 90
 ```
 
 The smoke frame count must be 60–600. Validation enables synchronization checks as well as standard validation; warning/error counts include teardown. Timing output includes GPU command timestamps and CPU redraw time (including acquire waits), so these are distinct measurements.

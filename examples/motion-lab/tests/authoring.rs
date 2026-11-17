@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use ruster_app::{Application, Runtime};
-use ruster_motion_lab::{MotionLab, DEFAULT_SOURCE};
+use rot_app::{Application, Runtime};
+use rot_motion_lab::{MotionLab, DEFAULT_SOURCE};
 
 fn runtime(source: &str) -> Runtime<MotionLab> {
     Runtime::new(
@@ -14,7 +14,7 @@ fn runtime(source: &str) -> Runtime<MotionLab> {
 #[test]
 fn drafts_reset_rejection_and_schema_recovery_preserve_last_good_runtime() {
     let path = std::env::temp_dir().join(format!(
-        "ruster-motion-{}-{}.rhai",
+        "rot-motion-{}-{}.rhai",
         std::process::id(),
         std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)

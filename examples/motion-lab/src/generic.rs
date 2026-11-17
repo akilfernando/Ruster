@@ -2,15 +2,15 @@
 
 use std::{collections::BTreeMap, path::Path, sync::Arc, time::Duration};
 
-use ruster_app::audio::{Output as AudioOutput, OutputStatus};
-use ruster_app::hud::{paint_hud, HudPresentationMode};
-use ruster_app::{egui, Application, Content, MeshMap, Step, TextureMap};
-use ruster_behavior::{Diagnostic, Engine, Limits, Runtime};
-use ruster_scene::hud::{resolve_hud, HudCache, ResolvedHud};
-use ruster_scene::input::{
+use rot_app::audio::{Output as AudioOutput, OutputStatus};
+use rot_app::hud::{paint_hud, HudPresentationMode};
+use rot_app::{egui, Application, Content, MeshMap, Step, TextureMap};
+use rot_behavior::{Diagnostic, Engine, Limits, Runtime};
+use rot_scene::hud::{resolve_hud, HudCache, ResolvedHud};
+use rot_scene::input::{
     ActionFrame, ActionKind, ActionMap, ActionValue, InputKey, KeyEventAccumulator,
 };
-use ruster_scene::{PropertyValue, Session};
+use rot_scene::{PropertyValue, Session};
 mod commands;
 mod hud_controls;
 use commands::CommandUi;
@@ -23,7 +23,7 @@ pub const FIXED_DT: Duration = Duration::from_millis(100);
 /// shares the editor/export duration instead of a sample-specific default.
 pub fn session_tick_duration(session: &Session) -> Duration {
     if session.loaded_format_version() >= 11 {
-        ruster_behavior::DEFAULT_FIXED_TICK
+        rot_behavior::DEFAULT_FIXED_TICK
     } else {
         FIXED_DT
     }
@@ -31,7 +31,7 @@ pub fn session_tick_duration(session: &Session) -> Duration {
 
 /// No lock, registry, cache or authored-file writes on this resource path.
 pub fn read_session(path: &Path) -> Result<Session, String> {
-    let bytes = ruster_assets::read_regular_file(path, ruster_scene::MAX_FILE_BYTES as usize)
+    let bytes = rot_assets::read_regular_file(path, rot_scene::MAX_FILE_BYTES as usize)
         .map_err(|e| format!("Scene resource {}: {e}", path.display()))?;
     Session::from_snapshot_bytes(&bytes)
         .map_err(|e| format!("Scene resource {}: {e}", path.display()))
@@ -54,10 +54,10 @@ pub struct GenericMotionLab {
     last_input: Option<(u64, ActionFrame, &'static str)>,
     run_epoch: u64,
     command_ui: CommandUi,
-    command_receipt: Option<ruster_behavior::CommandReceipt>,
+    command_receipt: Option<rot_behavior::CommandReceipt>,
     hud_cache: HudCache,
     hud_controls: HudControls,
-    sounds: BTreeMap<String, Arc<ruster_assets::AudioClip>>,
+    sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
     audio: AudioOutput,
 }
 
@@ -117,7 +117,7 @@ impl GenericMotionLab {
     }
     pub fn runtime_state_report(
         &self,
-    ) -> std::collections::BTreeMap<&str, &ruster_scene::StateFields> {
+    ) -> std::collections::BTreeMap<&str, &rot_scene::StateFields> {
         self.runtime
             .as_ref()
             .map(Runtime::state_report)
@@ -139,9 +139,7 @@ impl GenericMotionLab {
                     .authoring_snapshot()
                     .bindings
                     .iter()
-                    .filter(|(_, binding)| {
-                        binding.target == ruster_scene::BindingTarget::Application
-                    })
+                    .filter(|(_, binding)| binding.target == rot_scene::BindingTarget::Application)
                     .flat_map(|(binding_id, binding)| {
                         binding.commands.iter().map(move |(id, definition)| {
                             serde_json::json!({"binding_id":binding_id,"command_id":id,
@@ -150,7 +148,7 @@ impl GenericMotionLab {
                         "argument_count":definition.arguments.len()})
                         })
                     })
-                    .take(ruster_scene::MAX_COMMANDS)
+                    .take(rot_scene::MAX_COMMANDS)
                     .collect();
                 serde_json::json!(rows)
             },
@@ -162,7 +160,7 @@ impl GenericMotionLab {
             .map(commands::receipt_wire)
             .unwrap_or(serde_json::Value::Null)
     }
-    pub fn query_observations(&self) -> &[ruster_behavior::QueryObservation] {
+    pub fn query_observations(&self) -> &[rot_behavior::QueryObservation] {
         self.runtime
             .as_ref()
             .map_or(&[], Runtime::query_observations)
@@ -325,12 +323,12 @@ impl GenericMotionLab {
         Ok(())
     }
 
-    pub fn set_sounds(&mut self, sounds: BTreeMap<String, Arc<ruster_assets::AudioClip>>) {
+    pub fn set_sounds(&mut self, sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>) {
         self.sounds = sounds;
         self.audio.stop();
     }
 
-    pub fn audio_batch(&self) -> Option<&ruster_behavior::AudioBatch> {
+    pub fn audio_batch(&self) -> Option<&rot_behavior::AudioBatch> {
         self.runtime.as_ref()?.audio_batch()
     }
 
@@ -379,7 +377,7 @@ impl GenericMotionLab {
 /// Explicit supplied-frame execution with outer-clock authority. It never
 /// pauses a playing application to make an otherwise invalid request succeed.
 pub fn step_with_input(
-    runtime: &mut ruster_app::Runtime<GenericMotionLab>,
+    runtime: &mut rot_app::Runtime<GenericMotionLab>,
     expected_tick: u64,
     frame: ActionFrame,
 ) -> Result<(), String> {
@@ -478,7 +476,7 @@ impl Application for GenericMotionLab {
         &mut self,
         ui: &mut egui::Ui,
         rect: egui::Rect,
-    ) -> Result<ruster_app::ViewportInputOwnership, String> {
+    ) -> Result<rot_app::ViewportInputOwnership, String> {
         Ok(self.interact_hud(ui, rect))
     }
     fn cancel_viewport_input(&mut self) {

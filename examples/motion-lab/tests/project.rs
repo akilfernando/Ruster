@@ -1,5 +1,5 @@
-use ruster_app::{Application, Runtime};
-use ruster_motion_lab::{MotionLab, DEFAULT_SOURCE};
+use rot_app::{Application, Runtime};
+use rot_motion_lab::{MotionLab, DEFAULT_SOURCE};
 use std::time::Duration;
 
 // Unique persistence risk: save accidentally captures animated state, loses authoring
@@ -37,7 +37,7 @@ fn project_roundtrip_undo_and_runtime_are_separate() {
         "history is explicitly session-local"
     );
     reopened
-        .tick(ruster_app::Step {
+        .tick(rot_app::Step {
             tick: 1,
             dt: Duration::from_millis(100),
         })
@@ -94,7 +94,7 @@ fn failed_load_save_and_close_preserve_work() {
     for mutate in 0..5 {
         let mut value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         match mutate {
-            0 => value["format"] = "ruster-scene".into(),
+            0 => value["format"] = "rot-scene".into(),
             1 => value["format_version"] = 2.into(),
             2 => value["unknown"] = true.into(),
             3 => value["authored"]["attachments"]["missing"] = serde_json::json!({"speed": 1.0}),

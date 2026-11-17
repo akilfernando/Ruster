@@ -1,6 +1,6 @@
 # Generic Lua backend production cost baseline
 
-Date:2026-11-04. This records one bounded public-API release matrix for the provisional [generic backend](../../crates/ruster-behavior/README.md), after its scoped callback/cancellation review. It is not a comparison with the disposable debugger trial, another interpreter or another engine; bundled configuration and production host paths differ. No language selection, UI-frame latency, export/platform acceptance or performance superiority follows.
+Date:2026-11-04. This records one bounded public-API release matrix for the provisional [generic backend](../../crates/rot-behavior/README.md), after its scoped callback/cancellation review. It is not a comparison with the disposable debugger trial, another interpreter or another engine; bundled configuration and production host paths differ. No language selection, UI-frame latency, export/platform acceptance or performance superiority follows.
 
 ## Workload and method
 

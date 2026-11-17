@@ -15,8 +15,8 @@ import time
 
 def qualify(host_binary, adapter, output_root):
     run=Path(tempfile.mkdtemp(prefix="native-preview-",dir=output_root))
-    env={k:v for k,v in os.environ.items() if not k.startswith(("RUSTER_","VK_","EGUI_INSPECTION"))}
-    env.update(PREVIEW_FIXTURE_DIR=str(run),RUSTER_RECOVERY_DIR=str(run/"recovery"),RUSTER_EDITOR_STATE=str(run/"editor-state.json"))
+    env={k:v for k,v in os.environ.items() if not k.startswith(("ROT_","VK_","EGUI_INSPECTION"))}
+    env.update(PREVIEW_FIXTURE_DIR=str(run),ROT_RECOVERY_DIR=str(run/"recovery"),ROT_EDITOR_STATE=str(run/"editor-state.json"))
     protocol=run/"protocol.jsonl"
     result={"actual_chatgpt":False,"human_consent":False,"fixture_authority_only":True,"run":str(run),"host_sha256":hashlib.sha256(host_binary.read_bytes()).hexdigest(),"adapter_sha256":hashlib.sha256(adapter.read_bytes()).hexdigest()}
     host=None
@@ -30,7 +30,7 @@ def qualify(host_binary, adapter, output_root):
                 assert host.poll() is None and time.monotonic()<deadline,"host startup failed"
                 time.sleep(.03)
             state=json.loads((run/"state.json").read_text())
-            env["RUSTER_MCP_LOCATOR"]=state["locator"]
+            env["ROT_MCP_LOCATOR"]=state["locator"]
             mcp=subprocess.Popen([str(adapter)],env=env,stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=err,text=True,bufsize=1)
             assert mcp.stdin is not None and mcp.stdout is not None
             def rpc(method,params=None,notify=False):

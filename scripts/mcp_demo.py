@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Real MCP SDK client: inspect, compare bounded replays, reject stale state, undo.
 Run with uv run --with mcp==2.3.0 scripts/mcp_demo.py; see editor README.
-Does not save; use a disposable project. Requires RUSTER_MCP_SOCKET.
+Does not save; use a disposable project. Requires ROT_MCP_SOCKET.
 """
 import asyncio
 import json
@@ -13,7 +13,7 @@ from mcp.client.stdio import stdio_client
 
 
 async def main():
-    binary = Path(__file__).resolve().parents[1] / "target/debug/ruster-mcp"
+    binary = Path(__file__).resolve().parents[1] / "target/debug/rot-mcp"
     params = StdioServerParameters(command=str(binary), env={**os.environ})
     async with stdio_client(params) as (read, write):
         async with ClientSession(read, write) as client:
@@ -48,7 +48,7 @@ async def main():
             after = await call("replay", {**expected, "ticks": "10"})
             print(json.dumps({"client": "official Python MCP SDK 2.3.0", "protocol": info.protocol_version,
                               "baseline": baseline, "edit": edit, "comparison": after}, indent=2))
-            if os.environ.get("RUSTER_MCP_DEMO_KEEP") != "1":
+            if os.environ.get("ROT_MCP_DEMO_KEEP") != "1":
                 undone = await call("undo", expected)
                 assert undone["after"] == before["config"]
                 print("Shared authored undo restored original configuration; no save performed.")

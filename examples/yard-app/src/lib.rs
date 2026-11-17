@@ -1,8 +1,8 @@
 //! Application-owned delivery rules. The engine kit supplies hosting, not goals.
 
-use ruster_app::{egui, Application, Content, MeshMap, ResourceRoot, Step};
-use ruster_core::{Config, Simulation, State};
-use ruster_scene::{Object, Scene, Transform};
+use rot_app::{egui, Application, Content, MeshMap, ResourceRoot, Step};
+use rot_core::{Config, Simulation, State};
+use rot_scene::{Object, Scene, Transform};
 
 /// Change these defaults to make a different challenge, then run or package it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

@@ -1,6 +1,6 @@
 # M8 generic scene construction — 2026-11-04
 
-This slice enables creating a scene instead of only modifying the fixed demo. [Decision0013](../decisions/0013-scene-object-lifecycle.md) records the identity/history boundary; the [scene guide](../../crates/ruster-scene/README.md) and [editor guide](../../crates/ruster-editor/README.md) contain executable commands and UI steps. M8 remains open.
+This slice enables creating a scene instead of only modifying the fixed demo. [Decision0013](../decisions/0013-scene-object-lifecycle.md) records the identity/history boundary; the [scene guide](../../crates/rot-scene/README.md) and [editor guide](../../crates/rot-editor/README.md) contain executable commands and UI steps. M8 remains open.
 
 ## Implemented result
 

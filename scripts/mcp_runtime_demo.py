@@ -30,7 +30,7 @@ end}
 
 
 async def main(args):
-    binary = Path(__file__).resolve().parents[1] / 'target/debug/ruster-mcp'
+    binary = Path(__file__).resolve().parents[1] / 'target/debug/rot-mcp'
     trace = []
     async with stdio_client(StdioServerParameters(command=str(binary), env={**os.environ})) as (read, write):
         async with ClientSession(read, write) as client:

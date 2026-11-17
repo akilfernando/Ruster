@@ -1,5 +1,5 @@
 {
-  "format": "ruster-scene",
+  "format": "rot-scene",
   "format_version": 5,
   "scene": {
     "id": "motion-comparison",

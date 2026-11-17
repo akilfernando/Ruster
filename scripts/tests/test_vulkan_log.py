@@ -19,6 +19,6 @@ class VulkanLogTests(unittest.TestCase):
             self.assertTrue(log.defects(text), text)
         for text in [
             "WARN wgpu_hal::vulkan::instance: env var VK_INSTANCE_LAYERS adds validation layer",
-            "Ruster shader: candidate rejected; last good pipeline retained",
+            "Rot Engine shader: candidate rejected; last good pipeline retained",
         ]:
             self.assertFalse(log.defects(text), text)

@@ -9,7 +9,7 @@ use std::os::unix::{fs::MetadataExt, net::UnixStream};
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
-pub const WIRE: &str = "ruster-owner-1";
+pub const WIRE: &str = "rot-owner-1";
 pub const LIMIT: usize = 65536;
 pub const POLL: Duration = Duration::from_millis(20);
 pub const DEADLINE: Duration = Duration::from_secs(2);

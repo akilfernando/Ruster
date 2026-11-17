@@ -1,6 +1,6 @@
 # Editor familiarity and everyday usability
 
-Updated 2026-11-04. **Confirmed user requirement:** an experienced Unity or Unreal creator should arrive in Ruster and feel at home immediately. The small quality-of-life behaviors people rely on every day are non-negotiable product requirements. They must be designed into workflows and verified, rather than left as optional polish after the systems work.
+Updated 2026-11-04. **Confirmed user requirement:** an experienced Unity or Unreal creator should arrive in Rot Engine and feel at home immediately. The small quality-of-life behaviors people rely on every day are non-negotiable product requirements. They must be designed into workflows and verified, rather than left as optional polish after the systems work.
 
 This requirement strengthens the [creator ethos](DIRECTION.md#project-ethos-serve-the-creator). It does not assert that the current prototype already meets it. Historical M0–M6 prototype acceptance remains historical; it cannot substitute for editor experience acceptance.
 
@@ -40,7 +40,7 @@ At M6, the inspected generic scene editor provides a hierarchy, viewport selecti
 
 Those M6 gaps drove the construction/manipulation updates below. Current construction, grouped history and tools are implemented; workspace/keyboard/camera refinements have integrated native evidence. Valid numeric drafts now commit when selection/focus changes, while invalid edits are preserved for repair. Asset catalog operations still persist separately from scene undo. Discovery/context/internal drops, bounded recovery and generic behavior editing/runtime are implemented with native evidence. Final debugger/MCP and regenerated LuaLS acceptance passed; see the M8 completion evaluation.
 
-Implementation evidence: `crates/ruster-editor/src/scene_editor.rs`, `workspace.rs`, the renderer camera API, editor guide and linked native evidence. The first actual creator feedback is recorded below; automated checks alone do not establish familiarity.
+Implementation evidence: `crates/rot-editor/src/scene_editor.rs`, `workspace.rs`, the renderer camera API, editor guide and linked native evidence. The first actual creator feedback is recorded below; automated checks alone do not establish familiarity.
 
 ## Relationship to the roadmap
 
@@ -84,7 +84,7 @@ Remappable Rename (defaultF2) and Select all (defaultCtrl+A outside owned text/m
 
 ## Revised human walkthrough and visual direction — 2026-11-05
 
-The user immediately found viewport selection unreliable and requested live transform updates in the inspector while dragging. Their supplied inspector screenshot exposed weak hierarchy, unclear controls and reliance on tiny explanatory copy. They require familiar Unity/Godot interaction/copy conventions and a distinct Ruster identity inspired by Obsidian/Notion: clean, simple, readable and aesthetically pleasing. Godot reference use/installation is authorized;4.7.2 was already installed. [EDITOR-DESIGN.md](EDITOR-DESIGN.md) separates these confirmed requirements, primary sources, actual reference observations and agent-selected proposals. Existing M8 injected/native evidence does not overrule this physical user feedback. The user requested autonomous continuation while asleep; preserve their open work.
+The user immediately found viewport selection unreliable and requested live transform updates in the inspector while dragging. Their supplied inspector screenshot exposed weak hierarchy, unclear controls and reliance on tiny explanatory copy. They require familiar Unity/Godot interaction/copy conventions and a distinct Rot Engine identity inspired by Obsidian/Notion: clean, simple, readable and aesthetically pleasing. Godot reference use/installation is authorized;4.7.2 was already installed. [EDITOR-DESIGN.md](EDITOR-DESIGN.md) separates these confirmed requirements, primary sources, actual reference observations and agent-selected proposals. Existing M8 injected/native evidence does not overrule this physical user feedback. The user requested autonomous continuation while asleep; preserve their open work.
 
 
 2026-11-05 repaired-build follow-up: the Unity-experienced user reviewed the latest default release and reports a significant improvement, reliable viewport selection and actively updating Transform values. This is physical confirmation of those two reported repairs. They also confirm closing both review windows. Enter rename, broader keyboard/focus/gizmo paths, final visual approval and the full first-run/recovery/distribution/MCP journey were not individually reported and remain separate.
