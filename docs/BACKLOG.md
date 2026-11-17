@@ -343,7 +343,7 @@ words appear; the Themed Wording checkbox changes the lines that have a Rot
 variant.
 
 #### S-09 · Command layer and palette — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** Every action is one registered command used by menus, context
 menus, shortcuts and a command palette.
 **Facts.** Shortcuts use an `Action` enum
