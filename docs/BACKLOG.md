@@ -134,7 +134,7 @@ standalone window yet), real Project Settings… and Preferences… windows (S-1
 today Project Settings ▸ Input Actions… and Preferences… open the old modal).
 
 #### S-04 · One toolbar; view options move into the viewport — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** One toolbar row and a much larger viewport.
 **Facts.** Toolbar rows are laid out in `scene_editor.rs:5799-5842`; a third
 row ("Perspective", "View presets", "Fit") is drawn inside
