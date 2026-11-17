@@ -51,6 +51,10 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · T-01: Style (Rot or Plain) beside Mode (Dark, Light, System,
+  OLED black) in preferences; switching is instant; a first-launch chooser
+  in the project hub previews both. Themed Wording checkbox stored (used by
+  S-08). Plain Light's accent darkened to #1A62B6 to pass 4.5:1.
 - 2026-11-17 · A-04: Window → AI Connection… → Connect an AI App… lists the
   AI apps found (Claude Code, Codex, Claude Desktop, Cursor, VS Code) with
   Connect, Undo, Copy Configuration and Add AI Configuration to This Project.

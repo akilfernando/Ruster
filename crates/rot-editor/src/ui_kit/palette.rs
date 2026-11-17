@@ -85,3 +85,59 @@ pub const LIGHT: Palette = Palette {
     error: rgb(0xb3261e),
     axis: [rgb(0xb42318), rgb(0x2b7a0b), rgb(0x1f5fbf)],
 };
+
+/// Plain style: a neutral Unity/Unreal-like palette (UX-STANDARDS §9).
+pub const PLAIN_DARK: Palette = Palette {
+    background: rgb(0x1b1b1c),
+    surface: rgb(0x242425),
+    raised: rgb(0x2d2d2f),
+    hover: rgb(0x3a3a3d),
+    field: rgb(0x161617),
+    divider: rgb(0x37373a),
+    control_border: rgb(0x7a7a80),
+    text: rgb(0xe6e6e8),
+    secondary: rgb(0xa9a9ae),
+    accent: rgb(0x5aa2ea),
+    accent_hover: rgb(0x7ab6ef),
+    accent_pressed: rgb(0x4790d8),
+    on_accent: rgb(0x0b1622),
+    selection: rgb(0x1f3b57),
+    success: rgb(0x6cc38a),
+    warning: rgb(0xe8b454),
+    error: rgb(0xf0736b),
+    axis: DARK.axis,
+};
+
+/// Plain on pure black for OLED panels.
+pub const PLAIN_OLED_BLACK: Palette = Palette {
+    background: rgb(0x000000),
+    surface: rgb(0x000000),
+    raised: rgb(0x141416),
+    hover: rgb(0x1f1f22),
+    field: rgb(0x000000),
+    divider: rgb(0x262629),
+    control_border: rgb(0x6c6c72),
+    ..PLAIN_DARK
+};
+
+pub const PLAIN_LIGHT: Palette = Palette {
+    background: rgb(0xececee),
+    surface: rgb(0xf6f6f7),
+    raised: rgb(0xffffff),
+    hover: rgb(0xe4e4e8),
+    field: rgb(0xffffff),
+    divider: rgb(0xd5d5d9),
+    control_border: rgb(0x85858c),
+    text: rgb(0x1a1a1c),
+    secondary: rgb(0x55555c),
+    // #1F6FCC from the standard fails 4.5:1 on `background`; one step darker.
+    accent: rgb(0x1a62b6),
+    accent_hover: rgb(0x1f6fcc),
+    accent_pressed: rgb(0x1757a3),
+    on_accent: rgb(0xffffff),
+    selection: rgb(0xcfe3fa),
+    success: rgb(0x1e7a3e),
+    warning: rgb(0x8a5a00),
+    error: rgb(0xb3261e),
+    axis: LIGHT.axis,
+};

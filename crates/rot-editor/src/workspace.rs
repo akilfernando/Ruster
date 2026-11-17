@@ -234,6 +234,10 @@ pub(super) struct Preferences {
     pub bindings: Vec<Binding>,
     pub external_editor: crate::behavior_files::LaunchSpec,
     pub theme: crate::editor_theme::ThemeChoice,
+    /// Rot or Plain. `None` until the creator picks one at first launch.
+    pub style: Option<crate::editor_theme::Style>,
+    /// Playful Rot lines where the wording table has them (UX-STANDARDS §9).
+    pub themed_wording: bool,
     /// Let AI apps find this editor and ask to connect. Approval still applies.
     pub allow_ai_connections: bool,
 }
@@ -283,6 +287,8 @@ impl Default for Preferences {
             inspector_visible: true,
             content_visible: true,
             theme: Default::default(),
+            style: None,
+            themed_wording: true,
             allow_ai_connections: true,
             scale: 1.0,
             movement_speed: 4.0,
@@ -331,10 +337,14 @@ impl Default for Preferences {
     }
 }
 impl Preferences {
-    fn json(&self) -> Value {
-        json!({"format":"rot-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"theme":self.theme.name(),"allow_ai_connections":self.allow_ai_connections,"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"projects":self.projects,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
+    #[cfg(test)]
+    pub fn json_for_test(&self) -> Value {
+        self.json()
     }
-    fn parse(bytes: &[u8]) -> Result<Self, String> {
+    fn json(&self) -> Value {
+        json!({"format":"rot-editor-preferences","version":1,"hierarchy_width":self.hierarchy_width,"inspector_width":self.inspector_width,"hierarchy_side":if self.hierarchy_side==Side::Left {"left"} else {"right"},"inspector_side":if self.inspector_side==Side::Left {"left"} else {"right"},"hierarchy_visible":self.hierarchy_visible,"inspector_visible":self.inspector_visible,"content_visible":self.content_visible,"theme":self.theme.name(),"style":self.style.map(|style|style.name()),"themed_wording":self.themed_wording,"allow_ai_connections":self.allow_ai_connections,"external_editor":self.external_editor,"ui_scale":self.scale,"movement_speed":self.movement_speed,"recent":self.recent,"projects":self.projects,"cameras":self.cameras.iter().map(|(path,camera)|json!({"path":path,"target":camera.target,"yaw":camera.yaw,"pitch":camera.pitch,"distance":camera.distance,"orthographic":camera.orthographic})).collect::<Vec<_>>(),"bindings":self.bindings.iter().map(|b|json!({"action":b.action.name(),"key":b.key.map(|key|key.name()),"ctrl":b.ctrl,"shift":b.shift,"alt":b.alt})).collect::<Vec<_>>()})
+    }
+    pub(super) fn parse(bytes: &[u8]) -> Result<Self, String> {
         if bytes.len() > MAX_WORKSPACE_BYTES {
             return Err("Editor preferences and project history exceed 1 MiB.".into());
         }
@@ -373,11 +383,13 @@ impl Preferences {
             "external_editor",
             "theme",
             "allow_ai_connections",
+            "style",
+            "themed_wording",
         ];
         let map = v.as_object().ok_or("Preferences must be an object.")?;
-        // content_visible, external_editor, theme and allow_ai_connections are
-        // optional later fields.
-        if !(keys.len() - 4..=keys.len()).contains(&map.len())
+        // content_visible, external_editor, theme, allow_ai_connections,
+        // style and themed_wording are optional later fields.
+        if !(keys.len() - 6..=keys.len()).contains(&map.len())
             || map.keys().any(|k| !keys.contains(&k.as_str()))
             || v["format"] != "rot-editor-preferences"
             || v["version"] != 1
@@ -590,6 +602,21 @@ impl Preferences {
                     .and_then(crate::editor_theme::ThemeChoice::from_name)
                     .ok_or("Invalid theme preference.")?,
             },
+            style: match v.get("style") {
+                None | Some(Value::Null) => None,
+                Some(value) => Some(
+                    value
+                        .as_str()
+                        .and_then(crate::editor_theme::Style::from_name)
+                        .ok_or("Invalid style preference.")?,
+                ),
+            },
+            themed_wording: match v.get("themed_wording") {
+                None => true,
+                Some(value) => value
+                    .as_bool()
+                    .ok_or("Invalid themed wording preference.")?,
+            },
             allow_ai_connections: match v.get("allow_ai_connections") {
                 None => true,
                 Some(value) => value.as_bool().ok_or("Invalid AI connection preference.")?,
@@ -651,8 +678,12 @@ pub(super) struct Workspace {
     pub error: String,
     pub settings_open: bool,
     pub welcome: bool,
+    /// No preferences file existed: offer the style chooser once.
+    pub first_launch: bool,
     pub layout_generation: u64,
     capture: Option<Action>,
+    /// The style the first-launch chooser is previewing.
+    style_preview: Option<crate::editor_theme::Style>,
     storage: Storage,
     dirty: bool,
     recovery_required: bool,
@@ -686,8 +717,10 @@ impl Workspace {
             error: String::new(),
             settings_open: false,
             welcome: true,
+            first_launch: false,
             layout_generation: 0,
             capture: None,
+            style_preview: None,
             storage: Storage {
                 path,
                 baseline: None,
@@ -699,6 +732,7 @@ impl Workspace {
             editor_dirty: false,
         };
         if let Some(path) = &workspace.storage.path {
+            workspace.first_launch = path.symlink_metadata().is_err();
             if path.exists() || path.symlink_metadata().is_ok() {
                 match rot_assets::read_regular_file(path,MAX_WORKSPACE_BYTES) {
                     Ok(bytes)=> {match Preferences::parse(&bytes) {Ok(prefs)=>workspace.prefs=prefs,Err(e)=>{workspace.error=e;workspace.recovery_required=true;}}workspace.storage.baseline=Some(bytes);},
@@ -710,6 +744,127 @@ impl Workspace {
         }
         workspace.reset_editor_draft();
         workspace
+    }
+    /// First launch: choose Rot or Plain, and a mode, before anything else.
+    /// Choices preview live; Continue (or Enter) keeps them.
+    pub fn style_chooser_ui(&mut self, ctx: &egui::Context) {
+        use crate::editor_theme::{Style, ThemeChoice};
+        use crate::ui_kit::tokens::*;
+        if !self.first_launch || self.prefs.style.is_some() {
+            return;
+        }
+        let chosen = self.style_preview.unwrap_or_default();
+        let mut keep = false;
+        egui::Modal::new(egui::Id::unique("rot_style_chooser")).show(ctx, |ui| {
+            ui.set_width(520.0f32.min(ctx.content_rect().width() - 48.0));
+            ui.heading("Choose Your Style");
+            ui.add_space(SPACE_S);
+            ui.columns(2, |columns| {
+                for (column, style) in columns.iter_mut().zip(Style::ALL) {
+                    let palette =
+                        style.palette(ctx.theme(), self.prefs.theme == ThemeChoice::OledBlack);
+                    let (rect, response) = column.allocate_exact_size(
+                        egui::vec2(column.available_width(), 120.0),
+                        egui::Sense::click(),
+                    );
+                    let painter = column.painter();
+                    let selected = chosen == style;
+                    painter.rect_filled(rect, RADIUS_MENU, palette.background);
+                    let panel = egui::Rect::from_min_size(
+                        rect.min + egui::vec2(SPACE_S, SPACE_S),
+                        egui::vec2(rect.width() * 0.35, rect.height() - 2.0 * SPACE_S),
+                    );
+                    painter.rect_filled(panel, RADIUS_CONTROL, palette.surface);
+                    for row in 0..3 {
+                        let y = panel.top() + SPACE_S + row as f32 * 14.0;
+                        painter.rect_filled(
+                            egui::Rect::from_min_size(
+                                egui::pos2(panel.left() + SPACE_S, y),
+                                egui::vec2(panel.width() * (0.7 - row as f32 * 0.15), 6.0),
+                            ),
+                            2,
+                            if row == 0 {
+                                palette.accent
+                            } else {
+                                palette.secondary
+                            },
+                        );
+                    }
+                    let button = egui::Rect::from_min_size(
+                        egui::pos2(panel.right() + SPACE_M, rect.bottom() - 36.0),
+                        egui::vec2(72.0, 22.0),
+                    );
+                    painter.rect_filled(button, RADIUS_CONTROL, palette.accent);
+                    painter.text(
+                        egui::pos2(panel.right() + SPACE_M, rect.top() + SPACE_M),
+                        egui::Align2::LEFT_TOP,
+                        style.label(),
+                        crate::ui_kit::semibold(TEXT_DIALOG_TITLE),
+                        palette.text,
+                    );
+                    painter.rect_stroke(
+                        rect,
+                        RADIUS_MENU,
+                        egui::Stroke::new(
+                            if selected { FOCUS_RING } else { 1.0 },
+                            if selected {
+                                palette.accent
+                            } else {
+                                palette.divider
+                            },
+                        ),
+                        egui::StrokeKind::Inside,
+                    );
+                    let response = response.on_hover_text(match style {
+                        Style::Rot => "The Rot Engine look",
+                        Style::Plain => "A neutral look, like other engines",
+                    });
+                    response.widget_info(|| {
+                        egui::WidgetInfo::selected(
+                            egui::Role::RadioButton,
+                            true,
+                            selected,
+                            style.label(),
+                        )
+                    });
+                    if response.clicked() {
+                        self.style_preview = Some(style);
+                    }
+                }
+            });
+            ui.add_space(SPACE_S);
+            ui.horizontal(|ui| {
+                ui.label("Mode");
+                for choice in [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::System] {
+                    if ui
+                        .selectable_value(&mut self.prefs.theme, choice, choice.label())
+                        .changed()
+                    {
+                        self.dirty = true;
+                    }
+                }
+            });
+            if chosen == Style::Rot {
+                ui.checkbox(&mut self.prefs.themed_wording, "Themed Wording");
+            }
+            ui.add_space(SPACE_S);
+            ui.horizontal(|ui| {
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    keep |= crate::ui_kit::primary_button(ui, "Continue").clicked();
+                });
+            });
+            keep |=
+                ui.input(|i| i.key_pressed(egui::Key::Enter) || i.key_pressed(egui::Key::Escape));
+        });
+        if keep {
+            self.prefs.style = Some(chosen);
+            self.style_preview = None;
+            self.changed();
+        }
+    }
+    /// The style the first-launch chooser is previewing, if any.
+    pub fn previewed_style(&self) -> Option<crate::editor_theme::Style> {
+        self.style_preview.filter(|_| self.prefs.style.is_none())
     }
     pub fn state_path(&self) -> Option<&Path> {
         self.storage.path.as_deref()
@@ -1122,11 +1277,26 @@ impl Workspace {
                 .show(ui, |ui| {
                     let before = self.prefs.clone();
                     ui.horizontal_wrapped(|ui| {
-                        ui.label("Theme");
+                        ui.label("Style");
+                        let mut style = self.prefs.style.unwrap_or_default();
+                        for choice in crate::editor_theme::Style::ALL {
+                            ui.selectable_value(&mut style, choice, choice.label());
+                        }
+                        if Some(style) != self.prefs.style
+                            && (self.prefs.style.is_some()
+                                || style != crate::editor_theme::Style::default())
+                        {
+                            self.prefs.style = Some(style);
+                        }
+                    });
+                    ui.horizontal_wrapped(|ui| {
+                        ui.label("Mode");
                         for choice in crate::editor_theme::ThemeChoice::ALL {
                             ui.selectable_value(&mut self.prefs.theme, choice, choice.label());
                         }
                     });
+                    ui.checkbox(&mut self.prefs.themed_wording, "Themed Wording")
+                        .on_hover_text("Occasional Rot-flavored lines in empty states and messages");
                     ui.horizontal(|ui| {
                         ui.label("UI scale");
                         ui.add(egui::Slider::new(&mut self.prefs.scale, 0.75..=2.0));

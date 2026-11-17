@@ -284,7 +284,7 @@ boundaries (checked 2026-11-17).
 | border | `#827574` | `#8A7B77` | `#7A7A80` | `#85858C` |
 | text | `#F1E8E3` | `#151314` | `#E6E6E8` | `#1A1A1C` |
 | text secondary | `#B9ADAA` | `#5C504D` | `#A9A9AE` | `#55555C` |
-| accent | `#EF9AA2` | `#96373E` | `#5AA2EA` | `#1F6FCC` |
+| accent | `#EF9AA2` | `#96373E` | `#5AA2EA` | `#1A62B6` |
 | text on accent | `#1B1012` | `#FFFFFF` | `#0B1622` | `#FFFFFF` |
 | selection | `#583439` | `#F0D9DC` | `#1F3B57` | `#CFE3FA` |
 | success | `#9BDDAB` | `#2F6B3F` | `#6CC38A` | `#1E7A3E` |

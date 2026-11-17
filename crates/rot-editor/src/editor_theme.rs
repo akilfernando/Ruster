@@ -4,7 +4,9 @@
 //! active palette through [`colors`]/[`palette`] so labels, warnings and axis
 //! tints stay readable after the creator switches themes.
 use crate::ui_kit::palette::rgb;
-pub use crate::ui_kit::palette::{Palette, DARK, LIGHT, OLED_BLACK};
+pub use crate::ui_kit::palette::{
+    Palette, DARK, LIGHT, OLED_BLACK, PLAIN_DARK, PLAIN_LIGHT, PLAIN_OLED_BLACK,
+};
 use eframe::egui::{self, Color32, CornerRadius, FontId, Stroke, Theme, Vec2};
 use egui::theme::{DefaultStyle, StyleProvider};
 use egui::widget_style::{ButtonStyle, StyleArgs, WidgetState};
@@ -47,22 +49,68 @@ impl ThemeChoice {
     }
 }
 
+/// Rot (the brand) or Plain (neutral). Style changes color, artwork and
+/// wording only, never layout or sizes (UX-STANDARDS §1.6, §9).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Style {
+    #[default]
+    Rot,
+    Plain,
+}
+
+impl Style {
+    pub const ALL: [Self; 2] = [Self::Rot, Self::Plain];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Rot => "Rot",
+            Self::Plain => "Plain",
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::Rot => "rot",
+            Self::Plain => "plain",
+        }
+    }
+
+    pub fn from_name(name: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|style| style.name() == name)
+    }
+
+    /// The palette for this style in one mode.
+    pub fn palette(self, theme: Theme, oled: bool) -> &'static Palette {
+        match (self, theme, oled) {
+            (Self::Rot, Theme::Light, _) => &LIGHT,
+            (Self::Rot, Theme::Dark, true) => &OLED_BLACK,
+            (Self::Rot, Theme::Dark, false) => &DARK,
+            (Self::Plain, Theme::Light, _) => &PLAIN_LIGHT,
+            (Self::Plain, Theme::Dark, true) => &PLAIN_OLED_BLACK,
+            (Self::Plain, Theme::Dark, false) => &PLAIN_DARK,
+        }
+    }
+}
+
 fn choice_id() -> egui::Id {
     egui::Id::unique("rot_engine_editor_theme_choice")
 }
 
+fn style_id() -> egui::Id {
+    egui::Id::unique("rot_engine_editor_style")
+}
+
+/// The active style (Rot unless the creator chose Plain).
+pub fn style(ctx: &egui::Context) -> Style {
+    ctx.data(|data| data.get_temp::<Style>(style_id()))
+        .unwrap_or_default()
+}
+
 /// The active palette after resolving `System` through egui's reported theme.
 pub fn palette(ctx: &egui::Context) -> &'static Palette {
-    match ctx.theme() {
-        Theme::Light => &LIGHT,
-        Theme::Dark
-            if ctx.data(|data| data.get_temp::<ThemeChoice>(choice_id()))
-                == Some(ThemeChoice::OledBlack) =>
-        {
-            &OLED_BLACK
-        }
-        Theme::Dark => &DARK,
-    }
+    let oled =
+        ctx.data(|data| data.get_temp::<ThemeChoice>(choice_id())) == Some(ThemeChoice::OledBlack);
+    style(ctx).palette(ctx.theme(), oled)
 }
 
 pub fn colors(ui: &egui::Ui) -> &'static Palette {
@@ -70,23 +118,21 @@ pub fn colors(ui: &egui::Ui) -> &'static Palette {
 }
 
 pub fn configure(ctx: &egui::Context) {
-    apply(ctx, ThemeChoice::default());
+    apply(ctx, ThemeChoice::default(), Style::default());
 }
 
 /// Installs both egui theme styles; egui then follows runtime system changes.
-pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
-    let dark = if choice == ThemeChoice::OledBlack {
-        &OLED_BLACK
-    } else {
-        &DARK
-    };
+pub fn apply(ctx: &egui::Context, choice: ThemeChoice, style: Style) {
+    let oled = choice == ThemeChoice::OledBlack;
+    let dark = style.palette(Theme::Dark, oled);
+    let light = style.palette(Theme::Light, oled);
     use crate::ui_kit::tokens::*;
     let fonts_id = egui::Id::unique("rot_engine_editor_fonts");
     if !ctx.data(|data| data.get_temp::<bool>(fonts_id).unwrap_or(false)) {
         ctx.set_fonts(crate::ui_kit::font_definitions());
         ctx.data_mut(|data| data.insert_temp(fonts_id, true));
     }
-    for (theme, palette) in [(Theme::Dark, dark), (Theme::Light, &LIGHT)] {
+    for (theme, palette) in [(Theme::Dark, dark), (Theme::Light, light)] {
         let visuals = visuals(palette, theme);
         ctx.style_mut_of(theme, |style| {
             style.visuals = visuals;
@@ -120,7 +166,10 @@ pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
             ThemeChoice::Light => egui::ThemePreference::Light,
         };
     });
-    ctx.data_mut(|data| data.insert_temp(choice_id(), choice));
+    ctx.data_mut(|data| {
+        data.insert_temp(choice_id(), choice);
+        data.insert_temp(style_id(), style);
+    });
     ctx.replace_widget_theme::<ButtonStyle>(EditorButtons);
 }
 
@@ -340,11 +389,41 @@ mod tests {
         (a.max(b) + 0.05) / (a.min(b) + 0.05)
     }
 
+    /// T-01: switching style takes effect at once and the preference
+    /// survives a save and reload.
+    #[test]
+    fn style_switches_instantly_and_persists() {
+        let ctx = egui::Context::default();
+        apply(&ctx, ThemeChoice::Dark, Style::Plain);
+        assert_eq!(palette(&ctx), &PLAIN_DARK);
+        apply(&ctx, ThemeChoice::OledBlack, Style::Plain);
+        assert_eq!(palette(&ctx), &PLAIN_OLED_BLACK);
+        apply(&ctx, ThemeChoice::Dark, Style::Rot);
+        assert_eq!(palette(&ctx), &DARK);
+        let mut prefs = crate::workspace::Preferences::default();
+        assert_eq!(prefs.style, None, "first launch has not chosen yet");
+        prefs.style = Some(Style::Plain);
+        prefs.themed_wording = false;
+        let saved = crate::workspace::Preferences::parse(
+            &serde_json::to_vec(&prefs.json_for_test()).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(saved.style, Some(Style::Plain));
+        assert!(!saved.themed_wording);
+    }
+
     // Unreadable theme: every theme must keep WCAG reading/interaction contrast
     // for the text, accent, status and control-border pairs the chrome paints.
     #[test]
     fn every_theme_meets_reading_and_control_contrast() {
-        for (name, p) in [("dark", &DARK), ("oled", &OLED_BLACK), ("light", &LIGHT)] {
+        for (name, p) in [
+            ("dark", &DARK),
+            ("oled", &OLED_BLACK),
+            ("light", &LIGHT),
+            ("plain dark", &PLAIN_DARK),
+            ("plain oled", &PLAIN_OLED_BLACK),
+            ("plain light", &PLAIN_LIGHT),
+        ] {
             let panels = [p.surface, p.background, p.raised, p.field];
             let mut pairs = vec![];
             for surface in panels.into_iter().chain([p.hover, p.selection]) {

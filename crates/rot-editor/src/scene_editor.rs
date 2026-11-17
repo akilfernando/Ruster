@@ -560,7 +560,7 @@ pub struct SceneEditor {
     content_scroll_to: bool,
     content_search: ContentSearch,
     scale_applied: f32,
-    theme_applied: Option<crate::editor_theme::ThemeChoice>,
+    theme_applied: Option<(crate::editor_theme::ThemeChoice, crate::editor_theme::Style)>,
     preview: Preview,
     generation: u64,
     error: String,
@@ -5776,9 +5776,15 @@ impl SceneEditor {
     }
     /// Applies a changed theme preference; the next frame paints it everywhere.
     fn apply_theme(&mut self, ctx: &egui::Context) {
-        let theme = self.workspace.prefs.theme;
+        let theme = (
+            self.workspace.prefs.theme,
+            self.workspace
+                .previewed_style()
+                .or(self.workspace.prefs.style)
+                .unwrap_or_default(),
+        );
         if self.theme_applied != Some(theme) {
-            crate::editor_theme::apply(ctx, theme);
+            crate::editor_theme::apply(ctx, theme.0, theme.1);
             if self.theme_applied.is_some() {
                 ctx.request_repaint();
             }
@@ -6595,7 +6601,10 @@ impl eframe::App for Host {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         if let Some(mut picker) = self.editor.project_picker.take() {
             if !picker.switching || !ui.input(|input| input.viewport().close_requested()) {
+                // The hub follows the chosen style too, including the first-launch chooser.
+                self.editor.apply_theme(ui.ctx());
                 let (session, back) = picker.show(ui, &self.editor.workspace);
+                self.editor.workspace.style_chooser_ui(ui.ctx());
                 if let Some(session) = session {
                     if !picker.switching
                         || (!self.editor.needs_recovery()
