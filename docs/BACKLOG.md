@@ -415,7 +415,7 @@ whenever both are running, with no prompts, tokens or environment
 variables. See [A10](PARITY-PLAN.md#4-architecture-decisions).
 
 #### A-01 · The editor is always reachable — M — ready
-Status: in progress — Claude Opus 5.5 (AI lane helper), 2026-11-17
+Status: done — 2026-11-17, 2c5811d
 **Outcome.** `rot-mcp` started with no configuration finds the running
 editor.
 **Facts.** The editor listens only after Connect AI or with
