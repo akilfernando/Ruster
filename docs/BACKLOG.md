@@ -33,7 +33,8 @@ One line each. Anyone may add; the user or a planning pass orders them.
 - An open scene repaints about 3 frames per 10 s while idle; the hub draws
   none (P-01, 2026-11-17).
 - Scrubbing an Inspector axis letter commits on release; the viewport does not follow live during the drag (S-02).
-- `human_and_deferred_assets_share_admission_authority_and_terminal_adoption` races the asset worker thread and fails under CPU load, on main too (9 of 18 runs with three suites in parallel, 2026-11-17).
+- `conflict_never_reads_back_and_mismatched_readback_fails_closed` (connection/worker.rs) failed once in about 105 full-suite runs under parallel load: the conflict case reported "failed or indeterminate". Not reproduced; a spawn `ETXTBSY` on the freshly written script is the likely cause (2026-11-17).
+- `enrolled_local_transport_never_needs_native_approval_and_revokes_before_commit` (bridge.rs:534) failed once in 24 full-suite runs under parallel load: `grant.revoke(false)` returned `WouldBlock`. Decide whether a contended durable revoke may fail or must wait (2026-11-17).
 - The legacy logistics prototype (`rot-core`, `rot-cli`, `rot-viewer`,
   `rot-script`, `examples/yard-app`, editor `ui.rs` and `model.rs`, five
   legacy MCP tools) is unused by the scene editor. Proposal: delete it.

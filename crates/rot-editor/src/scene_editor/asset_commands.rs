@@ -3166,13 +3166,28 @@ mod tests {
         };
         let delayed_recovery =
             case.starts_with("save_recovery_error_") || case == "save_committed_disconnect";
+        // A committed Save finishes once the asset worker acknowledges the old
+        // Session's retirement and recovery acknowledges its boundary. Both
+        // run on other threads, so without a hold the whole follow-up (and a
+        // New or Close continuation) can finish inside any one service frame.
+        // Cases that inspect the follow-up before it finishes hold the real
+        // recovery worker behind a gated checkpoint until they are done.
+        let hold_followup = delayed_recovery
+            || matches!(
+                case,
+                "save_then_new"
+                    | "save_then_close"
+                    | "save_close_publishing"
+                    | "save_revoke"
+                    | "save_revoke_after"
+            );
         let mut release_recovery = None;
-        if delayed_recovery {
+        if hold_followup {
             let store = crate::recovery::Store::open(root.join("save-recovery")).unwrap();
             editor.recovery = crate::recovery_ui::RecoveryUi::at(store);
             let snapshot = editor.recovery_snapshot();
             editor.recovery.checkpoint(snapshot);
-            if case != "save_committed_disconnect" {
+            if case.starts_with("save_recovery_error_") {
                 let record = std::fs::read_dir(root.join("save-recovery"))
                     .unwrap()
                     .map(|entry| entry.unwrap().path())
@@ -3193,11 +3208,14 @@ mod tests {
                 .recovery
                 .dispatch(Box::new(move || {
                     started.send(()).unwrap();
-                    gate.recv_timeout(Duration::from_secs(3)).unwrap();
+                    // Released explicitly, or by drop if the test fails. No
+                    // deadline: a loaded machine must not turn a hold into a
+                    // recovery-thread panic.
+                    let _ = gate.recv();
                     snapshot
                 }))
                 .unwrap();
-            entered.recv_timeout(Duration::from_secs(3)).unwrap();
+            entered.recv_timeout(Duration::from_secs(10)).unwrap();
             release_recovery = Some(release);
         }
         let fault = if matches!(
@@ -3353,10 +3371,24 @@ mod tests {
                 }
                 if matches!(case, "save_revoke" | "save_human_offset_revoke") {
                     escape_save_continuation(editor, ctx);
-                    assert_eq!(
-                        editor.asset_ops.saving.as_ref().unwrap().continuation,
-                        Continuation::SaveOnly
+                    // Escape is consumed before that frame's controller
+                    // service, so the continuation is revoked while the Save
+                    // is still owned. The offset case has no recovery boundary
+                    // to hold, so its follow-up may then finish in the same
+                    // frame; it can only finish as Save-only.
+                    assert!(editor.save_continuation.is_none(), "{case}");
+                    assert!(!editor.asset_ops.close_after, "{case}");
+                    assert!(
+                        editor
+                            .asset_ops
+                            .saving
+                            .as_ref()
+                            .is_none_or(|save| save.continuation == Continuation::SaveOnly),
+                        "{case}"
                     );
+                    if hold_followup {
+                        assert!(editor.asset_ops.saving.is_some(), "{case}");
+                    }
                 }
                 if case == "save_stale_after_commit" {
                     editor.generation = GENERATION.fetch_add(1, Ordering::Relaxed);
@@ -3401,29 +3433,44 @@ mod tests {
                         assert!(retired.session.is_some());
                     }
                 } else {
+                    // Adoption always queues the old Session in `immediate`;
+                    // it leaves only by submission (`retiring` until the
+                    // worker's Retired ack) or by worker failure. With neither
+                    // pending, the ack has arrived: the follow-up is finished,
+                    // or still waits only for the recovery boundary.
                     assert!(
                         editor.asset_ops.retiring
                             || editor.asset_ops.disconnected
-                            || editor.asset_ops.saving.is_none(),
-                        "session disposal must be queued, in flight or acknowledged"
+                            || editor.asset_ops.saving.as_ref().is_none_or(|save| save
+                                .followup
+                                .as_ref()
+                                .is_some_and(|followup| followup.result.is_none())),
+                        "{case}: session disposal must be queued, in flight or acknowledged"
                     );
                 }
 
                 editor.finish_save_continuation();
                 assert!(
                     !editor.close_approved,
-                    "post-save continuation must wait for retirement"
+                    "{case}: post-save continuation must wait for retirement"
                 );
+                if hold_followup && case != "save_revoke_after" {
+                    if let Some(release) = release_recovery.take() {
+                        release.send(()).unwrap();
+                    }
+                }
             }
         }
         if case == "save_revoke_after" {
-            assert!(editor
-                .asset_ops
-                .saving
+            // Held recovery keeps the committed follow-up open whichever
+            // retirement state the asset worker has reached.
+            assert!(!editor.asset_ops.disconnected);
+            assert!(editor.asset_ops.saving.as_ref().is_some_and(|save| save
+                .followup
                 .as_ref()
-                .is_some_and(|save| save.followup.is_some()));
-            assert!(editor.asset_ops.immediate.is_some() || editor.asset_ops.retiring);
+                .is_some_and(|followup| followup.result.is_none())));
             escape_save_continuation(editor, ctx);
+            release_recovery.take().unwrap().send(()).unwrap();
             assert!(editor.save_continuation.is_none());
             assert!(editor
                 .asset_ops

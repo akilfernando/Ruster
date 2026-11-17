@@ -454,10 +454,13 @@ mod tests {
         let (client, reply) = serve(&mut host, client);
         assert_eq!(reply["ok"], true, "{reply}");
         std::thread::sleep(Duration::from_millis(20));
+        // Hold this connection's authority: once revoked it drains, and the
+        // host may retire and drop the bridge in the same service loop.
+        let authority = host.bridge.as_ref().unwrap().authority();
         crate::trust::Store::revoke(&host.editor.ai_trust.store, "claude-code").unwrap();
         let (_, reply) = serve(&mut host, client);
         assert_ne!(reply["ok"], true);
-        assert!(!host.bridge.as_ref().unwrap().authority().live());
+        assert!(!authority.live());
     }
 
     #[test]
