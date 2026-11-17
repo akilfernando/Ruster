@@ -42,6 +42,7 @@ mod player_view;
 #[cfg(all(test, feature = "inspection", unix))]
 mod preview_probe;
 mod project_picker;
+mod project_settings;
 mod recovered_input_ui;
 mod runtime_commands;
 mod runtime_transform_ui;
@@ -470,6 +471,8 @@ pub struct SceneEditor {
     behavior: crate::behavior_ui::BehaviorUi,
     input_actions: crate::input_ui::InputUi,
     input_actions_open: bool,
+    /// Edit → Project Settings…, on a page.
+    project_settings: Option<project_settings::ProjectPage>,
     runtime: crate::behavior_ui::RuntimeUi,
     hud_open: bool,
     hud_draft: Option<hud_ui::HudDraft>,
@@ -727,6 +730,7 @@ impl SceneEditor {
             behavior: crate::behavior_ui::BehaviorUi::default(),
             input_actions: crate::input_ui::InputUi::default(),
             input_actions_open: false,
+            project_settings: None,
             runtime: crate::behavior_ui::RuntimeUi::default(),
             hud_open: false,
             hud_draft: None,
@@ -4358,11 +4362,19 @@ impl SceneEditor {
                     self.recovered_input_open = true;
                     self.recovered_input_focused = false;
                 } else {
-                    self.input_actions_open = true;
+                    self.open_project_settings(project_settings::ProjectPage::InputActions);
                 }
                 self.release_runtime_input();
             }
-            Action::Preferences | Action::KeyboardShortcuts => self.workspace.settings_open = true,
+            Action::ProjectSettings => {
+                self.open_project_settings(project_settings::ProjectPage::Project)
+            }
+            Action::Preferences => self
+                .workspace
+                .open_settings(crate::workspace::SettingsPage::General),
+            Action::KeyboardShortcuts => self
+                .workspace
+                .open_settings(crate::workspace::SettingsPage::Shortcuts),
             Action::ImportAsset => self.open_asset_import(),
             Action::CreateShaderSource => self.create_shader_source(),
             Action::RefreshShader => self.refresh_shader_command(),
@@ -4885,9 +4897,7 @@ impl SceneEditor {
                     self.command_item(ui, action);
                 }
                 ui.separator();
-                ui.menu_button("Project Settings", |ui| {
-                    self.command_item(ui, Action::InputActions)
-                });
+                self.command_item(ui, Action::ProjectSettings);
                 self.command_item(ui, Action::Preferences);
                 self.command_item(ui, Action::CommandPalette);
             });
@@ -5266,15 +5276,8 @@ impl SceneEditor {
         self.content_ui(&ctx);
         self.play_checks_ui(&ctx);
         self.recovered_input_window(&ctx);
-        if self.input_actions_open {
-            self.runtime.release_input(&ctx);
-            let editable = self.input_action_editable();
-            let mut opened = true;
-            let edit = self
-                .input_actions
-                .window(&ctx, &self.session, editable, &mut opened);
-            self.input_actions_open = opened;
-            if let Some(edit) = edit {
+        if self.input_actions_open || self.project_settings.is_some() {
+            if let Some(edit) = self.project_settings_ui(&ctx) {
                 #[cfg(feature = "inspection")]
                 let observed = (
                     self.asset_ops.timing_immediate_begin(

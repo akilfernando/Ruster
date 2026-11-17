@@ -54,6 +54,7 @@ pub(super) enum Action {
     NewProject,
     OpenProject,
     InputActions,
+    ProjectSettings,
     Preferences,
     ImportAsset,
     CreateShaderSource,
@@ -81,7 +82,7 @@ pub(super) enum Action {
     CommandPalette,
 }
 impl Action {
-    pub const ALL: [Self; 67] = [
+    pub const ALL: [Self; 68] = [
         Self::New,
         Self::Open,
         Self::Save,
@@ -124,6 +125,7 @@ impl Action {
         Self::NewProject,
         Self::OpenProject,
         Self::InputActions,
+        Self::ProjectSettings,
         Self::Preferences,
         Self::ImportAsset,
         Self::CreateShaderSource,
@@ -195,6 +197,7 @@ impl Action {
             Self::NewProject => "New Project…",
             Self::OpenProject => "Open Project…",
             Self::InputActions => "Input Actions…",
+            Self::ProjectSettings => "Project Settings…",
             Self::Preferences => "Preferences…",
             Self::ImportAsset => "Import…",
             Self::CreateShaderSource => "Shader Source",
@@ -266,6 +269,7 @@ impl Action {
             Self::NewProject => "New project",
             Self::OpenProject => "Open project",
             Self::InputActions => "Input actions",
+            Self::ProjectSettings => "Project settings",
             Self::Preferences => "Preferences",
             Self::ImportAsset => "Import asset",
             Self::CreateShaderSource => "Create shader source",
@@ -441,6 +445,7 @@ impl Default for Preferences {
                         Action::NewProject,
                         Action::OpenProject,
                         Action::InputActions,
+                        Action::ProjectSettings,
                         Action::ImportAsset,
                         Action::CreateShaderSource,
                         Action::RefreshShader,
@@ -840,7 +845,43 @@ pub(super) struct Workspace {
     editor_executable: String,
     editor_args: String,
     editor_dirty: bool,
+    /// The Preferences page on show.
+    pub settings_page: SettingsPage,
+    shortcut_query: String,
 }
+
+/// Preferences pages, in sidebar order.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(super) enum SettingsPage {
+    #[default]
+    General,
+    Appearance,
+    Viewport,
+    Shortcuts,
+    ExternalTools,
+    Ai,
+}
+impl SettingsPage {
+    pub const ALL: [Self; 6] = [
+        Self::General,
+        Self::Appearance,
+        Self::Viewport,
+        Self::Shortcuts,
+        Self::ExternalTools,
+        Self::Ai,
+    ];
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::General => "General",
+            Self::Appearance => "Appearance",
+            Self::Viewport => "Viewport",
+            Self::Shortcuts => "Shortcuts",
+            Self::ExternalTools => "External Tools",
+            Self::Ai => "AI",
+        }
+    }
+}
+
 impl Workspace {
     pub fn detached() -> Self {
         Self::at(None)
@@ -870,6 +911,8 @@ impl Workspace {
             first_launch: false,
             layout_generation: 0,
             capture: None,
+            settings_page: SettingsPage::General,
+            shortcut_query: String::new(),
             style_preview: None,
             storage: Storage {
                 path,
@@ -1048,8 +1091,8 @@ impl Workspace {
         Ok(())
     }
     fn editor_settings_ui(&mut self, ui: &mut egui::Ui) {
-        ui.heading("External code editor · Zed");
-        ui.label("Executable and argument vector; no shell is used. Placeholders: {workspace}, {file}, {line}.");
+        ui.strong("Script Editor");
+        ui.weak("Runs without a shell. Placeholders: {workspace}, {file}, {line}.");
         let ids = [
             egui::Id::unique("external-editor-executable"),
             egui::Id::unique("external-editor-arguments"),
@@ -1078,16 +1121,24 @@ impl Workspace {
                     .desired_width(f32::INFINITY),
             )
             .changed();
-        let mut apply =
-            ctrl_enter || (enter && (executable.has_focus() || executable.lost_focus()));
-        ui.horizontal_wrapped(|ui| {
-            apply |= ui.button("Apply editor configuration").clicked();
-            if ui.button("Revert editor configuration draft").clicked() {
-                self.reset_editor_draft();
-            }
-        });
-        if self.editor_dirty {
-            ui.small("Unapplied editor configuration · Enter in executable / Ctrl+Enter applies · Ctrl+S applies and saves preferences.");
+        // Changes apply when you leave a field or press Enter, like any other
+        // field; an invalid entry stays as typed with its error shown.
+        let left = executable.lost_focus()
+            || ui.memory(|memory| {
+                memory
+                    .focused()
+                    .is_none_or(|focused| !ids.contains(&focused))
+            }) && self.editor_dirty
+                && ui
+                    .ctx()
+                    .memory(|m| m.data.get_temp::<bool>(ids[1].with("had_focus")))
+                    .unwrap_or(false);
+        ui.ctx()
+            .memory_mut(|m| m.data.insert_temp(ids[1].with("had_focus"), owns));
+        let apply =
+            ctrl_enter || left || (enter && (executable.has_focus() || executable.lost_focus()));
+        if self.editor_dirty && ui.button("Revert").clicked() {
+            self.reset_editor_draft();
         }
         if apply || save {
             match self
@@ -1414,9 +1465,161 @@ impl Workspace {
             action
         })
     }
+    /// Open Preferences on a page (Ctrl+, opens General; Keyboard
+    /// Shortcuts… opens Shortcuts).
+    pub fn open_settings(&mut self, page: SettingsPage) {
+        self.settings_open = true;
+        self.settings_page = page;
+    }
+    fn close_settings(&mut self) {
+        self.capture = None;
+        self.settings_open = false;
+        self.flush();
+    }
+    /// Reset the settings on one page to their defaults.
+    fn reset_page(&mut self, page: SettingsPage) {
+        let defaults = Preferences::default();
+        match page {
+            SettingsPage::General => self.prefs.scale = defaults.scale,
+            SettingsPage::Appearance => {
+                self.prefs.style = defaults.style;
+                self.prefs.theme = defaults.theme;
+                self.prefs.themed_wording = defaults.themed_wording;
+            }
+            SettingsPage::Viewport => self.prefs.movement_speed = defaults.movement_speed,
+            SettingsPage::Shortcuts => {
+                self.prefs.bindings = defaults.bindings;
+                self.capture = None;
+            }
+            SettingsPage::ExternalTools => {
+                self.prefs.external_editor = defaults.external_editor;
+                self.reset_editor_draft();
+            }
+            SettingsPage::Ai => self.prefs.allow_ai_connections = defaults.allow_ai_connections,
+        }
+    }
+    fn general_page(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("UI scale");
+            ui.add(egui::Slider::new(&mut self.prefs.scale, 0.75..=2.0));
+        });
+        if let Some(path) = self.state_path() {
+            let path = path.display().to_string();
+            ui.add(
+                egui::Label::new(
+                    egui::RichText::new(format!("Saved in {path}"))
+                        .small()
+                        .weak(),
+                )
+                .truncate(),
+            )
+            .on_hover_text(path);
+        }
+    }
+    fn appearance_page(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Style");
+            let mut style = self.prefs.style.unwrap_or_default();
+            for choice in crate::editor_theme::Style::ALL {
+                ui.selectable_value(&mut style, choice, choice.label());
+            }
+            if Some(style) != self.prefs.style
+                && (self.prefs.style.is_some() || style != crate::editor_theme::Style::default())
+            {
+                self.prefs.style = Some(style);
+            }
+        });
+        ui.horizontal_wrapped(|ui| {
+            ui.label("Mode");
+            for choice in crate::editor_theme::ThemeChoice::ALL {
+                ui.selectable_value(&mut self.prefs.theme, choice, choice.label());
+            }
+        });
+        ui.checkbox(&mut self.prefs.themed_wording, "Themed Wording")
+            .on_hover_text("Occasional Rot-flavored lines in empty states and messages");
+    }
+    fn viewport_page(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.label("Fly speed (units/second)");
+            ui.add(
+                egui::DragValue::new(&mut self.prefs.movement_speed)
+                    .range(0.05..=1000.0)
+                    .speed(0.1),
+            );
+        })
+        .response
+        .on_hover_text("Scroll while flying with the right mouse button to change it");
+    }
+    fn shortcuts_page(&mut self, ui: &mut egui::Ui) {
+        ui.add(
+            egui::TextEdit::singleline(&mut self.shortcut_query)
+                .hint_text("Search")
+                .desired_width(f32::INFINITY),
+        );
+        ui.weak("Click a shortcut, then press the new keys. Escape cancels.");
+        let query = self.shortcut_query.to_lowercase();
+        for action in Action::ALL {
+            if !query.is_empty() && !action.label().to_lowercase().contains(&query) {
+                continue;
+            }
+            let binding = self
+                .prefs
+                .bindings
+                .iter()
+                .find(|b| b.action == action)
+                .copied()
+                .unwrap_or(Binding {
+                    action,
+                    key: None,
+                    ctrl: false,
+                    shift: false,
+                    alt: false,
+                });
+            let conflict = self
+                .prefs
+                .bindings
+                .iter()
+                .find(|other| other.action != action && other.same_keys(binding))
+                .map(|other| other.action.label());
+            ui.horizontal(|ui| {
+                ui.add_sized([200.0, 20.0], egui::Label::new(action.label()).truncate());
+                let text = if self.capture == Some(action) {
+                    "Press keys…".into()
+                } else {
+                    binding.text()
+                };
+                if ui.button(text).clicked() {
+                    self.capture = Some(action);
+                }
+                if binding.key.is_some()
+                    && ui
+                        .small_button("×")
+                        .on_hover_text("Remove this shortcut")
+                        .clicked()
+                {
+                    if let Some(b) = self.prefs.bindings.iter_mut().find(|b| b.action == action) {
+                        b.key = None;
+                    }
+                }
+                if let Some(other) = conflict {
+                    ui.colored_label(ui.visuals().warn_fg_color, format!("Also {other}"));
+                }
+            });
+        }
+    }
+    fn ai_page(&mut self, ui: &mut egui::Ui) {
+        ui.checkbox(
+            &mut self.prefs.allow_ai_connections,
+            "Allow AI apps to connect",
+        )
+        .on_hover_text("When off, this editor does not listen for AI apps");
+        ui.weak("Trusted apps and diagnostics: Window → AI Connection…");
+    }
     pub fn settings_ui(&mut self, ctx: &egui::Context) {
         let _ = self.settings_ui_with_footer(ctx);
     }
+    /// The Preferences window: a page list on the left, the page on the
+    /// right. Changes apply at once and are saved when it closes.
     fn settings_ui_with_footer(&mut self, ctx: &egui::Context) -> Option<[egui::Rect; 3]> {
         if !self.settings_open {
             return None;
@@ -1424,125 +1627,90 @@ impl Workspace {
         if self.capture.is_none()
             && ctx.input_mut(|i| i.consume_key(egui::Modifiers::NONE, egui::Key::Escape))
         {
-            self.settings_open = false;
-            self.flush();
+            self.close_settings();
             return None;
         }
-        let response=egui::Modal::new(egui::Id::unique("workspace-settings")).show(ctx, |ui| {
-            // Work in current logical points: at2x a960×640 window is480×320.
-            let screen=ctx.content_rect();
-            ui.set_width((screen.width()-64.0).clamp(220.0,640.0));
-            let start_y=ui.cursor().min.y;
-            ui.heading("Workspace and shortcuts");
-            if let Some(path) = self.state_path() {
-                let path=path.display().to_string();
-                ui.add(egui::Label::new(egui::RichText::new(&path).small()).truncate()).on_hover_text(path);
-            }
-            let spacing=ui.spacing().item_spacing.y;
-            let button_height=ui.spacing().interact_size.y.max(ui.text_style_height(&egui::TextStyle::Button)+2.0*ui.spacing().button_padding.y);
-            // Reserve the worstcase three wrapped footer rows plus one error line.
-            // The body alone scrolls, leaving recovery/close controls reachable.
-            let header_height=ui.cursor().min.y-start_y;
-            let footer_budget=3.0*button_height+3.0*spacing;
-            let error_budget=ui.text_style_height(&egui::TextStyle::Body)+spacing;
-            let body_height=(screen.height()-64.0-header_height-footer_budget-error_budget).max(24.0);
-            egui::ScrollArea::vertical()
-                .max_height(body_height)
-                .show(ui, |ui| {
-                    let before = self.prefs.clone();
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Style");
-                        let mut style = self.prefs.style.unwrap_or_default();
-                        for choice in crate::editor_theme::Style::ALL {
-                            ui.selectable_value(&mut style, choice, choice.label());
-                        }
-                        if Some(style) != self.prefs.style
-                            && (self.prefs.style.is_some()
-                                || style != crate::editor_theme::Style::default())
-                        {
-                            self.prefs.style = Some(style);
+        let screen = ctx.content_rect();
+        let mut open = true;
+        let mut footer = [egui::Rect::NOTHING; 3];
+        egui::Window::new("Preferences")
+            .open(&mut open)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::Vec2::ZERO)
+            .fixed_size(egui::vec2(
+                (screen.width() - 64.0).clamp(220.0, 640.0),
+                (screen.height() - 120.0).clamp(160.0, 520.0),
+            ))
+            .show(ctx, |ui| {
+                let before = self.prefs.clone();
+                let footer_height = ui.spacing().interact_size.y * 2.0 + 8.0;
+                let body_height = (ui.available_height() - footer_height).max(48.0);
+                ui.horizontal_top(|ui| {
+                    ui.vertical(|ui| {
+                        ui.set_width(120.0);
+                        for page in SettingsPage::ALL {
+                            ui.selectable_value(&mut self.settings_page, page, page.label());
                         }
                     });
-                    ui.horizontal_wrapped(|ui| {
-                        ui.label("Mode");
-                        for choice in crate::editor_theme::ThemeChoice::ALL {
-                            ui.selectable_value(&mut self.prefs.theme, choice, choice.label());
-                        }
-                    });
-                    ui.checkbox(&mut self.prefs.themed_wording, "Themed Wording")
-                        .on_hover_text("Occasional Rot-flavored lines in empty states and messages");
-                    ui.horizontal(|ui| {
-                        ui.label("UI scale");
-                        ui.add(egui::Slider::new(&mut self.prefs.scale, 0.75..=2.0));
-                    });
-                    ui.horizontal(|ui| {
-                        ui.label("Navigation speed (units/second)");
-                        ui.add(
-                            egui::DragValue::new(&mut self.prefs.movement_speed)
-                                .range(0.05..=1000.0)
-                                .speed(0.1),
-                        );
-                    });
                     ui.separator();
-                    ui.strong("AI");
-                    ui.checkbox(&mut self.prefs.allow_ai_connections, "Allow AI apps to connect")
-                        .on_hover_text("Trusted apps and diagnostics: Window → AI Connection…");
-                    ui.separator();
-                    self.editor_settings_ui(ui);
-                    ui.separator();
-                    ui.label(
-                        "Select a binding, then press the new combination. Escape cancels capture.",
-                    );
-                    for binding in self.prefs.bindings.clone() {
-                        ui.horizontal(|ui| {
-                            ui.label(binding.action.name());
-                            if ui
-                                .button(if self.capture == Some(binding.action) {
-                                    "Press keys…".into()
-                                } else {
-                                    binding.text()
-                                })
-                                .clicked()
-                            {
-                                self.capture = Some(binding.action);
-                            }
-                        });
-                    }
-                    if ui.button("Reset shortcuts").clicked() {
-                        self.prefs.bindings = Preferences::default().bindings;
-                        self.capture = None;
-                    }
-                    if before != self.prefs {
+                    ui.vertical(|ui| {
+                        egui::ScrollArea::vertical()
+                            .id_salt("preferences-page")
+                            .max_height(body_height)
+                            .auto_shrink([false, true])
+                            .show(ui, |ui| match self.settings_page {
+                                SettingsPage::General => self.general_page(ui),
+                                SettingsPage::Appearance => self.appearance_page(ui),
+                                SettingsPage::Viewport => self.viewport_page(ui),
+                                SettingsPage::Shortcuts => self.shortcuts_page(ui),
+                                SettingsPage::ExternalTools => self.editor_settings_ui(ui),
+                                SettingsPage::Ai => self.ai_page(ui),
+                            });
+                    });
+                });
+                if before != self.prefs {
+                    self.dirty = true;
+                    self.layout_generation = self.layout_generation.wrapping_add(1);
+                }
+                if !self.error.is_empty() {
+                    ui.add(
+                        egui::Label::new(
+                            egui::RichText::new(&self.error).color(ui.visuals().error_fg_color),
+                        )
+                        .truncate(),
+                    )
+                    .on_hover_text(&self.error);
+                }
+                ui.separator();
+                ui.horizontal_wrapped(|ui| {
+                    let reset = ui
+                        .button("Reset to Defaults")
+                        .on_hover_text(format!("Reset the {} page", self.settings_page.label()));
+                    footer[0] = reset.rect;
+                    if reset.clicked() {
+                        self.reset_page(self.settings_page);
                         self.dirty = true;
                         self.layout_generation = self.layout_generation.wrapping_add(1);
                     }
-                });
-            if !self.error.is_empty() {
-                ui.add(egui::Label::new(egui::RichText::new(&self.error).color(ui.visuals().error_fg_color)).truncate()).on_hover_text(&self.error);
-            }
-            let mut footer=[egui::Rect::NOTHING;3];
-            ui.horizontal_wrapped(|ui| {
-                let save=ui.button("Save workspace preferences");footer[0]=save.rect;
-                if save.clicked() {
-                    match self.apply_editor_draft().and_then(|()|self.persist()) {
-                        Ok(()) => self.error.clear(),
-                        Err(e) => self.error = e,
+                    let all = ui
+                        .button("Reset All Preferences")
+                        .on_hover_text("Also repairs an unreadable preferences file");
+                    footer[1] = all.rect;
+                    if all.clicked() {
+                        self.reset_preferences();
                     }
-                }
-                let reset=ui.button("Reset preferences").on_hover_text("Resets readable malformed settings. For unreadable, oversized or nonregular paths, move the displayed state path aside or repair access, then reopen.");footer[1]=reset.rect;
-                if reset.clicked() {
-                    self.reset_preferences();
-                }
-                let close=ui.button("Close workspace settings");footer[2]=close.rect;
-                if close.clicked() {
-                    self.capture = None;
-                    self.settings_open = false;
-                    self.flush();
-                }
+                    let close = ui.button("Close");
+                    footer[2] = close.rect;
+                    if close.clicked() {
+                        self.close_settings();
+                    }
+                });
             });
-            footer
-        });
-        Some(response.inner)
+        if !open {
+            self.close_settings();
+        }
+        Some(footer)
     }
 }
 
@@ -2280,5 +2448,87 @@ mod tests {
             );
             output.textures_delta.clear();
         }
+    }
+
+    // Every command is listed by its menu name, a shared shortcut is flagged,
+    // and Reset to Defaults on the page restores the default bindings.
+    #[test]
+    fn shortcuts_page_lists_every_command_and_flags_conflicts() {
+        let ctx = egui::Context::default();
+        let mut w = Workspace::detached();
+        w.open_settings(SettingsPage::Shortcuts);
+        let frame = |w: &mut Workspace| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(900.0, 20000.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| {
+                    egui::Frame::new().show(ui, |ui| w.shortcuts_page(ui));
+                },
+            );
+            output.textures_delta.clear();
+            output
+                .shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) => Some(text.galley.job.text.clone()),
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let texts = frame(&mut w);
+        for action in Action::ALL {
+            assert!(
+                texts.iter().any(|t| t == action.label()),
+                "missing {}",
+                action.label()
+            );
+        }
+        assert!(!texts.iter().any(|t| t.starts_with("Also ")));
+        let undo = w
+            .prefs
+            .bindings
+            .iter()
+            .find(|b| b.action == Action::Undo)
+            .copied()
+            .unwrap();
+        let redo = w
+            .prefs
+            .bindings
+            .iter_mut()
+            .find(|b| b.action == Action::Redo)
+            .unwrap();
+        redo.key = undo.key;
+        redo.ctrl = undo.ctrl;
+        redo.shift = undo.shift;
+        assert!(frame(&mut w)
+            .iter()
+            .any(|t| t == &format!("Also {}", Action::Undo.label())));
+        w.reset_page(SettingsPage::Shortcuts);
+        assert_eq!(w.prefs.bindings, Preferences::default().bindings);
+        w.shortcut_query = "redo".into();
+        let filtered = frame(&mut w);
+        assert!(filtered.iter().any(|t| t == Action::Redo.label()));
+        assert!(!filtered.iter().any(|t| t == Action::Undo.label()));
+    }
+
+    // Changes apply at once; closing saves them; nothing needs a Save button.
+    #[test]
+    fn preferences_apply_at_once_and_save_on_close() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("editor.json");
+        let mut w = Workspace::at(Some(path.clone()));
+        w.open_settings(SettingsPage::Ai);
+        w.prefs.allow_ai_connections = false;
+        w.dirty = true;
+        w.close_settings();
+        assert!(!w.settings_open);
+        assert!(!Workspace::at(Some(path.clone())).prefs.allow_ai_connections);
+        w.reset_page(SettingsPage::Ai);
+        assert!(w.prefs.allow_ai_connections);
     }
 }

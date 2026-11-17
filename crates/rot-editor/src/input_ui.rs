@@ -260,6 +260,7 @@ pub(super) struct InputUi {
     interaction_frame: Option<u64>,
     // Observed widget identity bridges egui clearing focus for Escape. It is
     // never authority without current or actual previous-frame focus.
+    #[cfg_attr(not(test), allow(dead_code))]
     window_focus: Option<egui::Id>,
 }
 
@@ -500,6 +501,9 @@ impl InputUi {
         ui.memory_mut(|memory| memory.request_focus(capture.focus));
     }
 
+    // The standalone window, kept for its focus tests; the editor shows the
+    // same content in Project Settings → Input Actions.
+    #[cfg_attr(not(test), allow(dead_code))]
     pub(super) fn window(
         &mut self,
         ctx: &egui::Context,
