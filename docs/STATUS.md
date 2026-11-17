@@ -51,6 +51,12 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · S-11: the Scene view navigates like Unity (Alt+left-drag
+  orbit, middle pan, right-drag look, wheel or Alt+right zoom, right button +
+  WASD/QE fly, Shift faster, wheel sets fly speed); left-drag box-selects
+  (Ctrl/Shift adds); double-click frames; orientation gizmo top-right (axis
+  click = view, center = projection); Stats shows frame, FPS, GPU, draw
+  calls, triangles, repainting 4×/s only while open.
 - 2026-11-17 · A-05: the toolbar mushroom is grey when no AI app is
   connected, Rot red when one is, and pulses while it works. Clicking it
   shows the app, Pause AI Edits (edits wait, reads continue), recent AI
@@ -80,10 +86,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   Step from stopped starts paused on the first tick; an edit during Play
   restarts it; Stop returns to editing. Ctrl+P, Ctrl+Shift+P, Ctrl+Alt+P.
   A red frame marks Play mode; clicking the playing view takes the keyboard.
-- 2026-11-17 · S-04: one toolbar row (Move/Rotate/Scale, World, Center,
-  Snap; Play controls centered; Layout and the AI indicator right; a »
-  menu below 1180 px). Scene/Game tabs sit above the viewport; Perspective,
-  View Presets and Fit float in its corner. Viewport at 1280×800: 533 px tall.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified

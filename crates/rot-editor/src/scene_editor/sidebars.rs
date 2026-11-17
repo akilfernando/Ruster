@@ -290,17 +290,27 @@ mod tests {
         };
         frame(&mut editor, vec![]);
         shapes.extend(frame(&mut editor, vec![]));
-        // The Position row's X is the top-most "X" in the Inspector column.
-        let letter = shapes
-            .iter()
-            .filter_map(|shape| match &shape.shape {
-                egui::epaint::Shape::Text(text) if text.galley.job.text == "X" => {
-                    Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center())
-                }
-                _ => None,
-            })
-            .filter(|point| point.x > 640.0)
-            .min_by(|a, b| a.y.total_cmp(&b.y))
+        // The Position row's X is the "X" in the Inspector on the Position
+        // label's row (the viewport's orientation gizmo also paints an X).
+        let centers = |label: &str| {
+            shapes
+                .iter()
+                .filter_map(|shape| match &shape.shape {
+                    egui::epaint::Shape::Text(text) if text.galley.job.text == label => {
+                        Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center())
+                    }
+                    _ => None,
+                })
+                .collect::<Vec<_>>()
+        };
+        let row = centers("Position")
+            .into_iter()
+            .find(|point| point.x > 640.0)
+            .expect("Position label");
+        let letter = centers("X")
+            .into_iter()
+            .filter(|point| point.x > 640.0 && (point.y - row.y).abs() < 8.0)
+            .min_by(|a, b| a.x.total_cmp(&b.x))
             .expect("Position X letter");
         let before = editor
             .session

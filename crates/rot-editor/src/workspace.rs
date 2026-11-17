@@ -1012,6 +1012,14 @@ impl Workspace {
             }
         }
     }
+    /// Fly speed changed from the viewport (wheel while flying); saved on the
+    /// next flush.
+    pub fn set_movement_speed(&mut self, speed: f32) {
+        if speed.is_finite() && speed != self.prefs.movement_speed {
+            self.prefs.movement_speed = speed.clamp(0.05, 1000.0);
+            self.dirty = true;
+        }
+    }
     pub fn camera_for(&self, path: &Path) -> Option<rot_render::CameraState> {
         self.prefs
             .cameras

@@ -65,7 +65,7 @@ replaced; `python3 scripts/install_local.py --rollback` restores that.
 
 Run `cargo run --locked -p rot-editor` for a blank creation workspace. Scene sources, workspace preferences and local recovery records have separate lifetimes; see the [editor guide](crates/rot-editor/README.md).
 
-Select an object in the hierarchy or click a cube. Edit a Position, Rotation or Scale component, then press Enter or choose **Apply transform components**. Escape reverts a pending component edit; invalid text stays available for correction. Right-drag to orbit, scroll to zoom, and use **Fit** to frame the scene. **Edit → Undo** reverses an authored change. Use **File → Save as…** to keep experiments separate from the checked-in example.
+Select an object in the hierarchy or click a cube. Edit a Position, Rotation or Scale component, then press Enter or choose **Apply transform components**. Escape reverts a pending component edit; invalid text stays available for correction. Navigate as in Unity (Alt+left-drag orbits, right-drag looks, middle-drag pans, scroll zooms) and use **Fit** to frame the scene. **Edit → Undo** reverses an authored change. Use **File → Save as…** to keep experiments separate from the checked-in example.
 
 For a first creation from the blank workspace, using the default shortcuts:
 

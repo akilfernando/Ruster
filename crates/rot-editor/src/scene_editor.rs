@@ -547,6 +547,8 @@ pub struct SceneEditor {
     view_state: view_commands::ViewState,
     captures: capture_commands::Captures,
     queued_selection: Option<(Option<String>, bool)>,
+    /// A finished viewport box select: the objects inside, and whether it adds.
+    queued_box_selection: Option<(Vec<String>, bool)>,
     queued_action: Option<Action>,
     queued_context: Option<(Option<String>, ContextAction)>,
     queued_drop: Option<(String, AssetDrag)>,
@@ -774,6 +776,7 @@ impl SceneEditor {
                 ..Default::default()
             },
             queued_selection: None,
+            queued_box_selection: None,
             queued_action: None,
             queued_context: None,
             queued_drop: None,
@@ -1974,9 +1977,11 @@ impl SceneEditor {
         self.selected = self.manipulation.selected();
     }
     fn process_queued_selection(&mut self) {
-        let Some((id, additive)) = self.queued_selection.take() else {
+        let boxed = self.queued_box_selection.take();
+        let single = self.queued_selection.take();
+        if boxed.is_none() && single.is_none() {
             return;
-        };
+        }
         if self.asset_publishing()
             || self.manipulation.active()
             || self.dialog.is_some()
@@ -1992,7 +1997,21 @@ impl SceneEditor {
         if self.drafts() && !self.apply() {
             return;
         }
-        self.select_object(id, additive);
+        if let Some((ids, additive)) = boxed {
+            // Selection is not an Undo step, matching single clicks.
+            if !additive {
+                self.manipulation.ids.clear();
+            }
+            for id in ids {
+                if !self.manipulation.ids.contains(&id) {
+                    self.manipulation.ids.push(id);
+                }
+            }
+            self.selected = self.manipulation.selected();
+            self.sync_draft();
+        } else if let Some((id, additive)) = single {
+            self.select_object(id, additive);
+        }
     }
     fn select_object(&mut self, id: Option<String>, additive: bool) {
         self.manipulation.select(id, additive);
@@ -6192,6 +6211,9 @@ impl SceneEditor {
                 &mut self.navigation,
                 surface,
             );
+            // The wheel changes fly speed while the right button is held.
+            self.workspace
+                .set_movement_speed(self.navigation.movement_speed);
             if let Some(error) = viewport.fit_error.filter(|_| viewport.fit_attempted) {
                 self.error = error.into();
             } else if (mixed_fit_succeeded || viewport.fit_attempted)
@@ -6296,7 +6318,7 @@ impl SceneEditor {
                 false
             };
             if viewport.response.clicked() && !overlay_owns && can_pick {
-                let id = light_pick.or(viewport.picked).filter(|id| {
+                let id = light_pick.clone().or(viewport.picked.clone()).filter(|id| {
                     lighting_viewport::selectable_target(
                         self.session.scene(),
                         id,
@@ -6306,6 +6328,28 @@ impl SceneEditor {
                 let additive =
                     ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
                 self.queued_selection = Some((id, additive));
+            }
+            // Double-clicking an object selects and frames it, like F. The
+            // first click already shows the transform handles under the
+            // pointer, so the second click may land on them.
+            if viewport.response.double_clicked()
+                && !hud_owns
+                && !sidebar_pointer
+                && !self.runtime.visible
+                && !player_view
+            {
+                if let Some(id) = light_pick.or(viewport.picked).filter(|id| {
+                    lighting_viewport::selectable_target(self.session.scene(), id, true)
+                }) {
+                    self.queued_selection = Some((Some(id), false));
+                    self.navigation.frame_selected = true;
+                    ui.ctx().request_repaint();
+                }
+            }
+            if let Some(ids) = viewport.box_selection.filter(|_| !overlay_owns && can_pick) {
+                let additive =
+                    ui.input(|i| i.modifiers.ctrl || i.modifiers.command || i.modifiers.shift);
+                self.queued_box_selection = Some((ids, additive));
             }
             self.paint_hud_overlay(ui, hud_rect, shown_frame.as_ref());
             sidebars.show(self, ui);
@@ -6599,7 +6643,8 @@ impl eframe::App for Host {
         }
         self.logic_tick(ctx);
     }
-    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, frame: &mut eframe::Frame) {
+        self.editor.navigation.frame_cpu_seconds = frame.info().cpu_usage;
         if let Some(mut picker) = self.editor.project_picker.take() {
             if !picker.switching || !ui.input(|input| input.viewport().close_requested()) {
                 // The hub follows the chosen style too, including the first-launch chooser.
@@ -6725,11 +6770,8 @@ fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
         options,
         Box::new(move |cc| {
             crate::editor_theme::configure(&cc.egui_ctx);
-            #[cfg(feature = "inspection")]
             let metrics = cc.wgpu_render_state.as_ref().map(rot_render::install);
             if let Some(render) = cc.wgpu_render_state.as_ref() {
-                #[cfg(not(feature = "inspection"))]
-                rot_render::install(render);
                 eprintln!("Scene editor adapter: {:?}", render.adapter.get_info());
             }
             #[cfg(unix)]
@@ -6740,6 +6782,7 @@ fn run_session(session: Session, startup_projects: bool) -> Result<(), String> {
                 input: Default::default(),
                 editor: {
                     let mut editor = SceneEditor::new(session);
+                    editor.navigation.metrics = metrics.clone();
                     #[cfg(feature = "inspection")]
                     editor.asset_ops.probe.attach_metrics(metrics);
                     editor.ai_workspace = std::env::var_os("ROT_PROJECT_STARTUP").is_none()
@@ -6810,6 +6853,142 @@ mod tests {
             );
         }
     }
+    // S-11: left-drag box select (Ctrl adds, empty clears, no Undo step) and
+    // double-click to frame, through the real editor frame.
+    #[test]
+    fn viewport_box_select_and_double_click_frame() {
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut editor = SceneEditor::new(Session::new(Scene::demo()).unwrap());
+        let mut time = 0.0;
+        let mut modifiers = egui::Modifiers::NONE;
+        let mut frame = |editor: &mut SceneEditor, mods: egui::Modifiers, events: Vec<_>| {
+            time += 0.1;
+            let mut all = Vec::new();
+            if mods != modifiers {
+                modifiers = mods;
+                all.push(egui::Event::ModifiersChanged(mods));
+            }
+            all.extend(events);
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    events: all,
+                    time: Some(time),
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| editor.ui(ui),
+            );
+            output.textures_delta.clear();
+        };
+        for _ in 0..3 {
+            frame(&mut editor, egui::Modifiers::NONE, vec![]);
+        }
+        // Screen position of a world point, through the frame's own matrices.
+        let project = |editor: &SceneEditor, p: [f32; 3]| {
+            let rect = editor.captures.rect.unwrap();
+            let (v, m) = (
+                editor.captures.view.unwrap(),
+                editor.captures.projection.unwrap(),
+            );
+            let mul = |m: [[f32; 4]; 4], x: [f32; 4]| {
+                std::array::from_fn::<f32, 4, _>(|r| (0..4).map(|c| m[c][r] * x[c]).sum())
+            };
+            let clip = mul(m, mul(v, [p[0], p[1], p[2], 1.0]));
+            egui::pos2(
+                rect.left() + (clip[0] / clip[3] + 1.0) * 0.5 * rect.width(),
+                rect.top() + (1.0 - clip[1] / clip[3]) * 0.5 * rect.height(),
+            )
+        };
+        let button = |pos, pressed, mods| egui::Event::PointerButton {
+            pos,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: mods,
+        };
+        let mut drag = |editor: &mut SceneEditor, mods, from: egui::Pos2, to: egui::Pos2| {
+            frame(
+                editor,
+                mods,
+                vec![egui::Event::PointerMoved(from), button(from, true, mods)],
+            );
+            frame(
+                editor,
+                mods,
+                vec![egui::Event::PointerMoved(from.lerp(to, 0.5))],
+            );
+            frame(editor, mods, vec![egui::Event::PointerMoved(to)]);
+            frame(editor, mods, vec![button(to, false, mods)]);
+            frame(editor, egui::Modifiers::NONE, vec![]);
+        };
+        let ids = |editor: &SceneEditor| editor.manipulation.ids.clone();
+        let around = |p: egui::Pos2| (p - egui::vec2(20.0, 20.0), p + egui::vec2(20.0, 20.0));
+        let left = project(&editor, [-2.0, 0.0, 0.0]);
+        let right = project(&editor, [2.0, 0.0, 0.0]);
+        assert!(editor.captures.visible_crop.unwrap().contains(left));
+        assert!(editor.captures.visible_crop.unwrap().contains(right));
+        let undo = editor.session.undo_len();
+
+        // A box around all three cubes selects them; selection is not an Undo step.
+        drag(
+            &mut editor,
+            egui::Modifiers::NONE,
+            left - egui::vec2(40.0, 40.0),
+            right + egui::vec2(40.0, 40.0),
+        );
+        let mut all = ids(&editor);
+        all.sort();
+        assert_eq!(all, ["center", "left", "right"]);
+        assert_eq!(editor.session.undo_len(), undo);
+
+        // A plain box replaces the selection; Ctrl adds to it.
+        let (from, to) = around(left);
+        drag(&mut editor, egui::Modifiers::NONE, from, to);
+        assert_eq!(ids(&editor), ["left"]);
+        let (from, to) = around(right);
+        drag(&mut editor, egui::Modifiers::CTRL, from, to);
+        assert_eq!(ids(&editor), ["left", "right"]);
+
+        // An empty box clears the selection.
+        let empty = editor.captures.visible_crop.unwrap().center_bottom() - egui::vec2(0.0, 30.0);
+        drag(
+            &mut editor,
+            egui::Modifiers::NONE,
+            empty - egui::vec2(30.0, 15.0),
+            empty + egui::vec2(30.0, 15.0),
+        );
+        assert!(ids(&editor).is_empty(), "{:?}", ids(&editor));
+
+        // Double-clicking an object selects and frames it.
+        for _ in 0..2 {
+            frame(
+                &mut editor,
+                egui::Modifiers::NONE,
+                vec![
+                    egui::Event::PointerMoved(right),
+                    button(right, true, egui::Modifiers::NONE),
+                ],
+            );
+            frame(
+                &mut editor,
+                egui::Modifiers::NONE,
+                vec![button(right, false, egui::Modifiers::NONE)],
+            );
+        }
+        frame(&mut editor, egui::Modifiers::NONE, vec![]);
+        frame(&mut editor, egui::Modifiers::NONE, vec![]);
+        assert_eq!(ids(&editor), ["right"]);
+        let target = editor.navigation.camera.unwrap().target;
+        assert!(
+            (target[0] - 2.0).abs() < 1e-3 && target[1].abs() < 1e-3,
+            "{target:?}"
+        );
+    }
+
     // A small window must constrain only its temporary panel instances, not
     // erase preferred widths or leave the actual viewport behind the chrome.
     #[test]

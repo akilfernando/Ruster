@@ -372,7 +372,7 @@ scene, Input Actions (moved from Edit), Build.
 Ctrl+, opens Preferences.
 
 #### S-11 · Viewport navigation and selection — M — ready
-Status: open
+Status: done — Claude Opus 5.5 (UX helper), 2026-11-17
 **Outcome.** The viewport handles like Unity's Scene view.
 **Facts.** Navigation is in `crates/rot-render/src/lib.rs:1192-1235`:
 right-drag orbits, middle-drag pans, wheel zooms, right button plus WASD
