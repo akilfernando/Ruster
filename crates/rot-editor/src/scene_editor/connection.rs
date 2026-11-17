@@ -4,6 +4,8 @@ mod native;
 #[cfg(unix)]
 mod prompt;
 use super::*;
+#[cfg(unix)]
+pub(super) use prompt::TrustUi;
 
 // Bounded CP2 consent seam; native wiring is a subsequent integration slice.
 #[allow(dead_code)]

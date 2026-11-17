@@ -62,6 +62,11 @@ fn filename(value: &Value) -> Result<&str> {
     }
     Ok(name)
 }
+/// The real folder holding a file, so a scene opened by another path to the
+/// same folder still matches the save grant.
+fn canonical_parent(path: &Path) -> Option<PathBuf> {
+    path.parent()?.canonicalize().ok()
+}
 fn reject_symlink(path: &Path) -> Result<()> {
     match path.symlink_metadata() {
         Ok(metadata) if !metadata.is_file() => Err(error(
@@ -97,7 +102,7 @@ impl SceneEditor {
                 "This scene has no saved association; provide a fresh filename",
             )
         })?;
-        if path.parent() != Some(root) {
+        if canonical_parent(path).as_deref() != Some(root) {
             return Err(error("save_permission_required", "The associated scene is outside the granted save directory; provide a fresh filename within the grant"));
         }
         reject_symlink(path)?;
@@ -183,7 +188,7 @@ impl SceneEditor {
                     "This scene has no saved association; provide a fresh filename",
                 )
             })?;
-            if associated.parent() != Some(root) {
+            if canonical_parent(associated).as_deref() != Some(root) {
                 return Err(error("save_permission_required", "Associated scene is outside the granted save directory; provide a fresh filename within the grant"));
             }
             associated.to_path_buf()

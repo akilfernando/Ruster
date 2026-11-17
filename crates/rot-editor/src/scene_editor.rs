@@ -461,8 +461,8 @@ pub struct SceneEditor {
     ai_listen: bool,
     ai_listen_retry: Option<std::time::Instant>,
     ai_listen_scene: Option<PathBuf>,
-    /// AI apps the creator denied in this session; they are not asked again.
-    ai_denied: Vec<String>,
+    #[cfg(unix)]
+    ai_trust: connection::TrustUi,
     retired_connection_receipts: std::collections::VecDeque<Value>,
     save_grant: Option<persistence_commands::SaveGrant>,
     save_sequence: u64,
@@ -680,7 +680,8 @@ impl SceneEditor {
             ai_listen: false,
             ai_listen_retry: None,
             ai_listen_scene: None,
-            ai_denied: Vec::new(),
+            #[cfg(unix)]
+            ai_trust: Default::default(),
             retired_connection_receipts: Default::default(),
             save_grant: None,
             save_sequence: 0,

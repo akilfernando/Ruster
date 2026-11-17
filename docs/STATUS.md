@@ -55,7 +55,7 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 - 2026-11-17 · A-02: an AI app is asked once (Allow Always / Allow Once /
   Deny, a floating prompt) and then reconnects silently across editor
   restarts and rebuilds; Revoke in Rot connection asks again; an allowed app
-  saves and builds with no environment variables.
+  saves (and, in a Rot project, builds) with no environment variables.
   [Decision](decisions/2026-11-17-trust-ai-apps-once.md). Checked with two
   hidden-workspace editor runs around a rebuild, plus a headless test.
 - 2026-11-17 · S-02: UI kit (`crates/rot-editor/src/ui_kit/`) with tokens,

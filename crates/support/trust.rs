@@ -1,14 +1,18 @@
 //! The AI apps this user has trusted, in one owner-only file:
 //! `$XDG_CONFIG_HOME/rot/ai-apps.json`. Each app has a name, a random token
 //! that its adapter presents, and whether the creator chose Allow Always.
-//! Same-user processes can read and change this file; like the socket, it
-//! protects against mistakes and other users, not against the user's own
-//! programs.
+//! Programs running as this user can read the tokens and add trust; the user
+//! accepted that on 2026-11-17 (docs/decisions/2026-11-17-trust-ai-apps-once.md).
+//! The checks below keep out other users and accidental damage.
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, OpenOptionsExt};
 use std::path::{Path, PathBuf};
+
+/// Untrusted entries kept; older ones are dropped so the file stays small.
+const UNTRUSTED_KEPT: usize = 32;
+const MAX_BYTES: u64 = 65536;
 
 pub fn path() -> PathBuf {
     let config = std::env::var_os("XDG_CONFIG_HOME")
@@ -19,12 +23,21 @@ pub fn path() -> PathBuf {
     config.join("rot").join("ai-apps.json")
 }
 
-/// A client name as the adapter reports it: printable, at most 64 bytes.
+/// A client name as the adapter reports it: at most 64 bytes of letters,
+/// digits, ASCII punctuation and single inner spaces. This keeps out
+/// invisible, right-to-left and look-alike spacing characters.
 pub fn valid_name(name: &str) -> bool {
-    !name.is_empty() && name.len() <= 64 && !name.chars().any(char::is_control)
+    !name.is_empty()
+        && name.len() <= 64
+        && name.trim() == name
+        && !name.contains("  ")
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || c == ' ' || c.is_ascii_punctuation())
 }
 
-/// The name a creator recognizes for common MCP client names.
+/// The name a creator recognizes for common MCP client names; any other name
+/// is shown as the app reported it.
 pub fn display_name(name: &str) -> String {
     match name {
         "claude-code" => "Claude Code".into(),
@@ -43,29 +56,58 @@ pub struct App {
     pub allowed: bool,
 }
 
-#[derive(Debug, Default, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 pub struct Store {
     pub apps: Vec<App>,
 }
 
+/// The folder must be a real directory owned by this user that no one else
+/// can write to.
+fn check_directory(directory: &Path) -> io::Result<()> {
+    let meta = fs::symlink_metadata(directory)?;
+    if !meta.is_dir()
+        || meta.uid() != rustix::process::getuid().as_raw()
+        || meta.mode() & 0o022 != 0
+    {
+        return Err(io::Error::other(format!(
+            "{} must be a folder only you can change",
+            directory.display()
+        )));
+    }
+    Ok(())
+}
+
 impl Store {
-    /// A missing, unreadable, malformed or group/world-accessible file reads as
-    /// empty, so nothing is trusted from it.
-    pub fn load(path: &Path) -> Self {
-        let Ok(meta) = fs::symlink_metadata(path) else {
-            return Self::default();
+    /// The store, `None` when there is no file yet, or an error when the file
+    /// or its folder is not private to this user or cannot be read.
+    pub fn read(path: &Path) -> io::Result<Option<Self>> {
+        let meta = match fs::symlink_metadata(path) {
+            Ok(meta) => meta,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+            Err(error) => return Err(error),
         };
+        check_directory(path.parent().ok_or_else(|| io::Error::other("no parent"))?)?;
         if !meta.is_file()
             || meta.mode() & 0o077 != 0
             || meta.uid() != rustix::process::getuid().as_raw()
-            || meta.len() > 65536
+            || meta.len() > MAX_BYTES
         {
-            return Self::default();
+            return Err(io::Error::other(format!(
+                "{} must be a private file of at most 64 KiB",
+                path.display()
+            )));
         }
-        fs::read(path)
-            .ok()
-            .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-            .unwrap_or_default()
+        Ok(Some(serde_json::from_slice(&fs::read(path)?)?))
+    }
+
+    /// For trust decisions: anything unreadable trusts nobody.
+    pub fn load(path: &Path) -> Self {
+        Self::read(path).ok().flatten().unwrap_or_default()
+    }
+
+    /// When the file last changed, to notice edits by other processes.
+    pub fn modified(path: &Path) -> Option<std::time::SystemTime> {
+        fs::symlink_metadata(path).and_then(|m| m.modified()).ok()
     }
 
     pub fn allowed(&self, name: &str, token: &str) -> bool {
@@ -74,13 +116,20 @@ impl Store {
             .any(|app| app.allowed && app.name == name && app.token == token)
     }
 
+    /// Whether `name` is allowed with some token (it may present a new one).
+    pub fn known(&self, name: &str) -> bool {
+        self.apps.iter().any(|app| app.allowed && app.name == name)
+    }
+
     /// Change the store under an exclusive lock and replace it atomically.
+    /// A file that exists but cannot be read is left alone, not overwritten.
     fn update<T>(path: &Path, change: impl FnOnce(&mut Self) -> T) -> io::Result<T> {
         let directory = path.parent().ok_or_else(|| io::Error::other("no parent"))?;
         fs::DirBuilder::new()
             .recursive(true)
             .mode(0o700)
             .create(directory)?;
+        check_directory(directory)?;
         let lock = fs::OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -88,12 +137,23 @@ impl Store {
             .mode(0o600)
             .open(path.with_extension("lock"))?;
         lock.lock()?;
-        let mut store = Self::load(path);
+        let mut store = Self::read(path)?.unwrap_or_default();
         let result = change(&mut store);
+        let untrusted = store.apps.iter().filter(|a| !a.allowed).count();
+        let mut drop = untrusted.saturating_sub(UNTRUSTED_KEPT);
+        store.apps.retain(|a| {
+            let keep = a.allowed || drop == 0;
+            if !keep {
+                drop -= 1;
+            }
+            keep
+        });
         let temporary = path.with_extension(format!("tmp{}", std::process::id()));
+        // unlink never follows a link, and create_new (O_EXCL) refuses to
+        // open through one.
+        let _ = fs::remove_file(&temporary);
         let mut file = fs::OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .write(true)
             .mode(0o600)
             .open(&temporary)?;
@@ -105,7 +165,12 @@ impl Store {
 
     /// The adapter's token for `name`, creating an untrusted entry if needed.
     pub fn token_for(path: &Path, name: &str) -> io::Result<String> {
-        if let Some(app) = Self::load(path).apps.into_iter().find(|a| a.name == name) {
+        if let Some(app) = Self::read(path)?
+            .unwrap_or_default()
+            .apps
+            .into_iter()
+            .find(|a| a.name == name)
+        {
             return Ok(app.token);
         }
         let token = crate::connection::unpredictable()?;
@@ -163,17 +228,63 @@ mod tests {
         Store::allow(&path, "claude-code", &token).unwrap();
         assert!(Store::load(&path).allowed("claude-code", &token));
         assert!(!Store::load(&path).allowed("claude-code", &"0".repeat(64)));
+        assert!(Store::load(&path).known("claude-code"));
         assert!(!Store::load(&path).allowed("codex", &token));
-
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
-        assert!(
-            !Store::load(&path).allowed("claude-code", &token),
-            "readable by others"
-        );
-        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
 
         Store::revoke(&path, "claude-code").unwrap();
         assert!(!Store::load(&path).allowed("claude-code", &token));
         assert_ne!(Store::token_for(&path, "claude-code").unwrap(), token);
+    }
+
+    // A rejected file trusts nobody and is never rewritten empty.
+    #[test]
+    fn unreadable_store_is_kept_and_many_names_do_not_wipe_trust() {
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("rot").join("ai-apps.json");
+        let token = Store::token_for(&path, "codex").unwrap();
+        Store::allow(&path, "codex", &token).unwrap();
+        for i in 0..400 {
+            Store::token_for(&path, &format!("app {i}")).unwrap();
+        }
+        let store = Store::load(&path);
+        assert!(store.allowed("codex", &token), "trust survives many names");
+        assert_eq!(store.apps.len(), 1 + UNTRUSTED_KEPT);
+
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        assert!(!Store::load(&path).allowed("codex", &token));
+        assert!(Store::allow(&path, "other", &token).is_err());
+        assert!(Store::token_for(&path, "new").is_err());
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o600)).unwrap();
+        assert!(Store::load(&path).allowed("codex", &token), "not rewritten");
+
+        let shared = root.path().join("shared");
+        fs::create_dir(&shared).unwrap();
+        fs::set_permissions(&shared, fs::Permissions::from_mode(0o777)).unwrap();
+        assert!(Store::token_for(&shared.join("ai-apps.json"), "x").is_err());
+    }
+
+    #[test]
+    fn names_reject_invisible_and_reordering_characters() {
+        for good in [
+            "claude-code",
+            "Visual Studio Code",
+            "codex-mcp-client",
+            "Zed 1.2",
+        ] {
+            assert!(valid_name(good), "{good}");
+        }
+        for bad in [
+            "",
+            " claude",
+            "claude ",
+            "a  b",
+            "claude\u{202e}edoc",
+            "cla\u{200b}ude",
+            "claude\u{a0}code",
+            "claude\ncode",
+            &"x".repeat(65),
+        ] {
+            assert!(!valid_name(bad), "{bad:?}");
+        }
     }
 }

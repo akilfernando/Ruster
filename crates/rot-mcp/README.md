@@ -15,7 +15,7 @@ Always, Allow Once or Deny; an app allowed always reconnects without asking,
 across restarts and rebuilds ([decision](../../docs/decisions/2026-11-17-trust-ai-apps-once.md)).
 The app is named by `rot-mcp --client NAME` or by its MCP `clientInfo.name`.
 Revoke it in File → Advanced → Rot connection…. An allowed app may save the
-open scene and build into `<project>/Builds`. Turning off
+open scene and, in a Rot project, build into `<project>/Builds`. Turning off
 `allow_ai_connections` in the editor preferences stops listening. The
 `ROT_MCP_PROJECT_REGISTRY` and `ROT_MCP_LOCATOR` modes below still work when
 set.

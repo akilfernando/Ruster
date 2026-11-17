@@ -34,6 +34,8 @@ struct AuthorityState {
     owner: Option<(String, u32)>,
     /// The AI app's name and trust token, as its adapter presented them.
     client: Option<(String, String)>,
+    /// Approved by Allow Always, so a later revoke in the store ends it.
+    remembered: bool,
     commits: usize,
     requests: usize,
     listener_owned: bool,
@@ -69,6 +71,7 @@ impl Authority {
             grant: None,
             owner: None,
             client: None,
+            remembered: false,
             commits: 0,
             requests: 0,
             listener_owned: false,
@@ -730,15 +733,20 @@ impl Bridge {
                         (None, None) => false,
                     };
                     let owner = hello["hello"].as_str().unwrap().to_string();
+                    // Enrolled connectors keep their own path and never act as
+                    // a named app (no prompt, no save or build grant).
+                    let client = if trusted || grant.is_some() { None } else { client };
+                    // An app the creator chose Allow Always for connects
+                    // without a prompt. Read the store before taking the lock.
+                    let mut store_seen = trust.as_deref().and_then(crate::trust::Store::modified);
+                    let remembered = client.as_ref().zip(trust.as_ref())
+                        .is_some_and(|((name, token), store)| crate::trust::Store::load(store).allowed(name, token));
                     {
                         let mut state = worker_authority.0.lock().map_err(|_| std::io::Error::other("authority poisoned"))?;
                         if !state.live || state.owner.is_some() { return Ok(()); }
                         state.owner = Some((owner.clone(), pid));
-                        // An app the creator chose Allow Always for connects
-                        // without a prompt. Enrolled connectors keep their own path.
-                        let remembered = !trusted && grant.is_none() && client.as_ref().zip(trust.as_ref())
-                            .is_some_and(|((name, token), store)| crate::trust::Store::load(store).allowed(name, token));
                         state.approved = trusted || remembered;
+                        state.remembered = remembered;
                         state.client = client.clone();
                     }
                     ctx.request_repaint();
@@ -763,6 +771,21 @@ impl Bridge {
                                 else { json!({"state":"approval_required"}) };
                             connection::send(&mut stream, &reply)?;
                             continue;
+                        }
+                        // Revoke elsewhere (another editor, or the file) ends
+                        // an Allow Always connection at its next call.
+                        if let (Some(store), Some((name, token))) = (&trust, &client) {
+                            let modified = crate::trust::Store::modified(store);
+                            if modified != store_seen {
+                                store_seen = modified;
+                                let allowed = crate::trust::Store::load(store).allowed(name, token);
+                                let remembered = worker_authority.0.lock().is_ok_and(|s| s.remembered);
+                                if remembered && !allowed {
+                                    worker_authority.revoke();
+                                    let _ = connection::send(&mut stream, &denied("trust_revoked"));
+                                    return Ok(());
+                                }
+                            }
                         }
                         if !worker_authority.authorized() || request["wire"] != connection::WIRE
                             || request["binding"] != worker_locator.binding() || request["capability"] != capability
@@ -849,6 +872,12 @@ impl Bridge {
     /// The connected AI app's name and trust token, when its adapter named it.
     pub fn client(&self) -> Option<(String, String)> {
         self.authority.0.lock().ok()?.client.clone()
+    }
+    /// After Allow Always: a revoke in the store now ends this connection.
+    pub fn remember_client(&self) {
+        if let Ok(mut state) = self.authority.0.lock() {
+            state.remembered = state.client.is_some();
+        }
     }
     /// This API is human-owner-only, never reachable through MCP. CP2 supplies UI.
     pub fn approve_owner(&self, owner: &(String, u32)) -> bool {

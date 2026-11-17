@@ -380,18 +380,30 @@ impl Controller {
         self.output_directory.as_ref().map(DirectoryGrant::root)
     }
 
-    /// Only future agent writes lose their grant; an authorized publication
-    /// retains its captured directory and cleanup owner until drained.
-    /// A trusted AI app builds into `<project>/Builds`.
+    /// A trusted AI app builds into `<project>/Builds`, a real folder inside
+    /// the project. A `Builds` link, or one that resolves elsewhere, is refused.
     pub(crate) fn grant_agent_destination(&mut self, project: &Path) -> Result<(), String> {
+        let project = project.canonicalize().map_err(|error| error.to_string())?;
         let builds = project.join("Builds");
-        std::fs::create_dir_all(&builds).map_err(|error| error.to_string())?;
+        match std::fs::symlink_metadata(&builds) {
+            Ok(meta) if meta.is_dir() => {}
+            Ok(_) => return Err(format!("{} is not a folder", builds.display())),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                std::fs::create_dir(&builds).map_err(|error| error.to_string())?;
+            }
+            Err(error) => return Err(error.to_string()),
+        }
+        if builds.canonicalize().map_err(|error| error.to_string())? != builds {
+            return Err(format!("{} leads outside the project", builds.display()));
+        }
         self.output_directory = Some(DirectoryGrant::new(&builds)?);
         Ok(())
     }
     pub(crate) fn has_agent_destination(&self) -> bool {
         self.output_directory.is_some()
     }
+    /// Only future agent writes lose their grant; an authorized publication
+    /// retains its captured directory and cleanup owner until drained.
     pub(crate) fn revoke_agent_destination(&mut self) {
         self.output_directory = None;
         if self.job.as_ref().is_some_and(|job| job.agent) {
