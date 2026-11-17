@@ -17,8 +17,7 @@ package in your lane under **Now**. How to work is in the
 - **Vetoes.** The [architecture decisions](PARITY-PLAN.md#4-architecture-decisions)
   and the [vocabulary](UX-STANDARDS.md#2-vocabulary) are agent-selected.
 - **Outside the repository.** The installed editor is still the pre-rename
-  build. `~/.codex/skills/ruster-*` links and two MCP entries in
-  `~/.codex/config.toml` point at old names. Projects in
+  build. Two MCP entries in `~/.codex/config.toml` point at old names. Projects in
   `~/Projects/Ruster-Creations` use pre-rename file names.
 
 ## Inbox

@@ -6,10 +6,12 @@ Updated 2026-11-17. This file stays under 100 lines. Older entries are in
 ## Where to work
 
 - **Trunk:** `main`, on `origin`. Branch from it and merge back to it.
-- **Other checkouts:** `/home/akilf/Projects/rusterize-cumulative-editor-20261115`
-  holds an uncommitted status note from another session; leave it alone. Old
-  worktrees are under `~/Projects/Archive/Rot Engine/`. An edit from the stale
-  `claude/e1-editor-feedback` branch is kept as a git stash.
+- **One checkout:** `/home/akilf/Projects/rot_engine`. All other branches
+  were removed on 2026-11-17; each tip is kept as an `archive/<name>` tag on
+  `origin`, including work that had not been merged. Two git stashes hold
+  small status notes from older sessions. The detached worktrees under
+  `~/Projects/Ruster-Audits` and `~/Projects/Ruster-Creations` are retained
+  evidence; leave them.
 - **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
   requests, review, merge and keep branches tidy without asking.
 
@@ -43,8 +45,8 @@ names (`ruster-editor`, `ruster-mcp`). Nothing from this branch is installed.
   variables the code no longer reads (A-06).
 - Play checks refuse scenes that use groups, so they cannot cover an animated
   model.
-- Outside the repository, still using old names: the installed binaries, the
-  `~/.codex/skills/ruster-*` links, two MCP entries in `~/.codex/config.toml`,
+- Outside the repository, still using old names: the installed binaries,
+  two MCP entries in `~/.codex/config.toml`,
   and the projects in `~/Projects/Ruster-Creations`, which will not load in a
   build from this branch until their files are renamed.
 
