@@ -290,7 +290,7 @@ mod tests {
     /// A host listening like the running editor, with a private trust store.
     fn listening(root: &Path, scene: &Path) -> Host {
         let mut host = super::super::tests::host("trust");
-        host.editor.session.save(scene.to_path_buf()).unwrap();
+        host.editor.session.save(scene).unwrap();
         host.editor.ai_trust.store = root.join("config/rot/ai-apps.json");
         host.bridge = Some(
             crate::bridge::Bridge::start_discoverable(
@@ -436,7 +436,7 @@ mod tests {
             crate::connection::Client::open(host.bridge.as_ref().unwrap().locator_path()).unwrap();
         client.identify(json!({"name":"claude-code","token":token}));
         let ctx = egui::Context::default();
-        let mut serve = |host: &mut Host, client: crate::connection::Client| {
+        let serve = |host: &mut Host, client: crate::connection::Client| {
             let worker = std::thread::spawn(move || {
                 let mut client = client;
                 let reply = client.call("scene_inspect", &json!({}));
