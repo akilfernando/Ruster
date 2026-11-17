@@ -177,8 +177,9 @@ they did not.
   agent would otherwise have to rediscover.
 - **Ask the user** before: anything destructive to their files or projects,
   installing system software, editing their own AI app configuration,
-  pushing to a remote unless STATUS says pushing is allowed, changing brand
-  assets, or reordering the phases of the plan.
+  changing brand assets, or reordering the phases of the plan. Git work
+  needs no permission: the user asked on 2026-11-17 for fully autonomous
+  pushing, pull requests, reviews, merging and branch hygiene.
 - **Changing the plan.** Add a line under **Inbox** in BACKLOG with your
   reason. Do not reorder **Now** yourself unless a package is blocked.
 

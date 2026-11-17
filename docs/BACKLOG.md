@@ -14,9 +14,6 @@ package in your lane under **Now**. How to work is in the
 
 ## Needs the user
 
-- **Trunk.** `claude/rot-next-20261117` holds the rename, imported animation
-  and this framework. It is not merged or pushed. Say whether agents may
-  merge to `main` and push when a package is done.
 - **Vetoes.** The [architecture decisions](PARITY-PLAN.md#4-architecture-decisions)
   and the [vocabulary](UX-STANDARDS.md#2-vocabulary) are agent-selected.
 - **Outside the repository.** The installed editor is still the pre-rename

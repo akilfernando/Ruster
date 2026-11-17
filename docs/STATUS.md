@@ -12,8 +12,8 @@ Updated 2026-11-17. This file stays under 100 lines. Older entries are in
   holds an uncommitted status note from another session; leave it alone. Old
   worktrees are under `~/Projects/Archive/Rot Engine/`. An edit from the stale
   `claude/e1-editor-feedback` branch is kept as a git stash.
-- **Push policy:** not yet stated by the user for this framework. Ask before
-  pushing.
+- **Push policy (user, 2026-11-17):** fully autonomous. Push, open pull
+  requests, review, merge and keep branches tidy without asking.
 
 ## What to do next
 
