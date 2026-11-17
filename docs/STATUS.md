@@ -51,6 +51,11 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · A-05: the toolbar mushroom is grey when no AI app is
+  connected, Rot red when one is, and pulses while it works. Clicking it
+  shows the app, Pause AI Edits (edits wait, reads continue), recent AI
+  changes with Undo, Connect an AI App… and Disconnect; toasts on connect and
+  disconnect. AI Connection panel and Preferences → AI in plain words.
 - 2026-11-17 · T-01: Style (Rot or Plain) beside Mode (Dark, Light, System,
   OLED black) in preferences; switching is instant; a first-launch chooser
   in the project hub previews both. Themed Wording checkbox stored (used by

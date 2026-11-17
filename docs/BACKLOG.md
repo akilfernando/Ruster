@@ -532,7 +532,7 @@ atomic merge. An earlier attempt at this spent days there and shipped
 nothing.
 
 #### A-05 · AI indicator and activity — M — ready
-Status: open
+Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
 **Outcome.** The creator can see what the AI is doing and stop it.
 **Facts.** The mushroom badge only has a hover label
 (`crates/rot-editor/src/branding.rs:60-77`); the panel is under File →

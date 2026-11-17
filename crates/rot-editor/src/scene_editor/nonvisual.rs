@@ -361,6 +361,7 @@ impl Host {
             }
             self.dispatch_one_ai_request(ctx);
             served += 1;
+            self.editor.ai_status.last_request = Some(std::time::Instant::now());
             if std::time::Instant::now() >= budget {
                 break;
             }
@@ -377,6 +378,11 @@ impl Host {
         let mut step = None;
         if let Some(bridge) = &mut self.bridge {
             bridge.dispatch_request(|nonce, op, args, lease| {
+                if self.editor.ai_status.paused && !ai_indicator::read_only(op) {
+                    // rot-mcp holds the call and asks again until resumed.
+                    lease.respond(json!({"ok":false,"error":{"code":"ai_paused","message":"The creator paused AI edits."}}));
+                    return;
+                }
                 step = ai_steps::label(op, &args, self.editor.session.scene());
                 if op == "workspace_descriptor" {
                     lease.run_immediate(|| {
@@ -398,6 +404,8 @@ impl Host {
         }
         let after = self.editor.session.scene().revision;
         if let Some(label) = step.filter(|_| after != before) {
+            // The status bar names the change in plain words.
+            self.editor.notice = label.clone();
             self.editor.ai_steps.record(label, after);
         }
     }

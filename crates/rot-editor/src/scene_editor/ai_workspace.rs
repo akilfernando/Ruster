@@ -35,7 +35,7 @@ impl SceneEditor {
                     self.set_ai_workspace(false, &ctx);
                 }
                 #[cfg(unix)]
-                crate::branding::connection_indicator(ui, self.ai_connection_label);
+                self.ai_indicator_ui(ui);
                 if ui
                     .button("Undo")
                     .on_hover_text(self.workspace.shortcut_text(Action::Undo))
@@ -362,7 +362,7 @@ mod tests {
             (egui::vec2(600., 850.), 1.25),
         ] {
             editor.workspace.prefs.scale = scale;
-            editor.ai_connection_label = "Approval required (manual)";
+            editor.ai_status.asking = Some("Claude Code".into());
             for _ in 0..3 {
                 let mut output = ctx.run_ui(
                     egui::RawInput {

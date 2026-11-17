@@ -31,7 +31,6 @@ impl AiSteps {
             .map(|step| step.label.as_str())
     }
     /// Newest first.
-    #[allow(dead_code)] // the AI activity list (A-05) reads this
     pub(super) fn recent(&self) -> impl Iterator<Item = &AiStep> {
         self.steps.iter().rev()
     }

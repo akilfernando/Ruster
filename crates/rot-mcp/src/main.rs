@@ -700,6 +700,24 @@ fn listed() -> Value {
     listed
 }
 
+/// While the creator has paused AI edits the editor refuses changes (they
+/// did not apply); hold the call and ask again until resumed, within the
+/// time an MCP client usually allows a tool call.
+fn wait_while_paused(
+    bridge: &mut impl FnMut(&str, &Value) -> Value,
+    name: &str,
+    arguments: &Value,
+) -> Value {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(50);
+    loop {
+        let result = bridge(name, arguments);
+        if result["error"]["code"] != "ai_paused" || std::time::Instant::now() >= deadline {
+            return result;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(250));
+    }
+}
+
 /// Tools whose full schema requires the scene guards.
 fn guarded(name: &str) -> bool {
     static GUARDED: std::sync::OnceLock<Vec<String>> = std::sync::OnceLock::new();
@@ -834,7 +852,7 @@ impl Server {
         if !valid_arguments(name, &arguments) {
             return domain_error("invalid_arguments", "Arguments must match the tool schema; transform vectors contain exactly three numbers");
         }
-        let mut result = bridge(name, &arguments);
+        let mut result = wait_while_paused(bridge, name, &arguments);
         for _ in 0..2 {
             let stale = matches!(
                 result["error"]["code"].as_str(),
@@ -858,7 +876,7 @@ impl Server {
                 arguments.as_object_mut().unwrap().remove(guard);
             }
             self.fill_scene_guards(name, &mut arguments, bridge);
-            result = bridge(name, &arguments);
+            result = wait_while_paused(bridge, name, &arguments);
         }
         result
     }
@@ -1712,6 +1730,27 @@ mod tests {
             assert_eq!(reply["result"]["isError"], false, "{reply}");
         }
         assert_eq!(revisions, ["7", "8", "9", "10", "11", "12"]);
+    }
+
+    // While the creator has paused AI edits, an edit waits and then lands.
+    #[test]
+    fn paused_edits_wait_until_resumed() {
+        let mut server = ready();
+        let edit = json!({"expected_session_token":"s","expected_revision":"1","object_id":"cube","transform":{"translation":[1,2,3],"rotation":[0,0,0],"scale":[1,1,1]}});
+        let mut refusals = 2;
+        let request = json!({"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"scene_transform","arguments":edit}});
+        let reply = server
+            .handle(request.to_string().as_bytes(), |_, _| {
+                if refusals > 0 {
+                    refusals -= 1;
+                    json!({"ok":false,"error":{"code":"ai_paused"}})
+                } else {
+                    json!({"ok":true,"result":{"revision":"2"}})
+                }
+            })
+            .unwrap();
+        assert_eq!(reply["result"]["isError"], false, "{reply}");
+        assert_eq!(refusals, 0);
     }
 
     #[test]

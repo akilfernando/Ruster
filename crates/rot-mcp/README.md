@@ -47,6 +47,8 @@ connected project.
 - Other `expected_*` arguments (asset, view, run and save tokens) are still
   required where a tool lists them; read them from the matching inspect tool.
 - Decimal arguments accept JSON integers or decimal strings.
+- When the creator pauses AI edits (the toolbar mushroom), changes wait
+  inside the call until resumed, up to 50 seconds; reads still run.
 - If the creator has an unfinished field edit, it is committed before the AI
   edit; during a drag the AI edit waits up to a second. AI changes appear in
   the Edit menu as "Undo AI: Move Cube".

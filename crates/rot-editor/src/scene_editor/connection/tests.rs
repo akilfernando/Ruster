@@ -205,27 +205,27 @@ fn cp2_local_status_keeps_disconnected_listening_and_revoked_distinct() {
         text.join("\n")
     };
     let text = paint(&mut host);
-    assert!(text.contains("Disconnected"));
+    assert!(text.contains("Not listening"));
     assert!(
-        text.contains("Connect AI"),
+        text.contains("Start Listening"),
         "native status must expose a supported Connect action: {text}"
     );
     assert!(!text.contains("Registered"));
     let locator = host.connect_adapter(&ctx).unwrap();
     let text = paint(&mut host);
-    assert!(text.contains("Waiting for an adapter"));
-    assert!(text.contains("Open your AI client to continue."));
-    assert!(!text.contains("Connected to this project"));
+    assert!(text.contains("Ready for AI apps"));
+    assert!(text.contains("Open your AI app; it finds this editor by itself."));
+    assert!(!text.contains("AI app connected"));
     let (owner, _) = approved(host.bridge.as_ref().unwrap());
     let text = paint(&mut host);
-    assert!(text.contains("Connected to this project"));
-    assert!(text.contains("Asset catalog changes can persist immediately, before Save."));
+    assert!(text.contains("AI app connected"));
+    assert!(text.contains("Imported assets are saved to the project at once, before Save."));
     assert!(!text.contains("Registered"));
     host.disconnect_adapter();
-    assert!(paint(&mut host).contains("Authority revoked; retiring connection"));
+    assert!(paint(&mut host).contains("Disconnecting…"));
     drop(owner);
     retire(&mut host, &ctx);
-    assert!(paint(&mut host).contains("Disconnected"));
+    assert!(paint(&mut host).contains("Not listening"));
     assert!(!locator.exists());
     assert_eq!(host.editor.session.snapshot_bytes().unwrap(), authored);
 }

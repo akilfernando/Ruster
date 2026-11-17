@@ -1333,6 +1333,10 @@ impl Workspace {
                         self.prefs.content_visible = true;
                     }
                     ui.separator();
+                    ui.strong("AI");
+                    ui.checkbox(&mut self.prefs.allow_ai_connections, "Allow AI apps to connect")
+                        .on_hover_text("Trusted apps and diagnostics: Window → AI Connection…");
+                    ui.separator();
                     self.editor_settings_ui(ui);
                     ui.separator();
                     ui.label(

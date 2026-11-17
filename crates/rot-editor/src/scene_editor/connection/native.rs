@@ -130,11 +130,11 @@ impl Host {
                 .frame(egui::Frame::side_top_panel(ui.style()).inner_margin(egui::Margin::same(14)))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
-                        ui.heading("Rot connection");
+                        ui.heading("AI Connection");
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                             if ui
                                 .button("Close")
-                                .on_hover_text("Close Rot panel")
+                                .on_hover_text("Close AI Connection")
                                 .clicked()
                             {
                                 state.open = false;
@@ -185,8 +185,8 @@ impl Host {
             ui.label("Use project_connect in the enrolled connector. No native approval is needed; browser access is optional and separate. Disconnect retains enrollment; Revoke removes persistent access.");
         }
         let action = match self.connection_state() {
-            "retired" => Some("Connect AI"),
-            "approval_required" => Some("Review adapter approval"),
+            "retired" => Some("Start Listening"),
+            "approval_required" => Some("Review Request…"),
             _ => None,
         };
         if let Some(action) = action.filter(|_| !enrolled) {
@@ -209,7 +209,7 @@ impl Host {
                 }
             }
         }
-        if self.bridge.is_some() && ui.button("Disconnect AI").clicked() {
+        if self.pending_adapter().is_some() && ui.button("Disconnect").clicked() {
             state.preview = None;
             self.disconnect_adapter();
         }
@@ -226,56 +226,80 @@ impl Host {
         self.trusted_apps_ui(ui);
         ui.add_space(8.0);
         ui.separator();
-        ui.collapsing("Connection details", |ui| {
-            ui.label(format!("Project: {}", self.editor.document_label()));
-            ui.label(format!("Scene: {}", self.editor.session.scene().id));
+        let mut allow = self.editor.workspace.prefs.allow_ai_connections;
+        if ui
+            .checkbox(&mut allow, "Allow AI apps to connect")
+            .on_hover_text("When off, this editor does not listen for AI apps")
+            .changed()
+        {
+            self.editor.workspace.prefs.allow_ai_connections = allow;
+            self.editor.workspace.changed();
+        }
+        // Details for troubleshooting a connection, kept out of the way.
+        ui.collapsing("Diagnostics", |ui| {
+            ui.label(format!("Scene file: {}", self.editor.document_label()));
+            ui.label(format!("Scene ID: {}", self.editor.session.scene().id));
             ui.label(format!(
                 "Editor session: {}",
                 self.editor.connection_incarnation
             ));
-            ui.label(format!(
-                "Project generation: {}",
-                self.editor.connection_generation
-            ));
             Self::scene_observation_ui(ui, &self.native_scene_observation(), "");
             if let Some(bridge) = &self.bridge {
-                ui.label(format!(
-                    "Nonsecret locator: {}",
-                    bridge.locator_path().display()
-                ));
+                ui.label(format!("Listening at: {}", bridge.locator_path().display()));
             }
-            if let Some((owner, pid)) = self.pending_adapter() {
-                ui.label(format!("Adapter owner: {owner} · local PID {pid}"));
-                ui.label(
-                    "Owner identity is socket-bound, not executable provenance or client registration.",
-                );
+            if let Some((_, pid)) = self.pending_adapter() {
+                ui.label(format!("AI app process: {pid}"));
             }
         });
         if let Some(preview) = state.preview.clone() {
-            egui::Modal::new(egui::Id::unique(("ai_binding_consent", &preview.incarnation))).show(&ctx, |ui| {
-                ui.heading(if preview.owner.is_some() { "Approve this exact adapter?" } else { "Start a project-local listener?" });
-                ui.label(format!("Project: {} · Scene: {}", self.editor.document_label(), self.editor.session.scene().id));
-                ui.collapsing("Approval details", |ui| {
-                    ui.label(format!("Session: {}\nGeneration: {}", preview.incarnation, preview.generation));
-                    Self::scene_observation_ui(ui, &preview.observation, "Frozen ");
-                    ui.label(format!("Frozen scene: {}", preview.observation.scene_id));
+            egui::Modal::new(egui::Id::unique((
+                "ai_binding_consent",
+                &preview.incarnation,
+            )))
+            .show(&ctx, |ui| {
+                ui.heading(if preview.owner.is_some() {
+                    "Allow this AI app?"
+                } else {
+                    "Start listening for AI apps?"
                 });
-                if let Some((owner, pid)) = &preview.owner { ui.label(format!("Adapter: {owner} · local PID {pid}")); }
-                ui.label("Approval grants this adapter authority over this project/session only. No automatic retargeting or reconnect.");
-                ui.label("Asset catalog changes can persist immediately, before Save. Save/export destinations require separate grants.");
-                let (cancel, confirm) = ui.horizontal_wrapped(|ui| {
-                    let cancel = ui.button("Cancel AI connection");
-                    let confirm = crate::editor_theme::primary_button(ui, "Confirm AI connection");
-                    (cancel, confirm)
-                }).inner;
-                if state.focus_cancel { cancel.request_focus(); state.focus_cancel = false; }
-                let escape = ui.input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
+                ui.label(format!(
+                    "It can read and change {} until it disconnects.",
+                    self.editor.document_label()
+                ));
+                if let Some((_, pid)) = &preview.owner {
+                    ui.weak(format!("AI app process {pid}"));
+                }
+                let (cancel, confirm) = ui
+                    .horizontal_wrapped(|ui| {
+                        let cancel = ui.button("Cancel");
+                        let confirm = crate::editor_theme::primary_button(
+                            ui,
+                            if preview.owner.is_some() {
+                                "Allow"
+                            } else {
+                                "Start"
+                            },
+                        );
+                        (cancel, confirm)
+                    })
+                    .inner;
+                if state.focus_cancel {
+                    cancel.request_focus();
+                    state.focus_cancel = false;
+                }
+                let escape = ui
+                    .input_mut(|input| input.consume_key(egui::Modifiers::NONE, egui::Key::Escape));
                 if cancel.clicked() || escape {
                     state.preview = None;
                 } else if confirm.clicked() {
                     // Taking the frozen preview consumes consent, even on stale refusal.
                     let accepted = self.confirm_binding(state.preview.take().unwrap(), &ctx);
-                    state.notice = if accepted { "Local binding action completed. Client registration/reload was not performed." } else { "Connection changed or is unavailable. Consent discarded; review again." }.into();
+                    state.notice = if accepted {
+                        ""
+                    } else {
+                        "The request changed or ended. Review it again."
+                    }
+                    .into();
                 }
             });
         }
@@ -422,7 +446,7 @@ mod tests {
         let mut host = super::super::tests::host("native-consent");
         let before = host.editor.session.snapshot_bytes().unwrap();
         let mut state = NativeUi::default();
-        click(&mut host, &ctx, &mut state, "Connect AI");
+        click(&mut host, &ctx, &mut state, "Start Listening");
         assert!(state.preview.is_some());
         assert!(host.bridge.is_none());
         paint(
@@ -439,8 +463,8 @@ mod tests {
         );
         assert!(state.preview.is_none());
         assert!(host.bridge.is_none());
-        click(&mut host, &ctx, &mut state, "Connect AI");
-        click(&mut host, &ctx, &mut state, "Confirm AI connection");
+        click(&mut host, &ctx, &mut state, "Start Listening");
+        click(&mut host, &ctx, &mut state, "Start");
         assert!(state.preview.is_none());
         let locator_path = host.bridge.as_ref().unwrap().locator_path();
         let locator: crate::connection::Locator =
@@ -458,11 +482,11 @@ mod tests {
             crate::bridge::tests::receive(&mut stream)["state"],
             "approval_required"
         );
-        click(&mut host, &ctx, &mut state, "Review adapter approval");
-        click(&mut host, &ctx, &mut state, "Cancel AI connection");
+        click(&mut host, &ctx, &mut state, "Review Request…");
+        click(&mut host, &ctx, &mut state, "Cancel");
         assert!(!host.bridge.as_ref().unwrap().approved());
-        click(&mut host, &ctx, &mut state, "Review adapter approval");
-        click(&mut host, &ctx, &mut state, "Confirm AI connection");
+        click(&mut host, &ctx, &mut state, "Review Request…");
+        click(&mut host, &ctx, &mut state, "Allow");
         assert!(state.preview.is_none());
         crate::connection::send(
             &mut stream,
@@ -500,7 +524,7 @@ mod tests {
             .as_ref()
             .unwrap()
             .browser_authorized(&wrong_project));
-        click(&mut host, &ctx, &mut state, "Disconnect AI");
+        click(&mut host, &ctx, &mut state, "Disconnect");
         assert_eq!(host.connection_state(), "revoked_draining");
         assert!(!host.editor.connection_authority.as_ref().unwrap().live());
         drop(stream);
@@ -529,19 +553,14 @@ mod tests {
         assert!(!paint(&mut host, &ctx, &mut state, vec![])
             .iter()
             .any(|(text, _)| text.contains(&observation.session_token)));
-        click(&mut host, &ctx, &mut state, "Connection details");
-        click(&mut host, &ctx, &mut state, "Connect AI");
-        click(&mut host, &ctx, &mut state, "Approval details");
+        click(&mut host, &ctx, &mut state, "Diagnostics");
+        click(&mut host, &ctx, &mut state, "Start Listening");
         let painted = paint(&mut host, &ctx, &mut state, vec![]);
-        for prefix in ["", "Frozen "] {
-            assert!(painted.iter().any(|(text, _)| text
-                == &format!(
-                    "{prefix}Scene guard session_token: {}",
-                    observation.session_token
-                )));
-            assert!(painted.iter().any(|(text, _)| text
-                == &format!("{prefix}Scene guard revision: {}", observation.revision)));
-        }
+        assert!(painted.iter().any(|(text, _)| text
+            == &format!("Scene guard session_token: {}", observation.session_token)));
+        assert!(painted
+            .iter()
+            .any(|(text, _)| text == &format!("Scene guard revision: {}", observation.revision)));
         assert!(host.bridge.is_none());
         assert!(host.editor.connection_authority.is_none());
         assert_eq!(before, host.editor.session.snapshot_bytes().unwrap());

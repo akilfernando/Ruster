@@ -155,7 +155,7 @@ def measure_mcp(args, out):
         adapter = Adapter(args.mcp, editor_socket(editor.pid).with_name("connection.json"))
         _, first = adapter.tool("scene_inspect")
         assert first["error"]["code"] == "approval_required", first
-        for label in ("File", "Advanced", "Rot connection…", "Review adapter approval", "Confirm AI connection"):
+        for label in ("Window", "AI Connection…", "Review Request…", "Allow"):
             wait_label(editor, label, 5)
             editor.click(label)
         inspects, edits = [], []
