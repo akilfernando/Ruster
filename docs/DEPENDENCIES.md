@@ -497,6 +497,13 @@ Readable UTF-8 license, notice, copying, or font-license files found in package 
 
 `epaint_default_fonts 0.37.0` declares `(MIT OR Apache-2.0) AND OFL-1.1 AND Ubuntu-font-1.0`. Its package source contains `fonts/OFL.txt` and `fonts/UFL.txt`; both texts are included in the notices bundle. This records package metadata and source files, not a determination of which terms apply to a particular distribution or font use.
 
+## Bundled fonts
+
+These font files are committed to the repository and embedded in the binaries that use them. Each is licensed under the SIL Open Font License 1.1; the license text sits beside the font and is reproduced in the notices bundle.
+
+- `crates/rot-editor/assets/fonts/OFL-Inter.txt`
+- `crates/rot-editor/assets/fonts/OFL-JetBrainsMono.txt`
+
 No readable matching source text was found for the following packages; metadata declarations are retained above and absence of bundled text is not interpreted as permission:
 
 - `accesskit 0.25.2`

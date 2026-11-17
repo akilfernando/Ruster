@@ -112,6 +112,12 @@ def outputs(metadata: dict) -> tuple[str, str, dict]:
         for relative, data in texts:
             content_groups.setdefault(data, []).append((package["name"], package["version"], relative))
         missing.extend(package_missing)
+    # Fonts committed to the repository and embedded in a binary (Inter and
+    # JetBrains Mono in the editor) carry their license beside the font file.
+    bundled = sorted(ROOT.glob("crates/*/assets/fonts/OFL-*.txt"))
+    for path in bundled:
+        relative = path.relative_to(ROOT).as_posix()
+        content_groups.setdefault(path.read_bytes(), []).append(("bundled font", "(repository)", relative))
 
     lines = [
         "# Third-party dependency inventory",
@@ -136,6 +142,10 @@ def outputs(metadata: dict) -> tuple[str, str, dict]:
     if font_packages:
         font = font_packages[0]
         lines.extend(["## Notable declared license expressions", "", f"`{font['name']} {font['version']}` declares `{font.get('license')}`. Its package source contains `fonts/OFL.txt` and `fonts/UFL.txt`; both texts are included in the notices bundle. This records package metadata and source files, not a determination of which terms apply to a particular distribution or font use.", ""])
+    if bundled:
+        lines.extend(["## Bundled fonts", "", "These font files are committed to the repository and embedded in the binaries that use them. Each is licensed under the SIL Open Font License 1.1; the license text sits beside the font and is reproduced in the notices bundle.", ""])
+        lines.extend(f"- `{path.relative_to(ROOT).as_posix()}`" for path in bundled)
+        lines.append("")
     if missing:
         lines.append("No readable matching source text was found for the following packages; metadata declarations are retained above and absence of bundled text is not interpreted as permission:")
         lines.append("")

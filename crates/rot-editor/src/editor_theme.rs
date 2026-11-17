@@ -3,6 +3,8 @@
 //! One [`Palette`] per theme owns every chrome color. Call sites ask for the
 //! active palette through [`colors`]/[`palette`] so labels, warnings and axis
 //! tints stay readable after the creator switches themes.
+use crate::ui_kit::palette::rgb;
+pub use crate::ui_kit::palette::{Palette, DARK, LIGHT, OLED_BLACK};
 use eframe::egui::{self, Color32, CornerRadius, FontId, Stroke, Theme, Vec2};
 use egui::theme::{DefaultStyle, StyleProvider};
 use egui::widget_style::{ButtonStyle, StyleArgs, WidgetState};
@@ -45,87 +47,6 @@ impl ThemeChoice {
     }
 }
 
-/// Chrome colors for one theme. `accent` is also used as text, so it must
-/// remain readable on every surface; `on_accent` is the primary button label.
-#[derive(Debug, PartialEq)]
-pub struct Palette {
-    pub background: Color32,
-    pub surface: Color32,
-    pub raised: Color32,
-    pub hover: Color32,
-    pub field: Color32,
-    pub divider: Color32,
-    pub control_border: Color32,
-    pub text: Color32,
-    pub secondary: Color32,
-    pub accent: Color32,
-    pub accent_hover: Color32,
-    pub accent_pressed: Color32,
-    pub on_accent: Color32,
-    pub selection: Color32,
-    pub warning: Color32,
-    pub error: Color32,
-    pub axis: [Color32; 3],
-}
-
-const fn rgb(hex: u32) -> Color32 {
-    Color32::from_rgb((hex >> 16) as u8, (hex >> 8) as u8, hex as u8)
-}
-
-pub const DARK: Palette = Palette {
-    background: rgb(0x151314),
-    surface: rgb(0x201d1e),
-    raised: rgb(0x292527),
-    hover: rgb(0x382e30),
-    field: rgb(0x191617),
-    divider: rgb(0x383032),
-    control_border: rgb(0x827574),
-    text: rgb(0xf1e8e3),
-    secondary: rgb(0xb9adaa),
-    accent: rgb(0xef9aa2),
-    accent_hover: rgb(0xf9b2b7),
-    accent_pressed: rgb(0xdd838c),
-    on_accent: rgb(0x151314),
-    selection: rgb(0x583439),
-    warning: rgb(0xffc078),
-    error: rgb(0xff8291),
-    axis: [rgb(0xffa2a7), rgb(0x9bddab), rgb(0xa7caff)],
-};
-
-/// Dark text and accents on pure-black panels; raised controls stay lifted.
-pub const OLED_BLACK: Palette = Palette {
-    background: rgb(0x000000),
-    surface: rgb(0x000000),
-    raised: rgb(0x121820),
-    hover: rgb(0x1c242d),
-    field: rgb(0x000000),
-    divider: rgb(0x222b34),
-    control_border: rgb(0x5f7384),
-    selection: rgb(0x362127),
-    ..DARK
-};
-
-/// Light chrome uses graphite text and deep oxide accents.
-pub const LIGHT: Palette = Palette {
-    background: rgb(0xeee6e1),
-    surface: rgb(0xf7efeb),
-    raised: rgb(0xffffff),
-    hover: rgb(0xece1de),
-    field: rgb(0xffffff),
-    divider: rgb(0xd9c8c4),
-    control_border: rgb(0x7e6967),
-    text: rgb(0x151314),
-    secondary: rgb(0x634f4d),
-    accent: rgb(0x96373e),
-    accent_hover: rgb(0xa34249),
-    accent_pressed: rgb(0x7d2d34),
-    on_accent: rgb(0xffffff),
-    selection: rgb(0xf0d9dc),
-    warning: rgb(0x8a5300),
-    error: rgb(0xb3261e),
-    axis: [rgb(0xb42318), rgb(0x2b7a0b), rgb(0x1f5fbf)],
-};
-
 fn choice_id() -> egui::Id {
     egui::Id::unique("rot_engine_editor_theme_choice")
 }
@@ -159,22 +80,33 @@ pub fn apply(ctx: &egui::Context, choice: ThemeChoice) {
     } else {
         &DARK
     };
+    use crate::ui_kit::tokens::*;
+    let fonts_id = egui::Id::unique("rot_engine_editor_fonts");
+    if !ctx.data(|data| data.get_temp::<bool>(fonts_id).unwrap_or(false)) {
+        ctx.set_fonts(crate::ui_kit::font_definitions());
+        ctx.data_mut(|data| data.insert_temp(fonts_id, true));
+    }
     for (theme, palette) in [(Theme::Dark, dark), (Theme::Light, &LIGHT)] {
         let visuals = visuals(palette, theme);
         ctx.style_mut_of(theme, |style| {
             style.visuals = visuals;
             // Keep editor chrome transitions immediate for reduced-motion users.
             style.animation_time = 0.0;
-            style.spacing.item_spacing = Vec2::new(8.0, 8.0);
-            style.spacing.button_padding = Vec2::new(10.0, 6.0);
-            style.spacing.interact_size = Vec2::new(32.0, 30.0);
-            style.spacing.indent = 16.0;
+            style.spacing.item_spacing = Vec2::new(SPACE_S, SPACE_XS);
+            style.spacing.button_padding = Vec2::new(SPACE_S, 3.0);
+            style.spacing.interact_size = Vec2::new(MIN_HIT, CONTROL_HEIGHT);
+            style.spacing.indent = TREE_INDENT;
+            style.spacing.menu_margin = egui::Margin::same(SPACE_XS as i8);
+            style.spacing.window_margin = egui::Margin::same(SPACE_M as i8);
             for (kind, font) in [
-                (egui::TextStyle::Body, FontId::proportional(14.0)),
-                (egui::TextStyle::Button, FontId::proportional(14.0)),
-                (egui::TextStyle::Heading, FontId::proportional(18.0)),
-                (egui::TextStyle::Small, FontId::proportional(12.0)),
-                (egui::TextStyle::Monospace, FontId::monospace(13.0)),
+                (egui::TextStyle::Body, FontId::proportional(TEXT_BODY)),
+                (egui::TextStyle::Button, FontId::proportional(TEXT_BODY)),
+                (
+                    egui::TextStyle::Heading,
+                    crate::ui_kit::semibold(TEXT_DIALOG_TITLE),
+                ),
+                (egui::TextStyle::Small, FontId::proportional(TEXT_SMALL)),
+                (egui::TextStyle::Monospace, FontId::monospace(TEXT_MONO)),
             ] {
                 style.text_styles.insert(kind, font);
             }
@@ -206,7 +138,7 @@ fn visuals(p: &Palette, theme: Theme) -> egui::Visuals {
     visuals.warn_fg_color = p.warning;
     visuals.error_fg_color = p.error;
     visuals.selection.bg_fill = p.selection;
-    visuals.selection.stroke = Stroke::new(1.5, p.accent);
+    visuals.selection.stroke = Stroke::new(crate::ui_kit::tokens::FOCUS_RING, p.accent);
     visuals.window_stroke = Stroke::new(1.0, p.control_border);
     visuals.window_corner_radius = CornerRadius::same(10);
     visuals.menu_corner_radius = CornerRadius::same(8);
@@ -234,7 +166,7 @@ fn visuals(p: &Palette, theme: Theme) -> egui::Visuals {
     visuals.widgets.hovered.bg_stroke = Stroke::new(1.0, p.secondary);
     visuals.widgets.active.bg_fill = p.selection;
     visuals.widgets.active.weak_bg_fill = p.selection;
-    visuals.widgets.active.bg_stroke = Stroke::new(1.5, p.accent);
+    visuals.widgets.active.bg_stroke = Stroke::new(crate::ui_kit::tokens::FOCUS_RING, p.accent);
     visuals.widgets.open = visuals.widgets.active;
     visuals
 }

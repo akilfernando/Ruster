@@ -39,6 +39,7 @@ mod scene_editor;
 #[path = "../../support/strict_json.rs"]
 mod strict_json;
 mod ui;
+mod ui_kit;
 mod workspace;
 
 use std::path::PathBuf;

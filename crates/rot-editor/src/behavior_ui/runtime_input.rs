@@ -1040,7 +1040,9 @@ mod tests {
             fn find(shape: &egui::epaint::Shape, clip: egui::Rect, label: &str) -> bool {
                 match shape {
                     egui::epaint::Shape::Text(text) if text.galley.text() == label => {
-                        clip.contains_rect(text.galley.rect.translate(text.pos.to_vec2()))
+                        // Allow a pixel of subpixel rounding at the clip edge.
+                        clip.expand(1.0)
+                            .contains_rect(text.galley.rect.translate(text.pos.to_vec2()))
                     }
                     egui::epaint::Shape::Vec(shapes) => {
                         shapes.iter().any(|shape| find(shape, clip, label))

@@ -3833,8 +3833,8 @@ impl SceneEditor {
             .id_salt("scene_object_scroll")
             .show(ui, |ui| {
                 crate::focus::scroll_focus_into_view(ui);
-                ui.spacing_mut().item_spacing.y = 4.0;
-                ui.spacing_mut().interact_size.y = 26.0;
+                ui.spacing_mut().item_spacing.y = 0.0;
+                ui.spacing_mut().interact_size.y = crate::ui_kit::tokens::ROW_HEIGHT;
                 ui.spacing_mut().button_padding.y = 3.0;
                 let mut lights_heading = false;
                 for index in &self.hierarchy_search.visible {
@@ -5630,12 +5630,6 @@ impl SceneEditor {
     }
 
     fn begin_ui(&mut self, ui: &mut egui::Ui) {
-        // Keep the supported compact viewport usable while retaining normal-size controls.
-        if ui.max_rect().height() < 600.0 {
-            ui.spacing_mut().interact_size.y = 28.0;
-            ui.spacing_mut().button_padding.y = 5.0;
-            ui.spacing_mut().item_spacing.y = 7.0;
-        }
         let ctx = ui.ctx().clone();
         crate::focus::track_focus(&ctx);
         self.export_context = Some(ctx.clone());

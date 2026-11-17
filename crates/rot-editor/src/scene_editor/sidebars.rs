@@ -199,6 +199,101 @@ pub(super) fn round_viewport(ui: &egui::Ui, rect: egui::Rect) {
 mod tests {
     use super::*;
 
+    /// S-02: dragging the Position X letter scrubs the value, and the whole
+    /// drag is one Undo step.
+    #[test]
+    fn dragging_an_axis_letter_scrubs_and_undoes_in_one_step() {
+        let mut editor =
+            SceneEditor::new(rot_scene::Session::new(rot_scene::Scene::demo()).unwrap());
+        editor.select_object(Some("left".into()), false);
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut time = 0.;
+        let mut shapes = Vec::new();
+        let mut frame = |editor: &mut SceneEditor, events| {
+            time += 0.1;
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(1280.0, 800.0),
+                    )),
+                    time: Some(time),
+                    events,
+                    ..Default::default()
+                },
+                |ui| editor.ui(ui),
+            );
+            output.textures_delta.clear();
+            output.shapes
+        };
+        frame(&mut editor, vec![]);
+        shapes.extend(frame(&mut editor, vec![]));
+        // The Position row's X is the top-most "X" in the Inspector column.
+        let letter = shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text) if text.galley.job.text == "X" => {
+                    Some(egui::Rect::from_min_size(text.pos, text.galley.size()).center())
+                }
+                _ => None,
+            })
+            .filter(|point| point.x > 640.0)
+            .min_by(|a, b| a.y.total_cmp(&b.y))
+            .expect("Position X letter");
+        let before = editor
+            .session
+            .scene()
+            .target_transform("left")
+            .unwrap()
+            .translation[0];
+        let revision = editor.session.scene().revision;
+        let button = |pressed| egui::Event::PointerButton {
+            pos: letter,
+            button: egui::PointerButton::Primary,
+            pressed,
+            modifiers: egui::Modifiers::NONE,
+        };
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerMoved(letter), button(true)],
+        );
+        for step in 1..=10 {
+            let pos = letter + egui::vec2(10.0 * step as f32, 0.0);
+            frame(&mut editor, vec![egui::Event::PointerMoved(pos)]);
+        }
+        frame(
+            &mut editor,
+            vec![egui::Event::PointerButton {
+                pos: letter + egui::vec2(100.0, 0.0),
+                button: egui::PointerButton::Primary,
+                pressed: false,
+                modifiers: egui::Modifiers::NONE,
+            }],
+        );
+        frame(&mut editor, vec![]);
+        let after = editor
+            .session
+            .scene()
+            .target_transform("left")
+            .unwrap()
+            .translation[0];
+        assert!(after > before + 0.5, "scrubbed from {before} to {after}");
+        assert_eq!(editor.session.scene().revision, revision + 1, "one commit");
+        editor
+            .session
+            .undo(editor.session.scene().revision)
+            .unwrap();
+        let undone = editor
+            .session
+            .scene()
+            .target_transform("left")
+            .unwrap()
+            .translation[0];
+        assert_eq!(undone, before, "one Undo restores the value");
+    }
+
     /// S-01: Tab must walk into the Hierarchy and Inspector and never drop
     /// focus on a surface such as the viewport (which used to reset to File).
     #[test]

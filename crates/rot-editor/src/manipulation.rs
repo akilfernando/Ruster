@@ -416,6 +416,10 @@ pub(super) fn component_group_width(ui: &egui::Ui) -> f32 {
         .clamp(1.0, 3.0);
     ((available - (columns - 1.0) * spacing) / columns).max(1.0)
 }
+/// A scrubbed component, rounded to a thousandth so drags do not leave float noise.
+fn format_component(value: f64) -> String {
+    (((value * 1000.0).round() / 1000.0) as f32).to_string()
+}
 // Format only canonical syncs or an active preview, never all scene objects per idle frame.
 fn precision_components<'a>(
     transforms: impl Iterator<Item = &'a Transform>,
@@ -625,9 +629,15 @@ impl Manipulation {
                         .enumerate()
                         .filter(|(i, _)| self.edited[*i])
                     {
-                        let value = text.trim().parse::<f64>().map_err(|_| {
-                            "Enter finite transform values; the draft is preserved.".to_owned()
-                        })?;
+                        let current = match i {
+                            0..3 => t.translation[i],
+                            3..6 => self.rotation_unit.display(t.rotation[i - 3]),
+                            _ => t.scale[i - 6],
+                        };
+                        let value = crate::ui_kit::eval_number(text, Some(f64::from(current)))
+                            .ok_or_else(|| {
+                                "Enter finite transform values; the draft is preserved.".to_owned()
+                            })?;
                         if i < 3 {
                             requested.translation[i] = value;
                         } else if i < 6 {
@@ -649,28 +659,26 @@ impl Manipulation {
         } else {
             None
         };
-        let mut values = [0.0_f32; 9];
-        for (i, text) in self
-            .precision
-            .iter()
-            .enumerate()
-            .filter(|(i, _)| self.edited[*i])
-        {
-            values[i] = text.trim().parse::<f32>().map_err(|_| {
-                "Enter finite transform values; the draft is preserved.".to_string()
-            })?;
-            if !values[i].is_finite() {
-                return Err("Enter finite transform values; the draft is preserved.".into());
-            }
-        }
         let edits: Vec<_> = self
             .ids
             .iter()
             .zip(selected)
             .map(|(id, original)| {
                 let mut next = original.clone();
-                for (i, value) in values.iter().copied().enumerate() {
+                for (i, text) in self.precision.iter().enumerate() {
                     if self.edited[i] {
+                        // `+=1` and friends apply to each target's own value.
+                        let current = match i {
+                            0..3 => original.translation[i],
+                            3..6 => self.rotation_unit.display(original.rotation[i - 3]),
+                            _ => original.scale[i - 6],
+                        };
+                        let value = crate::ui_kit::eval_number(text, Some(f64::from(current)))
+                            .map(|value| value as f32)
+                            .filter(|value| value.is_finite())
+                            .ok_or_else(|| {
+                                "Enter finite transform values; the draft is preserved.".to_string()
+                            })?;
                         if i < 3 {
                             next.translation[i] = value;
                         } else if i < 6 {
@@ -729,43 +737,59 @@ impl Manipulation {
         if mixed.iter().any(|mixed| *mixed) {
             ui.label("— = mixed values").on_hover_text("Editing a component replaces only that component for all selected targets; other components keep their individual values.");
         }
+        let mut scrub_released = false;
         for (row, label) in ["Position", unit.label(), "Scale"].into_iter().enumerate() {
-            ui.label(label);
+            let editable = !previewing && ui.is_enabled() && (row != 2 || scale_allowed);
+            // Rotation scrubs a degree per pixel; position and scale a hundredth.
+            let step = if row == 1 { 1.0 } else { 0.01 };
+            crate::ui_kit::vector_row(ui, label, |ui, axis, width| {
+                let i = row * 3 + axis;
+                let text = if let Some((text, _)) = &mut preview {
+                    &mut text[i]
+                } else {
+                    &mut self.precision[i]
+                };
+                let cell =
+                    crate::ui_kit::axis_cell(ui, axis, text, mixed[i], width, editable, step);
+                if cell.scrub.delta != 0.0 && !mixed[i] {
+                    if let Some(value) = crate::ui_kit::eval_number(text, None) {
+                        *text = format_component(value + cell.scrub.delta);
+                        self.draft_changed();
+                        self.edited[i] = true;
+                        self.precision_revision
+                            .get_or_insert(session.scene().revision);
+                    }
+                }
+                scrub_released |= cell.scrub.released && self.edited[i];
+                let response = cell.field.on_hover_ui(|ui| {
+                    let value = preview
+                        .as_ref()
+                        .map(|(text, _)| text[i].as_str())
+                        .unwrap_or(&self.precision[i]);
+                    if !value.is_empty() && value.chars().count() <= 128 {
+                        ui.label(value);
+                    }
+                });
+                if response.has_focus() || response.lost_focus() {
+                    focused_field = Some(response.id);
+                }
+                field_has_focus |= response.has_focus();
+                if response.changed() && !previewing {
+                    self.draft_changed();
+                    self.edited[i] = true;
+                    self.precision_revision
+                        .get_or_insert(session.scene().revision);
+                }
+            });
             if row == 2 && !scale_allowed {
                 ui.small("Lights keep unit scale; use intensity or point range.");
             }
-            let group_width = component_group_width(ui);
-            ui.horizontal_wrapped(|ui| {
-                for (axis, label) in ["X", "Y", "Z"].into_iter().enumerate() {
-                    let i = row * 3 + axis;
-                    ui.allocate_ui_with_layout(egui::vec2(group_width,ui.spacing().interact_size.y),egui::Layout::left_to_right(egui::Align::Center),|ui| {
-                        ui.colored_label(crate::editor_theme::colors(ui).axis[axis], label);
-                        let response = ui.add_sized([ui.available_width().max(48.0),ui.spacing().interact_size.y],
-                            egui::TextEdit::singleline(if let Some((text,_))=&mut preview {&mut text[i]} else {&mut self.precision[i]}).char_limit(1024).interactive(!previewing && ui.is_enabled() && (row != 2 || scale_allowed))
-                                .hint_text(if mixed[i] { "—" } else { "" }));
-                        let response=response.on_hover_ui(|ui| {
-                            let value=preview.as_ref().map(|(text,_)|text[i].as_str()).unwrap_or(&self.precision[i]);
-                            if !value.is_empty() && value.chars().count()<=128 {ui.label(value);}
-                            ui.label("Editing changes only this component for selected targets. Long input stays in the field; use the cursor to scroll through it.");
-                        });
-                        if response.has_focus() || response.lost_focus() {
-                            focused_field = Some(response.id);
-                        }
-                        field_has_focus |= response.has_focus();
-                        if response.changed() && !previewing {
-                            self.draft_changed();
-                            self.edited[i] = true;
-                            self.precision_revision.get_or_insert(session.scene().revision);
-                        }
-                    });
-                }
-            });
         }
         if previewing {
             ui.small("Drag preview · release to apply · Escape to cancel");
             return Ok(false);
         }
-        let mut apply = focused_field.is_some() && enter_pressed;
+        let mut apply = (focused_field.is_some() && enter_pressed) || scrub_released;
         apply |=
             auto_commit && self.precision_had_focus && !field_has_focus && self.precision_pending();
         self.precision_had_focus = field_has_focus;
