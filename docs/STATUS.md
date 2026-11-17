@@ -51,6 +51,13 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · A-04: Window → AI Connection… → Connect an AI App… lists the
+  AI apps found (Claude Code, Codex, Claude Desktop, Cursor, VS Code) with
+  Connect, Undo, Copy Configuration and Add AI Configuration to This Project.
+  Only the `rot` entry changes; a backup sits beside the file. Checked on the
+  user's real Claude Code and Codex configs (user go-ahead): connect, the app
+  ran `scene_inspect`, Undo; Codex file byte-identical after.
+
 - 2026-11-17 · A-03: AI edits apply to the current scene, so a creator's edit
   between the AI's read and write no longer fails it; a pending field edit is
   committed first, a drag is waited on up to a second; JSON numbers accepted;
@@ -79,10 +86,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   saves (and, in a Rot project, builds) with no environment variables.
   [Decision](decisions/2026-11-17-trust-ai-apps-once.md). Checked with two
   hidden-workspace editor runs around a rebuild, plus a headless test.
-- 2026-11-17 · S-02: UI kit (`crates/rot-editor/src/ui_kit/`) with tokens,
-  palette roles and shared controls; Inter 13 px and JetBrains Mono bundled;
-  24 px controls; Transform is three rows and dragging an axis letter scrubs
-  (Shift fast, Alt slow), committing as one Undo. Fields accept `2*3`, `+=1`.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified

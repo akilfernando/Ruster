@@ -6,6 +6,10 @@ mod prompt;
 use super::*;
 #[cfg(unix)]
 pub(super) use prompt::TrustUi;
+#[cfg(unix)]
+mod apps_ui;
+#[cfg(unix)]
+pub(super) use apps_ui::AppsDialog;
 
 // Bounded CP2 consent seam; native wiring is a subsequent integration slice.
 #[allow(dead_code)]

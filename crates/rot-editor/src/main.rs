@@ -1,4 +1,6 @@
 //! Native authoring frontend. egui paints through wgpu's Vulkan backend only.
+#[cfg(unix)]
+mod ai_apps;
 mod asset_save;
 mod asset_worker;
 mod behavior_external;

@@ -465,6 +465,8 @@ pub struct SceneEditor {
     ai_listen_scene: Option<PathBuf>,
     #[cfg(unix)]
     ai_trust: connection::TrustUi,
+    #[cfg(unix)]
+    ai_apps: connection::AppsDialog,
     ai_steps: ai_steps::AiSteps,
     /// Since when an AI request has waited for the creator's input to finish.
     ai_wait: Option<std::time::Instant>,
@@ -693,6 +695,8 @@ impl SceneEditor {
             ai_listen_scene: None,
             #[cfg(unix)]
             ai_trust: Default::default(),
+            #[cfg(unix)]
+            ai_apps: Default::default(),
             ai_steps: Default::default(),
             ai_wait: None,
             retired_connection_receipts: Default::default(),
@@ -6518,6 +6522,8 @@ impl eframe::App for Host {
         self.native_connection_ui(ui);
         #[cfg(unix)]
         self.ai_prompt_ui(ui.ctx());
+        #[cfg(unix)]
+        self.editor.ai_apps_ui(ui.ctx());
         self.editor.workspace_ui(ui);
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.

@@ -509,7 +509,7 @@ and write succeeds; fifty edits in a row finish in under two seconds; after
 killing and restarting the adapter the next call works.
 
 #### A-04 · Connect an AI App — M — ready
-Status: open
+Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
 **Outcome.** One click registers Rot Engine with the creator's AI app.
 **Facts.** Nothing in the repository writes any AI app's configuration. The
 panel says "Automatic Hermes registration is unavailable"
