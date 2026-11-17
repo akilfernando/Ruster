@@ -308,7 +308,7 @@ survive a restart; no `ai_workspace` identifier remains in the editor crate.
 **Not now.** User-named layouts, floating OS windows, multiple viewports.
 
 #### S-07d · Panel code in `panels/<name>.rs` — M — ready
-Status: open
+Status: in progress — Claude Sonnet (UX helper), 2026-11-17
 **Outcome.** Each panel's code is one file and `scene_editor.rs` is about
 1,500 lines shorter. No behavior changes.
 **Facts.** Panel bodies are `SceneEditor` methods in `scene_editor.rs`:

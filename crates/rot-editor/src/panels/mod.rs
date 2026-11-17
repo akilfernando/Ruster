@@ -6,6 +6,10 @@ use eframe::egui;
 use egui_tiles::{Container, Linear, LinearDir, SimplificationOptions, Tile, TileId, Tiles, Tree};
 use std::path::{Path, PathBuf};
 
+mod hierarchy;
+mod inspector;
+mod viewport;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum Pane {
     Hierarchy,
