@@ -40,6 +40,8 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Known problems
 
+- Every new AI adapter process still needs approval in File → Advanced →
+  Rot connection…, and an editor serves one adapter at a time (A-02, A-03).
 - An editor serves one AI adapter at a time, and the adapter does not
   reconnect after a transport error (A-03).
 - The MCP demo scripts and parts of `crates/rot-mcp/README.md` describe
@@ -52,6 +54,12 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · A-06: `tools/list` is 39 KB for 94 tools (was 145 KB, 98):
+  plain one-line descriptions, no `connection` argument, legacy logistics
+  tools gone, scene edits apply to the current scene unless guards are sent,
+  and one-call `viewport_screenshot`. Checked on a hidden-workspace editor
+  (create, move, screenshot, undo with no guards). README rewritten; stale
+  `scripts/mcp_*demo.py` deleted.
 - 2026-11-17 · A-02: an AI app is asked once (Allow Always / Allow Once /
   Deny, a floating prompt) and then reconnects silently across editor
   restarts and rebuilds; Revoke in Rot connection asks again; an allowed app

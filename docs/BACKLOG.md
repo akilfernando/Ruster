@@ -537,7 +537,7 @@ Preferences → AI and remove internal wording.
 and resume.
 
 #### A-06 · Slim the tool list — M — ready
-Status: open
+Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
 **Outcome.** The tool list costs an AI client a fraction of today's context.
 **Facts.** 98 tools, roughly 90–120 KB. Every tool repeats a `connection`
 parameter and a long suffix (`crates/rot-mcp/src/main.rs:623-635`). The
