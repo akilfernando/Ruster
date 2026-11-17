@@ -2460,8 +2460,12 @@ impl RuntimeUi {
             // is not ready for it, they reset from the scene first.
             let ctx = ui.ctx().clone();
             let mut start = |runtime: &mut Self, operation: Operation| {
-                if fresh && runtime.worker.is_some() {
-                    let key = runtime.worker.as_ref().unwrap().current_key();
+                if let Some(key) = runtime
+                    .worker
+                    .as_ref()
+                    .filter(|_| fresh)
+                    .map(VmWorker::current_key)
+                {
                     runtime.visible = true;
                     runtime.pending = Some(match operation {
                         Operation::Step => Request::Step(key),
