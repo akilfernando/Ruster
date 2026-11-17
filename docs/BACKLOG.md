@@ -405,7 +405,7 @@ it into the scene, with no form.
 **Not now.** Folder tree, automatic reimport and sidecar files (C-04).
 
 #### S-13 · Project hub and templates — S — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX helper), 2026-11-17
 **Outcome.** A first launch that looks finished.
 **Facts.** `scene_editor/project_picker.rs:30-135`; New Project creates one
 empty scene; no templates.
