@@ -674,12 +674,12 @@ fn listed() -> Value {
     for tool in listed["tools"].as_array_mut().unwrap() {
         let name = tool["name"].as_str().unwrap().to_owned();
         let schema = &mut tool["inputSchema"];
-        if let Some(properties) = schema["properties"].as_object_mut() {
+        if let Some(properties) = schema.get_mut("properties").and_then(Value::as_object_mut) {
             for (guard, _) in SCENE_GUARDS {
                 properties.remove(guard);
             }
         }
-        if let Some(required) = schema["required"].as_array_mut() {
+        if let Some(required) = schema.get_mut("required").and_then(Value::as_array_mut) {
             required.retain(|r| !SCENE_GUARDS.iter().any(|(guard, _)| r == *guard));
         }
         compact(schema);
@@ -1632,6 +1632,22 @@ mod tests {
             let description = tool["description"].as_str().unwrap();
             assert!(
                 !description.is_empty() && description.len() <= 200,
+                "{}",
+                tool["name"]
+            );
+            // Clients validate these shapes (Claude Code drops every tool
+            // when one schema has "required": null).
+            let schema = tool["inputSchema"].as_object().unwrap();
+            assert_eq!(schema["type"], "object", "{}", tool["name"]);
+            assert!(
+                schema
+                    .get("required")
+                    .is_none_or(|r| r.as_array().is_some_and(|r| r.iter().all(Value::is_string))),
+                "{}",
+                tool["name"]
+            );
+            assert!(
+                schema.get("properties").is_none_or(Value::is_object),
                 "{}",
                 tool["name"]
             );
