@@ -212,7 +212,7 @@ hard-coded colors in the files you touch.
 the checklist; layout is pixel-identical between styles.
 
 #### S-07a · Dock shell: every panel in a tab — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** Hierarchy, Inspector, Scene, Game, Assets and Console are tabs
 in one dock. Tabs drag between docks; nothing is painted over the viewport.
 **Facts.** Agent decision 2026-11-17: `egui_tiles = "0.18.0"` (needs `egui
