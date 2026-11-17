@@ -52,6 +52,10 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · S-04: one toolbar row (Move/Rotate/Scale, World, Center,
+  Snap; Play controls centered; Layout and the AI indicator right; a »
+  menu below 1180 px). Scene/Game tabs sit above the viewport; Perspective,
+  View Presets and Fit float in its corner. Viewport at 1280×800: 533 px tall.
 - 2026-11-17 · S-03: menus are File, Edit, Assets, Object, Window, Help in
   Title Case with shortcuts; panels are titled Hierarchy and Assets; the
   view toggle reads Scene and Game; Reset Camera moved to View Presets.

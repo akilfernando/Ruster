@@ -545,6 +545,9 @@ pub struct NavigationOptions {
     /// A frontend-owned Fit succeeded outside the shared geometry route.
     /// Consumed once to clear its old diagnostic, without claiming a shared Fit.
     pub clear_fit_error: bool,
+    /// Top-left corner of the visible viewport for the overlaid view controls,
+    /// when side panels cover part of the surface. Defaults to the surface corner.
+    pub overlay_origin: Option<egui::Pos2>,
     /// The surface may hold keyboard focus (a running game owns the keys).
     /// Off by default so Tab skips the viewport like any other surface.
     pub focusable: bool,
@@ -565,6 +568,7 @@ impl Default for NavigationOptions {
             toggle_projection: false,
             view_preset: None,
             clear_fit_error: false,
+            overlay_origin: None,
             focusable: false,
         }
     }
@@ -984,64 +988,6 @@ pub fn allocate_viewport(
     navigation.toggle_projection = false;
     navigation.reset = false;
     navigation.frame_selected = false;
-    if navigation.show_controls && !navigation.player_view {
-        ui.horizontal_wrapped(|ui| {
-        if ui
-            .add_enabled(
-                navigation_enabled,
-                egui::Button::new(if camera.orthographic {
-                    "Orthographic"
-                } else {
-                    "Perspective"
-                }),
-            )
-            .on_hover_text("Toggle perspective/orthographic projection")
-            .clicked()
-        {
-            camera.orthographic = !camera.orthographic;
-        }
-        ui.menu_button("View presets", |ui| {
-            ui.label("Navigation");
-            ui.label("Left-click selects. Right-drag orbits. Middle-drag or Shift-right pans. Wheel zooms. Fit frames all objects.");
-            ui.separator();
-            for (label, preset) in [
-                ("Front (+Z)", ViewPreset::Front),
-                ("Back (-Z)", ViewPreset::Back),
-                ("Left (-X)", ViewPreset::Left),
-                ("Right (+X)", ViewPreset::Right),
-                ("Top (+Y)", ViewPreset::Top),
-                ("Bottom (-Y)", ViewPreset::Bottom),
-                ("Isometric", ViewPreset::Isometric),
-                ("Free perspective", ViewPreset::Free),
-            ] {
-                if ui
-                    .add_enabled(navigation_enabled, egui::Button::new(label))
-                    .clicked()
-                {
-                    camera.set_preset(preset);
-                    ui.close();
-                }
-            }
-            ui.separator();
-            if ui
-                .add_enabled(navigation_enabled, egui::Button::new("Reset Camera"))
-                .clicked()
-            {
-                // Applied at the start of the next frame.
-                navigation.reset = true;
-                ui.ctx().request_repaint();
-                ui.close();
-            }
-        });
-        if ui
-            .add_enabled(navigation_enabled, egui::Button::new("Fit"))
-            .clicked()
-        {
-            selected_fit = false;
-            fitted = true;
-        }
-    });
-    }
     let (rect, response) = ui.allocate_exact_size(
         ui.available_size().max(egui::vec2(1.0, 1.0)),
         // A surface, not a control: Tab skips it unless a game owns the keys.
@@ -1051,6 +997,81 @@ pub fn allocate_viewport(
             egui::Sense::CLICK | egui::Sense::DRAG
         },
     );
+    // View options float in the viewport's top-left corner (UX-STANDARDS §3).
+    // Drawn after the surface so they sit on top for input.
+    if navigation.show_controls && !navigation.player_view {
+        let origin = navigation.overlay_origin.unwrap_or(rect.min) + egui::vec2(8.0, 8.0);
+        let area = egui::Rect::from_min_max(origin, rect.max).intersect(rect);
+        // A layer above the scene image (painted later in this pass) but below
+        // menus and tooltips.
+        let layer = egui::LayerId::new(
+            egui::Order::Middle,
+            ui.scope_id().with("rot-viewport-overlay"),
+        );
+        let mut overlay = ui.new_child(
+            egui::UiBuilder::new()
+                .id_salt("rot-viewport-overlay")
+                .layer_id(layer)
+                .max_rect(area)
+                .layout(egui::Layout::left_to_right(egui::Align::Min)),
+        );
+        overlay.set_clip_rect(area);
+        let ui = &mut overlay;
+        ui.spacing_mut().item_spacing.x = 4.0;
+        {
+            if ui
+                .add_enabled(
+                    navigation_enabled,
+                    egui::Button::new(if camera.orthographic {
+                        "Orthographic"
+                    } else {
+                        "Perspective"
+                    }),
+                )
+                .on_hover_text("Toggle perspective/orthographic projection")
+                .clicked()
+            {
+                camera.orthographic = !camera.orthographic;
+            }
+            ui.menu_button("View Presets", |ui| {
+                for (label, preset) in [
+                    ("Front (+Z)", ViewPreset::Front),
+                    ("Back (-Z)", ViewPreset::Back),
+                    ("Left (-X)", ViewPreset::Left),
+                    ("Right (+X)", ViewPreset::Right),
+                    ("Top (+Y)", ViewPreset::Top),
+                    ("Bottom (-Y)", ViewPreset::Bottom),
+                    ("Isometric", ViewPreset::Isometric),
+                    ("Free perspective", ViewPreset::Free),
+                ] {
+                    if ui
+                        .add_enabled(navigation_enabled, egui::Button::new(label))
+                        .clicked()
+                    {
+                        camera.set_preset(preset);
+                        ui.close();
+                    }
+                }
+                ui.separator();
+                if ui
+                    .add_enabled(navigation_enabled, egui::Button::new("Reset Camera"))
+                    .clicked()
+                {
+                    // Applied at the start of the next frame.
+                    navigation.reset = true;
+                    ui.ctx().request_repaint();
+                    ui.close();
+                }
+            });
+            if ui
+                .add_enabled(navigation_enabled, egui::Button::new("Fit"))
+                .clicked()
+            {
+                selected_fit = false;
+                fitted = true;
+            }
+        }
+    }
     ViewportSurface {
         rect,
         response,

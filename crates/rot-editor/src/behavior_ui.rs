@@ -2383,6 +2383,14 @@ impl RuntimeUi {
         self.controls_with_sounds(ui, session, generation, blocked, focus_shortcut, None)
     }
     #[allow(clippy::too_many_arguments)]
+    /// Window → Script Debugger.
+    pub fn open_debugger(&mut self) {
+        self.debug.open = true;
+    }
+    /// Help → Game Controls.
+    pub fn open_game_controls(&mut self, ctx: &egui::Context) {
+        self.open_input_help(ctx);
+    }
     pub fn controls_with_sounds(
         &mut self,
         ui: &mut egui::Ui,
@@ -2396,7 +2404,7 @@ impl RuntimeUi {
         let focus_controls = std::mem::take(&mut self.focus_controls);
         self.maintain_control_focus(ui.ctx());
         let inline_feedback = ui.available_width() >= 560.0;
-        ui.horizontal_wrapped(|ui| {
+        ui.horizontal(|ui| {
             ui.spacing_mut().item_spacing.x=4.0;
             ui.spacing_mut().button_padding.x=6.0;
             let reset_button = ui
@@ -2460,9 +2468,10 @@ impl RuntimeUi {
                     self.arm_control_focus(&stop_button, key, Operation::Stop);
                 }
             }
-            let runtime_menu = ui.menu_button("Runtime",|ui| {
-                if ui.button("Behavior debugger…").clicked(){self.debug.open=true;ui.close();}
-                if ui.button("Runtime input help…").clicked(){self.open_input_help(ui.ctx());ui.close();}
+            // Play options: game-view toggle, controls help and run status.
+            // The Script Debugger lives under Window, Game Controls also under Help.
+            let runtime_menu = ui.menu_button("…",|ui| {
+                if ui.button("Game Controls…").clicked(){self.open_input_help(ui.ctx());ui.close();}
                 ui.add_enabled(self.frame.is_some(),egui::Checkbox::new(&mut self.visible,if self.stale {"View retained runtime (stale)"}else{"View runtime"}));
                 self.spatial_feedback_menu(ui);
                 if let Some(report) = self.worker.as_ref().and_then(|worker| worker.audio_report(worker.current_key())) {
@@ -2501,9 +2510,8 @@ impl RuntimeUi {
             }
         });
         if !inline_feedback {
-            ui.horizontal(|ui| {
-                self.control_feedback(ui, blocked, !session.authoring().actions.is_empty())
-            });
+            // Narrow toolbar: keep the one row; status shows in the Play tooltip.
+            self.input_control_button(ui, blocked, !session.authoring().actions.is_empty());
         }
         self.flush();
         self.input_help_window(ui.ctx(), session, generation);

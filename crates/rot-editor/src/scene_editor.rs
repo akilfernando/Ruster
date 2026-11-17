@@ -526,6 +526,8 @@ pub struct SceneEditor {
     asset_origin: Option<PathBuf>,
     recovered_origin: Option<PathBuf>,
     ai_workspace: bool,
+    /// Below about 1180 px, tool options and Layout move into the » menu.
+    toolbar_compact: bool,
     ai_drawer: Option<ai_workspace::Drawer>,
     ai_connection_label: &'static str,
     ai_connection_requested: bool,
@@ -745,6 +747,7 @@ impl SceneEditor {
             view_state: Default::default(),
             captures: Default::default(),
             ai_workspace: false,
+            toolbar_compact: false,
             ai_drawer: None,
             ai_connection_label: "Disconnected",
             ai_connection_requested: false,
@@ -2309,11 +2312,12 @@ impl SceneEditor {
             Err(error) => self.error = error,
         }
     }
+    /// Space, Pivot and Snap as compact toolbar dropdowns (Unity's
+    /// Global/Local and Center/Pivot toggles, plus a Snap menu).
     fn tool_options_ui(&mut self, ui: &mut egui::Ui) {
-        use crate::manipulation::{Pivot, Tool};
-        ui.label("Space");
+        use crate::manipulation::Pivot;
         egui::ComboBox::from_id_salt("tool_space")
-            .width(64.0)
+            .width(56.0)
             .selected_text(if self.manipulation.local {
                 "Local"
             } else {
@@ -2324,66 +2328,68 @@ impl SceneEditor {
                 ui.selectable_value(&mut self.manipulation.local, true, "Local");
             })
             .response
-            .on_hover_text("Local uses the active object's axes");
-        ui.label("Pivot");
+            .on_hover_text("Handle orientation: World or the active object's Local axes");
         egui::ComboBox::from_id_salt("tool_pivot")
-            .width(120.0)
+            .width(76.0)
             .selected_text(match self.manipulation.pivot {
-                Pivot::Individual => "Individual origins",
-                Pivot::Center => "Selection center",
-                Pivot::Active => "Active object",
+                Pivot::Individual => "Pivot",
+                Pivot::Center => "Center",
+                Pivot::Active => "Active",
             })
             .show_ui(ui, |ui| {
-                ui.selectable_value(
-                    &mut self.manipulation.pivot,
-                    Pivot::Individual,
-                    "Individual origins",
-                );
-                ui.selectable_value(
-                    &mut self.manipulation.pivot,
-                    Pivot::Center,
-                    "Selection center",
-                );
-                ui.selectable_value(&mut self.manipulation.pivot, Pivot::Active, "Active object");
+                ui.selectable_value(&mut self.manipulation.pivot, Pivot::Center, "Center");
+                ui.selectable_value(&mut self.manipulation.pivot, Pivot::Individual, "Pivot");
+                ui.selectable_value(&mut self.manipulation.pivot, Pivot::Active, "Active");
             })
             .response
-            .on_hover_text("Selection center is the mean of object origins");
-        ui.checkbox(&mut self.manipulation.snap, "Snap");
-        if self.manipulation.snap {
-            match self.manipulation.tool {
-                Tool::Translate => {
-                    ui.add(
-                        egui::DragValue::new(&mut self.manipulation.snap_distance)
-                            .range(0.001..=1000.0)
-                            .speed(0.1)
-                            .suffix(" units"),
-                    )
-                    .on_hover_text("Snap distance in scene units");
+            .on_hover_text(
+                "Handle position: selection Center, each object's own Pivot, or the Active object",
+            );
+        egui::ComboBox::from_id_salt("tool_snap")
+            .width(64.0)
+            .selected_text(if self.manipulation.snap {
+                "Snap On"
+            } else {
+                "Snap"
+            })
+            .show_ui(ui, |ui| {
+                ui.checkbox(&mut self.manipulation.snap, "Snap While Dragging");
+                ui.separator();
+                for (label, value, range, speed, suffix) in [
+                    (
+                        "Move",
+                        &mut self.manipulation.snap_distance,
+                        0.001..=1000.0,
+                        0.1,
+                        "",
+                    ),
+                    (
+                        "Rotate",
+                        &mut self.manipulation.snap_degrees,
+                        0.1..=180.0,
+                        1.0,
+                        "°",
+                    ),
+                    (
+                        "Scale",
+                        &mut self.manipulation.snap_scale,
+                        0.001..=10.0,
+                        0.05,
+                        "",
+                    ),
+                ] {
+                    crate::ui_kit::property_row(ui, label, |ui| {
+                        ui.add(
+                            egui::DragValue::new(value)
+                                .range(range)
+                                .speed(speed)
+                                .suffix(suffix),
+                        )
+                    });
                 }
-                Tool::Rotate => {
-                    ui.add(
-                        egui::DragValue::new(&mut self.manipulation.snap_degrees)
-                            .range(0.1..=180.0)
-                            .speed(1.0)
-                            .suffix("°"),
-                    )
-                    .on_hover_text("Snap angle in degrees");
-                }
-                Tool::Scale => {
-                    ui.add(
-                        egui::DragValue::new(&mut self.manipulation.snap_scale)
-                            .range(0.001..=10.0)
-                            .speed(0.05),
-                    )
-                    .on_hover_text("Scale-factor increment");
-                }
-            }
-        }
-        if self.manipulation.tool == Tool::Scale
-            && !(self.manipulation.local && self.manipulation.pivot == Pivot::Individual)
-        {
-            ui.label("Uniform scale").on_hover_text("Choose Local and Individual origins for nonuniform scaling. World nonuniform scaling would require shear.");
-        }
+            })
+            .response
+            .on_hover_text("Snap increments for Move, Rotate and Scale");
     }
     fn manipulation_mode_buttons(&mut self, ui: &mut egui::Ui) {
         use crate::manipulation::Tool;
@@ -2414,27 +2420,92 @@ impl SceneEditor {
 
     fn manipulation_tools_ui(&mut self, ui: &mut egui::Ui) {
         let editable = self.guard().is_ok() && !self.runtime.visible;
-        let compact = ui.available_width() < 560.0;
+        // In a narrow window the options move into the toolbar's » menu.
+        let compact = self.toolbar_compact;
         ui.add_enabled_ui(editable, |ui| {
-            if compact {
-                ui.spacing_mut().item_spacing.x = 4.0;
-                ui.spacing_mut().button_padding.x = 6.0;
-            }
             self.manipulation_mode_buttons(ui);
-            if compact {
-                let label = match (self.manipulation.local, self.manipulation.snap) {
-                    (true, true) => "Local · Snap",
-                    (true, false) => "Local options",
-                    (false, true) => "Snap options",
-                    _ => "Tool options",
-                };
-                ui.menu_button(label, |ui| self.tool_options_ui(ui))
-                    .response
-                    .on_hover_text("Tool options · Space, Pivot and Snap");
-            } else {
-                ui.separator();
+            if !compact {
+                ui.add_space(crate::ui_kit::tokens::SPACE_S);
                 self.tool_options_ui(ui);
             }
+        });
+    }
+    /// The one toolbar row: tools left, Play controls centered, Layout and the
+    /// AI indicator right (UX-STANDARDS §3).
+    fn toolbar_ui(&mut self, ui: &mut egui::Ui, blocked: bool) {
+        use crate::ui_kit::tokens::*;
+        let width = ui.available_width();
+        self.toolbar_compact = width < 1180.0;
+        let center_id = egui::Id::unique("toolbar_center_width");
+        let center_width = ui.data(|d| d.get_temp::<f32>(center_id)).unwrap_or(200.0);
+        ui.allocate_ui_with_layout(
+            egui::vec2(width, TOOLBAR_HEIGHT),
+            egui::Layout::left_to_right(egui::Align::Center),
+            |ui| {
+                ui.set_min_size(egui::vec2(width, TOOLBAR_HEIGHT));
+                let left = ui.max_rect().left();
+                if !self.navigation.player_view {
+                    self.manipulation_tools_ui(ui);
+                }
+                let target = left + (width - center_width) * 0.5;
+                ui.add_space((target - ui.next_widget_position().x).max(SPACE_M));
+                let used = ui
+                    .scope(|ui| self.runtime_toolbar(ui, blocked))
+                    .response
+                    .rect
+                    .width();
+                ui.data_mut(|d| d.insert_temp(center_id, used));
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    #[cfg(unix)]
+                    crate::branding::connection_indicator(ui, self.ai_connection_label);
+                    if self.toolbar_compact {
+                        ui.menu_button("»", |ui| {
+                            if !self.navigation.player_view {
+                                ui.horizontal(|ui| self.tool_options_ui(ui));
+                                ui.separator();
+                            }
+                            self.layout_menu(ui);
+                        })
+                        .response
+                        .on_hover_text("More tools");
+                    } else {
+                        egui::ComboBox::from_id_salt("toolbar_layout")
+                            .width(96.0)
+                            .selected_text(if self.ai_workspace {
+                                "AI Workspace"
+                            } else {
+                                "Default"
+                            })
+                            .show_ui(ui, |ui| self.layout_menu(ui))
+                            .response
+                            .on_hover_text("Layout");
+                    }
+                });
+            },
+        );
+    }
+    fn layout_menu(&mut self, ui: &mut egui::Ui) {
+        if ui
+            .add(egui::Button::selectable(!self.ai_workspace, "Default"))
+            .clicked()
+        {
+            self.set_ai_workspace(false, &ui.ctx().clone());
+            ui.close();
+        }
+        if ui
+            .add(egui::Button::selectable(self.ai_workspace, "AI Workspace"))
+            .clicked()
+        {
+            self.set_ai_workspace(true, &ui.ctx().clone());
+            ui.close();
+        }
+    }
+    /// Scene and Game view tabs above the viewport.
+    fn view_tabs_ui(&mut self, ui: &mut egui::Ui) {
+        ui.horizontal(|ui| {
+            ui.set_min_height(crate::ui_kit::tokens::PANEL_TAB);
+            ui.spacing_mut().item_spacing.x = crate::ui_kit::tokens::SPACE_XXS;
+            self.player_view_controls(ui, false);
         });
     }
     fn runtime_toolbar(&mut self, ui: &mut egui::Ui, blocked: bool) {
@@ -5522,28 +5593,17 @@ impl SceneEditor {
                     self.open_play_checks();
                     ui.close();
                 }
+                if ui.button("Script Debugger…").clicked() {
+                    self.runtime.open_debugger();
+                    ui.close();
+                }
                 if ui.button("Recovery Checkpoints…").clicked() {
                     self.recovery.show_picker();
                     self.manipulation.cancel();
                     ui.close();
                 }
                 ui.separator();
-                ui.menu_button("Layouts", |ui| {
-                    if ui
-                        .add(egui::Button::selectable(!self.ai_workspace, "Default"))
-                        .clicked()
-                    {
-                        self.set_ai_workspace(false, &ui.ctx().clone());
-                        ui.close();
-                    }
-                    if ui
-                        .add(egui::Button::selectable(self.ai_workspace, "AI Workspace"))
-                        .clicked()
-                    {
-                        self.set_ai_workspace(true, &ui.ctx().clone());
-                        ui.close();
-                    }
-                });
+                ui.menu_button("Layouts", |ui| self.layout_menu(ui));
             });
             crate::editor_theme::text_menu(ui, "Help", |ui| {
                 if ui.button("Documentation").clicked() {
@@ -5552,6 +5612,10 @@ impl SceneEditor {
                 }
                 if ui.button("Keyboard Shortcuts…").clicked() {
                     self.workspace.settings_open = true;
+                    ui.close();
+                }
+                if ui.button("Game Controls…").clicked() {
+                    self.runtime.open_game_controls(ui.ctx());
                     ui.close();
                 }
                 ui.separator();
@@ -5610,10 +5674,6 @@ impl SceneEditor {
                     egui::Label::new(&title).truncate(),
                 )
                 .on_hover_text(&title);
-            }
-            #[cfg(unix)]
-            if !overflow {
-                crate::branding::connection_indicator(ui, self.ai_connection_label);
             }
         };
         if overflow {
@@ -5738,7 +5798,7 @@ impl SceneEditor {
             let min_height = (ctx.content_rect().height() * 0.15)
                 .clamp(96.0, 160.0)
                 .min(max_height);
-            let default_height = (ctx.content_rect().height() * 0.22).clamp(108.0, 250.0);
+            let default_height = (ctx.content_rect().height() * 0.16).clamp(108.0, 250.0);
             let preferred_height = egui::containers::panel::PanelState::load(
                 &ctx,
                 ui.scope_id().with("content_browser"),
@@ -5820,53 +5880,11 @@ impl SceneEditor {
                 self.runtime.cancel_control_focus();
             }
             let blocked = document_blocked || self.asset_busy();
-            let width = ui.available_width();
-            if !self.ai_workspace && width >= 1540.0 {
-                let runtime_width = 580.0;
-                let tools_width = 600.0;
-                let tools_x =
-                    ui.cursor().min.x + (width - runtime_width - tools_width) * 0.5 + 140.0;
-                let runtime_x = ui.cursor().min.x + width - runtime_width;
-                ui.horizontal_top(|ui| {
-                    self.player_view_controls(ui, false);
-                    if !self.navigation.player_view {
-                        ui.add_space((tools_x - ui.next_widget_position().x).max(0.0));
-                        ui.allocate_ui_with_layout(
-                            egui::vec2(tools_width, ui.spacing().interact_size.y),
-                            egui::Layout::left_to_right(egui::Align::Center),
-                            |ui| {
-                                self.manipulation_tools_ui(ui);
-                            },
-                        );
-                    }
-                    ui.add_space((runtime_x - ui.next_widget_position().x).max(0.0));
-                    ui.allocate_ui_with_layout(
-                        egui::vec2(runtime_width, ui.spacing().interact_size.y),
-                        egui::Layout::top_down(egui::Align::Min),
-                        |ui| {
-                            self.runtime_toolbar(ui, blocked);
-                        },
-                    );
-                });
-            } else {
-                if !self.ai_workspace {
-                    ui.horizontal_wrapped(|ui| {
-                        ui.spacing_mut().item_spacing.x = 6.0;
-                        // The View menu retains the camera controls on narrow windows.
-                        if ctx.content_rect().width() >= 900.0 {
-                            self.player_view_controls(ui, false);
-                            ui.add_space(12.0);
-                            ui.separator();
-                            ui.add_space(8.0);
-                        }
-                        if !self.navigation.player_view {
-                            self.manipulation_tools_ui(ui);
-                        }
-                    });
-                }
-                if !self.ai_workspace || self.runtime.has_worker() {
-                    self.runtime_toolbar(ui, blocked);
-                }
+            if !self.ai_workspace {
+                self.toolbar_ui(ui, blocked);
+                self.view_tabs_ui(ui);
+            } else if self.runtime.has_worker() {
+                self.runtime_toolbar(ui, blocked);
             }
             self.runtime.observe(
                 self.generation,
@@ -5957,6 +5975,12 @@ impl SceneEditor {
                 .map_or(authored_view, |frame| frame.scene.as_ref());
             let player_sidebars = player_view
                 .then(|| sidebars::SceneSidebars::new(self, ui.available_rect_before_wrap()));
+            // View options sit in the visible corner, beside the Hierarchy panel.
+            self.navigation.overlay_origin = Some(
+                sidebars::SceneSidebars::new(self, ui.available_rect_before_wrap())
+                    .visible_scene()
+                    .min,
+            );
             let mut surface = if let Some(sidebars) = &player_sidebars {
                 // The Player View retains the original unoccluded aspect and HUD
                 // bounds. Only the editor Scene view paints behind its panels.
@@ -6721,7 +6745,7 @@ mod tests {
                             return None;
                         };
                         let label = text.galley.job.text.as_str();
-                        ["Save", "Scene", "Space", "Reset"]
+                        ["Save", "Scene", "World", "Reset"]
                             .contains(&label)
                             .then_some((
                                 label.to_owned(),
@@ -6795,13 +6819,16 @@ mod tests {
             {
                 let chrome = chrome.borrow();
                 assert!(!chrome.contains_key("Save"), "Save belongs in File");
+                // S-04: one toolbar row (tools left, Play controls centered)
+                // with the Scene/Game tabs below it, above the viewport.
                 assert!(
-                    chrome["Scene"].right() < chrome["Space"].left()
-                        && chrome["Space"].right() < chrome["Reset"].left()
-                        && chrome["Reset"].left() > wide_size.x * 0.6
-                        && chrome["Scene"].top() < chrome["Reset"].bottom()
-                        && chrome["Reset"].top() < chrome["Scene"].bottom(),
-                    "wide view, tools, and runtime groups share one row: {:?}",
+                    chrome["World"].right() < chrome["Reset"].left()
+                        && chrome["Reset"].left() > wide_size.x * 0.3
+                        && chrome["Reset"].left() < wide_size.x * 0.6
+                        && chrome["World"].top() < chrome["Reset"].bottom()
+                        && chrome["Reset"].top() < chrome["World"].bottom()
+                        && chrome["Scene"].top() > chrome["Reset"].bottom(),
+                    "tools and Play controls share one row above the view tabs: {:?}",
                     *chrome
                 );
             }

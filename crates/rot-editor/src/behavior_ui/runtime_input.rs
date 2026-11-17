@@ -1061,12 +1061,12 @@ mod tests {
                 draw(&mut runtime, vec![], false);
             }
             for close_key in [egui::Key::Escape, egui::Key::Enter] {
-                let menu = label_point(&rendered.borrow(), "Runtime");
+                let menu = label_point(&rendered.borrow(), "…");
                 draw(&mut runtime, vec![egui::Event::PointerMoved(menu)], false);
                 draw(&mut runtime, vec![pointer(menu, true)], false);
                 draw(&mut runtime, vec![pointer(menu, false)], false);
                 draw(&mut runtime, vec![], false);
-                let item = label_point(&rendered.borrow(), "Runtime input help…");
+                let item = label_point(&rendered.borrow(), "Game Controls…");
                 draw(&mut runtime, vec![egui::Event::PointerMoved(item)], false);
                 draw(&mut runtime, vec![pointer(item, true)], false);
                 draw(&mut runtime, vec![pointer(item, false)], false);
