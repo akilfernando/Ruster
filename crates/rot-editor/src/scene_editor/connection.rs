@@ -233,13 +233,10 @@ impl Host {
         let state = self.connection_state();
         let (status, description) = match state {
             "retired" => (
-                "Disconnected",
-                "Connect an AI client to work with this project.",
+                "Not listening",
+                "Start Listening so AI apps can find this editor.",
             ),
-            "revoked_draining" => (
-                "Authority revoked; retiring connection",
-                "The previous connection is winding down.",
-            ),
+            "revoked_draining" => ("Disconnecting…", "The AI app's last request is finishing."),
             "access_revoked" => (
                 "Persistent access revoked",
                 "Re-enroll this project to connect again.",
@@ -248,14 +245,17 @@ impl Host {
                 "Connection refused",
                 "Enrollment or the registered owner identity changed.",
             ),
-            "listening_unbound" => ("Waiting for an adapter", "Open your AI client to continue."),
+            "listening_unbound" => (
+                "Ready for AI apps",
+                "Open your AI app; it finds this editor by itself.",
+            ),
             "approval_required" => (
-                "Adapter approval required",
-                "Review the request before granting project access.",
+                "An AI app is asking to connect",
+                "Allow it to let it read and change this project.",
             ),
             "bound" => (
-                "Connected to this project",
-                "Asset catalog changes can persist immediately, before Save.",
+                "AI app connected",
+                "Imported assets are saved to the project at once, before Save.",
             ),
             _ => ("Connection state unavailable", ""),
         };

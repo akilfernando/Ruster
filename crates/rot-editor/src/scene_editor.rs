@@ -1,4 +1,5 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
+mod ai_indicator;
 mod ai_steps;
 mod ai_workspace;
 #[cfg(all(test, unix))]
@@ -468,6 +469,7 @@ pub struct SceneEditor {
     #[cfg(unix)]
     ai_apps: connection::AppsDialog,
     ai_steps: ai_steps::AiSteps,
+    ai_status: ai_indicator::AiStatus,
     /// Since when an AI request has waited for the creator's input to finish.
     ai_wait: Option<std::time::Instant>,
     retired_connection_receipts: std::collections::VecDeque<Value>,
@@ -537,7 +539,6 @@ pub struct SceneEditor {
     /// Every message the editor shows, the Console panel and toasts (S-06).
     console: crate::console::Console,
     ai_drawer: Option<ai_workspace::Drawer>,
-    ai_connection_label: &'static str,
     ai_connection_requested: bool,
     ai_release_navigation: bool,
     ai_drawer_rect: Option<egui::Rect>,
@@ -700,6 +701,7 @@ impl SceneEditor {
             #[cfg(unix)]
             ai_apps: Default::default(),
             ai_steps: Default::default(),
+            ai_status: Default::default(),
             ai_wait: None,
             retired_connection_receipts: Default::default(),
             save_grant: None,
@@ -762,7 +764,6 @@ impl SceneEditor {
             toolbar_compact: false,
             console: Default::default(),
             ai_drawer: None,
-            ai_connection_label: "Disconnected",
             ai_connection_requested: false,
             ai_release_navigation: false,
             player_view_draft: None,
@@ -2470,7 +2471,7 @@ impl SceneEditor {
                 ui.data_mut(|d| d.insert_temp(center_id, used));
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     #[cfg(unix)]
-                    crate::branding::connection_indicator(ui, self.ai_connection_label);
+                    self.ai_indicator_ui(ui);
                     if self.toolbar_compact {
                         ui.menu_button("»", |ui| {
                             if !self.navigation.player_view {
@@ -5516,7 +5517,7 @@ impl SceneEditor {
                 });
                 #[cfg(unix)]
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    crate::branding::connection_indicator(ui, self.ai_connection_label);
+                    self.ai_indicator_ui(ui);
                 });
             });
         } else {
@@ -6628,18 +6629,6 @@ impl eframe::App for Host {
         }
         #[cfg(feature = "inspection")]
         self.editor.asset_ops.timing_frame(ui.ctx());
-        #[cfg(unix)]
-        {
-            self.editor.ai_connection_label = match self.connection_state() {
-                "bound" => "Connected",
-                "listening_unbound" => "Disconnected",
-                "approval_required" => "Approval required (manual)",
-                "revoked_draining" => "Disconnected / retiring",
-                "access_revoked" => "Access revoked",
-                "connection_error" => "Connection error",
-                _ => "Disconnected",
-            };
-        }
         self.editor.begin_ui(ui);
         #[cfg(unix)]
         self.native_connection_ui(ui);
@@ -6647,6 +6636,9 @@ impl eframe::App for Host {
         self.ai_prompt_ui(ui.ctx());
         #[cfg(unix)]
         self.editor.ai_apps_ui(ui.ctx());
+        #[cfg(unix)]
+        self.refresh_ai_status();
+        self.editor.ai_toast_ui(ui.ctx());
         self.editor.workspace_ui(ui);
         self.editor.poll_capture(ui.ctx());
         // Widgets, dialogs and cancellation own this frame's input first.

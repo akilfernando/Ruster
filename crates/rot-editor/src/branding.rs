@@ -56,24 +56,29 @@ fn padded_mark(ui: &mut egui::Ui, size: f32, padding: egui::Margin) {
     });
 }
 
+/// The mushroom, tinted, as a clickable control. `label` names it for
+/// screen readers and the tooltip.
 #[cfg(unix)]
-pub fn connection_indicator(ui: &mut egui::Ui, state: &str) {
+pub fn connection_indicator(ui: &mut egui::Ui, tint: egui::Color32, label: &str) -> egui::Response {
     let texture = texture(ui.ctx(), true);
     let source = texture.size_vec2();
-    let color = if state == "Connected" {
-        editor_theme::ROT_RED
-    } else if ui.visuals().dark_mode {
+    ui.add(
+        egui::Image::new((texture.id(), source * (24.0 / source.y)))
+            .alt_text(label)
+            .tint(tint)
+            .sense(egui::Sense::click()),
+    )
+    .on_hover_text(label)
+}
+
+/// The indicator's idle grey for the current theme.
+#[cfg(unix)]
+pub fn idle_tint(ui: &egui::Ui) -> egui::Color32 {
+    if ui.visuals().dark_mode {
         egui::Color32::from_gray(151)
     } else {
         egui::Color32::from_gray(99)
-    };
-    let label = format!("Rot connection · {state}");
-    ui.add(
-        egui::Image::new((texture.id(), source * (24.0 / source.y)))
-            .alt_text(&label)
-            .tint(color),
-    )
-    .on_hover_text(label);
+    }
 }
 
 pub fn is_about_open(ctx: &egui::Context) -> bool {
@@ -134,12 +139,16 @@ mod tests {
         for (state, color) in [
             ("Connected", editor_theme::ROT_RED),
             ("Disconnected", egui::Color32::from_gray(151)),
-            ("Connection error", egui::Color32::from_gray(151)),
         ] {
             let ctx = egui::Context::default();
             editor_theme::configure(&ctx);
             let mut output = ctx.run_ui(egui::RawInput::default(), |ui| {
-                connection_indicator(ui, state);
+                let tint = if state == "Connected" {
+                    editor_theme::ROT_RED
+                } else {
+                    idle_tint(ui)
+                };
+                connection_indicator(ui, tint, state);
             });
             output.textures_delta.clear();
             let meshes = ctx.tessellate(output.shapes, output.pixels_per_point);
