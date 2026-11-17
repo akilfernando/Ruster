@@ -16,6 +16,8 @@ pub struct ImportedPlacement {
     pub hierarchy: Hierarchy,
     pub objects: Vec<Object>,
     pub materials: BTreeMap<String, OpaqueMaterial>,
+    /// Optional clip binding owned by `root_id`, inserted in the same Undo step.
+    pub animation: Option<AnimationBinding>,
 }
 
 impl Session {
@@ -84,8 +86,14 @@ impl Session {
         after.groups.extend(imported.hierarchy.groups);
         after.parents.extend(imported.hierarchy.parents);
         let start = self.scene().objects.len();
+        let animations = placement.animation.map(|binding| {
+            let before = self.scene().animations.clone();
+            let mut after = before.clone();
+            after.insert(placement.root_id.clone(), binding);
+            SceneDelta::Animations { before, after }
+        });
         self.commit_change(Change {
-            scene: vec![
+            scene: [
                 SceneDelta::Objects {
                     created: imported
                         .objects
@@ -99,7 +107,10 @@ impl Session {
                     deleted: Vec::new(),
                 },
                 SceneDelta::Hierarchy { before, after },
-            ],
+            ]
+            .into_iter()
+            .chain(animations)
+            .collect(),
             materials: imported
                 .materials
                 .into_iter()
@@ -148,6 +159,7 @@ mod tests {
                     ..OpaqueMaterial::default()
                 },
             )]),
+            animation: None,
         }
     }
 

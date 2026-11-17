@@ -261,6 +261,7 @@ fn scene_for(delivery: &Delivery) -> Scene {
         hierarchy: Default::default(),
         display: Default::default(),
         player_view: None,
+        animations: Default::default(),
         lighting: Default::default(),
         materials: Default::default(),
         id: "delivery-yard".into(),

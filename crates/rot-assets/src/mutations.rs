@@ -280,6 +280,7 @@ impl AssetStore {
             meshes: self.meshes.clone(),
             textures: self.textures.clone(),
             sounds: self.sounds.clone(),
+            clips: self.clips.clone(),
             infos: self.infos.clone(),
             identity: self.identity.clone(),
         }
@@ -560,6 +561,12 @@ fn validate_mutation(store: &AssetStore, mutation: &AssetMutation) -> Result<(),
 }
 pub(super) fn encode_registry(mut registry: Registry) -> Result<PreparedRegistry, AssetError> {
     registry.version = if registry
+        .models
+        .values()
+        .any(|model| !model.clips.is_empty())
+    {
+        7
+    } else if registry
         .assets
         .values()
         .any(|record| record.kind == AssetKind::Sound)

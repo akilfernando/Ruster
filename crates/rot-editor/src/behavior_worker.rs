@@ -151,6 +151,7 @@ pub(super) enum Command {
         scene: Arc<Scene>,
         authoring: Arc<Authoring>,
         sounds: Sounds,
+        clips: Arc<rot_behavior::Clips>,
     },
     Play {
         key: RunKey,
@@ -1170,6 +1171,7 @@ fn process(
             scene,
             authoring,
             sounds,
+            clips,
             ..
         } => {
             let _ = shared.revoke_input(true);
@@ -1263,12 +1265,9 @@ fn process(
             // former session and cannot cancel the newly attached VM session.
             *shared.debugger.lock().unwrap_or_else(|p| p.into_inner()) =
                 handle.map(|handle| (key, handle));
-            match execution
-                .engine
-                .as_mut()
-                .expect("engine constructed above")
-                .reset(&scene, &authoring)
-            {
+            let engine = execution.engine.as_mut().expect("engine constructed above");
+            engine.set_clips((*clips).clone());
+            match engine.reset(&scene, &authoring) {
                 Ok(runtime) if active(shared, key) && !shared.cancel.load(Ordering::SeqCst) => {
                     let keys = KeyEventAccumulator::new(authoring.actions.clone())
                         .expect("Reset validated the immutable action map");
@@ -2184,6 +2183,7 @@ mod tests {
                 scene,
                 authoring,
                 sounds: Sounds::new(),
+                clips: Default::default(),
             })
             .unwrap();
         assert!(
@@ -2827,6 +2827,7 @@ mod tests {
                     scene: scene.clone(),
                     authoring: authoring.clone(),
                     sounds: Sounds::new(),
+                    clips: Default::default(),
                 })
                 .unwrap();
             assert!(matches!(wait_event(&worker, &pulses), Event::Reset { .. }));
@@ -2961,6 +2962,7 @@ mod tests {
                 scene: scene.clone(),
                 authoring: authoring.clone(),
                 sounds: Sounds::new(),
+                clips: Default::default(),
             })
             .unwrap();
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -3000,6 +3002,7 @@ mod tests {
                 scene,
                 authoring,
                 sounds: Sounds::new(),
+                clips: Default::default(),
             })
             .unwrap();
         entered.recv_timeout(Duration::from_secs(5)).unwrap();
@@ -3064,6 +3067,7 @@ mod tests {
                 scene: scene.clone(),
                 authoring: Arc::new(invalid),
                 sounds: Sounds::new(),
+                clips: Default::default(),
             })
             .unwrap();
         match wait_event(&worker, &pulses) {

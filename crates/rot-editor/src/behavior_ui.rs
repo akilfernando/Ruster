@@ -1768,6 +1768,7 @@ enum Request {
         scene: Arc<rot_scene::Scene>,
         authoring: Arc<rot_scene::Authoring>,
         sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
+        clips: Arc<rot_behavior::Clips>,
     },
     Play(RunKey),
     Pause(RunKey),
@@ -1797,11 +1798,13 @@ impl Request {
                 scene,
                 authoring,
                 sounds,
+                clips,
             } => VmCommand::Reset {
                 key: *key,
                 scene: scene.clone(),
                 authoring: authoring.clone(),
                 sounds: sounds.clone(),
+                clips: clips.clone(),
             },
             Self::Play(key) => VmCommand::Play { key: *key },
             Self::Pause(key) => VmCommand::Pause { key: *key },
@@ -2038,15 +2041,27 @@ impl RuntimeUi {
         session: &Session,
         generation: u64,
     ) -> Result<RunKey, String> {
-        self.reset_with_sounds(ctx, session, generation, BTreeMap::new())
+        self.reset_with_resources(ctx, session, generation, None)
     }
-    pub fn reset_with_sounds(
+    /// Reset with the project's accepted sounds and animation clips. A clip
+    /// payload that fails to decode refuses the Reset before any worker effect.
+    pub fn reset_with_resources(
         &mut self,
         ctx: &egui::Context,
         session: &Session,
         generation: u64,
-        sounds: BTreeMap<String, Arc<rot_assets::AudioClip>>,
+        assets: Option<&rot_assets::AssetStore>,
     ) -> Result<RunKey, String> {
+        let sounds = assets
+            .map(rot_assets::AssetStore::sound_snapshots)
+            .unwrap_or_default();
+        let clips = match assets {
+            Some(store) if !session.scene().animations.is_empty() => {
+                let accepted = store.clip_snapshots();
+                Arc::new(rot_behavior::decode_clips(&accepted)?)
+            }
+            _ => Arc::default(),
+        };
         self.ensure_worker(ctx)?;
         self.supersede_hud_activation("Runtime Reset superseded HUD activation");
         self.supersede_operation();
@@ -2064,6 +2079,7 @@ impl RuntimeUi {
             scene: Arc::new(session.scene().clone()),
             authoring,
             sounds,
+            clips,
         });
         self.begin_reset(key);
         self.diagnostic = None;
@@ -2394,7 +2410,7 @@ impl RuntimeUi {
                 reset_button.scroll_to_me(Some(egui::Align::Center));
             }
             if reset_button.clicked() {
-                match self.reset_with_sounds(ui.ctx(), session, generation, assets.map(rot_assets::AssetStore::sound_snapshots).unwrap_or_default()) {
+                match self.reset_with_resources(ui.ctx(), session, generation, assets) {
                     Ok(key) => {
                         reset = Some(key);
                         self.arm_control_focus(&reset_button, key, Operation::Reset);

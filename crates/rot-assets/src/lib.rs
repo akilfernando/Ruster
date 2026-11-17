@@ -24,7 +24,12 @@ mod mutations;
 pub use audio::{
     decode_wav, AudioClip, MAX_SOUND_RESOLVED_BYTES, MAX_SOUND_SECONDS, MAX_SOUND_SOURCE_BYTES,
 };
-pub use glb::{ModelInfo, ModelMaterial, ModelNode, MAX_GLB_SOURCE_BYTES};
+pub use glb::{
+    ClipProperty, ClipTarget, ModelClip, ModelInfo, ModelMaterial, ModelNode, MAX_CLIP_BYTES,
+    MAX_GLB_SOURCE_BYTES, MAX_MODEL_CLIPS,
+};
+#[doc(hidden)]
+pub mod fixtures;
 mod texture;
 pub use mutations::{
     AssetAdoption, AssetCompletion, AssetMutation, AssetOutcome, AssetRequest, AssetStateIdentity,
@@ -263,14 +268,24 @@ struct Version3Registry {
 fn parse_registry(bytes: &[u8]) -> Result<Registry, AssetError> {
     let value: serde_json::Value = serde_json::from_slice(bytes)?;
     let version = value.get("version").and_then(serde_json::Value::as_u64);
-    if !matches!(version, Some(5 | 6)) && value.get("models").is_some() {
-        return Err(error("models require asset catalog version 5 or 6"));
+    if !matches!(version, Some(5..=7)) && value.get("models").is_some() {
+        return Err(error("models require asset catalog version 5 through 7"));
+    }
+    if version != Some(7)
+        && value
+            .get("models")
+            .and_then(serde_json::Value::as_object)
+            .is_some_and(|models| models.values().any(|model| model.get("clips").is_some()))
+    {
+        return Err(error(
+            "model animation clips require asset catalog version 7",
+        ));
     }
     if let Some(assets) = value.get("assets").and_then(serde_json::Value::as_object) {
         for record in assets.values() {
             if record.get("kind").and_then(serde_json::Value::as_str) == Some("sound") {
-                if version != Some(6) {
-                    return Err(error("sound assets require asset catalog version 6"));
+                if !matches!(version, Some(6 | 7)) {
+                    return Err(error("sound assets require asset catalog version 6 or 7"));
                 }
                 if record.get("mesh_normal_policy").is_some()
                     || record.get("texture_role").is_some()
@@ -390,6 +405,8 @@ pub struct AssetStore {
     meshes: BTreeMap<String, Arc<Mesh>>,
     textures: BTreeMap<String, Arc<Texture>>,
     sounds: BTreeMap<String, Arc<AudioClip>>,
+    /// Encoded `rot-clip` payloads of accepted model generations.
+    clips: BTreeMap<String, Arc<Vec<u8>>>,
     infos: BTreeMap<String, Arc<AssetInfo>>,
 }
 
@@ -403,6 +420,8 @@ pub struct ExportSnapshot {
     revision: u64,
     sources: BTreeMap<String, ExportSource>,
     models: BTreeMap<String, ModelInfo>,
+    /// Accepted `rot-clip` payloads captured in memory with the snapshot.
+    clips: BTreeMap<String, Arc<Vec<u8>>>,
 }
 
 #[derive(Clone, Debug)]
@@ -428,6 +447,13 @@ impl ResourcePin {
         Self {
             source_sha256: Sha256::digest(bytes).into(),
             interpretation: 5,
+        }
+    }
+
+    pub fn clip(bytes: &[u8]) -> Self {
+        Self {
+            source_sha256: Sha256::digest(bytes).into(),
+            interpretation: 6,
         }
     }
 
@@ -480,6 +506,11 @@ impl ExportSnapshot {
         self.sources.keys().map(String::as_str)
     }
 
+    /// Selected accepted animation clip payloads by clip resource ID.
+    pub fn clips(&self) -> &BTreeMap<String, Arc<Vec<u8>>> {
+        &self.clips
+    }
+
     /// Kind of a selected accepted resource.
     pub fn kind(&self, id: &str) -> Option<AssetKind> {
         self.sources.get(id).map(|source| source.kind)
@@ -515,7 +546,10 @@ impl ExportSnapshot {
             resources.insert(id.to_owned(), pin);
             Ok(())
         })?;
-        if resources.len() != self.sources.len() {
+        for (id, bytes) in &self.clips {
+            resources.insert(id.clone(), ResourcePin::clip(bytes));
+        }
+        if resources.len() != self.sources.len() + self.clips.len() {
             return Err(error("accepted resource closure incomplete"));
         }
         Ok(resource_identity(&resources))
@@ -604,6 +638,7 @@ impl AssetStore {
             meshes: BTreeMap::new(),
             textures: BTreeMap::new(),
             sounds: BTreeMap::new(),
+            clips: BTreeMap::new(),
             infos: BTreeMap::new(),
         };
         // Recover last-good derived content before inspecting mutable sources.
@@ -746,7 +781,17 @@ impl AssetStore {
         }
         let mut sources = BTreeMap::new();
         let mut models = BTreeMap::new();
+        let mut clips = BTreeMap::new();
         for id in ids {
+            if self.registry.model_clip(id).is_some() {
+                let bytes = self.clips.get(id).ok_or_else(|| {
+                    error(format!(
+                        "animation clip {id:?} has no accepted content; Refresh its model before exporting"
+                    ))
+                })?;
+                clips.insert(id.clone(), bytes.clone());
+                continue;
+            }
             let Some(record) = self.registry.assets.get(id) else {
                 let (model, kind) = self
                     .registry
@@ -802,6 +847,7 @@ impl AssetStore {
             revision: self.revision(),
             sources,
             models,
+            clips,
         })
     }
     /// Borrow metadata in stable asset-ID order without cloning diagnostics.
@@ -1365,9 +1411,9 @@ fn confined_path(
     Ok(path)
 }
 fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
-    if registry.format != "rot-assets" || !matches!(registry.version, 1..=6) {
+    if registry.format != "rot-assets" || !matches!(registry.version, 1..=7) {
         return Err(error(
-            "unsupported asset catalog format/version; expected rot-assets version 1 through 6",
+            "unsupported asset catalog format/version; expected rot-assets version 1 through 7",
         ));
     }
     if registry.version == 5 && registry.models.is_empty() {
@@ -1379,7 +1425,16 @@ fn validate_registry(registry: &Registry) -> Result<(), AssetError> {
         .assets
         .values()
         .any(|record| record.kind == AssetKind::Sound);
-    if (registry.version == 6) != has_sound {
+    let has_clips = registry
+        .models
+        .values()
+        .any(|model| !model.clips.is_empty());
+    if (registry.version == 7) != has_clips {
+        return Err(error(
+            "asset catalog version 7 requires model animation clips",
+        ));
+    }
+    if !has_clips && (registry.version == 6) != has_sound {
         return Err(error("asset catalog version 6 requires sound assets"));
     }
     if registry.asset_count() > MAX_ASSETS {

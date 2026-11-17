@@ -17,6 +17,7 @@ pub const FORMAT_VERSION: u32 = 18;
 pub const HIERARCHY_FORMAT_VERSION: u32 = 19;
 pub const GROUP_ROTATION_FORMAT_VERSION: u32 = 20;
 pub const PLAYER_VIEW_FORMAT_VERSION: u32 = 21;
+pub const ANIMATION_FORMAT_VERSION: u32 = 22;
 pub const SOUND_FORMAT_VERSION: u32 = 21;
 pub const MAX_MATERIALS: usize = 64;
 
@@ -24,12 +25,17 @@ mod imported;
 pub use imported::ImportedPlacement;
 mod hierarchy;
 pub use hierarchy::{Group, Hierarchy, ResolvedPoses, TransformRequest};
+mod animation;
 mod authoring;
 mod collider;
 pub mod hud;
 pub mod input;
 mod lighting;
 mod lighting_authoring;
+pub use animation::{
+    AnimationBinding, Clip, ClipInterpolation, ClipProperty, ClipTrack, MAX_ANIMATIONS,
+    MAX_ANIMATION_TARGETS, MAX_CLIP_BYTES,
+};
 mod player_view;
 pub use player_view::{PlayerAnchor, PlayerView, ResolvedPlayerView};
 #[path = "../../support/strict_json.rs"]
@@ -290,6 +296,9 @@ pub struct Scene {
     pub display: DisplayProfile,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub player_view: Option<PlayerView>,
+    /// Imported clip bindings keyed by their placement root Group ID.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub animations: BTreeMap<String, AnimationBinding>,
 }
 
 impl Scene {
@@ -303,6 +312,7 @@ impl Scene {
             lighting: Lighting::Legacy,
             display: DisplayProfile::LegacySdr,
             player_view: None,
+            animations: BTreeMap::new(),
         }
     }
 
@@ -323,6 +333,7 @@ impl Scene {
             lighting: Lighting::Legacy,
             display: DisplayProfile::LegacySdr,
             player_view: None,
+            animations: BTreeMap::new(),
             objects: [
                 ("left", [-2.0, 0.0, 0.0], [0.12, 0.58, 0.85, 1.0]),
                 ("center", [0.0, 0.0, 0.0], [0.9, 0.4, 0.16, 1.0]),
@@ -399,6 +410,8 @@ impl Scene {
                 )));
             }
         }
+        // Before pose resolution, so removing a driven target names its animation.
+        self.validate_animations()?;
         let poses = self.resolve_poses()?;
         self.validate_player_view_with_poses(&poses)?;
         for (id, _) in self.lighting.lights() {
@@ -530,7 +543,7 @@ impl fmt::Display for SceneError {
             Self::Format(error) => write!(f, "invalid scene JSON: {error}"),
             Self::UnsupportedVersion(version) => write!(
                 f,
-                "unsupported scene version {version}; supported versions are 1 through {PLAYER_VIEW_FORMAT_VERSION}"
+                "unsupported scene version {version}; supported versions are 1 through {ANIMATION_FORMAT_VERSION}"
             ),
             Self::Invalid(reason) => write!(f, "invalid scene: {reason}"),
             Self::Capacity => write!(f, "authored state and required reversible history exceed 1 MiB; reduce content or edit size before retrying"),
@@ -654,6 +667,10 @@ enum SceneDelta {
         before: Option<PlayerView>,
         after: Option<PlayerView>,
     },
+    Animations {
+        before: BTreeMap<String, AnimationBinding>,
+        after: BTreeMap<String, AnimationBinding>,
+    },
     Display {
         before: DisplayProfile,
         after: DisplayProfile,
@@ -699,6 +716,11 @@ impl SceneDelta {
                 .into_iter()
                 .flatten()
                 .any(|view| view.followed_target() == Some(id)),
+            Self::Animations { before, after } => [before, after].into_iter().any(|bindings| {
+                bindings.iter().any(|(owner, binding)| {
+                    owner == id || binding.targets.values().any(|target| target == id)
+                })
+            }),
             Self::Display { .. } => false,
         }
     }
@@ -748,6 +770,17 @@ impl SceneDelta {
                     return Err(inconsistent());
                 }
                 scene.player_view = replacement.clone();
+            }
+            Self::Animations { before, after } => {
+                let (expected, replacement) = if undo {
+                    (after, before)
+                } else {
+                    (before, after)
+                };
+                if before == after || &scene.animations != expected {
+                    return Err(inconsistent());
+                }
+                scene.animations = replacement.clone();
             }
             Self::Display { before, after } => {
                 before.validate()?;
@@ -1201,6 +1234,7 @@ impl From<LegacyDocument> for Document {
                 lighting: Lighting::Legacy,
                 display: DisplayProfile::LegacySdr,
                 player_view: None,
+                animations: BTreeMap::new(),
                 objects: old
                     .scene
                     .objects
@@ -1292,6 +1326,7 @@ impl From<V2Document> for Document {
                 lighting: Lighting::Legacy,
                 display: DisplayProfile::LegacySdr,
                 player_view: None,
+                animations: BTreeMap::new(),
                 objects: old
                     .scene
                     .objects
@@ -1391,6 +1426,14 @@ impl Document {
 
     fn required_version(&self) -> u32 {
         let history = self.undo.iter().chain(&self.redo);
+        if !self.scene.animations.is_empty()
+            || history
+                .clone()
+                .flat_map(|change| &change.scene)
+                .any(|delta| matches!(delta, SceneDelta::Animations { .. }))
+        {
+            return ANIMATION_FORMAT_VERSION;
+        }
         if self.scene.player_view.is_some()
             || history
                 .clone()
@@ -1484,6 +1527,22 @@ impl Document {
                 "Player view or its history requires Scene21".into(),
             ));
         }
+        if version < u64::from(ANIMATION_FORMAT_VERSION)
+            && (value["scene"].get("animations").is_some()
+                || ["undo", "redo"]
+                    .into_iter()
+                    .flat_map(|stack| value[stack].as_array().into_iter().flatten())
+                    .any(|change| {
+                        change["kind"] == "animations"
+                            || change["scene"].as_array().is_some_and(|deltas| {
+                                deltas.iter().any(|delta| delta["kind"] == "animations")
+                            })
+                    }))
+        {
+            return Err(SceneError::Invalid(
+                "Imported animation bindings or their history require Scene22".into(),
+            ));
+        }
         if (1..19).contains(&version) {
             hierarchy::reject_legacy_fields(&value)?;
         }
@@ -1533,7 +1592,7 @@ impl Document {
             1 => serde_json::from_value::<LegacyDocument>(value)?.into(),
             2 => serde_json::from_value::<V2Document>(value)?.into(),
             3 | 4 => serde_json::from_value::<V4Document>(value)?.into(),
-            5..=21 => serde_json::from_value(value)?,
+            5..=22 => serde_json::from_value(value)?,
             _ => return Err(SceneError::UnsupportedVersion(version)),
         };
         if version < 5
@@ -2024,6 +2083,8 @@ fn check_serialized_size(
         hierarchy: &'a Hierarchy,
         #[serde(skip_serializing_if = "Option::is_none")]
         player_view: &'a Option<PlayerView>,
+        #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+        animations: &'a BTreeMap<String, AnimationBinding>,
     }
     impl<'a> From<&'a Scene> for SceneView<'a> {
         fn from(scene: &'a Scene) -> Self {
@@ -2036,6 +2097,7 @@ fn check_serialized_size(
                 display: &scene.display,
                 hierarchy: &scene.hierarchy,
                 player_view: &scene.player_view,
+                animations: &scene.animations,
             }
         }
     }
@@ -2878,6 +2940,14 @@ impl Session {
                                 .flatten()
                                 .filter_map(PlayerView::followed_target),
                         );
+                    }
+                    SceneDelta::Animations { before, after } => {
+                        for bindings in [before, after] {
+                            for (owner, binding) in bindings {
+                                used.insert(owner.as_str());
+                                used.extend(binding.targets.values().map(String::as_str));
+                            }
+                        }
                     }
                     SceneDelta::Display { .. } => {}
                 }
@@ -7314,7 +7384,7 @@ mod tests {
             br#"{"format_version":1,"id":"logistics","config":{}}"#.to_vec(),
         ];
         let mut value = good.clone();
-        value["format_version"] = (PLAYER_VIEW_FORMAT_VERSION + 1).into();
+        value["format_version"] = (ANIMATION_FORMAT_VERSION + 1).into();
         cases.push(serde_json::to_vec(&value).unwrap());
         let mut value = good.clone();
         value["unexpected"] = true.into();

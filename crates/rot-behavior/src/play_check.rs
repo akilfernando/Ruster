@@ -340,6 +340,7 @@ pub fn run(
     case: &PlayCheck,
     resources_sha256: &str,
     tick_nanos: u64,
+    clips: &crate::Clips,
     cancel: Arc<AtomicBool>,
 ) -> Report {
     let deadline = Instant::now() + MAX_RUN_TIME;
@@ -413,6 +414,7 @@ pub fn run(
         Ok(engine) => engine,
         Err(failure) => return report.script_error(failure),
     };
+    engine.set_clips(clips.clone());
     let mut runtime = match engine.reset(session.scene(), session.authoring()) {
         Ok(runtime) => runtime,
         Err(failure) => return report.script_error(failure),
@@ -492,7 +494,16 @@ mod tests {
         let session = Session::new(Scene::empty("play-check")).unwrap();
         let mut case = fixture(&session, vec![ActionFrame::default(); 2]);
         let cancel = Arc::new(AtomicBool::new(false));
-        let run_case = |case: &PlayCheck| run(&session, case, RESOURCE_HASH, TICK, cancel.clone());
+        let run_case = |case: &PlayCheck| {
+            run(
+                &session,
+                case,
+                RESOURCE_HASH,
+                TICK,
+                &Default::default(),
+                cancel.clone(),
+            )
+        };
         let bytes = case.encode().unwrap();
         let pass = run_case(&PlayCheck::decode(&bytes).unwrap());
         assert_eq!(pass.status, Status::Passed);
@@ -500,7 +511,15 @@ mod tests {
         assert!(pass.results[0].passed);
         assert_eq!(pass.completed_tick, 2);
         assert_eq!(
-            run(&session, &case, &"2".repeat(64), TICK, cancel.clone()).status,
+            run(
+                &session,
+                &case,
+                &"2".repeat(64),
+                TICK,
+                &Default::default(),
+                cancel.clone()
+            )
+            .status,
             Status::Stale
         );
 
@@ -573,6 +592,7 @@ mod tests {
                 case,
                 RESOURCE_HASH,
                 TICK,
+                &Default::default(),
                 Arc::new(AtomicBool::new(false)),
             )
         };

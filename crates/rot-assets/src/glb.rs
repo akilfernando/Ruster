@@ -8,6 +8,12 @@ const MAX_JSON_BYTES: usize = 2 * 1024 * 1024;
 // and the Group placed around an imported mesh that also has children.
 const MAX_GROUP_LEVELS: usize = 8;
 const MIN_DIELECTRIC_ROUGHNESS: f32 = 0.08;
+pub const MAX_MODEL_CLIPS: usize = 8;
+const MAX_CLIP_TRACKS: usize = 96;
+const MAX_TRACK_KEYS: usize = 1024;
+const MAX_CLIP_KEYS: usize = 8192;
+const MAX_CLIP_SECONDS: f32 = 600.0;
+pub const MAX_CLIP_BYTES: usize = 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -17,6 +23,49 @@ pub struct ModelInfo {
     pub hash: String,
     pub nodes: BTreeMap<String, ModelNode>,
     pub materials: BTreeMap<String, ModelMaterial>,
+    /// Named node-transform clips. Present only in catalog version 7.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    pub clips: BTreeMap<String, ModelClip>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ClipProperty {
+    Translation,
+    Rotation,
+    Scale,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ClipTarget {
+    /// Named node path within this model.
+    pub node: String,
+    pub property: ClipProperty,
+}
+
+/// Catalog summary of one clip. Key times and values stay in the accepted
+/// GLB generation and are delivered as a `rot-clip` payload.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ModelClip {
+    /// Stable resource ID derived from the model ID and clip name.
+    pub id: String,
+    pub duration: f32,
+    /// Sorted, unique animated node properties. Structural for Refresh.
+    pub targets: Vec<ClipTarget>,
+}
+
+impl ModelInfo {
+    /// Refresh may change key times and values, never what a clip animates.
+    pub(super) fn same_clip_structure(&self, other: &Self) -> bool {
+        self.clips.len() == other.clips.len()
+            && self
+                .clips
+                .iter()
+                .zip(&other.clips)
+                .all(|(a, b)| a.0 == b.0 && a.1.id == b.1.id && a.1.targets == b.1.targets)
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -66,6 +115,88 @@ pub(super) struct ModelResource {
 pub(super) struct DecodedModel {
     pub info: ModelInfo,
     pub resources: BTreeMap<String, ModelResource>,
+    /// Encoded `rot-clip` payloads by clip resource ID.
+    pub clips: BTreeMap<String, Vec<u8>>,
+}
+
+#[derive(Serialize)]
+struct ClipPayload<'a> {
+    format: &'static str,
+    version: u32,
+    duration: f32,
+    tracks: &'a [ClipTrack],
+}
+
+#[derive(Serialize)]
+struct ClipTrack {
+    node: String,
+    property: ClipProperty,
+    interpolation: &'static str,
+    times: Vec<f32>,
+    /// Three components for translation and scale; a unit XYZW quaternion for rotation.
+    values: Vec<Vec<f32>>,
+}
+
+impl ClipTrack {
+    fn sample(&self, time: f32) -> Vec<f64> {
+        let value = |i: usize| {
+            self.values[i]
+                .iter()
+                .map(|n| f64::from(*n))
+                .collect::<Vec<_>>()
+        };
+        let last = self.times.len() - 1;
+        if time <= self.times[0] {
+            return value(0);
+        }
+        if time >= self.times[last] {
+            return value(last);
+        }
+        let next = self.times.partition_point(|key| *key <= time);
+        let (a, b) = (value(next - 1), value(next));
+        if self.interpolation == "step" {
+            return a;
+        }
+        let (t0, t1) = (self.times[next - 1], self.times[next]);
+        let f = f64::from(time - t0) / f64::from(t1 - t0);
+        if self.property == ClipProperty::Rotation {
+            let a = DQuat::from_slice(&a);
+            let b = DQuat::from_slice(&b);
+            a.slerp(b, f).normalize().to_array().to_vec()
+        } else {
+            a.iter().zip(&b).map(|(a, b)| a + (b - a) * f).collect()
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Animation {
+    name: String,
+    channels: Vec<Channel>,
+    samplers: Vec<AnimationSampler>,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct Channel {
+    sampler: usize,
+    target: ChannelTarget,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ChannelTarget {
+    node: usize,
+    path: String,
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct AnimationSampler {
+    input: usize,
+    output: usize,
+    interpolation: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -87,6 +218,8 @@ struct Document {
     images: Vec<Image>,
     #[serde(default)]
     samplers: Vec<Sampler>,
+    #[serde(default)]
+    animations: Vec<Animation>,
 }
 
 #[derive(Deserialize)]
@@ -399,6 +532,9 @@ struct Decoder<'a> {
     used_materials: BTreeMap<String, usize>,
     mesh_bytes: usize,
     texture_bytes: usize,
+    /// Source node index to named path, and which paths place as Groups.
+    paths: BTreeMap<usize, String>,
+    group_paths: BTreeSet<String>,
     model: DecodedModel,
 }
 
@@ -734,11 +870,220 @@ impl Decoder<'_> {
             definition.material = Some(material);
         }
         self.model.info.nodes.insert(path.clone(), definition);
+        self.paths.insert(index, path.clone());
+        if becomes_group {
+            self.group_paths.insert(path.clone());
+        }
         ancestors.push(local);
         for child in children {
             self.node(child, Some(&path), ancestors)?;
         }
         ancestors.pop();
+        Ok(())
+    }
+
+    fn track(
+        &self,
+        clip: &str,
+        animation: &Animation,
+        channel: &Channel,
+    ) -> Result<ClipTrack, AssetError> {
+        let fail = |reason: &str| error(format!("GLB animation {clip:?}: {reason}"));
+        let node = self
+            .paths
+            .get(&channel.target.node)
+            .ok_or_else(|| fail("a channel targets a node outside the imported hierarchy"))?;
+        let property = match channel.target.path.as_str() {
+            "translation" => ClipProperty::Translation,
+            "rotation" => ClipProperty::Rotation,
+            "scale" => ClipProperty::Scale,
+            "weights" => return Err(fail(
+                "morph target weights are unsupported; remove shape key animation before export",
+            )),
+            _ => return Err(fail("channels must target translation, rotation or scale")),
+        };
+        let sampler = at(&animation.samplers, channel.sampler, "animation sampler")?;
+        let interpolation =
+            match sampler.interpolation.as_deref().unwrap_or("LINEAR") {
+                "LINEAR" => "linear",
+                "STEP" => "step",
+                "CUBICSPLINE" => return Err(fail(
+                    "cubic spline interpolation is unsupported; export sampled (baked) LINEAR keys",
+                )),
+                _ => return Err(fail("unknown sampler interpolation")),
+            };
+        let times: Vec<f32> = self
+            .rows(sampler.input, "SCALAR", 1, 5126)?
+            .map(|row| f32::from_bits(u32_at(row, 0)))
+            .collect();
+        if times.len() > MAX_TRACK_KEYS
+            || !times
+                .iter()
+                .all(|t| t.is_finite() && (0.0..=MAX_CLIP_SECONDS).contains(t))
+            || times.windows(2).any(|pair| pair[0] >= pair[1])
+        {
+            return Err(fail(
+                "key times must be 1..1024 strictly increasing seconds within 0..600",
+            ));
+        }
+        let values: Vec<Vec<f32>> = if property == ClipProperty::Rotation {
+            self.vectors::<4>(sampler.output, "VEC4")?
+                .into_iter()
+                .map(|q| {
+                    let q = DQuat::from_array(q.map(f64::from));
+                    if (q.length_squared() - 1.).abs() > 1e-3 {
+                        return Err(fail("rotation keys must be unit quaternions"));
+                    }
+                    Ok(q.normalize().to_array().map(|n| n as f32).to_vec())
+                })
+                .collect::<Result<_, _>>()?
+        } else {
+            self.vectors::<3>(sampler.output, "VEC3")?
+                .into_iter()
+                .map(|v| v.to_vec())
+                .collect()
+        };
+        if values.len() != times.len() {
+            return Err(fail("each sampler needs exactly one output per key time"));
+        }
+        let group = self.group_paths.contains(node);
+        for value in &values {
+            let valid = match property {
+                ClipProperty::Translation => value.iter().all(|n| n.abs() <= 10_000.),
+                ClipProperty::Rotation => true,
+                ClipProperty::Scale => {
+                    value.iter().all(|n| (0.001..=1000.).contains(n))
+                        && (!group || (value[0] == value[1] && value[0] == value[2]))
+                }
+            };
+            if !valid {
+                return Err(error(format!("GLB animation {clip:?} node {node:?}: keys require translation within ±10000 and scale 0.001..1000, uniform on nodes placed as Groups")));
+            }
+        }
+        Ok(ClipTrack {
+            node: node.clone(),
+            property,
+            interpolation,
+            times,
+            values,
+        })
+    }
+
+    /// Every key time must leave the whole hierarchy placeable, using the same
+    /// storage precision and composition as static placement.
+    fn validate_clip_poses(&self, clip: &str, tracks: &[ClipTrack]) -> Result<(), AssetError> {
+        let mut times: Vec<f32> = tracks
+            .iter()
+            .flat_map(|track| track.times.iter().copied())
+            .collect();
+        times.sort_by(f32::total_cmp);
+        times.dedup();
+        for time in times {
+            let mut locals = self.model.info.nodes.clone();
+            for track in tracks {
+                let value = track.sample(time);
+                let node = locals.get_mut(&track.node).expect("validated track node");
+                match track.property {
+                    ClipProperty::Translation => {
+                        node.translation = [value[0] as f32, value[1] as f32, value[2] as f32];
+                    }
+                    ClipProperty::Scale => {
+                        node.scale = [value[0] as f32, value[1] as f32, value[2] as f32];
+                    }
+                    ClipProperty::Rotation => {
+                        let (z, y, x) = DQuat::from_slice(&value)
+                            .normalize()
+                            .to_euler(EulerRot::ZYX);
+                        node.rotation = [x as f32, y as f32, z as f32];
+                    }
+                }
+            }
+            for path in locals.keys() {
+                let mut world = PlacementPose::from_local(&locals[path]);
+                let mut parent = locals[path].parent.as_deref();
+                while let Some(id) = parent {
+                    world = PlacementPose::from_local(&locals[id]).compose(world);
+                    parent = locals[id].parent.as_deref();
+                }
+                world.validate_world().map_err(|e| {
+                    error(format!(
+                        "GLB animation {clip:?} node {path:?} at {time} s: {e}"
+                    ))
+                })?;
+            }
+        }
+        Ok(())
+    }
+
+    fn animations(&mut self) -> Result<(), AssetError> {
+        if self.doc.animations.len() > MAX_MODEL_CLIPS {
+            return Err(error("GLB models support at most 8 animation clips"));
+        }
+        for animation in &self.doc.animations {
+            let name = named(&animation.name)
+                .map_err(|_| error("GLB animation clips require a unique 1..128 byte name with no slash or controls"))?;
+            if self.model.info.clips.contains_key(name) {
+                return Err(error(format!("duplicate GLB animation clip name {name:?}")));
+            }
+            if animation.channels.is_empty() || animation.channels.len() > MAX_CLIP_TRACKS {
+                return Err(error(format!(
+                    "GLB animation {name:?} requires 1..96 channels"
+                )));
+            }
+            let mut tracks = animation
+                .channels
+                .iter()
+                .map(|channel| self.track(name, animation, channel))
+                .collect::<Result<Vec<_>, _>>()?;
+            tracks.sort_by(|a, b| (&a.node, a.property).cmp(&(&b.node, b.property)));
+            if tracks
+                .windows(2)
+                .any(|pair| pair[0].node == pair[1].node && pair[0].property == pair[1].property)
+            {
+                return Err(error(format!(
+                    "GLB animation {name:?} animates one node property more than once"
+                )));
+            }
+            let duration = tracks
+                .iter()
+                .map(|track| *track.times.last().expect("nonempty keys"))
+                .fold(0.0_f32, f32::max);
+            if duration <= 0.
+                || tracks.iter().map(|track| track.times.len()).sum::<usize>() > MAX_CLIP_KEYS
+            {
+                return Err(error(format!(
+                    "GLB animation {name:?} requires a positive duration and at most 8192 keys"
+                )));
+            }
+            self.validate_clip_poses(name, &tracks)?;
+            let bytes = serde_json::to_vec(&ClipPayload {
+                format: "rot-clip",
+                version: 1,
+                duration,
+                tracks: &tracks,
+            })?;
+            if bytes.len() > MAX_CLIP_BYTES {
+                return Err(error(format!(
+                    "GLB animation {name:?} exceeds the 1 MiB clip payload limit"
+                )));
+            }
+            let id = resource_id(&self.model.info.id, "clip", name);
+            self.model.info.clips.insert(
+                name.to_owned(),
+                ModelClip {
+                    id: id.clone(),
+                    duration,
+                    targets: tracks
+                        .iter()
+                        .map(|track| ClipTarget {
+                            node: track.node.clone(),
+                            property: track.property,
+                        })
+                        .collect(),
+                },
+            );
+            self.model.clips.insert(id, bytes);
+        }
         Ok(())
     }
 }
@@ -766,6 +1111,7 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         ]
         .into_iter()
         .any(|n| n > MAX_ASSETS)
+        || doc.animations.len() > MAX_ASSETS
         || buffer.byte_length > bin.len()
         || bin.len() - buffer.byte_length > 3
         || bin[buffer.byte_length..].iter().any(|b| *b != 0)
@@ -783,6 +1129,8 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
         used_materials: BTreeMap::new(),
         mesh_bytes: 0,
         texture_bytes: 0,
+        paths: BTreeMap::new(),
+        group_paths: BTreeSet::new(),
         model: DecodedModel {
             info: ModelInfo {
                 id: id.into(),
@@ -790,8 +1138,10 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
                 hash: digest(bytes),
                 nodes: BTreeMap::new(),
                 materials: BTreeMap::new(),
+                clips: BTreeMap::new(),
             },
             resources: BTreeMap::new(),
+            clips: BTreeMap::new(),
         },
     };
     let mut ancestors = Vec::with_capacity(MAX_GROUP_LEVELS);
@@ -808,5 +1158,6 @@ pub(super) fn decode(id: &str, source: &str, bytes: &[u8]) -> Result<DecodedMode
             "GLB requires a selected hierarchy with at least one reachable mesh",
         ));
     }
+    decoder.animations()?;
     Ok(decoder.model)
 }

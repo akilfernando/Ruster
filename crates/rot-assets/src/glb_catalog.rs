@@ -69,6 +69,17 @@ impl Registry {
         self.assets.contains_key(id)
             || self.models.contains_key(id)
             || self.model_resource(id).is_some()
+            || self.model_clip(id).is_some()
+    }
+
+    pub(super) fn model_clip(&self, id: &str) -> Option<(&ModelInfo, &str)> {
+        self.models.values().find_map(|model| {
+            model
+                .clips
+                .iter()
+                .find(|(_, clip)| clip.id == id)
+                .map(|(name, _)| (model, name.as_str()))
+        })
     }
 
     pub(super) fn asset_count(&self) -> usize {
@@ -77,7 +88,7 @@ impl Registry {
             + self
                 .models
                 .values()
-                .map(|model| model.resources().count())
+                .map(|model| model.resources().count() + model.clips.len())
                 .sum::<usize>()
     }
 
@@ -111,6 +122,24 @@ impl Registry {
                     return Err(error("duplicate static model resource ID"));
                 }
             }
+            if model.clips.len() > glb::MAX_MODEL_CLIPS {
+                return Err(error("static model exceeds 8 animation clips"));
+            }
+            for (name, clip) in &model.clips {
+                validate_id(&clip.id)?;
+                if clip.id != glb::resource_id(id, "clip", name)
+                    || !ids.insert(&clip.id)
+                    || clip.targets.is_empty()
+                    || !(clip.duration > 0. && clip.duration.is_finite())
+                    || clip.targets.windows(2).any(|pair| pair[0] >= pair[1])
+                    || clip
+                        .targets
+                        .iter()
+                        .any(|target| !model.nodes.contains_key(&target.node))
+                {
+                    return Err(error("invalid static model animation clip catalog entry"));
+                }
+            }
         }
         Ok(())
     }
@@ -131,6 +160,21 @@ impl AssetStore {
 
     pub fn models(&self) -> impl ExactSizeIterator<Item = &ModelInfo> {
         self.registry.models.values()
+    }
+
+    /// Accepted `rot-clip` payload for one model clip resource ID.
+    pub fn clip(&self, id: &str) -> Option<&Arc<Vec<u8>>> {
+        self.clips.get(id)
+    }
+
+    /// Cheap shared snapshot of every accepted clip payload.
+    pub fn clip_snapshots(&self) -> BTreeMap<String, Arc<Vec<u8>>> {
+        self.clips.clone()
+    }
+
+    /// Model ID and clip name owning a clip resource ID.
+    pub fn clip_owner(&self, id: &str) -> Option<(&ModelInfo, &str)> {
+        self.registry.model_clip(id)
     }
 
     pub fn import_glb_at(
@@ -200,6 +244,9 @@ impl AssetStore {
         if let Some(prior) = prior {
             if decoded.info.nodes != prior.nodes || decoded.info.materials != prior.materials {
                 return Err(error("GLB structure changed (named paths, local transforms, material assignments or settings); import as a fresh model"));
+            }
+            if !decoded.info.same_clip_structure(prior) {
+                return Err(error("GLB animation structure changed (clip names or animated node properties); import as a fresh model. Refresh accepts changed key times and values only"));
             }
         }
         let mut next = self.registry.clone();
@@ -312,6 +359,9 @@ impl AssetStore {
     fn install_model(&mut self, model: DecodedModel) -> ModelInfo {
         for (id, resource) in model.resources {
             self.install_payload(&id, resource.payload);
+        }
+        for (id, bytes) in model.clips {
+            self.clips.insert(id, Arc::new(bytes));
         }
         model.info
     }

@@ -1,7 +1,7 @@
 use rot_assets::ModelInfo;
 use rot_scene::{
-    Group, Hierarchy, ImportedPlacement, MaterialResponse, Object, OpaqueMaterial, SceneError,
-    Session, TextureAddress, TextureFilter, Transform,
+    AnimationBinding, Group, Hierarchy, ImportedPlacement, MaterialResponse, Object,
+    OpaqueMaterial, SceneError, Session, TextureAddress, TextureFilter, Transform,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -125,7 +125,30 @@ pub(super) fn model_placement(
             objects.push(object);
         }
     }
+    // Every node is mapped so any of the model's clips can drive this copy.
+    // A mesh node with children animates its Group, which carries the local TRS.
+    let animation = model.clips.values().next().map(|clip| {
+        let mut object_ids = objects.iter().map(|object| object.id.clone());
+        AnimationBinding {
+            clip: clip.id.clone(),
+            looping: true,
+            targets: model
+                .nodes
+                .iter()
+                .map(|(path, node)| {
+                    let object = node.mesh_id.as_ref().and_then(|_| object_ids.next());
+                    let id = groups_by_path
+                        .get(path.as_str())
+                        .cloned()
+                        .or(object)
+                        .expect("each node places a Group or an Object");
+                    (path.clone(), id)
+                })
+                .collect(),
+        }
+    });
     Ok(ImportedPlacement {
+        animation,
         root_id,
         root: Group {
             name: Some(name),
@@ -252,6 +275,85 @@ mod tests {
     use std::path::{Path, PathBuf};
     use std::time::{Duration, Instant};
     use std::{fs, thread};
+
+    // Unique boundary: one hand-built animated GLB crosses the real asset store,
+    // placement transaction and runtime engine; Refresh changes motion without
+    // touching the authored binding or rest pose.
+    #[test]
+    fn animated_model_places_plays_refreshes_and_undoes_as_one_step() {
+        use rot_assets::fixtures::{animated_glb, AnimatedFixture};
+        let root = tempfile::tempdir().unwrap();
+        let source = root.path().join("rig.glb");
+        fs::write(&source, animated_glb(AnimatedFixture::default())).unwrap();
+        let mut store = AssetStore::open(root.path()).unwrap();
+        let model = store.import_glb_at(0, "rig", "rig.glb").unwrap();
+        let mut session = Session::new(Scene::authored_empty("animated")).unwrap();
+        let placement = model_placement(&session, &model, "Rig copy".into()).unwrap();
+        let owner = placement.root_id.clone();
+        session.place_imported(0, placement).unwrap();
+        let binding = session.scene().animations[&owner].clone();
+        assert_eq!(binding.clip, model.clips["Swing"].id);
+        assert!(binding.looping);
+        let arm = binding.targets["Rig/Arm"].clone();
+        assert!(session
+            .scene()
+            .hierarchy
+            .groups
+            .contains_key(&binding.targets["Rig"]));
+        let arm_pose = |scene: &Scene| {
+            scene
+                .objects
+                .iter()
+                .find(|object| object.id == arm)
+                .unwrap()
+                .transform
+                .clone()
+        };
+        let authored = session.snapshot_bytes().unwrap();
+        let wire: Value = serde_json::from_slice(&authored).unwrap();
+        assert_eq!(wire["format_version"], rot_scene::ANIMATION_FORMAT_VERSION);
+
+        let play = |store: &AssetStore, session: &Session, ticks: usize| {
+            let mut engine = rot_behavior::Engine::new(rot_behavior::Limits {
+                fixed_dt: 0.5,
+                ..Default::default()
+            })
+            .unwrap();
+            engine.set_clips(rot_behavior::decode_clips(&store.clip_snapshots()).unwrap());
+            let mut runtime = engine.reset(session.scene(), session.authoring()).unwrap();
+            for _ in 0..ticks {
+                engine.step(&mut runtime).unwrap();
+            }
+            arm_pose(runtime.scene())
+        };
+        assert_eq!(play(&store, &session, 0).translation, [0.; 3]);
+        let mid = play(&store, &session, 2);
+        assert_eq!(mid.translation, [1., 0., 0.]);
+        assert!((mid.rotation[2] - std::f32::consts::FRAC_PI_2).abs() < 1e-6);
+        assert_eq!(play(&store, &session, 4).translation, [0.; 3], "looped");
+        assert_eq!(session.snapshot_bytes().unwrap(), authored);
+
+        fs::write(
+            &source,
+            animated_glb(AnimatedFixture {
+                mid_angle: 0.5,
+                end_x: 6.0,
+                ..Default::default()
+            }),
+        )
+        .unwrap();
+        store.refresh_glb_at(1, "rig").unwrap();
+        let revised = play(&store, &session, 2);
+        assert_eq!(revised.translation, [3., 0., 0.]);
+        assert!((revised.rotation[2] - 0.5).abs() < 1e-6);
+        assert_eq!(session.snapshot_bytes().unwrap(), authored);
+
+        session.undo(1).unwrap();
+        assert!(session.scene().animations.is_empty());
+        assert!(session.scene().objects.is_empty());
+        session.redo(2).unwrap();
+        assert_eq!(session.scene().animations[&owner], binding);
+    }
 
     // Real asset-to-command boundary: ownership/freshness, repeat placement and
     // graph-free inspection are distinct from the lower scene transaction test.

@@ -14,10 +14,13 @@ use mlua::debug::DebugEvent;
 use mlua::{Function, HookTriggers, Lua, LuaOptions, StdLib, Table, Value, VmState};
 use rot_scene::input::{ActionFrame, ActionValue, ValidatedActionFrame};
 use rot_scene::{
-    Authoring, BehaviorBinding, BehaviorSource, PropertyValue, Scene, StateFields, Transform,
+    AnimationBinding, Authoring, BehaviorBinding, BehaviorSource, Clip, PropertyValue, Scene,
+    StateFields, Transform,
 };
 use sha2::{Digest, Sha256};
 
+#[cfg(test)]
+mod animation_tests;
 #[cfg(test)]
 mod assembly_gate_tests;
 mod audio;
@@ -207,6 +210,23 @@ pub fn source_hash(text: &str) -> String {
     format!("{:x}", Sha256::digest(text.as_bytes()))
 }
 
+/// Accepted clip payloads by clip resource ID.
+pub type Clips = BTreeMap<String, Arc<Clip>>;
+
+/// Decode accepted `rot-clip` payloads once, outside the fixed step.
+pub fn decode_clips<'a>(
+    payloads: impl IntoIterator<Item = (&'a String, &'a Arc<Vec<u8>>)>,
+) -> Result<Clips, String> {
+    payloads
+        .into_iter()
+        .map(|(id, bytes)| {
+            Clip::decode(bytes)
+                .map(|clip| (id.clone(), Arc::new(clip)))
+                .map_err(|error| format!("animation clip {id}: {error}"))
+        })
+        .collect()
+}
+
 /// No VM handles escape. Authored source/properties stay fixed until explicit Reset.
 #[derive(Clone, Debug)]
 pub struct Runtime {
@@ -222,6 +242,8 @@ pub struct Runtime {
     audio_batch: Option<AudioBatch>,
     has_sound_binding: bool,
     kinematic_owner: Option<KinematicOwner>,
+    /// Clip bindings resolved at Reset; fixed for this Runtime.
+    animations: Arc<Vec<(AnimationBinding, Arc<Clip>)>>,
     state: Arc<RuntimeState>,
 }
 impl Runtime {
@@ -306,8 +328,77 @@ pub struct Engine {
     tick_count: Rc<Cell<u64>>,
     failure: Rc<Cell<Option<DiagnosticCode>>>,
     debugger: Rc<RefCell<Option<debug::DebugSession>>>,
+    clips: Clips,
 }
 impl Engine {
+    /// Supply the accepted clip payloads by resource ID. A scene animation whose
+    /// clip is absent fails Reset; clips never change inside a Runtime.
+    pub fn set_clips(&mut self, clips: Clips) {
+        self.clips = clips;
+    }
+    fn resolve_animations(
+        &self,
+        scene: &Scene,
+        authoring: &Authoring,
+    ) -> Result<Vec<(AnimationBinding, Arc<Clip>)>, Diagnostic> {
+        let invalid = |message: String| {
+            Diagnostic::plain(DiagnosticCode::InvalidAuthoring, Phase::Setup, &message)
+        };
+        let mut resolved = Vec::with_capacity(scene.animations.len());
+        for (owner, binding) in &scene.animations {
+            let clip = self.clips.get(&binding.clip).ok_or_else(|| {
+                invalid(format!(
+                    "animation on {owner} uses clip {}, which has no accepted content; Refresh its model or remove the animation",
+                    binding.clip
+                ))
+            })?;
+            if let Some(track) = clip
+                .tracks()
+                .iter()
+                .find(|track| !binding.targets.contains_key(&track.node))
+            {
+                return Err(invalid(format!(
+                    "animation on {owner} does not map clip node {:?}; Place the model again",
+                    track.node
+                )));
+            }
+            resolved.push((binding.clone(), clip.clone()));
+        }
+        // Only targets a clip actually animates have a second transform writer.
+        let driven: std::collections::BTreeSet<&str> = resolved
+            .iter()
+            .flat_map(|(binding, clip)| {
+                clip.tracks()
+                    .iter()
+                    .map(|track| binding.targets[&track.node].as_str())
+            })
+            .collect();
+        for (id, binding) in &authoring.bindings {
+            let target = match &binding.target {
+                rot_scene::BindingTarget::Object(id) | rot_scene::BindingTarget::Group(id) => id,
+                rot_scene::BindingTarget::Application => continue,
+            };
+            if binding.enabled && driven.contains(target.as_str()) {
+                return Err(invalid(format!(
+                    "behavior {id} and an imported animation both write the transform of {target}; disable one of them"
+                )));
+            }
+        }
+        Ok(resolved)
+    }
+    fn apply_animations(
+        animations: &[(AnimationBinding, Arc<Clip>)],
+        seconds: f64,
+        scene: &mut Scene,
+        phase: Phase,
+    ) -> Result<(), Diagnostic> {
+        for (binding, clip) in animations {
+            clip.apply(binding, seconds, scene).map_err(|error| {
+                Diagnostic::plain(DiagnosticCode::InvalidOutput, phase, &error.to_string())
+            })?;
+        }
+        Ok(())
+    }
     pub fn new(limits: Limits) -> Result<Self, Diagnostic> {
         Self::with_cancellation(limits, Arc::new(AtomicBool::new(false)))
     }
@@ -332,6 +423,7 @@ impl Engine {
             hook_ready: Cell::new(false),
             binding_count,
             tick_count,
+            clips: BTreeMap::new(),
             failure,
             debugger: Rc::new(RefCell::new(None)),
         };
@@ -579,6 +671,20 @@ impl Engine {
         let input = ValidatedActionFrame::neutral(&authoring.actions).map_err(|e| {
             Diagnostic::plain(DiagnosticCode::InvalidInput, Phase::Setup, &e.to_string())
         })?;
+        // Reset shows clip time zero. Authored transforms remain the rest pose
+        // and are never written back.
+        let animations = Arc::new(self.resolve_animations(scene, authoring)?);
+        let posed;
+        let scene = if animations.is_empty() {
+            scene
+        } else {
+            let mut staged = scene.clone();
+            Self::apply_animations(&animations, 0.0, &mut staged, Phase::Setup)?;
+            validate_group_commit(&staged)?;
+            validate_player_view_commit(&staged)?;
+            posed = staged;
+            &posed
+        };
         self.begin()?;
         self.begin_debug(0, 0, 0, 0, true);
         let snapshot = Arc::new(scene.clone());
@@ -689,6 +795,7 @@ impl Engine {
             audio_batch: None,
             has_sound_binding,
             kinematic_owner,
+            animations,
             state,
         })
     }
@@ -740,7 +847,13 @@ impl Engine {
             runtime.tick,
             runtime.kinematic_owner.as_ref(),
         )?;
-        let mut group_changed = false;
+        let mut group_changed = !runtime.animations.is_empty();
+        Self::apply_animations(
+            &runtime.animations,
+            next as f64 * self.limits.fixed_dt,
+            &mut staged,
+            Phase::Commit,
+        )?;
         let audio = RefCell::new(Vec::new());
         for (id, binding) in &runtime.authoring.bindings {
             if !binding.enabled {

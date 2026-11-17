@@ -806,6 +806,7 @@ fn execute_play_check(options: &Options) -> Result<bool, String> {
         &case,
         &resource_identity(&pins),
         tick_nanos,
+        &Default::default(),
         Arc::new(AtomicBool::new(false)),
     );
     println!(

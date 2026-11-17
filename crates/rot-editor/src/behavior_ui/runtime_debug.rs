@@ -737,12 +737,7 @@ impl RuntimeUi {
                     .context
                     .clone()
                     .ok_or("Native UI context unavailable")?;
-                self.reset_with_sounds(
-                    &ctx,
-                    session,
-                    generation,
-                    assets.map_or_else(Default::default, rot_assets::AssetStore::sound_snapshots),
-                )?
+                self.reset_with_resources(&ctx, session, generation, assets)?
             }
             Operation::Stop => {
                 self.stop(generation, session.scene().revision);

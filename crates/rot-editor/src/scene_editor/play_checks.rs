@@ -266,7 +266,7 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
         return Ok(Completion::Refused{status:"stale",diagnostic:"Saved scene changed externally. Reopen it before capturing or running a play check.".into()});
     }
     let resources = match snapshot.assets {
-        Some(assets) => assets.resource_identity().map_err(|e| e.to_string())?,
+        Some(ref assets) => assets.resource_identity().map_err(|e| e.to_string())?,
         None => rot_assets::empty_resource_identity(),
     };
     let tick = rot_behavior::DEFAULT_FIXED_TICK.as_nanos() as u64;
@@ -290,11 +290,16 @@ fn execute(snapshot: Snapshot, work: Work, cancel: Arc<AtomicBool>) -> Result<Co
                     })
                 }
             };
+            let clips = match &snapshot.assets {
+                Some(assets) => rot_behavior::decode_clips(assets.clips())?,
+                None => Default::default(),
+            };
             Ok(Completion::Ran(check::run(
                 &snapshot.session,
                 &case,
                 &resources,
                 tick,
+                &clips,
                 cancel,
             )))
         }
@@ -381,7 +386,20 @@ impl SceneEditor {
             .to_owned();
         let (mesh, texture) = crate::creation_export::scene_dependencies(self.session.scene())?;
         let sound = self.session.sound_asset_references().assets;
-        let ids = mesh.iter().chain(&texture).chain(&sound).cloned().collect();
+        let clip: std::collections::BTreeSet<String> = self
+            .session
+            .scene()
+            .animations
+            .values()
+            .map(|binding| binding.clip.clone())
+            .collect();
+        let ids = mesh
+            .iter()
+            .chain(&texture)
+            .chain(&sound)
+            .chain(&clip)
+            .cloned()
+            .collect();
         if !sound.is_disjoint(&mesh) || !sound.is_disjoint(&texture) {
             return Err("WAV assets must use distinct IDs from meshes and textures.".into());
         }
@@ -394,7 +412,13 @@ impl SceneEditor {
         }
         let assets = match &self.assets {
             Some(store) => Some(store.export_snapshot(&ids).map_err(|e| e.to_string())?),
-            None if mesh.is_empty() && texture.is_empty() && sound.is_empty() => None,
+            None if mesh.is_empty()
+                && texture.is_empty()
+                && sound.is_empty()
+                && clip.is_empty() =>
+            {
+                None
+            }
             None => {
                 return Err("Project assets unavailable; reopen or repair content first.".into())
             }

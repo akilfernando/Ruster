@@ -345,6 +345,7 @@ impl Clipboard {
             },
             display: rot_scene::DisplayProfile::LegacySdr,
             player_view: None,
+            animations: Default::default(),
             id: "clipboard".into(),
             revision: 0,
             objects: self.objects.clone(),
