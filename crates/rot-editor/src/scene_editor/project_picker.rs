@@ -56,6 +56,8 @@ impl ProjectPicker {
                     .inner_margin(SPACE_XL),
             )
             .show(ui, |ui| {
+                // Faint mycelium in the corner (Rot style only).
+                crate::ui_kit::motif::background(ui, ui.max_rect().expand(SPACE_XL));
                 let width = ui.available_width().clamp(1.0, HUB_WIDTH);
                 ui.vertical_centered(|ui| {
                     ui.allocate_ui_with_layout(

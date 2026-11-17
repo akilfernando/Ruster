@@ -2418,7 +2418,7 @@ impl SceneEditor {
                     }
                 }
                 if busy {
-                    ui.add(egui::Spinner::new().size(ui.spacing().interact_size.y));
+                    crate::ui_kit::motif::spinner(ui, ui.spacing().interact_size.y);
                 }
                 let (message, color) = if busy {
                     if self.pending_asset_open.is_some() {

@@ -102,6 +102,7 @@ pub fn show_about(ctx: &egui::Context) {
     let response = egui::Modal::new(egui::Id::unique(ABOUT)).show(ctx, |ui| {
         let width = (ctx.content_rect().width() - 48.0).clamp(170.0, 400.0);
         ui.set_width(width);
+        crate::ui_kit::motif::background(ui, ui.max_rect().expand(16.0));
         ui.horizontal(|ui| {
             padded_mark(
                 ui,
