@@ -51,6 +51,13 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · A-04: Window → AI Connection… → Connect an AI App… lists the
+  AI apps found (Claude Code, Codex, Claude Desktop, Cursor, VS Code) with
+  Connect, Undo, Copy Configuration and Add AI Configuration to This Project.
+  Only the `rot` entry changes; a backup sits beside the file. Checked on the
+  user's real Claude Code and Codex configs (user go-ahead): connect, the app
+  ran `scene_inspect`, Undo; Codex file byte-identical after.
+
 - 2026-11-17 · A-03: AI edits apply to the current scene, so a creator's edit
   between the AI's read and write no longer fails it; a pending field edit is
   committed first, a drag is waited on up to a second; JSON numbers accepted;

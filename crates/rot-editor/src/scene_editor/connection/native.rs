@@ -216,6 +216,13 @@ impl Host {
         if !state.notice.is_empty() {
             ui.label(&state.notice);
         }
+        if ui
+            .button("Connect an AI App…")
+            .on_hover_text("Add Rot Engine to Claude Code, Codex or another AI app")
+            .clicked()
+        {
+            self.editor.ai_apps.show();
+        }
         self.trusted_apps_ui(ui);
         ui.add_space(8.0);
         ui.separator();
@@ -243,8 +250,6 @@ impl Host {
                     "Owner identity is socket-bound, not executable provenance or client registration.",
                 );
             }
-            ui.weak("Registration and client reload are separate from editor binding.");
-            ui.weak("Automatic Hermes registration is unavailable. This panel leaves client configuration alone.");
         });
         if let Some(preview) = state.preview.clone() {
             egui::Modal::new(egui::Id::unique(("ai_binding_consent", &preview.incarnation))).show(&ctx, |ui| {

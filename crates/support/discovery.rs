@@ -7,12 +7,17 @@ use std::io;
 use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 
-/// `$XDG_RUNTIME_DIR/rot`, or a private directory under the system temporary
-/// directory when the session has no runtime directory.
+/// `$XDG_RUNTIME_DIR/rot`. Some AI apps start MCP servers with a trimmed
+/// environment, so without the variable `/run/user/<uid>` is used when it
+/// exists, else a private folder in the system temporary directory.
 pub fn directory() -> PathBuf {
+    let uid = rustix::process::getuid().as_raw();
     match std::env::var_os("XDG_RUNTIME_DIR").map(PathBuf::from) {
         Some(runtime) if runtime.is_absolute() => runtime.join("rot"),
-        _ => std::env::temp_dir().join(format!("rot-{}", rustix::process::getuid().as_raw())),
+        _ if Path::new(&format!("/run/user/{uid}")).is_dir() => {
+            PathBuf::from(format!("/run/user/{uid}/rot"))
+        }
+        _ => std::env::temp_dir().join(format!("rot-{uid}")),
     }
 }
 

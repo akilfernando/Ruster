@@ -7,8 +7,10 @@ editor's Undo history.
 
 ## Connecting
 
-Register `rot-mcp` as a stdio MCP server with no arguments or environment
-variables. While a scene is open, every editor listens at
+In the editor, Window → AI Connection… → Connect an AI App… registers
+`rot-mcp` with the AI apps it finds, with Undo. By hand, register `rot-mcp`
+as a stdio MCP server with no arguments or environment variables (Codex:
+forward `XDG_RUNTIME_DIR` and `XDG_CONFIG_HOME` with `env_vars`). While a scene is open, every editor listens at
 `$XDG_RUNTIME_DIR/rot/<pid>.sock` and describes itself in `<pid>.json`
 (project folder, scene, process start). `rot-mcp` picks the editor whose
 project folder contains its working directory, else the only one open.
