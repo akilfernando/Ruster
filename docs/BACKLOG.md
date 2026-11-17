@@ -417,7 +417,7 @@ camera). First launch shows the style chooser from T-01 and an optional
 **Done when.** Screenshots pass the checklist in both styles.
 
 #### T-02 · Rot motif and themed wording — S — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** The Rot style has its character, lightly.
 **Do.** Follow [the motif](UX-STANDARDS.md#the-motif): empty-state line art,
 the three-spore loading indicator, the AI mushroom pulse, hub and About
