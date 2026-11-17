@@ -143,7 +143,8 @@ Rules that keep the second workflow good:
 | See and drive the editor UI | `cargo build -p rot-editor --features inspection` then `python3 scripts/ui_drive.py --help` | Every UI change |
 | Keyboard reach | `python3 scripts/ui_drive.py … tabwalk:60` and read the order; add `shot:` steps to see the focus ring | Every new panel or dialog |
 | Speed | `python3 scripts/measure_budgets.py --foreground` on a release build, user away (see the performance section of the plan) | When touching rendering, scene updates, import or the per-frame UI |
-| Real AI client | Connect Claude Code or Codex to the running editor and ask it to perform the task | When adding or changing MCP tools |
+| AI route end to end | `python3 scripts/mcp_smoke.py` (editor + `rot-mcp`: tools, read, create, move, screenshot, Undo) | When changing the editor bridge, `rot-mcp` or MCP tools |
+| Real AI client | Claude Code or Codex against the running editor with a private config, e.g. `claude -p "…" --mcp-config mcp.json --strict-mcp-config` in a throwaway project folder | When adding or changing MCP tools |
 
 Tests: write the few that protect behavior a creator depends on. Prefer one
 test through the real command path over many unit tests of internals. Do not

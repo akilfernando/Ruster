@@ -51,6 +51,12 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · A-07: `python3 scripts/mcp_smoke.py` checks the AI route in
+  one command (passes: 94 tools, 36 KB). Real client: Claude Code 2.1.326,
+  private `--mcp-config`, empty throwaway scene, asked to "add three cubes in
+  a row and color them differently": in 16 s it made Red, Green and Blue
+  cubes at x = −2, 0, 2 and checked with a screenshot, without prompting.
+
 - 2026-11-17 · A-05: the toolbar mushroom is grey when no AI app is
   connected, Rot red when one is, and pulses while it works. Clicking it
   shows the app, Pause AI Edits (edits wait, reads continue), recent AI
@@ -80,15 +86,10 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   Step from stopped starts paused on the first tick; an edit during Play
   restarts it; Stop returns to editing. Ctrl+P, Ctrl+Shift+P, Ctrl+Alt+P.
   A red frame marks Play mode; clicking the playing view takes the keyboard.
-- 2026-11-17 · S-04: one toolbar row (Move/Rotate/Scale, World, Center,
-  Snap; Play controls centered; Layout and the AI indicator right; a »
-  menu below 1180 px). Scene/Game tabs sit above the viewport; Perspective,
-  View Presets and Fit float in its corner. Viewport at 1280×800: 533 px tall.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified
 
 - No person has walked through this branch's editor. All UI checks used
   injected events on a hidden workspace.
-- No real AI client has been run against this branch.
 - Gizmo drag latency is not measured (injected drags do not engage the gizmo).

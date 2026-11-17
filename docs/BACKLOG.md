@@ -564,7 +564,7 @@ the A-07 journey.
 **Not now.** The general object and component tools (C-06).
 
 #### A-07 · Real-client check — S — ready
-Status: open
+Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
 **Outcome.** One command proves the AI route works end to end.
 **Do.** `scripts/mcp_smoke.py`, standard library only: start the editor with
 `ui_drive.Editor`, start `rot-mcp` over stdio, then initialize, list tools

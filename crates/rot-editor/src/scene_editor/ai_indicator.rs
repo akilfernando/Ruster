@@ -60,6 +60,11 @@ pub(super) fn read_only(op: &str) -> bool {
         )
 }
 
+/// The toast's layer, which viewport captures do not count as covering.
+pub(super) fn toast_id() -> egui::Id {
+    egui::Id::unique("ai_toast")
+}
+
 impl SceneEditor {
     /// The indicator and its popover. The single call site places it.
     pub(super) fn ai_indicator_ui(&mut self, ui: &mut egui::Ui) {
@@ -168,12 +173,12 @@ impl SceneEditor {
             return;
         }
         ctx.request_repaint_after(TOAST.saturating_sub(since.elapsed()));
-        egui::Area::new(egui::Id::unique("ai_toast"))
+        egui::Area::new(toast_id())
             .anchor(egui::Align2::RIGHT_BOTTOM, egui::vec2(-16.0, -40.0))
             .interactable(false)
             .show(ctx, |ui| {
                 egui::Frame::popup(ui.style()).show(ui, |ui| {
-                    ui.label(text);
+                    ui.add(egui::Label::new(text.as_str()).extend());
                 });
             });
     }

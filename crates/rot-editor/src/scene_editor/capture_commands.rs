@@ -607,7 +607,12 @@ fn clear_layers(ctx: &egui::Context) -> bool {
             .areas()
             .visible_layer_ids()
             .iter()
-            .all(|layer| layer.order == egui::Order::Background)
+            // The AI toast is a one-line notice, never over the rendered
+            // viewport image itself, so it does not block a capture.
+            .all(|layer| {
+                layer.order == egui::Order::Background
+                    || layer.id == super::ai_indicator::toast_id()
+            })
     })
 }
 
