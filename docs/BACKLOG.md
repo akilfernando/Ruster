@@ -326,7 +326,7 @@ holds no panel body; one `ui_drive.py` screenshot is unchanged; the gate
 passes.
 
 #### S-08 · String table and wording pass — M — ready
-Status: open
+Status: in progress — Claude Opus 5.5 (UX lane), 2026-11-17
 **Outcome.** All text follows the [writing rules](UX-STANDARDS.md#8-writing)
 and comes from one table with Plain and Rot wording.
 **Facts.** Strings are inline. About 337 literals are longer than 80
