@@ -2384,6 +2384,39 @@ impl SceneEditor {
                             "Read full diagnostics and recovery actions."
                         });
                 }
+                // Warning and error counts open the Console (UX-STANDARDS §3).
+                for level in [crate::console::Level::Error, crate::console::Level::Warning] {
+                    let count = self.console.count(level);
+                    if count == 0 {
+                        continue;
+                    }
+                    let (icon, color, tip) = match level {
+                        crate::console::Level::Error => (
+                            "×",
+                            ui.visuals().error_fg_color,
+                            "Errors · open the Console",
+                        ),
+                        _ => (
+                            "⚠",
+                            ui.visuals().warn_fg_color,
+                            "Warnings · open the Console",
+                        ),
+                    };
+                    if ui
+                        .add(
+                            egui::Button::new(
+                                egui::RichText::new(format!("{icon} {count}")).color(color),
+                            )
+                            .frame_when_inactive(false),
+                        )
+                        .on_hover_text(tip)
+                        .clicked()
+                    {
+                        self.console.open = true;
+                        self.workspace.prefs.content_visible = true;
+                        self.workspace.changed();
+                    }
+                }
                 if busy {
                     ui.add(egui::Spinner::new().size(ui.spacing().interact_size.y));
                 }
@@ -2401,28 +2434,23 @@ impl SceneEditor {
                         )
                     }
                 } else if !self.error.is_empty() {
+                    // A current error stays visible until it is resolved.
                     (self.error.as_str(), ui.visuals().error_fg_color)
-                } else if !self.recovery.warning.is_empty() {
-                    (self.recovery.warning.as_str(), ui.visuals().warn_fg_color)
-                } else if let Some(shader) = self.shader_problem() {
-                    (shader, ui.visuals().warn_fg_color)
-                } else if !self.workspace.error.is_empty() {
-                    (self.workspace.error.as_str(), ui.visuals().warn_fg_color)
-                } else if let Some(diagnostic) = &self.runtime.diagnostic {
-                    (diagnostic.message.as_str(), ui.visuals().error_fg_color)
-                } else if !self.runtime.status.is_empty() {
-                    (self.runtime.status.as_str(), ui.visuals().text_color())
-                } else if !self.external.status.is_empty() {
-                    (self.external.status.as_str(), ui.visuals().text_color())
-                } else if self.notice.is_empty() {
-                    ("Ready", ui.visuals().text_color())
+                } else if let Some(latest) = self.console.latest() {
+                    // Otherwise the newest Console message, on one quiet line.
+                    let color = match latest.level {
+                        crate::console::Level::Error => ui.visuals().error_fg_color,
+                        crate::console::Level::Warning => ui.visuals().warn_fg_color,
+                        crate::console::Level::Info => ui.visuals().weak_text_color(),
+                    };
+                    (latest.text.as_str(), color)
                 } else {
-                    (self.notice.as_str(), ui.visuals().text_color())
+                    ("", ui.visuals().text_color())
                 };
                 let summary = message
                     .lines()
                     .find(|line| !line.trim().is_empty())
-                    .unwrap_or("Ready")
+                    .unwrap_or("")
                     .trim();
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     ui.add(egui::Label::new(egui::RichText::new(summary).color(color)).truncate())

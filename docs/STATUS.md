@@ -58,6 +58,10 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   user's real Claude Code and Codex configs (user go-ahead): connect, the app
   ran `scene_inspect`, Undo; Codex file byte-identical after.
 
+- 2026-11-17 · S-06: a Console tab beside Assets logs every message once
+  (notices, errors, script errors with file and line, engine warnings); Clear,
+  Collapse and level filters; double-click a script error to open it. The
+  status bar is one line with warning/error counts; toasts confirm actions.
 - 2026-11-17 · A-03: AI edits apply to the current scene, so a creator's edit
   between the AI's read and write no longer fails it; a pending field edit is
   committed first, a drag is waited on up to a second; JSON numbers accepted;
@@ -71,21 +75,6 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
   Snap; Play controls centered; Layout and the AI indicator right; a »
   menu below 1180 px). Scene/Game tabs sit above the viewport; Perspective,
   View Presets and Fit float in its corner. Viewport at 1280×800: 533 px tall.
-- 2026-11-17 · S-03: menus are File, Edit, Assets, Object, Window, Help in
-  Title Case with shortcuts; panels are titled Hierarchy and Assets; the
-  view toggle reads Scene and Game; Reset Camera moved to View Presets.
-- 2026-11-17 · A-06: `tools/list` is 39 KB for 94 tools (was 145 KB, 98):
-  plain one-line descriptions, no `connection` argument, legacy logistics
-  tools gone, scene edits apply to the current scene unless guards are sent,
-  and one-call `viewport_screenshot`. Checked on a hidden-workspace editor
-  (create, move, screenshot, undo with no guards). README rewritten; stale
-  `scripts/mcp_*demo.py` deleted.
-- 2026-11-17 · A-02: an AI app is asked once (Allow Always / Allow Once /
-  Deny, a floating prompt) and then reconnects silently across editor
-  restarts and rebuilds; Revoke in Rot connection asks again; an allowed app
-  saves (and, in a Rot project, builds) with no environment variables.
-  [Decision](decisions/2026-11-17-trust-ai-apps-once.md). Checked with two
-  hidden-workspace editor runs around a rebuild, plus a headless test.
 - Older entries: [archive](archive/STATUS-2026-11-17.md).
 
 ## Not verified

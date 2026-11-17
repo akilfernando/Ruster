@@ -199,6 +199,66 @@ pub(super) fn round_viewport(ui: &egui::Ui, rect: egui::Rect) {
 mod tests {
     use super::*;
 
+    /// S-06: a script error reaches the Console with its file and line, the
+    /// status bar shows it on one line, and the creator's notice toasts.
+    #[test]
+    fn script_errors_reach_the_console_with_file_and_line() {
+        let mut editor =
+            SceneEditor::new(rot_scene::Session::new(rot_scene::Scene::demo()).unwrap());
+        let ctx = egui::Context::default();
+        crate::editor_theme::configure(&ctx);
+        let mut frame = |editor: &mut SceneEditor| {
+            let mut output = ctx.run_ui(
+                egui::RawInput {
+                    focused: true,
+                    screen_rect: Some(egui::Rect::from_min_size(
+                        egui::Pos2::ZERO,
+                        egui::vec2(960.0, 600.0),
+                    )),
+                    ..Default::default()
+                },
+                |ui| editor.ui(ui),
+            );
+            output.textures_delta.clear();
+            output.shapes
+        };
+        frame(&mut editor);
+        editor.runtime.diagnostic = Some(rot_behavior::Diagnostic {
+            code: rot_behavior::DiagnosticCode::Runtime,
+            source_id: Some("mover".into()),
+            source_hash: None,
+            binding_id: None,
+            object_id: None,
+            phase: rot_behavior::Phase::Update,
+            message: "attempt to index a nil value".into(),
+            line: Some(7),
+        });
+        frame(&mut editor);
+        let latest = editor.console.latest().expect("logged");
+        assert_eq!(latest.source, "Script");
+        assert_eq!(latest.location, Some(("mover".to_owned(), 7)));
+        assert_eq!(editor.console.count(crate::console::Level::Error), 1);
+        // Next frame the status bar shows it on one line at 960 px.
+        let shapes = frame(&mut editor);
+        let lines: Vec<_> = shapes
+            .iter()
+            .filter_map(|shape| match &shape.shape {
+                egui::epaint::Shape::Text(text)
+                    if text.galley.job.text == "attempt to index a nil value" =>
+                {
+                    Some(text.galley.rows.len())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(lines, vec![1], "one status line");
+        assert_eq!(
+            editor.console.count(crate::console::Level::Error),
+            1,
+            "once"
+        );
+    }
+
     /// S-02: dragging the Position X letter scrubs the value, and the whole
     /// drag is one Undo step.
     #[test]

@@ -534,6 +534,8 @@ pub struct SceneEditor {
     ai_workspace: bool,
     /// Below about 1180 px, tool options and Layout move into the » menu.
     toolbar_compact: bool,
+    /// Every message the editor shows, the Console panel and toasts (S-06).
+    console: crate::console::Console,
     ai_drawer: Option<ai_workspace::Drawer>,
     ai_connection_label: &'static str,
     ai_connection_requested: bool,
@@ -758,6 +760,7 @@ impl SceneEditor {
             captures: Default::default(),
             ai_workspace: false,
             toolbar_compact: false,
+            console: Default::default(),
             ai_drawer: None,
             ai_connection_label: "Disconnected",
             ai_connection_requested: false,
@@ -789,7 +792,7 @@ impl SceneEditor {
             preview,
             generation: GENERATION.fetch_add(1, Ordering::Relaxed),
             error: String::new(),
-            notice: "Ready. Right-drag to orbit; scroll to zoom.".into(),
+            notice: String::new(),
             seen_history_evictions,
             path_text: String::new(),
             #[cfg(target_os = "linux")]
@@ -4385,7 +4388,6 @@ impl SceneEditor {
         };
         let search = ui
             .horizontal_wrapped(|ui| {
-                ui.heading("Assets");
                 if crate::editor_theme::primary_button(ui, "Import Asset…").clicked() {
                     self.open_asset_import();
                 }
@@ -5302,6 +5304,76 @@ impl SceneEditor {
         }
         ui.label(&self.shader_notice);
     }
+    /// Log every message source once per change, and toast the results of
+    /// the creator's own actions (S-06).
+    fn observe_messages(&mut self, ctx: &egui::Context) {
+        use crate::console::{Entry, Level};
+        self.console.drain_engine_log();
+        let creator_input = ctx.input(|input| {
+            input.events.iter().any(|event| {
+                matches!(
+                    event,
+                    egui::Event::PointerButton { pressed: false, .. }
+                        | egui::Event::Key { pressed: true, .. }
+                        | egui::Event::AccessKitActionRequest(_)
+                )
+            })
+        });
+        let notice = self.notice.clone();
+        if self
+            .console
+            .observe("notice", "Editor", Level::Info, &notice)
+            && creator_input
+        {
+            self.console.toast(&notice);
+        }
+        let error = self.error.clone();
+        self.console
+            .observe("error", "Editor", Level::Error, &error);
+        let warning = self.recovery.warning.clone();
+        self.console
+            .observe("recovery", "Recovery", Level::Warning, &warning);
+        let preferences = self.workspace.error.clone();
+        self.console
+            .observe("preferences", "Preferences", Level::Warning, &preferences);
+        let shader = self.shader_problem().unwrap_or_default().to_owned();
+        self.console
+            .observe("shader", "Shader", Level::Warning, &shader);
+        let external = self.external.status.clone();
+        self.console
+            .observe("external", "Code Editor", Level::Info, &external);
+        let assets = self.asset_ops.status.clone();
+        self.console
+            .observe("assets", "Assets", Level::Info, &assets);
+        let script = self
+            .runtime
+            .diagnostic
+            .as_ref()
+            .map(|diagnostic| diagnostic.message.clone())
+            .unwrap_or_default();
+        if self
+            .console
+            .observe("script", "Script", Level::Error, &script)
+        {
+            // Replace the plain entry with one that knows its file and line.
+            let diagnostic = self.runtime.diagnostic.as_ref().unwrap();
+            let location = diagnostic
+                .source_id
+                .as_deref()
+                .zip(diagnostic.line)
+                .map(|(source, line)| (source.to_owned(), line));
+            self.console.replace_latest(Entry {
+                level: Level::Error,
+                source: "Script",
+                text: script,
+                location,
+                repeats: 1,
+            });
+        }
+        let status_height = 32.0;
+        let corner = ctx.content_rect().right_bottom() - egui::vec2(0.0, status_height);
+        self.console.toasts_ui(ctx, corner);
+    }
     fn status_diagnostics(&self) -> bool {
         !self.error.is_empty()
             || !self.recovery.warning.is_empty()
@@ -5831,6 +5903,47 @@ impl SceneEditor {
             };
             panel.show(ui, |ui| {
                 ui.set_min_height(ui.available_height());
+                // Assets and Console share the bottom dock as tabs.
+                ui.horizontal(|ui| {
+                    ui.spacing_mut().item_spacing.x = crate::ui_kit::tokens::SPACE_XXS;
+                    let title = |text: &str| {
+                        egui::RichText::new(text)
+                            .font(crate::ui_kit::semibold(crate::ui_kit::tokens::TEXT_TITLE))
+                    };
+                    if ui
+                        .add(egui::Button::selectable(
+                            !self.console.open,
+                            title("Assets"),
+                        ))
+                        .clicked()
+                    {
+                        self.console.open = false;
+                    }
+                    let errors = self.console.count(crate::console::Level::Error);
+                    let console = if errors > 0 {
+                        format!("Console ({errors})")
+                    } else {
+                        "Console".to_owned()
+                    };
+                    if ui
+                        .add(egui::Button::selectable(self.console.open, title(&console)))
+                        .clicked()
+                    {
+                        self.console.open = true;
+                    }
+                });
+                if self.console.open {
+                    if let Some(crate::console::Request::OpenSource(source, line)) =
+                        self.console.ui(ui)
+                    {
+                        self.external_action(
+                            &ctx,
+                            &source,
+                            crate::behavior_external::Intent::Open { line },
+                        );
+                    }
+                    return;
+                }
                 egui::ScrollArea::vertical()
                     .id_salt("content_panel_scroll")
                     .min_scrolled_height(0.0)
@@ -6209,6 +6322,7 @@ impl SceneEditor {
         }
         self.show_hud_editor(&ctx);
         self.show_player_view_editor(&ctx);
+        self.observe_messages(&ctx);
         self.rename_dialog(&ctx);
         if self.dialog.is_none() {
             self.path_focused = false;

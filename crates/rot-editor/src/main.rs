@@ -15,6 +15,7 @@ mod commands;
 #[allow(dead_code)]
 #[path = "../../support/connection.rs"]
 mod connection;
+mod console;
 mod creation_export;
 mod directory_grant;
 #[cfg(unix)]
@@ -65,6 +66,10 @@ impl log::Log for Diagnostics {
     fn log(&self, record: &log::Record<'_>) {
         if self.enabled(record.metadata()) {
             eprintln!("{} {}: {}", record.level(), record.target(), record.args());
+            console::engine_log(
+                record.level(),
+                format!("{}: {}", record.target(), record.args()),
+            );
         }
     }
 
