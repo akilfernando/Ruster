@@ -44,6 +44,10 @@ connected project.
   `expected_session_token` and `expected_revision` from an inspect.
 - Other `expected_*` arguments (asset, view, run and save tokens) are still
   required where a tool lists them; read them from the matching inspect tool.
+- Decimal arguments accept JSON integers or decimal strings.
+- If the creator has an unfinished field edit, it is committed before the AI
+  edit; during a drag the AI edit waits up to a second. AI changes appear in
+  the Edit menu as "Undo AI: Move Cube".
 - `viewport_screenshot` returns a PNG of the viewport, at most 512 pixels, in
   one call. `viewport_capture_start` and `viewport_capture_inspect` do the
   same in two steps.
@@ -58,7 +62,7 @@ before a call reaches the editor.
 
 ## Limits today
 
-- One AI app per editor at a time. After a transport error the adapter
+- One AI app per editor at a time. After a lost connection the adapter
   reconnects on the next call.
 - The scene is limited to 256 objects and five lights.
 - Linux only.

@@ -1,4 +1,5 @@
 //! Generic scene authoring frontend; logistics rules stay in the legacy sample.
+mod ai_steps;
 mod ai_workspace;
 #[cfg(all(test, unix))]
 mod ai_workspace_tracer;
@@ -464,6 +465,9 @@ pub struct SceneEditor {
     ai_listen_scene: Option<PathBuf>,
     #[cfg(unix)]
     ai_trust: connection::TrustUi,
+    ai_steps: ai_steps::AiSteps,
+    /// Since when an AI request has waited for the creator's input to finish.
+    ai_wait: Option<std::time::Instant>,
     retired_connection_receipts: std::collections::VecDeque<Value>,
     save_grant: Option<persistence_commands::SaveGrant>,
     save_sequence: u64,
@@ -689,6 +693,8 @@ impl SceneEditor {
             ai_listen_scene: None,
             #[cfg(unix)]
             ai_trust: Default::default(),
+            ai_steps: Default::default(),
+            ai_wait: None,
             retired_connection_receipts: Default::default(),
             save_grant: None,
             save_sequence: 0,
@@ -5482,7 +5488,8 @@ impl SceneEditor {
             });
             crate::editor_theme::text_menu(ui, "Edit", |ui| {
                 for action in [Action::Undo, Action::Redo] {
-                    self.command_menu_item(ui, action.label(), action);
+                    let label = self.history_label(action);
+                    self.command_menu_item(ui, &label, action);
                 }
                 ui.separator();
                 for action in [

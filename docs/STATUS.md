@@ -42,8 +42,7 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 - Every new AI adapter process still needs approval in File → Advanced →
   Rot connection…, and an editor serves one adapter at a time (A-02, A-03).
-- An editor serves one AI adapter at a time, and the adapter does not
-  reconnect after a transport error (A-03).
+- An editor serves one AI adapter at a time; a second waits or fails.
 - Play checks refuse scenes that use groups, so they cannot cover an animated
   model.
 - Outside the repository, still using old names: two MCP entries in `~/.codex/config.toml`,
@@ -52,6 +51,11 @@ kept in `~/.local/share/rot-engine/previous`; `--rollback` restores it.
 
 ## Recently finished
 
+- 2026-11-17 · A-03: AI edits apply to the current scene, so a creator's edit
+  between the AI's read and write no longer fails it; a pending field edit is
+  committed first, a drag is waited on up to a second; JSON numbers accepted;
+  a restarted adapter reconnects; Edit shows "Undo AI: Move …". Fifty edits:
+  0.80 s release, 3.65 s debug (hidden workspace, scripted run).
 - 2026-11-17 · S-04: one toolbar row (Move/Rotate/Scale, World, Center,
   Snap; Play controls centered; Layout and the AI indicator right; a »
   menu below 1180 px). Scene/Game tabs sit above the viewport; Perspective,

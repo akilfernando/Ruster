@@ -150,8 +150,20 @@ mod tests {
         ));
         host.input.human_pending = false;
         host.service_bridge(&ctx);
-        assert_eq!(observe().unwrap()["error"]["code"], "drafts_pending");
-        host.editor.lighting_draft = None;
+        // A valid pending draft is committed first; the AI edit then applies.
+        let reply = observe().unwrap();
+        assert_eq!(reply["ok"], true, "{reply}");
+        assert!(host.editor.lighting_draft.is_none());
+        assert_ne!(host.editor.session.scene().revision, 0);
+        // The rest needs a clean document again.
+        host = Host {
+            editor: SceneEditor::new(Session::new(Scene::authored_empty("hidden")).unwrap()),
+            input: Default::default(),
+            bridge: None,
+            workspace: None,
+            workspace_enabled: false,
+        };
+        let revision = 0;
 
         let (bridge, mut expired) = crate::bridge::queued_test_bridge(
             request.clone(),
@@ -160,7 +172,7 @@ mod tests {
         host.bridge = Some(bridge);
         tick(&mut host, &ctx, vec![]);
         assert!(expired().is_none());
-        assert_eq!(host.editor.session.scene().revision, 0);
+        assert_eq!(host.editor.session.scene().revision, revision);
 
         let (bridge, mut closed) =
             crate::bridge::queued_test_bridge(request, Instant::now() + Duration::from_secs(10));
@@ -189,7 +201,7 @@ mod tests {
         // The synthetic input owner releases its event; no paint is introduced.
         raw.events.clear();
         assert!(closed().is_none());
-        assert_eq!(host.editor.session.scene().revision, 0);
+        assert_eq!(host.editor.session.scene().revision, revision);
         // A clean blank document has no callback fence. Its ordinary Close
         // must finish via owner logic without any UI pass or hidden paint.
         let mut sent_close = output.viewport_commands[&egui::ViewportId::ROOT]
@@ -279,7 +291,11 @@ impl Host {
         self.keep_listening(ctx);
         #[cfg(unix)]
         self.grant_trusted_app();
-        if self.input.bridge_serviced || self.input.human_pending || self.input.close_requested {
+        if self.input.bridge_serviced || self.input.close_requested {
+            return;
+        }
+        #[cfg(unix)]
+        if self.input.human_pending && !self.ai_waited_enough(ctx) {
             return;
         }
         self.input.bridge_serviced = true;
@@ -295,10 +311,76 @@ impl Host {
             let _ = self.connect_adapter(ctx);
         }
         #[cfg(unix)]
-        let descriptor = self.workspace_descriptor();
+        self.dispatch_ai_requests(ctx);
         #[cfg(unix)]
+        self.service_workspace(ctx);
+    }
+
+    /// While the creator is mid-gesture or typing, an AI request waits up to a
+    /// second; then it runs (and is refused if a drag is still going).
+    #[cfg(unix)]
+    fn ai_waited_enough(&mut self, ctx: &egui::Context) -> bool {
+        if self.bridge.as_mut().and_then(|b| b.waiting()).is_none() {
+            self.editor.ai_wait = None;
+            return false;
+        }
+        let since = *self
+            .editor
+            .ai_wait
+            .get_or_insert_with(std::time::Instant::now);
+        let waited = since.elapsed() >= std::time::Duration::from_secs(1);
+        if !waited {
+            ctx.request_repaint_after(std::time::Duration::from_millis(50));
+        }
+        waited
+    }
+
+    /// Serve AI requests: several per frame while they keep arriving, within a
+    /// few milliseconds. A creator's pending field edit is committed first, as
+    /// if they had pressed Enter, so the AI's change lands on top of it.
+    #[cfg(unix)]
+    fn dispatch_ai_requests(&mut self, ctx: &egui::Context) {
+        let budget = std::time::Instant::now() + std::time::Duration::from_millis(4);
+        let mut served = 0;
+        loop {
+            let Some(bridge) = &mut self.bridge else {
+                break;
+            };
+            let op = if served == 0 {
+                bridge.waiting()
+            } else {
+                bridge.wait_for_request(budget)
+            };
+            let Some(op) = op else {
+                break;
+            };
+            self.editor.ai_wait = None;
+            if !op.ends_with("_inspect") && !self.editor.manipulation.active() {
+                for _ in 0..8 {
+                    if !self.editor.drafts() || !self.editor.apply() {
+                        break;
+                    }
+                }
+            }
+            self.dispatch_one_ai_request(ctx);
+            served += 1;
+            if std::time::Instant::now() >= budget {
+                break;
+            }
+        }
+        if served > 0 {
+            ctx.request_repaint();
+        }
+    }
+
+    #[cfg(unix)]
+    fn dispatch_one_ai_request(&mut self, ctx: &egui::Context) {
+        let descriptor = self.workspace_descriptor();
+        let before = self.editor.session.scene().revision;
+        let mut step = None;
         if let Some(bridge) = &mut self.bridge {
-            if bridge.dispatch_request(|nonce, op, args, lease| {
+            bridge.dispatch_request(|nonce, op, args, lease| {
+                step = ai_steps::label(op, &args, self.editor.session.scene());
                 if op == "workspace_descriptor" {
                     lease.run_immediate(|| {
                         if args.as_object().is_some_and(|m| m.is_empty()) {
@@ -315,11 +397,11 @@ impl Host {
                 } else {
                     lease.run_immediate(|| self.editor.command(nonce, op, args));
                 }
-            }) {
-                ctx.request_repaint();
-            }
+            });
         }
-        #[cfg(unix)]
-        self.service_workspace(ctx);
+        let after = self.editor.session.scene().revision;
+        if let Some(label) = step.filter(|_| after != before) {
+            self.editor.ai_steps.record(label, after);
+        }
     }
 }

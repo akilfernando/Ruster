@@ -484,7 +484,7 @@ reconnect: no prompt. Revoke blocks the next call. Save works for a trusted
 app with no environment variable.
 
 #### A-03 · Smooth shared editing — M — ready
-Status: open
+Status: done — Claude Opus 5.5 (AI lane helper), 2026-11-17
 **Outcome.** The AI and the creator edit the same scene without tripping
 over each other.
 **Facts.** Every edit needs `expected_session_token` and
